@@ -295,7 +295,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     static_assert(is_same_v<BElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<CDEElementwiseOperation, element_wise::PassThrough>);
 
-    static constexpr GemmSpecialization GemmSpec = GemmSpecialization::MNKPadding;
+    static constexpr GemmSpecialization GemmSpec =
+        DirectLoad ? GemmSpecialization::MNKPadding : GemmSpecialization::Default;
 
     // AK0PerBlock = K0PerBlock / K1. Transfer cluster K0 dim must not exceed it,
     // otherwise thread_slice_k0 = AK0PerBlock / K0_cluster truncates to 0.
@@ -558,7 +559,7 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
     using CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock =
-        decltype(GridwiseGemm32::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
+        decltype(GridwiseGemm64::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
             EGridDesc_M_N{}, 1, 1));
 
     // #undef GridwiseGemmV3TemplateParams
@@ -713,11 +714,10 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
             const index_t GemmN = b_grid_desc_bk0_n_bk1_.GetLength(I1);
 
             c_grid_desc_mblock_mperblock_nblock_nperblock_ =
-                GridwiseGemm32::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
+                GridwiseGemm64::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                     e_grid_desc_m_n_,
-                    GridwiseGemm32::CalculateMBlock(GemmM),
-                    GridwiseGemm32::CalculateNBlock(GemmN));
-
+                    GridwiseGemm64::CalculateMBlock(GemmM),
+                    GridwiseGemm64::CalculateNBlock(GemmN));
             // A/B/E Batch/N Stride
             compute_ptr_offset_of_groups_.BatchStrideA_ =
                 a_g_n_c_wis_strides_[0] * NumGroupsToMerge;

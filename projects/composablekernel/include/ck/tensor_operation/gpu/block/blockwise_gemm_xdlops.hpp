@@ -495,6 +495,12 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
     BThreadCopy b_thread_copy_{CalculateBThreadOriginDataIndex()};
 };
 
+// Different Run method to reuse registers (MRepeat inner loop)
+// It's using MRepeat as inner loop and not NRepeat to get consistent behavoior and
+// register usage between RDNA and CDNA (on RDNA the NRepeat is halved,
+// while MRepeat stays the same for 16x16 wave tile)
+// It also avoids registers dependency and delays in wmma instructions issuing
+// observed when KRepeat is inner loop
 template <index_t BlockSize,
           typename FloatA,
           typename FloatB,
@@ -510,7 +516,7 @@ template <index_t BlockSize,
           typename ComputeTypeB = FloatB,
           bool DirectLoad       = false,
           bool TransposeC       = false>
-struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
+struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
     : BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1<BlockSize,
                                                           FloatA,
                                                           FloatB,
@@ -575,13 +581,6 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
                                    b_thread_desc_,
                                    make_tuple(n0, I0, k, I0),
                                    b_thread_buf);
-                // // read A
-                // a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
-                //                    make_tuple(m0, I0, I0, Number<k * KPack>{}),
-                //                    a_block_buf,
-                //                    a_thread_desc_,
-                //                    make_tuple(m0, I0, k, I0),
-                //                    a_thread_buf);
 
                 if constexpr(n0 == 0)
                 {
@@ -593,22 +592,12 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
                                            a_thread_desc_,
                                            make_tuple(m0, I0, k, I0),
                                            a_thread_buf);
-
-                        // b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
-                        //                    make_tuple(n0, I0, I0, Number<k * KPack>{}),
-                        //                    b_block_buf,
-                        //                    b_thread_desc_,
-                        //                    make_tuple(n0, I0, k, I0),
-                        //                    b_thread_buf);
                     });
                 }
-                // });
 
                 wait_dscnt();
-
                 __builtin_amdgcn_sched_barrier(0);
 
-                // static_for<0, MRepeat, 1>{}([&](auto m0) {
                 static_for<0, MRepeat, 1>{}([&](auto m0) {
                     vector_type<ElementDataTypeA, KPack> a_thread_vec;
                     vector_type<ElementDataTypeB, KPack> b_thread_vec;
@@ -641,23 +630,6 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
 
                     constexpr index_t c_offset =
                         c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
-
-                    // if constexpr(m0 == MRepeat - 1 && n0 == NRepeat - 1 && k == KRepeat - 1)
-                    // {
-                    //     if(threadIdx.x == 0 && blockIdx.x == 0)
-                    //     {
-                    //         printf("A reg = %f %f %f %f \n",
-                    //                type_convert<float>(a_thread_vec.data_[0]),
-                    //                type_convert<float>(a_thread_vec.data_[1]),
-                    //                type_convert<float>(a_thread_vec.data_[2]),
-                    //                type_convert<float>(a_thread_vec.data_[3]));
-                    //         printf("B reg = %f %f %f %f \n",
-                    //                type_convert<float>(b_thread_vec.data_[0]),
-                    //                type_convert<float>(b_thread_vec.data_[1]),
-                    //                type_convert<float>(b_thread_vec.data_[2]),
-                    //                type_convert<float>(b_thread_vec.data_[3]));
-                    //     }
-                    // }
 
                     xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type_a>(),
                                     b_thread_vec.template AsType<mfma_input_type_b>(),

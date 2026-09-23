@@ -940,7 +940,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
             // Match epilogue LDS syncs: RunEpilogue calls block_sync_lds() twice per
             // SFC access iteration (once before VGPR->LDS, once before LDS->global).
-            // For !TransposeC && !IsMxGemm, the SFC access count equals
+            // For !IsMxGemm, the SFC access count equals
             // (MXdlPerWave / CShuffleMXdlPerWavePerShuffle) * (NXdlPerWave /
             // CShuffleNXdlPerWavePerShuffle) because the M2/M4/N2 SFC dimensions have equal
             // total and per-access lengths. See Base::GetCThreadWiseSpaceFillingCurve and
@@ -954,7 +954,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
         else if(TileMathThreadGroup::IsBelong())
         {
-            auto blockwise_gemm = BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1<
+            auto blockwise_gemm = BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1<
                 TileMathThreadGroupSize,
                 ADataType,
                 BDataType,
