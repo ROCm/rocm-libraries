@@ -4259,6 +4259,18 @@ class _Lowerer:
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
         )
 
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        ptr, index = op.operands
+        elem_ty = _llvm_type(ptr.type.pointee)  # type: ignore[attr-defined]
+        gep = self._fresh("gaddr_gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
+            f"{self._operand(ptr)}, {_llvm_type(index.type)} {self._operand(index)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = ptrtoint ptr addrspace(1) {gep} to i64"
+        )
+
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
         self._current().emit(

@@ -821,6 +821,12 @@ class _Lowerer:
         base, off = op.operands
         self._emit(f"int64_t {_name(op.result)} = {_name(base)} + {_name(off)};")
 
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        ptr, index = op.operands
+        self._emit(
+            f"int64_t {_name(op.result)} = (int64_t)(&{_name(ptr)}[{_name(index)}]);"
+        )
+
     def _op_tile_global_ptr_add(self, op: Op) -> None:
         # ptr + byte_off as a new global pointer (byte arithmetic). The
         # result feeds make_buffer_rsrc (which casts to void*), so a char*
