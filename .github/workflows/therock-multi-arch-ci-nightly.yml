@@ -106,8 +106,6 @@ jobs:
       projects_to_test: >-
         hipblas,hipdnn
       test_type: "standard"
-      repository: ROCm/TheRock
-      ref: users/jainprad/codecoverage-workflows-therock
     permissions:
       contents: read
       id-token: write
