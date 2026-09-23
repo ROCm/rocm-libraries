@@ -28,17 +28,17 @@ namespace
 
 // Names the config helper assigns to the fp8 q/k/v descale tensors; the fill below
 // selects them by these names (see initializeBundle).
-constexpr const char* kDescaleQName = "descale_q";
-constexpr const char* kDescaleKName = "descale_k";
-constexpr const char* kDescaleVName = "descale_v";
+constexpr const char* K_DESCALE_Q_NAME = "descale_q";
+constexpr const char* K_DESCALE_K_NAME = "descale_k";
+constexpr const char* K_DESCALE_V_NAME = "descale_v";
 
 // Fixed, positive, DISTINCT dequantization factors for the q/k/v descales. Distinct so a
 // q/k/v pointer swap changes the result and fails the test; fixed (not randomized) so the
 // same host value feeds both the GPU kernel and the CPU reference and the fp8 3e-2 bound
 // stays deterministic.
-constexpr float kDescaleQFill = 0.25f;
-constexpr float kDescaleKFill = 0.5f;
-constexpr float kDescaleVFill = 0.75f;
+constexpr float K_DESCALE_Q_FILL = 0.25f;
+constexpr float K_DESCALE_K_FILL = 0.5f;
+constexpr float K_DESCALE_V_FILL = 0.75f;
 
 /**
  * @brief Test fixture that takes a GraphTestCase as parameter.
@@ -52,7 +52,7 @@ protected:
     // per-(batch, KV-head) descales land (they stop being element-count 1) and it cannot
     // separate the descales from the equally-scalar attention scale. Descales are
     // dequantization factors, so they get the fixed, positive, DISTINCT fill constants
-    // defined above (see kDescale*Fill for the distinct-and-fixed rationale).
+    // defined above (see K_DESCALE_*_FILL for the distinct-and-fixed rationale).
     // Non-fp8 graphs have no descale tensors, so this reduces to the plain random fill.
     void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
                           GraphTensorBundle& bundle,
@@ -70,17 +70,17 @@ protected:
         {
             const auto nameIt = uidToName.find(tensorPair.first);
             const bool hasName = (nameIt != uidToName.end());
-            if(hasName && nameIt->second == kDescaleQName)
+            if(hasName && nameIt->second == K_DESCALE_Q_NAME)
             {
-                bundle.randomizeTensor(tensorPair.first, kDescaleQFill, kDescaleQFill, seed);
+                bundle.randomizeTensor(tensorPair.first, K_DESCALE_Q_FILL, K_DESCALE_Q_FILL, seed);
             }
-            else if(hasName && nameIt->second == kDescaleKName)
+            else if(hasName && nameIt->second == K_DESCALE_K_NAME)
             {
-                bundle.randomizeTensor(tensorPair.first, kDescaleKFill, kDescaleKFill, seed);
+                bundle.randomizeTensor(tensorPair.first, K_DESCALE_K_FILL, K_DESCALE_K_FILL, seed);
             }
-            else if(hasName && nameIt->second == kDescaleVName)
+            else if(hasName && nameIt->second == K_DESCALE_V_NAME)
             {
-                bundle.randomizeTensor(tensorPair.first, kDescaleVFill, kDescaleVFill, seed);
+                bundle.randomizeTensor(tensorPair.first, K_DESCALE_V_FILL, K_DESCALE_V_FILL, seed);
             }
             else
             {
@@ -425,8 +425,7 @@ TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
     // covers it. The dynamic SDPA tolerance model does not yet account for fp8 (see
     // DynamicTolerancesSdpa.hpp), so this fixed fp8 bound is the interim; tighten once
     // that lands.
-    const bool isFp8
-        = (this->GetParam().config.dtype == hip_kernel_provider_common::config::FP8BF16);
+    const bool isFp8 = (GetParam().config.dtype == hip_kernel_provider_common::config::FP8BF16);
     const float tolerance = isFp8 ? 3e-2f : 1e-2f;
     runGraphTest(tolerance);
 }
