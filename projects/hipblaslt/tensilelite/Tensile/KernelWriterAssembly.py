@@ -2671,7 +2671,7 @@ class KernelWriterAssembly(KernelWriter):
     fold runs later in StreamK.preLoop), the ClusterDim axes are Cs (X/M,
     B-multicast) and Ck (Y/N, A-multicast), and the grid is rounded up to a
     ClusterDim multiple, so the same validX/validY reduction applies. Its padded
-    peers early-exit in StreamK.persistentClusterPadEarlyExit, so the surviving
+    peers early-exit in WorkAssignment.persistentClusterPadEarlyExit, so the surviving
     peers' ld_bcst must wait only on the present lanes. The two-tile
     (StreamKForceDPOnly==0) Stream-K cluster is excluded: WorkGroup0 there is the
     linear work index rather than an M-tile, so it derives Multicast=False and
@@ -3200,7 +3200,7 @@ class KernelWriterAssembly(KernelWriter):
       # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
       # The queue index reads it, masked % numQueues, in StreamK.graWorkGroup.
       # Once-per-workgroup setup only -- no steady-state instructions added.
-      if self.skUsesRawQueueRank(kernel):
+      if Component.WorkAssignment.usesRawQueueRank(self, kernel):
         module.add(SMovB32(dst=sgpr("StreamKTileIdx"), src=sgpr("WorkGroup0"),
                            comment="StreamK: snapshot raw pre-remap launch WG id -> dead-in-window StreamKTileIdx carrier (queue = rawWG %% numQueues)"))
 
@@ -3683,9 +3683,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("graWorkGroup")
     module.addComment0("graWorkGroup mapping")
 
-    if isPersistent(kernel):
-      processingComponent = Component.TileProcessingStrategy.find(self)
-      module.add(processingComponent.graWorkGroup(self, kernel, tPA, tPB))
+    module.add(Component.PersistentLoop.find(self).activateReservedOrAcquire(self, kernel, tPA, tPB))
 
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.graWorkGroup(self, kernel))
@@ -16611,7 +16609,8 @@ class KernelWriterAssembly(KernelWriter):
       # allocate tmps for the store header (before the batch implementations)
       # branch B1 or B0
       skPartialsLabel = Label(label=self.labels.getNameInc("SK_Partials"), comment="")
-      # GSU0 temporarily selects the ordinary policy for this store branch.
+      # GSU0 temporarily selects the ordinary policy; resolve this store branch's
+      # strategy rather than reusing the kernel's allocation capabilities.
       processingComponent = Component.TileProcessingStrategy.find(self) if isPersistent(kernel) else None
       if processingComponent is not None:
         module.add(processingComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
@@ -19018,59 +19017,9 @@ class KernelWriterAssembly(KernelWriter):
   # persistent tile to compute next-tile addresses, but current NLL/tail code
   # resumes immediately after the prefetch. Keep tile identity borrowed.
   ##############################################################################
-  def papTileIdentityNames(self, kernel):
-    names = [
-      "WorkGroup0",
-      "WorkGroup1",
-      "WorkGroup2",
-    ]
-    # DP-only tiles are always full: StreamKLocalStart/End are constant
-    # (0 / ItersPerTile) and the next-tile setup recomputes the same values,
-    # so they need no checkpoint/restore. (DP-only PAP: skip unneeded state.)
-    if not isDataParallel(kernel):
-      names.append("StreamKLocalStart")
-      names.append("StreamKLocalEnd")
-    if len(kernel["SpaceFillingAlgo"]):
-      names.append("PersistentTileID")
-    # SK4 (StreamKDynamic) derives the next-tile identity from a work-queue pop
-    # and, unlike static StreamK, overwrites StreamKTileIdx/StreamKPartialIdx
-    # while doing so. The current tile's fixup/store phase reads those (see
-    # StreamK.py skFixupStep / globalWriteBatch), so they must be checkpointed
-    # and restored around the borrowed next-tile identity.
-    #
-    # SK5 (StreamKHybrid) aliases PersistentIteration/PersistentIterationEnd onto the same
-    # physical SGPRs as StreamKTileIdx/StreamKPartialIdx (see the SK5 RegSet
-    # block). Checkpoint the idx names only; listing both the iter and idx
-    # names would save/restore the same registers twice. On the dynamic
-    # sub-path these regs hold the tile/partial index that the next-tile
-    # identity overwrites (restore required); on the static sub-path they hold
-    # PersistentIteration/PersistentIterationEnd, which next-tile setup only reads, so the
-    # save/restore is a no-op. One list covers both sub-paths.
-    if (hasDynamicAssignment(kernel) or hasHybridAssignment(kernel)):
-      names.append("StreamKTileIdx")
-      names.append("StreamKPartialIdx")
-    return names
 
-  @contextmanager
-  def allocPapTileIdentitySgprs(self, kernel):
-    names = self.papTileIdentityNames(kernel)
-    with self.allocTmpSgpr(len(names), alignment=1, tag="PAP tile identity") as papTileIdentitySgpr:
-      yield {name: papTileIdentitySgpr.idx + i for i, name in enumerate(names)}
 
-  def papCheckpointCurrentTileIdentity(self, kernel, prevTile):
-    module = Module("papCheckpointCurrentTileIdentity")
-    for name in self.papTileIdentityNames(kernel):
-      module.add(SMovB32(dst=sgpr(prevTile[name]), src=sgpr(name), comment="checkpoint %s for PAP restore" % name))
-    return module
 
-  def papRestoreCurrentTileIdentity(self, kernel, prevTile):
-    module = Module("papRestoreCurrentTileIdentity")
-    # PAP temporarily maps WorkGroup*/StreamKLocal* to the next persistent tile
-    # so it can issue the first PGR early. Restore the current tile for the
-    # remaining NLL/tail code; PersistentIteration already points at the next chunk.
-    for name in self.papTileIdentityNames(kernel):
-      module.add(SMovB32(dst=sgpr(name), src=sgpr(prevTile[name]), comment="restore current %s after PAP" % name))
-    return module
 
   ##############################################################################
   # Prefetch across persistent: prefetch next tile's data during the NLL.
@@ -19081,67 +19030,7 @@ class KernelWriterAssembly(KernelWriter):
   # before current-tile code observes those registers again.
   ##############################################################################
   def prefetchAcrossPersistent(self, kernel, tensorParametersA, tensorParametersB, skipBarrier=False):
-    module = Module("prefetchAcrossPersistent")
-    if not self.isPrefetchAcrossPersistentEnabled(kernel):
-      return module
-
-    processingComponent = Component.TileProcessingStrategy.find(self)
-    skipLabel = Label(self.labels.getNameInc("SK_SkipNllPAP"), "")
-    # Parallel reduction (no synchronizer): WGs do not advance across tiles.
-    # Under StreamKForceDPOnly the reduction is always forced to the tree path
-    # (Synchronizer always non-null, AddressFlags != 0 invariant), so this
-    # parallel-reduction skip never fires; fold it out.
-    if not isDataParallel(kernel):
-      module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
-      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
-    # Variant-specific "is there a next persistent iteration?" predicate. SK3
-    # (and the SK3/static path of SK5) compares PersistentIteration/PersistentIterationEnd; SK4
-    # (StreamKDynamic) and SK5-dynamic override against the work-queue pop.
-    module.add(processingComponent.papHasNextPersistentIteration(self, kernel, skipLabel))
-
-    if not skipBarrier:
-      module.add(SBarrier(comment="PAP: sync before next-tile prefetch"))
-
-    with self.allocPapTileIdentitySgprs(kernel) as prevTile:
-      module.add(self.papCheckpointCurrentTileIdentity(kernel, prevTile))
-      module.add(processingComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))
-      # From here to the restore below, WorkGroup* names the next tile. RAP's A
-      # silencing reads that to decide whether the next tile still shares the
-      # resident A; nothing else in this window depends on the flag.
-      rapPapOuter = self.states.rapInPapNextTilePrefetch
-      self.states.rapInPapNextTilePrefetch = kernel["ReuseAcrossPersistent"]
-      if kernel["enableTDMA"] and kernel["enableTDMB"]:
-        module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
-      loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
-      # DP-only: LoopCounter is constant ItersPerTile and OrigLoopCounter is a
-      # per-problem constant, so calculateLoopNumIter recomputes the same values
-      # (idempotent) and PAP never runs on the last tile. Skip the 2-VGPR
-      # checkpoint/restore. (DP-only PAP saving.)  HalfPLR is the exception: it
-      # enters PAP while LoopCounter is one, so the counters must be preserved.
-      snapshotLoopCounter = kernel["HalfPLR"] or not isDataParallel(kernel)
-      if snapshotLoopCounter:
-        prevLoopVgpr = self.vgprPool.checkOutAligned(2, 1, "PAP loop counters")
-        module.add(VMovB32(dst=vgpr(prevLoopVgpr), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
-        module.add(VMovB32(dst=vgpr(prevLoopVgpr + 1), src=sgpr("OrigLoopCounter"), comment="checkpoint OrigLoopCounter for PAP restore"))
-      module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
-      module.add(self.setupPrefetchAcrossPersistentLoads(kernel, tensorParametersA, tensorParametersB, isOptNLL=True))
-      if snapshotLoopCounter:
-        module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(prevLoopVgpr), comment="restore LoopCounter after PAP"))
-        module.add(VReadfirstlaneB32(dst=sgpr("OrigLoopCounter"), src=vgpr(prevLoopVgpr + 1), comment="restore OrigLoopCounter after PAP"))
-        self.vgprPool.checkIn(prevLoopVgpr)
-      if kernel["enableTDMA"] and kernel["enableTDMB"]:
-        module.add(self.papTdmSaveLdsBank(kernel))
-      self.states.rapInPapNextTilePrefetch = rapPapOuter
-      module.add(self.papRestoreCurrentTileIdentity(kernel, prevTile))
-    if (kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"]
-        and not kernel["HalfPLR"]):
-      module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA, tensorParametersB, preservePapBank=False))
-      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA["MX"], tensorParametersB["MX"], preservePapBank=False))
-    module.add(skipLabel)
-    return module
+    return Component.PersistentLoop.find(self).prefetch(self, kernel, tensorParametersA, tensorParametersB, skipBarrier=skipBarrier)
 
   ##############################################################################
   # Function End

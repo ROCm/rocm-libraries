@@ -3,7 +3,7 @@
 """Unit tests for the single-hop next-neighbor StreamK work-stealing codegen.
 
 These tests assert that the work-stealing assembly is emitted by the helper
-methods on the ``StreamK`` base class, and -- crucially -- that those helpers
+methods on the ``WorkAssignment`` base class, and -- crucially -- that those helpers
 are only ever reached behind the codegen-time ``WorkQueueStealing`` toggle.
 They import rocisa instructions and inspect emitted modules rather than matching
 source text; the toggle gating and the Solution-level validation are verified by
@@ -40,14 +40,14 @@ from rocisa.instruction import (
 )
 
 from Tensile.Common.ValidParameters import validParameters
-from Tensile.ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment
-from Tensile.ExecutionPolicy import normalize_execution_policy
+from Tensile.ExecutionPolicy import (
+    hasDynamicAssignment, hasHybridAssignment, normalize_execution_policy,
+)
 from Tensile.Components.StreamK import (
-    StreamK,
     StreamKDynamic,
     StreamKHybrid,
-    StreamKTwoTileDPFirst,
 )
+from Tensile.Components.WorkAssignment import WorkAssignment, DynamicWorkQueue, Hybrid
 from Tensile.SolutionStructs import Solution
 from Tensile.SolutionStructs.Utilities import reject
 
@@ -88,6 +88,7 @@ class _FakeWriter:
         # queue count from writer.states.archCaps["NumXCD"] and the per-queue
         # counter stride from writer.states.archCaps["CacheLineBytes"].
         self.states = types.SimpleNamespace(
+            kernel={"TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue"},
             archCaps={"NumXCD": numXCD, "CacheLineBytes": cacheLineBytes})
 
 
@@ -100,9 +101,9 @@ def _mk_label(base: str) -> Label:
 _WS_KERNEL = {"ISA": (9, 4, 0)}
 
 
-def _stream_k_instance(streamk: int) -> StreamK:
-    """A concrete StreamK variant (helpers live on the base class)."""
-    return {3: StreamKTwoTileDPFirst, 4: StreamKDynamic, 5: StreamKHybrid}[streamk]()
+def _stream_k_instance(streamk: int) -> WorkAssignment:
+    """A concrete assignment; queue protocol helpers live on its base class."""
+    return {4: DynamicWorkQueue, 5: Hybrid}[streamk]()
 
 
 def _imm_in(inst, value: int) -> bool:
@@ -145,7 +146,7 @@ def _is_subscript_on(node, name: str, key: str) -> bool:
 
 
 def _ws_guarded_calls(func) -> set:
-    """Names of ``self.streamKWorkStealing*`` calls that sit inside an
+    """Names of home-bound and neighbor-steal calls that sit inside an
     ``if kernel["WorkQueueStealing"]:`` block in *func* (recursing into
     nested closures)."""
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
@@ -156,18 +157,18 @@ def _ws_guarded_calls(func) -> set:
         ):
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute):
-                    if sub.func.attr.startswith("streamKWorkStealing"):
+                    if sub.func.attr in {"foldHomeBound", "stealFromNeighbor"}:
                         guarded.add(sub.func.attr)
     return guarded
 
 
 def _all_ws_calls(func) -> set:
-    """Every ``self.streamKWorkStealing*`` call in *func*, guarded or not."""
+    """Every home-bound and neighbor-steal call in *func*, guarded or not."""
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
     calls = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr.startswith("streamKWorkStealing"):
+            if node.func.attr in {"foldHomeBound", "stealFromNeighbor"}:
                 calls.add(node.func.attr)
     return calls
 
@@ -250,18 +251,18 @@ class TestValidParameters:
 
 
 # ===========================================================================
-# 2. The work-stealing helper methods exist on the StreamK base class.
+# 2. The work-stealing helper methods exist on the WorkAssignment base class.
 # ===========================================================================
 class TestHelperMethodsExist:
     @pytest.mark.parametrize(
         "name",
         [
-            "streamKWorkStealingHomeBound",
-            "streamKWorkStealingSteal",
+            "foldHomeBound",
+            "stealFromNeighbor",
         ],
     )
     def test_method_is_defined_on_base(self, name):
-        assert callable(getattr(StreamK, name))
+        assert callable(getattr(WorkAssignment, name))
 
 
 # ===========================================================================
@@ -275,7 +276,7 @@ class TestHomeBoundEmission:
         module = Module("home-bound")
         sBound = writer.sgprPool.checkOut(1, "bound")
         sQueueIdx = writer.sgprPool.checkOut(1, "queueIdx")
-        sk.streamKWorkStealingHomeBound(
+        sk.foldHomeBound(
             writer, module, _WS_KERNEL, sBound, sQueueIdx, "skGrid"
         )
         return _flat(module)
@@ -316,7 +317,7 @@ class TestStealEmission:
         module = Module("steal")
         sQueueIdx = writer.sgprPool.checkOut(1, "queueIdx")
         sWorkItemIdx = writer.sgprPool.checkOut(1, "workItemIdx")
-        sk.streamKWorkStealingSteal(
+        sk.stealFromNeighbor(
             writer, module, _WS_KERNEL, sQueueIdx, sWorkItemIdx, "skGrid", _mk_label
         )
         return _flat(module)
@@ -372,17 +373,17 @@ class TestStealEmission:
 # ===========================================================================
 # 3c. Sticky-home: the home fetch is gated by a persistent StreamKStickyEmpty
 #     SGPR, and the flag is latched on an empty home fetch. Verified against
-#     the real _fetchWorkItemAndBroadcast source (the pop was extracted out of
+#     the real fetchAndBroadcast source (the pop was extracted out of
 #     graWorkGroup so PAP can reuse it without a second atomic).
 # ===========================================================================
 class TestStickyHomeGate:
     @pytest.mark.parametrize(
         "func",
-        [StreamKDynamic._fetchWorkItemAndBroadcast, StreamKHybrid._fetchWorkItemAndBroadcast],
+        [DynamicWorkQueue.fetchAndBroadcast, Hybrid.fetchAndBroadcast],
     )
     def test_home_fetch_is_gated_by_sticky_flag(self, func):
         src = _source_of(func)
-        assert "StreamKStickyEmpty" in src, (
+        assert "partition.sticky_empty" in src, (
             "the home fetch must be gated by the persistent sticky-empty SGPR"
         )
         # A steal-only skip label proves the home s_atomic_inc is bypassed once
@@ -393,14 +394,13 @@ class TestStickyHomeGate:
 
     @pytest.mark.parametrize(
         "func",
-        [StreamKDynamic._fetchWorkItemAndBroadcast, StreamKHybrid._fetchWorkItemAndBroadcast],
+        [DynamicWorkQueue.fetchAndBroadcast, Hybrid.fetchAndBroadcast],
     )
     def test_steal_passes_grid_sgpr(self, func):
         # The steal now needs the mode-appropriate grid SGPR for its bound.
         src = _source_of(func)
-        grid = "SKGrid" if func is StreamKHybrid._fetchWorkItemAndBroadcast else "skGrid"
-        assert "streamKWorkStealingSteal" in src
-        assert grid in src
+        assert "stealFromNeighbor" in src
+        assert "partition.grid" in src
 
 
 # ===========================================================================
@@ -434,7 +434,7 @@ class TestQueueConstants:
         # get_default_cache_line_bytes == 128, so the constants tuple is exactly
         # (numQueues=8, mask=7, log2=3, cacheLineLog2=log2(128)=7).
         writer = _FakeWriter(numXCD=8, cacheLineBytes=128)
-        assert sk._wsQueueConstants(writer, {"ISA": isa}) == (8, 7, 3, 7)
+        assert sk.queueConstants(writer, {"ISA": isa}) == (8, 7, 3, 7)
 
     def test_non_power_of_two_queue_count_asserts(self):
         # The shift/AND fast masking is only valid for a power-of-two queue
@@ -442,7 +442,7 @@ class TestQueueConstants:
         sk = _stream_k_instance(4)
         writer = _FakeWriter(numXCD=6)
         with pytest.raises(AssertionError):
-            sk._wsQueueConstants(writer, {"ISA": (9, 9, 0)})
+            sk.queueConstants(writer, {"ISA": (9, 9, 0)})
 
 
 # ===========================================================================
@@ -452,16 +452,16 @@ class TestQueueConstants:
 # ===========================================================================
 class TestCallsitesAreToggleGated:
     def test_sk4_fetch_steal_calls_are_all_gated(self):
-        guarded = _ws_guarded_calls(StreamKDynamic._fetchWorkItemAndBroadcast)
-        allcalls = _all_ws_calls(StreamKDynamic._fetchWorkItemAndBroadcast)
-        assert {"streamKWorkStealingHomeBound", "streamKWorkStealingSteal"} <= guarded
+        guarded = _ws_guarded_calls(DynamicWorkQueue.fetchAndBroadcast)
+        allcalls = _all_ws_calls(DynamicWorkQueue.fetchAndBroadcast)
+        assert {"foldHomeBound", "stealFromNeighbor"} <= guarded
         # Nothing slips through ungated.
         assert allcalls == guarded
 
     def test_sk5_fetch_steal_calls_are_all_gated(self):
-        guarded = _ws_guarded_calls(StreamKHybrid._fetchWorkItemAndBroadcast)
-        allcalls = _all_ws_calls(StreamKHybrid._fetchWorkItemAndBroadcast)
-        assert {"streamKWorkStealingHomeBound", "streamKWorkStealingSteal"} <= guarded
+        guarded = _ws_guarded_calls(Hybrid.fetchAndBroadcast)
+        allcalls = _all_ws_calls(Hybrid.fetchAndBroadcast)
+        assert {"foldHomeBound", "stealFromNeighbor"} <= guarded
         assert allcalls == guarded
 
 

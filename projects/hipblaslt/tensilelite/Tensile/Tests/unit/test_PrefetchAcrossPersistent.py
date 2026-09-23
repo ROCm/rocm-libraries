@@ -22,6 +22,9 @@ from Tensile.KernelWriter import KernelWriter
 import Tensile.KernelWriterAssembly as kwa_module
 from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
 from Tensile.Components.TDMFuse import TDM_GROUPS, tdmGrouping, tdmPapRejectReason, tdmScaleSharesDataSet
+from Tensile.Components.TileProcessingStrategy import DataParallel
+from Tensile.Components.PersistentLoop import PersistentLoopOn
+from Tensile.Components.WorkAssignment import StaticGrid, DynamicWorkQueue, Hybrid
 from Tensile.Common.GlobalParameters import defaultSolution, globalParameters
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.Types import IsaInfo, IsaVersion, SemanticVersion
@@ -382,7 +385,7 @@ class _ClassicPapWrapperWriter:
         return True
 
     @contextmanager
-    def allocPapTileIdentitySgprs(self, kernel):
+    def allocPapTileIdentity(self, kernel, subtile=False):
         yield {
             "WorkGroup0": 100,
             "WorkGroup1": 101,
@@ -391,7 +394,7 @@ class _ClassicPapWrapperWriter:
             "StreamKLocalEnd": 104,
         }
 
-    def papCheckpointCurrentTileIdentity(self, kernel, prev_tile):
+    def papCheckpointCurrentTileIdentity(self, kernel, prev_tile, subtile=False):
         return _module_with_comment("papCheckpointCurrentTileIdentity", "unit: checkpoint tile")
 
     def loopCounterName(self, kernel, loop_idx):
@@ -403,16 +406,21 @@ class _ClassicPapWrapperWriter:
     def setupPrefetchAcrossPersistentLoads(self, kernel, tpa, tpb, isOptNLL=True):
         return _module_with_comment("setupPrefetchAcrossPersistentLoads", "unit: setup PAP loads")
 
-    def papRestoreCurrentTileIdentity(self, kernel, prev_tile):
+    def papRestoreCurrentTileIdentity(self, kernel, prev_tile, subtile=False):
         return _module_with_comment("papRestoreCurrentTileIdentity", "unit: restore tile")
 
 
 class _StubStreamK:
-    def papHasNextPersistentIteration(self, writer, kernel, skipLabel):
-        return _module_with_comment("papHasNextPersistentIteration", "unit: has next persistent iteration")
+    def prefetchEligibility(self, writer, kernel, skipLabel):
+        return Module("prefetchEligibility")
 
     def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tpa, tpb, skipLroReset=False):
         return _module_with_comment("prefetchAcrossPersistentSetupNextTile", "unit: setup next tile")
+
+
+class _StubWorkAssignment:
+    def reserveNext(self, writer, kernel, skipLabel):
+        return _module_with_comment("reserveNext", "unit: reserve next persistent assignment")
 
 
 def _problem_type(**overrides):
@@ -702,14 +710,27 @@ def _waveidx_is_in_pool(writer):
 
 def _prefetch_across_persistent(monkeypatch, *, skip_barrier=False, **kernel_overrides):
     monkeypatch.setattr(kwa_module.Component.TileProcessingStrategy, "find", lambda writer: _StubStreamK())
+    monkeypatch.setattr(kwa_module.Component.WorkAssignment, "find", lambda writer: _StubWorkAssignment())
+    monkeypatch.setattr(kwa_module.Component.PersistentLoop, "find", lambda writer: PersistentLoopOn())
     writer = _ClassicPapWrapperWriter()
+    kernel = _pap_wrapper_kernel(**kernel_overrides)
+    processing = DataParallel() if kernel["TileProcessingStrategy"] == "DataParallel" else StreamKTwoTileDPFirst()
+    writer.states.kernel = kernel
+    writer.states.currentTileWork = processing.tileWork(kernel)
     module = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
         writer,
-        _pap_wrapper_kernel(**kernel_overrides),
+        kernel,
         *_tensor_parameters(),
         skipBarrier=skip_barrier,
     )
-    return writer, _module_items(module)
+    # The loop now owns the classic handoff as a nested module. Preserve the
+    # instruction-order assertions across that ownership boundary.
+    def flatten(module):
+        for item in _module_items(module):
+            yield item
+            if isinstance(item, Module):
+                yield from flatten(item)
+    return writer, list(flatten(module))
 
 
 def _streamk_with_stubbed_tile_indexing():
@@ -1109,7 +1130,7 @@ def test_dp_only_pap_skips_loop_counter_checkpoint(monkeypatch):
     # DataParallel keeps LoopCounter/OrigLoopCounter constant (idempotent
     # recompute, PAP never runs on the last tile), so prefetchAcrossPersistent
     # skips the 2-VGPR checkpoint/restore entirely
-    # (KernelWriterAssembly: snapshotLoopCounter = HalfPLR or not isDataParallel).
+    # (PersistentLoop checks HalfPLR and the TileWork local-K capability).
     writer, items = _prefetch_across_persistent(monkeypatch, TileProcessingStrategy="DataParallel")
 
     assert not any(tag == "PAP loop counters" for _, _, tag in writer.vgprPool.checked_out)
@@ -1167,16 +1188,14 @@ def test_streamk_pap_next_tile_setup_applies_wgm_remap(
     assert writer.states.WGMTransformLevels == expected_transform_levels
 
 
-def test_streamk3_pap_has_next_persistent_iteration_uses_streamkiter_compare():
-    # The PAP "is there a next persistent iteration?" predicate is now a
-    # StreamK-component seam. The static StreamK variants (SK3 TwoTileDPFirst,
-    # and the SK3/static path of SK5) keep the historical
-    # PersistentIteration >= PersistentIterationEnd compare + skip branch, byte-for-byte, so
-    # relaxing the seam for SK4 (StreamKDynamic) does not perturb SK3 codegen.
+def test_static_assignment_reservation_uses_streamk_partition_bound(monkeypatch):
+    # Assignment owns the reservation; StreamK supplies the cursor and bound.
+    # Extraction retains the old exhaustion compare and skip branch.
     from rocisa.code import Label
 
+    monkeypatch.setattr(kwa_module.Component.TileProcessingStrategy, "find", lambda writer: StreamKTwoTileDPFirst())
     skip_label = Label("SK_SkipNllPAP_unit", "")
-    module = StreamKTwoTileDPFirst().papHasNextPersistentIteration(
+    module = StaticGrid().reserveNext(
         writer=None, kernel={}, skipLabel=skip_label
     )
     rendered = str(module)
@@ -1198,31 +1217,33 @@ def _fake_fetch(self, writer, kernel, preventOverflow=True, uniqueLabels=False):
     return _module_with_comment("fakeFetch", "unit: queue pop"), sidx
 
 
-def test_sk4_pap_has_next_primes_before_drain_check(monkeypatch):
+def test_queue_reservation_primes_before_drain_check(monkeypatch):
     # SK4 PAP must stash NextWorkItem and set PersistentPrefetchState before the
     # TotalItems drain compare so the back-edge never re-pops a termination token.
-    monkeypatch.setattr(StreamKDynamic, "_fetchWorkItemAndBroadcast", _fake_fetch)
+    monkeypatch.setattr(DynamicWorkQueue, "fetchAndBroadcast", _fake_fetch)
+    monkeypatch.setattr(kwa_module.Component.TileProcessingStrategy, "find", lambda writer: StreamKDynamic())
     from rocisa.code import Label
 
     skip_label = Label("SK_SkipNllPAP_sk4", "")
-    module = StreamKDynamic().papHasNextPersistentIteration(
+    module = DynamicWorkQueue().reserveNext(
         _PapFetchWriter(), {"TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue"}, skip_label
     )
     rendered = str(module)
-    primed = rendered.find("s[sgprPersistentPrefetchState]")
+    primed = rendered.find("s_mov_b32 s[sgprPersistentPrefetchState], 1")
     drain = rendered.find("s[sgprTotalItems]")
     assert primed != -1 and drain != -1 and primed < drain
     assert "s[sgprNextWorkItem]" in rendered
 
 
-def test_sk5_pap_has_next_dispatches_static_and_dynamic(monkeypatch):
+def test_hybrid_reservation_dispatches_static_and_dynamic(monkeypatch):
     # SK5 PAP is a runtime hybrid: mode==0 keeps the SK3 PersistentIteration compare;
     # mode!=0 reuses the SK4 pop-and-prime handoff.
-    monkeypatch.setattr(StreamKHybrid, "_fetchWorkItemAndBroadcast", _fake_fetch)
+    monkeypatch.setattr(Hybrid, "fetchAndBroadcast", _fake_fetch)
+    monkeypatch.setattr(kwa_module.Component.TileProcessingStrategy, "find", lambda writer: StreamKHybrid())
     from rocisa.code import Label
 
     skip_label = Label("SK_SkipNllPAP_sk5", "")
-    module = StreamKHybrid().papHasNextPersistentIteration(
+    module = Hybrid().reserveNext(
         _PapFetchWriter(), {"TileProcessingStrategy": "StreamK", "WorkAssignment": "Hybrid"}, skip_label
     )
     rendered = str(module)

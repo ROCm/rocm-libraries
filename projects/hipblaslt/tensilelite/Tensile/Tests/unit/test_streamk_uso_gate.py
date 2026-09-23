@@ -31,6 +31,7 @@ reads the wrong partials and the result is silently wrong. Hence the mechanical
 import inspect
 import itertools
 import re
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -39,7 +40,7 @@ import pytest
 from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 
 from rocisa.code import Module
-from rocisa.container import vgpr
+from rocisa.container import ContinuousRegister, vgpr
 from rocisa.instruction import (
     SAndB32,
     SBitcmp1B32,
@@ -58,6 +59,9 @@ from Tensile.Components.StreamK import (
     StreamKHybrid,
     StreamKTwoTileDPFirst,
 )
+from Tensile.Components.WorkAssignment import Hybrid, StaticGrid
+from _persistent_isa import Machine
+from streamk5_test_helpers import emit_mode_extraction_module
 
 pytestmark = pytest.mark.unit
 
@@ -283,12 +287,48 @@ def test_past_tile_check_is_slaved_to_coop_end():
 # --- 5. No prologue: nothing extracts or clears the bit -------------------
 
 
-@pytest.mark.parametrize("variant", [StreamKTwoTileDPFirst, StreamKHybrid])
-def test_preloop_does_not_extract_the_uso_bit(variant):
-    assert "_extract_uso_bit(" not in inspect.getsource(variant.preLoop)
+@pytest.mark.parametrize("assignment,processing", [
+    (StaticGrid, StreamKTwoTileDPFirst), (Hybrid, StreamKHybrid),
+])
+def test_initialization_does_not_extract_the_uso_bit(assignment, processing):
+    writer = _writer(False)
+    kernel = {
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": assignment.__name__,
+        "PersistentXCCMapping": 0, "WorkQueueStealing": 0, "ClusterDim": [1, 1],
+        "WavefrontSize": 64, "MagicDivAlg": 2,
+        "ProblemType": {"NumIndicesC": 3, "NumIndicesFree": 2},
+    }
+    writer.states.kernel = kernel
+    writer.states.archCaps = {"WorkGroupIdFromTTM": False}
+
+    @contextmanager
+    def alloc_tmp(size, alignment=1, tag=""):
+        index = writer.sgprPool.checkOut(size, tag)
+        try:
+            yield ContinuousRegister(index, size)
+        finally:
+            writer.sgprPool.checkIn(index)
+
+    writer.allocTmpSgpr = alloc_tmp
+    writer.longBranchScc0 = lambda label, **kw: SCBranchSCC0(labelName=label.getLabelName())
+    module = assignment().initialize(writer, kernel, processing())
+    insts = list(module.flatitems())
+    assert sum(_is_uso_test(inst) for inst in insts) == 1
+    for inst in insts:
+        if isinstance(inst, (SAndB32, SLShiftRightB32)):
+            params = list(inst.getParams())
+            if any(_reg_name(param) == "sgprMagicShiftItersPerTile" for param in params[1:]):
+                assert isinstance(inst, SLShiftRightB32)
+                assert params[2] == hex(30), "Only the hybrid mode bit is extracted"
 
 
 def test_sk5_mode_extraction_leaves_bit_29_alone():
     """Bit 30 DOES need clearing (SKTiles aliases the register); bit 29 must not."""
-    assert "_emitModeExtraction(" in inspect.getsource(StreamKHybrid.preLoop)
-    assert str(_SK_USO_BIT) not in inspect.getsource(StreamKHybrid._emitModeExtraction)
+    assert ".extractMode(" in inspect.getsource(Hybrid.initialize)
+    module = emit_mode_extraction_module()
+    for mode, uso in itertools.product((0, 1), repeat=2):
+        packed = (mode << 30) | (uso << _SK_USO_BIT) | 17
+        machine = Machine(MagicShiftItersPerTile=packed)
+        assert machine.run(module) is None
+        assert machine["WorkAssignmentMode"] == mode
+        assert machine["MagicShiftItersPerTile"] == (uso << _SK_USO_BIT) | 17
