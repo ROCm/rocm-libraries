@@ -23,6 +23,7 @@ target_sources(stinkytofu_objs PRIVATE
     ExecMaskGrouping.cpp
     StinkyDAGSchedulerPass.cpp
     dag/RegionDAG.cpp
+    dag/SchedulingKnobHeuristics.cpp
     WaitAwareScheduleRepairPass.cpp
     StinkyMergeBarrierPass.cpp
     SetMatrixReusePass.cpp

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -290,17 +290,10 @@ bool Single2DNode::CreateDeviceResources()
     radices1.insert(radices1.cbegin(), kernelFactors.cbegin(), kernelFactors.cbegin() + count);
     radices2.insert(radices2.cbegin(), kernelFactors.cbegin() + count, kernelFactors.cend());
 
-    twd_attach_halfN  = (ebtype != EmbeddedType::NONE);
-    twd_attach_halfN2 = false;
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
     // create one set of twiddles for each dimension
-    std::tie(twiddles, twiddles_size) = Repo::GetTwiddles2D(length[0],
-                                                            length[1],
-                                                            precision,
-                                                            deviceProp,
-                                                            twd_attach_halfN,
-                                                            twd_attach_halfN2,
-                                                            radices1,
-                                                            radices2);
+    std::tie(twiddles, twiddles_size) = Repo::GetTwiddles2D(
+        length[0], length[1], precision, deviceProp, twd_attach_halfN, radices1, radices2);
 
     return CreateLargeTwdTable();
 }

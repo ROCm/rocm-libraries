@@ -2,6 +2,10 @@ EMU version: v0.3.1-0-g93b98ccf
 EMU commit: 93b98ccf7819f92558118d546717bebad7fcca1d
 Snapshot date: 2026-09-17
 Arches: cdna3,cdna4,cdna5
+Out-of-snapshot patch: src/arch/cdna4/direct/direct_wgrad/epilogue.h carries hipconv
+  e1777ac9 (AMD-ROCm-Core-Perf-Team/hipconv#231), a cross-lane ordering fix taken ahead of
+  the next sync. Any snapshot from hipconv main at or after that commit supersedes it;
+  do not publish an earlier revision over this tree.
 Files:
   ./CHANGELOG.md
   ./.clang-format
