@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -190,6 +190,7 @@ template <testAPI_t API,
           bool      NPVT,
           typename T,
           typename I,
+          typename SIZE,
           typename Td,
           typename Id,
           typename INTd,
@@ -206,7 +207,7 @@ void getri_getError(const hipsolverHandle_t handle,
                     Td&                     dC,
                     const I                 ldc,
                     TdWork&                 dWork,
-                    const I                 lwork,
+                    const SIZE              lwork,
                     INTd&                   dInfo,
                     const int               bc,
                     Th&                     hA,
@@ -218,7 +219,7 @@ void getri_getError(const hipsolverHandle_t handle,
                     INTh&                   hInfoRes,
                     double*                 max_err)
 {
-    rocblas_int    sizeW = n;
+    rocblas_int    sizeW = std::max(1, n);
     std::vector<T> hW(sizeW);
 
     // input data initialization (includes cpu_getrf to compute LU factorization)
@@ -276,6 +277,7 @@ template <testAPI_t API,
           bool      NPVT,
           typename T,
           typename I,
+          typename SIZE,
           typename Td,
           typename Twork,
           typename Id,
@@ -292,7 +294,7 @@ void getri_getPerfData(const hipsolverHandle_t handle,
                        Td&                     dC,
                        const I                 ldc,
                        Twork&                  dWork,
-                       const I                 lwork,
+                       const SIZE              lwork,
                        INTd&                   dInfo,
                        const int               bc,
                        Th&                     hA,
@@ -306,7 +308,7 @@ void getri_getPerfData(const hipsolverHandle_t handle,
 {
     if(!perf)
     {
-        rocblas_int    sizeW = n;
+        rocblas_int    sizeW = std::max(1, n);
         std::vector<T> hW(sizeW);
 
         getri_initData<NPVT, true, false, T>(
@@ -438,29 +440,31 @@ void testing_getri(Arguments& argus)
     }
 
     // memory size query is necessary
-    I lwork;
+    SIZE size_W;
     hipsolver_getri_bufferSize(
-        API, handle, n, (T**)nullptr, lda, (int*)nullptr, stP, (T**)nullptr, ldc, &lwork, bc);
+        API, handle, n, (T**)nullptr, lda, (int*)nullptr, stP, (T**)nullptr, ldc, &size_W, bc);
+    SIZE size_W_elems = (size_W + sizeof(T) - 1) / sizeof(T);
 
     if(argus.mem_query)
     {
-        rocsolver_bench_inform(inform_mem_query, lwork);
+        rocsolver_bench_inform(inform_mem_query, size_W);
         return;
     }
 
     if(BATCHED)
     {
         // memory allocations
-        host_batch_vector<T>             hA(size_A, 1, bc);
-        host_batch_vector<T>             hC(size_C, 1, bc);
-        host_batch_vector<T>             hCRes(size_CRes, 1, bc);
-        host_strided_batch_vector<int>   hIpiv(size_P, 1, stP, bc);
-        host_strided_batch_vector<int>   hIpivRes(size_PRes, 1, stPRes, bc);
-        host_strided_batch_vector<int>   hInfo(1, 1, 1, bc);
-        host_strided_batch_vector<int>   hInfoRes(1, 1, 1, bc);
-        device_batch_vector<T>           dA(size_A, 1, bc);
-        device_batch_vector<T>           dC(size_C, 1, bc);
-        device_strided_batch_vector<T>   dWork(lwork, 1, lwork, bc);
+        host_batch_vector<T>           hA(size_A, 1, bc);
+        host_batch_vector<T>           hC(size_C, 1, bc);
+        host_batch_vector<T>           hCRes(size_CRes, 1, bc);
+        host_strided_batch_vector<int> hIpiv(size_P, 1, stP, bc);
+        host_strided_batch_vector<int> hIpivRes(size_PRes, 1, stPRes, bc);
+        host_strided_batch_vector<int> hInfo(1, 1, 1, bc);
+        host_strided_batch_vector<int> hInfoRes(1, 1, 1, bc);
+        device_batch_vector<T>         dA(size_A, 1, bc);
+        device_batch_vector<T>         dC(size_C, 1, bc);
+        device_strided_batch_vector<T> dWork(
+            size_W_elems, 1, size_W_elems, 1); // size_W accounts for bc
         device_strided_batch_vector<int> dIpiv(size_P, 1, stP, bc);
         device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
         if(size_A)
@@ -470,7 +474,7 @@ void testing_getri(Arguments& argus)
         CHECK_HIP_ERROR(dInfo.memcheck());
         if(size_P)
             CHECK_HIP_ERROR(dIpiv.memcheck());
-        if(lwork)
+        if(size_W)
             CHECK_HIP_ERROR(dWork.memcheck());
 
         // check computations
@@ -484,7 +488,7 @@ void testing_getri(Arguments& argus)
                                          dC,
                                          ldc,
                                          dWork,
-                                         lwork,
+                                         size_W,
                                          dInfo,
                                          bc,
                                          hA,
@@ -507,7 +511,7 @@ void testing_getri(Arguments& argus)
                                             dC,
                                             ldc,
                                             dWork,
-                                            lwork,
+                                            size_W,
                                             dInfo,
                                             bc,
                                             hA,
@@ -535,8 +539,8 @@ void testing_getri(Arguments& argus)
             std::cerr << "============================================\n";
             if(BATCHED)
             {
-                rocsolver_bench_output("n", "lda", "strideP", "batch_c");
-                rocsolver_bench_output(n, lda, stP, bc);
+                rocsolver_bench_output("n", "lda", "ldc", "strideP", "batch_c");
+                rocsolver_bench_output(n, lda, ldc, stP, bc);
             }
             std::cerr << "\n============================================\n";
             std::cerr << "Results:\n";
