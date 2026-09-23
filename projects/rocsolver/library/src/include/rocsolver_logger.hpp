@@ -104,9 +104,7 @@ ROCSOLVER_BEGIN_NAMESPACE
         hipError_t status = hipGetLastError();                                                      \
         if(status != hipSuccess)                                                                    \
         {                                                                                           \
-            hipStream_t stream;                                                                     \
-            rocblas_get_stream(handle, &stream);                                                    \
-            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));                                       \
+            THROW_IF_HIP_ERROR(status);                                                             \
         }                                                                                           \
     } while(0)
 #else
@@ -151,9 +149,7 @@ ROCSOLVER_BEGIN_NAMESPACE
             std::cerr << "hipGetLastError() " << hipGetErrorString(status) << "( " << status        \
                       << ") " << std::endl;                                                         \
             assert(status == hipSuccess);                                                           \
-            hipStream_t stream;                                                                     \
-            rocblas_get_stream(handle, &stream);                                                    \
-            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));                                       \
+            THROW_IF_HIP_ERROR(status);                                                             \
         }                                                                                           \
     } while(0)
 
