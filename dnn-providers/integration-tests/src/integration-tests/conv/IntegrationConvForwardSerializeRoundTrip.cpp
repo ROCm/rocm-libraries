@@ -204,8 +204,9 @@ protected:
         }
 
         const float tolerance = this->getTolerance(graphObj, outputs.y);
-        const auto site
-            = referenceUsesDevice ? bundle::ValidationSite::DEVICE : bundle::ValidationSite::HOST;
+        const auto site = resolveValidationSite(TestConfig::get().getValidatorDevice(),
+                                                referenceUsesDevice ? ValidationSite::DEVICE
+                                                                    : ValidationSite::HOST);
         auto selection
             = bundle::makeValidator(frontendToSdkDataType(outputs.y->get_data_type()),
                                     bundle::tensorLabel(yUid, outputs.y->get_name()),

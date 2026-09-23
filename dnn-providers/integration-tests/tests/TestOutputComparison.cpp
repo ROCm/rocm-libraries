@@ -21,13 +21,13 @@
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 
+using hipdnn_integration_tests::ValidationSite;
 using hipdnn_integration_tests::bundle::compareOutputs;
 using hipdnn_integration_tests::bundle::compareTensor;
 using hipdnn_integration_tests::bundle::ComparisonTolerance;
 using hipdnn_integration_tests::bundle::makeValidator;
 using hipdnn_integration_tests::bundle::OutputTensors;
 using hipdnn_integration_tests::bundle::tensorLabel;
-using hipdnn_integration_tests::bundle::ValidationSite;
 using hipdnn_integration_tests::bundle::ValidatorKind;
 
 // NOLINTBEGIN(readability-identifier-naming)

@@ -42,10 +42,12 @@ class BundleReferenceValidationHarness : public ::testing::Test
 public:
     BundleReferenceValidationHarness(ReferenceExecutorType referenceType,
                                      bool requiresDevice,
-                                     std::shared_ptr<IReferenceExecutors> referenceExecutors)
+                                     std::shared_ptr<IReferenceExecutors> referenceExecutors,
+                                     ValidatorDevice validator = ValidatorDevice::AUTO)
         : _referenceType(referenceType)
         , _requiresDevice(requiresDevice)
         , _referenceExecutors(std::move(referenceExecutors))
+        , _validator(validator)
     {
     }
 
@@ -82,6 +84,8 @@ private:
     ReferenceExecutorType _referenceType;
     bool _requiresDevice;
     std::shared_ptr<IReferenceExecutors> _referenceExecutors;
+    /// Where the comparison runs. AUTO means the host: golden data is loaded there.
+    ValidatorDevice _validator;
     std::filesystem::path _bundlePath;
     std::shared_ptr<IntegrationTestBundle> _bundle;
 };

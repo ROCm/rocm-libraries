@@ -639,13 +639,14 @@ VerificationOutcome IntegrationBundleVerificationHarness::compareAgainst(
               return gradingForTensor(currentTestName(), label, value, value);
           };
 
-    const auto mismatches = bundle::compareOutputs(wrapper,
-                                                   _bundle->outputTensorUids,
-                                                   engineOutputs,
-                                                   expectedFor,
-                                                   toleranceFor,
-                                                   site,
-                                                   "Bundle: " + _bundlePath.string());
+    const auto mismatches
+        = bundle::compareOutputs(wrapper,
+                                 _bundle->outputTensorUids,
+                                 engineOutputs,
+                                 expectedFor,
+                                 toleranceFor,
+                                 resolveValidationSite(_deps.policy.validator, site),
+                                 "Bundle: " + _bundlePath.string());
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
     // the outcome carries no message because of it.

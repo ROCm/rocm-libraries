@@ -16,6 +16,8 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
+#include "harness/ValidationSite.hpp"
+
 namespace hipdnn_integration_tests::bundle
 {
 
@@ -74,19 +76,6 @@ struct ComparisonTolerance
     {
         return ComparisonTolerance{0.0f, 0.0f, ValidatorKind::RMS, threshold};
     }
-};
-
-/// Where a comparison runs, for either validator kind.
-///
-/// Not a setting of its own: it follows the reference that produced the expected
-/// values, so the reference selection (--reference-executor, --verification-mode) is
-/// the one switch. A GPU reference leaves its output on the device, and the engine's
-/// output is already there, so the comparison runs there too. Golden data is loaded
-/// on the host and a CPU reference writes to the host, so those compare on the host.
-enum class ValidationSite
-{
-    HOST,
-    DEVICE,
 };
 
 /// Resolves how one output tensor is compared.

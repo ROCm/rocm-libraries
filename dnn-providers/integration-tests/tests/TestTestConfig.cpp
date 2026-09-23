@@ -116,6 +116,47 @@ TEST(TestResolveVerificationMode, NulloptCliWithoutEnvReturnsNullopt)
     EXPECT_FALSE(result.has_value());
 }
 
+TEST(TestParseValidatorDevice, AcceptsAutoCpuGpuCaseInsensitiveAndNothingElse)
+{
+    using hipdnn_integration_tests::parseValidatorDevice;
+    using hipdnn_integration_tests::ValidatorDevice;
+
+    EXPECT_EQ(parseValidatorDevice("auto"), ValidatorDevice::AUTO);
+    EXPECT_EQ(parseValidatorDevice("CPU"), ValidatorDevice::CPU);
+    EXPECT_EQ(parseValidatorDevice("Gpu"), ValidatorDevice::GPU);
+
+    EXPECT_THROW(parseValidatorDevice("host"), std::runtime_error);
+    EXPECT_THROW(parseValidatorDevice(""), std::runtime_error);
+}
+
+// An explicit --validator auto must beat the env var, not fall through to it: "follow
+// the reference" is a choice, not the absence of one.
+TEST(TestResolveValidatorDevice, ExplicitAutoOnTheCliBeatsTheEnv)
+{
+    using hipdnn_integration_tests::resolveValidatorDevice;
+    using hipdnn_integration_tests::ValidatorDevice;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard("HIPDNN_TEST_VALIDATOR",
+                                                                            "gpu");
+    EXPECT_EQ(resolveValidatorDevice(ValidatorDevice::AUTO), ValidatorDevice::AUTO);
+    EXPECT_EQ(resolveValidatorDevice(std::nullopt), ValidatorDevice::GPU);
+}
+
+TEST(TestResolveValidationSite, AutoFollowsTheReferenceAndCpuGpuOverrideIt)
+{
+    using hipdnn_integration_tests::resolveValidationSite;
+    using hipdnn_integration_tests::ValidationSite;
+    using hipdnn_integration_tests::ValidatorDevice;
+
+    for(const auto referenceSite : {ValidationSite::HOST, ValidationSite::DEVICE})
+    {
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::AUTO, referenceSite), referenceSite);
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::CPU, referenceSite), ValidationSite::HOST);
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::GPU, referenceSite),
+                  ValidationSite::DEVICE);
+    }
+}
+
 TEST(TestResolveGoldenDataDir, CliValueWinsOverEnv)
 {
     using hipdnn_integration_tests::resolveGoldenDataDir;

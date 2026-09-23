@@ -233,16 +233,22 @@ runs the bundle graphs without any DVC pull. Bundle registration is on by defaul
 pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
 that were compiled into the binary.
 
-The comparison runs where the expected values live, so the reference you select is
-also the validator you get — there is no separate switch. Output checked against the
-GPU reference is compared on the device (`GpuFpReferenceValidation`, or
-`GpuFpReferenceRmsValidation` for a `[[validator_overrides]]` RMS check); output
-checked against the CPU reference or against golden data is compared on the host
-(`CpuFpReferenceValidation` / `CpuFpReferenceMiopenRmsValidation`). That holds for
-every mode, including each step of the `auto` fallback chain, and for C++ graph tests
-under `--reference-executor gpu|cpu`. Only the pass/fail call moves: a failure report
-is always built on the host from the read-back values. `hipdnn_golden_data_tests`
-always compares on the host, since the golden data it checks against is loaded there.
+By default the comparison runs where the expected values live, so the reference you
+select is also the validator you get. Output checked against the GPU reference is
+compared on the device (`GpuFpReferenceValidation`, or `GpuFpReferenceRmsValidation`
+for a `[[validator_overrides]]` RMS check); output checked against the CPU reference
+or against golden data is compared on the host (`CpuFpReferenceValidation` /
+`CpuFpReferenceMiopenRmsValidation`). That holds for every mode, including each step
+of the `auto` fallback chain, and for C++ graph tests under
+`--reference-executor gpu|cpu`.
+
+`--validator auto|cpu|gpu` (or `HIPDNN_TEST_VALIDATOR`) overrides that choice for
+every comparison in the run, independently of the reference. `auto` (the default)
+follows the reference as above; `cpu` always uses the host validators; `gpu` always
+uses the device validators, copying golden data or a CPU reference's output to the
+device first — so it needs a GPU even where the reference does not. An explicit
+`--validator auto` wins over the env var like any other value. Only the pass/fail
+call moves: a failure report is always built on the host from the read-back values.
 
 ### Validating golden data itself
 
@@ -253,7 +259,9 @@ validates our data, not a provider. Suites are named `…_CpuRef` / `…_GpuRef`
 
 It validates against both references by default; `--reference cpu|gpu|both` narrows
 that. The CPU reference is host-only and needs no GPU; the GPU one skips without a
-device.
+device. Comparisons run on the host, where the golden data is loaded, unless
+`--validator gpu` moves them to the device — which then makes the CPU suite need a
+device too.
 
 It has no skip path: a test is registered only when the bundle has golden data and
 every node type in its graph is in that reference's required-op set, so a reference
