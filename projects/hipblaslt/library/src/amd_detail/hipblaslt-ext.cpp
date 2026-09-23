@@ -129,6 +129,10 @@ namespace hipblaslt_ext
         hipblasComputeType_t type_compute; //!< The compute datatype.
         hipblasLtOrder_t     order_a; //!< The A martix data layout order
         hipblasLtOrder_t     order_b; //!< The B martix data layout order
+        //! hipblasLtInt4Encoding_t for A on the w4a16 path. Must stay last and
+        //! mirror RocGemmProblemTypeV2: the two are reinterpret_cast onto each
+        //! other (see rocblaslt_gemm_create_cpp / groupedgemm below).
+        int32_t int4_encoding_a = 0;
     };
 
     GemmProblemType::GemmProblemType()
@@ -231,6 +235,19 @@ namespace hipblaslt_ext
         pimpl->order_b = order;
     }
 
+    void GemmProblemType::setInt4EncodingA(hipblasLtInt4Encoding_t encoding)
+    {
+        // Same range check the C API applies to
+        // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT.
+        if(encoding < 0 || encoding >= HIPBLASLT_INT4_ENCODING_END_EXT)
+        {
+            std::cerr << "Unsupported int4 encoding for A matrix: "
+                      << static_cast<int>(encoding) << std::endl;
+            throw std::invalid_argument("Unsupported int4 encoding for A matrix");
+        }
+        pimpl->int4_encoding_a = static_cast<int32_t>(encoding);
+    }
+
     hipblasOperation_t GemmProblemType::getOpA() const
     {
         return pimpl->op_a;
@@ -274,6 +291,11 @@ namespace hipblaslt_ext
     hipblasLtOrder_t GemmProblemType::getOrderB() const
     {
         return pimpl->order_b;
+    }
+
+    hipblasLtInt4Encoding_t GemmProblemType::getInt4EncodingA() const
+    {
+        return static_cast<hipblasLtInt4Encoding_t>(pimpl->int4_encoding_a);
     }
 
     class GemmEpilogue::GemmEpilogueImpl

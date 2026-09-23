@@ -722,6 +722,9 @@ namespace rocblaslt
         rocblaslt_compute_type type_compute;
         hipblasLtOrder_t       order_a;
         hipblasLtOrder_t       order_b;
+        // Mirrors GemmProblemType::GemmProblemTypeImpl, which is
+        // reinterpret_cast to this; keep the two field lists identical.
+        int32_t int4_encoding_a = 0;
     };
 
     class RocGemmEpilogueV2

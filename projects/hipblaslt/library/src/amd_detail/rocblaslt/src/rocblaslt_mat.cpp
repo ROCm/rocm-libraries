@@ -1103,6 +1103,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         0, // streamk_tile_scheduling_ext: OFF (matches struct default)
         effective_sm_count_target(handle, nullptr, nullptr),
         effective_uniform_summation_order(handle, nullptr)};
+    problem.int4EncodingA = problemtype.int4_encoding_a;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1221,6 +1222,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
     hipDataType            type_d       = problemtype[0].type_d;
     hipblasLtOrder_t       orderA       = problemtype[0].order_a;
     hipblasLtOrder_t       orderB       = problemtype[0].order_b;
+    int32_t                int4EncA     = problemtype[0].int4_encoding_a;
 
     std::vector<const void*>        A_vec, B_vec, C_vec, alpha_vec, beta_vec;
     std::vector<void*>              D_vec, E_vec, amaxD_vec;
@@ -1434,6 +1436,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         0, // streamk_tile_scheduling_ext: OFF (matches struct default)
                                         effective_sm_count_target(handle, nullptr, nullptr),
                                         effective_uniform_summation_order(handle, nullptr)});
+        problems.back().int4EncodingA = int4EncA;
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

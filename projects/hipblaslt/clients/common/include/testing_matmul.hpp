@@ -4045,6 +4045,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                         case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                         default:
+                            // The client enum mirrors hipblasLtMatmulMatrixScale_t
+                            // for the w4a16 group scales, so the value carries
+                            // across unchanged; everything else is scalar.
+                            if(isW4A16Scaling(f))
+                                return static_cast<hipblasLtMatmulMatrixScale_t>(f);
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
                         }
                     };
@@ -4053,8 +4058,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                     extepilogue[gemmIdx].setAuxDataType(aux_type);
                     extepilogue[gemmIdx].setAuxLeadingDimension(lde[gemmIdx]);
                     extepilogue[gemmIdx].setAuxBatchStride(stride_e[gemmIdx]);
-                    extepilogue[gemmIdx].setScalingAType(toMatrixScale(arg.scaleA));
-                    extepilogue[gemmIdx].setScalingBType(toMatrixScale(arg.scaleB));
+                    // Leave the format at None when no scale was requested, as
+                    // the C path does: setting it unconditionally maps none to
+                    // Scalar, and rocblaslt_epilogue_valid_args rejects a
+                    // problem whose two non-None scale formats differ.
+                    if(arg.scaleA != hipblaslt_scaling_format::none)
+                        extepilogue[gemmIdx].setScalingAType(toMatrixScale(arg.scaleA));
+                    if(arg.scaleB != hipblaslt_scaling_format::none)
+                        extepilogue[gemmIdx].setScalingBType(toMatrixScale(arg.scaleB));
                 }
                 extinputs[b][gemmIdx].setA((void*)((dA[gemmIdx].as<char>())
                                                    + b * size_dA[gemmIdx] * realDataTypeSize(TiA)));
@@ -4097,6 +4108,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         extproblemtype.setTypeC(arg.c_type);
         extproblemtype.setTypeD(arg.d_type);
         extproblemtype.setTypeCompute(arg.compute_type);
+        if(isW4A16Scaling(arg.scaleA))
+            extproblemtype.setInt4EncodingA(
+                static_cast<hipblasLtInt4Encoding_t>(arg.int4_encoding));
 
         if(do_swizzle_a)
         {

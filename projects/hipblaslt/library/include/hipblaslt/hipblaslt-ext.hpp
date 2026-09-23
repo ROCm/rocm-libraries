@@ -185,6 +185,12 @@ namespace hipblaslt_ext
             setTypeCompute(hipblasComputeType_t type); //!< Set the compute data type.
         HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order); //!< Set the A matrix data order.
         HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order); //!< Set the B matrix data order.
+        //! Set how the int4 weights in A are encoded; the C-API equivalent of
+        //! HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT. Describes A's storage, not
+        //! its scales, so it is independent of GemmEpilogue::setScalingAType.
+        //! Ignored unless A is HIP_R_4I with a w4a16 group scale mode. Throws
+        //! std::invalid_argument for values outside hipblasLtInt4Encoding_t.
+        HIPBLASLT_EXPORT void setInt4EncodingA(hipblasLtInt4Encoding_t encoding);
 
         HIPBLASLT_EXPORT hipblasOperation_t   getOpA() const; //!< The A matrix transpose.
         HIPBLASLT_EXPORT hipblasOperation_t   getOpB() const; //!< The B matrix transpose.
@@ -195,6 +201,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute data type.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderA() const; //!< The A matrix data order.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderB() const; //!< The B matrix data order.
+        HIPBLASLT_EXPORT hipblasLtInt4Encoding_t
+            getInt4EncodingA() const; //!< How the int4 weights in A are encoded.
     };
 
     [[deprecated("GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]]
