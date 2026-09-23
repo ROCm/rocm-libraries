@@ -329,7 +329,9 @@ __device__ void run_syevj(const rocblas_int dimx,
         if(tix == 0)
         {
             *residual = sqrt(local_res);
-            if(sweeps <= max_sweeps)
+            // test convergence, not the sweep counter: the loop above exits at
+            // sweeps == max_sweeps, so a sweeps <= max_sweeps test is always true
+            if(local_res <= tolerance)
             {
                 *n_sweeps = sweeps;
                 *info = 0;
