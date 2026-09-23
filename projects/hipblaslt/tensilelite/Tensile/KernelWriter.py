@@ -6117,6 +6117,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
         comment="counterL<=PGR"))
       module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
+      module.add(self.gl2PrefetchSkipPGR(kernel, tensorParametersA, tensorParametersB))
       module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
       if kernel["PrefetchGL2"] == 2:
         module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+1), comment="counterL<=PGR+1"))
@@ -12661,6 +12662,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
+    return ""
+  
+  @abc.abstractmethod
+  def gl2PrefetchSkipPGR(self, kernel, tPA, tPB) -> Module:
     return ""
 
   def _nextLdsToken(self, idx: int) -> int:

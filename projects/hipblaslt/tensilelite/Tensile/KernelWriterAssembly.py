@@ -21680,6 +21680,20 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["enableTDMMetadata"]:
       mod.add(comp.incrementAddr(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
     return mod
+  
+  def gl2PrefetchSkipPGR(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Skip PGR")
+    mod.addComment("GL2 Prefetch Skip PGR")
+    comp = GL2PrefetchLoad.find(self)
+    mod.add(comp.skipPGR(self, kernel, tPA))
+    mod.add(comp.skipPGR(self, kernel, tPB))
+    if kernel["ProblemType"]["MXBlockA"]:
+      mod.add(comp.skipPGR(self, kernel, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      mod.add(comp.skipPGR(self, kernel, tPB["MX"]))
+    if kernel["enableTDMMetadata"]:
+      mod.add(comp.skipPGR(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    return mod
 
   def getHalfPLRGroups(self, kernel, lc, u):
     # 2: each subIter use 2 vgpr groups. 3: HalfPLR has 3 vgpr groups
