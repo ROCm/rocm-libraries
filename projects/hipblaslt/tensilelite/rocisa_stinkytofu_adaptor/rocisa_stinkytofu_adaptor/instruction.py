@@ -12,7 +12,7 @@ from copy import deepcopy as _deepcopy
 from typing import Any, Dict, List, Optional
 
 from ._dummy import make_dummy_class, make_dummy_func
-from .enum import DelayALUSkip, DelayALUType, InstType
+from .enum import CacheScope, DelayALUSkip, DelayALUType, InstType
 
 _P = "rocisa.instruction"
 
@@ -1026,6 +1026,66 @@ def _make_no_operand_class(class_name: str, mnemonic: str):
         "__doc__": f"``{mnemonic}`` shim with stinkytofu left-path bridge.",
         "__init__": __init__,
         "__slots__": (),
+        "getParams": getParams,
+        "getDstParams": getDstParams,
+        "getSrcParams": getSrcParams,
+        "toString": toString,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    cls.__qualname__ = class_name
+    cls.__module__ = __name__
+    return cls
+
+
+def _make_scoped_no_operand_class(class_name: str, mnemonic: str):
+    """Factory for zero-operand fences carrying a cache-scope modifier."""
+
+    def __init__(
+        self,
+        scope: CacheScope = CacheScope.SCOPE_DEV,
+        comment: str = "",
+        **kw,
+    ):
+        _ = kw
+        Instruction.__init__(self, InstType.INST_NOTYPE, comment)
+        self.scope = scope
+        self.setInst(mnemonic)
+
+    def getParams(self):
+        return []
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def toString(self) -> str:
+        kstr = self.instStr
+        if self.scope != CacheScope.SCOPE_NONE:
+            kstr += f" scope:{self.scope.name}"
+        return self.formatWithComment(kstr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        factory = getattr(_st, class_name)
+        inst = factory(self.comment)
+        inst.set_global(scope=int(self.scope))
+        return inst
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = type(self)(scope=self.scope, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+    cls = type(class_name, (Instruction,), {
+        "__doc__": f"``{mnemonic}`` cache-scope fence shim.",
+        "__init__": __init__,
+        "__slots__": ("scope",),
         "getParams": getParams,
         "getDstParams": getDstParams,
         "getSrcParams": getSrcParams,
@@ -2360,9 +2420,9 @@ class SSetPrior(Instruction):
 # logicalIR: SDcacheWb
 SDcacheWb = _make_no_operand_class("SDcacheWb", "s_dcache_wb")
 # logicalIR: GlobalWb
-GlobalWb = _make_no_operand_class("GlobalWb", "global_wb")
+GlobalWb = _make_scoped_no_operand_class("GlobalWb", "global_wb")
 # logicalIR: GlobalInv
-GlobalInv = _make_no_operand_class("GlobalInv", "global_inv")
+GlobalInv = _make_scoped_no_operand_class("GlobalInv", "global_inv")
 # logicalIR: STtraceData
 STtraceData = _make_no_operand_class("STtraceData", "s_ttracedata")
 # SNop — real class (see class SNop above, after SMovB64).
