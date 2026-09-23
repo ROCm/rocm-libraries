@@ -1746,8 +1746,11 @@ class KernelWriterAssembly(KernelWriter):
       module.add(ValueSet("Srd127_96", srdUpperValue.getValue(), format=1))
     
     if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
-      module.addComment0("MT offset for 64b address (=MT0*MT1*bpeC)")
-      reductionOffset = int(kernel["MacroTile0"]*kernel["MacroTile1"]*self.states.bpeCinternal)
+      module.addComment0("MT offset for 64b address (=MT0*MT1*bpeWorkspace)")
+      # Per-workgroup stride through the partial-sum workspace, so it scales by
+      # the stored width. Leaving this at bpeCinternal while the partials are
+      # narrower puts every GSU slice at twice its true offset.
+      reductionOffset = int(kernel["MacroTile0"]*kernel["MacroTile1"]*self.states.bpeCworkspace)
       reductionOffsetLow32 = reductionOffset & 0xFFFFFFFF
       reductionOffsetHigh32 = (reductionOffset >> 32) & 0xFFFFFFFF
       module.add(ValueSet("MTOffset", reductionOffsetLow32, format=1))
