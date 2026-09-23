@@ -320,17 +320,6 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
 
-        hipdnn_integration_tests::TestConfigOptions opts;
-        opts.articlePath = std::move(articlePath);
-        opts.engineName = std::move(engineName);
-        opts.failOnUnsupported = failOnUnsupported;
-        opts.skipGraphValidation = skipGraphValidation;
-        opts.configPath = std::move(configPath);
-        opts.referenceExecutorType = refExecType;
-        opts.allowBundles = allowBundles;
-        opts.goldenDataDir = std::move(goldenDataDir);
-        opts.verificationMode = verificationMode;
-        opts.captureDir = std::move(captureDir);
         // Enforcement defaults on, so the positive flag's *value* is always true and
         // says nothing. What it is asked for here is whether it was typed: that is the
         // only thing separating a lane that means to enforce from one that merely
@@ -345,10 +334,17 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        opts.enforceSupportClaims = !enforceRefused;
-        opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
+        const bool writeSupportClaims = parser.get<bool>("--write-support-claims");
 
-        if(opts.writeSupportClaims && !opts.articlePath.has_value())
+        // Enforcement needs something to check and something to check it against: a
+        // write run skips every graph before the check is reached, and without
+        // --test-engine there is no engine to hold to a claim. Inheriting the default
+        // into either case is not a request to enforce, so it is dropped rather than
+        // refused; typing the flag is, and those are refused below.
+        const bool enforceSupportClaims
+            = !enforceRefused && !writeSupportClaims && engineName.has_value();
+
+        if(writeSupportClaims && !articlePath.has_value())
         {
             std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
                       << "Mode A (auto-select) cannot generate support claims.\n";
@@ -358,7 +354,7 @@ int main(int argc, char** argv) noexcept
         // Only that a directory was named -- "is this the source tree" is not
         // decidable, a build directory is just a directory. The env var is the
         // documented alternative to the flag, so it satisfies this too.
-        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value()
+        if(writeSupportClaims && !goldenDataDir.has_value()
            && hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR").empty())
         {
             std::cerr << "--write-support-claims requires a bundle data directory: pass "
@@ -368,47 +364,36 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // Writing authors the claims; enforcing checks them against the very file the
-        // same run would be rewriting. Whichever way that race landed the answer
-        // would be meaningless, so the two never run together.
-        //
-        // Only a typed --enforce-support-claims is a contradiction worth refusing.
-        // Inheriting the default is not a request, and erroring on it would make
-        // --write-support-claims unusable without an opt-out flag that says nothing
-        // about what the run is for.
-        if(opts.writeSupportClaims)
+        if(writeSupportClaims && enforceAsked)
         {
-            if(enforceAsked)
-            {
-                std::cerr << "--write-support-claims is mutually exclusive with "
-                          << "--enforce-support-claims.\n";
-                return 1;
-            }
-            opts.enforceSupportClaims = false;
+            std::cerr << "--write-support-claims is mutually exclusive with "
+                      << "--enforce-support-claims.\n";
+            return 1;
         }
 
-        // Enforcement checks a sidecar against a named engine. Without one there is
-        // nothing to check, and silently degrading to "enforced nothing, exit 0" is
-        // the exact failure --enforce-support-claims exists to prevent -- so a run
-        // that asked for enforcement is refused rather than downgraded.
-        //
-        // A run that only inherited the default is downgraded instead. Enforcement is
-        // on everywhere now, and a plain `hipdnn_integration_tests` has never needed an
-        // engine; turning that into an error would fail runs that are not doing
-        // anything wrong. Nothing is lost by the downgrade: with no engine to check
-        // against, no claim is observed in either mode, and the summary header then
-        // reports the mode the run is actually in.
-        if(opts.enforceSupportClaims && !opts.engineName.has_value())
+        // Silently degrading an asked-for enforcement to "enforced nothing, exit 0" is
+        // the exact failure --enforce-support-claims exists to prevent.
+        if(enforceAsked && !engineName.has_value())
         {
-            if(enforceAsked)
-            {
-                std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
-                             "engine to\n"
-                             "       check sidecar claims against.\n";
-                return 1;
-            }
-            opts.enforceSupportClaims = false;
+            std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
+                         "engine to\n"
+                         "       check sidecar claims against.\n";
+            return 1;
         }
+
+        hipdnn_integration_tests::TestConfigOptions opts;
+        opts.articlePath = std::move(articlePath);
+        opts.engineName = std::move(engineName);
+        opts.failOnUnsupported = failOnUnsupported;
+        opts.skipGraphValidation = skipGraphValidation;
+        opts.configPath = std::move(configPath);
+        opts.referenceExecutorType = refExecType;
+        opts.allowBundles = allowBundles;
+        opts.goldenDataDir = std::move(goldenDataDir);
+        opts.verificationMode = verificationMode;
+        opts.captureDir = std::move(captureDir);
+        opts.writeSupportClaims = writeSupportClaims;
+        opts.enforceSupportClaims = enforceSupportClaims;
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
