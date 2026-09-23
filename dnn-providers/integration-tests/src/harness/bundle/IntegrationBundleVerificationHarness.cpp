@@ -385,7 +385,7 @@ VerificationOutcome
                                            refLabel(type) + " errored (verification-mode="
                                                + refLabel(type) + "): " + result.message);
     case RefStatus::RAN:
-        return compareOutputs(engine.outputs, refOutputs);
+        return compareOutputs(engine.outputs, refOutputs, result.site);
     default:
         return VerificationOutcome::failed(
             VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
@@ -413,7 +413,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
             = runReferenceCapturingOutputs(ReferenceExecutorType::GPU, refOutputs);
         if(gpu.status == RefStatus::RAN)
         {
-            return compareOutputs(engine.outputs, refOutputs);
+            return compareOutputs(engine.outputs, refOutputs, gpu.site);
         }
         if(gpu.status == RefStatus::RUNTIME_ERROR)
         {
@@ -446,7 +446,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
                                                "CPU reference errored (auto mode, last resort): "
                                                    + cpu.message);
         case RefStatus::RAN:
-            return compareOutputs(engine.outputs, refOutputs);
+            return compareOutputs(engine.outputs, refOutputs, cpu.site);
         default:
             return VerificationOutcome::failed(
                 VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
@@ -596,7 +596,7 @@ IntegrationBundleVerificationHarness::RefRunResult
     }
 
     detail::markOutputsModified(refOutputs, useDevice);
-    return {RefStatus::RAN, {}};
+    return {RefStatus::RAN, {}, useDevice ? ValidationSite::DEVICE : ValidationSite::HOST};
 }
 
 void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& outputs) const
@@ -609,23 +609,25 @@ void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& ou
 VerificationOutcome
     IntegrationBundleVerificationHarness::compareAgainstGolden(OutputTensors& engineOutputs)
 {
-    return compareAgainst(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-        return *_bundle->tensors->at(uid);
-    });
+    return compareAgainst(
+        engineOutputs,
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+            return *_bundle->tensors->at(uid);
+        },
+        ValidationSite::HOST);
 }
 
-VerificationOutcome
-    IntegrationBundleVerificationHarness::compareOutputs(OutputTensors& engineOutputs,
-                                                         OutputTensors& expected)
+VerificationOutcome IntegrationBundleVerificationHarness::compareOutputs(
+    OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site)
 {
-    return compareAgainst(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-        return *expected.at(uid);
-    });
+    return compareAgainst(
+        engineOutputs,
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
+        site);
 }
 
-VerificationOutcome
-    IntegrationBundleVerificationHarness::compareAgainst(OutputTensors& engineOutputs,
-                                                         const ExpectedTensorLookup& expectedFor)
+VerificationOutcome IntegrationBundleVerificationHarness::compareAgainst(
+    OutputTensors& engineOutputs, const ExpectedTensorLookup& expectedFor, ValidationSite site)
 {
     auto wrapper = _bundle->graphWrapper();
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
@@ -642,6 +644,7 @@ VerificationOutcome
                                                    engineOutputs,
                                                    expectedFor,
                                                    toleranceFor,
+                                                   site,
                                                    "Bundle: " + _bundlePath.string());
 
     // Reported one per tensor so each diff lands next to the tensor it describes;

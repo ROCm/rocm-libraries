@@ -139,7 +139,9 @@ protected:
     InputFillRecipes _inputFillRecipes;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, TensorValidationEntry> _tensorValidationMap;
-    std::vector<std::function<void()>> _deferredValidators;
+    /// Built in validateOutputs(), once the reference executor says where its output
+    /// lives: that is where each allclose comparison runs.
+    std::vector<std::function<void(bundle::ValidationSite)>> _deferredValidators;
 
     void SetUp() override
     {
@@ -276,7 +278,8 @@ protected:
     {
         const auto testName = currentTestName();
         _deferredValidators.emplace_back(
-            [this, attr, testName, absoluteTolerance, relativeTolerance]() {
+            [this, attr, testName, absoluteTolerance, relativeTolerance](
+                bundle::ValidationSite site) {
                 const auto sdkDataType
                     = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
                 const auto label = bundle::tensorLabel(attr->get_uid(), attr->get_name());
@@ -286,7 +289,7 @@ protected:
                 const auto tolerance
                     = gradingForTensor(testName, label, absoluteTolerance, relativeTolerance);
 
-                auto selection = bundle::makeValidator(sdkDataType, label, tolerance);
+                auto selection = bundle::makeValidator(sdkDataType, label, tolerance, site);
                 auto [it, inserted] = _tensorValidationMap.insert(
                     {attr->get_uid(),
                      TensorValidationEntry{std::move(selection.validator),
@@ -383,12 +386,16 @@ protected:
         HIPDNN_PLUGIN_LOG_INFO("Validating " << gpuBundle.outputTensorIds.size()
                                              << " output tensors");
 
+        // A GPU reference leaves its output on the device, next to the engine's, so
+        // the comparison runs there; a CPU reference's output is compared on the host.
+        const bool referenceUsesDevice = getReferenceExecutor().requiresDeviceMemory();
+        const auto site
+            = referenceUsesDevice ? bundle::ValidationSite::DEVICE : bundle::ValidationSite::HOST;
+
         for(const auto& registerValidator : _deferredValidators)
         {
-            registerValidator();
+            registerValidator(site);
         }
-
-        const bool referenceUsesDevice = getReferenceExecutor().requiresDeviceMemory();
 
         for(const auto& tensorId : gpuBundle.outputTensorIds)
         {

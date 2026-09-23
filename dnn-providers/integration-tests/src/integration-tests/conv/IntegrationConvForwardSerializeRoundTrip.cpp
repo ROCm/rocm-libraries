@@ -14,7 +14,6 @@
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Logging.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -205,9 +204,15 @@ protected:
         }
 
         const float tolerance = this->getTolerance(graphObj, outputs.y);
-        auto validator = createAllCloseValidator(
-            frontendToSdkDataType(outputs.y->get_data_type()), tolerance, tolerance);
-        ASSERT_TRUE(validator->allClose(*refTensor, *gpuTensor))
+        const auto site
+            = referenceUsesDevice ? bundle::ValidationSite::DEVICE : bundle::ValidationSite::HOST;
+        auto selection
+            = bundle::makeValidator(frontendToSdkDataType(outputs.y->get_data_type()),
+                                    bundle::tensorLabel(yUid, outputs.y->get_name()),
+                                    bundle::ComparisonTolerance::allClose(tolerance, tolerance),
+                                    site);
+        ASSERT_NE(selection.validator, nullptr) << selection.error;
+        ASSERT_TRUE(selection.validator->allClose(*refTensor, *gpuTensor))
             << "Mismatch in output tensor after serialize round-trip (uid: " << yUid << ")";
     }
 };

@@ -233,6 +233,17 @@ runs the bundle graphs without any DVC pull. Bundle registration is on by defaul
 pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
 that were compiled into the binary.
 
+The comparison runs where the expected values live, so the reference you select is
+also the validator you get — there is no separate switch. Output checked against the
+GPU reference is compared on the device (`GpuFpReferenceValidation`, or
+`GpuFpReferenceRmsValidation` for a `[[validator_overrides]]` RMS check); output
+checked against the CPU reference or against golden data is compared on the host
+(`CpuFpReferenceValidation` / `CpuFpReferenceMiopenRmsValidation`). That holds for
+every mode, including each step of the `auto` fallback chain, and for C++ graph tests
+under `--reference-executor gpu|cpu`. Only the pass/fail call moves: a failure report
+is always built on the host from the read-back values. `hipdnn_golden_data_tests`
+always compares on the host, since the golden data it checks against is loaded there.
+
 ### Validating golden data itself
 
 The `hipdnn_golden_data_tests` binary runs a **separate suite** that recomputes each

@@ -7,9 +7,11 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -32,11 +34,20 @@ std::string tensorLabel(int64_t uid,
 
 ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                                  const std::string& label,
-                                 const ComparisonTolerance& tolerance)
+                                 const ComparisonTolerance& tolerance,
+                                 ValidationSite site)
 {
     switch(tolerance.kind)
     {
     case ValidatorKind::ALLCLOSE:
+        if(site == ValidationSite::DEVICE)
+        {
+            return {hipdnn_gpu_ref::createGpuAllCloseValidator(
+                        hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType),
+                        tolerance.atol,
+                        tolerance.rtol),
+                    {}};
+        }
         return {hipdnn_test_sdk::utilities::createAllCloseValidator(
                     dataType, tolerance.atol, tolerance.rtol),
                 {}};
@@ -48,6 +59,13 @@ ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType 
         // there is no glob to blame and its own throw stays a throw.
         try
         {
+            if(site == ValidationSite::DEVICE)
+            {
+                return {hipdnn_gpu_ref::createGpuRmsValidator(
+                            hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType),
+                            tolerance.rmsThreshold),
+                        {}};
+            }
             return {
                 hipdnn_test_sdk::utilities::createRmsValidator(dataType, tolerance.rmsThreshold),
                 {}};
@@ -124,12 +142,13 @@ std::optional<TensorMismatch>
                   hipdnn_data_sdk::utilities::ITensor& expected,
                   hipdnn_data_sdk::utilities::ITensor& actual,
                   ComparisonTolerance tolerance,
+                  ValidationSite site,
                   const std::string& contextLine)
 {
     const auto dataType = attrs.data_type();
     const auto label = tensorLabel(uid, attrs);
 
-    auto selection = makeValidator(dataType, label, tolerance);
+    auto selection = makeValidator(dataType, label, tolerance, site);
     if(selection.validator == nullptr)
     {
         return TensorMismatch{uid, label, std::move(selection.error)};
@@ -151,6 +170,7 @@ std::vector<TensorMismatch>
                    OutputTensors& actual,
                    const ExpectedTensorLookup& expectedFor,
                    const ToleranceLookup& toleranceFor,
+                   ValidationSite site,
                    const std::string& contextLine)
 {
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -164,6 +184,7 @@ std::vector<TensorMismatch>
                                       expectedFor(uid),
                                       *actual.at(uid),
                                       toleranceFor(tensorLabel(uid, *attrs), attrs->data_type()),
+                                      site,
                                       contextLine);
         if(mismatch.has_value())
         {
