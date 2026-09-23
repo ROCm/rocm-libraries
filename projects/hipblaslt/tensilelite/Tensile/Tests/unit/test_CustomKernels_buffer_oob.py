@@ -37,6 +37,21 @@ REACHABLE_ENCODED_KERNEL = (
     "CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942"
 )
 
+# Kernels from other generators, which bound their stores without BufferOOB.
+# A kernel in which the scan recognizes no store bound must be listed here.
+NO_BUFFER_OOB_KERNELS = {
+    "RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WGMXCC0_LABufferToLDS_"
+    "LBBufferToLDS_SD1_LSABufferToVGPR_LSBBufferToVGPR_UNROLL0x0_SwizzleScale00_"
+    "SwizzleTileSize0x0X0x0_PF4x1m1_M_98fd6c3c16c08d0e": "rocRoller",
+    "_ZN5aiter24bf16gemm_bf16_tn_256x256E": "aiter",
+    "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256E": "aiter",
+    "_gemm_afp4wfp4_kernel_BLOCK_SIZE_M_256_BLOCK_SIZE_N_256_BLOCK_SIZE_K_64_GROUP_SIZE_M_8_"
+    "num_warps_4_num_stages_2_waves_per_eu_0_matrix_instr_nonkdim_16_cache_modifier_NONE_"
+    "NUM_KSPLIT_1": "Triton, global_store only",
+    "c_ck_gemm_basic_hip_amdgcn_amd_amdhsa_gfx942": "Composable Kernel",
+    "wave_bf16_gemm_256x256x64": "Wave, global_store only",
+}
+
 _SET_BUFFER_OOB = re.compile(r"^\s*\.set\s+BufferOOB\s*,\s*([^\s/]+)", re.M)
 _STORE_SRD_NUM_RECORDS = re.compile(
     r"^\s*s_mov_b32\s+s\[sgprSrd(D|C|WS)\+2\]\s*,\s*([^\s/]+)", re.M
@@ -141,6 +156,20 @@ def test_custom_kernel_store_bounds_match_generator(name):
         f"{name} bounds stores with a value other than BufferOOB = "
         f"{generator_buffer_oob():#x}, so the host can admit shapes whose "
         f"stores this kernel drops:\n  " + "\n  ".join(violations)
+    )
+
+
+def test_every_kernel_without_a_recognized_store_bound_is_listed():
+    unrecognized = set()
+    for name in custom_kernel_names():
+        checked, _ = store_bound_findings(_kernel_text(name), generator_buffer_oob())
+        if not any("BufferOOB" in kind or "num_records" in kind for kind in checked):
+            unrecognized.add(name)
+    listed = set(NO_BUFFER_OOB_KERNELS)
+    assert unrecognized == listed, (
+        f"no store bound recognized, not listed: {sorted(unrecognized - listed)}; "
+        f"listed, but a store bound is recognized or the kernel is gone: "
+        f"{sorted(listed - unrecognized)}"
     )
 
 
