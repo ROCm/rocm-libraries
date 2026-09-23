@@ -350,10 +350,16 @@ MXSA_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXSc
 MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 
 # gfx1250 wave32 32x16x128 FP4 scale tiles (mxBlock=32): A=1.0 VGPR, B=0.5 VGPR.
+# A (instM=32): TileSpan is illegal — one ds_read_b32 / MMA tile, no matrix_a_scale.
+# B (instN=16): TileSpan packs two N tiles in one load; WMMA uses matrix_b_scale.
 _MXS_B4_W32_A = dict(scaleLayout=WMMA_SCALE_32x16_W32_MX32_A, instK=128, bpe=1, supportedTypes=('fp4',))
 _MXS_B4_W32_B = dict(scaleLayout=WMMA_SCALE_32x16_W32_MX32_B, instK=128, bpe=1, supportedTypes=('fp4',))
-MXSA_B4_W32_M32 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4_W32_A, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4_W32_A, loadWidth=4))
-MXSB_B4_W32_N16 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4_W32_B, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4_W32_B, loadWidth=4))
+MXSA_B4_W32_M32 = MXScaleTilePair(
+    gr=MXScaleGRGeometry(**_MXS_B4_W32_A, loadWidth=16),
+    lr=MXScaleLRGeometry(**_MXS_B4_W32_A, loadWidth=4, subtileShape=(1, 1)))
+MXSB_B4_W32_N16 = MXScaleTilePair(
+    gr=MXScaleGRGeometry(**_MXS_B4_W32_B, loadWidth=16),
+    lr=MXScaleLRGeometry(**_MXS_B4_W32_B, loadWidth=4, subtileShape=(2, 1)))
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
@@ -731,12 +737,9 @@ class TileInfo:
     """
     self.vgprTiles = []
     numMMATiles = int(self.localMMATileGrid[0] * self.localMMATileGrid[1])
-    numMMATilesPerReg = max(1, int(1 // self.mmaTileRegCount))
-    # Scale tiles: legacy MXSA/MXSB used bpe=1 (scale byte) which gives mmaTileRegCount=0.25
-    # and numMMATilesPerReg=4. TileInfo uses data bpe (0.5 for f4), halving mmaTileRegCount.
-    # The scale emit code (SubtileScaleEmit.py) uses stride 4 to index vgprTiles, so override.
-    if isinstance(self.geometry, MXScaleTilePair):
-      numMMATilesPerReg = 4
+    # gfx950 MX: 0.25 VGPR/tile → 4 MMA tiles share one VGPR (byte op_sel).
+    # gfx1250 A: 1.0 VGPR/tile; B TileSpan: 0.5 VGPR/tile → 2 N tiles share one VGPR.
+    numMMATilesPerReg = max(1, int(round(1 / self.mmaTileRegCount))) if self.mmaTileRegCount else 1
     numDword = int(math.ceil(self.mmaTileRegCount))
 
     isDTile = isinstance(self.geometry, CDTileGeometry)
@@ -901,9 +904,7 @@ class TileInfo:
   def deallocVgprTileRegisters_legacy(self, writer, kernel):
     """Deallocate vgprTiles.
     TODO: Remove after full migration — temporary port from legacy TileInfo."""
-    numMMATilesPerReg = max(1, int(1 // self.mmaTileRegCount))
-    if isinstance(self.geometry, MXScaleTilePair):
-      numMMATilesPerReg = 4  # mirror allocVgprTileRegisters_legacy override for scale tiles
+    numMMATilesPerReg = max(1, int(round(1 / self.mmaTileRegCount))) if self.mmaTileRegCount else 1
     for i, vtiles in enumerate(self.vgprTiles):
       if i % numMMATilesPerReg != 0:
         continue
@@ -1268,7 +1269,8 @@ def emitMfmaCode(writer, kernel):
         dtiles = dtileInfo.vgprTiles[mma0 + mma1 * dtileInfo.localMMATileGrid[0]]
 
         if hasScaleA:
-          # Scale group index: one VGPR per lrSubtileShape[0] M-tiles x lrSubtileShape[1] K-tiles
+          # Scale group index: one VGPR per lrSubtileShape[0] M/N-tiles x lrSubtileShape[1] K-tiles.
+          # gfx1250 A is (1,1) (no TileSpan). B is (2,1): two N tiles share a VGPR; sBsel is matrix_b_scale.
           scaleMShapeA = tiMXSA.lrSubtileShape[0]
           scaleMShapeB = tiMXSB.lrSubtileShape[0]
           scaleKShapeA = tiMXSA.lrSubtileShape[1]
@@ -1279,8 +1281,10 @@ def emitMfmaCode(writer, kernel):
           scaleGroupA = (mma0 // scaleMShapeA) * scaleKGridA + mmak // scaleKShapeA
           scaleGroupB = (mma1 // scaleMShapeB) * scaleKGridB + mmak // scaleKShapeB
 
-          scaleAVgpr = tiMXSA.vgprTiles[4 * scaleGroupA].regList.indices[0] if tiMXSA.mxBlock else -1
-          scaleBVgpr = tiMXSB.vgprTiles[4 * scaleGroupB].regList.indices[0] if tiMXSB.mxBlock else -1
+          tilesPerA = max(1, int(round(1 / tiMXSA.mmaTileRegCount))) if tiMXSA.mmaTileRegCount else 1
+          tilesPerB = max(1, int(round(1 / tiMXSB.mmaTileRegCount))) if tiMXSB.mmaTileRegCount else 1
+          scaleAVgpr = tiMXSA.vgprTiles[tilesPerA * scaleGroupA].regList.indices[0] if tiMXSA.mxBlock else -1
+          scaleBVgpr = tiMXSB.vgprTiles[tilesPerB * scaleGroupB].regList.indices[0] if tiMXSB.mxBlock else -1
 
           sAsel = (mma0 % scaleMShapeA) + scaleMShapeA * (mmak % scaleKShapeA)
           sBsel = (mma1 % scaleMShapeB) + scaleMShapeB * (mmak % scaleKShapeB)

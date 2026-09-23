@@ -357,6 +357,10 @@ def _fp4_tdm_kernel():
         "MatrixInstN": 16,
         "MatrixInstK": 128,
         "MIWaveGroup": [2, 2],
+        "MIWaveTile": [2, 2],
+        "VectorWidthMXSA": 1,
+        "VectorWidthMXSB": 1,
+        "MXScaleFormat": "InMemorySwizzle",
         "WavefrontSize": WAVESIZE_32,
         "UseSubtileImpl": True,
         "ISA": GFX1250_ISA,
@@ -408,7 +412,7 @@ def _create_writer_gfx1250_mx(kernel):
         mxsb=SimpleNamespace(tileInfo=tiSB),
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
-        asmCaps={"HasMFMA": False, "HasWMMA_AccImmZero": True, "HasTDM": True},
+        asmCaps={"HasMFMA": False, "HasWMMA_AccImmZero": True, "HasTDM": True, "HasWMMA_V3": True},
         kernel={"TDMInst": 3},
         subtileLdsSwizzle=False,
         laneSGPRCount=2,
@@ -579,13 +583,13 @@ class TestGfx1250MxSubtileTdm:
         tD = SimpleNamespace(regList=SimpleNamespace(indices=list(range(32, 48)), pool=writer.vgprPool))
         asm = str(emitMfmaInstruction(
             writer, kernel, tA, tB, tC, tD,
-            scaleAVgpr=100, scaleBVgpr=101, scaleAsel=1, scaleBsel=1,
+            scaleAVgpr=100, scaleBVgpr=101, scaleAsel=0, scaleBsel=1,
         ))
         assert "v_wmma_scale_f32_32x16x128_f4" in asm
         assert "v_mfma_scale" not in asm
         assert "16x16x128" not in asm
         assert "op_sel" not in asm
-        assert "matrix_a_scale:1" in asm
+        assert "matrix_a_scale" not in asm
         assert "matrix_b_scale:1" in asm
         assert "v[0:15]" in asm and "v[16:23]" in asm
         assert "v[32:47]" in asm
@@ -604,6 +608,46 @@ class TestGfx1250MxSubtileTdm:
         assert "v_wmma_scale_f32_32x16x128_f4" in asm
         assert "op_sel" not in asm
         assert "v250" in asm
+
+    def test_tilespan_gate_n_only(self):
+        """TileSpan is legal only on N=16 (MXSB), never on M=32 (MXSA)."""
+        from Tensile.Components.LocalRead import LocalReadMFMA
+        kernel = _fp4_tdm_kernel()
+        writer, *_ = _create_writer_gfx1250_mx(kernel)
+        caps = writer.states.asmCaps
+        assert LocalReadMFMA.getMxsTileSpanInfo(kernel, "MXSA", 0, caps) is None
+        assert LocalReadMFMA.getMxsTileSpanInfo(kernel, "MXSB", 1, caps) == {
+            "vectorWidth": 1, "numGroups": 1,
+        }
+
+    def test_scale_lr_a_four_loads_b_tilespan_two(self):
+        """A: 4 ds_read_b32 (one per MMA). B TileSpan: 2 loads (N-pair x K)."""
+        from Tensile.Components.Subtile.SubtileScaleEmit import localReadDoScaleSubtile
+        kernel = _fp4_tdm_kernel()
+        writer, _, _, tiSA, tiSB = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        tiSA.allocOffsetRegisters(writer, kernel)
+        tiSB.allocOffsetRegisters(writer, kernel)
+        tiSA.allocVgprTileRegisters_legacy(writer, kernel)
+        tiSB.allocVgprTileRegisters_legacy(writer, kernel)
+        asmA = str(localReadDoScaleSubtile("MXSA", writer, kernel))
+        asmB = str(localReadDoScaleSubtile("MXSB", writer, kernel))
+        assert asmA.count("ds_load_b32") == 4
+        assert asmB.count("ds_load_b32") == 2
+        assert "scaleMXSA[group0]" in asmA and "scaleMXSA[group3]" in asmA
+        assert "scaleMXSB[group0]" in asmB and "scaleMXSB[group1]" in asmB
+        assert "scaleMXSB[group2]" not in asmB
+
+    def test_scale_lra_notes_tilespan_half_wave(self):
+        from Tensile.Components.Subtile.SubtileScaleEmit import lraTileAssignmentScaleSwizzled
+        kernel = _fp4_tdm_kernel()
+        writer, _, _, tiSA, tiSB = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        tiSA.allocOffsetRegisters(writer, kernel)
+        tiSB.allocOffsetRegisters(writer, kernel)
+        asm = str(lraTileAssignmentScaleSwizzled(writer, kernel))
+        assert "TileSpan N partner in upper half-wave" in asm
+        assert "laneId * 4" in asm
 
 
 # ---------------------------------------------------------------------------

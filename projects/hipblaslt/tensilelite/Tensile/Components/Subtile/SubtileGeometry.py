@@ -637,8 +637,8 @@ class MXScaleGRGeometry(MXScaleInputGeometry):
 class MXScaleLRGeometry(MXScaleInputGeometry):
   """LR geometry for MX scale factors.
 
-  subtileShape is fixed at (2, 2) — 2 scale MMA tiles in M × 2 in K.
-  This matches the 2×2 VGPR packing used by the MX scale LDS layout.
+  Default subtileShape is (2, 2) — gfx950 byte-packing (4 MMA tiles / VGPR).
+  gfx1250 32x16 overrides this: A (1, 1) one tile/VGPR; B (2, 1) TileSpan N-pair.
   """
   subtileShape: Tuple[int, int] = (2, 2)
 

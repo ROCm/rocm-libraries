@@ -113,6 +113,10 @@ def test_tileinfo_grids_match_smoke_yaml():
     # (1,2) K-subtiles: A 4 ds_load_b128 per MMA x 2 K = 8 offsets; B 2 x 2 = 4.
     assert tiA.numLRPerSubtile == 8
     assert tiB.numLRPerSubtile == 4
+    assert tiSA.lrSubtileShape == [1, 1]
+    assert tiSB.lrSubtileShape == [2, 1]
+    assert tiSA.lrLocalSubtileGrid == [2, 2]
+    assert tiSB.lrLocalSubtileGrid == [1, 2]
 
 
 def test_tileinfo_mx_tdm_packed_bytes():

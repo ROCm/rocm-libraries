@@ -178,12 +178,13 @@ def emitScaleLRLoad(ti, writer, kernel):
   if ti.mxBlock == 0:
     return module
 
-  numScaleGroups = (int(ti.lrGlobalSubtileGrid[0]) // ti.waveGroupSize) * int(ti.lrGlobalSubtileGrid[1])
+  numScaleGroups = int(ti.lrLocalSubtileGrid[0]) * int(ti.lrLocalSubtileGrid[1])
   groupStride = int(ti.lrSubtileSize)
+  tilesPerReg = max(1, int(round(1 / ti.mmaTileRegCount))) if ti.mmaTileRegCount else 1
 
   for gid in range(numScaleGroups):
     dsOffset = groupStride * gid
-    vdst = ti.vgprTiles[4 * gid].regList.indices[0]
+    vdst = ti.vgprTiles[tilesPerReg * gid].regList.indices[0]
     module.add(DSLoadB32(dst=vgpr(vdst),
                src=vgpr(ti.sharedVgprLROffset[0]),
                ds=DSModifiers(offset=dsOffset),
@@ -402,7 +403,8 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
   writer.vgprPool.checkIn(waveIdVgpr)
   laneOffset = writer.vgprPool.checkOut(1, tag="_lraTileAssignmentScaleSwizzled_legacy_laneOffset")
   module.add(VAndB32(dst=vgpr(laneOffset), src0=vgpr("Serial"), src1=wavesize-1, comment="scale: laneId"))
-  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset), comment="scale: laneId * 4"))
+  # 4B/lane. gfx1250 MXSB TileSpan: lanes 0-15 hold N-tile 0, lanes 16-31 the partner (matrix_b_scale).
+  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset), comment="scale: laneId * 4 (TileSpan N partner in upper half-wave)"))
   module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiA_.sharedVgprLROffset[0]), comment="scaleA: lrOffset = laneId * 4"))
   module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiB_.sharedVgprLROffset[0]), comment="scaleB: lrOffset = laneId * 4"))
   writer.vgprPool.checkIn(laneOffset)
@@ -482,14 +484,14 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
   if tileInfo.mxBlock == 0:
     return module
 
-  # TileInfo LR subtile (2,2) already spans 2 M-adjacent tiles -> stride = lrSubtileSize.
-  # Legacy TileInfo subtile (1,2) spans 1 M-tile -> stride = 2 * subtileSize.
+  # TileInfo LR subtile size is the packed group: gfx950 (2,2), gfx1250 A (1,1), B TileSpan (2,1).
   if hasattr(tileInfo, 'lrSubtileSize'):
     groupStride = int(tileInfo.lrSubtileSize)
   else:
     groupStride = 2 * tileInfo.subtileSize
+  tilesPerReg = max(1, int(round(1 / tileInfo.mmaTileRegCount))) if tileInfo.mmaTileRegCount else 1
   dsOffset = groupStride * scaleGroupIdx
-  vdst = tileInfo.vgprTiles[4 * scaleGroupIdx].regList.indices[0]
+  vdst = tileInfo.vgprTiles[tilesPerReg * scaleGroupIdx].regList.indices[0]
   module.add(DSLoadB32(dst=vgpr(vdst),
                        src=vgpr(tileInfo.sharedVgprLROffset[0]),
                        ds=DSModifiers(offset=dsOffset),
@@ -505,8 +507,8 @@ def localReadDoScaleSubtile(tc, writer, kernel):
 
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
 
-  # Iterate over scale groups: one ds_read per 2 M-adjacent subtiles
-  numScaleGroups = math.ceil(tileInfo.localSubtileGrid[0] / 2) * tileInfo.localSubtileGrid[1]
+  # One ds_read per LR scale subtile. gfx1250 A is (1,1); B TileSpan is (2,1).
+  numScaleGroups = int(tileInfo.lrLocalSubtileGrid[0]) * int(tileInfo.lrLocalSubtileGrid[1])
   for gid in range(numScaleGroups):
     module.add(emitSubtileScaleDsRead(tc, writer, kernel, gid))
 
