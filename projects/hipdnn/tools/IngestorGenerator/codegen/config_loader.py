@@ -133,18 +133,27 @@ def _unique_arch(raw_arch, where: str) -> list[str]:
     return list(dict.fromkeys(_require_sequence(raw_arch, where, what="arch ids")))
 
 
-def load_config(path: Path) -> IngestorConfig:
-    """Load and validate a YAML config file, returning an ``IngestorConfig``.
+def read_yaml(path: Path):
+    """Parse one YAML file and return the document unvalidated.
 
-    A ``.gz`` path is decompressed transparently. Raises ``ConfigError`` on any
-    structural problem or failed pre-mint check; no UUID is minted here. Input
-    that is not safe YAML, or a mapping declaring one key twice, raises the
-    parser's ``yaml.YAMLError`` carrying the source marks.
+    A ``.gz`` path is decompressed transparently. Input that is not safe YAML, or
+    a mapping declaring one key twice, raises the parser's ``yaml.YAMLError``
+    carrying the source marks.
     """
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt") as f:
         # _DuplicateKeySafeLoader subclasses yaml.SafeLoader; safe_load takes no Loader.
-        raw = yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
+        return yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
+
+
+def load_config(path: Path) -> IngestorConfig:
+    """Load and validate a YAML config file, returning an ``IngestorConfig``.
+
+    Parses with `read_yaml`, so its ``yaml.YAMLError`` propagates. Raises
+    ``ConfigError`` on any structural problem or failed pre-mint check; no UUID
+    is minted here.
+    """
+    raw = read_yaml(path)
 
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: YAML document must be a top-level mapping.")

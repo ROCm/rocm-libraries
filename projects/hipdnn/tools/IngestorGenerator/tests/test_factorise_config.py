@@ -489,6 +489,16 @@ class TestCommandLine:
         assert factorise_config.main(argv) != 0
         assert not out.exists()
 
+    def test_main_refuses_an_input_that_repeats_a_key(self, tmp_path, capsys):
+        """YAML keeps the later of two equal keys, so a repeat is dropped before the
+        round trip can see it, even when both values agree."""
+        src = self._write(tmp_path, SAMPLE)
+        src.write_text(src.read_text() + "kernel_source_kind: rocke\n")
+        out = tmp_path / "compact.yaml"
+        assert factorise_config.main(self._argv(src, out)) != 0
+        assert "'kernel_source_kind'" in capsys.readouterr().err
+        assert not out.exists()
+
     def test_main_parses_the_vocabulary_flag(self, tmp_path):
         src = self._write(tmp_path, SAMPLE)
         out = tmp_path / "compact.yaml"
