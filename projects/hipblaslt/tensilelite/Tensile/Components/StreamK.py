@@ -469,18 +469,15 @@ class StreamK(Component):
     def _summationStride(writer, kernel, tc):
         """K stride, in tensor elements, for the StreamK partial-tile offset.
 
-        A swizzled MX scale buffer is block-linear: preSwizzleScalesGFX950 lays
-        it out as [32-row group][8-K-block chunk][256 bytes], so one K element is
-        one scale byte whatever the layout, and the K stride is the constant 1.
-        The logical strides describe the unswizzled tensor instead, so neither
-        strideRef nor Strides<tc> answers this question -- strideRef returns the
-        canonical stride, and KernelWriter has overwritten Strides<tc> with the
-        MN group span (roundUp(kBlocks, 8) * 32), which is a step along MN, not K.
-        Using either sends a workgroup that starts mid-tile far outside the
-        buffer; the MN span overshoots by a factor of kBlocks * 32.
+        A swizzled MX scale buffer is block-linear, so one K element is one scale
+        byte and the K stride is 1. The logical strides describe the unswizzled
+        tensor: strideRef gives the canonical stride, and KernelWriter overwrites
+        Strides<tc> with the MN group span. Either would place a workgroup that
+        starts mid-tile far outside the buffer.
         """
-        if ("MXS" in tc) and kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle",
-                                                                         "HostPreSwizzle"):
+        if ("MXS" in tc) and kernel.get("UseSubtileImpl") \
+           and kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle",
+                                                            "HostPreSwizzle"):
             return 1
         return writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
 
