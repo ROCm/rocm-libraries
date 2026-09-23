@@ -683,11 +683,18 @@ def _reported(stderr, label):
 
 
 def _assert_refused(r, bundle_dir, before, where):
-    """Import exited 1 at the named round-trip site and wrote nothing."""
+    """Import exited 1 at the named round-trip site and wrote nothing.
+
+    The ERROR line is the first line after the skeleton-hash/operation preamble.
+    """
     assert r.returncode == 1, f"expected exit 1, got {r.returncode}:\n{r.stderr}"
+    lines = r.stderr.splitlines()
     assert (
-        f"ERROR: round-trip verify failed {where}" in r.stderr
-    ), f"expected failure {where}:\n{r.stderr}"
+        len(lines) > 2
+        and lines[0].startswith("  skeleton hash:")
+        and lines[1].startswith("  operation:")
+        and lines[2] == f"  ERROR: round-trip verify failed {where}"
+    ), f"expected failure {where} directly after the preamble:\n{r.stderr}"
     assert "Traceback" not in r.stderr, f"diagnostics crashed:\n{r.stderr}"
     assert _inventory(bundle_dir) == before, "refused import changed the bundle tree"
 
@@ -794,7 +801,9 @@ def test_import_canonical_only_difference():
         before = _inventory(bundle_dir)
         r = _import(tmp, "g_float", g_float, bundle_dir, check=False)
         _assert_refused(r, bundle_dir, before, "after extraction")
-        assert "no field compares unequal" in r.stderr, r.stderr
+        assert not any(
+            line.startswith("    field:") for line in r.stderr.splitlines()
+        ), r.stderr
 
         want = canon(remap_graph(g_float, canonical_uid_map_by_name(g_float)))
         got = canon(remap_graph(g_int, canonical_uid_map_by_name(g_int)))

@@ -159,9 +159,15 @@ def _brief(value, limit=200):
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
-def _report_roundtrip_failure(where, expanded, graph):
-    """Name the first location a failed round-trip lost, with expected vs actual."""
+def _report_roundtrip_failure(where, expanded, graph, selected=None):
+    """Name the first location a failed round-trip lost, with expected vs actual.
+
+    `selected`, when given, describes the sweep the graph was matched to and is
+    printed directly after the ERROR line.
+    """
     print(f"  ERROR: round-trip verify failed {where}", file=sys.stderr)
+    if selected is not None:
+        print(f"  selected sweep: {selected}", file=sys.stderr)
     mismatch = _first_mismatch(graph, expanded)
     if mismatch is None:
         want, got = canon(graph), canon(expanded)
@@ -341,13 +347,14 @@ def main() -> int:
 
         expanded = expand(template, values)
         if canon(expanded) != canon(graph):
-            print(
-                f"  selected sweep: {sweep_path}"
+            _report_roundtrip_failure(
+                "after extraction",
+                expanded,
+                graph,
+                selected=f"{sweep_path}"
                 f" (of {len(matches)} structural match(es),"
                 f" {len(tier_matches)} in tier '{args.tier}')",
-                file=sys.stderr,
             )
-            _report_roundtrip_failure("after extraction", expanded, graph)
             return 1
 
         if not args.dry_run:
