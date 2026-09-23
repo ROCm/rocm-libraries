@@ -61,26 +61,12 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     gemmTileConfig.NumGRA = opts.NumGRA;
     gemmTileConfig.NumGRB = opts.NumGRB;
     gemmTileConfig.NumGRM = opts.NumGRM;
-    // Assigned as-is, including 0, and deliberately not defaulted to 1 here.
-    //
-    // TensileLite's production kernel generation (KernelWriter.kernelBody ->
-    // KernelWriterAssembly.getSourceFileString) does not set WaveGroup0/1, so
-    // this product is 0 for real hipblaslt kernels even though their tile
-    // dimensions are all set. Substituting the struct's single-wave default
-    // would look harmless and is not: StinkyWaitCntInsertionPass drains the
-    // tensor counter on `isBarrier(i) || numWaves == 1`, so flipping 0 to 1
-    // starts emitting s_wait_tensorcnt on every kernel in the library. That is
-    // a codegen and performance change to all of hipblaslt, unrelated to the
-    // ds_load cap this PR is about, so it is not smuggled in here.
-    //
-    // The 1 default on GemmTileConfig still does its job: it fixes the
-    // uninitialised read for callers that default-construct the struct (.stir
-    // parsing, tests). This path explicitly assigns, so there is nothing
-    // indeterminate to protect against -- only a real value or a real 0.
-    //
-    // Wiring WaveGroup0/1 through from TensileLite, and then deciding what the
-    // tensorcnt rule should be for a genuinely multi-wave kernel, is a separate
-    // change that needs its own hardware numbers.
+    // Assigned as-is, including 0. Production TensileLite never sets
+    // WaveGroup0/1, so this is 0 for every real hipblaslt kernel. Defaulting it
+    // to 1 here is not the fix it looks like: StinkyWaitCntInsertionPass drains
+    // the tensor counter on `numWaves == 1`, so it would start emitting
+    // s_wait_tensorcnt library-wide. GemmTileConfig's 1 default still covers
+    // the case it is for -- callers that default-construct the struct.
     gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
 
     // Entry-point validation. This is the GEMM backend: a kernel arriving here
@@ -89,10 +75,7 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     // values. Fail loudly instead of letting every downstream pass silently
     // work from defaults and schedule for a kernel shape that does not exist.
     //
-    // Tile dimensions only. NumWaves is deliberately NOT gated: production
-    // TensileLite does not set WaveGroup0/1 (see above), so requiring it here
-    // would reject every real hipblaslt kernel. It has a meaningful default;
-    // a tile size does not.
+    // Tile dimensions only -- NumWaves is not gated (see above).
     //
     // Deliberately NOT in PassContext::setGemmTileConfig: that is the generic
     // config setter and has legitimate non-GEMM callers, notably
@@ -103,16 +86,10 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     // for a zero-width tile, which is the same silent default this check exists
     // to stop.
     //
-    // Scoped to OptLevel > O0, because that is exactly when the config is
-    // consumed: Gfx1250Backend gates the DAG scheduler on
-    // `runScheduler = optLevel != O0`, and the scheduler and the cycle
-    // estimators are what read the tile shape. At O0 the backend is a
-    // legalization/emission path, and it has real non-GEMM callers that have no
-    // tile shape to give and are not wrong for that -- rocisa drives bare
-    // instruction modules through it (rocisa/test/test_mubuf.py,
-    // test_streamk_fences.py, test_pass_plugin.py all use OptLevel 0), as does
-    // stinkytofu-opt on raw asm. Aborting there would fail a caller for not
-    // supplying something nothing downstream is going to look at.
+    // Scoped to OptLevel > O0, where the config is actually consumed
+    // (Gfx1250Backend: `runScheduler = optLevel != O0`). At O0 the backend has
+    // real non-GEMM callers with no tile shape to give -- rocisa pushes bare
+    // instruction modules through it, as does stinkytofu-opt on raw asm.
     const bool tileConfigIsUsed = opts.OptLevel > 0;
     const auto rejectUnsetTile = [tileConfigIsUsed](const char* name, uint32_t value) {
         if (!tileConfigIsUsed || value != 0) return;

@@ -196,11 +196,11 @@ class DAGSchedulerPassTest : public ::testing::Test {
     }
 
     // Run with ds_read queue-depth + throttled-issue controls enabled.
-    // perWmma is held generously high by default so the separate per-WMMA-window
+    // perCap is held generously high by default so the separate per-WMMA-window
     // ds cap never binds. throttleLatency drives queue-full pacing; drainLatency
     // is kept for paths that still model data-return/drain behavior (e.g. barrier
     // timing).
-    void runPassWithDsReadThrottle(int queueDepth, int throttleLatency, int perWmma = 100,
+    void runPassWithDsReadThrottle(int queueDepth, int throttleLatency, int perCap = 100,
                                    int drainLatency = -1, double transitionFactor = 0.5,
                                    int transitionEntries = -1,
                                    bool enableWmmaHideBudgetPrescan = false) {
@@ -214,7 +214,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pfc.dagFeatures.dsReadThrottleTransitionEntries = transitionEntries;
         if (drainLatency <= 0) drainLatency = throttleLatency;
         pfc.dagFeatures.dsReadDrainLatency = drainLatency;
-        pfc.dagFeatures.dsReadPerWmma = perWmma;
+        pfc.dagFeatures.dsReadPerCap = perCap;
         pfc.dagFeatures.enableWmmaHideBudgetPrescan = enableWmmaHideBudgetPrescan;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
@@ -353,21 +353,21 @@ class DAGSchedulerPassTest : public ::testing::Test {
     // the gfx1250 pipeline so tensor loads take their normal queue.
     // A ds_load ceiling far above any count these tests place, so rule (4)
     // never binds. Not INT_MAX: that is the "take the arch default" sentinel
-    // (see CDNA5ReadyQueue::dsReadPerWmma), which resolves to 3.
+    // (see CDNA5ReadyQueue::dsReadPerCap), which resolves to 3.
     static constexpr int kDsCapOff = 1 << 20;
 
-    // dsReadPerWmmaOverride lifts the rule (4) ceiling for tests whose subject
+    // dsReadPerCapOverride lifts the rule (4) ceiling for tests whose subject
     // is the SCC rule but whose setup needs a burst of ds_loads to displace the
     // chain under test. Both halves of a positive/negative control pair must
     // pass the same value, or the pair stops comparing like with like.
-    void runPassWithClusterBarrier(bool clusterBarrier, int dsReadPerWmmaOverride = 0) {
+    void runPassWithClusterBarrier(bool clusterBarrier, int dsReadPerCapOverride = 0) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.distributeGlobalRead = true;
         pfc.dagFeatures.clusterBarrier = clusterBarrier;
-        if (dsReadPerWmmaOverride > 0) pfc.dagFeatures.dsReadPerWmma = dsReadPerWmmaOverride;
+        if (dsReadPerCapOverride > 0) pfc.dagFeatures.dsReadPerCap = dsReadPerCapOverride;
         ctx.setPassFeatureConfig(pfc);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (clusterBarrier=" << (clusterBarrier ? "on" : "off")
@@ -717,7 +717,7 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetUsesThrottleDistributionWithoutOverla
          /*threshold=*/0, /*dsLoadCount=*/6, /*dsLoadWmmaNeeded=*/5, /*overlap=*/false},
     };
     DsLoadBudgetConfig config;
-    config.dsReadPerWmma = 2;
+    config.dsReadPerCap = 2;
     config.dsReadQueueDepth = 2;
     config.dsReadThrottleLatency = 8;
     config.wmmaLatency = 4;
@@ -743,10 +743,10 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetUsesThrottleDistributionWithoutOverla
     }
 
     // Throttle rounding alone places both overflow loads in one latency window,
-    // but dsReadPerWmma=1 is the hard cap and therefore takes precedence.
+    // but dsReadPerCap=1 is the hard cap and therefore takes precedence.
     barriers.front().dsLoadCount = 3;
     barriers.front().overlap = false;
-    config.dsReadPerWmma = 1;
+    config.dsReadPerCap = 1;
     config.dsReadQueueDepth = 1;
     config.dsReadThrottleLatency = 8;
     config.dsReadThrottleTransitionFactor = 0.5;
@@ -800,7 +800,7 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsSplitBarrierGroupOnce) {
 // so a ds_load's ISA issue cost of 1 only holds at one wave. With more waves
 // resident the cost doubles, and fewer ds_loads fit in a WMMA's co-issue window.
 //
-// The rule (4) cap is held inert here (perWmma well above the ds_load count) so
+// The rule (4) cap is held inert here (perCap well above the ds_load count) so
 // what is measured is the window filling up, not the cap.
 // ---------------------------------------------------------------------------
 TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
@@ -811,7 +811,7 @@ TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
         for (int i = 0; i < 12; ++i)
             createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 1);
         config.NumWaves = numWaves;
-        runPassWithDsReadThrottle(/*queueDepth=*/64, /*throttleLatency=*/64, /*perWmma=*/100);
+        runPassWithDsReadThrottle(/*queueDepth=*/64, /*throttleLatency=*/64, /*perCap=*/100);
         int count = 0;
         bool seenFirstWmma = false;
         for (const IRBase& ir : *bb) {
@@ -842,16 +842,16 @@ TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
            "is the assertion to flip";
 }
 
-// A non-positive dsReadPerWmma is not a cap anyone can mean. It used to fall
+// A non-positive dsReadPerCap is not a cap anyone can mean. It used to fall
 // through to the arch default silently, so a caller asking for 0 got 3; and with
 // the cap held in an InFlightQueue a depth of 0 would make full() report "not
 // full" forever, disabling rule (4) rather than enforcing it. Rejected outright.
-TEST_F(DAGSchedulerPassTest, NonPositiveDsReadPerWmmaIsRejected) {
+TEST_F(DAGSchedulerPassTest, NonPositiveDsReadPerCapIsRejected) {
     createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/1);
     EXPECT_DEATH(runPassWithDsReadThrottle(/*queueDepth=*/8, /*throttleLatency=*/32,
-                                           /*perWmma=*/0),
-                 "dsReadPerWmma must be positive");
+                                           /*perCap=*/0),
+                 "dsReadPerCap must be positive");
 }
 
 TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsPickedNodesRatherThanIssueCycles) {
@@ -1820,7 +1820,7 @@ TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
 }
 
 // ---------------------------------------------------------------------------
-// dsReadQueueDepth / dsReadThrottleLatency / dsReadPerWmma: queue-full pacing
+// dsReadQueueDepth / dsReadThrottleLatency / dsReadPerCap: queue-full pacing
 // and in-flight depth control for ds_read_b128 (analogous to global-read
 // queue throttling, but with DS-specific queue + WMMA interactions). Unlike
 // global-read throttling, the ds_read gate additionally requires a WMMA to have
@@ -1871,7 +1871,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_UsesIndependentWmmaSchedulingBudget)
                             /*ldsToken=*/i + 1);
 
     runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8,
-                              /*perWmma=*/100);
+                              /*perCap=*/100);
 
     EXPECT_EQ(maxConsecutiveDsReads(mnemonicSequence(*body)), 2)
         << "throttle cost that fits the independent DS budget may be packed "
@@ -1893,7 +1893,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_HideBudgetKeepsFreeWorkAheadOfThrott
     // cap, the second DS is either capped out or throttle-gated. Hide-budget
     // pending must not promote that DS ahead of genuinely free VALU fill.
     runPassWithDsReadThrottle(
-        /*queueDepth=*/1, /*throttleLatency=*/8, /*perWmma=*/1,
+        /*queueDepth=*/1, /*throttleLatency=*/8, /*perCap=*/1,
         /*drainLatency=*/80, /*transitionFactor=*/0.5,
         /*transitionEntries=*/-1, /*enableWmmaHideBudgetPrescan=*/true);
 
@@ -1926,7 +1926,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_BudgetedDsBeatsRealStallWhenNoFreeWo
         createMovableDsLoad(/*destReg=*/4, /*addrReg=*/304, /*ldsToken=*/2);
 
     runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8,
-                              /*perWmma=*/100);
+                              /*perCap=*/100);
 
     EXPECT_LT(positionOf(*body, saluProducer), positionOf(*body, budgetedDs));
     EXPECT_LT(positionOf(*body, budgetedDs), positionOf(*body, stalledSalu))
@@ -1948,7 +1948,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_WaitDoesNotAdvanceActiveWmmaWindow) 
                             /*ldsToken=*/i + 1);
 
     runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/16,
-                              /*perWmma=*/100);
+                              /*perCap=*/100);
 
     const std::vector<std::string> seq = mnemonicSequence(*body);
     EXPECT_EQ(maxConsecutiveDsReads(seq), 1)
@@ -1966,7 +1966,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_PhaseGFallbackUsesOnlyThrottleClock)
     std::ostringstream captured;
     std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
     runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8,
-                              /*perWmma=*/100, /*drainLatency=*/80);
+                              /*perCap=*/100, /*drainLatency=*/80);
     std::cerr.rdbuf(oldBuf);
     PassManagerDebugConfig::clearDebugOnly();
 
@@ -2002,7 +2002,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
         for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
 
         runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8,
-                                  /*perWmma=*/100,
+                                  /*perCap=*/100,
                                   /*drainLatency=*/drainLatency);
         return mnemonicSequence(*bb);
     };
@@ -2033,7 +2033,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_ZeroLatencyUsesHardwareDefault) {
         for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
 
         runPassWithDsReadThrottle(/*queueDepth=*/2, throttleLatency,
-                                  /*perWmma=*/100,
+                                  /*perCap=*/100,
                                   /*drainLatency=*/80);
         return mnemonicSequence(*bb);
     };
@@ -2062,7 +2062,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_ThrottleLatencyControlsBurstLength) 
 
         runPassWithDsReadThrottle(/*queueDepth=*/2,
                                   /*throttleLatency=*/throttleLatency,
-                                  /*perWmma=*/100, /*drainLatency=*/80);
+                                  /*perCap=*/100, /*drainLatency=*/80);
         return mnemonicSequence(*bb);
     };
 
@@ -2093,7 +2093,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_TransitionConfigControlsBurstLength)
         for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
 
         runPassWithDsReadThrottle(
-            /*queueDepth=*/2, /*throttleLatency=*/8, /*perWmma=*/100,
+            /*queueDepth=*/2, /*throttleLatency=*/8, /*perCap=*/100,
             /*drainLatency=*/80, transitionFactor, transitionEntries);
         return maxConsecutiveDsReads(mnemonicSequence(*bb));
     };
@@ -2130,10 +2130,10 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_NoWmma_LoadsDrainBeforeConsumerValu)
         createVAddInBlock(body, arch, /*dst=*/100 + i, /*src0=*/i * 4,
                           /*src1=*/i * 4 + 1);
 
-    // Queue depth 6 so all loads can be in flight at once; perWmma irrelevant (no
+    // Queue depth 6 so all loads can be in flight at once; perCap irrelevant (no
     // WMMA).
     runPassWithDsReadThrottle(/*queueDepth=*/6, /*throttleLatency=*/8,
-                              /*perWmma=*/100);
+                              /*perCap=*/100);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     // Every ds_load must precede every v_add: find the last load and first valu.
@@ -2490,7 +2490,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_GuardingBarrierNeverSplitsCha
     // issue across the whole region, which no longer lets that burst through,
     // so lift the ceiling here. Its interaction with the SCC rule is not what
     // these tests are about, and the matching control uses the same override.
-    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerWmmaOverride=*/kDsCapOff);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerCapOverride=*/kDsCapOff);
     ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
 
     EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
@@ -2524,7 +2524,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLetsBarrierSplitChain
     // issue across the whole region, which no longer lets that burst through,
     // so lift the ceiling here. Its interaction with the SCC rule is not what
     // these tests are about, and the matching control uses the same override.
-    runPassWithClusterBarrier(/*clusterBarrier=*/false, /*dsReadPerWmmaOverride=*/kDsCapOff);
+    runPassWithClusterBarrier(/*clusterBarrier=*/false, /*dsReadPerCapOverride=*/kDsCapOff);
 
     const int signalPos = firstBarrierSignalPosition(*body);
     const int waitPos = lastBarrierWaitPosition(*body);
@@ -2561,7 +2561,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierStaysWhole)
     // issue across the whole region, which no longer lets that burst through,
     // so lift the ceiling here. Its interaction with the SCC rule is not what
     // these tests are about, and the matching control uses the same override.
-    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerWmmaOverride=*/kDsCapOff);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerCapOverride=*/kDsCapOff);
 
     EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
         << "hoisting the chain above the barrier is allowed, but only as a whole";
@@ -2597,7 +2597,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledSplitsChainBehindBarr
     // issue across the whole region, which no longer lets that burst through,
     // so lift the ceiling here. Its interaction with the SCC rule is not what
     // these tests are about, and the matching control uses the same override.
-    runPassWithClusterBarrier(/*clusterBarrier=*/false, /*dsReadPerWmmaOverride=*/kDsCapOff);
+    runPassWithClusterBarrier(/*clusterBarrier=*/false, /*dsReadPerCapOverride=*/kDsCapOff);
 
     const std::string order = scheduleOrder(*body);
     // The compare hoists above the barrier and leaves its reader behind, so the
@@ -2633,7 +2633,7 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierHoistsWhole
     // issue across the whole region, which no longer lets that burst through,
     // so lift the ceiling here. Its interaction with the SCC rule is not what
     // these tests are about, and the matching control uses the same override.
-    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerWmmaOverride=*/kDsCapOff);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerCapOverride=*/kDsCapOff);
     ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
 
     const std::string order = scheduleOrder(*body);

@@ -100,10 +100,14 @@ struct PassFeatureConfig {
         /// before full throttling begins. 0 disables the transition; negative
         /// means one queue depth.
         int dsReadThrottleTransitionEntries = 0;
-        int dsReadPerWmma = INT_MAX;
-        /// Cycle span the dsReadPerWmma ceiling applies over: at most
-        /// dsReadPerWmma ds_loads may issue in any dsIssueCapSpanCycles of the
-        /// real timeline. Tuned alongside dsReadPerWmma -- the pair is the cap,
+        /// Rule (4) ds_load ceiling: at most this many ds_loads per
+        /// dsIssueCapSpanCycles. INT_MAX = per-arch default; non-positive is
+        /// rejected. Was dsReadPerWmma, when the window was delimited by WMMA
+        /// issues; the old module-option key still works (SchedulingKnobHeuristics).
+        int dsReadPerCap = INT_MAX;
+        /// Cycle span the dsReadPerCap ceiling applies over: at most
+        /// dsReadPerCap ds_loads may issue in any dsIssueCapSpanCycles of the
+        /// real timeline. Tuned alongside dsReadPerCap -- the pair is the cap,
         /// and neither means anything without the other.
         ///
         /// 0 = use the per-arch default (CDNA5Config::dsIssueCapSpanCycles).

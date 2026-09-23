@@ -19,8 +19,8 @@
 # it at cycle ~4 only pushed the remaining ds_loads -- WMMA2's operands -- behind
 # it, serialising two 56-cycle latencies instead of overlapping them. Draining
 # all six first overlaps every ds_load latency and both WMMAs then issue against
-# ready operands. The cap still binds, as a wait: it admits dsReadPerWmma (3)
-# ds_loads before the v_add gets a turn, and --ds-read-per-wmma=1/2/6 moves that
+# ready operands. The cap still binds, as a wait: it admits dsReadPerCap (3)
+# ds_loads before the v_add gets a turn, and --ds-read-per-cap=1/2/6 moves that
 # boundary to 1/2/6 -- textual adjacency after that point is not cycle
 # adjacency, since the wait advances the real timeline between issues.
 #
@@ -28,7 +28,7 @@
 # CHECK: tensor_load_to_lds
 # CHECK: tensor_load_to_lds
 # ds_loads drain before the independent VALU (loads prioritized, no WMMA ready).
-# Exactly dsReadPerWmma (3) of them fit in the cap window before the v_add.
+# Exactly dsReadPerCap (3) of them fit in the cap window before the v_add.
 # CHECK: ds_load_b128
 # CHECK-NEXT: ds_load_b128
 # CHECK-NEXT: ds_load_b128

@@ -180,7 +180,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-throttle-latency=") ||
                 arg.starts_with("--ds-read-throttle-transition-factor=") ||
                 arg.starts_with("--ds-read-throttle-transition-entries=") ||
-                arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--ds-read-per-cap=") ||
                 arg.starts_with("--ds-issue-cap-span-cycles=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
@@ -520,11 +520,15 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--ds-read-throttle-transition-entries=")) {
             passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
                 std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
-        } else if (a.starts_with("--ds-read-per-wmma=")) {
-            passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--ds-read-per-cap=")) {
+            // Length taken from the flag rather than hardcoded: the literal 19
+            // here was the length of the old --ds-read-per-cap=, and renaming
+            // the flag to an 18-character one silently made this parse the '='.
+            passFeatureConfig.dagFeatures.dsReadPerCap =
+                std::stoi(a.substr(std::string("--ds-read-per-cap=").size()));
         } else if (a.starts_with("--ds-issue-cap-span-cycles=")) {
             // The other half of the rule (4) cap: the ceiling is
-            // dsReadPerWmma ds_loads per this many cycles. Neither number means
+            // dsReadPerCap ds_loads per this many cycles. Neither number means
             // anything alone, so both are reachable from the CLI.
             passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
                 std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));

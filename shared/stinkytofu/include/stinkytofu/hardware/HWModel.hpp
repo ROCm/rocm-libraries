@@ -12,7 +12,7 @@
 // PassFeatureConfig (user-overridable, plumbed to both the Python bindings and
 // stinkytofu-opt) or stay local to the pass that owns the policy. Examples
 // deliberately kept out include InsertClusterBarrierPass's configurable Rule 3
-// signal lead and the dsReadPerWmma / globalReadPerWmma scheduling ratios in
+// signal lead and the dsReadPerCap / globalReadPerWmma scheduling ratios in
 // CDNA5Config.
 //
 // Per-opcode LDS drain caps / throughputs live on HwInstDesc (filled from each
@@ -59,7 +59,7 @@ struct HWModel {
         ///
         /// 0 or 1 = unmodelled, issue cost is taken from the ISA as-is.
         ///
-        /// NOTE: this is NOT a substitute for dagFeatures.dsReadPerWmma. That
+        /// NOTE: this is NOT a substitute for dagFeatures.dsReadPerCap. That
         /// knob is a separate manual ceiling the hardware team tunes; this
         /// field only makes the modelled issue cost match the machine.
         int wavesPerDsIssuePipe;
