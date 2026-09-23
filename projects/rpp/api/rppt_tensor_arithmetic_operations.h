@@ -47,11 +47,9 @@ extern "C" {
  *          It multiplies each element of the source tensor by a corresponding element in the
  * 'mulTensor', adds a corresponding element from the 'addTensor', and stores the result in the
  * destination tensor. Support added for f32 -> f32 dataype.
- * \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * "Sample Input" \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/arithmetic_operations_fused_multiply_add_scalar_150x150x4.gif
- * "Sample Output" \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html arithmetic_operations_fused_multiply_add_scalar_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param[in] srcGenericDescPtr source tensor descriptor \param[out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param[in]
  * dstGenericDescPtr destination tensor descriptor \param[in] mulTensor mul values for fmadd
@@ -74,11 +72,9 @@ RppStatus rppt_fused_multiply_add_scalar(RppPtr_t srcPtr, RpptGenericDescPtr src
  * \details This function performs the addition operation on a batch of 4D tensors.
  *          It adds a corresponding element from the 'addTensor' to source tensor, and stores the
  * result in the destination tensor. Support added for f32 -> f32 dataype.
- * \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * "Sample Input" \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/arithmetic_operations_add_scalar_150x150x4.gif
- * "Sample Output" \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html arithmetic_operations_add_scalar_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param[in] srcGenericDescPtr source tensor descriptor \param[out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param[in]
  * dstGenericDescPtr destination tensor descriptor \param[in] addTensor add values for used for
@@ -98,11 +94,9 @@ RppStatus rppt_add_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr,
  * \details This function performs the subtraction operation on a batch of 4D tensors.
  *          It takes a corresponding element from 'subtractTensor' and subtracts it from source
  * tensor. Result is stored in the destination tensor. Support added for f32 -> f32 dataype.
- * \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * "Sample Input" \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/arithmetic_operations_subtract_scalar_150x150x4.gif
- * "Sample Output" \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html arithmetic_operations_subtract_scalar_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param [in] srcGenericDescPtr source tensor descriptor \param [out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
  * dstGenericDescPtr destination tensor descriptor \param[in] subtractTensor subtract values for
@@ -123,11 +117,9 @@ RppStatus rppt_subtract_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDes
  * \details This function performs the multiplication operation on a batch of 4D tensors.
  *          It takes a corresponding element from 'multiplyTensor' and multiplies it with source
  * tensor. Result is stored in the destination tensor. Support added for f32 -> f32 dataype.
- * \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * "Sample Input" \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/arithmetic_operations_multiply_scalar_150x150x4.gif
- * "Sample Output" \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html arithmetic_operations_multiply_scalar_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param[in] srcGenericDescPtr source tensor descriptor \param[out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param[in]
  * dstGenericDescPtr destination tensor descriptor \param[in] mulTensor multiplier values for used

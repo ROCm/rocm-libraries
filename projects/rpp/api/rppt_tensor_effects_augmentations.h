@@ -383,11 +383,9 @@ RppStatus rppt_jitter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
 /*! \brief  Gaussian noise augmentation on HIP/HOST backend
  * \details This function adds gaussian noise to a batch of 4D tensors.
  *          Support added for u8 -> u8, f32 -> f32 datatypes.
- * \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * "Sample Input" \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/effects_augmentations_gaussian_noise_150x150x4.gif
- * "Sample Output" \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html effects_augmentations_gaussian_noise_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param [in] srcGenericDescPtr source tensor descriptor \param [out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
  * dstGenericDescPtr destination tensor descriptor \param [in] meanTensor mean values for each

@@ -396,11 +396,9 @@ RppStatus rppt_crop_and_patch(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr sr
 /*! \brief Flip voxel augmentation on HIP/HOST backend
  * \details The flip voxel augmentation performs a mask-controlled horizontal/vertical/depth flip on
  * a generic 4D tensor. <br> Support added for f32 -> f32 and u8 -> u8 dataypes.
- * \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * "Sample Input" \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/geometric_augmentations_flip_150x150x4.gif
- * "Sample Output" \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html geometric_augmentations_flip_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param [in] srcGenericDescPtr source tensor descriptor (Restrictions - numDims
  * = 5, offsetInBytes
  * >= 0, dataType = U8/F32, layout = NCDHW/NDHWC, c = 1/3)
