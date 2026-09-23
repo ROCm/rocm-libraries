@@ -747,6 +747,68 @@ class KernelWriterAssembly(KernelWriter):
     self.vgprPool.checkIn(payload)
     return module
 
+  def wgmDebugRawStoreOrigin(self, kernel):
+    """Debug-only WGM instrumentation, store-path independent.
+
+    Emits a lane-0 raw 16-byte (buffer_store_dwordx4) write of the WG-mapping
+    record to the MACRO-TILE ORIGIN. Uses WGMDebugSrdD (the D store SRD
+    snapshotted before the store loop incremented it): computeStoreSrdStart sets
+    the SRD base to the macro-tile top-left in N (column) only, and the M (row)
+    offset is a per-workitem vaddr offset. So we address the tile origin exactly
+    like the real store: vaddr = post-WGM WorkGroup0 (M-tile idx) * MacroTile0 *
+    StrideD0(=bpe, M contiguous), offen=True, soffset=0. Emitted once at GW_End
+    (after all real stores + a store-completion wait), so it lands at each
+    workgroup's tile (0,0) regardless of the (subtile/paired/...) store path.
+    All waves of a workgroup write identical data to the same address
+    (idempotent). Produces INCORRECT GEMM results; visualization only.
+    """
+    module = Module("DebugWGM origin store")
+    module.addComment1("@DebugWGM: raw 16B store of WG-mapping info to macro-tile origin (SRD N-base + M vaddr)")
+    wave64 = (kernel["WavefrontSize"] == 64)
+    module.add(SWaitCnt(vscnt=0, comment="DebugWGM: ensure real D stores complete before overwrite"))
+    payload = self.vgprPool.checkOutAligned(4, 4, "wgmDebugOriginPayload")
+    vAddr = self.vgprPool.checkOut(1, "wgmDebugOriginVAddr")
+    mtile0Bytes = int(kernel["MacroTile0"] * kernel["ProblemType"]["DestDataType"].numBytes())
+    with self.allocTmpSgpr(1, tag="wgmDebugRawStoreOrigin") as tmpSgprRes:
+      tmp = tmpSgprRes.idx
+      module.add(VMovB32(dst=vgpr(payload+0), src=sgpr("WGMDebugOrigWG0"),
+                         comment="DebugWGM: original 1D workgroup id"))
+      module.add(SLShiftLeftB32(dst=sgpr(tmp), shiftHex=16, src=sgpr("WGMDebugPostWG+0"),
+                                comment="DebugWGM: post-WGM WorkGroup0 << 16"))
+      module.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WGMDebugPostWG+1"),
+                         comment="DebugWGM: | post-WGM WorkGroup1"))
+      module.add(VMovB32(dst=vgpr(payload+1), src=sgpr(tmp), comment="DebugWGM: packed (newWG0<<16)|newWG1"))
+      module.add(SGetRegB32(dst=sgpr(tmp), src="hwreg(HW_REG_XCC_ID)", comment="DebugWGM: read XCC id"))
+      module.add(VMovB32(dst=vgpr(payload+2), src=sgpr(tmp), comment="DebugWGM: XCC id"))
+      module.add(VMovB32(dst=vgpr(payload+3), src=0, comment="DebugWGM: reserved (WGM in kernel name)"))
+      # vaddr = M-tile byte offset from SRD base = post-WGM WorkGroup0 * MacroTile0 * bpe
+      module.add(SMulI32(dst=sgpr(tmp), src0=sgpr("WGMDebugPostWG+0"), src1=mtile0Bytes,
+                         comment="DebugWGM: M-tile byte offset = post-WGM WorkGroup0 * MacroTile0 * bpe"))
+      module.add(VMovB32(dst=vgpr(vAddr), src=sgpr(tmp), comment="DebugWGM: vaddr = M-tile byte offset"))
+    with self.allocTmpSgpr(2 if wave64 else 1, alignment=(2 if wave64 else 1),
+                           tag="wgmDebugOriginExecSave") as execRes:
+      esave = execRes.idx
+      if wave64:
+        module.add(SMovB64(dst=sgpr(esave, 2), src=EXEC(), comment="DebugWGM: save exec"))
+        module.add(SMovB64(dst=EXEC(), src=1, comment="DebugWGM: exec = lane 0 only"))
+      else:
+        module.add(SMovB32(dst=sgpr(esave), src=EXEC(), comment="DebugWGM: save exec"))
+        module.add(SMovB32(dst=EXEC(), src=1, comment="DebugWGM: exec = lane 0 only"))
+      module.add(BufferStoreB128(src=vgpr(payload, 4),
+                                 vaddr=vgpr(vAddr),
+                                 saddr=sgpr("WGMDebugSrdD", 4),
+                                 soffset=0,
+                                 mubuf=MUBUFModifiers(offen=True, offset12=0,
+                                                      glc=True, slc=True),
+                                 comment="DebugWGM: raw dwordx4 store to macro-tile origin (SRD N-base + M vaddr)"))
+      if wave64:
+        module.add(SMovB64(dst=EXEC(), src=sgpr(esave, 2), comment="DebugWGM: restore exec"))
+      else:
+        module.add(SMovB32(dst=EXEC(), src=sgpr(esave), comment="DebugWGM: restore exec"))
+    self.vgprPool.checkIn(vAddr)
+    self.vgprPool.checkIn(payload)
+    return module
+
   def defineMultiSgprIndex(self, names: List[str], numSgprs: List[int], align=1):
     assert(len(names) == len(numSgprs))
 
@@ -14211,6 +14273,14 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprBpeList = [sgprLog2BpeC, sgprLog2BpeD]
 
       module.add(self.computeStoreSrdStart(kernel, ["C", "D"], sgprBpeList=self.sgprBpeList))
+      if kernel.get("EnableWGMDebug", 0):
+        module.addComment1("@DebugWGM: snapshot D store SRD (tile N-base) + final tile coords before store loop")
+        module.add(SMovB64(dst=sgpr("WGMDebugSrdD", 2), src=sgpr("SrdD", 2), comment="DebugWGM: save SrdD base"))
+        module.add(SMovB64(dst=sgpr("WGMDebugSrdD+2", 2), src=sgpr("SrdD+2", 2), comment="DebugWGM: save SrdD size/flags"))
+        # Capture the SAME WorkGroup0/1 the SRD was just computed from, so the
+        # M vaddr offset (WG0) is consistent with the SRD's N base (WG1).
+        module.add(SMovB32(dst=sgpr("WGMDebugPostWG+0"), src=sgpr("WorkGroup0"), comment="DebugWGM: final M-tile index"))
+        module.add(SMovB32(dst=sgpr("WGMDebugPostWG+1"), src=sgpr("WorkGroup1"), comment="DebugWGM: final N-tile index"))
       if not skipUndefine:
         if kernel["GlobalSplitU"] != 0:
           module.add(self.undefineSgpr("GSULog2BpeC"))
@@ -17974,6 +18044,13 @@ class KernelWriterAssembly(KernelWriter):
 
       # End label
       module.add(endLabel)
+
+      # WGM debug: after all real D stores converge here, overwrite each
+      # workgroup's macro-tile origin with the WG-mapping record (store-path
+      # independent). Uses the tile-N-base SRD snapshotted before the store loop
+      # plus a per-WI M-tile vaddr offset (mirrors the real store's addressing).
+      if kernel.get("EnableWGMDebug", 0):
+        module.add(self.wgmDebugRawStoreOrigin(kernel))
 
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["StreamK"] > 0 and \
         (not self._plsinFusedSkipEpilogueMul()) and \

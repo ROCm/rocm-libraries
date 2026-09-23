@@ -85,8 +85,7 @@ extern "C" __global__ void flush_icache()
                          :);
 }
 
-#ifndef NDEBUG
-// Debug-only WGM (workgroup-mapping) instrumentation support.
+// Debug-only WGM (workgroup-mapping) instrumentation support (guard removed to enable in Release).
 //
 // When hipBLASLt is built with the build-script option `--debug-wgm` (Debug
 // builds only), the generated GEMM kernels overwrite the top-left element of
@@ -134,7 +133,6 @@ static inline void debug_wgm_dump_d(const std::vector<HipHostBuffer>& hD_1,
                    << ", ldd=" << ldd << ", " << bytesPerElement << "B/elem) to " << fname
                    << std::endl;
 }
-#endif
 
 // Convert element count to byte count, accounting for sub-byte packing.
 // FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
@@ -5519,9 +5517,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                 }
-#ifndef NDEBUG
                 debug_wgm_dump_d(hD_1, M[0], N[0], ldd[0], realDataTypeSize(To));
-#endif
                 check(stream,
                       arg,
                       gemm_count,
@@ -6127,9 +6123,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
-#ifndef NDEBUG
                 debug_wgm_dump_d(hD_1, M[0], N[0], ldd[0], realDataTypeSize(To));
-#endif
                 if(arg.dump_matrix)
                 {
                     for(int batchId = 0; batchId < num_batches[0]; batchId++)

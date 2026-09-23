@@ -10182,6 +10182,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # and KernelWriterAssembly.wgmDebugStoreValues().
     if kernel.get("EnableWGMDebug", 0):
       self.defineSgpr("WGMDebugOrigWG0", 1)
+      # Snapshot of the workgroup's D store SRD (tile-base descriptor, 4 sgprs)
+      # taken right after it is computed and BEFORE the store loop increments it
+      # (optSrdIncForRow). The SRD base is the macro-tile top-left in N (column)
+      # only; the M (row) offset is applied per-workitem via vaddr. Used at
+      # GW_End to write the WG-mapping record to the macro-tile origin.
+      self.defineSgpr("WGMDebugSrdD", 4, 4)
+      # Snapshot of the post-WGM tile coords (WorkGroup0=M-tile, WorkGroup1=N-tile)
+      # right after the WGM/XCC remap. WorkGroup0/1 can be reused as scratch by
+      # the store code, so keep our own copy for the GW_End origin store.
+      self.defineSgpr("WGMDebugPostWG", 2)
 
     if kernel["LocalSplitU"] > 1:
       self.defineSgpr("LSUTailLoopOffset", 1)
