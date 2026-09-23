@@ -861,13 +861,15 @@ namespace
             static int         determined_path{determine_tensile_base_path(base_path)};
 
             // The device predicate name stays `processor` (matches the physical
-            // gfx1250 device for Tensile solution selection); the catalog key may
-            // diverge to select the strict device library by GPU revision.
-            std::string catalog_key = processor;
+            // device for Tensile solution selection); the catalog key may diverge
+            // to select the strict device library by GPU revision. The strict
+            // variant is the base arch with a "-strict" suffix.
+            std::string catalog_key    = processor;
+            std::string strict_catalog = processor + "-strict";
             if(rocblas_internal_is_strict_target(deviceId)
-               && TestPath(base_path + "/gfx1250-strict"))
+               && TestPath(base_path + "/" + strict_catalog))
             {
-                catalog_key = "gfx1250-strict";
+                catalog_key = strict_catalog;
             }
 
             path = base_path;
@@ -1067,7 +1069,7 @@ namespace
             {
                 // initialize adapter for lazy loading or experimental code objects.
                 // Uses catalog_key (not processor) because the helper kernel's on-disk
-                // name carries the compiler-target arch, i.e. gfx1250-strict under strict.
+                // name carries the compiler-target arch, i.e. the -strict variant under strict.
                 PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(catalog_key, path));
 
                 // Load library for this specific architecture if not already loaded

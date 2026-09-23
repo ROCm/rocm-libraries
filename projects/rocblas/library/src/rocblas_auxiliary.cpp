@@ -998,11 +998,11 @@ std::string rocblas_internal_get_xnack_mode()
     return XnackMode<hipDeviceProp_t>{}(deviceProperties);
 }
 
-// Internal use. True when the device's revision requires the strict gfx1250
-// device library. Kept revision-numeric and codename-neutral on purpose.
+// Internal use. True when the device's revision requires the strict device
+// library. Kept revision-numeric and codename-neutral on purpose.
 bool rocblas_internal_is_strict_target(int deviceId)
 {
-    // Test/CI override: force strict-catalog selection on any gfx1250 device.
+    // Test/CI override: force strict-catalog selection on a strict-capable device.
     static const bool force_strict = [] {
         const char* e = std::getenv("ROCBLAS_TENSILE_STRICT");
         return e && strtol(e, nullptr, 0) != 0;
@@ -1012,16 +1012,16 @@ bool rocblas_internal_is_strict_target(int deviceId)
     if(hipGetDeviceProperties(&deviceProperties, deviceId) != hipSuccess)
         return false;
 
-    // The strict identity only applies to gfx1250 silicon.
+    // The strict identity currently only applies to gfx1250 silicon.
     if(std::string(deviceProperties.gcnArchName).find("gfx1250") == std::string::npos)
         return false;
 
     if(force_strict)
         return true;
 
-    // Revision-gated: the strict device library targets the earliest gfx1250
-    // silicon revision, which reports asicRevision 0 (confirmed against ROCr
-    // agent enumeration); later revisions use the regular library.
+    // Revision-gated: the strict device library targets the earliest silicon
+    // revision, which reports asicRevision 0 (confirmed against ROCr agent
+    // enumeration); later revisions use the regular library.
     static constexpr int c_strict_asic_revision = 0;
     return deviceProperties.asicRevision == c_strict_asic_revision;
 }
