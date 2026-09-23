@@ -1178,7 +1178,12 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["MXBlockA"]:
         # Defer MXSA's alias only when B owns the set and is allocated below.
         mxsaOwner = setOwner("MXSA")
-        if mxsaOwner == "A":
+        if kernel["UseSubtileImpl"]:
+          # Subtile issues data and scale loads at disjoint schedule points.
+          # Rebuild the descriptor before each issue and reuse A's 12 SGPRs.
+          module.add(RegSet("s", "sgprtdmMXSAGroup0", "sgprtdmAGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSAGroup1", "sgprtdmAGroup1"))
+        elif mxsaOwner == "A":
           # Keeping the two sets at 4+8 twice holds this row at 24 SGPRs.
           module.add(RegSet("s", "sgprtdmMXSAGroup0", "sgprtdmAGroup0"))
           module.add(RegSet("s", "sgprtdmMXSAGroup1", "sgprtdmAGroup1"))
@@ -1209,9 +1214,14 @@ class KernelWriterAssembly(KernelWriter):
                 and kernel.get("_TDMIterateModeA", False))):
           module.add(self.defineSgpr("tdmBGroup2", 4, 4))
           module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
+        if kernel["UseSubtileImpl"] and kernel["ProblemType"]["MXBlockB"]:
+          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmBGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmBGroup1"))
         # Allocate or alias each scale only after its descriptor owner exists.
         for mxs in ("MXSA", "MXSB"):
           if not kernel["ProblemType"]["MXBlock%s" % mxs[-1]]:
+            continue
+          if kernel["UseSubtileImpl"]:
             continue
           owner = setOwner(mxs)
           if mxs == "MXSA" and owner != "B":

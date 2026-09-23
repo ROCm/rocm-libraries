@@ -12,6 +12,7 @@ from __future__ import annotations
 from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
 from Tensile.Components.Subtile.SubtileGREmit import (
     emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
+    refreshTDMDescriptorSubtile,
 )
 from Tensile.Components.Subtile.SubtileLREmit import (
     emitSingleDsRead, localReadLDSBufferSwap,
@@ -259,9 +260,18 @@ class InstructionEmitter:
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // self.subtileShapeK
+                    if (self.kernel.get("UseSubtileImpl")
+                            and self.kernel.get("enableTDM%s" % tensor, False)
+                            and tileId == 0 and subtileK == 0):
+                        module.add(refreshTDMDescriptorSubtile(
+                            self.writer, self.kernel, tensor))
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
+            if (self.kernel.get("UseSubtileImpl")
+                    and self.kernel.get("enableTDM%s" % tc[-1], False)):
+                module.add(refreshTDMDescriptorSubtile(
+                    self.writer, self.kernel, tc))
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
         return list(module.flatitems())
 

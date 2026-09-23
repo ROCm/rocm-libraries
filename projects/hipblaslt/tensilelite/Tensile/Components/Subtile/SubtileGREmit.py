@@ -1176,13 +1176,13 @@ def _tdmGlobalOffsetSubtileMX(writer, kernel, tP):
   return mod
 
 
-def initTDMDescriptorSubtile(writer, kernel, tP):
+def initTDMDescriptorSubtile(writer, kernel, tP, refresh=False):
   """Subtile variant of initTDMDescriptor()."""
   from ...Components.TensorDataMover import TensorDataMoverLoad
   comp = TensorDataMoverLoad.find(writer)
   tc = tP['tensorChar']
   if tc.startswith("MX"):
-    return _initTDMDescriptorSubtileMX(writer, kernel, tP)
+    return _initTDMDescriptorSubtileMX(writer, kernel, tP, refresh)
   ti = tP["idx"]
   tileChar = tP["tileChar"]
   mod = Module(f"Init TDM Descriptor Subtile {tc}")
@@ -1236,34 +1236,37 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   if clusterComp:
     mod.add(clusterComp.applyToDescriptor(writer, kernel, descSgprName(1), tc, subtile=True))
 
-  with writer.allocTmpSgpr(1) as tmpSgprRes:
-    waveOffsetSgprIdx = tmpSgprRes.idx
-    mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
-    mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
-    # Each wave writes its mt/numWaves rows to a distinct LDS region,
-    # matching the cooperative full-wave global split in
-    # tdmGlobalOffsetSubtile. The union over all waves covers the whole
-    # mt-row tile (identity map global-row r -> LDS-row r).
-    if padIntervalBytes != 0 and padAmountBytes != 0:
-      tileBytes = round(mt // numWaves * du * bpe)
-      padBytes = tileBytes // padIntervalBytes * padAmountBytes
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
-              f"woffset = wId * ({tileBytes}+{padBytes})"))
-    else:
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe),
-              "woffset = wId * (mt // numWaves * du * bpe)"))
-    mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
-            f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
-    mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
-    # Save LDS offset to tracking SGPR for runtime double-buffer swap
-    ldsTrackSgpr = f"tdmLdsAddr{tc}"
-    mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"init {ldsTrackSgpr} for buffer tracking"))
-    # Compute swap mask: swapMask = addr XOR (addr + ldsTotalSize)
-    # Used by globalReadLDSBufferSwap to toggle between buffer 0 and buffer 1.
-    swapMaskSgpr = f"tdmLdsSwapMask{tc}"
-    ldsTotalSize = writer.ldsTotalSize
-    mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize, comment=f"addr + ldsTotalSize({ldsTotalSize})"))
-    mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr), comment=f"swapMask = addr XOR (addr + ldsTotalSize)"))
+  ldsTrackSgpr = f"tdmLdsAddr{tc}"
+  if refresh:
+    mod.add(comp.setLdsAddr(descSgprName(0), sgpr(ldsTrackSgpr)))
+  else:
+    with writer.allocTmpSgpr(1) as tmpSgprRes:
+      waveOffsetSgprIdx = tmpSgprRes.idx
+      mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
+      # Each wave writes its mt/numWaves rows to a distinct LDS region,
+      # matching the cooperative full-wave global split in
+      # tdmGlobalOffsetSubtile. The union over all waves covers the whole
+      # mt-row tile (identity map global-row r -> LDS-row r).
+      if padIntervalBytes != 0 and padAmountBytes != 0:
+        tileBytes = round(mt // numWaves * du * bpe)
+        padBytes = tileBytes // padIntervalBytes * padAmountBytes
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
+                f"woffset = wId * ({tileBytes}+{padBytes})"))
+      else:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe),
+                "woffset = wId * (mt // numWaves * du * bpe)"))
+      mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
+              f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
+      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+      # Save LDS offset to tracking SGPR for runtime double-buffer swap
+      mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"init {ldsTrackSgpr} for buffer tracking"))
+      # Compute swap mask: swapMask = addr XOR (addr + ldsTotalSize)
+      # Used by globalReadLDSBufferSwap to toggle between buffer 0 and buffer 1.
+      swapMaskSgpr = f"tdmLdsSwapMask{tc}"
+      ldsTotalSize = writer.ldsTotalSize
+      mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize, comment=f"addr + ldsTotalSize({ldsTotalSize})"))
+      mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr), comment=f"swapMask = addr XOR (addr + ldsTotalSize)"))
   sizeShifter = 1 if dtype.isFloat4() else 0
   sizeShifterDim = sizeShifter
 
@@ -1329,7 +1332,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   return mod
 
 
-def _initTDMDescriptorSubtileMX(writer, kernel, tP):
+def _initTDMDescriptorSubtileMX(writer, kernel, tP, refresh=False):
   """Subtile TDM descriptor for MXSA/MXSB (InMemorySwizzle, cooperative waves)."""
   from ...Components.TensorDataMover import TensorDataMoverLoad
   comp = TensorDataMoverLoad.find(writer)
@@ -1365,32 +1368,35 @@ def _initTDMDescriptorSubtileMX(writer, kernel, tP):
   if clusterComp:
     mod.add(clusterComp.applyToDescriptor(writer, kernel, descSgprName(1), tc, subtile=True))
 
-  with writer.allocTmpSgpr(1) as tmpSgprRes:
-    waveOffsetSgprIdx = tmpSgprRes.idx
-    mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
-    mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx),
-            "wId=fTid // wavelen"))
-    perWaveBytes = round(mt // numWaves * du * bpe)
-    if padIntervalBytes != 0 and padAmountBytes != 0:
-      padBytes = perWaveBytes // padIntervalBytes * padAmountBytes
-      perWaveBytes = perWaveBytes + padBytes
-    if numWaves > 1:
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), perWaveBytes,
-              f"woffset = wId * {perWaveBytes}"))
-    else:
-      mod.add(SMovB32(sgpr(waveOffsetSgprIdx), 0, "single wave: LDS wave offset 0"))
-    mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
-            f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
-    mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
-    ldsTrackSgpr = f"tdmLdsAddr{tc}"
-    mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx),
-                    comment=f"init {ldsTrackSgpr} for buffer tracking"))
-    swapMaskSgpr = f"tdmLdsSwapMask{tc}"
-    ldsTotalSize = writer.ldsTotalSize
-    mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize,
-                    comment=f"addr + ldsTotalSize({ldsTotalSize})"))
-    mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr),
-                    comment="swapMask = addr XOR (addr + ldsTotalSize)"))
+  ldsTrackSgpr = f"tdmLdsAddr{tc}"
+  if refresh:
+    mod.add(comp.setLdsAddr(descSgprName(0), sgpr(ldsTrackSgpr)))
+  else:
+    with writer.allocTmpSgpr(1) as tmpSgprRes:
+      waveOffsetSgprIdx = tmpSgprRes.idx
+      mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx),
+              "wId=fTid // wavelen"))
+      perWaveBytes = round(mt // numWaves * du * bpe)
+      if padIntervalBytes != 0 and padAmountBytes != 0:
+        padBytes = perWaveBytes // padIntervalBytes * padAmountBytes
+        perWaveBytes = perWaveBytes + padBytes
+      if numWaves > 1:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), perWaveBytes,
+                f"woffset = wId * {perWaveBytes}"))
+      else:
+        mod.add(SMovB32(sgpr(waveOffsetSgprIdx), 0, "single wave: LDS wave offset 0"))
+      mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
+              f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
+      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+      mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx),
+                      comment=f"init {ldsTrackSgpr} for buffer tracking"))
+      swapMaskSgpr = f"tdmLdsSwapMask{tc}"
+      ldsTotalSize = writer.ldsTotalSize
+      mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize,
+                      comment=f"addr + ldsTotalSize({ldsTotalSize})"))
+      mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr),
+                      comment="swapMask = addr XOR (addr + ldsTotalSize)"))
 
   sizeShifter = 1 if dtype.isFloat4() else 0
   mod.add(comp.setIterationEnabled(descSgprName(1), False))
@@ -1426,6 +1432,19 @@ def _initTDMDescriptorSubtileMX(writer, kernel, tP):
     mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups, writer))
   mod.add(comp.setTensorStride0(descSgprName(1), sizeName, ceil(log2(mxUnit)), True))
   return mod
+
+
+def refreshTDMDescriptorSubtile(writer, kernel, tc):
+  """Rebuild an aliased subtile descriptor immediately before its load."""
+  ti = _subtileTileInfo(writer, tc)
+  idx = 0 if tc.endswith("A") else 1
+  tP = {
+    "tensorChar": tc,
+    "idx": idx,
+    "tileChar": f"{idx}{INDEX_CHARS[idx]}",
+    "bpeGR": ti.bpe,
+  }
+  return initTDMDescriptorSubtile(writer, kernel, tP, refresh=True)
 
 
 def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):

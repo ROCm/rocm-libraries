@@ -81,6 +81,8 @@ def test_select_scale_and_d_geometry_32x16_fp4():
     assert selectDGeometry(kernel) is CD_F32_W32_M32
     assert CD_F32_W32_M32.mmaTileShape == (32, 16)
     assert CD_F32_W32_M32.mmaTileRegCount == 16
+    assert CD_F32_W32_M32.storeShape.k == 8
+    assert CD_F32_W32.storeShape.k == 8
 
 
 def test_select_d_geometry_wave32_16x16_unchanged():
@@ -249,6 +251,49 @@ def test_smoke_yaml_solution_is_valid(_gp_gfx1250, gfx1250_iim, assembler, capsy
     assert sol.get("MatrixInstN") == 16
     assert sol.get("MacroTile0") == 128
     assert sol.get("MacroTile1") == 64
+    assert sol.get("MIOutputVectorWidth") == 8
+
+
+def test_smoke_solution_emits_full_gfx1250_kernel(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    """The smoke solution must survive complete assembly-source generation."""
+    import shutil
+
+    import rocisa
+    from Tensile.Common.Types import DebugConfig
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from Tensile.TensileCreateLibrary.Run import (
+        generateKernelObjectsFromSolutions,
+        processKernelSource,
+    )
+
+    sol = Solution(_make_smoke_params(gfx1250_iim), False, True, False, assembler, gfx1250_iim)
+    capsys.readouterr()
+    assert sol.get("Valid") is True
+    kernel = generateKernelObjectsFromSolutions([sol])[0]
+
+    isa = tuple(kernel["ISA"])
+    ri = rocisa.rocIsa.getInstance()
+    ri.init(isa, shutil.which("amdclang++") or "/usr/bin/amdclang++")
+    ri.setKernel(isa, kernel["WavefrontSize"])
+
+    kernel.duplicate = False
+    kernel["BaseName"] = getKernelFileBase(False, kernel)
+    result = processKernelSource(
+        KernelWriterAssembly(assembler, DebugConfig()),
+        ri.getData(),
+        ri.getOutputOptions(),
+        False,
+        kernel,
+    )
+    source = result.src.decode(errors="replace") if isinstance(result.src, bytes) else result.src
+
+    assert result.err == 0
+    assert "v_wmma_scale_f32_32x16x128_f4" in source
+    assert ".set sgprtdmMXSAGroup0, sgprtdmAGroup0+0" in source
+    assert ".set sgprtdmMXSBGroup0, sgprtdmBGroup0+0" in source
 
 
 def test_wave32_fp4_16x16_subtile_is_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys):

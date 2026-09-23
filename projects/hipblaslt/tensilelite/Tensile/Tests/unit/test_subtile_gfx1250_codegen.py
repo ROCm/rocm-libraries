@@ -649,6 +649,22 @@ class TestGfx1250MxSubtileTdm:
         assert "TileSpan N partner in upper half-wave" in asm
         assert "laneId * 4" in asm
 
+    def test_store_two_16row_blocks_per_32row_mma_tile(self):
+        """32x16 C/D keeps MIOutputVW=8 and exposes two 16-row store blocks per MMA."""
+        from Tensile.Components.NotLocalFullTileElements import NotLocalFullTileElementsMFMA
+        kernel = {
+            "MatrixInstM": 32, "MatrixInstN": 16, "MatrixInstBM": 1, "MatrixInstBN": 1,
+            "WavefrontSize": 32, "MIWaveTile": [2, 2], "SourceSwap": False,
+            "VectorWidthA": 1, "VectorWidthB": 1,
+            "MIOutputVectorWidth": 8, "StoreVectorWidth": 8, "_VectorStore": True,
+        }
+        writer = SimpleNamespace(maxGwvw=lambda k: 8)
+        widths, elements = NotLocalFullTileElementsMFMA().getElements(writer, kernel)
+        assert widths[0] == 8
+        tt0s = sorted({e[1] for e in elements[0]})
+        assert tt0s == [0, 1, 2, 3]
+        assert len(elements[0]) == 8  # 2 N-tiles x (2 M-tiles x 2 store blocks)
+
 
 # ---------------------------------------------------------------------------
 # Iterate-mode (large DepthU) tests

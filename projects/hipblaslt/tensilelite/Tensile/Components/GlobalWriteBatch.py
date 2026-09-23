@@ -2413,7 +2413,8 @@ class GlobalWriteBatchWriter:
           # Apply exec mask for partial M/N blocks (regular fp32 store path)
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
             tmpInrSgpr = self._epilogScratchSgpr(2*self.laneSGPRC)
-            # wave32: 2 LGs x 8 rows/LG -> shift=1; wave64: 4 LGs x 4 rows/LG -> shift=2
+            # The common store path decomposes rectangular 32x16 into 16-row
+            # blocks, so wave32 keeps two lanes per row here.
             rowScaleShift = 1 if self.wavelen == 32 else 2
             # '*' not '**'; wave64 would pick the wrong slot.
             self._emitAlign8ExecMask(storeCodeModule, tmpInrSgpr, tmpInrSgpr+1*self.laneSGPRC, blockIdxM, blockIdxN,

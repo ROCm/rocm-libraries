@@ -217,7 +217,8 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             waveBlockRows = MIBShape0 * kernel["MIWaveTile"][0] if kernel.get("UseSubtileImpl") else MIBShape0
             module.add(vectorStaticMultiply(vgpr(tmpVgpr0), vgpr(tmpVgpr0), waveBlockRows, tmpSgprInfo, "wave coordination offset 0"))
 
-            # coord 0 : thread part
+            # coord 0 : thread part. Rectangular 32x16 is represented as two
+            # 16x16 store blocks, so each lane group still spans MIOutputVectorWidth rows.
             module.add(vectorStaticRemainder(dummy, tid0, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
             module.add(vectorStaticDivide(tid0, tid0, matrixInstN, tmpVgpr1Res))
             module.add(vectorStaticMultiply(vgpr(tid0), vgpr(tid0), kernel["MIOutputVectorWidth"], tmpSgprInfo, "thread0 * continuous_output"))

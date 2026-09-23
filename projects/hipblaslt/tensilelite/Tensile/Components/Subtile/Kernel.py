@@ -365,7 +365,8 @@ MXSB_B4_W32_N16 = MXScaleTilePair(
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
 # Wave32 f32 output: 8 VGPRs per lane (WMMA V3 gfx1250)
 CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=8))
-# Wave32 32x16 f32 accumulator: 16 VGPRs per lane, rectangular 32x16 MMA tile.
+# Wave32 32x16 f32 accumulator: 16 VGPRs per lane, emitted as two 8-output
+# 16-row store blocks by the common store path.
 CD_F32_W32_M32 = CDTile_1x1(
     mmaLayout=WMMA_32x16_W32_CD_16V, bpe=4, supportedTypes=('f32',),
     storeShape=LoadShape(m=1, k=8), instN=16,
