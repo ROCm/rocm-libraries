@@ -64,6 +64,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportClaimWriter.cpp
     TestObserveSupportOnly.cpp
     TestSupportVerdict.cpp
+    TestClaimModeResolution.cpp
     TestUnpinnedRunEnforcement.cpp
     TestBundleReferenceValidationHarness.cpp
     TestProductionPolicy.cpp

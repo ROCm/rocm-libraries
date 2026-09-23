@@ -26,6 +26,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
@@ -320,29 +321,24 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
 
+        const bool writeSupportClaims = parser.get<bool>("--write-support-claims");
+
+        hipdnn_integration_tests::bundle::ClaimModeRequest claimRequest;
         // Enforcement defaults on, so the positive flag's *value* is always true and
         // says nothing. What it is asked for here is whether it was typed: that is the
         // only thing separating a lane that means to enforce from one that merely
-        // inherited the default, and the checks below owe those two different answers.
-        const bool enforceAsked = parser.is_used("--enforce-support-claims");
-        const bool enforceRefused = parser.get<bool>("--no-enforce-support-claims");
+        // inherited the default, and resolveClaimMode() owes those two different answers.
+        claimRequest.enforceAsked = parser.is_used("--enforce-support-claims");
+        claimRequest.enforceRefused = parser.get<bool>("--no-enforce-support-claims");
+        claimRequest.writing = writeSupportClaims;
+        claimRequest.hasEngine = engineName.has_value();
 
-        if(enforceAsked && enforceRefused)
+        const auto claimMode = hipdnn_integration_tests::bundle::resolveClaimMode(claimRequest);
+        if(claimMode.error.has_value())
         {
-            std::cerr << "--enforce-support-claims and --no-enforce-support-claims are "
-                      << "mutually exclusive.\n";
+            std::cerr << *claimMode.error;
             return 1;
         }
-
-        const bool writeSupportClaims = parser.get<bool>("--write-support-claims");
-
-        // Enforcement needs something to check and something to check it against: a
-        // write run skips every graph before the check is reached, and without
-        // --test-engine there is no engine to hold to a claim. Inheriting the default
-        // into either case is not a request to enforce, so it is dropped rather than
-        // refused; typing the flag is, and those are refused below.
-        const bool enforceSupportClaims
-            = !enforceRefused && !writeSupportClaims && engineName.has_value();
 
         if(writeSupportClaims && !articlePath.has_value())
         {
@@ -364,23 +360,6 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        if(writeSupportClaims && enforceAsked)
-        {
-            std::cerr << "--write-support-claims is mutually exclusive with "
-                      << "--enforce-support-claims.\n";
-            return 1;
-        }
-
-        // Silently degrading an asked-for enforcement to "enforced nothing, exit 0" is
-        // the exact failure --enforce-support-claims exists to prevent.
-        if(enforceAsked && !engineName.has_value())
-        {
-            std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
-                         "engine to\n"
-                         "       check sidecar claims against.\n";
-            return 1;
-        }
-
         hipdnn_integration_tests::TestConfigOptions opts;
         opts.articlePath = std::move(articlePath);
         opts.engineName = std::move(engineName);
@@ -393,7 +372,8 @@ int main(int argc, char** argv) noexcept
         opts.verificationMode = verificationMode;
         opts.captureDir = std::move(captureDir);
         opts.writeSupportClaims = writeSupportClaims;
-        opts.enforceSupportClaims = enforceSupportClaims;
+        opts.enforceSupportClaims
+            = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
