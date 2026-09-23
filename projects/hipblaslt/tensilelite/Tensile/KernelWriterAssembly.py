@@ -16312,13 +16312,16 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprPool.checkIn(sgprScaleA)
         self.sgprPool.checkIn(sgprScaleB)
 
+      # The epilogue consumes these scalar loads even when beta is unused.
+      # GSU1 does not otherwise guarantee a wait before the first scale read.
+      if kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+        module.add(SWaitCnt(kmcnt=0, comment="wait for scaleC and scaleD loads"))
+
       # Update beta with ScaleC (only when Beta is actually used)
       if kernel["ProblemType"]["UseBeta"] and kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
         newBetaVgpr = self.vgprPool.checkOut(1, tag="globalWriteElements_newBetaVgpr")
         module.add(VMovB32(dst=vgpr(newBetaVgpr), src=sgpr("Beta")))
-        if (not ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) or kernel["StreamK"] > 0:
-          module.add(SWaitCnt(kmcnt=0, comment="wait for scaleC load"))
         module.add(VMulF32(dst=vgpr(newBetaVgpr), src0=vgpr(newBetaVgpr), src1=sgpr(sgprScaleC)))
         module.add(SNop(waitState=0, comment="1 wait states"))
         module.add(VReadfirstlaneB32(dst=sgpr("Beta"), src=vgpr(newBetaVgpr), comment="Update Beta"))

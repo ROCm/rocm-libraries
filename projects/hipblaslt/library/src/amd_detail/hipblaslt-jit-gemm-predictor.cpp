@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-gemm-predictor.hpp"
+#include <Tensile/UtilsOrigami.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <algorithm>
 #include <array>
@@ -89,22 +90,12 @@ namespace hipblaslt_ext::experimental
         std::vector<Candidate> candidates(const origami::hardware_t& hardware,
                                           origami::data_type_t       dtype)
         {
-            const auto recommended = hardware.get_recommended_matrix_instruction(dtype);
-            require(recommended.m == 16 && recommended.n == 16 && recommended.k != 0,
-                    "no supported square matrix-instruction recommendation for the requested type");
-            const auto valid    = hardware.get_valid_matrix_instructions(dtype);
-            const auto supports = [&](const origami::dim3_t& mi) {
-                return std::any_of(valid.begin(), valid.end(), [&](const auto& item) {
-                    return item.m == mi.m && item.n == mi.n && item.k == mi.k;
-                });
-            };
-            require(supports(recommended), "Origami recommended an unsupported instruction");
-            std::vector<origami::dim3_t> instructions{recommended};
-            // Origami provides the native MFMA/WMMA instruction for each architecture.
-            // Add K=16 only if the target also supports it (gfx1250 does not).
-            const origami::dim3_t legacyHalf{16, 16, 16};
-            if(dtype == origami::data_type_t::Half && recommended.k != 16 && supports(legacyHalf))
-                instructions.push_back(legacyHalf);
+            // Use the target's instruction catalog for every datatype. Tensile
+            // subsequently validates the complete instruction and tile combination.
+            auto instructions = hardware.get_valid_matrix_instructions(dtype);
+            std::sort(instructions.begin(), instructions.end(), [](const auto& a, const auto& b) {
+                return std::array{a.m, a.n, a.k} < std::array{b.m, b.n, b.k};
+            });
 
             // Declarative parameter shapes, independent of the installed solution library.
             // Each shape retains its wave topology; MT/MI alone cannot reconstruct it.
@@ -133,9 +124,12 @@ namespace hipblaslt_ext::experimental
             std::vector<Candidate> result;
             for(const auto& mi : instructions)
                 for(const auto& shape : shapes)
-                    for(size_t depth : {size_t(32), size_t(64)})
+                    for(size_t depth : {std::max(size_t(32), mi.k), std::max(size_t(64), 2 * mi.k)})
                         for(const auto& hint : hints)
                         {
+                            if(!mi.m || !mi.n || !mi.k || shape[0] % (mi.m * shape[2])
+                               || shape[1] % (mi.n * shape[3]) || depth % mi.k)
+                                continue;
                             Candidate candidate;
                             candidate.matrixInstruction = {mi.m,
                                                            mi.n,
@@ -165,7 +159,10 @@ namespace hipblaslt_ext::experimental
     std::string predictJitGemmConfig(const TensileLite::ContractionProblemGemm& problem,
                                      const TensileLite::Hardware&               hardware,
                                      const GenerateOptions&                     options,
-                                     JitGemmInfo&                               info)
+                                     JitGemmInfo&                               info,
+                                     const std::string&                         mxScaleFormat,
+                                     const std::string&                         scaleModeA,
+                                     const std::string&                         scaleModeB)
     {
         namespace fs       = std::filesystem;
         using Type         = rocisa::DataType;
@@ -179,27 +176,21 @@ namespace hipblaslt_ext::experimental
         require(analytical.N_CU && analytical.NUM_XCD && analytical.lds_capacity
                     && analytical.rf_capacity && analytical.compute_clock_ghz > 0,
                 "actual device resource limits are unavailable");
-        const auto type = problem.a().dataType();
-        require((type == Type::Half || type == Type::Float) && problem.b().dataType() == type
-                    && problem.c().dataType() == type && problem.d().dataType() == type
-                    && problem.computeType() == Type::Float,
-                "expected F32/F32 or FP16/F32 accumulation with matching A/B/C/D types");
-        require(type != Type::Half || problem.highPrecisionAccumulate(),
-                "FP16 requires high precision accumulation");
-        require(problem.f32XdlMathOp() == Type::Float && problem.computeInputTypeA() == type
-                    && problem.computeInputTypeB() == type,
-                "special compute-input conversions are not supported by the initial predictor");
-        require(problem.stridedBatched() && !problem.groupedGemm() && !problem.sparse()
-                    && !problem.swizzleTensorA() && !problem.swizzleTensorB() && !problem.mxBlockA()
-                    && !problem.mxBlockB() && !problem.useBias() && !problem.useE()
-                    && !problem.useGradient() && !problem.useGateResidual()
-                    && problem.useScaleAB().empty() && !problem.useScaleCD()
-                    && !problem.useScaleAlphaVec()
-                    && problem.activationType() == TensileLite::ActivationType::None,
-                "expected a dense strided GEMM with optional output-amax and no scaling");
-        require(problem.aOps().empty() && problem.bOps().empty() && problem.cOps().empty()
-                    && problem.dOps().empty(),
-                "tensor operations are unsupported");
+        require(problem.stridedBatched() && !problem.groupedGemm(),
+                "prediction requires a single strided GEMM; grouped GEMM is not implemented");
+        require(problem.c().dataType() == problem.d().dataType(),
+                "Tensile ProblemType requires matching C and D datatypes");
+        const auto conjugate = [](const TensileLite::TensorOps& ops) {
+            require(ops.empty()
+                        || (ops.size() == 1
+                            && ops.front().type == TensileLite::TensorOp::Type::ComplexConjugate),
+                    "the input tensor operation cannot be represented by Tensile ProblemType");
+            return !ops.empty();
+        };
+        const bool conjugateA = conjugate(problem.aOps());
+        const bool conjugateB = conjugate(problem.bOps());
+        require(problem.cOps().empty() && problem.dOps().empty(),
+                "Tensile ProblemType does not describe C/D tensor operations");
         require(problem.freeIndicesA().size() == 1 && problem.freeIndicesB().size() == 1
                     && problem.boundIndices().size() == 1 && problem.batchIndices().size() == 1
                     && !problem.transposeC01(),
@@ -211,7 +202,7 @@ namespace hipblaslt_ext::experimental
         const bool   transB = problem.freeIndicesB()[0].i == 0;
         const size_t m = problem.freeSizeA(0), n = problem.freeSizeB(0);
         const size_t k = problem.boundSize(0), batch = problem.batchSize(0);
-        require(m && n && k && batch, "zero-sized GEMMs do not require JIT generation");
+        require(batch, "a GEMM must describe at least one batch");
 
         origami::problem_t request;
         request.size        = {m, n, k};
@@ -219,15 +210,39 @@ namespace hipblaslt_ext::experimental
         request.num_cus     = problem.getParams().smCountTarget();
         request.a_transpose = transA ? origami::transpose_t::T : origami::transpose_t::N;
         request.b_transpose = transB ? origami::transpose_t::T : origami::transpose_t::N;
-        request.a_dtype = request.b_dtype = request.c_dtype = request.d_dtype = request.mi_dtype
-            = type == Type::Half ? origami::data_type_t::Half : origami::data_type_t::Float;
-        const auto                     recipes = candidates(analytical, request.mi_dtype);
+        request.a_dtype     = TensileLite::datatypeToAnalyticalDatatype(problem.a().dataType());
+        request.b_dtype     = TensileLite::datatypeToAnalyticalDatatype(problem.b().dataType());
+        request.c_dtype     = TensileLite::datatypeToAnalyticalDatatype(problem.c().dataType());
+        request.d_dtype     = TensileLite::datatypeToAnalyticalDatatype(problem.d().dataType());
+        request.mi_dtype    = TensileLite::datatypeToAnalyticalDatatype(
+            problem.f32XdlMathOp() == Type::XFloat32 ? Type::XFloat32
+                                                     : problem.computeInputTypeA());
+        request.a_mx_block_size = problem.mxBlockA();
+        request.b_mx_block_size = problem.mxBlockB();
+        // Origami's instruction model describes one MAC input type. Mixed MAC
+        // inputs and sparse instructions still go through Tensile validation.
+        const auto                     recipes = m && n && k
+                                     && problem.computeInputTypeA() == problem.computeInputTypeB()
+                                     && !problem.sparse()
+                                                     ? candidates(analytical, request.mi_dtype)
+                                                     : std::vector<Candidate>{};
         std::vector<origami::config_t> configs;
         for(const auto& recipe : recipes)
             configs.push_back(recipe.config);
-        const auto ranked
-            = origami::rank_configs(request, analytical, configs, origami::model_t::gemm);
-        const std::string output = fs::absolute(options.outputPath).string();
+        auto ranked
+            = configs.empty()
+                  ? std::vector<origami::prediction_result_t>{}
+                  : origami::rank_configs(request, analytical, configs, origami::model_t::gemm);
+        ranked.erase(std::remove_if(ranked.begin(),
+                                    ranked.end(),
+                                    [](const auto& result) {
+                                        return !std::isfinite(result.latency) || result.latency <= 0
+                                               || result.latency
+                                                      == std::numeric_limits<double>::max();
+                                    }),
+                     ranked.end());
+        const bool        modeled = !ranked.empty();
+        const std::string output  = fs::absolute(options.outputPath).string();
         require(!fs::exists(output) && !fs::exists(output + ".yaml")
                     && !fs::exists(output + ".prediction.json"),
                 "output artifacts already exist");
@@ -235,22 +250,81 @@ namespace hipblaslt_ext::experimental
 
         std::ostringstream json;
         json << std::setprecision(17) << std::boolalpha;
-        json << "{\n\"schema_version\":1,\"model\":\"origami.gemm.estimation\","
-             << "\"architecture\":" << jsonString(options.architecture)
-             << ",\"problem\":{\"m\":" << m << ",\"n\":" << n << ",\"k\":" << k
+        json << "{\n\"schema_version\":1,\"model\":"
+             << jsonString(modeled ? "origami.gemm.estimation" : "tensile.defaults")
+             << ",\"architecture\":" << jsonString(options.architecture)
+             << ",\"problem_type\":{\"OperationType\":\"GEMM\",\"Batched\":true,"
+                "\"StridedBatched\":true,\"TransposeA\":"
+             << transA << ",\"TransposeB\":" << transB << ",\"ComplexConjugateA\":" << conjugateA
+             << ",\"ComplexConjugateB\":" << conjugateB;
+        const auto dataType = [&](const char* key, Type value) {
+            json << "," << jsonString(key) << ':' << static_cast<int>(value);
+        };
+        dataType("DataType", problem.computeInputTypeA());
+        dataType("DataTypeA", problem.a().dataType());
+        dataType("DataTypeB", problem.b().dataType());
+        dataType("MacDataTypeA", problem.computeInputTypeA());
+        dataType("MacDataTypeB", problem.computeInputTypeB());
+        dataType("DestDataType", problem.d().dataType());
+        dataType("ComputeDataType", problem.computeType());
+        dataType("F32XdlMathOp", problem.f32XdlMathOp());
+        if(problem.mxBlockA())
+            dataType("DataTypeMXSA", problem.mxTypeA());
+        if(problem.mxBlockB())
+            dataType("DataTypeMXSB", problem.mxTypeB());
+        json << ",\"HighPrecisionAccumulate\":" << problem.highPrecisionAccumulate()
+             << ",\"UseBias\":" << problem.useBias() << ",\"UseE\":" << problem.useE()
+             << ",\"Gradient\":" << problem.useGradient()
+             << ",\"UseScaleAB\":" << jsonString(problem.useScaleAB())
+             << ",\"UseScaleCD\":" << problem.useScaleCD()
+             << ",\"UseScaleAlphaVec\":" << problem.useScaleAlphaVec()
+             << ",\"OutputAmaxD\":" << problem.outputAmaxD()
+             << ",\"MXBlockA\":" << problem.mxBlockA() << ",\"MXBlockB\":" << problem.mxBlockB()
+             << ",\"Sparse\":" << problem.sparse()
+             << ",\"SwizzleTensorA\":" << problem.swizzleTensorA()
+             << ",\"SwizzleTensorB\":" << problem.swizzleTensorB()
+             << ",\"UseGateResidual\":" << problem.useGateResidual();
+        if(problem.useBias())
+            json << ",\"BiasDataTypeList\":[" << static_cast<int>(problem.bias().dataType())
+                 << "],\"BiasSrc\":" << jsonString(std::string(1, 'A' + problem.biasSrc()));
+        if(problem.useGateResidual())
+            json << ",\"GateResidualDataTypeList\":["
+                 << static_cast<int>(problem.gateResidual().dataType()) << ']';
+        if(problem.useE())
+            dataType("DataTypeE", problem.e().dataType());
+        if(problem.outputAmaxD())
+            dataType("DataTypeAmaxD", problem.amaxd().dataType());
+        if(problem.activationType() != TensileLite::ActivationType::None)
+        {
+            json << ",\"Activation\":true,\"ActivationType\":\"hipblaslt_all\"";
+            dataType("ActivationComputeDataType", problem.activationComputeType());
+        }
+        json << "},\"problem\":{\"m\":" << m << ",\"n\":" << n << ",\"k\":" << k
              << ",\"batch\":" << batch << ",\"transpose_a\":" << transA
-             << ",\"transpose_b\":" << transB
-             << ",\"data_type\":" << jsonString(type == Type::Half ? "h" : "s")
-             << ",\"high_precision_accumulate\":" << problem.highPrecisionAccumulate()
-             << ",\"c_equals_d\":" << problem.cEqualsD()
-             << ",\"output_amax_d\":" << problem.outputAmaxD()
-             << ",\"use_scale_cd\":" << problem.useScaleCD() << ",\"num_cus\":" << request.num_cus;
+             << ",\"transpose_b\":" << transB << ",\"c_equals_d\":" << problem.cEqualsD()
+             << ",\"num_cus\":" << request.num_cus;
+        if(problem.mxBlockA() || problem.mxBlockB())
+            json << ",\"mx_scale_format\":" << jsonString(mxScaleFormat)
+                 << ",\"scale_mode_a\":" << jsonString(scaleModeA)
+                 << ",\"scale_mode_b\":" << jsonString(scaleModeB);
         const std::array<const TensileLite::TensorDescriptor*, 4> tensors{
             &problem.a(), &problem.b(), &problem.c(), &problem.d()};
         for(size_t i = 0; i != tensors.size(); ++i)
         {
             json << ",\"strides_" << char('a' + i) << "\":";
             array(json, tensors[i]->strides());
+            json << ",\"sizes_" << char('a' + i) << "\":";
+            array(json, tensors[i]->sizes());
+        }
+        for(const auto& entry :
+            {std::make_pair("mxsa", &problem.mxsa()), std::make_pair("mxsb", &problem.mxsb())})
+        {
+            if(entry.second->empty())
+                continue;
+            json << ",\"strides_" << entry.first << "\":";
+            array(json, entry.second->strides());
+            json << ",\"sizes_" << entry.first << "\":";
+            array(json, entry.second->sizes());
         }
         json << "},\"hardware\":{\"device_id\":" << device->deviceId
              << ",\"cu_count\":" << analytical.N_CU << ",\"xcd_count\":" << analytical.NUM_XCD
@@ -260,7 +334,8 @@ namespace hipblaslt_ext::experimental
              << "},\"model_assumptions\":{\"occupancy\":1,\"stream_k\":0,"
                 "\"workgroup_mapping\":\"estimated internally; Tensile uses its default\","
                 "\"vector_widths\":\"Origami defaults; Tensile derives actual widths\","
-                "\"epilogue\":\"output-amax overhead is not modeled\","
+                "\"epilogue\":\"bias, activation, auxiliary outputs and scaling overhead are not "
+                "modeled\","
                 "\"architecture_constants\":"
              << jsonString(analytical.arch == Arch::gfx1250
                                ? "Origami gfx1250 provisional model: upstream memory constants "
@@ -270,9 +345,6 @@ namespace hipblaslt_ext::experimental
         size_t count = 0;
         for(const auto& result : ranked)
         {
-            if(!std::isfinite(result.latency) || result.latency <= 0
-               || result.latency == std::numeric_limits<double>::max())
-                continue;
             require(result.config.index < recipes.size(), "Origami returned an unknown candidate");
             const auto& recipe = recipes[result.config.index];
             if(count++)
@@ -284,12 +356,15 @@ namespace hipblaslt_ext::experimental
                  << ",\"NonTemporalA\":" << recipe.config.cache_hints_a
                  << ",\"NonTemporalB\":" << recipe.config.cache_hints_b << "}}";
         }
-        require(count != 0, "Origami rejected every parameter candidate");
+        if(!modeled)
+            json << "{\"id\":0,\"predicted_cycles\":null,\"parameters\":{}}";
         json << "]}\n";
         const auto requestPath = output + ".request.json";
         writeFresh(requestPath, json.str());
-        info.prediction = "Origami ranked " + std::to_string(count)
-                          + " parameter candidates; Tensile validation pending";
+        info.prediction = modeled
+                              ? "Origami ranked " + std::to_string(count)
+                                    + " parameter candidates; Tensile validation pending"
+                              : "No Origami estimate; Tensile default candidate validation pending";
         return requestPath;
     }
 }

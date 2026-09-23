@@ -11,7 +11,7 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext-op.cpp"
 )
 
-# Build-only experiment: no public header installation or client dependency tree.
+# Build-time opt-in implementation of the public experimental JIT extension.
 if(HIPBLASLT_ENABLE_JIT_GEMM)
     find_package(Boost CONFIG REQUIRED)
     target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT_GEMM)

@@ -41,8 +41,10 @@ namespace
             throw std::runtime_error(what);
     }
 
-    // The fixture supports this non-square NN FP16/HPA shape. All input fractions
-    // are binary-exact; the independent CPU oracle accumulates in FP32.
+    // A/B values are small multiples of 1/8 and C values are multiples of 1/4,
+    // so FP16 and FP32 represent the inputs without rounding. At the tested
+    // K <= 4096, products and sums also fit FP32's 24-bit significand exactly.
+    // The CPU reference rounds the final result to FP16 before comparing D.
     int         M = 256, N = 128, K = 128;
     bool        transposeB             = false;
     bool        outputAmax             = false;

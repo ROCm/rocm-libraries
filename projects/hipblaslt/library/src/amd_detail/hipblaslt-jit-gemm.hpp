@@ -2,27 +2,15 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
 #include <memory>
 #include <string>
 #include <vector>
 
-// Build-only experiment, enabled by HIPBLASLT_ENABLE_JIT_GEMM.
-// This header is intentionally not installed and has no stable ABI commitment.
+// Standalone owner used by the JIT sample. The selection API is declared in
+// hipblaslt-ext.hpp; this sample-support header is not installed.
 namespace hipblaslt_ext::experimental
 {
-    struct GenerateOptions
-    {
-        std::string pythonExecutable;
-        std::string tensileSourceDirectory; // Directory containing the Tensile package.
-        std::string pythonPath; // Additional absolute source/build import paths (colon separated).
-        std::string configPath;
-        std::string outputPath; // Must not exist; ".log" and ".cwd" siblings hold diagnostics.
-        std::string architecture;
-        std::string cxxCompiler    = "amdclang++";
-        std::string offloadBundler = "clang-offload-bundler";
-    };
-
     struct DispatchInfo
     {
         int                      configuredGlobalSplitU = 0;
@@ -30,35 +18,6 @@ namespace hipblaslt_ext::experimental
         std::string              accumulation;
         std::vector<std::string> kernelNames;
     };
-
-    struct JitGemmInfo
-    {
-        std::string configPath, manifestPath, kernelName, prediction, error;
-    };
-
-    // Select one generated algorithm for normal hipblasLtMatmul or Gemm execution.
-    // An empty configPath requests prediction; otherwise use the supplied YAML.
-    // Generation is synchronous and must precede stream capture. The algorithm
-    // and its private modules are retained until process exit (no eviction).
-    // Copies are valid on the same device in this process; persist the YAML and
-    // manifest, not the opaque algorithm or a prebuilt solution index.
-    // Normal handle, workspace, stream and synchronization contracts apply.
-    HIPBLASLT_EXPORT hipblasStatus_t getJitGemmAlgo(hipblasLtHandle_t       handle,
-                                                    hipblasLtMatmulDesc_t   desc,
-                                                    const void*             alpha,
-                                                    const void*             A,
-                                                    hipblasLtMatrixLayout_t layoutA,
-                                                    const void*             B,
-                                                    hipblasLtMatrixLayout_t layoutB,
-                                                    const void*             beta,
-                                                    const void*             C,
-                                                    hipblasLtMatrixLayout_t layoutC,
-                                                    void*                   D,
-                                                    hipblasLtMatrixLayout_t layoutD,
-                                                    const GenerateOptions&  options,
-                                                    size_t                  maxWorkspaceBytes,
-                                                    hipblasLtMatmulHeuristicResult_t& result,
-                                                    JitGemmInfo&                      info);
 
     // Calls on one object must be serialized. The handle, matrix storage, and workspace
     // must outlive submitted work. Scalars are captured by setProblem. Destruction waits

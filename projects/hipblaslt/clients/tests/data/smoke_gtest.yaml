@@ -44,6 +44,41 @@ Tests:
   activation_type: [none, relu]
   unit_check: 1
 
+# Exercise typed scalar dispatch through Gemm::isAlgoSupported.
+- name: matmul_ext_i8_dst_i32_support_smoke
+  category: smoke
+  function:
+    matmul: *i8_precision_dst_i32
+  matrix_size:
+    - { M: 128, N: 128, K: 128 }
+  transA: N
+  transB: N
+  alpha: 2
+  beta: -1
+  use_ext: true
+  use_ext_setproblem: true
+  algo_method: 1
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Preserve conjugation independently for A and B during extension setup.
+- name: matmul_ext_complex_support_smoke
+  category: smoke
+  function:
+    matmul: *complex_precisions
+  matrix_size:
+    - { M: 128, N: 128, K: 128 }
+  transA_transB:
+    - { transA: N, transB: N }
+    - { transA: C, transB: N }
+    - { transA: N, transB: C }
+  alpha_beta: *alpha_beta_range_small
+  use_ext: true
+  use_ext_setproblem: true
+  algo_method: 1
+  unit_check: 1
+  gpu_arch: '9(42|50)|1250'
+
 - name: matmul_smoke
   category: smoke
   function:

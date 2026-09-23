@@ -1594,4 +1594,31 @@ namespace hipblaslt_ext
         }
         return HIPBLAS_STATUS_SUCCESS;
     }
+#ifndef HIPBLASLT_ENABLE_JIT_GEMM
+    namespace experimental
+    {
+        hipblasStatus_t getJitGemmAlgo(hipblasLtHandle_t,
+                                       hipblasLtMatmulDesc_t,
+                                       const void*,
+                                       const void*,
+                                       hipblasLtMatrixLayout_t,
+                                       const void*,
+                                       hipblasLtMatrixLayout_t,
+                                       const void*,
+                                       const void*,
+                                       hipblasLtMatrixLayout_t,
+                                       void*,
+                                       hipblasLtMatrixLayout_t,
+                                       const GenerateOptions&,
+                                       size_t,
+                                       hipblasLtMatmulHeuristicResult_t& result,
+                                       JitGemmInfo&                      info)
+        {
+            result     = {};
+            info       = {};
+            info.error = "JIT GEMM requires HIPBLASLT_ENABLE_JIT_GEMM=ON";
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
+#endif
 } // End of namespace hipblasltext

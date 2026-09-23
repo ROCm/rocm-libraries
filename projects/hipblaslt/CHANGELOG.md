@@ -6,7 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* Experimental runtime GEMM generation through `HIPBLASLT_ENABLE_JIT_GEMM` (default `OFF`), a build-only algorithm selection API, and `hipblaslt-bench --jit-gemm`. Origami ranks FP16/FP32 recipes for gfx90a, gfx942, gfx950, and gfx1250, with optional output-amax; generated solutions execute through the normal C and extension paths. `Tensile.SingleSolution` also generates one complete solution from explicit YAML without benchmarking, including Stream-K recipes.
+* Runtime GEMM generation through `HIPBLASLT_ENABLE_JIT_GEMM` (default `OFF`), the public `hipblaslt_ext::experimental::getJitGemmAlgo` API, and `hipblaslt-bench --jit-gemm`. Origami ranks parameter recipes for gfx90a, gfx942, gfx950, and gfx1250; TensileLite validates the requested datatypes and epilogue features, with a labeled fallback when no modeled recipe is available. Generated algorithms execute through the C and C++ extension APIs. `Tensile.SingleSolution` also compiles one complete solution from explicit YAML without benchmarking, including Stream-K recipes.
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.
@@ -38,6 +38,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
 * Fixed output-amax accumulation omitting packed-store values and returning zero when C/D scaling is disabled. Invalid Stream-K or split-reduction combinations with output-amax are rejected during solution validation.
+* Fixed GEMM output scaling reading C/D scale values before their scalar memory loads completed.
+* Fixed C++ algorithm support checks rejecting integer and complex scalar types, and preserved complex conjugation when constructing or updating GEMM descriptors.
 * Fixed gfx1250 output-amax generation to use Wave32 masks, supported atomics, cross-workgroup memory ordering, and target-specific buffer descriptors.
 * Fixed incorrect results (`beta` applied twice) for `AdaptiveGemmGSUA` GEMMs that resolve to MultipleBuffer accumulation with a non-zero `beta`.
 * Fixed out-of-bounds tensor loads in the single-wave TDM kernel for edge (non-tile-aligned) `M`/`N` sizes on gfx1250, which could produce incorrect results.

@@ -15,6 +15,27 @@ pytestmark = pytest.mark.unit
 CONFIG = Path(__file__).parent / "test_data" / "output_amax.yaml"
 
 
+def _assert_scalar_scales_ready_before_use(assembly):
+    # Read emitted instructions: every scale load must complete before its
+    # destination register is consumed or reused. This also catches ScaleD-only
+    # reads, which must not depend on a nonzero beta or an unrelated bias load.
+    loads = list(re.finditer(
+        r"^\s*s_load_(?:dword|b32)\s+(s(?:\[[^\]]+\]|\d+)),[^\n]*// load scale[CD]\s*$",
+        assembly, re.MULTILINE,
+    ))
+    assert loads, "scaled kernels must load the requested scalar values"
+    for load in loads:
+        register = load.group(1)
+        remaining = assembly[load.end():]
+        use = re.search(re.escape(register) + r"(?!\d)", remaining)
+        assert use, f"loaded scale register {register} must be consumed"
+        before_use = remaining[:use.start()]
+        assert re.search(
+            r"\bs_waitcnt\b[^\n]*\blgkmcnt\(0\)|\bs_wait_kmcnt\b[^\n]*\b(?:0|0x0)\b",
+            before_use,
+        ), f"scalar scale {register} is used before its memory load completes"
+
+
 @pytest.mark.parametrize("stream_k", [1, 2, 3, 4, 5])
 def test_streamk_amax_combination_rejected_before_derivation(stream_k, capsys):
     from Tensile.SolutionStructs import Solution
@@ -67,6 +88,7 @@ def test_packed_outputs_contribute_to_amax_before_scaling(arch, scale_cd, tmp_pa
             scaling = assembly.index("result *= ScaleD", start)
             assert run.end() <= scaling, "amax must be independent of ScaleD"
     if scale_cd:
+        _assert_scalar_scales_ready_before_use(assembly)
         assert "result *= ScaleD" in assembly
     else:
         assert "result *= ScaleD" not in assembly

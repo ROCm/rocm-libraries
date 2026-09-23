@@ -1965,7 +1965,16 @@ namespace
         TensileLite::TensorDescriptor scaleD{"scaleD"};
         TensileLite::TensorDescriptor scaleAlphaVec{"scaleAlphaVec"};
 
-        // The ContractionProblemGemm
+        const TensileLite::TensorOps aOps
+            = prob.trans_a == HIPBLAS_OP_C
+                  ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                  : TensileLite::TensorOps{};
+        const TensileLite::TensorOps bOps
+            = prob.trans_b == HIPBLAS_OP_C
+                  ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                  : TensileLite::TensorOps{};
+
+        // Pass tensor operations at construction so the cached operation identifier includes them.
         TensileLite::ContractionProblemGemm tensileProblem{a,
                                                            b,
                                                            c,
@@ -1981,6 +1990,10 @@ namespace
                                                            batchIndex,
                                                            boundIndex,
                                                            value_category(beta),
+                                                           aOps,
+                                                           bOps,
+                                                           {},
+                                                           {},
                                                            prob.workspaceSize};
 
         tensileProblem.setComputeInputTypeA(
@@ -2241,11 +2254,14 @@ namespace
                                    {prob.m, prob.n, prob.batch_count},
                                    {prob.row_stride_d, prob.col_stride_d, prob.batch_stride_d});
 
-        if(prob.trans_a == HIPBLAS_OP_C)
-            tensileProblem.setAOps({TensileLite::TensorOp::ComplexConjugate()});
-
-        if(prob.trans_b == HIPBLAS_OP_C)
-            tensileProblem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
+        tensileProblem.setAOps(
+            prob.trans_a == HIPBLAS_OP_C
+                ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                : TensileLite::TensorOps{});
+        tensileProblem.setBOps(
+            prob.trans_b == HIPBLAS_OP_C
+                ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                : TensileLite::TensorOps{});
 
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
@@ -3206,6 +3222,11 @@ struct TensileDataGemm
     // Preserve the complete opaque identity for separate initialize/run calls.
     // JIT registry entries retain the corresponding private context for process lifetime.
     rocblaslt_matmul_algo selectedAlgo{};
+    // Tensile's logical MX type/block size does not retain the descriptor's physical layout.
+    RocblasltContractionProblem::ScalingFormat scaleAType
+        = RocblasltContractionProblem::ScalingFormat::None;
+    RocblasltContractionProblem::ScalingFormat scaleBType
+        = RocblasltContractionProblem::ScalingFormat::None;
 };
 
 struct TensileDataGroupedGemm
@@ -3237,6 +3258,37 @@ namespace
 #else
         return false;
 #endif
+    }
+
+    rocblaslt_status validateJitScaleLayout(const rocblaslt_matmul_algo*               algo,
+                                            int                                        device,
+                                            RocblasltContractionProblem::ScalingFormat scaleA,
+                                            RocblasltContractionProblem::ScalingFormat scaleB)
+    {
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+        if(isJitAlgorithm(algo))
+        {
+            try
+            {
+                const auto context
+                    = hipblaslt_ext::experimental::detail::resolveJitAlgo(*algo, device);
+                if(!hipblaslt_ext::experimental::detail::jitScaleLayoutMatches(
+                       *context, scaleA, scaleB))
+                {
+                    log_error(
+                        __func__,
+                        "JIT algorithm MX scale layout differs from the supplied descriptors");
+                    return rocblaslt_status_invalid_value;
+                }
+            }
+            catch(const std::exception& e)
+            {
+                log_error(__func__, e.what());
+                return rocblaslt_status_invalid_value;
+            }
+        }
+#endif
+        return rocblaslt_status_success;
     }
 
     rocblaslt_status resolveJitInvocationSymbols(
@@ -3505,6 +3557,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
+        if(const auto layoutStatus
+           = validateJitScaleLayout(algo, handle->device, prob.scaleAType, prob.scaleBType);
+           layoutStatus != rocblaslt_status_success)
+            return layoutStatus;
 #ifdef HIPBLASLT_USE_ROCROLLER
         if(!isJitAlgorithm(algo) && useRocRoller(handle, prob))
             return runRocRollerContractionProblem(handle, algo, prob);
@@ -3790,6 +3846,10 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             gemmData = std::static_pointer_cast<void>(std::make_shared<TensileDataGemm>(data));
         }
 
+        auto data        = std::static_pointer_cast<TensileDataGemm>(gemmData);
+        data->scaleAType = problem.scaleAType;
+        data->scaleBType = problem.scaleBType;
+
         status = rocblaslt_status_success;
     }
     catch(const std::exception& e)
@@ -3957,6 +4017,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
+
+            if(const auto layoutStatus
+               = validateJitScaleLayout(&algo, handle->device, data->scaleAType, data->scaleBType);
+               layoutStatus != rocblaslt_status_success)
+                return layoutStatus;
 
             auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
 
@@ -5330,6 +5395,10 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
                                      rocblaslt_matmul_algo*       algo,
                                      size_t*                      workspaceSizeInBytes)
 {
+    if(const auto layoutStatus
+       = validateJitScaleLayout(algo, handle->device, prob.scaleAType, prob.scaleBType);
+       layoutStatus != rocblaslt_status_success)
+        return layoutStatus;
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(!isJitAlgorithm(algo) && useRocRoller(handle, prob))
         return isRocRollerSolutionSupported(handle, prob, algo, workspaceSizeInBytes);
@@ -5359,7 +5428,14 @@ rocblaslt_status dispatchByComputeType(rocisa::DataType dt, F&& f)
         return f(static_cast<float*>(nullptr));
     case rocisa::DataType::Double:
         return f(static_cast<double*>(nullptr));
-    // Extend as needed:
+    case rocisa::DataType::Int32:
+        return f(static_cast<int32_t*>(nullptr));
+    case rocisa::DataType::ComplexFloat:
+        return f(static_cast<hipblaslt_complex_float*>(nullptr));
+    case rocisa::DataType::ComplexDouble:
+        return f(static_cast<hipblaslt_complex_double*>(nullptr));
+    case rocisa::DataType::Half:
+        return f(static_cast<hipblasLtHalf*>(nullptr));
     default:
         return rocblaslt_status_not_implemented;
     }
@@ -5380,6 +5456,11 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(!data)
             return rocblaslt_status_invalid_pointer;
+
+        if(const auto layoutStatus
+           = validateJitScaleLayout(&algo, handle->device, data->scaleAType, data->scaleBType);
+           layoutStatus != rocblaslt_status_success)
+            return layoutStatus;
 
         auto checkSupportForTypeTag = [&](auto tag) -> rocblaslt_status {
             using T = std::remove_pointer_t<decltype(tag)>;

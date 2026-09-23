@@ -1059,11 +1059,14 @@ try
     if(arg.b_type == HIPBLASLT_DATATYPE_INVALID)
         throw std::invalid_argument("Invalid value for --b_type " + b_type);
 
-    arg.c_type = c_type == "" ? prec : string_to_hip_datatype(c_type);
+    // JIT uses FP32 output by default; an explicit precision or tensor type wins.
+    const auto outputPrec
+        = hipblaslt_bench_options::jit_gemm() && vm["precision"].defaulted() ? HIP_R_32F : prec;
+    arg.c_type = c_type == "" ? outputPrec : string_to_hip_datatype(c_type);
     if(arg.c_type == HIPBLASLT_DATATYPE_INVALID)
         throw std::invalid_argument("Invalid value for --c_type " + c_type);
 
-    arg.d_type = d_type == "" ? prec : string_to_hip_datatype(d_type);
+    arg.d_type = d_type == "" ? outputPrec : string_to_hip_datatype(d_type);
     if(arg.d_type == HIPBLASLT_DATATYPE_INVALID)
         throw std::invalid_argument("Invalid value for --d_type " + d_type);
 

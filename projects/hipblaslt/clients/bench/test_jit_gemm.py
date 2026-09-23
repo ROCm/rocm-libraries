@@ -26,17 +26,25 @@ def rows(stdout):
             continue
         header = re.sub(r'^\s*\[\d+\]:', '', line).strip()
         fields = next(csv.reader([header]))
-        values = next(csv.reader([lines[index + 1].strip()]))
+        # Complex alpha/beta are printed as (real,imag) by the benchmark.
+        row = re.sub(r'\(([^()]*)\)', r'"\1"', lines[index + 1].strip())
+        values = next(csv.reader([row]))
         require(len(fields) == len(values), 'Malformed benchmark result row')
         found.append(dict(zip(fields, values)))
     require(found, 'No benchmark correctness CSV row found')
     return found
 
 
-def check_numerics(stdout, dtype):
+def check_numerics(stdout):
     result = rows(stdout)
-    bound = 5e-3 if dtype == 'h' else 1e-5
+    # Match clients/common/include/norm.hpp: include both input types even when
+    # C/D are FP32. MX and other low-precision inputs use that ordinary policy.
+    tolerances = {'f32_r': 1e-5, 'f64_r': 1e-12, 'f32_c': 1e-5, 'f64_c': 1e-12,
+                  'f16_r': 0.01, 'bf16_r': 0.1, 'f8_r': 0.125, 'bf8_r': 0.25,
+                  'f8_fnuz_r': 0.125, 'bf8_fnuz_r': 0.25, 'i32_r': 1e-4, 'i8_r': 0.01,
+                  'f4_r': 0.3, 'f6_r': 0.5, 'bf6_r': 0.5}
     for row in result:
+        bound = max(tolerances[row[field]] for field in ('a_type', 'b_type', 'd_type'))
         require(all(value.strip().lower() != 'failed' for value in row.values()),
                 'Benchmark reported failed allclose')
         for field in ('norm_error', 'atol', 'rtol', 'us'):
@@ -71,22 +79,20 @@ def check_provenance(stderr, stdout, case, artifact_root, architecture):
     require(manifest['main_kernel']['name'] in stdout, 'Reported kernel differs from artifact')
     require(manifest['architecture']['resolved'].split(':')[0] == architecture, 'Wrong device ISA')
     prediction = manifest['jit_prediction']
-    require(prediction['model'] == 'origami.gemm.estimation', 'Missing Origami model provenance')
+    model = prediction['model']
+    require(model in ('origami.gemm.estimation', 'tensile.defaults'), 'Missing model provenance')
     ranked = prediction['ranked_candidates']
-    require(len(ranked) > 1, 'No actual candidate ranking was recorded')
+    require(ranked, 'No candidates were recorded')
     for candidate in ranked:
         score = candidate['predicted_cycles']
+        if model == 'tensile.defaults':
+            require(score is None, 'Fallback invented a latency estimate')
+            continue
         require(math.isfinite(score) and 0 < score < 1e300, 'Invalid Origami score')
         parameters = candidate['parameters']
         mi = parameters['MatrixInstruction']
-        if case['dtype'] == 's':
-            permitted_k = {4}
-        elif architecture == 'gfx1250':
-            permitted_k = {32}
-        else:
-            permitted_k = {16, 32} if architecture == 'gfx950' else {16}
-        require(mi[:2] == [16, 16] and mi[2] in permitted_k,
-                f'Unsupported {architecture} matrix instruction: {mi}')
+        require(len(mi) == 9 and all(isinstance(value, int) and value > 0 for value in mi),
+                f'Malformed matrix instruction: {mi}')
         if architecture in ('gfx90a', 'gfx1250'):
             require(parameters['NonTemporalA'] == parameters['NonTemporalB'] == 0,
                     f'{architecture} recipe uses unsupported cache hints')
@@ -95,7 +101,8 @@ def check_provenance(stderr, stdout, case, artifact_root, architecture):
     accepted = next(candidate for candidate in ranked if candidate['id'] not in rejected)
     require(prediction['candidate_id'] == accepted['id'], 'Not the first valid ranked candidate')
     require(prediction['predicted_cycles'] == accepted['predicted_cycles'], 'Score changed')
-    require(prediction['selected_parameters'] == accepted['parameters'], 'Candidate changed')
+    if model != 'tensile.defaults':
+        require(prediction['selected_parameters'] == accepted['parameters'], 'Candidate changed')
     require(prediction['defaults_source'], 'No default provenance')
     problem = prediction['problem']
     for key, expected in case['problem'].items():
@@ -107,13 +114,18 @@ def check_provenance(stderr, stdout, case, artifact_root, architecture):
                 require(problem[f'strides_{tensor}'][index] == expected,
                         f'Explicit {option} was not preserved in the generated problem')
     document = yaml.safe_load(config.read_text())
+    problem_type = document['BenchmarkProblems'][0][0]
+    for key, expected in case.get('problem_type', {}).items():
+        require(problem_type[key] == expected,
+                f'ProblemType {key}: {problem_type[key]} != {expected}')
     fork = document['BenchmarkProblems'][0][1]['ForkParameters']
     parameters = {key: values[0] for item in fork for key, values in item.items()}
     for key, value in accepted['parameters'].items():
         require(parameters[key] == value, f'Resolved YAML does not preserve predicted {key}')
     request_path = config.with_suffix('.request.json')
     request = json.loads(request_path.read_text())
-    require(request['candidates'] == ranked, 'Ranking changed between C++ request and manifest')
+    if model != 'tensile.defaults':
+        require(request['candidates'] == ranked, 'Ranking changed between C++ request and manifest')
     for relative in manifest['code_objects'] + [manifest['library']['path']]:
         artifact = (manifest_path.parent / relative).resolve(strict=True)
         require(artifact.is_relative_to(manifest_path.parent), 'Nonlocal generated artifact')
@@ -123,18 +135,77 @@ def check_provenance(stderr, stdout, case, artifact_root, architecture):
             'architecture': architecture}
 
 
-def make_case(name, api, dtype, m, n, k, extra=(), batch=1, ta=False, tb=False, amax=False):
-    problem = dict(m=m, n=n, k=k, batch=batch, transpose_a=ta, transpose_b=tb,
-                   data_type=dtype, high_precision_accumulate=(dtype == 'h'), output_amax_d=amax)
+def make_case(name, api, dtype, m, n, k, extra=(), batch=1, ta=False, tb=False, amax=False,
+              problem_type=None):
+    problem = dict(m=m, n=n, k=0 if name == 'float-alpha-zero' else k,
+                   batch=batch, transpose_a=ta, transpose_b=tb)
+    type_id = {'s': 0, 'h': 4, 'b': 7, 'f8': 15, 'b8': 16, 'i8': 8, 'c': 2, 'f4': 21}[dtype]
+    expected = dict(DataTypeA=type_id, DataTypeB=type_id,
+                    DestDataType=0 if name == 'half-c-default' else type_id,
+                    ComputeDataType={'i8': 6, 'c': 2}.get(dtype, 0), OutputAmaxD=amax)
+    expected.update(problem_type or {})
     args = ['--api_method', api, '-m', str(m), '-n', str(n), '-k', str(k)]
-    # The first case deliberately uses the bench's FP16 / FP32-compute defaults.
+    # Omitting precision verifies the JIT-specific FP16 input / FP32 output defaults.
     if name != 'half-c-default':
-        args += ['-r', 'f16_r' if dtype == 'h' else 'f32_r', '--compute_type', 'f32_r']
-    return dict(name=name, args=args + list(extra), problem=problem, dtype=dtype)
+        precision = {'h': 'f16_r', 's': 'f32_r', 'b': 'bf16_r',
+                     'f8': 'f8_r', 'b8': 'bf8_r', 'i8': 'i8_r', 'c': 'f32_c', 'f4': 'f4_r'}[dtype]
+        args += ['-r', precision, '--compute_type', 'i32_r' if dtype == 'i8' else 'f32_r']
+    return dict(name=name, args=args + list(extra), problem=problem, dtype=dtype,
+                problem_type=expected)
 
 
 CASES = [
     make_case('half-c-default', 'c', 'h', 128, 128, 128),
+    make_case('half-explicit-precision', 'c', 'h', 128, 128, 128),
+    make_case('half-float-output', 'mix', 'h', 128, 96, 128,
+              ['--c_type', 'f32_r', '--d_type', 'f32_r'], problem_type={'DestDataType': 0}),
+    make_case('bfloat16', 'cpp', 'b', 128, 96, 128),
+    make_case('float8-float-output', 'c', 'f8', 128, 96, 128,
+              ['--c_type', 'f32_r', '--d_type', 'f32_r'],
+              problem_type={'DestDataType': 0}),
+    make_case('mixed-float8-float-output', 'mix', 'f8', 128, 96, 128,
+              ['--b_type', 'bf8_r', '--c_type', 'f32_r', '--d_type', 'f32_r'],
+              problem_type={'DataTypeB': 16, 'DestDataType': 0}),
+    make_case('int8-int32-output', 'cpp', 'i8', 128, 96, 128,
+              ['--c_type', 'i32_r', '--d_type', 'i32_r'],
+              problem_type={'DestDataType': 6}),
+    make_case('complex-nn', 'c', 'c', 64, 48, 64),
+    make_case('complex-conjugate', 'c', 'c', 64, 48, 64,
+              ['--transA', 'C'], ta=True,
+              problem_type={'ComplexConjugateA': True, 'ComplexConjugateB': False}),
+    make_case('mxfp4-float-output', 'c', 'f4', 128, 128, 256,
+              ['--transA', 'T', '--c_type', 'f32_r', '--d_type', 'f32_r',
+               '--scaleA', '3', '--scaleB', '3', '--initialization', 'uniform_low_precision'],
+              ta=True, problem_type={'DestDataType': 0, 'MXBlockA': 32, 'MXBlockB': 32,
+                                     'DataTypeMXSA': 22, 'DataTypeMXSB': 22}),
+    make_case('mxfp8-float-output', 'mix', 'f8', 128, 128, 256,
+              ['--transA', 'T', '--c_type', 'f32_r', '--d_type', 'f32_r',
+               '--scaleA', '3', '--scaleB', '3', '--initialization', 'uniform_low_precision'],
+              ta=True, problem_type={'DestDataType': 0, 'MXBlockA': 32, 'MXBlockB': 32,
+                                     'DataTypeMXSA': 22, 'DataTypeMXSB': 22}),
+    make_case('float-zero-m', 'c', 's', 0, 96, 64),
+    make_case('float-zero-n', 'cpp', 's', 128, 0, 64),
+    make_case('float-zero-k', 'c', 's', 128, 96, 0),
+    make_case('float-alpha-zero', 'cpp', 's', 128, 96, 64),
+    make_case('half-bias', 'c', 'h', 128, 96, 128, ['--bias_vector'],
+              problem_type={'UseBias': 1}),
+    make_case('half-relu', 'mix', 'h', 128, 96, 128, ['--activation_type', 'relu'],
+              problem_type={'Activation': True, 'ActivationType': 'hipblaslt_all'}),
+    make_case('half-gelu-aux', 'cpp', 'h', 128, 96, 128,
+              ['--activation_type', 'gelu', '--use_e'],
+              problem_type={'Activation': True, 'ActivationType': 'hipblaslt_all', 'UseE': True}),
+    make_case('half-bias-relu-scaled-amax', 'c', 'h', 128, 96, 128,
+              ['--bias_vector', '--activation_type', 'relu', '--scaleC', '1', '--scaleD', '1',
+               '--amaxD'], amax=True,
+              problem_type={'UseBias': 1, 'Activation': True, 'ActivationType': 'hipblaslt_all',
+                            'UseScaleCD': True}),
+    make_case('float-scale-ab', 'c', 's', 128, 96, 128, ['--scaleA', '1', '--scaleB', '1'],
+              problem_type={'UseScaleAB': 'Scalar'}),
+    make_case('half-scale-alpha', 'mix', 'h', 128, 96, 128, ['--scaleAlpha_vector'],
+              problem_type={'UseScaleAlphaVec': 1}),
+    make_case('float-scale-cd-amax', 'c', 's', 128, 96, 64,
+              ['--scaleC', '1', '--scaleD', '1', '--amaxD'], amax=True,
+              problem_type={'UseScaleCD': True}),
     make_case('float-c', 'c', 's', 128, 96, 64),
     make_case('half-mix', 'mix', 'h', 256, 128, 512),
     make_case('float-cpp', 'cpp', 's', 128, 128, 64),
@@ -258,30 +329,55 @@ sys.exit(status)
     require(not (output / 'unused').exists(), 'Invalid invocation created JIT artifacts')
     report.append({'case': 'output-without-jit', 'pass': True})
 
+    if args.architecture == 'gfx950':
+        natural = next(case for case in CASES if case['name'] == 'mxfp4-float-output')
+        natural_root = output / 'natural-mx-artifacts'
+        proc, path, _ = run('negative-natural-mx-layout',
+                            ['--jit-gemm', '--jit-output-dir', str(natural_root), *natural['args']])
+        require(proc.returncode != 0 and 'Unsupported MX scale layout' in proc.stderr,
+                'Natural gfx950 MX scales were not rejected')
+        require(not (path / 'generator.jsonl').exists(), 'Unsupported MX layout invoked generation')
+        require(not list(natural_root.glob('**/manifest.json')), 'Unsupported MX layout built a bundle')
+        report.append({'case': 'natural-mx-layout', 'pass': True})
+
     if not args.negative_only:
-        for name, options in [('activation', ['--activation_type', 'relu']),
-                              ('dtype', ['-r', 'bf16_r']),
-                              ('scale-cd', ['--amaxD', '--scaleC', '1', '--scaleD', '1'])]:
-            proc, path, _ = run('negative-' + name, ['--jit-gemm', *options])
-            require(proc.returncode != 0 and 'JIT preparation failed' in proc.stderr,
-                    f'Unsupported descriptor was not rejected: {name}')
-            require(not (path / 'generator.jsonl').exists(),
-                    f'Unsupported descriptor invoked generation: {name}')
-            report.append({'case': name, 'pass': True})
         for case in CASES:
             if args.case and case['name'] not in args.case:
                 continue
+            if case['problem_type'].get('MXBlockA') and args.architecture not in ('gfx950', 'gfx1250'):
+                continue  # MX instructions require these architectures.
+            if case['dtype'] in ('f8', 'b8') and args.architecture == 'gfx90a':
+                continue  # gfx90a has no FP8 instructions.
+            case = dict(case, args=list(case['args']), problem_type=dict(case['problem_type']))
+            if case['problem_type'].get('MXBlockA') and args.architecture == 'gfx950':
+                # Tensile gfx950 consumes the public pre-swizzled scale layout.
+                for option in ('--scaleA', '--scaleB'):
+                    case['args'][case['args'].index(option) + 1] = '1001'
+            if args.architecture == 'gfx942':
+                for key in ('DataTypeA', 'DataTypeB'):
+                    case['problem_type'][key] = {15: 11, 16: 12}.get(
+                        case['problem_type'][key], case['problem_type'][key])
             artifact_root = output / (case['name'] + '-artifacts')
             sentinel = case['name'] == 'half-c-default'
             options = ['--jit-gemm', '--jit-output-dir', str(artifact_root), *case['args'],
-                       '--alpha', '1.25', '--beta', '0.5', '--verify',
+                       '--alpha', '0' if case['name'] == 'float-alpha-zero' else
+                       '2' if case['dtype'] == 'i8' else '1.25',
+                       '--beta', '1' if case['dtype'] == 'i8' else '0.5', '--verify',
                        '--iters', '3', '--cold_iters', '1', '--print_kernel_info']
             if not sentinel:
                 options.append('--use_gpu_timer')
             proc, path, elapsed = run(case['name'], options,
                                       {'HIPBLASLT_JIT_TEST_DELAY': '2' if sentinel else '0'})
             require(proc.returncode == 0, f'{case["name"]} failed; see {path}')
-            numeric = check_numerics(proc.stdout, case['dtype'])
+            if not case['problem']['m'] or not case['problem']['n']:
+                require('empty output; no kernel generation or launch' in proc.stderr,
+                        f'Missing empty-output result: {path}')
+                require(not (path / 'generator.jsonl').exists(), 'Empty output invoked generation')
+                require(not artifact_root.exists(), 'Empty output created generation artifacts')
+                report.append(dict(case=case['name'], pass_=True, elapsed_seconds=elapsed))
+                print(f'PASS {case["name"]}: no generation or launch', flush=True)
+                continue
+            numeric = check_numerics(proc.stdout)
             provenance = check_provenance(proc.stderr, proc.stdout, case, artifact_root, args.architecture)
             trace = [json.loads(line) for line in (path / 'generator.jsonl').read_text().splitlines()]
             require(len(trace) == 1, f'Expected one generation across warmup/timing: {trace}')

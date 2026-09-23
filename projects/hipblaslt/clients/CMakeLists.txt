@@ -7,8 +7,6 @@ add_library(hipblaslt-clients-common STATIC)
 if(HIPBLASLT_ENABLE_JIT_GEMM)
     # testing_matmul.hpp is shared by the benchmark and client tests.
     target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_JIT_GEMM)
-    target_include_directories(hipblaslt-clients-common PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>)
     find_program(HIPBLASLT_JIT_OFFLOAD_BUNDLER clang-offload-bundler
         HINTS "${ROCM_PATH}/llvm/bin" "${HIP_CLANG_ROOT}/bin" "/opt/rocm/llvm/bin"
         REQUIRED)

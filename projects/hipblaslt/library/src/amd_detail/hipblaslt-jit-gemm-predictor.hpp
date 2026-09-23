@@ -13,5 +13,8 @@ namespace hipblaslt_ext::experimental
     std::string predictJitGemmConfig(const TensileLite::ContractionProblemGemm& problem,
                                      const TensileLite::Hardware&               hardware,
                                      const GenerateOptions&                     options,
-                                     JitGemmInfo&                               info);
+                                     JitGemmInfo&                               info,
+                                     const std::string&                         mxScaleFormat,
+                                     const std::string&                         scaleModeA,
+                                     const std::string&                         scaleModeB);
 }

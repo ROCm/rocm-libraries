@@ -318,6 +318,40 @@ namespace hipblaslt_ext::experimental
         return found->second;
     }
 
+    int detail::jitMXScaleFormat(RocblasltContractionProblem::ScalingFormat scaleA,
+                                 RocblasltContractionProblem::ScalingFormat scaleB,
+                                 const std::string&                         architecture)
+    {
+        using Format        = RocblasltContractionProblem::ScalingFormat;
+        int        expected = -1;
+        const auto arch     = architecture.substr(0, architecture.find(':'));
+        for(const auto mode : {scaleA, scaleB})
+        {
+            if(mode == Format::None || mode == Format::Scalar || mode == Format::Vector)
+                continue;
+            int format = -2;
+            if(arch == "gfx950" && mode == Format::Block_32_UE8M0_32_8_EXT)
+                format = 1;
+            else if(arch == "gfx1250" && mode >= Format::Block_32_UE8M0
+                    && mode <= Format::Block_16_UE5M3)
+                format = 2;
+            if(format == -2 || (expected != -1 && expected != format))
+                return -2;
+            expected = format;
+        }
+        return expected;
+    }
+
+    bool detail::jitScaleLayoutMatches(const JitContext&                          context,
+                                       RocblasltContractionProblem::ScalingFormat scaleA,
+                                       RocblasltContractionProblem::ScalingFormat scaleB)
+    {
+        const int expected = jitMXScaleFormat(scaleA, scaleB, context.properties->gcnArchName);
+        return expected == -1
+               || (expected >= 0
+                   && context.library->solutions.at(0)->problemType.mxScaleFormat == expected);
+    }
+
     hipblasStatus_t getJitGemmAlgo(hipblasLtHandle_t                 handle,
                                    hipblasLtMatmulDesc_t             desc,
                                    const void*                       alpha,
@@ -373,14 +407,33 @@ namespace hipblaslt_ext::experimental
                                           type,
                                           opaque,
                                           count));
+            const auto outputLayout = reinterpret_cast<rocblaslt_matrix_layout>(layoutD);
+            if(status == HIPBLAS_STATUS_SUCCESS && (!outputLayout->m || !outputLayout->n))
+            {
+                info.error   = "Empty output does not require a GEMM algorithm";
+                result.state = HIPBLAS_STATUS_NOT_SUPPORTED;
+                return HIPBLAS_STATUS_NOT_SUPPORTED;
+            }
             require(status == HIPBLAS_STATUS_SUCCESS && count == 1 && opaque,
                     "Canonical GEMM descriptor translation failed");
+            const auto rocDesc       = reinterpret_cast<rocblaslt_matmul_desc>(desc);
+            const int  mxScaleFormat = detail::jitMXScaleFormat(
+                rocDesc->scaleAType, rocDesc->scaleBType, properties.gcnArchName);
+            require(mxScaleFormat != -2,
+                    "Unsupported MX scale layout: gfx950 requires block32 UE8M0 pre-swizzled "
+                    "scales (scale mode 1001); gfx1250 requires its natural block-scale modes");
             const bool predict = options.configPath.empty();
             if(predict)
             {
                 const auto hardware = TensileLite::hip::GetDevice(properties, device);
-                options.configPath
-                    = predictJitGemmConfig(*ExtractProblemGemm(opaque), *hardware, options, info);
+                options.configPath  = predictJitGemmConfig(
+                    *ExtractProblemGemm(opaque),
+                    *hardware,
+                    options,
+                    info,
+                    mxScaleFormat == 1 ? "HostPreSwizzle" : "InMemorySwizzle",
+                    rocblaslt_scaling_format_to_string(rocDesc->scaleAType),
+                    rocblaslt_scaling_format_to_string(rocDesc->scaleBType));
             }
             else
                 info.configPath = fs::absolute(options.configPath).string();
@@ -394,6 +447,9 @@ namespace hipblaslt_ext::experimental
                 info.prediction = field(prediction, "summary");
             }
             auto context      = loadGeneratedBundle(options, properties, device);
+            require(
+                detail::jitScaleLayoutMatches(*context, rocDesc->scaleAType, rocDesc->scaleBType),
+                "Generated solution MX scale layout differs from the supplied descriptors");
             info.manifestPath = context->manifest;
             info.kernelName   = context->kernel;
             token             = registerContext(context);
@@ -411,8 +467,23 @@ namespace hipblaslt_ext::experimental
                                                 algo,
                                                 tuning,
                                                 workspace));
-            require(status == HIPBLAS_STATUS_SUCCESS,
-                    "Generated solution does not support the problem or workspace limit");
+            if(status != HIPBLAS_STATUS_SUCCESS)
+            {
+                const auto&        problem  = *ExtractProblemGemm(opaque);
+                const auto&        solution = *context->library->solutions.at(0);
+                TensileLite::Task  task(*context->hardware, problem, solution);
+                std::ostringstream diagnostics;
+                diagnostics << "hipBLASLt status " << static_cast<int>(status) << std::boolalpha
+                            << "; hardware=" << (*solution.hardwarePredicate)(*context->hardware)
+                            << ", problem=" << (*solution.problemPredicate)(problem)
+                            << ", task=" << (*solution.taskPredicate)(task) << '\n';
+                solution.hardwarePredicate->debugEval(*context->hardware, diagnostics);
+                solution.problemPredicate->debugEval(problem, diagnostics);
+                solution.taskPredicate->debugEval(task, diagnostics);
+                throw std::runtime_error(
+                    "Generated solution does not support the problem or workspace limit: "
+                    + diagnostics.str());
+            }
             std::memcpy(&result.algo, &algo, sizeof(algo));
             result.workspaceSize = workspace;
             result.state         = HIPBLAS_STATUS_SUCCESS;
@@ -439,6 +510,10 @@ namespace hipblaslt_ext::experimental
         TensileLite::ContractionInputs                     inputs;
         std::vector<TensileLite::KernelInvocation>         kernels;
         bool                                               hasProblem = false;
+        RocblasltContractionProblem::ScalingFormat         scaleAType
+            = RocblasltContractionProblem::ScalingFormat::None;
+        RocblasltContractionProblem::ScalingFormat scaleBType
+            = RocblasltContractionProblem::ScalingFormat::None;
         std::shared_ptr<TensileLite::Hardware>             hardware;
         std::shared_ptr<Master>                            library;
         std::shared_ptr<TensileLite::ContractionSolution>  solution;
@@ -621,6 +696,9 @@ namespace hipblaslt_ext::experimental
             require(count == 1 && opaque, "Expected one GEMM problem");
             p.problem    = *ExtractProblemGemm(opaque);
             p.inputs     = *ExtractInputsGemm(opaque);
+            const auto rocDesc = reinterpret_cast<rocblaslt_matmul_desc>(desc);
+            p.scaleAType       = rocDesc->scaleAType;
+            p.scaleBType       = rocDesc->scaleBType;
             p.hasProblem = true;
             return HIPBLAS_STATUS_SUCCESS;
         }
@@ -645,9 +723,14 @@ namespace hipblaslt_ext::experimental
             require(targetMatchesDevice(options.architecture, properties.gcnArchName),
                     "Requested architecture does not match device; this runtime accepts its HIP "
                     "architecture and feature qualifiers");
+            require(detail::jitMXScaleFormat(p.scaleAType, p.scaleBType, properties.gcnArchName)
+                        != -2,
+                    "Unsupported MX scale layout for this device");
             ++p.generations;
             generate(options);
             auto context = loadGeneratedBundle(options, properties, p.device);
+            require(detail::jitScaleLayoutMatches(*context, p.scaleAType, p.scaleBType),
+                    "Generated solution MX scale layout differs from the supplied descriptors");
             p.manifest   = context->manifest;
             p.kernel     = context->kernel;
             p.hardware   = context->hardware;

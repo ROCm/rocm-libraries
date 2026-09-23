@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <string>
 #ifdef HIPBLASLT_ENABLE_JIT_GEMM
-#include "hipblaslt-jit-gemm.hpp"
+#include <hipblaslt/hipblaslt-ext.hpp>
 #endif
 
 // Process-wide CLI knobs that hipblaslt-bench forwards into the matmul

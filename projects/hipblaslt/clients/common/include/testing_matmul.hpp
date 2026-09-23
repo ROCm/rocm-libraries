@@ -4127,24 +4127,46 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
 #ifdef HIPBLASLT_ENABLE_JIT_GEMM
+    auto select_jit_algo = [&](const hipblaslt_ext::experimental::GenerateOptions& options,
+                               hipblasLtMatmulHeuristicResult_t&                   result,
+                               hipblaslt_ext::experimental::JitGemmInfo&           info) {
+        return hipblaslt_ext::experimental::getJitGemmAlgo(handle,
+                                                           matmul[0][0],
+                                                           alpha_in[0],
+                                                           dA[0].buf(),
+                                                           matA[0],
+                                                           dB[0].buf(),
+                                                           matB[0],
+                                                           &h_beta[0],
+                                                           dC[0].buf(),
+                                                           matC[0],
+                                                           (*dDp)[0].buf(),
+                                                           matD[0],
+                                                           options,
+                                                           max_workspace_size,
+                                                           result,
+                                                           info);
+    };
+    if(hipblaslt_bench_options::jit_gemm() && (!M[0] || !N[0]))
+    {
+        // Validate the descriptors through the same API. Empty outputs need no
+        // generated algorithm, reference calculation, warmup, or timed launch.
+        hipblasLtMatmulHeuristicResult_t         result{};
+        hipblaslt_ext::experimental::JitGemmInfo info;
+        auto                                     status = select_jit_algo({}, result, info);
+        if(status != HIPBLAS_STATUS_NOT_SUPPORTED
+           || info.error != "Empty output does not require a GEMM algorithm")
+            throw std::invalid_argument("JIT empty-output validation failed: " + info.error);
+        hipblaslt_cerr << "JIT GEMM: empty output; no kernel generation or launch" << std::endl;
+        return;
+    }
+
     // Preparation runs once during selection, before reference, warmup, or timing.
     auto generate_jit_algo = [&]() {
-        hipblasLtMatmulHeuristicResult_t result{};
+        hipblasLtMatmulHeuristicResult_t         result{};
         hipblaslt_ext::experimental::JitGemmInfo info;
         const auto options = hipblaslt_bench_options::jit_generate_options();
-        const auto status = hipblaslt_ext::experimental::getJitGemmAlgo(
-            handle,
-            matmul[0][0],
-            alpha_in[0],
-            dA[0].buf(), matA[0],
-            dB[0].buf(), matB[0],
-            &h_beta[0],
-            dC[0].buf(), matC[0],
-            (*dDp)[0].buf(), matD[0],
-            options,
-            max_workspace_size,
-            result,
-            info);
+        const auto status  = select_jit_algo(options, result, info);
         if(status != HIPBLAS_STATUS_SUCCESS)
             throw std::invalid_argument("JIT preparation failed: " + info.error
                                         + " (artifacts: " + options.outputPath + ")");
