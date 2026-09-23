@@ -578,9 +578,30 @@ def test_derived_layout_change_rejected_before_emission(mx_layout_request, actua
 
 def test_old_mx_schema_retains_default_layout_derivation(mx_layout_request):
     del mx_layout_request["problem"]["mx_scale_format"]
+    del mx_layout_request["problem"]["scale_mode_a"]
+    del mx_layout_request["problem"]["scale_mode_b"]
     assert JG._implementationParameters(mx_layout_request) == {}
     config = JG._configuration(mx_layout_request, mx_layout_request["candidates"][0])
     assert config["BenchmarkProblems"][0][1]["ForkParameters"] == [{"StaggerU": [0]}]
+
+
+@pytest.mark.parametrize("architecture, mode, expected", [
+    ("gfx950", "Block_32_UE8M0_32_8_EXT", "HostPreSwizzle"),
+    ("gfx950", "Block_32_UE8M0", "NoSwizzle"),
+    ("gfx1250", "Block_32_UE8M0", "InMemorySwizzle"),
+])
+def test_descriptor_scale_modes_derive_provider_layout(mx_layout_request, architecture, mode, expected):
+    mx_layout_request["architecture"] = architecture
+    del mx_layout_request["problem"]["mx_scale_format"]
+    mx_layout_request["problem"].update(scale_mode_a=mode, scale_mode_b=mode)
+    assert JG._implementationParameters(mx_layout_request) == {"MXScaleFormat": expected}
+
+
+def test_descriptor_mixed_physical_layouts_are_rejected(mx_layout_request):
+    del mx_layout_request["problem"]["mx_scale_format"]
+    mx_layout_request["problem"]["scale_mode_b"] = "Block_32_UE8M0"
+    with pytest.raises(SS.SingleSolutionConfigError, match="different MX layouts"):
+        JG._implementationParameters(mx_layout_request)
 
 
 def compile_request(request, tmp_path):

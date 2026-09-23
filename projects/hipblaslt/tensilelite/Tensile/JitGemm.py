@@ -48,25 +48,34 @@ def _implementationParameters(request):
         if key in problem:
             _require(isinstance(problem[key], str) and problem[key] in modes,
                      f"problem.{key} must name a descriptor ScalingFormat")
-    # Earlier schema-1 requests omitted physical layout. Preserve their default
-    # derivation; descriptor callers now provide the format before type lowering.
+    architecture = request["architecture"].split(":", 1)[0]
+    expected = {
+        tensor: ("HostPreSwizzle" if mode == "Block_32_UE8M0_32_8_EXT" else
+                 "InMemorySwizzle" if architecture == "gfx1250" else "NoSwizzle")
+        for tensor in "ab"
+        if (mode := problem.get(f"scale_mode_{tensor}", "None")).startswith("Block_")
+    }
+    # Legacy requests without descriptor scale modes retain default derivation.
+    # New descriptor callers let this provider-private translation choose the
+    # layout; they do not repeat target-dependent Tensile layout rules in C++.
     if "mx_scale_format" not in problem:
-        return {}
-    layout = problem["mx_scale_format"]
+        if not expected:
+            return {}
+        layouts = set(expected.values())
+        _require(len(layouts) == 1, "Descriptor A/B scale modes require different MX layouts")
+        layout = next(iter(layouts))
+    else:
+        layout = problem["mx_scale_format"]
     _require(isinstance(layout, str) and layout in
              ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"),
              "problem.mx_scale_format must name an explicit MX scale layout")
     problemType = _problemType(request)
     _require(problemType.get("MXBlockA") or problemType.get("MXBlockB"),
              "problem.mx_scale_format requires an MX-scaled operand")
-    architecture = request["architecture"].split(":", 1)[0]
-    for tensor in "ab":
-        mode = problem.get(f"scale_mode_{tensor}", "None")
-        if mode.startswith("Block_"):
-            expected = ("HostPreSwizzle" if mode == "Block_32_UE8M0_32_8_EXT" else
-                        "InMemorySwizzle" if architecture == "gfx1250" else "NoSwizzle")
-            _require(layout == expected,
-                     f"problem.scale_mode_{tensor}={mode} disagrees with MXScaleFormat={layout}")
+    for tensor, value in expected.items():
+        _require(layout == value,
+                 f"problem.scale_mode_{tensor}={problem[f'scale_mode_{tensor}']} "
+                 f"disagrees with MXScaleFormat={layout}")
     return {"MXScaleFormat": layout}
 
 

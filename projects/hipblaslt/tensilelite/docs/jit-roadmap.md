@@ -23,7 +23,7 @@ without inventing a replacement recipe. Compilation does not benchmark recipes.
 | Component | Status | Input, output and connection |
 | --- | --- | --- |
 | One-solution builder | Implemented | One YAML recipe and target produce a complete kernel/helper bundle through `Tensile.SingleSolution` and the existing validators/compiler |
-| Ranked recipe selector | TBD in a later layer | Supplied candidates and problem facts produce one validated recipe or rejection reasons; `Tensile.JitGemm` calls the builder without running a model |
+| Ranked recipe selector | Implemented | Supplied candidates and problem facts produce one validated recipe or rejection reasons; `Tensile.JitGemm` calls the builder without running a model |
 | Generic JIT interface and TensileLite provider | TBD in a later layer | Opaque `Request` and configured `Backend` produce an owned `Solution`; provider settings stay outside the common types |
 | GEMM request and execution adapters | TBD in a later layer | `makeGemmRequest` captures existing descriptors; `getGemmAlgo` connects a compiled GEMM solution to C/C++ execution |
 | Public sample | TBD in a later layer | Application buffers and descriptors pass through the generic API using an explicit recipe and checked C/C++ execution |
@@ -52,3 +52,4 @@ these components without turning every request into a TensileLite recipe.
 
 The [single-solution guide](single-solution.md) explains how to compile a supplied
 recipe and inspect its complete bundle.
+Its ranked-selection section describes candidate validation and rejection diagnostics.
