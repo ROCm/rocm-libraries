@@ -2897,6 +2897,7 @@ inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
 {
     switch(API)
     {
+    case API_NORMAL:
         return hipsolverSgelsBatched_bufferSize(
             handle, HIPBLAS_OP_N, m, n, nrhs, A, lda, B, ldb, lwork, bc);
     default:
@@ -2921,6 +2922,7 @@ inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
 {
     switch(API)
     {
+    case API_NORMAL:
         return hipsolverDgelsBatched_bufferSize(
             handle, HIPBLAS_OP_N, m, n, nrhs, A, lda, B, ldb, lwork, bc);
     default:
@@ -2945,6 +2947,7 @@ inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
 {
     switch(API)
     {
+    case API_NORMAL:
         return hipsolverCgelsBatched_bufferSize(handle,
                                                 HIPBLAS_OP_N,
                                                 m,
@@ -2978,6 +2981,7 @@ inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t               API,
 {
     switch(API)
     {
+    case API_NORMAL:
         return hipsolverZgelsBatched_bufferSize(handle,
                                                 HIPBLAS_OP_N,
                                                 m,
