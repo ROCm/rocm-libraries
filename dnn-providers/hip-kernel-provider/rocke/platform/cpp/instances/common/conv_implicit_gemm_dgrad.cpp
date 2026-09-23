@@ -857,7 +857,8 @@ static const rocke_mmaop_t*
                                                             "fp32",
                                                             spec->warp_tile_m,
                                                             spec->warp_tile_n,
-                                                            spec->warp_tile_k);
+                                                            spec->warp_tile_k,
+                                                            nullptr);
     if(!op)
     {
         rocke_i_set_err(b,

@@ -5,7 +5,7 @@
       'file': 'BBS.yaml',
       'kernels': list([
         dict({
-          'basename': 'Cijk_Ailk_Bjlk_BBS_BH_Bias_A_UserArgs_MT16x16x32m2IlRIeAFZpYPsu7LXYFbN637HS-sszIiUQemXsQtno=',
+          'basename': 'Cijk_Ailk_Bjlk_BBS_BH_Bias_A_UserArgs_MT16x16x32dF2JvePmNw1E5EFKpDrClO8SsE1enxPuBzFHVGKDkM8=',
           'err': 0,
         }),
       ]),
@@ -14,7 +14,16 @@
       'file': 'F4_MX.yaml',
       'kernels': list([
         dict({
-          'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAH5U-JYOj2GXWO4UHUjOExbkdkjErbSE7Iy-oAF9J7Qg=',
+          'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAzdE0JMAQdc3U27SM_xl4iQrj9NyDyKxVVRY6hVNRPQY=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'F4_MX_DecouplePGR_TDMFuse.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAbxPR5xpMTP865qDbOVLm5X1l1PwK97REDIyeUlymYNc=',
           'err': 0,
         }),
       ]),
@@ -23,7 +32,7 @@
       'file': 'HHS.yaml',
       'kernels': list([
         dict({
-          'basename': 'Cijk_Ailk_Bjlk_HHS_BH_Bias_A_UserArgs_MT16x16x32m2IlRIeAFZpYPsu7LXYFbN637HS-sszIiUQemXsQtno=',
+          'basename': 'Cijk_Ailk_Bjlk_HHS_BH_Bias_A_UserArgs_MT16x16x32dF2JvePmNw1E5EFKpDrClO8SsE1enxPuBzFHVGKDkM8=',
           'err': 0,
         }),
       ]),
@@ -32,7 +41,7 @@
       'file': 'SB.yaml',
       'kernels': list([
         dict({
-          'basename': 'Cijk_Ailk_Bjlk_S_MX_B_Bias_SB_HA_S_SAB_SAV_UserAUZygoaBR62uPZ7smP4CrUo0gWYZpr3B8LHaBKAtcV-M=',
+          'basename': 'Cijk_Ailk_Bjlk_S_MX_B_Bias_SB_HA_S_SAB_SAV_UserAm18zIjTtKJXqBr3xyWfkkyYKefd3Ri_EYY-WU0QZ_B0=',
           'err': 0,
         }),
       ]),
