@@ -2041,11 +2041,12 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "GlobalAccumulation requires BufferStore (workspace SRD addressing not supported)")
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
-    # MBSK accumulates partials in-kernel with the width fixed to the compute
-    # type, so narrowing is restricted to MultipleBuffer.
+    # Both MultipleBuffer and MBSK round-trip their partials through the
+    # workspace, so either can hold them at the destination width. MBSK keeps
+    # accumulating in-kernel at the compute width; only the stored form narrows.
     workspaceType = state["ProblemType"]["ComputeDataType"]
     if state.get("NarrowGSUWorkspace", False) \
-        and state["_GlobalAccumulation"] == 'MultipleBuffer' \
+        and state["_GlobalAccumulation"] in ('MultipleBuffer', 'MultipleBufferSingleKernel') \
         and state["ProblemType"]["DestDataType"].numBytes() < computeBytes:
       workspaceType = state["ProblemType"]["DestDataType"]
     state["_WorkspaceDataType"] = workspaceType

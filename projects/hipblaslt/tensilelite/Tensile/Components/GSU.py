@@ -29,7 +29,8 @@ from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, 
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SWaitXCnt, SBarrier, \
     SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
-    SCmpEQU64, BufferStoreB32, BufferLoadB32, VMovB64, FlatAtomicDecU32, VAddCOU32, VAddCCOU32
+    SCmpEQU64, BufferStoreB32, BufferLoadB32, VMovB64, FlatAtomicDecU32, VAddCOU32, VAddCCOU32, \
+    VAndB32, VLShiftLeftB32, VCvtPkF32toBF16
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
@@ -46,6 +47,61 @@ class GSU(Component):
     """
     GSU block.
     """
+
+    # ---- narrow GSU workspace helpers -------------------------------------
+    # MBSK round-trips its partials through the workspace, so they can be held
+    # at the destination width even though the in-kernel accumulation stays at
+    # the compute width. Only the stored form narrows; every VGPR the existing
+    # accumulate code touches keeps its fp32 layout, which is why the unpack
+    # below expands in place rather than changing the register plan.
+
+    @staticmethod
+    def narrowWorkspace(writer):
+        """True when partials are stored narrower than the accumulator.
+
+        Restricted to bf16 because the pack and unpack below are bf16-specific:
+        the widening is a bit trick that only holds because bf16 is the top
+        half of an fp32 with the same value. An int8 destination also satisfies
+        the width test in Solution.py but would need a real conversion.
+        """
+        if writer.states.bpeCworkspace >= writer.states.bpeCinternal:
+            return False
+        wsType = writer.states.kernel["_WorkspaceDataType"]
+        return wsType.isBFloat16()
+
+    @staticmethod
+    def emitWorkspacePack(writer, module, startVgpr, numFp32):
+        """fp32 -> bf16, halving numFp32 registers into numFp32//2 in place.
+
+        Ascending: the pair at 2k is consumed before slot k is overwritten,
+        and k <= 2k, so no live value is clobbered.
+        """
+        for k in range(numFp32 // 2):
+            module.add(VCvtPkF32toBF16(dst=vgpr(startVgpr + k),
+                                       src0=vgpr(startVgpr + 2 * k),
+                                       src1=vgpr(startVgpr + 2 * k + 1),
+                                       comment="pack partials to bf16"))
+
+    @staticmethod
+    def emitWorkspaceUnpack(writer, module, startVgpr, numFp32):
+        """bf16 -> fp32, expanding numFp32//2 packed registers into numFp32.
+
+        Pair k arrives in startVgpr+k and expands into 2k and 2k+1. Walking k
+        downwards means every slot written is at or above the pair still to be
+        read, so no packed value is clobbered before use. k=0 is safe in place:
+        the AND reads slot 0 before writing slot 1, and the shift is a
+        read-modify-write of slot 0 itself.
+
+        bf16 is the top half of an fp32 holding the same value, so widening is
+        a mask for the high lane and a shift for the low one, with no cvt.
+        """
+        for k in range(numFp32 // 2 - 1, -1, -1):
+            src = vgpr(startVgpr + k)
+            module.add(VAndB32(dst=vgpr(startVgpr + 2 * k + 1), src0=hex(0xffff0000), src1=src,
+                               comment="unpack hi bf16 -> fp32"))
+            module.add(VLShiftLeftB32(dst=vgpr(startVgpr + 2 * k), shiftHex=16, src=src,
+                                      comment="unpack lo bf16 -> fp32"))
+
     @abc.abstractmethod
     def graWorkGroup(self, writer, kernel):
         pass
@@ -1408,6 +1464,7 @@ class GSUOn(GSU):
             wsBpe = writer.states.bpeCworkspace
             bps = kernel["StoreVectorWidth"] * wsBpe
             rpv = bps / writer.states.bpr
+            packVgprToFree = []
             isGlc = True
             isSlc = True
             isNT  = False #bool(kernel["NonTemporalD"] & 0x4)
@@ -1452,6 +1509,21 @@ class GSUOn(GSU):
                     prevAddrVgpr = addrDVgpr
 
                 sumIdx = ss.elementSumIdx[elementIdx]
+                if self.narrowWorkspace(writer):
+                    # The accumulator at sumIdx stays live: the last workgroup
+                    # adds it to the partials the others wrote, so the pack
+                    # needs its own destination. Take it from the pool rather
+                    # than from tmpVgpr, whose whole span is already spoken for
+                    # by the address maths and the bufferOOB register.
+                    packRegs = ceil(gwvw / 2)
+                    packBase = writer.vgprPool.checkOut(packRegs, tag="mbskNarrowPack")
+                    for k in range(packRegs):
+                        storeCodeGSUSK.add(VCvtPkF32toBF16(dst=vgpr(packBase + k),
+                                                           src0=vgpr(sumIdx + 2 * k),
+                                                           src1=vgpr(sumIdx + 2 * k + 1),
+                                                           comment="pack partials to workspace width"))
+                    packVgprToFree.append(packBase)
+                    sumIdx = packBase
                 if not kernel["StoreRemapVectorWidth"]:
                     # Only GSU>1 MBSK write to workspace (GSU1 MBSK will write to output buffer)
                     # so we need wsOffset to coalesced store to workspace buffer
@@ -1470,6 +1542,8 @@ class GSUOn(GSU):
                 if clsLoop and useBuffer:
                     storeCodeGSUSK.add(SAddU32(dst=sgpr(storeOffsetSgpr), src0=sgpr(storeOffsetSgpr), src1=increment, comment="Inc store offset (CLS)"))
             module.add(storeCodeGSUSK)
+            for v in packVgprToFree:
+                writer.vgprPool.checkIn(v)
 
         # return registers to pool:
         lastDataD = -1
@@ -1935,6 +2009,8 @@ class GSUOn(GSU):
                 for i in range(0, GSUP1):
                     vlcnt = vlcnt - 1 if vlcnt > 0 else 0
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
+                    if self.narrowWorkspace(writer):
+                        self.emitWorkspaceUnpack(writer, module, tmpVAdd+0+gwvw*i, gwvw)
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
@@ -2014,6 +2090,8 @@ class GSUOn(GSU):
                     for i in range(0, k):
                         vlcnt = vlcnt - 1 if vlcnt > 0 else 0
                         module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
+                        if self.narrowWorkspace(writer):
+                            self.emitWorkspaceUnpack(writer, module, tmpVAdd+0+gwvw*i, gwvw)
                         if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
@@ -2141,6 +2219,12 @@ class GSUOn(GSU):
                 vlcnt       = vlcnt - 2 if vlcnt > 0 else 0
 
                 module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
+                if self.narrowWorkspace(writer):
+                    # uidx==0 above loaded the first GSU slice straight into the
+                    # accumulator, so that register holds packed partials too and
+                    # has to be widened before it is used as an addend.
+                    self.emitWorkspaceUnpack(writer, module, vgprstart, gwvw)
+                    self.emitWorkspaceUnpack(writer, module, data, gwvw)
                 if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                     for j in range(0, int(gwvw)):
                         module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -2183,6 +2267,8 @@ class GSUOn(GSU):
                     vlcnt       = vlcnt - 1 if vlcnt > 0 else 0
 
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
+                    if self.narrowWorkspace(writer):
+                        self.emitWorkspaceUnpack(writer, module, data, gwvw)
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -2228,6 +2314,8 @@ class GSUOn(GSU):
                     data  = tmpVAdd[-1][elementIdx]
 
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
+                    if self.narrowWorkspace(writer):
+                        self.emitWorkspaceUnpack(writer, module, data, gwvw)
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -2249,6 +2337,8 @@ class GSUOn(GSU):
                         data  = tmpVAdd[i-1][elementIdx]
 
                         module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
+                        if self.narrowWorkspace(writer):
+                            self.emitWorkspaceUnpack(writer, module, data, gwvw)
                         if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -2307,6 +2397,8 @@ class GSUOn(GSU):
 
                 GSUP1 = 1 # do 1 element at a time
                 for i in range(0, GSUP1):
+                    if self.narrowWorkspace(writer):
+                        self.emitWorkspaceUnpack(writer, module, tmpVAdd+0+gwvw*i, gwvw)
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
@@ -2343,6 +2435,8 @@ class GSUOn(GSU):
 
                     GSUP1 = 1 # do 1 element at a time
                     for i in range(0, GSUP1):
+                        if self.narrowWorkspace(writer):
+                            self.emitWorkspaceUnpack(writer, module, tmpVAdd+0+gwvw*i, gwvw)
                         if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
