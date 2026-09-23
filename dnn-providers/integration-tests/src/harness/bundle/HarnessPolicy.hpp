@@ -24,16 +24,15 @@ enum class TensorPlacement
     DEVICE,
 };
 
-/// What this run does with support claims.
+/// What a broken claim costs this run.
 ///
-/// One ordered value rather than a report bool and an enforce bool: those two carry
-/// a rule -- enforcing without querying is nothing to enforce -- and so have a fourth
-/// state no caller should be able to construct. All three of these are legal, and
-/// "at least observing" is a `>=` rather than a second predicate.
+/// Both modes read the sidecar and publish every verdict: a lane that cannot afford to
+/// go red over drift still needs to see the drift, and a summary that only appears when
+/// it is also a gate is a summary nobody can use to decide whether to turn the gate on.
+/// The mode decides exactly one thing -- whether a broken claim fails the test.
 enum class ClaimMode : std::uint8_t
 {
-    OFF, ///< never open a sidecar
-    REPORT, ///< query and publish; a broken claim is counted and printed, never failed
+    REPORT_ONLY, ///< query and publish; a broken claim is reported, not failed
     ENFORCE, ///< query and publish; a broken claim fails the test
 };
 
@@ -46,7 +45,7 @@ enum class ClaimMode : std::uint8_t
 struct HarnessPolicy
 {
     VerificationMode mode = VerificationMode::AUTO;
-    ClaimMode claims = ClaimMode::OFF;
+    ClaimMode claims = ClaimMode::REPORT_ONLY;
     TensorPlacement placement = TensorPlacement::DEVICE;
 
     /// Full arch token as detected, e.g. "gfx942:sramecc+:xnack-". Empty when

@@ -241,9 +241,10 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
     EXPECT_NE(output.find("broken: 0"), std::string::npos);
 }
 
-// A failure block in a green lane is only readable if the header says the lane was
-// not enforcing. Asserted on a run that has failures, because that is the case where
-// the two modes are otherwise indistinguishable.
+// A summary scraped out of a CI log has to say on its own face whether the failures
+// under it were fatal, because a report-only lane prints the same shape and the same
+// failure list. Asserted on a run that has failures, since that is the case where the
+// header is load-bearing rather than decorative.
 TEST_F(TestSupportClaimReport, PrintHeaderNamesEnforcement)
 {
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
@@ -251,41 +252,9 @@ TEST_F(TestSupportClaimReport, PrintHeaderNamesEnforcement)
     const auto output = summary(ClaimMode::ENFORCE);
 
     EXPECT_NE(output.find("==== SUPPORT CLAIM SUMMARY (ENFORCING) ===="), std::string::npos);
-    EXPECT_EQ(output.find("REPORT ONLY"), std::string::npos);
-}
-
-TEST_F(TestSupportClaimReport, PrintHeaderNamesReportMode)
-{
-    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
-
-    const auto output = summary(ClaimMode::REPORT);
-
-    EXPECT_NE(output.find("(REPORT ONLY - failures below are not fatal)"), std::string::npos);
-    EXPECT_EQ(output.find("(ENFORCING)"), std::string::npos);
-    // The failures are still listed in full. Report mode withholding them would make
+    // The failures are listed in full under that header. Withholding them would make
     // the mode a coverage difference rather than an exit-code one.
     EXPECT_NE(output.find("CLAIM FAILURES (1)"), std::string::npos);
-}
-
-// The header is the *only* difference. If a body ever diverges by mode, the report
-// lane stops predicting what enforcement would have done, which is its whole job.
-TEST_F(TestSupportClaimReport, PrintBodyIsIdenticalAcrossModes)
-{
-    supportClaimCoverage().graphsFound = 3;
-    supportClaimCoverage().graphsWithClaims = 2;
-    supportClaimCoverage().graphsSelectedWithClaims = 2;
-    supportClaimCoverage().graphsReachedBody = 2;
-    supportClaimCoverage().graphsQueried = 2;
-    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
-    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
-
-    const auto enforced = summary(ClaimMode::ENFORCE);
-    const auto reported = summary(ClaimMode::REPORT);
-
-    const auto body = [](const std::string& out) { return out.substr(out.find('\n', 1)); };
-
-    EXPECT_NE(enforced, reported);
-    EXPECT_EQ(body(enforced), body(reported));
 }
 
 // "accepted" and "confirmed" are different facts and the header has to say so,
@@ -634,7 +603,7 @@ TEST(TestCountersAreConsistent, ANestedLadderIsConsistent)
     EXPECT_TRUE(countersAreConsistent(coverage));
 }
 
-// The all-zero run: claims off, or a tree with no sidecars. Every relation holds
+// The all-zero run: no engine named, or a tree with no sidecars. Every relation holds
 // on equality, so the check must not read "nothing happened" as a defect.
 TEST(TestCountersAreConsistent, AllZeroIsConsistent)
 {
@@ -650,11 +619,11 @@ TEST(TestCountersAreConsistent, MoreClaimsThanGraphsIsInconsistent)
     EXPECT_FALSE(countersAreConsistent(coverage));
 }
 
-// The shape the counter keying is there to prevent: registration seeds the two
-// discovery counters only when an engine was named, so a bump keyed on the sidecar
-// alone selects graphs that were never counted as discovered. Report mode without
-// --test-engine is the run that produces it, and the summary's answer used to be
-// "this is a harness defect" when the real answer was "you forgot a flag".
+// The shape the counter keying is there to prevent. Registration seeds the two
+// discovery counters only when an engine was named; key a later bump on the sidecar
+// alone and it selects graphs that were never counted as discovered. The summary
+// reads that as a harness defect, which sends a reader after the wrong bug -- so the
+// invariant is asserted here rather than left to be noticed in a log.
 TEST(TestCountersAreConsistent, SelectingMoreThanWasDiscoveredIsInconsistent)
 {
     SupportClaimCoverage coverage;
@@ -883,48 +852,30 @@ TEST(TestSupportClaimSummary, UnopenedGraphsAreNotBlamedOnTheFilter)
 }
 
 // ---------------------------------------------------------------------------
-// missedQueryComplaint(): the per-graph gap, worded once for both modes.
+// missedQueryComplaint(): the per-graph gap.
 //
 // The run-level guard only fires when *no* graph anywhere was queried, so a gap on
 // one graph out of many needs its own signal or it is silently absorbed.
 // ---------------------------------------------------------------------------
 
-TEST(TestMissedQueryComplaint, NoGapIsSilentInEitherMode)
+TEST(TestMissedQueryComplaint, NoGapIsSilent)
 {
     const CoverageUpdate update; // missedQuery defaults false
 
-    EXPECT_FALSE(missedQueryComplaint(update, "test/bundle", /*fatal=*/true).has_value());
-    EXPECT_FALSE(missedQueryComplaint(update, "test/bundle", /*fatal=*/false).has_value());
+    EXPECT_FALSE(missedQueryComplaint(update, "test/bundle").has_value());
 }
 
-TEST(TestMissedQueryComplaint, GapUnderEnforcementIsFatal)
+TEST(TestMissedQueryComplaint, AGapNamesTheBundleItIsAbout)
 {
     CoverageUpdate update;
     update.missedQuery = true;
 
-    const auto complaint = missedQueryComplaint(update, "test/bundle", /*fatal=*/true);
+    const auto complaint = missedQueryComplaint(update, "test/bundle");
 
     ASSERT_TRUE(complaint.has_value());
-    EXPECT_TRUE(complaint->fatal);
+    // The message is the whole payload -- a complaint carries no severity to inspect,
+    // and one that cannot say which bundle it came from is unactionable in a CI log.
     EXPECT_NE(complaint->message.find("test/bundle"), std::string::npos) << complaint->message;
-}
-
-// Report mode makes exactly one promise -- it never fails a run -- and exists for
-// exactly one purpose: predicting what enforcement would say. So the severity has to
-// move and the wording must not, or a log reader needs two greps to count one thing.
-TEST(TestMissedQueryComplaint, ReportModeChangesTheSeverityAndNotTheWording)
-{
-    CoverageUpdate update;
-    update.missedQuery = true;
-
-    const auto enforced = missedQueryComplaint(update, "test/bundle", /*fatal=*/true);
-    const auto reported = missedQueryComplaint(update, "test/bundle", /*fatal=*/false);
-
-    ASSERT_TRUE(enforced.has_value());
-    ASSERT_TRUE(reported.has_value());
-    EXPECT_EQ(enforced->message, reported->message);
-    EXPECT_TRUE(enforced->fatal);
-    EXPECT_FALSE(reported->fatal);
 }
 
 // NOLINTEND(readability-identifier-naming)

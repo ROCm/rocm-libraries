@@ -124,9 +124,9 @@ public:
         // shouldObserveClaims(), not a bare sidecar check, because registration seeds
         // graphsWithClaims only when an engine was named (BundleRegistration.hpp) and the
         // two counters have to nest or the subtraction above is arithmetic on unrelated
-        // sets. Report mode is allowed to run without --test-engine, and keying this on
-        // the file alone made that run report 0 with claims against a positive selected
-        // count -- a summary that blames the harness for a missing flag.
+        // sets. Keying this on the file alone made a run without --test-engine report 0
+        // with claims against a positive selected count -- a summary that blames the
+        // harness for a missing flag.
         if(shouldObserveClaims())
         {
             _deps.reporter->recordSelectedWithClaims();
@@ -244,8 +244,10 @@ private:
 
     SupportObservation observeSupportClaims(const GraphSession& session);
 
-    // Whether a bad verdict costs anything; the verdict itself is already recorded.
-    // Needs no shouldObserveClaims() guard: an unobserved graph carries no results.
+    // The one place the claim mode is read: whether a bad verdict costs anything. The
+    // verdict itself is recorded either way, which is what makes a report-only run
+    // worth printing. Needs no shouldObserveClaims() guard on top -- an unqueried graph
+    // carries no results, so there is nothing to block on.
     std::optional<VerificationOutcome>
         enforcedClaimFailure(const SupportObservation& observation) const
     {
@@ -263,9 +265,8 @@ private:
     // the rule stays assertable on its own.
     ClaimPhase observeClaims(const GraphSession& session);
 
-    // The one place a HarnessComplaint turns into a gtest failure or a warning.
-    // nullopts are skipped, which is what lets the call site pass every rule
-    // unconditionally.
+    // The one place a HarnessComplaint turns into a gtest failure. nullopts are
+    // skipped, which is what lets the call site pass every rule unconditionally.
     static void raiseComplaints(std::initializer_list<std::optional<HarnessComplaint>> complaints);
 
     // Publishes every verdict, promoting the engine-under-test's accepted claim by
@@ -283,38 +284,27 @@ private:
     VerificationOutcome unverifiable(const std::string& reason,
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
-    // The single definition of "this graph's claims must be looked at": claim
-    // checking is on in either mode, an engine was named to check against, and a
-    // sidecar exists. Ordered cheapest-first on purpose -- carriesSidecar() stats the
-    // filesystem once per test body, and a run that passed neither flag must not pay.
-    //
-    // Separate from shouldEnforceClaims() because observing and failing are two
-    // decisions. Folding them together is what made report mode impossible: the
-    // query never ran, so the summary had nothing to print.
+    // The single definition of "this graph's claims are this run's business": an engine
+    // was named to check against, and a sidecar exists. Deliberately free of the claim
+    // mode -- what a broken claim costs is enforcedClaimFailure()'s question, and
+    // reading it here too would make a run that cannot fail also unable to report.
+    // Ordered cheapest-first on purpose: carriesSidecar() stats the filesystem once per
+    // test body, and a run that named no engine must not pay.
     bool shouldObserveClaims() const
     {
-        return _deps.policy.claims >= ClaimMode::REPORT && _engineUnderTest.has_value()
-               && carriesSidecar();
+        return _engineUnderTest.has_value() && carriesSidecar();
     }
 
-    // "There is a sidecar here", and nothing more -- no engine, no mode. The run's
+    // "There is a sidecar here", and nothing more -- no engine. The run's
     // verified-nothing guard counts against this rather than shouldObserveClaims()
     // because the two disagree in precisely the case worth catching: a build whose
-    // engine plugin never loaded observes nothing while the sidecars sit untouched.
+    // engine plugin never loaded queries nothing while the sidecars sit untouched.
     // Factored out rather than repeated so the guard's denominator cannot drift
     // away from the predicate that decides whether the query happens.
     bool carriesSidecar() const
     {
         return !_claimLocator.sidecarPath.empty()
                && std::filesystem::exists(_claimLocator.sidecarPath);
-    }
-
-    // ...and the definition of "a broken claim must fail this test". Strictly
-    // narrower: everything observation needs, plus the mode being ENFORCE. Report
-    // mode observes the identical facts and returns false here.
-    bool shouldEnforceClaims() const
-    {
-        return shouldObserveClaims() && _deps.policy.claims == ClaimMode::ENFORCE;
     }
 
     VerificationDepth bundleRequiredDepth() const

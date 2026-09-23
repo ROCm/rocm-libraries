@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <initializer_list>
-#include <iostream>
 #include <optional>
 #include <ostream>
 #include <set>
@@ -66,8 +65,6 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 SupportObservation
     IntegrationBundleVerificationHarness::observeSupportClaims(const GraphSession& session)
 {
-    // Observation, not enforcement: report mode must reach the query too, or the
-    // summary it exists to print has nothing in it.
     if(_bundle == nullptr || !shouldObserveClaims())
     {
         return {};
@@ -94,26 +91,16 @@ ClaimPhase IntegrationBundleVerificationHarness::observeClaims(const GraphSessio
 {
     ClaimPhase phase;
 
-    // shouldObserveClaims() below stats the filesystem uncached, once per test body,
-    // and no counter it feeds is read when both claim flags are off.
-    if(_deps.policy.claims == ClaimMode::OFF)
-    {
-        return phase;
-    }
-
     phase.observation = observeSupportClaims(session);
 
     // Everything from here down derives from the observation, so a throw above loses
     // only facts that were not yet true. graphsReachedBody is the exception and is
     // published from TestBody() instead, ahead of anything that can throw.
-    //
-    // The observe predicate, not the enforce one: report mode has to reach the same
-    // counters enforcement would, or it cannot predict it.
     const CoverageUpdate update = coverageFor(phase.observation, shouldObserveClaims());
 
     _deps.reporter->recordCoverage(update);
 
-    phase.complaint = missedQueryComplaint(update, _bundlePath.string(), shouldEnforceClaims());
+    phase.complaint = missedQueryComplaint(update, _bundlePath.string());
     return phase;
 }
 
@@ -129,14 +116,7 @@ void IntegrationBundleVerificationHarness::raiseComplaints(
 
         // ADD_FAILURE() rather than FAIL(): FAIL() returns, and the caller still has
         // an outcome to report and possibly a second complaint to raise.
-        if(complaint->fatal)
-        {
-            ADD_FAILURE() << complaint->message;
-        }
-        else
-        {
-            std::cerr << "Warning: " << complaint->message << "\n";
-        }
+        ADD_FAILURE() << complaint->message;
     }
 }
 

@@ -851,7 +851,6 @@ TEST(TestShallowPassComplaint, PassingBelowTheRequiredDepthIsAComplaint)
                                "bundles/conv_fp32");
 
     ASSERT_TRUE(complaint.has_value());
-    EXPECT_TRUE(complaint->fatal);
     // Both halves matter to whoever reads the log: the rung that was owed, and the
     // bundle that owed it.
     EXPECT_NE(complaint->message.find(toString(VerificationDepth::VERIFIED)), std::string::npos)

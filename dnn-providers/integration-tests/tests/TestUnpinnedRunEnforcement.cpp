@@ -1,10 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// The other half of shouldEnforceClaims(): TestSupportClaimEnforcement.cpp pins the
+// The other half of shouldObserveClaims(): TestSupportClaimEnforcement.cpp pins the
 // engine-present half of the guard, but nothing else in this binary states what
 // happens when no engine was named at all. A run with no --test-engine still has to
-// finish cleanly -- it just has to enforce nothing while doing it, even when a
+// finish cleanly -- it just has to observe nothing while doing it, even when a
 // support sidecar exists and enforcement is on.
 
 #include <gtest/gtest-spi.h>
@@ -47,7 +47,7 @@ protected:
         _tempDir = _scopedDir->path();
     }
 
-    // A locator whose sidecar really exists -- everything shouldEnforceClaims()
+    // A locator whose sidecar really exists -- everything shouldObserveClaims()
     // needs except an engine under test.
     SupportClaimLocator makeLocator() const
     {
@@ -67,7 +67,7 @@ TEST_F(TestUnpinnedRunEnforcement, RunWithNoNamedEngineNeverQueriesClaimsOrRecor
 {
     using ::testing::_;
 
-    // Never asked: shouldEnforceClaims() has to fail before the sidecar is even
+    // Never asked: shouldObserveClaims() has to fail before the sidecar is even
     // opened, or this is only accidentally unenforced rather than structurally so.
     EXPECT_CALL(_mocks.claimObserver, observe(_, _, _, _, _)).Times(0);
 

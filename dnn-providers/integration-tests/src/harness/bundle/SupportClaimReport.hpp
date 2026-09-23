@@ -66,10 +66,9 @@ struct CoverageUpdate
     bool queried = false; ///< bump graphsQueried
     bool noApplicableClaim = false; ///< bump graphsWithNoApplicableClaim
     bool notOpened = false; ///< bump graphsNotOpened
-    /// A sidecar exists and claim checking is on, but the query never happened. The
-    /// run-level guard only fires when *no* graph anywhere was queried, so a partial
-    /// gap needs its own signal. Under enforcement this fails the individual test;
-    /// under report mode the caller demotes it to a warning.
+    /// A sidecar exists and this run was meant to read it, but the query never
+    /// happened. The run-level guard only fires when *no* graph anywhere was queried,
+    /// so a partial gap needs its own signal.
     bool missedQuery = false;
 };
 
@@ -77,16 +76,17 @@ struct CoverageUpdate
 // throwing. graphsReachedBody deliberately does not: it is true before the read and
 // is published straight to the reporter, ahead of it.
 //
-// `observationExpected` is shouldObserveClaims() -- the observe predicate, not the
-// enforce one, because report mode has to arrive at the same counters enforcement
-// would or it cannot predict it.
+// `observationExpected` is the caller's shouldObserveClaims(): this graph's claims
+// were this run's business, so a sidecar that went unread is a gap rather than a
+// bundle the run was never going to look at.
 CoverageUpdate coverageFor(const SupportObservation& observation, bool observationExpected);
 
-/// The complaint owed for a coverage gap, or nullopt when there is none. `fatal` is
-/// the caller's enforce predicate; the wording is the same either way, so a CI log
-/// reader greps one string whichever mode produced it.
-std::optional<HarnessComplaint>
-    missedQueryComplaint(const CoverageUpdate& update, std::string_view bundlePath, bool fatal);
+/// The complaint owed for a coverage gap, or nullopt when there is none. Takes no
+/// severity, and none is owed to the claim mode: a missed query is the harness failing
+/// to do the one thing it was asked to, not a claim that came out badly, so it goes red
+/// whether or not this run enforces.
+std::optional<HarnessComplaint> missedQueryComplaint(const CoverageUpdate& update,
+                                                     std::string_view bundlePath);
 
 class SupportClaimVerdicts
 {
@@ -172,9 +172,9 @@ bool verifiedNothing(const SupportClaimCoverage& coverage);
 // instead, since those are the lines the broken numbers would corrupt.
 bool countersAreConsistent(const SupportClaimCoverage& coverage);
 
-// `claims` only labels the header. Report and enforce produce byte-identical bodies,
-// CLAIM FAILURES block included, and differ solely in the exit code -- so a scraped
-// log showing failures next to a green lane is unreadable without the label.
+// `claims` only labels the header; the body is the same either way. Taken as an
+// argument rather than read from TestConfig so the summary can be rendered without a
+// singleton, and so the label cannot disagree with the mode the caller ran under.
 void printSupportClaimSummary(const SupportClaimCoverage& coverage,
                               const SupportClaimVerdicts& verdicts,
                               ClaimMode claims,

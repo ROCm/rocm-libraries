@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,8 +40,8 @@ CoverageUpdate coverageFor(const SupportObservation& observation, bool observati
     return update;
 }
 
-std::optional<HarnessComplaint>
-    missedQueryComplaint(const CoverageUpdate& update, std::string_view bundlePath, bool fatal)
+std::optional<HarnessComplaint> missedQueryComplaint(const CoverageUpdate& update,
+                                                     std::string_view bundlePath)
 {
     if(!update.missedQuery)
     {
@@ -48,9 +49,8 @@ std::optional<HarnessComplaint>
     }
 
     return HarnessComplaint{std::string("support claims exist for ") + std::string(bundlePath)
-                                + " but were never queried; enforcement would have passed "
-                                  "without checking them",
-                            fatal};
+                            + " but were never queried; enforcement would have passed "
+                              "without checking them"};
 }
 
 bool verifiedNothing(const SupportClaimCoverage& coverage)
@@ -78,22 +78,21 @@ bool countersAreConsistent(const SupportClaimCoverage& coverage)
 namespace
 {
 
-// OFF is here for completeness rather than because production reaches it: with
-// claims off nothing seeds the counters, so the early return below fires first.
+// Both modes print the same tallies, so the header is the only thing telling a reader
+// whether the numbers below cost the run anything.
 std::string_view modeLabel(ClaimMode claims)
 {
     switch(claims)
     {
     case ClaimMode::ENFORCE:
         return " (ENFORCING)";
-    case ClaimMode::REPORT:
-        return " (REPORT ONLY - failures below are not fatal)";
-    case ClaimMode::OFF:
-        return " (CLAIM CHECKING OFF)";
+    case ClaimMode::REPORT_ONLY:
+        return " (REPORT ONLY -- NOT ENFORCED)";
     default:
-        // A mode added without a label here would otherwise print a bare header, which
-        // is the exact ambiguity this label exists to remove. Say so instead.
-        return " (UNLABELLED MODE)";
+        // A header that misdescribes the run is worse than no header: every tally
+        // below it is then read in the wrong mode. Throwing keeps a value that is not
+        // a ClaimMode from being labelled as one.
+        throw std::logic_error("printSupportClaimSummary: unhandled ClaimMode");
     }
 }
 

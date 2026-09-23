@@ -30,9 +30,9 @@ public:
     IVerificationReporter(IVerificationReporter&&) = delete;
     IVerificationReporter& operator=(IVerificationReporter&&) = delete;
 
-    /// Applies one graph's coverage update to the run counters. `missedQuery` is
-    /// not published here: it is a harness bug, and the caller raises it as a GTest
-    /// failure under enforcement and a warning under report mode instead.
+    /// Applies one graph's coverage update to the run counters. `missedQuery` is not
+    /// published here: it is a harness bug rather than a coverage fact, and the
+    /// caller raises it as a GTest failure instead.
     virtual void recordCoverage(const CoverageUpdate& update) = 0;
 
     /// One claim-bearing graph survived --gtest_filter. Separate from recordCoverage

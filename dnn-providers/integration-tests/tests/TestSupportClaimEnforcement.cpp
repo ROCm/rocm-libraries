@@ -93,7 +93,7 @@ protected:
         return fixtures::loadBundle(_tempDir, name, includeGoldenOutput);
     }
 
-    // A locator whose sidecar really exists, so shouldEnforceClaims() is satisfied.
+    // A locator whose sidecar really exists, so shouldObserveClaims() is satisfied.
     SupportClaimLocator makeLocator() const
     {
         const auto path = _tempDir / "Bundle.support.json";
@@ -165,31 +165,6 @@ protected:
 
         IntegrationBundleVerificationHarness harness(
             _mocks.dependencies(testing_support::hostPolicy(mode, ClaimMode::ENFORCE)),
-            makeEngineUnderTest());
-        drive(harness, loadBundle("Bundle", includeGoldenOutput), results);
-    }
-
-    // The same run under report mode: identical query, identical verdicts, but a
-    // broken claim is counted rather than failed. Deliberately shares run()'s wiring
-    // so a difference between the two can only come from the policy.
-    void runReporting(VerificationMode mode,
-                      SupportObservation observation,
-                      bool includeGoldenOutput,
-                      bool engineSucceeds,
-                      ::testing::TestPartResultArray* results)
-    {
-        using ::testing::_;
-        using ::testing::Return;
-
-        ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
-            .WillByDefault(Return(std::move(observation)));
-        testing_support::engineWrites(_mocks.engineRunner,
-                                      &fixtures::writeOutput,
-                                      engineSucceeds ? fixtures::K_OUTPUT_VALUE
-                                                     : fixtures::K_OUTPUT_VALUE + 100.0f);
-
-        IntegrationBundleVerificationHarness harness(
-            _mocks.dependencies(testing_support::hostPolicy(mode, ClaimMode::REPORT)),
             makeEngineUnderTest());
         drive(harness, loadBundle("Bundle", includeGoldenOutput), results);
     }
@@ -739,133 +714,6 @@ TEST_F(TestSupportClaimEnforcement, AThrowOnTheWayToTheCommitStillPublishesTheVe
 }
 
 // ---------------------------------------------------------------------------
-// Report mode: the same query, the same verdicts, and no test failure.
-//
-// Each of these inverts the enforcement test directly above it in the file. The
-// input is identical and only the policy differs, so a disagreement between the
-// pair can only come from the predicate split -- which is the whole mechanism
-// report mode is made of. Asserting that the verdict is still published matters
-// as much as asserting that nothing failed: a mode that stayed green by skipping
-// the query would pass a bare `anyFailed` check and print an empty summary, which
-// is the one outcome that makes the mode pointless.
-// ---------------------------------------------------------------------------
-
-// Inverts BrokenClaimFailsBeforeReachingTheEngine. Enforcement stops there and
-// substitutes the claim failure for the verification; report mode records the
-// same verdict and lets the graph run, because a claim the engine has stopped
-// honouring says nothing about whether the comparison still passes.
-TEST_F(TestSupportClaimEnforcement, ReportModeCountsABrokenClaimWithoutFailing)
-{
-    using ::testing::_;
-
-    ::testing::TestPartResultArray results;
-    std::vector<SupportResult> verdicts;
-    testing_support::captureVerdicts(_mocks.reporter, verdicts);
-
-    // The inversion: enforcement asserts Times(0) on this exact call.
-    EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(1);
-
-    runReporting(VerificationMode::AUTO,
-                 observed({makeVerdict(SupportVerdict::CLAIM_BROKEN)}),
-                 /*includeGoldenOutput=*/true,
-                 /*engineSucceeds=*/true,
-                 &results);
-
-    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
-
-    // A passing run must not launder the verdict. finalizeClaims() only rewrites
-    // CLAIM_ACCEPTED and UNCLAIMED_SUPPORT, so this survives to the summary's
-    // failure section -- which is the number the measurement is after.
-    ASSERT_EQ(verdicts.size(), 1u);
-    EXPECT_EQ(verdicts.front().verdict, SupportVerdict::CLAIM_BROKEN);
-}
-
-// Inverts ErroredQueryFailsBeforeReachingTheEngine. A query that could not be
-// answered is counted the same way -- it is still a cell the ladder cannot rest
-// on, and still not a reason to turn the lane red while it is being counted.
-TEST_F(TestSupportClaimEnforcement, ReportModeCountsAnErroredQueryWithoutFailing)
-{
-    ::testing::TestPartResultArray results;
-    std::vector<SupportResult> verdicts;
-    testing_support::captureVerdicts(_mocks.reporter, verdicts);
-
-    runReporting(VerificationMode::AUTO,
-                 observed({makeVerdict(SupportVerdict::QUERY_ERRORED)}),
-                 /*includeGoldenOutput=*/true,
-                 /*engineSucceeds=*/true,
-                 &results);
-
-    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
-    ASSERT_EQ(verdicts.size(), 1u);
-    EXPECT_EQ(verdicts.front().verdict, SupportVerdict::QUERY_ERRORED);
-}
-
-// Inverts UnqueriedSidecarFailsTheRun, and pins the one place report mode had to
-// demote an existing ADD_FAILURE rather than just skip one: the gap is recorded
-// identically, so the counters predict what enforcement would see, but it is a
-// warning on stderr instead of a failed test.
-TEST_F(TestSupportClaimEnforcement, ReportModeRecordsAnUnqueriedSidecarWithoutFailing)
-{
-    ::testing::TestPartResultArray results;
-    std::vector<CoverageUpdate> coverage;
-    testing_support::captureCoverage(_mocks.reporter, coverage);
-
-    runReporting(VerificationMode::AUTO,
-                 SupportObservation{SidecarState::NONE, {}},
-                 /*includeGoldenOutput=*/true,
-                 /*engineSucceeds=*/true,
-                 &results);
-
-    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
-    ASSERT_EQ(coverage.size(), 1u);
-    EXPECT_FALSE(coverage.front().queried);
-    EXPECT_TRUE(coverage.front().missedQuery)
-        << "report mode must arrive at enforcement's counters, or it cannot predict it";
-}
-
-// Inverts AcceptedBecomesConfirmedWhenTheRunPasses. Report mode does not stop at
-// the query: the run still happens and the two-phase commit still promotes. That
-// distinction is the whole point of the measurement -- accepted means the engine
-// advertises support, confirmed means the run reached the declared depth -- so a
-// report mode that only ever emitted CLAIM_ACCEPTED would answer the wrong
-// question.
-TEST_F(TestSupportClaimEnforcement, ReportModeStillPromotesAnAcceptedClaimToConfirmed)
-{
-    ::testing::TestPartResultArray results;
-    std::vector<SupportResult> verdicts;
-    testing_support::captureVerdicts(_mocks.reporter, verdicts);
-
-    runReporting(VerificationMode::GOLDEN,
-                 observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
-                 /*includeGoldenOutput=*/true,
-                 /*engineSucceeds=*/true,
-                 &results);
-
-    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
-    EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_CONFIRMED);
-}
-
-// Inverts MismatchDemotesTheClaimToFailedInUse. The run is red on its own merits
-// and stays red -- report mode promises not to fail a test *over a claim*, not to
-// suppress a comparison failure. The verdict is still demoted, which is what
-// keeps the summary's "failed in use" section honest.
-TEST_F(TestSupportClaimEnforcement, ReportModeLeavesAnUnrelatedFailureAloneAndStillDemotes)
-{
-    ::testing::TestPartResultArray results;
-    std::vector<SupportResult> verdicts;
-    testing_support::captureVerdicts(_mocks.reporter, verdicts);
-
-    runReporting(VerificationMode::GOLDEN,
-                 observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
-                 /*includeGoldenOutput=*/true,
-                 /*engineSucceeds=*/false,
-                 &results);
-
-    EXPECT_TRUE(testing_support::anyFailed(results));
-    EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_FAILED_IN_USE);
-}
-
-// ---------------------------------------------------------------------------
 // The two counters the summary subtracts to attribute a shortfall.
 //
 // Everything above asserts on what the harness published *given* that a body ran.
@@ -904,30 +752,32 @@ TEST_F(TestSupportClaimEnforcement, ArchSkippedBundleStillCountsAsSelected)
     ASSERT_TRUE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
 }
 
-// Claims off touches neither counter, so a run with no claim flags cannot leave the
-// summary a partial tally to reconcile.
-TEST_F(TestSupportClaimEnforcement, ClaimsOffCountsNeitherSelectedNorReached)
+// A report-only run reads the same sidecars and needs the same denominators; only the
+// cost of a bad verdict differs. Counting less here would make the summary a run
+// cannot fail on also a summary it cannot read.
+TEST_F(TestSupportClaimEnforcement, ReportOnlyCountsBothSelectedAndReached)
 {
     ::testing::TestPartResultArray results;
 
-    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(0);
-    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(0);
+    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(1);
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(1);
 
     IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::OFF)),
+        _mocks.dependencies(
+            testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::REPORT_ONLY)),
         makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 }
 
 // Both bumps go through shouldObserveClaims(), which needs an engine -- the same
 // thing registration needs before it seeds graphsWithClaims. Key either bump on the
-// sidecar alone and report mode without --test-engine reports zero graphs with
-// claims beside a positive selected count, which the summary then reads as a gap it
-// must explain and attributes to a harness defect. It is a missing flag.
+// sidecar alone and the two disagree: zero graphs with claims beside a positive
+// selected count, which the summary reads as a gap it must explain and attributes to
+// a harness defect. It is a missing flag.
 //
-// Nothing is lost by declining to count here: --enforce-support-claims exits
-// non-zero without --test-engine, and a named engine that did not load exits too,
-// both before a body runs. See countersAreConsistent() for the invariant this keeps.
+// Nothing is lost by declining to count here: a run that names no engine has nothing
+// to check claims against, and a named engine that did not load exits non-zero before
+// a body runs. See countersAreConsistent() for the invariant this keeps.
 TEST_F(TestSupportClaimEnforcement, MissingEngineCountsNeitherSelectedNorReached)
 {
     ::testing::TestPartResultArray results;

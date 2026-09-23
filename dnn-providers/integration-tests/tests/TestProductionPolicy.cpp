@@ -44,30 +44,16 @@ TEST_F(TestProductionPolicy, EveryFieldMirrorsItsOwnConfigGetter)
     const HarnessPolicy policy = productionPolicy(TensorPlacement::DEVICE);
 
     EXPECT_EQ(policy.mode, TestConfig::get().getVerificationMode());
-    // The one field fed by a helper rather than a getter. Wiring only -- the
-    // precedence inside that helper is pinned by EnforcementSubsumesReporting below,
-    // which this fixture cannot reach: the singleton is initialized with both flags
-    // false, so claimMode() here can only ever answer OFF.
+    // The one field fed by a helper rather than a getter, and the assertion is
+    // wiring only: this fixture initializes the singleton with the flag false, so
+    // both sides can only ever answer OFF. What it does catch is productionPolicy()
+    // growing a second opinion about the mode instead of deferring to claimMode() --
+    // the header main.cpp prints comes from that same call, and the two disagreeing
+    // would label the run with a mode it did not use.
     EXPECT_EQ(policy.claims, claimMode());
     EXPECT_EQ(policy.arch, TestConfig::get().getCurrentArch());
     EXPECT_EQ(policy.platform, currentPlatform());
     EXPECT_EQ(policy.deviceVramMb, TestConfig::get().getCurrentDeviceVramMb());
-}
-
-// The flag-pair overload, which reads nothing, so every combination is reachable.
-// main.cpp calls claimMode() for the summary header and the harness calls it through
-// productionPolicy(); both are told not to re-derive this rule, which leaves it with
-// exactly one definition and, without this test, no coverage at all.
-TEST(TestClaimMode, EnforcementSubsumesReporting)
-{
-    EXPECT_EQ(claimMode(false, false), ClaimMode::OFF);
-    EXPECT_EQ(claimMode(false, true), ClaimMode::REPORT);
-    EXPECT_EQ(claimMode(true, true), ClaimMode::ENFORCE);
-
-    // Unreachable from the CLI: TestConfig::reportSupportClaims() ORs the enforce
-    // flag in, so enforcement always arrives with reporting already set. Pinned
-    // anyway -- the rule is "enforce wins", not "enforce wins when report agrees".
-    EXPECT_EQ(claimMode(true, false), ClaimMode::ENFORCE);
 }
 
 TEST_F(TestProductionPolicy, PlacementComesFromTheArgumentNotFromConfig)

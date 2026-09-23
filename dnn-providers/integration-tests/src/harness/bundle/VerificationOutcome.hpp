@@ -186,14 +186,12 @@ inline std::string describeOutcome(const VerificationOutcome& outcome, Verificat
 /// from VerificationOutcome: that is the engine's result and becomes the test's
 /// disposition, while this is the harness objecting to how the test was conducted.
 ///
-/// `fatal` because the same grievance costs differently by mode: an unqueried
-/// sidecar is a hole in enforcement, but failing over it in report mode would break
-/// the one promise report mode makes. Whoever knows the mode sets it; the raise site
-/// stays uniform.
+/// Every complaint is a failure. A grievance the harness is willing to print and let
+/// the run stay green is a grievance nobody acts on, so the type carries no severity
+/// to get wrong -- producing one is the decision, and the raise site has none left.
 struct HarnessComplaint
 {
     std::string message;
-    bool fatal = true;
 };
 
 /// The complaint, if this outcome went green without reaching `required` -- every
@@ -213,8 +211,7 @@ inline std::optional<HarnessComplaint> shallowPassComplaint(const VerificationOu
     }
 
     return HarnessComplaint{std::string("test passed without reaching ") + toString(required)
-                                + " for " + std::string(bundlePath),
-                            true};
+                            + " for " + std::string(bundlePath)};
 }
 
 } // namespace hipdnn_integration_tests::bundle

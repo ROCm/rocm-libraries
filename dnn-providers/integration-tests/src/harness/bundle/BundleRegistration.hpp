@@ -409,17 +409,18 @@ inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool coun
 /// the engine named by --test-engine.
 inline void registerBundleTests()
 {
-    // Either mode needs a named engine to check against, so a run without
-    // --test-engine has nothing to count; seeding the coverage counters anyway would
-    // print a summary reporting every claim on disk as unenforced by a run that was
-    // never going to enforce one.
+    // A named engine is what makes a claim checkable, so a run without --test-engine
+    // has nothing to count; seeding the coverage counters anyway would print a summary
+    // reporting every claim on disk as unchecked by a run that was never going to check
+    // one. Not keyed on the claim mode: a report-only run reads the same sidecars and
+    // needs the same denominators, and only the cost of a broken claim differs.
     //
-    // reportSupportClaims() already folds in enforcement, so this covers both: the
-    // counters have to be seeded identically under report mode or graphsFound and
-    // graphsWithClaims come back zero, the summary early-returns, and the mode
-    // prints nothing -- which is the only thing it exists to do.
+    // This is the same predicate the harness applies per graph, minus the sidecar
+    // check it cannot do this early. Registration seeds the denominators the summary
+    // divides by, so a mismatch here does not merely miscount -- it reattributes
+    // every gap line to the wrong cause.
     const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();
-    const bool observing = TestConfig::get().reportSupportClaims() && engineUnderTest.has_value();
+    const bool observing = engineUnderTest.has_value();
 
     // Write mode needs `graphsFound` as the denominator for what the observer
     // saw: SetUp() can skip a bundle before the observer runs, and such a graph
