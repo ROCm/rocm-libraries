@@ -517,8 +517,7 @@ int main(int argc, char** argv)
         options.pythonExecutable       = argv[1];
         options.tensileSourceDirectory = argv[2];
         options.pythonPath             = argv[3];
-        options.configPath             = argv[4];
-        require(options.configPath != "-", "This sample requires an explicit YAML recipe");
+        options.configPath             = std::string(argv[4]) == "-" ? "" : argv[4];
         options.outputPath             = argv[5];
         options.architecture           = argv[6];
         options.cxxCompiler            = argv[7];

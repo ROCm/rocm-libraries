@@ -315,16 +315,6 @@ try
     arg.init(); // set all defaults
     const char* tuningEnv          = getenv("HIPBLASLT_TUNING_FILE");
     const char* tuningMaxWorkSpace = getenv("HIPBLASLT_TUNING_USER_MAX_WORKSPACE");
-    if(tuningEnv)
-    {
-        bool tuning_success = tuning_path_compare_git_version(tuningEnv);
-        if(tuning_success)
-        {
-            hipblaslt_cout << "HIPBLASLT_TUNING_FILE is the correct setting." << std::endl;
-        }
-        else
-            return 1;
-    }
 
     options_description desc("hipblaslt-bench command line options");
     desc.add_options()
@@ -546,6 +536,14 @@ try
          "Adaptive timing: record one rel_iqr reading for the stability fallback every N "
          "samples (>= 1)")
 
+        ("jit-gemm",
+         bool_switch(&hipblaslt_bench_options::jit_gemm())->default_value(false),
+         "Predict and generate one GEMM solution, then benchmark it through the normal API.")
+
+        ("jit-output-dir",
+         value<std::string>(&hipblaslt_bench_options::jit_output_dir())->default_value(""),
+         "Parent directory for retained JIT recipes and artifacts (default: system temporary directory).")
+
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
          "Use different algorithm search API. Options: heuristic, all, index.")
@@ -731,6 +729,43 @@ try
     {
         hipblaslt_cout << desc << std::endl;
         return 0;
+    }
+
+    if(hipblaslt_bench_options::jit_gemm())
+    {
+#ifndef HIPBLASLT_ENABLE_JIT_GEMM
+        throw std::invalid_argument("--jit-gemm requires a build with HIPBLASLT_ENABLE_JIT_GEMM=ON");
+#else
+        if(tuningEnv)
+            throw std::invalid_argument("--jit-gemm cannot be combined with HIPBLASLT_TUNING_FILE");
+        if(datafile)
+            throw std::invalid_argument("--jit-gemm does not support datafile mode");
+        if(grouped_gemm || arg.batch_mode != 0)
+            throw std::invalid_argument("--jit-gemm supports only non-grouped strided GEMM");
+        if(algo_method_str != "heuristic" || arg.requested_solution_num != 1
+           || (vm.count("solution_index") && !vm["solution_index"].defaulted()))
+            throw std::invalid_argument(
+                "--jit-gemm prepares one generated solution; use --algo_method heuristic, "
+                "--requested_solution 1, and no --solution_index");
+        const auto nonzero = [](uint32_t value) { return value != 0; };
+        if(std::any_of(gsu_vector.begin(), gsu_vector.end(), nonzero)
+           || std::any_of(wgm_vector.begin(), wgm_vector.end(), nonzero))
+            throw std::invalid_argument("--jit-gemm cannot be combined with --splitk or --wgm tuning");
+#endif
+    }
+    else if(!hipblaslt_bench_options::jit_output_dir().empty())
+        throw std::invalid_argument("--jit-output-dir requires --jit-gemm");
+
+    // Tuning validation may create its output file; reject JIT conflicts first.
+    if(tuningEnv)
+    {
+        bool tuning_success = tuning_path_compare_git_version(tuningEnv);
+        if(tuning_success)
+        {
+            hipblaslt_cout << "HIPBLASLT_TUNING_FILE is the correct setting." << std::endl;
+        }
+        else
+            return 1;
     }
 
     // Reject misuse rather than silently ignore, so a misconfigured run never
@@ -1024,11 +1059,14 @@ try
     if(arg.b_type == HIPBLASLT_DATATYPE_INVALID)
         throw std::invalid_argument("Invalid value for --b_type " + b_type);
 
-    arg.c_type = c_type == "" ? prec : string_to_hip_datatype(c_type);
+    // JIT uses FP32 output by default; an explicit precision or tensor type wins.
+    const auto outputPrec
+        = hipblaslt_bench_options::jit_gemm() && vm["precision"].defaulted() ? HIP_R_32F : prec;
+    arg.c_type = c_type == "" ? outputPrec : string_to_hip_datatype(c_type);
     if(arg.c_type == HIPBLASLT_DATATYPE_INVALID)
         throw std::invalid_argument("Invalid value for --c_type " + c_type);
 
-    arg.d_type = d_type == "" ? prec : string_to_hip_datatype(d_type);
+    arg.d_type = d_type == "" ? outputPrec : string_to_hip_datatype(d_type);
     if(arg.d_type == HIPBLASLT_DATATYPE_INVALID)
         throw std::invalid_argument("Invalid value for --d_type " + d_type);
 

@@ -1,7 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-gemm.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
+#include "hipblaslt-jit-gemm-predictor.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt-functions.h"
 #include "rocblaslt.h"
@@ -17,7 +19,6 @@
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
-#include "hipblaslt-jit-gemm.hpp"
 #include <iostream>
 #include <limits>
 #include <mutex>
@@ -421,10 +422,31 @@ namespace hipblaslt_ext::experimental
             require(mxScaleFormat != -2,
                     "Unsupported MX scale layout: gfx950 requires block32 UE8M0 pre-swizzled "
                     "scales (scale mode 1001); gfx1250 requires its natural block-scale modes");
-            require(!options.configPath.empty(), "JIT selection requires an explicit YAML recipe");
-            info.configPath = fs::absolute(options.configPath).string();
-            generate(options);
-            auto context = loadGeneratedBundle(options, properties, device);
+            const bool predict = options.configPath.empty();
+            if(predict)
+            {
+                const auto hardware = TensileLite::hip::GetDevice(properties, device);
+                options.configPath  = predictJitGemmConfig(
+                    *ExtractProblemGemm(opaque),
+                    *hardware,
+                    options,
+                    info,
+                    mxScaleFormat == 1 ? "HostPreSwizzle" : "InMemorySwizzle",
+                    rocblaslt_scaling_format_to_string(rocDesc->scaleAType),
+                    rocblaslt_scaling_format_to_string(rocDesc->scaleBType));
+            }
+            else
+                info.configPath = fs::absolute(options.configPath).string();
+            generate(options, predict ? "Tensile.JitGemm" : "Tensile.SingleSolution");
+            if(predict)
+            {
+                Tree prediction;
+                boost::property_tree::read_json(options.outputPath + ".prediction.json",
+                                                prediction);
+                uniqueKeys(prediction);
+                info.prediction = field(prediction, "summary");
+            }
+            auto context      = loadGeneratedBundle(options, properties, device);
             require(
                 detail::jitScaleLayoutMatches(*context, rocDesc->scaleAType, rocDesc->scaleBType),
                 "Generated solution MX scale layout differs from the supplied descriptors");

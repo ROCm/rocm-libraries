@@ -1317,7 +1317,7 @@ namespace hipblaslt_ext
         };
 
         // Generate an algorithm for hipblasLtMatmul or hipblaslt_ext::Gemm execution.
-        // configPath must name the explicit YAML recipe to generate.
+        // An empty configPath requests prediction; otherwise use the supplied YAML.
         // Empty output (M=0 or N=0) returns NOT_SUPPORTED without generation:
         // no algorithm is needed for that no-op. K=0 still generates beta*C.
         // Generation is synchronous and must precede stream capture. The algorithm

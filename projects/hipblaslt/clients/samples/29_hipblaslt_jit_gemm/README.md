@@ -6,8 +6,15 @@ it. `hipblaslt_ext::experimental::getJitGemmAlgo`, declared in
 C `hipblasLtMatmul` API or the C++ extension `Gemm` API. Generation finishes
 before the application submits GPU work.
 
-`GenerateOptions::configPath` supplies an explicit YAML recipe for
-`Tensile.SingleSolution` to compile.
+The `GenerateOptions::configPath` field chooses the source of the kernel recipe.
+An empty path asks Origami to rank kernel parameters for the requested problem;
+TensileLite validates the recipes and compiles the first valid one. If Origami
+cannot model the problem or no ranked recipe is valid, TensileLite tries its
+default and native-instruction recipes. That path preserves the requested
+datatypes and records that no latency estimate was available. An explicit
+YAML path uses `Tensile.SingleSolution` to compile that exact recipe, bypassing
+prediction. [`hipblaslt-bench --jit-gemm`](../../bench/README.jit.md) uses the
+parameter-prediction path.
 
 The sample also demonstrates the separate `JitGemm` owner class. Its `prepare`
 method generates and loads one solution, and `run` submits its kernels without
@@ -21,21 +28,33 @@ JIT GEMM is a build-time opt-in feature enabled by
 header declares `getJitGemmAlgo` in either build configuration; without JIT
 enabled, the function returns `HIPBLAS_STATUS_NOT_SUPPORTED`.
 
-The enabled implementation requires the host library, Linux, ROCm, Boost
-headers, TensileLite's Python dependencies, and the local rocisa extension.
-Using an existing configured build and Python environment:
+The `jit-gemm` CMake preset configures the host library, `hipblaslt-bench`, and
+this sample without building a prebuilt device library. The build needs Linux,
+ROCm, Boost headers, TensileLite's Python dependencies, and the locally built
+rocisa extension. From the repository root, with the Python environment for
+those dependencies activated:
 
 ```bash
-cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
-  -DHIPBLASLT_ENABLE_JIT_GEMM=ON -DHIPBLASLT_ENABLE_HOST=ON \
-  -DHIPBLASLT_ENABLE_DEVICE=OFF -DGPU_TARGETS=gfx950 \
+project_root="$PWD"
+project_build="$project_root/projects/hipblaslt/build/release"
+project_python="$(command -v python)"
+
+cmake --preset jit-gemm -S "$project_root/projects/hipblaslt" -B "$project_build" \
+  -DGPU_TARGETS=gfx950 \
+  -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DPython_EXECUTABLE="$project_python" -DPython3_EXECUTABLE="$project_python"
-cmake --build "$project_build" --target _rocisa hipblaslt-jit-gemm --parallel
+cmake --build "$project_build" --target _rocisa hipblaslt-jit-gemm hipblaslt-bench --parallel
+
 export PYTHONPATH="$project_build/tensilelite/rocisa:$project_build/tensilelite:$project_root/projects/hipblaslt/tensilelite"
 ```
 
-Use the compiler and target appropriate for the local device. Generated
-bundles do not depend on a prebuilt hipBLASLt device library.
+`GPU_TARGETS` and the ROCm paths should match the local toolchain. If nanobind
+comes from a Python wheel, CMake can find it with
+`-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=ALWAYS` and
+`-Dnanobind_DIR="$(python -m nanobind --cmake_dir)"`. The import paths above let
+the generator use the checkout and its built rocisa module directly.
 
 ## Generate and run an explicit recipe
 
@@ -137,6 +156,7 @@ destruction immediately after submission. The accompanying
 `test_jit_bundle_failures.py` and `test_jit_normal_helper_failures.py` cover
 invalid manifests, metadata, modules, and symbols before GPU submission.
 
+The parameter-prediction path targets gfx90a, gfx942, gfx950, and gfx1250.
 Explicit YAML uses TensileLite's target and solution validators. Compiling
 kernels for a target checks generator and compiler support; checking numerical
 correctness requires execution on that GPU. Both runtime routes preserve the

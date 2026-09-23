@@ -16,7 +16,8 @@ if(HIPBLASLT_ENABLE_JIT_GEMM)
     find_package(Boost CONFIG REQUIRED)
     target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT_GEMM)
     target_sources(hipblaslt PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm-predictor.cpp")
     target_link_libraries(hipblaslt PRIVATE Boost::headers)
     add_executable(hipblaslt-jit-gemm
         "${PROJECT_SOURCE_DIR}/clients/samples/29_hipblaslt_jit_gemm/sample_hipblaslt_jit_gemm.cpp")
