@@ -328,6 +328,14 @@ def isStubGfxTarget(arch: str) -> bool:
   base = arch.replace(":", "-").split("-", 1)[0]
   return base == STUB_GFX_TARGET
 
+def isStubOnlyArchitecture(architecture: str) -> bool:
+  """Return True if *architecture* (raw ``;``/``_``-delimited CLI value) requests
+  only Tensile's stub gfx target (gfx000) and nothing else."""
+  if not architecture:
+    return False
+  wantedArchs = architecture.split(";") if ";" in architecture else architecture.split("_")
+  return bool(wantedArchs) and all(isStubGfxTarget(a) for a in wantedArchs)
+
 # Translate GPU targets to filter filenames in Tensile_LOGIC directory
 architectureMap = {
   'all':'_', STUB_GFX_TARGET:'none', 'fallback':'hip',
@@ -2355,8 +2363,17 @@ def splitArchs():
     return archs, cmdlineArchs
 
 
+class _DisabledAsmCaps(dict):
+  """AsmCaps entry for stub-only (gfx000) builds: no kernel will actually be
+  compiled for this ISA, so every capability queried (HasMFMA, MaxVmcnt, ...)
+  is reported as unsupported/False instead of probing the assembler."""
+  def __missing__(self, key):
+    return False
+
+
 def populateCapabilities(
-    globalParameters: Dict[str, Any], cachedAsmCaps: Dict[IsaVersion, dict], hipVer: SemanticVersion
+    globalParameters: Dict[str, Any], cachedAsmCaps: Dict[IsaVersion, dict], hipVer: SemanticVersion,
+    skipAsmProbe: bool = False,
 ):
     """Populates the assembler and archiecture capabilities based on the compiler and ISA.
 
@@ -2371,6 +2388,10 @@ def populateCapabilities(
         cachedAsmCaps: A dictionary to be populated with the assembler
             capabilities for each ISA version.
         hipVer: The hip compiler version.
+        skipAsmProbe: When True, skip invoking the assembler to derive real
+            capabilities (GetAsmCaps) and record every ISA as unsupported instead.
+            Intended for stub-only (gfx000) library generation, where no kernel
+            will actually be compiled and the probe results are never consulted.
 
     Note:
         This function modifies `globalParameters` and `cachedAsmCaps` in place.
@@ -2388,7 +2409,9 @@ def populateCapabilities(
             to_remove.append(v)
             continue
 
-        if emptyCache or not globalParameters["CacheAsmCaps"]:
+        if skipAsmProbe:
+            globalParameters["AsmCaps"][v] = _DisabledAsmCaps(SupportedISA=False)
+        elif emptyCache or not globalParameters["CacheAsmCaps"]:
             globalParameters["AsmCaps"][v] = GetAsmCaps(v, hipVer, cachedAsmCaps)
 
         globalParameters["ArchCaps"][v] = GetArchCaps(v)
@@ -2511,7 +2534,12 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
     *[int(c.split("-")[0]) for c in globalParameters["HipClangVersion"].split(".")[:3]]
   )
   cachedAsmCaps = getCapabilitiesCache(hipVersion)
-  populateCapabilities(globalParameters, cachedAsmCaps, hipVersion)
+  # "Architecture" isn't copied from config into globalParameters until after this
+  # call, so read it from config directly to detect a stub-only (gfx000) request.
+  stubOnlyArchitecture = isStubOnlyArchitecture(config.get("Architecture", ""))
+  if stubOnlyArchitecture:
+    tPrint(1, "# Requested only Tensile stub gfx target(s); skipping assembler capability probing")
+  populateCapabilities(globalParameters, cachedAsmCaps, hipVersion, skipAsmProbe=stubOnlyArchitecture)
 
   if globalParameters["PrintLevel"] >= 2:
     printCapTable(globalParameters)
