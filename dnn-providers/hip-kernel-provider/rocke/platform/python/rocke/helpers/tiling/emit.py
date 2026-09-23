@@ -133,11 +133,16 @@ def _positions(b: Any, window: TensorWindow, coords: tuple[Any, ...]) -> list[An
     return [b.add(_as_value(b, window.origin[axis]), coord) for axis, coord in enumerate(coords)]
 
 def _address(b: Any, window: TensorWindow, positions: list[Any]) -> Any:
-    """The strided element address from precomputed positions: sum(position * stride)."""
+    """The strided element address from precomputed positions: sum(position * stride), plus the
+    fixed offset of any batch axes already reduced away by ``TensorWindow.at_index`` (``pinned``)."""
     address: Any = None
     for axis, position in enumerate(positions):
         stride = window.tensor.strides[axis]
         term = position if stride == 1 else b.mul(position, b.const_i32(stride))
+        address = term if address is None else b.add(address, term)
+    for index, stride in window.pinned:
+        pos = _as_value(b, index)
+        term = pos if stride == 1 else b.mul(pos, b.const_i32(stride))
         address = term if address is None else b.add(address, term)
     return address
 
@@ -166,15 +171,23 @@ def _zero_scalar(b: Any, dtype: Any) -> Any:
 
 _WIDE_OK = {"f16", "bf16", "f32", "i32"}   # dtypes global_load_vN / smem_load_vN vectorize
 
-def _contiguous_run(layout: WarpDistributionEncoding, window: TensorWindow, dtype: Any) -> int:
+def _contiguous_run(
+    tile_desc: TileDesc, window: TensorWindow, dtype: Any, is_lds: bool
+) -> int:
     """Width of the innermost stride-1 register run -> a single WIDE load; else 1 (scalar).
 
     The innermost register bucket varies fastest in the register index; if it maps to the tensor's
     stride-1 axis then those registers are memory-contiguous and can be one `global_load_vN` /
-    `smem_load_vN`. Only when a clip is impossible (a wide load can't partially clip) and the width is
-    a supported vector size for the dtype (8/4/2, largest that divides the run)."""
-    if window.bounds is not None:
-        return 1
+    `smem_load_vN`. Width is the largest supported vector size for the dtype (8/4/2) dividing the run.
+
+    A wide GLOBAL load is UNMASKED, so it is emitted only for a tile that is FULLY IN BOUNDS on the
+    stride-1 run axis: the effective clip there (`window.bounds[axis]` or the tensor length) must be a
+    COMPILE-TIME multiple of the tile extent, so no tile overhangs the tensor. A ragged/odd tensor, or
+    a runtime clip that can't be proven aligned, falls to the SCALAR path (which masks against the
+    length) -- never an out-of-bounds wide read (the page-fault risk Principle 4 kills). LDS is EXEMPT:
+    its allocation is the full tile by construction (seam invariant a), so a wide LDS access never
+    overhangs; the gate applies to global only."""
+    layout = tile_desc.layout
     if dtype.name not in _WIDE_OK:
         return 1
     majors, minors = layout.register_to_rh_major, layout.register_to_rh_minor
@@ -183,6 +196,25 @@ def _contiguous_run(layout: WarpDistributionEncoding, window: TensorWindow, dtyp
     axis = majors[-1] - 1                      # innermost register bucket's X-dim -> tensor axis
     if axis < 0 or window.tensor.strides[axis] != 1:
         return 1
+    if not is_lds:
+        # Fully-in-bounds gate (global only): a wide load is UNMASKED, so it is safe only if the tile
+        # overhangs NO axis it spans -- not just the stride-1 run axis. A wide K-run at a fixed but
+        # OOB M row (odd M, aligned K) is just as out of bounds as an overhanging run. So EVERY axis's
+        # effective clip must be a compile-time multiple of the tile extent on that axis; otherwise
+        # some tile overhangs and the unmasked read faults -> scalarize (the masked path is safe).
+        # PRECONDITION: tile origins are on the tile grid. This gate proves the tensor EXTENT is a tile
+        # multiple; combined with grid-aligned origins (every caller: block_id*tile), no tile overhangs.
+        # A mid-tile origin (attention) can overhang even an aligned tensor -- gate that when it lands.
+        if len(tile_desc.shape) != len(window.tensor.lengths):
+            raise ValueError(
+                f"tile rank {len(tile_desc.shape)} != tensor rank {len(window.tensor.lengths)} -- "
+                f"the wide-load bounds check needs matching ranks (reduce an N-D tensor with at_index)"
+            )
+        for ax in range(len(window.tensor.lengths)):
+            clip = window.bounds[ax] if window.bounds is not None and window.bounds[ax] is not None \
+                else window.tensor.lengths[ax]
+            if not (isinstance(clip, int) and clip % tile_desc.shape[ax] == 0):
+                return 1
     length = layout.bucket_length(majors[-1], minors[-1])
     max_vw = 16 // _BYTE_WIDTH[dtype.name]   # one load = dwordx4 = 16 bytes; longer runs -> N loads
     for vw in (16, 8, 4, 2):
@@ -256,9 +288,15 @@ def load_fragment(
     `coherency` reserved.
     """
     dtype = window.tensor.dtype
+    # N-D boundary gate: a tensor that DECLARES axis_roles is being loaded as a typed MMA operand, so
+    # it must be the rank-2 one-free-one-contraction (EITHER order -- A is (M,K), B is (K,N)) an
+    # operand requires -- reduce batch axes (at_index / squeeze) BEFORE loading. A positional rank-2
+    # tensor (no roles) is unaffected.
+    if window.tensor.axis_roles is not None:
+        window.tensor.assert_mma_operand()
     align = _align_of(dtype)
     lds = _is_lds(ptr)
-    vw = _contiguous_run(tile_desc.layout, window, dtype)   # >1 -> one wide load per run
+    vw = _contiguous_run(tile_desc, window, dtype, lds)   # >1 -> one wide load per run
     # A custom swizzle relocates whole units of its granularity (vw_elems), capped + range-checked to
     # [1, natural run]. The built-in bool swizzle preserves its run.
     if lds:
@@ -289,8 +327,19 @@ def load_fragment(
             loaded = b.global_load(ptr, address, dtype, align=align)
         else:
             if pad != 0:
+                # The clip pad must be the compute stage's additive IDENTITY. On a CONTRACTION-axis
+                # operand (a MAC input) that identity is 0 -- a non-zero pad would add phantom terms
+                # to the sum. Forbid it outright; a general per-stage pad (e.g. -inf for max) is
+                # reserved for the reduction stages (Step 7).
+                roles = window.tensor.axis_roles
+                if roles is not None and "contraction" in roles:
+                    raise ValueError(
+                        f"non-zero clip pad on a contraction-axis operand corrupts the MAC -- the "
+                        f"additive identity is 0 (pad={pad!r})"
+                    )
                 raise NotImplementedError(
-                    f"non-zero pad (constant-value fill) is reserved -- pad={pad!r}"
+                    f"non-zero clip pad (non-GEMM stage identity) is reserved for the reduction "
+                    f"stages -- pad={pad!r}"
                 )
             if zero is None:
                 zero = _zero_scalar(b, dtype)
@@ -323,7 +372,7 @@ def store_fragment(
     lds = _is_lds(ptr)
     # Wide LDS stores when the innermost register run is contiguous (ds_write_b{32,64,128}); the
     # global store stays scalar (the C epilogue is one-shot + may clip/cast).
-    vw = _contiguous_run(fragment.tile_desc.layout, window, out_dtype) if lds else 1
+    vw = _contiguous_run(fragment.tile_desc, window, out_dtype, is_lds=True) if lds else 1
     # A custom swizzle relocates whole units of its granularity (vw_elems) -> the access is capped and
     # range-checked to [1, natural run]. The built-in bool swizzle preserves its run.
     if lds:

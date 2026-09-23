@@ -8,39 +8,41 @@ import everything they need from this one module (``from rocke.helpers.tiling im
 make_tile_desc, make_tensor_desc, ...``) -- never by reaching into submodules. The raw
 ``WarpDistributionEncoding`` integer sequences stay behind the named factories.
 
-The surface, grouped by role (each name is re-exported from the module that owns it):
+The surface is grouped by AUDIENCE tier. START HERE: to WRITE a kernel, read
+``docs/tiling_api_surface.md`` (its sec 2 is a complete minimal ``load -> mma -> store`` body) and reach
+for the FRONT DOOR names below. To understand WHY the surface is shaped this way -- and the rules for
+adding to it -- read ``docs/tiling_api_contract.md``.
 
-MMA operation -- target-aware MMA resolution + the atom-grid driver:
-    ``TileMma``          resolve a concrete intrinsic + A/B/C layouts for a bound target.
-    ``Tiling``           the tile-knobs policy (atom_shape override, iteration order).
+FRONT DOOR -- what you reach for by default:
+    ``TileMma``   resolve a concrete intrinsic + A/B/C layouts and drive the atom grid.
+    ``make_tensor_desc`` / ``make_window``   where a tensor sits + which sub-box a tile covers.
+    ``make_tile_desc``   author a custom (non-MMA) tile layout; for MMA operands use
+        ``mma.a_desc`` / ``b_desc`` / ``c_desc``.
+    ``make_fragment``    a ``TileDesc`` bound to a dtype + its SSA registers.
+    ``load_fragment`` / ``store_fragment`` / ``fill_fragment`` / ``transform_fragment``   the IR verbs
+        (these thread the IRBuilder ``b``).
 
-Traits -- the MMA intrinsic SSOT:
-    ``load_mma_traits``  load + validate the mma_traits.json catalog.
-    ``MmaTraits`` / ``MmaTraitsCatalog`` / ``DEFAULT_TRAITS_PATH``.
+TOOLBOX -- the primitives the front door composes, callable directly for finer control:
+    ``Tiling``   optional knobs for ``TileMma`` (pin the atom / the subtile order); not needed by default.
+    ``TileMmaPlan`` / ``TileMmaDriver``   the design + iteration halves ``TileMma`` composes -- reach for
+        these to hold the resolved layouts (plan) or drive the atom grid (driver) yourself.
+    ``LayoutStyle`` / ``CanonicalStyle`` / ``InterleavedStyle``   the operand-layout STRATEGY -- pass
+        ``style=`` to pick a profile (default canonical), or subclass to add one (docs/tiling_api_contract.md).
+    ``cooperative_load_desc`` / ``cooperative_load_width`` / ``lds_tile_alloc`` / ``lds_store`` /
+        ``lds_read``   the style-agnostic global->LDS memory bridge a style composes (full-tile alloc,
+        unmasked LDS verbs, extent-vs-allocation guard).
+    ``TensorDesc`` / ``TensorWindow`` / ``TileDesc`` / ``Fragment`` / ``fragment_length``   the value types.
+    ``load_mma_traits`` / ``MmaTraits`` / ``MmaTraitsCatalog`` / ``DEFAULT_TRAITS_PATH``   the atom SSOT.
+    ``describe`` / ``render_forward_map`` / ``render_inverse_map``   see a layout instead of decoding it.
+    ``emit_tensor_coordinates``   lower a desc to per-lane tensor coordinates.
+    ``classify_transform`` / ``describe_edge`` / ``diagnose_k_match`` / ``operand_soundness`` /
+        ``mma_pair_compatible`` / ``reorder_between`` / ``derive_c_distribution``   the read-only
+        transform observers -- classify an edge, check MMA soundness, derive C (never mutate/emit).
+    ``WarpDistributionEncoding``   the raw coordinate-transform encoding (extension substrate; rarely
+        built by hand).
 
-Authoring -- the human-approachable, quantity-major layout factory:
-    ``make_tile_desc``   author a ``TileDesc`` from axes-ordered geometric quantities.
-
-Memory model -- where a tensor sits + which sub-box a tile covers (pure data, no IRBuilder):
-    ``TensorDesc`` / ``make_tensor_desc``   ptr-free lengths + strides + dtype.
-    ``TensorWindow`` / ``make_window``       a desc positioned at an origin (+ optional clip).
-
-Register model -- where each element lives in lanes/registers (pure data, no IRBuilder):
-    ``TileDesc``         a logical-matrix -> per-lane-register layout (shape + encoding).
-    ``Fragment`` / ``make_fragment``         a TileDesc bound to a dtype + its SSA registers.
-    ``fragment_length``  per-lane register count for an encoding.
-
-Encoding substrate -- the foundational value type the above speak in:
-    ``WarpDistributionEncoding``   the raw coordinate-transform encoding (rarely built by hand).
-
-IR verbs -- the lowering layer (these thread the IRBuilder ``b``):
-    ``load_fragment`` / ``store_fragment`` / ``fill_fragment`` / ``emit_tensor_coordinates``.
-
-Reflection -- see a layout instead of decoding it:
-    ``describe`` / ``render_forward_map`` / ``render_inverse_map``.
-
-Internal machinery (``RegisterMapper``, the a/b/c warp-encoding calculators) is intentionally
-NOT re-exported here; import it from its own module if you are extending the layer.
+MACHINERY -- internal, NOT re-exported (``RegisterMapper``, the warp-encoding calculators, the transform
+solver core): import from its own module only if you are extending the layer.
 """
 
 from __future__ import annotations
@@ -55,7 +57,22 @@ from .emit import (
 from .encoding import WarpDistributionEncoding
 from .fragments import Fragment, TileDesc, fragment_length, make_fragment
 from .layouts import make_tile_desc
-from .mma import TileMma, Tiling
+from .mma import (
+    TileMma,
+    Tiling,
+    TileMmaPlan,
+    TileMmaDriver,
+    LayoutStyle,
+    CanonicalStyle,
+    InterleavedStyle,
+)
+from .memory import (
+    cooperative_load_desc,
+    cooperative_load_width,
+    lds_tile_alloc,
+    lds_store,
+    lds_read,
+)
 from .visualization import describe, render_forward_map, render_inverse_map
 from .traits import (
     DEFAULT_TRAITS_PATH,
@@ -63,39 +80,62 @@ from .traits import (
     MmaTraitsCatalog,
     load_mma_traits,
 )
-from .transforms import transform_fragment
+from .transforms import (
+    transform_fragment,
+    classify_transform,
+    describe_edge,
+    diagnose_k_match,
+    operand_soundness,
+    mma_pair_compatible,
+    reorder_between,
+    derive_c_distribution,
+)
 
 __all__ = [
-    # MMA operation
+    # ---- FRONT DOOR: reach for these by default -------------------------------------------------
     "TileMma",
-    "Tiling",
-    # Traits
-    "load_mma_traits",
-    "MmaTraits",
-    "MmaTraitsCatalog",
-    "DEFAULT_TRAITS_PATH",
-    # Authoring
-    "make_tile_desc",
-    # Memory model
-    "TensorDesc",
     "make_tensor_desc",
-    "TensorWindow",
     "make_window",
-    # Register model
-    "TileDesc",
-    "Fragment",
+    "make_tile_desc",
     "make_fragment",
-    "fragment_length",
-    # Encoding substrate
-    "WarpDistributionEncoding",
-    # IR verbs
     "load_fragment",
     "store_fragment",
     "fill_fragment",
     "transform_fragment",
-    "emit_tensor_coordinates",
-    # Reflection
+    # ---- TOOLBOX: the primitives the front door composes, callable directly ---------------------
+    "Tiling",
+    "TileMmaPlan",
+    "TileMmaDriver",
+    # layout styles (the operand-layout strategy seam) + the cooperative memory bridge they compose
+    "LayoutStyle",
+    "CanonicalStyle",
+    "InterleavedStyle",
+    "cooperative_load_desc",
+    "cooperative_load_width",
+    "lds_tile_alloc",
+    "lds_store",
+    "lds_read",
+    "TensorDesc",
+    "TensorWindow",
+    "TileDesc",
+    "Fragment",
+    "fragment_length",
+    "load_mma_traits",
+    "MmaTraits",
+    "MmaTraitsCatalog",
+    "DEFAULT_TRAITS_PATH",
     "describe",
     "render_forward_map",
     "render_inverse_map",
+    "emit_tensor_coordinates",
+    # transform observers (read-only analysis): classify an edge, check MMA soundness, derive C
+    "classify_transform",
+    "describe_edge",
+    "diagnose_k_match",
+    "operand_soundness",
+    "mma_pair_compatible",
+    "reorder_between",
+    "derive_c_distribution",
+    "WarpDistributionEncoding",  # extension substrate (rarely built by hand)
+    # ---- MACHINERY is intentionally NOT re-exported (see the module docstring) ------------------
 ]

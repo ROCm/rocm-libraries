@@ -479,7 +479,10 @@ def access_width(tile_desc, strides, dtype_name, lds_swizzle):
 
     _Win.tensor.strides = strides
     _Win.tensor.dtype = type("dt", (), {"name": dtype_name})
-    vw = _contiguous_run(tile_desc.layout, _Win, _Win.tensor.dtype)
+    # is_lds=True: this models the descriptor's INTRINSIC contiguous-run width; the global
+    # fully-in-bounds clip gate is a runtime-window concern (needs lengths, which this width model
+    # does not carry) and does not apply to the LDS access this records.
+    vw = _contiguous_run(tile_desc, _Win, _Win.tensor.dtype, is_lds=True)
     if lds_swizzle:
         vw = _swizzle_vw(lds_swizzle, vw, _ALIGN)
     return vw

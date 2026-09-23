@@ -195,16 +195,17 @@ class _Recorder:
 
     def add_mma(self, mma: Any, a_fragment: Any, b_fragment: Any, accumulator: Any, *,
                 produces: int | None = None, consumes: tuple[int, ...] = ()) -> None:
-        atom_count = mma._m_subtiles * mma._n_subtiles * mma._k_subtiles
+        m_sub, n_sub, k_sub = mma.subtiles           # public surface (front-door TileMma or a raw plan)
+        atom_count = m_sub * n_sub * k_sub
         # a_enc/b_enc = the CONSUMED operand encodings (the fragments the kernel feeds in -- for CRC these
         # are its OWN interleaved distributions, NOT TileMma's broken interleaved output). a_canon/b_canon =
-        # the CANONICAL machine refs (mma.a_layout, interleaved=False -- the trusted path the tee uses).
+        # the CANONICAL machine refs (mma.a_layout -- atom-canonical by construction, the trusted tee path).
         self.pipeline.nodes.append(PipelineOp(
             kind="mma", seq=self._next(),
             a_enc=a_fragment.tile_desc.layout, b_enc=b_fragment.tile_desc.layout,
             c_enc=accumulator.tile_desc.layout,
             a_canon=mma.a_layout, b_canon=mma.b_layout, c_canon=mma.c_layout,
-            atom_shape=tuple(mma._atom_shape), atom_count=atom_count, note="TileMma",
+            atom_shape=tuple(mma.atom_shape), atom_count=atom_count, note="TileMma",
             produces=produces, consumes=tuple(consumes),
         ))
         if self.pipeline.arch is None:                         # the recording's SoT for arch/wave-size

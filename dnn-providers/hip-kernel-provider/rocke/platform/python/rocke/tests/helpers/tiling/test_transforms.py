@@ -190,22 +190,21 @@ def test_validate_operands_per_atom_still_rejects_k_mismatch() -> None:
     assert "not K-aligned" in why
 
 
-def test_a_desc_interleaved_is_broken() -> None:
-    # a_desc(interleaved=True) does NOT produce a proper interleaved layout -- it is broken and raises.
-    # Real interleaved layouts are custom static tile distributions (make_tile_desc).
+def test_interleaved_style_operand_desc_is_distinct() -> None:
+    # The interleaved layout is now a first-class LayoutStyle (the old broken a_desc(interleaved=True)
+    # register-reorder guard is gone). Its operand descriptors differ from the canonical ones (a
+    # register reorder), while the canonical style's operand desc coincides with the canonical desc.
+    # The accumulator-vs-machine C-oracle is checked at plan construction (so building succeeds only if
+    # the style's C is machine-consistent).
     from rocke.helpers.tiling.mma import TileMma, Tiling
-    mma = TileMma((16, 16, 32), a="f16", b="f16", c="f32", target="gfx90a",
-                  tiling=Tiling(atom_shape=(16, 16, 16)))
-    with pytest.raises(RuntimeError, match="BROKEN"):
-        mma.a_desc(interleaved=True)
-
-
-def test_b_desc_interleaved_is_broken() -> None:
-    from rocke.helpers.tiling.mma import TileMma, Tiling
-    mma = TileMma((16, 16, 32), a="f16", b="f16", c="f32", target="gfx90a",
-                  tiling=Tiling(atom_shape=(16, 16, 16)))
-    with pytest.raises(RuntimeError, match="BROKEN"):
-        mma.b_desc(interleaved=True)
+    from rocke.helpers.tiling.mma.styles import InterleavedStyle
+    canon = TileMma((32, 32, 32), a="f16", b="f16", c="f32", target="gfx90a",
+                    tiling=Tiling(atom_shape=(16, 16, 16)))
+    inter = TileMma((32, 32, 32), a="f16", b="f16", c="f32", target="gfx90a",
+                    tiling=Tiling(atom_shape=(16, 16, 16)), style=InterleavedStyle())
+    assert canon.a_operand_desc == canon.a_desc()
+    assert inter.a_operand_desc != inter.a_desc()
+    assert inter.b_operand_desc != inter.b_desc()
 
 
 # --- reorder_between: derive the in-register reorder that bridges coalesced -> requested order ---

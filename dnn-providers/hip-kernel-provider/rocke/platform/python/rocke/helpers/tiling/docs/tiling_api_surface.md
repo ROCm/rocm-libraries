@@ -1,9 +1,10 @@
 # rocKE Tiling Primitives -- API Surface, Options & Composability
 
 **Status:** reflects the BUILT M1 + wave-tile subtiling + clipping surface (95/95 tests, bit-exact on gfx90a).
-**Companion to:** `tiling_design_proposal.md` (the why + architecture). This doc is the
-**how-to-use** catalog: every API surface, its **default (MMA-driven) mode**, and its
-**manual override**, with runnable examples that exercise the extents of the API.
+**Companion to:** `tiling_api_contract.md` (the WHY: promotion gate, audience tiers, glass-box mandate,
+the clipping/N-D rules). This doc is the **how-to-use** catalog: every API surface, its
+**default (MMA-driven) mode**, and its **manual override**, with runnable examples that exercise the
+extents of the API. (One-home rule: the *why* lives in the contract, the *how* lives here.)
 
 > **Location:** `platform/python/rocke/helpers/tiling/` (package `rocke.helpers.tiling`).
 > **Compliance:** the sibling `reference_docs/` holds internal artifacts -- scrub NPI /
@@ -42,9 +43,9 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | `fill_fragment(b, frag, 0)` | element-wise materialize | yes (b-first) | -- |
 | `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c) |
 | `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c) |
-| `TileMma(shape, a,b,c, target, tiling=)` | intrinsic resolver + subtile driver | no | atom/layouts/op_id/wave_size from traits |
+| `TileMma(shape, a,b,c, target, tiling=, style=)` | intrinsic resolver + subtile driver | no | atom/layouts/op_id/wave_size from traits; `style=` picks the operand-layout profile |
 | `Tiling(atom_shape=, order=)` | the MMA object's knobs | no | atom=shape (single MMA), order="MNK" |
-| `TilingGemmSpec(tile, atom, order, dtypes)` | instance knobs (spec->builder) | no | atom=None, order="MNK", f16->f32 |
+| `CanonicalStyle()` / `InterleavedStyle()` | the operand-layout profile (`style=`) | no | default canonical; interleaved = wide free-contiguous loads |
 
 Free `make_*` factories over thin value objects (`TensorDesc`/`TensorWindow` in `descriptors.py`;
 `TileDesc`/`Fragment` in `fragments.py`); three verbs (`emit.py`); one driver (`mma/`). The
@@ -106,6 +107,23 @@ A logical view onto a physically-transposed operand is a pure re-label: `a_td.pe
 a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), BF16)  # bf16 in
 c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F32)   # f32 store (no narrowing cast)
 ```
+
+### Override: N-D tensors -- axis roles + `at_index` / `squeeze`
+
+An MMA consumes a rank-2 `(free, K)` operand, but a tensor can be rank-N (a batched GEMM is
+`(batch, M, K)`). Declare a per-axis ROLE, then reduce the batch axes to reach rank-2:
+```python
+a3 = make_tensor_desc((BATCH, M, K), (M*K, K, 1), F16,
+                      ("batch", "free", "contraction"))    # role per axis
+a_win = make_window(a3, (0, m_base, 0)).at_index(0, batch)  # pin batch -> rank-2 (free, K) window
+# TensorDesc.squeeze(axis) drops a length-1 batch axis instead.
+```
+`at_index`/`squeeze` are TYPED: they reduce a `batch` axis only (they refuse the free/contraction
+axis -- that would silently drop matmul terms -- and refuse an un-roled tensor, never a bare `rank==2`
+check). Strides are preserved; the pinned batch offset rides the window so the reduced view still
+addresses the right element. `TensorDesc.assert_mma_operand()` is the boundary gate (rank-2, one free
++ one contraction, either order -- A is `(M,K)`, B is `(K,N)`); `load_fragment` runs it automatically
+for any roled tensor. Worked example: `kernels/tiling_gemm_batched_demo.py`.
 
 ### Reserved (post-M1)
 - LDS-space descriptors for staging.
@@ -447,55 +465,52 @@ designed-in seam, not yet implemented.
 
 ## 10. Worked progression -- one kernel, escalating overrides
 
-The same GEMM, adding exactly one override at a time. Note the body never changes -- only
-the spec.
+The same GEMM, adding exactly one override at a time -- the loop body never changes, only the
+`TileMma` construction. Knobs travel as constructor arguments (`shape`, `tiling=`, `style=`).
 
 ```python
 # (0) DEFAULT: single 16x16x16 atom, f16->f32, MNK order. Say almost nothing.
-spec = TilingGemmSpec(tile=(16, 16, 16))
+mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
 
 # (1) BIGGER K per tile: 4 K-subtiles, MMA owns the inner K loop.
-spec = TilingGemmSpec(tile=(16, 16, 64), atom=(16, 16, 16))
+mma = TileMma((16, 16, 64), a="f16", b="f16", c="f32", target="gfx90a",
+              tiling=Tiling(atom_shape=(16, 16, 16)))
 
 # (2) COOPERATIVE M/N: a 2x2 output grid, MMA walks it internally.
-spec = TilingGemmSpec(tile=(32, 32, 16), atom=(16, 16, 16))
+mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+              tiling=Tiling(atom_shape=(16, 16, 16)))
 
 # (3) FULL GRID + iteration order: 2x2x2, K outermost.
-spec = TilingGemmSpec(tile=(32, 32, 32), atom=(16, 16, 16), order="KNM")
+mma = TileMma((32, 32, 32), a="f16", b="f16", c="f32", target="gfx90a",
+              tiling=Tiling(atom_shape=(16, 16, 16), order="KNM"))
 
 # (4) PIN THE EXACT INTRINSIC by name (target-specific escape hatch).
-spec = TilingGemmSpec(tile=(32, 32, 16), atom="mfma_f32_16x16x16f16")
+mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+              tiling=Tiling(atom_shape="mfma_f32_16x16x16f16"))
 
-# every one of these: build + run the SAME body, bit-exact on gfx90a.
-kernel, mma = build_tiling_gemm(spec, 256, 256, 256, arch="gfx90a")
+# (5) SWITCH THE OPERAND-LAYOUT PROFILE: wide free-contiguous loads.
+mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+              tiling=Tiling(atom_shape=(16, 16, 16)), style=InterleavedStyle())
 ```
 
-Each step is one field on the spec; the loop body (`load_fragment -> mma -> store_fragment`)
-is byte-for-byte identical across all five. That is the composability claim, made concrete.
+Each step is one argument; the loop body (`load_fragment -> mma -> store_fragment`) is unchanged.
+(0)-(4) resolve the SAME layouts and are bit-exact; (5) changes the operand register layout -- the
+`style` picks the profile, validated identically to a derived one (the accumulator stays derived --
+see the C-oracle in `TileMmaPlan`). That is the composability claim, made concrete.
 
 ---
 
-## 11. Spec -> builder (the instance layer)
+## 11. Customising -- your own atom, layout, or style
 
-Knobs travel as data; the builder validates then lowers -- rocke's normal flow.
-
-```python
-@dataclass(frozen=True)
-class TilingGemmSpec:
-    tile: tuple[int, int, int]                       # REQUIRED wave-tile size
-    atom: tuple[int, int, int] | str | None = None   # shape tuple | intrinsic name | single-MMA
-    order: str = "MNK"                               # subtile loop-nest (permutation of MNK)
-    a_dtype: str = "f16"
-    b_dtype: str = "f16"
-    c_dtype: str = "f32"
-    name: str = "tiling_gemm_demo"
-
-ok, why = is_valid_spec(spec, arch="gfx90a")          # fail-fast pre-check (bool, reason)
-kernel, mma = build_tiling_gemm(spec, M_LEN, N_LEN, K_LEN, arch="gfx90a")
-```
-- Spec is **target-agnostic**; the arch binds at `build_tiling_gemm(..., arch=)`.
-- `is_valid_spec` returns `(ok, reason)`; `build_tiling_gemm` raises `ValueError` on an invalid
-  spec, `NotImplementedError` on a reserved combination.
+- **Pin the atom** with `Tiling(atom_shape=...)` -- a shape tuple, an intrinsic name (escape hatch),
+  or `None` for a single-MMA wave.
+- **Bring your own operand layout** by holding `mma.plan` and building a `Fragment` from your own
+  `TileDesc`; the driver validates it identically to a derived one (`operand_soundness` + the SOA
+  atom-contiguity slice guard). Overrides are OPERANDS only -- the accumulator is always derived.
+- **Add a layout style** by subclassing `LayoutStyle` (`mma/styles/`): implement `operand_desc` +
+  `accumulator_desc` composing the public primitives (`cooperative_load_desc`, `TileDesc.swap_dims`
+  / `.reorder_registers`, the `lds_*` bridge). See `docs/tiling_api_contract.md` -- "Adding a layout
+  style" -- for the interface contract, which gates police it, and the reach-past trigger.
 
 ---
 
