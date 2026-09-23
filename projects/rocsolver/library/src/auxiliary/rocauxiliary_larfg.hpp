@@ -121,20 +121,21 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
 template <typename T, typename S, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
 __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
 {
-    S r, rr, ri, ar, ai;
+    S r, rr, ri, ar, ai, ai2;
 
     ar = alpha[0].real();
     ai = alpha[0].imag();
+    ai2 = ai * ai;
 
     const auto ignore_beta = (beta == nullptr);
-    if(norms[0].real() > 0 || ai != 0)
+    if(norms[0].real() > 0 || ai2 > 0)
     {
-        S norm = sqrt(norms[0].real() + ai * ai + ar * ar);
+        S norm = sqrt(norms[0].real() + ai2 + ar * ar);
         norm = ar >= 0 ? -norm : norm;
 
         // scaling factor:
         //    norms[0] = 1.0 / (alpha[0] - norm);
-        r = (ar - norm) * (ar - norm) + ai * ai;
+        r = (ar - norm) * (ar - norm) + ai2;
         rr = (ar - norm) / r;
         ri = -ai / r;
         norms[0] = rocblas_complex_num<S>(rr, ri);
