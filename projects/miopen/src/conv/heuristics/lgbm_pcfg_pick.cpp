@@ -9,6 +9,7 @@
 #include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_predict.hpp>
 #include <miopen/conv/heuristics/lgbm_common.hpp>
+#include <miopen/conv/heuristics/ai_heuristics.hpp> // common::LgbmOnly
 
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/env.hpp>
@@ -199,9 +200,12 @@ std::vector<std::string> RankBucket(const LgbmForest& forest,
 // (see PerformanceConfig...::IsModelApplicable). The two-tower takes precedence
 // there; the LGBM perf-config picker is the fallback for solvers/architectures
 // the two-tower does not cover. This predicate mirrors that model's coverage so
-// the picker defers rather than competing with it.
+// the picker defers rather than competing with it. Under MIOPEN_DEBUG_LGBM_ONLY
+// the two-tower is bypassed, so nothing is deferred.
 bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx_id)
 {
+    if(common::LgbmOnly())
+        return false;
     const bool arch_covered = gfx_id.starts_with("gfx90a") || gfx_id.starts_with("gfx942") ||
                               gfx_id.starts_with("gfx950");
     if(!arch_covered)

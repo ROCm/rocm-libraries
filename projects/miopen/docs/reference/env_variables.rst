@@ -208,6 +208,13 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
+    * - | ``MIOPEN_DEBUG_LGBM_ONLY``
+        | Uses only the LightGBM heuristics: bypasses TunaNet solver selection and the
+        | KTN / two-tower kernel-tuning models, keeping the LightGBM solver selector and
+        | perf-config picker.
+      - | 0: Disable (default)
+        | 1: Enable
+
     * - | ``MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK``
         | Forces immediate mode fallback for convolution operations.
       - | 0: Disable

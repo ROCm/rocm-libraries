@@ -46,6 +46,9 @@
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LGBM_SELECTOR)
+// Bypass TunaNet and the KTN / two-tower kernel-tuning models, keeping only the LGBM
+// heuristics. See common::LgbmOnly().
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_ONLY)
 
 // 3D AI heuristics - now declared properly in header
 // No need for local forward declarations since we include the header
@@ -224,6 +227,8 @@ bool IsTunaNetCategoricalFeature(const std::string& name)
     return name == "in_layout" || name == "fil_layout" || name == "out_layout" ||
            name == "precision" || name == "direction";
 }
+
+bool LgbmOnly() { return env::enabled(MIOPEN_DEBUG_LGBM_ONLY); }
 } // namespace common
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
@@ -962,8 +967,13 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     // but never throws.
     try
     {
+        if(common::LgbmOnly())
+        {
+            MIOPEN_LOG_I2("TunaNet bypassed via MIOPEN_DEBUG_LGBM_ONLY for " << device
+                                                                             << "; trying LGBM");
+        }
         // ND model (for gfx942/gfx950, supports both 2D and 3D).
-        if((is2d || is3d) && HasNDTunaNetSupport(device))
+        else if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
             int dim                        = is3d ? 3 : 2;
             std::unique_ptr<ModelND> model = GetNDModel(device, dim);
@@ -1587,6 +1597,11 @@ bool ModelSetParams(const std::string& arch,
                     bool transform_features,
                     std::function<bool(std::size_t, std::string)> validator)
 {
+    if(common::LgbmOnly())
+    {
+        MIOPEN_LOG_I2("KTN bypassed via MIOPEN_DEBUG_LGBM_ONLY for " << solver << " on " << arch);
+        return false;
+    }
     using model_type = decltype(GetModel(arch, solver));
     model_type model;
     try
