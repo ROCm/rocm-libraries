@@ -7,7 +7,7 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.7.0 for ROCm 10.1.0
 
-* Level 2 `gemv` non-transposed (`transA == N`) for a short output and a long reduction: the `n` reduction is now split across `gridDim.y` and reduced in a second pass, mirroring the existing skinny-`n` path on the transposed side. The split is applied when the output grid has at most 8 tiles and the column split produces at least 4 parallel blocks; other shapes and `transA != N` are unchanged.
+* Level 2 `gemv` non-transposed (`transA == N`) for a short output and a long reduction: the `n` reduction is now split across `gridDim.y` and reduced in a second pass, mirroring the existing skinny-`n` path on the transposed side. The split is applied when the output grid has at most 8 tiles and the column split produces at least 2 parallel blocks, or when the output length is at or below the crossover; other shapes and `transA != N` are unchanged.
 
 ### Added
 

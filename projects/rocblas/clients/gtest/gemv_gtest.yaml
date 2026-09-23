@@ -28,18 +28,21 @@ Definitions:
     - { M: 131071, N:  63, lda:   131071, stride_a:  8257473 }
 
   - &skinny_m_matrix_size_range
-    # transA == N, short output and long reduction.
-    # Gate: output_tiles(m) <= 8 AND n_split(n) >= 4 AND m*n >= 2^20.
+    # transA == N, short output and long reduction. m*n >= 2^20 and EITHER:
+    #   A. output_tiles(m) <= 8 AND n_split(n) >= 2, or
+    #   B. m <= crossover (512 real/c-float, 128 double-complex).
     # output_tiles = (m-1)/(DIM_X*4)+1 for real/c-float, (m-1)/DIM_X+1 for zc,
-    # DIM_X = 32. So the tile boundary sits at m=1024 for real/c-float and at
-    # m=256 for double-complex. n_split = ceil(n / 4096), capped at 256.
-    # Shapes that sit outside the gate exercise the unmodified single-stage path.
-    - { M:    40, N:  32768, lda:    40, stride_a:   1310720 } # in gate: tiny m, all types (splits=8)
-    - { M:    63, N:  20479, lda:    64, stride_a:   1310656 } # in gate, lda > M, short final slice (splits=5)
-    - { M:  1024, N:  12289, lda:  1024, stride_a:  12583936 } # in gate at real/c-float tile boundary (tiles=8, splits=4)
-    - { M:   256, N:  12289, lda:   256, stride_a:   3145984 } # in gate at double-complex tile boundary (zc tiles=8, splits=4)
-    - { M:   300, N:  12289, lda:   301, stride_a:   3698989 } # in gate at split floor (splits=4), short final slice
-    - { M:  1024, N:   2048, lda:  1024, stride_a:   2097152 } # outside gate: splits=1 < 4 (the boundary regression case)
+    # DIM_X = 32 (real/c-float tile edge at m=1024, zc tile edge at m=256).
+    # n_split = ceil(n / 4096), capped at 256.
+    # Shapes below cover both clauses for both type families; the out-of-gate
+    # rows exercise the unmodified single-stage path.
+    - { M:    40, N:  32768, lda:    40, stride_a:   1310720 } # B: tiny m, all types
+    - { M:   256, N:   4096, lda:   256, stride_a:   1048576 } # B: real crossover, n_split=1 (short-output win, e.g. gfx950)
+    - { M:   512, N:   2048, lda:   512, stride_a:   1048576 } # B: real crossover edge m=512, n_split=1
+    - { M:  1024, N:  12289, lda:  1024, stride_a:  12583936 } # A: real/c-float tile edge m=1024, n_split=4
+    - { M:  1024, N:   6145, lda:  1024, stride_a:   6292480 } # A: real/c-float at split floor n_split=2
+    - { M:   200, N:   8192, lda:   256, stride_a:   2097152 } # A: zc (tiles=7, n_split=2); real via B; lda > M
+    - { M:  1024, N:   2048, lda:  1024, stride_a:   2097152 } # outside gate: m>512, tiles=8, n_split=1 < 2
     - { M:  1025, N:  12289, lda:  1025, stride_a:  12596225 } # outside gate: real tiles=9 > 8
     - { M:     7, N:  20480, lda:     7, stride_a:    143360 } # outside gate: m*n < 2^20
 

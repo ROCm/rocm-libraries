@@ -143,21 +143,41 @@ inline rocblas_int rocblas_gemvn_output_tiles(rocblas_int m)
 // parallelism — the regression at (m=1024, n=2048) is one such case (n_split=1).
 constexpr int rocblas_gemvn_sm_min_splits()
 {
-    return 4;
+    return 2;
 }
 
-// Gate: use the split path when:
-//   1. transA == none, m and n are positive
-//   2. m * n is large enough to amortise a second launch
-//   3. the output grid (tiled by m) has at most 8 tiles — below this the
-//      device cannot be filled from m alone and the split is a large win
-//   4. the split produces at least min_splits parallel column blocks —
-//      below this the extra launch is overhead on an already-fast single-stage
-//      kernel (e.g. the CDNA-tuned 512-thread path at m=1024, n=2048)
+// Output length below which the split is always taken (given the element
+// floor), regardless of the split count. This preserves the original crossover
+// behaviour: a short output cannot fill the device, so the split helps even at
+// n_split == 1 on architectures with a high compute-to-bandwidth ratio (e.g.
+// gfx950), where the single-stage kernel leaves the card idle. Real and
+// complex-float share the DIM_X * 4 tiling (crossover 512); double-complex uses
+// DIM_X, so its equivalent crossover is a quarter of that (128).
+template <typename T>
+inline rocblas_int rocblas_gemvn_sm_crossover()
+{
+    using element = std::remove_cv_t<std::remove_pointer_t<T>>;
+    if constexpr(std::is_same_v<element, rocblas_double_complex>)
+        return 128;
+    return 512;
+}
+
+// Gate: use the split path when transA == none, m and n are positive, the
+// operand is large enough to amortise a second launch (m * n >= 2^20), and
+// EITHER of the following holds:
+//   A. the output grid has at most 8 tiles AND the split produces at least
+//      min_splits (2) parallel column blocks — the general n-split win, sized
+//      by the work rather than by the output length; or
+//   B. the output length is at or below the crossover — a short output cannot
+//      fill the device, so the split is worthwhile even with a single column
+//      block. This is the behaviour of the prior m-crossover path and is kept
+//      as a floor so no shape it already accelerated is dropped.
 //
-// Conditions 3 and 4 together admit any m with 8 or fewer output tiles AND
-// a long enough n to create real parallelism, without an explicit crossover
-// constant that must be re-tuned per architecture.
+// The union never splits fewer shapes than the crossover alone did, so it
+// cannot regress against a build that shipped the crossover. Condition A adds
+// the larger-m, long-reduction shapes the crossover missed. The gate stays a
+// pure function of (transA, m, n): workspace sizing and launch selection use
+// it identically and cannot disagree.
 template <typename T>
 inline bool rocblas_gemvn_skinny_m(rocblas_operation transA, rocblas_int m, rocblas_int n)
 {
@@ -165,9 +185,14 @@ inline bool rocblas_gemvn_skinny_m(rocblas_operation transA, rocblas_int m, rocb
         return false;
     if(size_t(m) * size_t(n) < rocblas_gemvn_sm_min_elems())
         return false;
-    if(rocblas_gemvn_output_tiles<T>(m) > 8)
-        return false;
-    return rocblas_gemvn_sm_split_count(n) >= rocblas_gemvn_sm_min_splits();
+
+    // B: short output — split even at a single column block.
+    if(m <= rocblas_gemvn_sm_crossover<T>())
+        return true;
+
+    // A: general n-split — enough output tiling headroom and column parallelism.
+    return rocblas_gemvn_output_tiles<T>(m) <= 8
+           && rocblas_gemvn_sm_split_count(n) >= rocblas_gemvn_sm_min_splits();
 }
 
 template <typename T>
