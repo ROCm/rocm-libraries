@@ -9,12 +9,62 @@ from pathlib import Path
 
 import pytest
 
-from codegen.generator import PLACEHOLDER_MARKER, mint_ids
+from codegen.generator import (
+    PLACEHOLDER_MARKER,
+    build_kdp_documents,
+    emitted_inventory,
+    mint_ids,
+)
 from tests.helpers import make_engine, make_kernel, make_minimal_config, make_pack
 
 # Imported rather than re-written: a second extractor would be a second opinion about
 # what counts as a case, and the pin checked below is a claim about that set.
 from tests.test_generator import emitted_cases
+
+CENSUS_CALL = "hkp_register_census_tests("
+
+#: The multi-value keywords the emitted call uses. A value line is any line whose first
+#: token is not one of these, so the reader below needs no knowledge of their order.
+CALL_KEYWORDS = frozenset({"TARGET", "PACK_NAME", "ARCHES", "SUITES", "EXPECTED_CASES"})
+
+
+def census_call_lines(fragment: str) -> list[str]:
+    """The emitted ``hkp_register_census_tests(...)`` call, line by line. Sliced out
+    rather than matched across the fragment, which is mostly prose using the same
+    keywords."""
+    lines = fragment.splitlines()
+    opens = [index for index, line in enumerate(lines) if line.startswith(CENSUS_CALL)]
+    assert len(opens) == 1, f"expected exactly one census call:\n{fragment}"
+    closes = [
+        index
+        for index, line in enumerate(lines[opens[0] :], opens[0])
+        if line.strip() == ")"
+    ]
+    assert closes, f"the census call is never closed:\n{fragment}"
+    return lines[opens[0] : closes[0] + 1]
+
+
+def census_keyword_values(fragment: str, keyword: str):
+    """The argument tokens one multi-value keyword carries, or ``None``.
+
+    ``None`` means the keyword is ABSENT and ``[]`` means it is present with nothing
+    after it. The two must never be conflated: for ``ARCHES``, absence is the
+    deliberate "every wired arch" spelling and an empty list is fatal by contract.
+    """
+    lines = census_call_lines(fragment)
+    marks = [index for index, line in enumerate(lines) if line.strip() == keyword]
+    if not marks:
+        return None
+    assert len(marks) == 1, f"expected one {keyword} keyword:\n{lines}"
+    values = []
+    for line in lines[marks[0] + 1 :]:
+        token = line.strip()
+        if not token:
+            continue
+        if token == ")" or token.split()[0] in CALL_KEYWORDS:
+            break
+        values.append(token)
+    return values
 
 
 class TestFragmentsAgreeWithEachOther:
@@ -171,42 +221,144 @@ def packaged_opposite_shape_config():
     )
 
 
+@pytest.fixture
+def two_arch_packaged_config():
+    """A packaged bundle emitting for TWO architectures.
+
+    ``configs/gfx950_attention_dense.yaml`` emits for one, against which a restriction
+    transcribed from the profile's `arch:` is indistinguishable from one derived from
+    the finalized inventory -- and a one-element list is indistinguishable from a
+    truncated one.
+    """
+    return make_minimal_config(
+        dialect="packaged",
+        kernel_source_kind="rocke",
+        packs=[
+            make_pack(
+                name="north",
+                discriminator="north",
+                arch=["gfx942"],
+                kernels=[make_kernel(name="north.f32_block64")],
+            ),
+            make_pack(
+                name="south",
+                discriminator="south",
+                arch=["gfx950"],
+                kernels=[
+                    make_kernel(
+                        name="south.f32_block128",
+                        metadata={"block_size": 128, "dtype": "FLOAT"},
+                    )
+                ],
+            ),
+        ],
+    )
+
+
+class TestCensusArchRestrictionIsDerivedFromTheEmittedInventory:
+    """A census entry addresses ONE arch's shard, so the suite must be registered for
+    the arches this bundle actually emitted and no others. Registering it for every
+    arch the pack target carries asserts this bundle's inventory against a shard that
+    was never asked to hold it -- red for a reason that is about the registration
+    rather than about the artifact."""
+
+    @staticmethod
+    def _restriction_and_inventory(generator, config):
+        """Both from ONE render context, so the pair compared is what a single run
+        emits."""
+        ids = mint_ids(config)
+        emitted = emitted_inventory(config, build_kdp_documents(config, ids))
+        fragment = generator._render_template(
+            "fragments/cmake_test_sources.j2", config, ids=ids, emitted=emitted
+        )
+        return census_keyword_values(fragment, "ARCHES"), emitted, fragment
+
+    def test_the_restriction_is_exactly_the_inventorys_concrete_arches(
+        self, generator, two_arch_packaged_config
+    ):
+        restriction, emitted, fragment = self._restriction_and_inventory(
+            generator, two_arch_packaged_config
+        )
+        assert restriction is not None, (
+            "the emitted call carries no ARCHES keyword, so the suite registers for "
+            f"every arch the pack target was wired for:\n{fragment}"
+        )
+        concrete = sorted(arch for arch in emitted["arches"] if arch != "*")
+        assert sorted(restriction) == concrete, (
+            f"restricted to {sorted(restriction)} but the bundle emitted for "
+            f"{concrete}"
+        )
+        assert len(restriction) == 2, restriction
+
+    def test_the_shipped_bundle_restricts_to_the_one_arch_it_emits_for(
+        self, generator, gfx950_attention_dense_config
+    ):
+        restriction, emitted, _fragment = self._restriction_and_inventory(
+            generator, gfx950_attention_dense_config
+        )
+        assert restriction == ["gfx950"], restriction
+        assert sorted(emitted["arches"]) == ["gfx950"], sorted(emitted["arches"])
+
+    def test_the_keyword_is_never_emitted_with_nothing_after_it(
+        self, generator, gfx950_attention_dense_config, two_arch_packaged_config
+    ):
+        """``hkp_register_census_tests`` treats an explicitly empty ARCHES as fatal, and
+        rightly: it reads as a restriction while admitting no arch at all."""
+        for config in (gfx950_attention_dense_config, two_arch_packaged_config):
+            restriction, _emitted, fragment = self._restriction_and_inventory(
+                generator, config
+            )
+            assert restriction != [], (
+                "the ARCHES keyword was emitted with no values, which is a configure "
+                f"error rather than 'unrestricted':\n{fragment}"
+            )
+
+    def test_the_wildcard_is_never_emitted_as_an_architecture(
+        self, generator, gfx950_attention_dense_config, two_arch_packaged_config
+    ):
+        """``*`` is how a descriptor says it ships everywhere; no shard is named after
+        it, so an entry asking for it addresses a directory that never materializes."""
+        for config in (gfx950_attention_dense_config, two_arch_packaged_config):
+            restriction, _emitted, fragment = self._restriction_and_inventory(
+                generator, config
+            )
+            assert "*" not in (restriction or []), restriction
+            assert "ARCHES *" not in fragment, fragment
+
+    def test_a_direct_load_bundle_states_no_restriction_at_all(
+        self, generator, scale_add_config
+    ):
+        """Its descriptors declare no architecture, so it ships on every arch its pack
+        target carries and OMISSION is how that is spelled. The hand-added form it
+        documents must not hand the author an ARCHES keyword to fill in."""
+        assert not scale_add_config.is_packaged
+        fragment = generator._render_template(
+            "fragments/cmake_test_sources.j2", scale_add_config
+        )
+        payload = [
+            line
+            for line in fragment.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert not [line for line in payload if "ARCHES" in line], payload
+
+        start = fragment.index(CENSUS_CALL)
+        documented = fragment[start : fragment.index(")", start) + 1]
+        assert "ARCHES" not in documented, documented
+        assert "EXPECTED_CASES" in documented, documented
+
+
 class TestCensusCasePinIsDerivedFromTheSuite:
     """``EXPECTED_CASES`` is READ OUT OF the suite template, never restated: the pin is
     what lets the census see a suite that SHRINKS, since the execution guard builds its
     obligations from the cases that registered."""
 
-    @staticmethod
-    def _census_call(fragment: str) -> list[str]:
-        """The emitted ``hkp_register_census_tests(...)`` call, line by line. Sliced out
-        rather than matched across the fragment, which is mostly prose using the same
-        keywords."""
-        lines = fragment.splitlines()
-        opens = [
-            index
-            for index, line in enumerate(lines)
-            if line.startswith("hkp_register_census_tests(")
-        ]
-        assert len(opens) == 1, f"expected exactly one census call:\n{fragment}"
-        closes = [
-            index
-            for index, line in enumerate(lines[opens[0] :], opens[0])
-            if line.strip() == ")"
-        ]
-        assert closes, f"the census call is never closed:\n{fragment}"
-        return lines[opens[0] : closes[0] + 1]
-
     @classmethod
     def _pinned_case_lines(cls, fragment: str) -> list[str]:
-        """The raw argument lines the ``EXPECTED_CASES`` keyword carries."""
-        lines = cls._census_call(fragment)
-        keywords = [
-            index
-            for index, line in enumerate(lines)
-            if line.strip() == "EXPECTED_CASES"
-        ]
-        assert len(keywords) == 1, f"expected one EXPECTED_CASES keyword:\n{lines}"
-        return lines[keywords[0] + 1 : -1]
+        """The argument tokens the ``EXPECTED_CASES`` keyword carries."""
+        pinned = census_keyword_values(fragment, "EXPECTED_CASES")
+        assert pinned is not None, f"the census call pins no cases:\n{fragment}"
+        return pinned
 
     @classmethod
     def _pin_and_suite(cls, generator, config) -> tuple[list[str], dict]:

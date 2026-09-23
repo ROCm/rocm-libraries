@@ -1012,13 +1012,68 @@ class TestDeprecatedKeys:
 
 class TestShippedExampleConfigsLoad:
     """Every config under `configs/` is a worked example a reader copies, so a retired
-    key they still set would make each copy a config the loader refuses."""
+    key they still set would make each copy a config the loader refuses.
 
-    def test_every_shipped_config_loads(self, configs_dir):
-        paths = sorted(configs_dir.glob("*.yaml"))
-        assert len(paths) == 5
+    `configs/` holds TWO schemas. `*.profile.yaml` is a dispatch profile: it names the
+    dispatcher, request class and predicate the tools import, and carries none of the
+    keys `load_config` requires. Selecting it by extension alone feeds the wrong schema
+    into the generator loader, so it is selected out here and checked through the loader
+    that owns it. No file COUNT is asserted either way: a count fails for the one change
+    that is always correct -- adding a worked example -- while saying nothing about
+    whether any of them load.
+    """
+
+    @staticmethod
+    def _generator_configs(configs_dir):
+        return sorted(
+            path
+            for path in configs_dir.glob("*.yaml")
+            if not path.name.endswith(".profile.yaml")
+        )
+
+    def test_every_shipped_generator_config_loads(self, configs_dir):
+        paths = self._generator_configs(configs_dir)
+        assert paths, f"no generator configs found under {configs_dir}"
         for path in paths:
             assert load_config(path).engine.name
+
+    def test_every_shipped_dispatch_profile_loads_through_its_own_loader(
+        self, configs_dir
+    ):
+        """The profiles are shipped worked examples too, so leaving them unchecked
+        would just move the gap rather than close it."""
+        # Imported here rather than at module scope: this suite is about
+        # codegen.config_loader, and `tools/` is not otherwise on its path.
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import dispatch_parity
+
+        paths = sorted(configs_dir.glob("*.profile.yaml"))
+        assert paths, f"no dispatch profiles found under {configs_dir}"
+        for path in paths:
+            profile = dispatch_parity._load_profile(str(path))
+            # The blocks every profile tool dereferences; `_required` is the tool's
+            # own check, so this cannot drift from what the tools demand.
+            for scope, keys in (
+                ("dispatch", ("module", "function")),
+                ("request", ("module", "class")),
+                ("predicate", ("module", "function")),
+            ):
+                dispatch_parity._required(profile[scope], scope, *keys)
+            assert profile["provider_root"], path
+
+    def test_a_dispatch_profile_is_not_a_generator_config(self, configs_dir):
+        """The control for the selection above: if `load_config` ever accepted a
+        profile, the split would be silently unnecessary and the next reader would
+        re-merge it."""
+        profiles = sorted(configs_dir.glob("*.profile.yaml"))
+        assert profiles, f"no dispatch profiles found under {configs_dir}"
+        assert not [p for p in self._generator_configs(configs_dir) if p in profiles]
+        for path in profiles:
+            with pytest.raises(ConfigError):
+                load_config(path)
 
 
 class TestBehaviorNotesVocabulary:

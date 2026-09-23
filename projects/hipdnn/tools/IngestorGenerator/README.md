@@ -130,14 +130,23 @@ counts, SDK version and runtime source kind come from the actual output, after
 normalization and deduplication. Packaged runtime source kind is KPACK, not the authored
 builder kind.
 
+**The census lives in its own binary.** `Test<Name>Packs.cpp` is spliced into
+`hip_kernel_provider_census_tests`; the generated matcher test stays in the ordinary
+`hip_kernel_provider_tests`. Every census case needs a descriptor shard and the census
+environment, so a census case inside the ordinary unit binary makes an ordinary unit run
+require package state it should never need. The `cmake_test_sources.txt` fragment emits
+the two `target_sources()` lines separately for exactly this reason; splice them into the
+two different blocks rather than merging them.
+
 Declare the literal `Test<Name>Packs` suite in one `hkp_register_census_tests()` call in
 `.../src/tests/CMakeLists.txt`, beside `hkp_verify_embedded_sources()` and after the test
 target exists:
 
 ```cmake
 hkp_register_census_tests(
-    TARGET hip_kernel_provider_tests
+    TARGET hip_kernel_provider_census_tests
     PACK_NAME <the pack target holding this bundle's shard>
+    ARCHES <the architectures this bundle actually emitted>   # optional; see below
     SUITES Test<Name>Packs
     EXPECTED_CASES
         <one line per case name the suite registers>
@@ -150,12 +159,29 @@ The `cmake_test_sources.txt` fragment emits it pre-filled; re-splice when the bu
 changes.
 
 `PACK_NAME` selects the wired pack target whose `OUT_ROOT` and arch list the entries
-address. CMake registers one `hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs` per
-arch in that list, each running
-`hip_kernel_provider_tests --gtest_filter=Test<Name>Packs.*` directly, with:
+address.
+
+**Shard eligibility is restricted, not universal.** `ARCHES` narrows registration to the
+architectures the bundle emitted, intersected with the pack target's wired list, and the
+fragment fills it in from this run's own inventory. The three spellings are distinct:
+
+| `ARCHES` | Meaning |
+|---|---|
+| omitted | every arch the pack target was wired for -- the right answer for a bundle whose descriptors name no architecture |
+| given | the intersection with the wired list; an arch the bundle ships nothing for is not registered at all |
+| present with no values | a configure error, not "no restriction" |
+
+`ARCHES *` is never correct: `*` is how a descriptor says it ships everywhere, and no
+shard is named after it. Registering a bundle's suite for every product arch is the
+failure this prevents -- a gfx950-only bundle otherwise gets a gfx942 entry that asserts
+a gfx950 inventory against a gfx942 shard.
+
+CMake registers one `hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs` per eligible
+arch, each running `hip_kernel_provider_census_tests --gtest_filter=Test<Name>Packs.*`
+directly, with:
 
 - `HIPDNN_TEST_CENSUS_SUITE=Test<Name>Packs`
-- `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (from the wired list, not detected or read from descriptors)
+- `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (from the eligible list, not detected or read from descriptors)
 - `HIPDNN_DESCRIPTOR_DIR=<that pack target's OUT_ROOT>/<arch>` -- its own shard, not a shared stage tree
 - `HIPDNN_TEST_CENSUS_EXPECTED_CASES=<the pinned case names, comma-separated>`
 
@@ -181,6 +207,14 @@ censused nowhere and states its inventory through its ordinary host run. Declari
 suite at two pack targets is a configure error: the entry name carries arch and suite
 alone. Host registration/loading proves nothing about dispatch or numerical correctness.
 
+**The generator writes the call for a kpack bundle only.** A packaged bundle lowers to
+one production pack target with a known arch list, so the fragment can emit a complete,
+arch-restricted, case-pinned call. A direct-load bundle's authored set is chosen by the
+author, so its call is hand-added -- and it **omits `ARCHES` entirely**, because its
+descriptors declare no architecture and ship on every arch its pack target carries.
+Writing `ARCHES *` or a bare `ARCHES` keyword there turns "unrestricted" into a shard
+name nothing materializes or into a configure error.
+
 ## The five CMake/registration splice points
 
 `fragments/*.txt` are text for a human (or the driving skill's extend flow) to hand-apply;
@@ -192,7 +226,7 @@ alone. Host registration/loading proves nothing about dispatch or numerical corr
 | `cmake_target_sources.txt` | `.../kernel_ingestor_engine/CMakeLists.txt`'s `target_sources(hip_kernel_provider_impl ...)` block |
 | `ingestor_packs.hpp.txt` | `.../kernel_ingestor_engine/IngestorPacks.hpp` -- the `register<Name>Symbols` declaration |
 | `ingestor_packs.cpp.txt` | `.../kernel_ingestor_engine/IngestorPacks.cpp` -- the `s_packs` table row |
-| `cmake_test_sources.txt` | `.../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt`'s `target_sources(hip_kernel_provider_tests ...)` block |
+| `cmake_test_sources.txt` | `.../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` -- **two** blocks: the census source into `target_sources(hip_kernel_provider_census_tests ...)`, the matcher source into `target_sources(hip_kernel_provider_tests ...)`. For a kpack bundle it also carries the `hkp_register_census_tests()` call for `.../src/tests/CMakeLists.txt` |
 
 **`cmake_descriptor_files.txt` names no splice target because there is none.** The packer
 walks a source root recursively and no descriptor is named in CMake, so installing a bundle
@@ -530,6 +564,9 @@ Contracts between the emitted fragments, checked against each other:
 - `cmake_test_sources.txt` names files this run wrote.
 - The census case pin is exactly the case set the emitted suite renders, follows the suite's
   conditional arms, and survives the wire to the binary.
+- The emitted `ARCHES` restriction is exactly the concrete architectures of the emitted
+  inventory: never the `*` wildcard, and never the keyword with nothing after it. A
+  direct-load bundle's documented call carries no `ARCHES` at all.
 - The placeholder scan sees every emitted file across the two provider trees, reports an
   unlocatable one as missing, and treats two files at one spliced path as ambiguous.
 

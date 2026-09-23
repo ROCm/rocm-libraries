@@ -7,7 +7,10 @@
 arch: gfx950
 slug: gfx950_attention_dense
 
-provider_root: ../../../../../dnn-providers/hip-kernel-provider
+# Repository-relative, resolved against the checkout root the tools find from their
+# own location -- never against the current directory. A `../..` chain is only correct
+# when the tool is invoked from one particular directory, which nothing guarantees.
+provider_root: dnn-providers/hip-kernel-provider
 
 # The reference candidate registry, used by reconcile_applicability.py.
 reference_candidates:
@@ -32,6 +35,20 @@ request:
   defaults:
     arch: gfx950
     algorithm: attention_dense
+    # Pins the NON-persistent arm, which is the only one this catalog ships.
+    #
+    # AttentionRequest defaults this field to "auto", and the gfx950 dispatcher then
+    # reads auto as `persistent = work >= dense_num_persistent` (256). B=1,
+    # Sq=Skv=8192, Hq=Hkv=8, D=128 gives work = 32*8*1 = 256, so auto resolves
+    # persistent=True -- and, at D=128 causal bf16/fp16, wide_lds_dma=True with it.
+    # That is a different compiled kernel and a different kernel-argument contract
+    # from the 149 variants here, every one of which is non-persistent on the
+    # eight-argument signature.
+    #
+    # The quotes are mandatory, not style: PyYAML reads a bare `off` as the boolean
+    # False, and the dispatcher calls `.strip().lower()` on this field, so the
+    # unquoted spelling aborts the tool instead of selecting an arm.
+    dense_persistent: "off"
 
 # The eligibility predicate.
 predicate:
@@ -205,7 +222,9 @@ launch_surface:
     guard: >
       gfx950AttentionDenseGeometry() throws HipdnnPluginException for
       non-positive dimensions (seqlen_q, num_query_heads or batch <= 0).
-      Grid is (ceil(Sq/256), Hq, B) for aligned, ragged, and SWA alike.
+      Grid is (ceil(Sq/256), Hq, B) for the aligned and the ragged-tail
+      variants alike. This catalog ships no sliding-window variant, so
+      sliding_window is 0 on every one of them.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp
 
   - name: block
@@ -224,8 +243,9 @@ launch_surface:
     kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, seqlen_q, seqlen_kv, batch]
     guard: >
       kernelMatches() returns false (no panic) if any field disagrees.
-      shape_generic = (ragged==0): B/Sq/Skv equality skipped for aligned and SWA;
-      enforced for tail (ragged==1). score() returns constant 1.0.
+      shape_generic = (ragged==0): B/Sq/Skv equality skipped for the 132 aligned
+      variants; enforced for the 17 exact tails (ragged==1). No sliding-window
+      variant ships, so no third case exists. score() returns constant 1.0.
       block_n is fixed at 64 (not a KMD field); tile divisibility uses
       GFX950_ATTENTION_DENSE_BLOCK_N constant directly.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
@@ -236,7 +256,9 @@ launch_surface:
     kmd_fields: [ragged, seqlen_q, num_query_heads, batch]
     guard: >
       attentionDenseKernelSignature() always returns the 8-arg form
-      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv). All 150 variants are
-      non-persistent. use_sinks=False; no sink_ptr slot. Validated at
+      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv). All 149 variants
+      (132 aligned + 17 exact tails) are non-persistent, which is what
+      request.defaults.dense_persistent: "off" above keeps true.
+      use_sinks=False; no sink_ptr slot. Validated at
       prepare() time by buildIngestorKernelCode(..., expectedSignature).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp
