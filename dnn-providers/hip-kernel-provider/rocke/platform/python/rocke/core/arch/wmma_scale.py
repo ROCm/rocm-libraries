@@ -143,7 +143,7 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     atom = ArchTarget.from_gfx("gfx1250").mma.by_op_id(op_id.removeprefix("tile."))
     if atom is None or atom.family != "wmma_scaled":
         return None
-    formats = {"fp8e4m3": 0, "bf8e5m2": 1}
+    formats = {"fp8e4m3": 0, "bf8e5m2": 1, "fp4e2m1": 4}
     # The current backend supports E8M0 for both inputs and a shared K-group size.
     # Keep these restrictions here, independently of the catalog query model.
     if (

@@ -112,6 +112,8 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
             spec.matrix_formats[i] = 0;
         else if(strcmp(dtypes[i], "bf8e5m2") == 0)
             spec.matrix_formats[i] = 1;
+        else if(strcmp(dtypes[i], "fp4e2m1") == 0)
+            spec.matrix_formats[i] = 4;
         else
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA matrix format");
         if(!scale_dtypes[i] || strcmp(scale_dtypes[i], "e8m0") != 0)
