@@ -342,7 +342,6 @@ class FmhaBwdDQDKDVTileSize:
     # faster than the shipped kM0=32/kN0=64 on every nomask shape, but loses on
     # causal (hdim 64 on all three, hdim 32 at seqlen_q 32768). Masked falls
     # through to the next tile, which is the shipped one.
-    nomask_only: bool = False
     # Hold the dK/dV accumulators in LDS rather than registers. Frees
     # kN0*headdim/kBlockSize VGPRs per accumulator, which is what gets gfx1250
     # back to 2 waves/SIMD at headdim >= 128.
@@ -608,10 +607,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         if dtype in ["fp16", "bf16"]:
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
-                FmhaBwdDQDKDVTileSize( 64, 128,  32,  64,  32,  64,  32,   32,   32,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1, nomask_only=True),
-                FmhaBwdDQDKDVTileSize( 32,  64,  32,  32,  32,  32,  64,   32,   32,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1),
-                FmhaBwdDQDKDVTileSize( 64, 128,  64,  64,  64,  64,  32,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, nomask_only=True),
-                FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  32,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
+                FmhaBwdDQDKDVTileSize( 64, 128,  32,  64,  32,  64,  32,   32,   32,  1, 4, 1,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
+                FmhaBwdDQDKDVTileSize( 64, 128,  64,  64,  64,  64,  32,   64,   64,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
                 #FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  64,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
                 # headdim >= 128: the two fp32 dK/dV accumulators are 64 VGPRs
                 # each here and drop occupancy from 2 waves/SIMD to 1 (measured
@@ -1204,8 +1201,6 @@ def get_bwd_blobs(
             if (mode == "group") and (spad1d == "f"):
                 continue
             if ("no" not in mask) and tile.seq_q_limit != 0 and not tile.allow_mask:
-                continue
-            if ("no" not in mask) and tile.nomask_only:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue
