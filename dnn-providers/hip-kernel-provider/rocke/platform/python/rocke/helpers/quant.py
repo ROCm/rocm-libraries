@@ -39,7 +39,18 @@ from __future__ import annotations
 
 from typing import List, Literal
 
-from ..core.ir import BF8E5M2, F32, FP8E4M3, I8, I32, I64, IRBuilder, Type, Value
+from ..core.ir import (
+    BF8E5M2,
+    F32,
+    FP8E4M3,
+    I8,
+    I32,
+    I64,
+    IRBuilder,
+    Type,
+    Value,
+    dtype_to_ir_type,
+)
 
 
 __all__ = [
@@ -55,7 +66,7 @@ __all__ = [
 ]
 
 
-QDType = Literal["i8", "fp8e4m3", "bf8e5m2"]
+QDType = Literal["i8", "fp8e4m3", "bf8e5m2", "fp4e2m1", "fp6e2m3", "fp6e3m2"]
 
 
 # Per-dtype clamp magnitude (the largest representable absolute value).
@@ -89,6 +100,9 @@ _IR_TO_QDTYPE = {
     "i8": "i8",
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
+    "fp4e2m1": "fp4e2m1",
+    "fp6e2m3": "fp6e2m3",
+    "fp6e3m2": "fp6e3m2",
 }
 
 
@@ -104,19 +118,14 @@ def _canon(qdtype: str) -> QDType:
 def quant_ir_type(qdtype: str) -> Type:
     """Map a quant-dtype alias string to the canonical IR :class:`Type`.
 
-    Accepts ``"i8"`` / ``"int8"`` / ``"fp8e4m3"`` / ``"fp8"`` /
-    ``"bf8e5m2"`` / ``"bf8"``. Raises :class:`ValueError` for anything
-    else; this is the single point of truth for the alias map so
-    everywhere in the codebase agrees on the canonical names.
+    Accepts the existing i8/FP8/BF8 aliases and the FP4/FP6 aliases from
+    the common dtype resolver. Type recognition does not enable scalar
+    quantization or dequantization for the low-bit formats.
     """
-    canon = _canon(qdtype)
-    if canon == "i8":
-        return I8
-    if canon == "fp8e4m3":
-        return FP8E4M3
-    if canon == "bf8e5m2":
-        return BF8E5M2
-    raise ValueError(f"unreachable: canon={canon!r}")
+    # Type recognition includes low-bit formats before scalar conversions exist.
+    if qdtype in ("fp4", "fp4e2m1", "fp6", "fp6e2m3", "bf6", "fp6e3m2"):
+        return dtype_to_ir_type(qdtype)
+    return dtype_to_ir_type(_canon(qdtype))
 
 
 def quant_max_abs(qdtype: str) -> float:

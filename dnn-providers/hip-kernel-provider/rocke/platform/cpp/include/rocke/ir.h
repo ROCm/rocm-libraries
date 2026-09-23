@@ -105,6 +105,12 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_F32,
     ROCKE_SCALAR_FP8E4M3,
     ROCKE_SCALAR_BF8E5M2,
+    ROCKE_SCALAR_FP4E2M1,
+    ROCKE_SCALAR_FP6E2M3,
+    ROCKE_SCALAR_FP6E3M2,
+    ROCKE_SCALAR_E8M0,
+    ROCKE_SCALAR_E4M3,
+    ROCKE_SCALAR_E5M3,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 
@@ -574,6 +580,15 @@ const rocke_type_t* rocke_f16(void);
 const rocke_type_t* rocke_f32(void);
 const rocke_type_t* rocke_fp8e4m3(void);
 const rocke_type_t* rocke_bf8e5m2(void);
+const rocke_type_t* rocke_fp4e2m1(void);
+const rocke_type_t* rocke_fp6e2m3(void);
+const rocke_type_t* rocke_fp6e3m2(void);
+const rocke_type_t* rocke_e8m0(void);
+const rocke_type_t* rocke_e4m3(void);
+const rocke_type_t* rocke_e5m3(void);
+
+/* Logical dtype resolver; NULL for unknown or unrepresented encodings. */
+const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype);
 
 /* Look up a scalar singleton by canonical name ("i32",...); NULL if unknown. */
 const rocke_type_t* rocke_scalar_by_name(const char* name);

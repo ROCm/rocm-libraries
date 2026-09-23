@@ -9,6 +9,9 @@ Target-specific support belongs to the architecture catalog.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
+
 # Canonical dtype spellings used as catalog keys. Instance/spec dtype strings
 # are normalised through this map so "f16"/"half" and "fp16" all resolve.
 _DTYPE_ALIASES = {
@@ -48,3 +51,67 @@ def normalize_dtype(name: str) -> str:
     """Map a dtype spelling to its canonical catalog key."""
     key = name.strip().lower()
     return _DTYPE_ALIASES.get(key, key)
+
+
+class DTypeCategory(str, Enum):
+    FLOAT = "float"
+    INTEGER = "integer"
+    PREDICATE = "predicate"
+
+
+@dataclass(frozen=True)
+class DTypeInfo:
+    """Logical encoding, independent of storage slots and instruction support."""
+
+    name: str
+    category: DTypeCategory
+    encoded_bits: int
+
+
+_DTYPE_INFO = {
+    name: DTypeInfo(name, category, bits)
+    for category, entries in (
+        (
+            DTypeCategory.FLOAT,
+            (
+                ("fp32", 32),
+                ("fp16", 16),
+                ("bf16", 16),
+                ("fp8e4m3", 8),
+                ("bf8e5m2", 8),
+                ("fp6e2m3", 6),
+                ("fp6e3m2", 6),
+                ("fp4e2m1", 4),
+                ("e8m0", 8),
+                ("e4m3", 8),
+                ("e5m3", 8),
+            ),
+        ),
+        (
+            DTypeCategory.INTEGER,
+            (
+                ("i4", 4),
+                ("iu4", 4),
+                ("i8", 8),
+                ("iu8", 8),
+                ("i16", 16),
+                ("i32", 32),
+                ("i64", 64),
+            ),
+        ),
+        (DTypeCategory.PREDICATE, (("i1", 1),)),
+    )
+    for name, bits in entries
+}
+
+
+def dtype_info(name: str) -> DTypeInfo:
+    """Resolve an encoding; recognition alone does not enable an operation.
+
+    Scale names remain distinct keys. In particular e5m3 is not bf8e5m2.
+    Operand-role validation belongs to the selected atom.
+    """
+    key = normalize_dtype(name)
+    if key not in _DTYPE_INFO:
+        raise ValueError(f"unknown dtype {name!r}")
+    return _DTYPE_INFO[key]

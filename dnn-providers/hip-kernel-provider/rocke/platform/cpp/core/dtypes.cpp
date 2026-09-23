@@ -137,3 +137,28 @@ const char* rocke_normalize_dtype(const char* name, char* lowered, size_t cap)
     }
     return lowered;
 }
+
+static const rocke_dtype_info_t k_dtype_info[] = {
+    {"fp32", ROCKE_DTYPE_FLOAT, 32},   {"fp16", ROCKE_DTYPE_FLOAT, 16},
+    {"bf16", ROCKE_DTYPE_FLOAT, 16},   {"fp8e4m3", ROCKE_DTYPE_FLOAT, 8},
+    {"bf8e5m2", ROCKE_DTYPE_FLOAT, 8}, {"fp6e2m3", ROCKE_DTYPE_FLOAT, 6},
+    {"fp6e3m2", ROCKE_DTYPE_FLOAT, 6}, {"fp4e2m1", ROCKE_DTYPE_FLOAT, 4},
+    {"e8m0", ROCKE_DTYPE_FLOAT, 8},    {"e4m3", ROCKE_DTYPE_FLOAT, 8},
+    {"e5m3", ROCKE_DTYPE_FLOAT, 8},    {"i4", ROCKE_DTYPE_INTEGER, 4},
+    {"iu4", ROCKE_DTYPE_INTEGER, 4},   {"i8", ROCKE_DTYPE_INTEGER, 8},
+    {"iu8", ROCKE_DTYPE_INTEGER, 8},   {"i16", ROCKE_DTYPE_INTEGER, 16},
+    {"i32", ROCKE_DTYPE_INTEGER, 32},  {"i64", ROCKE_DTYPE_INTEGER, 64},
+    {"i1", ROCKE_DTYPE_PREDICATE, 1},
+};
+
+const rocke_dtype_info_t* rocke_dtype_info(const char* name)
+{
+    if(!name)
+        return NULL;
+    char scratch[64];
+    const char* key = rocke_normalize_dtype(name, scratch, sizeof(scratch));
+    for(const auto& info : k_dtype_info)
+        if(strcmp(key, info.name) == 0)
+            return &info;
+    return NULL;
+}

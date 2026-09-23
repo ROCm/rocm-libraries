@@ -895,6 +895,60 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
 
 /* ============================== public entry ======================== */
 
+/* Mirrors _extra_vector_declarations: preserve the static prologue and add
+ * only widths actually encountered, in parameter/operand/result walk order. */
+static void
+    h_extra_vector_type(ckc::rocke_h_lowerer_t* lw, const rocke_type_t* t, rocke_strbuf_t* out)
+{
+    if(!t)
+        return;
+    if(t->kind == ROCKE_TYPE_PTR)
+        h_extra_vector_type(lw, t->pointee, out);
+    else if(t->kind == ROCKE_TYPE_SMEM)
+        h_extra_vector_type(lw, t->elem, out);
+    else if(t->kind == ROCKE_TYPE_VECTOR)
+    {
+        const char* name = ckc::rocke_h_type_to_hip(lw, t);
+        const char* prefix
+            = strcmp(t->elem->name, "i1") == 0
+                  ? "boolx"
+                  : ckc::rocke_h_vec_prefix_checked(lw, t->elem->name, true, "vector type");
+        const char* scalar
+            = strcmp(prefix, "i8x") == 0 ? "int8_t" : ckc::rocke_h_hip_scalar(t->elem->name);
+        const char* macro
+            = rocke_arena_printf(&lw->b->arena, "_ROCKE_VEC(%s, %s, %d)", scalar, prefix, t->count);
+        const char* declaration
+            = rocke_arena_printf(&lw->b->arena,
+                                 "using %s = %s __attribute__((ext_vector_type(%d)));",
+                                 name,
+                                 scalar,
+                                 t->count);
+        if(!macro || !declaration)
+            ckc::rocke_h_fail(lw, ROCKE_ERR_OOM, "vector declaration allocation failed");
+        if(!strstr(ROCKE_HIP_PROLOGUE, macro) && !strstr(rocke_strbuf_cstr(out), declaration))
+        {
+            rocke_strbuf_append(out, declaration);
+            rocke_strbuf_append_char(out, '\n');
+        }
+    }
+}
+
+static void h_extra_vector_region(ckc::rocke_h_lowerer_t* lw,
+                                  const rocke_region_t* region,
+                                  rocke_strbuf_t* out)
+{
+    for(int i = 0; i < region->num_ops; ++i)
+    {
+        const auto* op = region->ops[i];
+        for(int j = 0; j < op->num_operands; ++j)
+            h_extra_vector_type(lw, op->operands[j]->type, out);
+        for(int j = 0; j < op->num_results; ++j)
+            h_extra_vector_type(lw, op->results[j]->type, out);
+        for(int j = 0; j < op->num_regions; ++j)
+            h_extra_vector_region(lw, op->regions[j], out);
+    }
+}
+
 rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
                                          const rocke_kernel_def_t* kernel,
                                          const rocke_lower_hip_opts_t* opts,
@@ -993,6 +1047,9 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
         {
             rocke_strbuf_append(out, ROCKE_HIP_PROLOGUE);
             rocke_strbuf_append_char(out, '\n');
+            for(int j = 0; j < kernel->num_params; ++j)
+                h_extra_vector_type(&lw, kernel->params[j]->type, out);
+            h_extra_vector_region(&lw, kernel->body, out);
         }
         /* head */
         rocke_strbuf_appendf(out,

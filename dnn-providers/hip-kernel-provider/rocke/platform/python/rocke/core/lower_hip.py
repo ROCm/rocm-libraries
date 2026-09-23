@@ -24,6 +24,7 @@ from .ir import (
     PtrType,
     Region,
     SmemType,
+    Type,
     Value,
     VectorType,
 )
@@ -2440,6 +2441,41 @@ def _find_enclosing_for(region: Region, target: Op) -> Optional[Op]:
     return None
 
 
+def _extra_vector_declarations(kernel: KernelDef) -> list[str]:
+    """Declare encountered widths absent from the fixed compatibility prologue."""
+    declarations: dict[str, str] = {}
+
+    def visit_type(t: Type) -> None:
+        if isinstance(t, PtrType):
+            visit_type(t.pointee)
+        elif isinstance(t, SmemType):
+            visit_type(t.elem)
+        elif isinstance(t, VectorType):
+            name = _type_to_hip(t)
+            prefix = (
+                "boolx"
+                if t.elem.name == "i1"
+                else _vec_prefix(t.elem.name, "vector type")
+            )
+            scalar = "int8_t" if prefix == "i8x" else _HIP_TYPE[t.elem.name]
+            if f"_ROCKE_VEC({scalar}, {prefix}, {t.count})" not in HIP_PROLOGUE:
+                declarations[name] = (
+                    f"using {name} = {scalar} __attribute__((ext_vector_type({t.count})));"
+                )
+
+    def visit_region(region: Region) -> None:
+        for op in region.ops:
+            for value in (*op.operands, *op.results):
+                visit_type(value.type)
+            for child in op.regions:
+                visit_region(child)
+
+    for param in kernel.params:
+        visit_type(param.type)
+    visit_region(kernel.body)
+    return list(declarations.values())
+
+
 def lower_kernel_to_hip(
     kernel: KernelDef,
     *,
@@ -2507,6 +2543,7 @@ def lower_kernel_to_hip(
     parts: List[str] = []
     if include_prologue:
         parts.append(HIP_PROLOGUE)
+        parts.extend(_extra_vector_declarations(kernel))
     parts.append(head)
     if smem_block:
         parts.append(smem_block)

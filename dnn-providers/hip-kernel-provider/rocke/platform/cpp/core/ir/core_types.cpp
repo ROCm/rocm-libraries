@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "rocke/arena.h"
+#include "rocke/dtypes.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 
@@ -55,6 +56,13 @@ ROCKE_SCALAR_SINGLETON(rocke_f32, ROCKE_SCALAR_F32, "f32")
 ROCKE_SCALAR_SINGLETON(rocke_fp8e4m3, ROCKE_SCALAR_FP8E4M3, "fp8e4m3")
 ROCKE_SCALAR_SINGLETON(rocke_bf8e5m2, ROCKE_SCALAR_BF8E5M2, "bf8e5m2")
 
+ROCKE_SCALAR_SINGLETON(rocke_fp4e2m1, ROCKE_SCALAR_FP4E2M1, "fp4e2m1")
+ROCKE_SCALAR_SINGLETON(rocke_fp6e2m3, ROCKE_SCALAR_FP6E2M3, "fp6e2m3")
+ROCKE_SCALAR_SINGLETON(rocke_fp6e3m2, ROCKE_SCALAR_FP6E3M2, "fp6e3m2")
+ROCKE_SCALAR_SINGLETON(rocke_e8m0, ROCKE_SCALAR_E8M0, "e8m0")
+ROCKE_SCALAR_SINGLETON(rocke_e4m3, ROCKE_SCALAR_E4M3, "e4m3")
+ROCKE_SCALAR_SINGLETON(rocke_e5m3, ROCKE_SCALAR_E5M3, "e5m3")
+
 #undef ROCKE_SCALAR_SINGLETON
 
 const rocke_type_t* rocke_scalar_by_name(const char* name)
@@ -81,7 +89,31 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return rocke_fp8e4m3();
     if(strcmp(name, "bf8e5m2") == 0)
         return rocke_bf8e5m2();
+    if(strcmp(name, "fp4e2m1") == 0)
+        return rocke_fp4e2m1();
+    if(strcmp(name, "fp6e2m3") == 0)
+        return rocke_fp6e2m3();
+    if(strcmp(name, "fp6e3m2") == 0)
+        return rocke_fp6e3m2();
+    if(strcmp(name, "e8m0") == 0)
+        return rocke_e8m0();
+    if(strcmp(name, "e4m3") == 0)
+        return rocke_e4m3();
+    if(strcmp(name, "e5m3") == 0)
+        return rocke_e5m3();
     return NULL;
+}
+
+const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
+    if(!info)
+        return NULL;
+    if(strcmp(info->name, "fp16") == 0)
+        return rocke_f16();
+    if(strcmp(info->name, "fp32") == 0)
+        return rocke_f32();
+    return rocke_scalar_by_name(info->name);
 }
 
 /* VectorType(elem, count) -> "vec<{elem}x{count}>" */
