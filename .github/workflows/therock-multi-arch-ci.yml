@@ -180,7 +180,9 @@ jobs:
       build_python_packages: ${{ inputs.build_python_packages || false }}
       build_pytorch: ${{ inputs.build_pytorch || false }}
       build_jax: ${{ inputs.build_jax || false }}
-      build_native_linux: ${{ inputs.build_native_linux || false }}
+      # Preserve manual workflow_dispatch control and enable native package
+      # builds for pull requests carrying the opt-in label.
+      build_native_linux: ${{ inputs.build_native_linux || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-linux-packages')) }}
       # A missing baseline disables artifact reuse and causes TheRock to
       # perform a full stage build.
       stage_reuse_mode: >-
