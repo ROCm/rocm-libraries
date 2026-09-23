@@ -35,6 +35,8 @@ from Tensile.Components.Subtile.Kernel import (
     MXSB_B4,
     MXSA_B8,
     MXSB_B8,
+    MXSA_B4_W32_M32,
+    MXSB_B4_W32_N16,
 )
 
 
@@ -46,18 +48,25 @@ from Tensile.Components.Subtile.Kernel import (
 #
 #     kernel["ProblemType"]["DataTypeA"]   when tc == 'MXSA'
 #     kernel["ProblemType"]["DataTypeB"]   when tc == 'MXSB'
+#     kernel.get("WavefrontSize", 64) and kernel.get("MatrixInstM", 16)
+#     for the gfx1250 wave32 32x16 FP4 scale geometries.
 #
 # (see ``data_tc = 'A' if tc == 'MXSA' else 'B'`` in the function body).
-def _build_kernel(*, dtype_a, dtype_b=None):
+def _build_kernel(*, dtype_a, dtype_b=None, wavefront_size=None, matrix_inst_m=None):
     """Build the smallest kernel dict accepted by selectMXScaleGeometry."""
     if dtype_b is None:
         dtype_b = dtype_a
-    return {
+    kernel = {
         "ProblemType": {
             "DataTypeA": dtype_a,
             "DataTypeB": dtype_b,
         }
     }
+    if wavefront_size is not None:
+        kernel["WavefrontSize"] = wavefront_size
+    if matrix_inst_m is not None:
+        kernel["MatrixInstM"] = matrix_inst_m
+    return kernel
 
 
 # ---------------------------------------------------------------------------
@@ -245,3 +254,38 @@ class TestSelectMXScaleGeometryAandBindependent:
         )
         assert selectMXScaleGeometry(kernel, "MXSA") is MXSA_B8
         assert selectMXScaleGeometry(kernel, "MXSB") is MXSB_B4
+
+
+# ===========================================================================
+# Section 5 — gfx1250 wave32 32x16 FP4 scale geometries
+# ===========================================================================
+class TestSelectMXScaleGeometryWave32FP4:
+    """Wave32 + MatrixInstM=32 + FP4 selects the 32x16 scale tiles."""
+
+    def test_wave32_32x16_fp4_returns_w32_geometries(self):
+        kernel = _build_kernel(
+            dtype_a=DataType(DataTypeEnum.Float4),
+            wavefront_size=32,
+            matrix_inst_m=32,
+        )
+        assert selectMXScaleGeometry(kernel, "MXSA") is MXSA_B4_W32_M32
+        assert selectMXScaleGeometry(kernel, "MXSB") is MXSB_B4_W32_N16
+
+    def test_wave32_without_instm_32_keeps_gfx950_b4(self):
+        """Missing MatrixInstM defaults to 16; do not pick 32-row A scales."""
+        kernel = _build_kernel(
+            dtype_a=DataType(DataTypeEnum.Float4),
+            wavefront_size=32,
+        )
+        assert selectMXScaleGeometry(kernel, "MXSA") is MXSA_B4
+        assert selectMXScaleGeometry(kernel, "MXSB") is MXSB_B4
+
+    def test_wave64_32x16_fp4_keeps_gfx950_b4(self):
+        kernel = _build_kernel(
+            dtype_a=DataType(DataTypeEnum.Float4),
+            wavefront_size=64,
+            matrix_inst_m=32,
+        )
+        assert selectMXScaleGeometry(kernel, "MXSA") is MXSA_B4
+        assert selectMXScaleGeometry(kernel, "MXSB") is MXSB_B4
+

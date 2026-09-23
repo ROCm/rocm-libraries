@@ -71,6 +71,11 @@ from .SubtileGeometry import (
   MFMA_16x16_1B_4K_8V,
   MFMA_16x16_1B_4N_4V,
   MFMA_SCALE_16x16_1B_MX32_8V,
+  WMMA_32x16_W32_A_16V,
+  WMMA_32x16_W32_B_8V,
+  WMMA_32x16_W32_CD_16V,
+  WMMA_SCALE_32x16_W32_MX32_A,
+  WMMA_SCALE_32x16_W32_MX32_B,
   TileGeometry,
   ABInputGeometry,
   ABGRGeometry,
@@ -297,6 +302,18 @@ AB_B4 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),   # 128-bit GR: 32 fp4 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
 )
+
+# Wave32 FP4 32x16: A covers 32 M-rows (16 VGPR), B covers 16 N-rows (8 VGPR).
+_B4_W32_M32 = dict(mmaLayout=WMMA_32x16_W32_A_16V, instK=128, bpe=0.5, supportedTypes=('fp4',))
+_B4_W32_N16 = dict(mmaLayout=WMMA_32x16_W32_B_8V,  instK=128, bpe=0.5, supportedTypes=('fp4',))
+AB_B4_W32_M32 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B4_W32_M32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),
+    lr=ABLRGeometry(tag=LRTag_1x2(), **_B4_W32_M32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),
+)
+AB_B4_W32_N16 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B4_W32_N16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),
+    lr=ABLRGeometry(tag=LRTag_1x2(), **_B4_W32_N16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),
+)
 AB_B8 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)),  # 128-bit GR: 16 fp8 along K
     lr=ABLRGeometry(tag=LRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)), # 128-bit LR: 16 fp8 along K
@@ -332,15 +349,29 @@ MXSB_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXSc
 MXSA_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 
+# gfx1250 wave32 32x16x128 FP4 scale tiles (mxBlock=32): A=1.0 VGPR, B=0.5 VGPR.
+_MXS_B4_W32_A = dict(scaleLayout=WMMA_SCALE_32x16_W32_MX32_A, instK=128, bpe=1, supportedTypes=('fp4',))
+_MXS_B4_W32_B = dict(scaleLayout=WMMA_SCALE_32x16_W32_MX32_B, instK=128, bpe=1, supportedTypes=('fp4',))
+MXSA_B4_W32_M32 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4_W32_A, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4_W32_A, loadWidth=4))
+MXSB_B4_W32_N16 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4_W32_B, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4_W32_B, loadWidth=4))
+
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
 # Wave32 f32 output: 8 VGPRs per lane (WMMA V3 gfx1250)
 CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=8))
+# Wave32 32x16 f32 accumulator: 16 VGPRs per lane, rectangular 32x16 MMA tile.
+CD_F32_W32_M32 = CDTile_1x1(
+    mmaLayout=WMMA_32x16_W32_CD_16V, bpe=4, supportedTypes=('f32',),
+    storeShape=LoadShape(m=1, k=8), instN=16,
+)
 
 def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB')."""
   data_tc = 'A' if tc == 'MXSA' else 'B'
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
+  wave32 = kernel.get("WavefrontSize", 64) == 32
+  if dtype.isFloat4() and wave32 and kernel.get("MatrixInstM", 16) == 32:
+    return MXSA_B4_W32_M32 if tc == 'MXSA' else MXSB_B4_W32_N16
   if dtype.is6bitFloat() or dtype.isFloat4():
     return MXSA_B4 if tc == 'MXSA' else MXSB_B4
   if dtype.is8bitFloat():
@@ -357,6 +388,8 @@ AB_GEOMETRY_MAP = {
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
+  "AB_B4_W32_M32": AB_B4_W32_M32,
+  "AB_B4_W32_N16": AB_B4_W32_N16,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
@@ -368,6 +401,8 @@ def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
 def selectDGeometry(kernel: dict) -> CDTileGeometry:
   """Return the CDTileGeometry for the D (output/accumulator) tile."""
   if kernel["WavefrontSize"] == 32:
+    if kernel.get("MatrixInstM", 16) == 32:
+      return CD_F32_W32_M32
     return CD_F32_W32
   return CD_F32
 

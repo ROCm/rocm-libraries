@@ -1173,7 +1173,17 @@ class Solution(collections.abc.Mapping):
             state[f"_ABTilePair{tc}"] = "AB_B16"
         elif dtype.is8bitFloat():
           state[f"_ABTilePair{tc}"] = "AB_B8"
-        elif dtype.is6bitFloat() or dtype.isFloat4():
+        elif dtype.isFloat4():
+          if state["WavefrontSize"] == 32:
+            if not (state["MatrixInstM"] == 32 and state["MatrixInstN"] == 16):
+              reject(state, printRejectionReason,
+                     "UseSubtileImpl=1 FP4 on wave32 currently requires MatrixInst 32x16")
+              return
+            # 32x16 WMMA: A covers 32 M-rows (16 VGPR), B covers 16 N-rows (8 VGPR).
+            state[f"_ABTilePair{tc}"] = "AB_B4_W32_M32" if tc == "A" else "AB_B4_W32_N16"
+          else:
+            state[f"_ABTilePair{tc}"] = "AB_B4"
+        elif dtype.is6bitFloat():
           state[f"_ABTilePair{tc}"] = "AB_B4"
         else:
           reject(state, printRejectionReason, f"No subtile geometry for dtype {dtype}")
@@ -1197,8 +1207,12 @@ class Solution(collections.abc.Mapping):
       if state["PrefetchGlobalRead"] not in [0, 1, 2]:
         reject(state, printRejectionReason,
                "UseSubtileImpl=1 requires PrefetchGlobalRead 0, 1 or 2, got %d" % state["PrefetchGlobalRead"])
-      if not (state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16):
-        reject(state, printRejectionReason, "UseSubtileImpl=1 requires MatrixInst 16x16")
+      mi16 = state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16
+      # gfx1250 MXF4 subtile: TN 32x16x128 scale-WMMA (wave32).
+      mi32x16 = isgfx1250 and state["MatrixInstM"] == 32 and state["MatrixInstN"] == 16
+      if not (mi16 or mi32x16):
+        reject(state, printRejectionReason,
+               "UseSubtileImpl=1 requires MatrixInst 16x16, or 32x16 on gfx1250")
       if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:

@@ -164,6 +164,12 @@ MFMA_16x16_1B_4K_8V = MMALayout(instM=16, blocks=1, vgprs=8, waveSize=64)  # fp8
 #   MFMA always accumulates in f32 (or i32) — 4 VGPRs per lane.
 #   Conversion to bf16 happens in the store path, not the MFMA output.
 MFMA_16x16_1B_4N_4V = MMALayout(instM=16, blocks=1, vgprs=4, waveSize=64)  # f32/i32 C/D
+#
+# gfx1250 wave32 32x16x128 FP4 WMMA V3:
+#   A: instM=32, 16 VGPRs; B: instM=16 (N), 8 VGPRs; C/D: 32x16 f32, 16 VGPRs.
+WMMA_32x16_W32_A_16V  = MMALayout(instM=32, blocks=1, vgprs=16, waveSize=32)
+WMMA_32x16_W32_B_8V   = MMALayout(instM=16, blocks=1, vgprs=8,  waveSize=32)
+WMMA_32x16_W32_CD_16V = MMALayout(instM=32, blocks=1, vgprs=16, waveSize=32)
 
 
 @dataclass(frozen=True)
@@ -204,6 +210,12 @@ class MMAScaleLayout:
 #   Scale tile = instM(16) x 4 x 1B = 64B / 64 lanes = 1B per lane = 0.25 VGPRs.
 #   The 2x2 subtile shape covers 4 MMA scale tiles → 4 x 0.25 = 1 full VGPR per subtile.
 MFMA_SCALE_16x16_1B_MX32_8V = MMAScaleLayout(instM=16, blocks=1, vgprs=0.25, mxBlock=32, waveSize=64)
+
+# gfx1250 wave32 32x16x128 FP4 scale tiles (mxBlock=32):
+#   A: instM=32, 32x4x1B = 128B / 32 lanes = 4B = 1.0 VGPR per MMA scale tile
+#   B: instM=16 (N), 16x4x1B = 64B / 32 lanes = 2B = 0.5 VGPR per MMA scale tile
+WMMA_SCALE_32x16_W32_MX32_A = MMAScaleLayout(instM=32, blocks=1, vgprs=1.0, mxBlock=32, waveSize=32)
+WMMA_SCALE_32x16_W32_MX32_B = MMAScaleLayout(instM=16, blocks=1, vgprs=0.5, mxBlock=32, waveSize=32)
 
 
 ################################################################################
@@ -497,6 +509,8 @@ class CDTileGeometry(TileGeometry):
   supportedTypes: Tuple[str, ...] = ()
 
   storeShape: LoadShape = field(default_factory=lambda: LoadShape(m=1, k=1))
+  # Non-K N dimension of the MMA output tile. None means square (instM x instM).
+  instN: Optional[int] = None
 
   # Derived (computed in __post_init__, independent of macro tile and subtile shape)
   mmaTileShape: Tuple[int, int] = field(init=False)
@@ -505,8 +519,9 @@ class CDTileGeometry(TileGeometry):
 
   def __post_init__(self):
     instM = self.mmaLayout.instM
-    mmaTileSize = int(instM * instM * self.bpe)
-    object.__setattr__(self, 'mmaTileShape', (instM, instM))
+    instN = self.instN if self.instN is not None else instM
+    mmaTileSize = int(instM * instN * self.bpe)
+    object.__setattr__(self, 'mmaTileShape', (instM, instN))
     object.__setattr__(self, 'mmaTileSize', mmaTileSize)
     object.__setattr__(self, 'mmaTileRegCount',
                        mmaTileSize / self.mmaLayout.waveSize / 4)
@@ -514,8 +529,8 @@ class CDTileGeometry(TileGeometry):
   # --- Grid queries (depend on macro tile config, computed on demand) ---
 
   def globalMMATileGrid(self, macroTile0: int, macroTile1: int) -> Tuple[int, int]:
-    instM = self.mmaLayout.instM
-    return (macroTile0 // instM, macroTile1 // instM)
+    instM, instN = self.mmaTileShape
+    return (macroTile0 // instM, macroTile1 // instN)
 
   def localMMATileGrid(self, macroTile0: int, macroTile1: int,
                        waveGroup: Tuple[int, int]) -> Tuple[int, int]:
