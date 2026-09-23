@@ -13,7 +13,16 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Iterable, Mapping, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Mapping,
+    Protocol,
+    Sequence,
+    Tuple,
+    runtime_checkable,
+)
 
 from ..core.arch import known_arches
 
@@ -398,6 +407,92 @@ class KernelCandidate:
             if not ok:
                 return False, f"capability: {why}"
         return self._supports(request)
+
+
+@runtime_checkable
+class PinnableRequest(Protocol):
+    """What the shared selector/identity helpers actually read off a request.
+
+    ``OperatorRequest`` declares only :meth:`normalized`, but
+    :func:`selector_matches` and :func:`make_kernel_id` also read ``algorithm``,
+    ``spec_id`` and ``arch``. While each family owned a private copy of those
+    helpers, the annotation was that family's concrete request type and the
+    requirement was stated where it was used. Hoisting made the consumers
+    shared, which left the contract stated nowhere -- a new family learns it
+    from an ``AttributeError`` at first dispatch.
+
+    A Protocol rather than base-class fields because the fields cannot go on the
+    frozen base: every family declares ``arch`` WITHOUT a default, and a
+    defaulted inherited field in front of it is a ``TypeError`` at class
+    creation ("non-default argument 'arch' follows default argument").
+
+    Structural, so no family has to inherit anything: a request that carries the
+    three attributes satisfies it.
+    """
+
+    arch: str
+    algorithm: str
+    spec_id: str
+
+    def normalized(self) -> dict: ...
+
+
+def normalize_selector(value: str) -> str:
+    """Normalize an algorithm or spec-id selector for matching and identity."""
+    return value.strip().lower()
+
+
+def selector_matches(
+    request: PinnableRequest, candidate: KernelCandidate
+) -> Tuple[bool, str]:
+    """Match an explicit ``algorithm``/``spec_id`` pin against one candidate.
+
+    ``"auto"`` (the default on every family request) matches any candidate; a
+    set value must equal the candidate's. Shared by every operator family so the
+    pin semantics cannot drift between them.
+
+    Both fields are read directly, not via ``getattr`` with a default, and
+    ``.strip()`` is called on the attribute itself rather than on ``str(...)``:
+    a request whose pin is missing OR not a string is a family wiring bug, and
+    it should raise here as it did when each family had its own copy. Wrapping
+    in ``str()`` would turn ``None`` into ``"none"`` and reject every candidate
+    instead, so the caller sees "no candidate supports request" -- a routing
+    failure pointing at the registry rather than at their malformed request.
+    Defaulting to ``"auto"`` is the same mistake one step worse: a pin silently
+    ignored.
+    """
+    algorithm = normalize_selector(request.algorithm)
+    spec_id = normalize_selector(request.spec_id)
+    if algorithm not in ("auto", candidate.algorithm):
+        return (
+            False,
+            f"request algorithm {request.algorithm!r} != {candidate.algorithm!r}",
+        )
+    if spec_id not in ("auto", candidate.spec_id):
+        return False, f"request spec_id {request.spec_id!r} != {candidate.spec_id!r}"
+    return True, "ok"
+
+
+def make_kernel_id(
+    request: PinnableRequest, candidate: KernelCandidate, spec: Any, *, op: str
+) -> KernelId:
+    """The stable identity shared by caches/manifests/benchmarks for one pick.
+
+    Identical across families except the operator name ``op``; the family is
+    taken from the candidate and the request/spec hashes from their normalized
+    forms, so a family cannot hash a pick differently from its peers.
+    """
+    return KernelId(
+        op=op,
+        family=candidate.family,
+        candidate=candidate.name,
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+        arch=request.arch,
+        abi_version=candidate.abi_version,
+        request_hash=stable_json_hash(request.normalized(), n=16),
+        spec_hash=stable_json_hash(asdict(spec), n=16),
+    )
 
 
 Ranker = Callable[

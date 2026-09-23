@@ -2,9 +2,9 @@
 
 This page covers:
 
-- `instances/common/conv_implicit_gemm.py`
-- `instances/common/conv_direct_grouped.py`
-- `instances/common/img2col.py`
+- `library/kernels/common/conv_implicit_gemm.py`
+- `library/kernels/common/conv_direct_grouped.py`
+- `library/kernels/common/img2col.py`
 - `instances/common/pooling.py`
 
 The implicit-GEMM tile/pipeline heuristic (formerly an experimental
@@ -25,7 +25,7 @@ Direct grouped:
 
 ## Implicit-GEMM Convolution
 
-Source: `instances/common/conv_implicit_gemm.py`.
+Source: `library/kernels/common/conv_implicit_gemm.py`.
 
 ### Contract
 
@@ -433,7 +433,7 @@ M-outer default for dgrad, and matches the fp32 reference for wgrad.
 
 ## Direct Grouped Convolution
 
-Source: `instances/common/conv_direct_grouped.py`.
+Source: `library/kernels/common/conv_direct_grouped.py`.
 
 These are specialized kernels for grouped direct convolution bake-off cases (`cpg=kpg in {16, 4}`), not generic implicit-GEMM conv.
 
@@ -445,8 +445,8 @@ Verified from `instances/conv_direct_grouped.py`:
 @dataclass(frozen=True)
 class DirectConvProblem:
     N: int
-    H: int           # input/output height (no Hi vs Ho here)
-    W: int           # input/output width
+    H: int           # input height
+    W: int           # input width
     groups: int
     cpg: int         # channels per group
     kpg: int         # filters per group (= cpg in bake-off)
@@ -456,9 +456,19 @@ class DirectConvProblem:
     stride: int = 1
 ```
 
+Derived output spatial properties (read-only):
+
+```python
+Ho = (H + 2*PAD - KH) // stride + 1
+Wo = (W + 2*PAD - KW) // stride + 1
+```
+
+`flops` is computed from `Ho × Wo` (output positions), not `H × W`, so stride > 1
+reports correctly.
+
 Note this layout is different from `ConvProblem`:
 
-- `H`/`W` not `Hi`/`Wi` (the grouped direct conv assumes equal in/out spatial size with padding);
+- `H`/`W` are input spatial; `Ho`/`Wo` are derived output spatial;
 - `KH`/`KW` not `R`/`S`;
 - single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`/`dH`/`dW`); dilation is implicitly 1.
 
@@ -542,9 +552,100 @@ Levers:
 
 This path avoids the implicit-GEMM LDS machinery because the channel group is tiny and direct vectorization is cleaner.
 
+### Depthwise Kernel (`DirectDepthwiseSpec`)
+
+`DirectDepthwiseSpec` / `build_direct_depthwise`. Scalar FMA, no MFMA. Each lane owns
+one absolute channel for the full kernel.
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise"
+    block_w: int = 8       # output W positions per workgroup
+    block_waves: int = 1
+    wave_size: int = 64
+```
+
+Constraints (Python `is_valid_depthwise_spec` / C++ `rocke_direct_depthwise_is_valid_spec`):
+
+- `cpg == kpg == 1`
+- No divisibility requirement on `groups` — partial channel tiles are
+  handled by `ch_in_range = ch < groups` predicate on loads and stores.
+- `stride >= 1` supported; output uses `D[N, Ho, Wo, total_k]`.
+
+Grid: `(ceil(W / block_w), ceil(groups / block_ch), N)` where
+`block_ch = block_waves * wave_size`.
+
+H-loop: the builder selects between two emission strategies based on
+`_UNROLL_THRESH = 20_000`:
+
+```text
+_use_unroll = n_iters * block_w * KH * KW <= 20_000
+```
+
+- **Unroll**: static Python/C loop — every iteration emits straight-line IR.
+  Faster to compile for small kernels.
+- **Runtime** (`scf_for_iter`): groups `KH` input rows per loop iteration
+  with `KH × block_w` loop-carried f32 accumulators. Keeps IR size bounded
+  for large `H` or many filter taps.
+
+Flush condition (both paths):
+
+```text
+p_flush_val = y - (KH - 1)
+if 0 <= p_flush_val < H and p_flush_val % stride == 0:
+    ho_row = p_flush_val // stride
+    if ho_row < Ho:          # bounds guard added for stride > 1
+        store to D[n, ho_row, w_out, ch]
+```
+
+### Depthwise Spatial Kernel (`DirectDepthwiseSpatialSpec`)
+
+`DirectDepthwiseSpatialSpec` / `build_direct_depthwise_spatial`. For small group
+counts (`groups <= wave_size`); maps both channel and output W-position onto a
+single wavefront.
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseSpatialSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_spatial"
+    block_waves: int = 1
+    wave_size: int = 64
+```
+
+Thread layout within each wavefront:
+
+```text
+ch        = tid % groups          # which channel this thread owns
+w_in_wave = tid // groups         # W-position offset within the wave
+n_w_per_wave = wave_size // groups
+block_w   = block_waves * n_w_per_wave
+```
+
+Thread utilisation: `floor(wave_size/groups) * groups / wave_size`. For
+`groups=3, wave_size=64`: 63/64 = 98.4%.
+
+Constraints (`is_valid_depthwise_spatial_spec`):
+
+- `cpg == kpg == 1`
+- `groups <= wave_size`
+- `n_w_per_wave > 0` (i.e. `groups < wave_size`)
+
+Grid: `(ceil(Wo / block_w), 1, N)` — no channel tile (all channels handled
+within one wavefront via the spatial thread mapping).
+
+Uses the same `_UNROLL_THRESH` / `scf_for_iter` branch logic as
+`DirectDepthwiseSpec`, but accumulates over a single output W position
+(no `block_w` outer loop). `stride >= 1` supported via `D[N, Ho, Wo, total_k]`.
+
+Parity gate: configs 10 (stride=1, groups=3) and 11 (stride=2, groups=3) in
+`tests/instances/parity/conv_direct_grouped_emit.{c,py}`.
+
 ## Img2Col
 
-Source: `instances/common/img2col.py`.
+Source: `library/kernels/common/img2col.py`.
 
 Materializes the implicit-GEMM A matrix `[M_gemm, K_gemm]`:
 

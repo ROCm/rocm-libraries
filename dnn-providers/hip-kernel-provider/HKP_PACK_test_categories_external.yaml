@@ -1,31 +1,43 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# CTest categories for the descriptor-packaging (hkp) pytest tests, which are
-# pre-registered via add_test() in descriptor-packaging/cmake/HkpPackaging.cmake
-# (not through a GTest binary). apply_ctest_category_labels() attaches the tier
-# labels below by exact test name.
+# CTest categories for the two families descriptor-packaging/cmake/HkpPackaging.cmake
+# pre-registers via add_test() rather than through a GTest binary: the hkp pytest entries
+# (hkp_register_tests) and the census entries (hkp_register_census_tests).
 #
-# The two entries run DISJOINT pytest sets: the quick entry runs `-m quick` (the
-# no-compile subset) and the standard entry runs `-m "not quick"` (the rest). The
-# tier cascade labels a quick test quick;standard;comprehensive;full and a
-# standard test standard;comprehensive;full, so every tier runs each test once
-# with no overlap, and comprehensive/full run the union via the cascade (there
-# are no comprehensive- or full-only tests yet).
+# The two pytest entries run DISJOINT sets -- quick is `-m quick` (the no-compile
+# subset), standard is `-m "not quick"`. The tier cascade labels a quick test
+# quick;standard;comprehensive;full and a standard test standard;comprehensive;full, so
+# each tier runs every test once and comprehensive/full run the union.
+#
+# The census pattern is a REGEX, unlike every other entry here: an entry is named
+# hip-kernel-provider-hkp-census-<arch>-<suite>, whose values are configure-time ones no
+# static YAML can spell. The parser takes the regex path on seeing a metacharacter and
+# anchors the pattern at both ends. That one pattern deliberately covers the entry AND
+# its three -control-* siblings, so a control cannot land in a different tier from the
+# entry it watches. The census sits in quick, and through the cascade in every tier,
+# because a census run is host-only and filtered to one suite.
+#
+# The quick block's three descriptive labels are load-bearing for the pytest entries,
+# whose add_test() sets none. _hkp_add_census_test() sets the same three on each census
+# entry directly, so they survive a tree where YAML categorization is off and
+# dnn-providers/cmake/Tests.cmake falls back to `ctest -L unit_test`.
 test_categories:
   quick:
-    description: "hkp descriptor-packaging pytest: no-compile validation subset"
+    description: "hkp descriptor-packaging pytest (no-compile subset) and the descriptor census"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
+      - "hip-kernel-provider-hkp-census-.*"
     labels:
       - "unit_test"
       - "hip-kernel-provider"
       - "host"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks"
+    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks and census"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
+      - "hip-kernel-provider-hkp-census-.*"
     labels:
       - "ffm-full"
 

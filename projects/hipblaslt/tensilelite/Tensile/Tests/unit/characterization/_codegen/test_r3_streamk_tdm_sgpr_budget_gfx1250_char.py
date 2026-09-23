@@ -29,6 +29,18 @@ currently land on the same pool sizes (93/97/101/105 of 106); FP4 is covered bec
 it reaches them through a different allocation path -- different global-read widths,
 LDS layout and scale-block bookkeeping -- that could drift away from FP8.
 
+NOTE on the tight corner: PGL1/SKFDPO0/PGR1/SIA0 sits at 105 of 106, i.e. one
+spare SGPR. The uniform-summation-order selector (bit 29 of
+``MagicShiftItersPerTile``, which chooses between the historical global "first-E"
+Stream-K K-split mapping and the per-tile extra-iters mapping) deliberately does
+NOT consume one: it is tested in place with ``s_bitcmp1_b32`` at each of the three
+divergence sites in ``Components/StreamK.py`` rather than held in a persistent
+register. On this VGPR-cache path the ``v_readfirstlane_b32`` target is a transient
+released before ``skTiles``/``skGrid`` are acquired, so it does not raise the peak
+either. The assertions below deliberately pin only ``<= MaxSgpr`` and
+``overflowedResources == 0``, never the exact sizes, but headroom here is one
+register: anything that adds two persistent SGPRs on this path will overflow.
+
 CPU-only: no GPU required.
 """
 

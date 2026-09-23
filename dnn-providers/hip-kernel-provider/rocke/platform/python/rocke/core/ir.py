@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .arch import target as _arch
+
 # ----------------------------- Types --------------------------------------
 
 
@@ -71,9 +73,8 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # Both are read from the arch SSOT (``core/arch/target``): fragment lengths from
 # ``_MMA_FRAGMENT_INFO`` and the accumulator dtype from the JSON catalog. ir.py
 # keeps *no* private copy of that data — an ``MmaOp`` object supplies both fields
-# directly, and a bare op_id string is resolved through the lazy helpers below.
-# The arch package is imported lazily (inside the helpers) so ir.py stays
-# importable without eagerly loading the arch tree.
+# directly, and a bare op_id string is resolved through the helpers below.
+# The arch module loads its JSON catalog lazily when a lookup needs it.
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. This is
 # purely ir-side SSA naming (not arch data), kept here so the emitted value
@@ -85,8 +86,6 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
-    "wmma_scale_f32_16x16x128_fp8_fp8": "mxacc",
-    "wmma_scale16_f32_16x16x128_fp8_fp8": "mxacc",
 }
 
 
@@ -135,12 +134,10 @@ def _check_cachepolicy(op: str, value: int) -> int:
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
+    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
     the strictness callers relied on.
     """
-    from rocke.core.arch import target as _arch
-
     frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
         raise ValueError(
@@ -154,11 +151,9 @@ def _mma_c_is_int(op_id: str) -> bool:
     """True when ``op_id`` accumulates in i32 (integer WMMA).
 
     Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
-    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
+    Op_ids absent from the catalog default to the f32 accumulator.
     """
-    from rocke.core.arch import target as _arch
-
     return _arch._op_id_c_dtype().get(op_id) == "i32"
 
 
@@ -1859,7 +1854,11 @@ class IRBuilder:
         c_dtype = getattr(op, "c_dtype", None)
         is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
         c_elem = I32 if is_int_acc else F32
-        hint = _MMA_RESULT_HINT.get(op_id, "acc")
+        hint = (
+            "mxacc"
+            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            else _MMA_RESULT_HINT.get(op_id, "acc")
+        )
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
@@ -1962,38 +1961,6 @@ class IRBuilder:
     def wmma_gfx1250_f32_16x16x64_bf8_bf8(self, a: Value, b: Value, c: Value) -> Value:
         """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
         return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
-
-    def wmma_scale_f32_16x16x128_fp8_fp8(
-        self,
-        a: Value,
-        b: Value,
-        c: Value,
-        a_scale: Value,
-        b_scale: Value,
-    ) -> Value:
-        """gfx1250 native SCALE FP8 WMMA with packed E8M0 scale operands.
-
-        A and B are ``<16 x i32>`` fragments (64 FP8 bytes per lane), C is
-        ``<8 x f32>``, and each scale operand is one i32 packing four E8M0
-        bytes for the instruction's four K=32 scale blocks.
-        """
-        return self.mma("wmma_scale_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
-
-    def wmma_scale16_f32_16x16x128_fp8_fp8(
-        self,
-        a: Value,
-        b: Value,
-        c: Value,
-        a_scale: Value,
-        b_scale: Value,
-    ) -> Value:
-        """gfx1250 native SCALE16 FP8 WMMA with eight packed E8M0 scales.
-
-        The matrix and accumulator fragments match
-        :meth:`wmma_scale_f32_16x16x128_fp8_fp8`; each scale operand is i64
-        because SCALE16 carries eight K=16 E8M0 scale bytes.
-        """
-        return self.mma("wmma_scale16_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
 
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)
@@ -2844,6 +2811,64 @@ class IRBuilder:
             attrs={"xor_mask": int(xor_mask)},
             result_name_hint="dppx",
         ).result
+
+    def quad_perm(self, data: Value, perm) -> Value:
+        """Intra-quad ``v_mov_b32_dpp`` permutation on the VALU.
+
+        Lane ``4q + i`` reads ``data`` from lane ``4q + perm[i]``.
+        ``perm`` is encoded in the low eight bits of the DPP control word.
+
+        **Wave size.** The mapping is wave-size-independent: the same
+        control word applies within every four-lane group, and four
+        divides both 32 and 64, so a lane never addresses outside its own
+        quad. Wave size changes only the *number* of quads (8 in wave32,
+        16 in wave64), never the permutation a quad performs. Contrast
+        :meth:`warp_shuffle_xor`, whose ``lane_xor = 32`` partner is a
+        real lane in wave64 and does not exist in wave32.
+
+        That is a property of the quad, not a claim about every target:
+        the op still requires DPP-capable hardware. Base-DPP
+        ``quad_perm`` is available on CDNA, where the RDNA-only
+        ``row_xmask`` of :meth:`dpp_xor` is not.
+
+        The op carries no lane targeting -- the control word is broadcast
+        to every quad in the wave, with row and bank masks fixed at
+        ``15, 15`` (all enabled) by the lowerers. Selecting a subset of
+        quads is the caller's job.
+        """
+        perm = list(perm)
+        if len(perm) != 4 or any(not (0 <= p <= 3) for p in perm):
+            raise ValueError(f"quad_perm perm must be 4 values in 0..3, got {perm}")
+        if data.type.name != "i32":
+            raise ValueError("quad_perm requires i32 data")
+        ctrl = perm[0] | (perm[1] << 2) | (perm[2] << 4) | (perm[3] << 6)
+        return self._op(
+            "tile.quad_perm",
+            [data],
+            [I32],
+            attrs={"ctrl": int(ctrl)},
+            result_name_hint="qperm",
+        ).result
+
+    def warp_shuffle_xor_quad(self, v: Value, xor_mask: int) -> Value:
+        """XOR shuffle within a four-lane quad.
+
+        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. Larger
+        masks require :meth:`warp_shuffle_xor`, which uses ``ds_swizzle``.
+        """
+        if xor_mask == 1:
+            perm = [1, 0, 3, 2]
+        elif xor_mask == 2:
+            perm = [2, 3, 0, 1]
+        else:
+            raise ValueError(
+                f"warp_shuffle_xor_quad supports xor_mask 1 or 2, got {xor_mask}"
+            )
+        if v.type.name == "f32":
+            return self.bitcast(self.quad_perm(self.bitcast(v, I32), perm), F32)
+        if v.type.name == "i32":
+            return self.quad_perm(v, perm)
+        raise ValueError(f"warp_shuffle_xor_quad: unsupported type {v.type.name}")
 
     def ds_bpermute_b64(self, addr: Value, data: Value) -> Value:
         """Packed 64-bit ``ds_bpermute`` — single LDS op for paired
@@ -4477,6 +4502,7 @@ PURE_OP_NAMES = {
     "tile.ds_swizzle_xor",
     "tile.ds_swizzle",
     "tile.mov_dpp8",
+    "tile.quad_perm",
     "tile.wave_reduce",
     "tile.readlane",
     "tile.writelane",

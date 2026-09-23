@@ -145,17 +145,18 @@ from dataclasses import asdict, dataclass
 from typing import Optional, Sequence, Tuple
 
 from rocke.core.arch import ArchTarget
-from rocke.instances.common.conv_implicit_gemm import (
+from kernels.common.conv_implicit_gemm import (
     ConvDataSpec,
     ConvProblem,
     ImplicitGemmConvSpec,
     is_valid_spec as _fwd_is_valid_spec,
 )
-from rocke.instances.common.conv_implicit_gemm_wgrad import (
+from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
+    wgrad_atomic_epilogue_available as _wgrad_atomic_epilogue_available,
 )
-from rocke.instances.common.conv_implicit_gemm_dgrad import (
+from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
     is_valid_dgrad_spec as _dgrad_is_valid_spec,
 )
@@ -168,6 +169,7 @@ from rocke.dispatch.core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 
 # ---------------------------------------------------------------------------
@@ -375,18 +377,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def _selector_matches(
-    req: ConvGroupedRequest, candidate: KernelCandidate
-) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
-
-
 def _vec_size_c(req: ConvGroupedRequest) -> int:
     """Compute vec_size_c the same way the kernel builder does.
 
@@ -546,29 +536,8 @@ class ConvGroupedSpec:
         launch without re-running the formula in the caller.
         """
         assert self.direction == "wgrad", "to_wgrad_spec is only valid for wgrad specs"
-        from rocke.helpers.split_k import select_split_k_wgrad
-
         target = ArchTarget.from_gfx(self.arch)
-        p = problem
-        # Honor a concrete split-K fixed by the candidate (WMMA forces 1 -- it
-        # has no split-K path); otherwise auto-resolve via the CK formula on the
-        # per-group GEMM dims (== full dims when groups==1).  Grouped rides the
-        # group on block_id_z alongside the K-slice (z = groups*split_k), so
-        # grouped split-K is valid on MFMA.
-        if self.split_k != -1:
-            resolved_split_k = self.split_k
-        else:
-            spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
-            resolved_split_k = select_split_k_wgrad(
-                wg_M=p.K // p.groups,
-                wg_N=spatial * (p.C // p.groups),
-                wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
-                tile_m=self.tile_m,
-                tile_n=self.tile_n,
-                tile_k=self.tile_k,
-                arch=self.arch,
-            ).split_k
-        two_stage = self.force_deterministic and resolved_split_k > 1
+        resolved_split_k, two_stage, _ = _resolve_wgrad_split_k(self, problem)
         return WgradConvSpec(
             problem=problem,
             name=self.name,
@@ -588,7 +557,9 @@ class ConvGroupedSpec:
             warp_tile_k=self.warp_tile_k,
             wave_size=target.wave_size,
             pipeline=self.pipeline,
-            epilogue=self.epilogue,
+            # two_stage writes one f32 per element via workspace store; cshuffle
+            # is not used and would produce an invalid spec (validator rejects it).
+            epilogue="default" if two_stage else self.epilogue,
             split_k=resolved_split_k,
             two_stage=two_stage,
             force_deterministic=self.force_deterministic,
@@ -642,6 +613,90 @@ def _fwd_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, in
     return (gn, gm, p.groups)
 
 
+# ws_bytes is i32 in the kernel ABI, so a two-stage workspace above this would
+# overflow the argument.
+_MAX_WGRAD_WS_BYTES = (1 << 31) - 4  # 2 GiB - 4
+
+# hipDeviceAttributeMaxGridDimZ. Unlike x, the z extent is a 16-bit field in the
+# dispatch packet on every arch rocke targets, so this is an architectural limit
+# rather than a per-device one and is safe as a constant. Grouped wgrad puts
+# groups*split_k on z, which is the only rocke launch that can reach it.
+_MAX_GRID_DIM_Z = 65535
+
+
+def _resolve_wgrad_split_k(
+    spec: ConvGroupedSpec, p: "ConvProblem"
+) -> Tuple[int, bool, int]:
+    """Resolve wgrad split_k and two-stage eligibility; returns
+    ``(split_k, two_stage, requested_split_k)``.
+
+    Honors a concrete split-K fixed by the candidate (WMMA forces 1 -- it has
+    no split-K path); otherwise auto-resolves via the CK formula on the
+    per-group GEMM dims (== full dims when groups==1). Grouped rides the group
+    on block_id_z alongside the K-slice (z = groups*split_k), so grouped
+    split-K is valid on MFMA.
+
+    The result is then held under the workspace cap: when it bites, split_k
+    falls back to 1 (a plain store, already deterministic) so callers
+    requesting force_deterministic still get a correct result. Shared by
+    ``to_wgrad_spec`` and ``_wgrad_grid`` so the spec and the launch grid can
+    never disagree on split_k.
+
+    Two further constraints, both of which only bite once ``groups`` is large
+    (they are no-ops at groups == 1):
+
+    * **gridDim.z.** The group and the K-slice share the z axis, so the launch
+      needs ``groups * split_k`` blocks there. The CK formula sizes split_k
+      from the *per-group* GEMM and never sees the groups factor, so on a
+      depthwise problem (groups == C, per-group GEMM 1 x Y*X) it happily asks
+      for a degree that overflows the z limit and the launch fails with
+      ``hipErrorInvalidValue``. Clamp here, in the one resolver both the spec
+      and the grid go through, so they cannot desynchronise.
+    * **Atomic availability.** The packed ``<2 x dtype>`` atomic the split-K
+      epilogue emits for a 16-bit dW needs an even dW row length
+      ``wg_N = Y*X*cpg``. When that fails there is no 16-bit atomic to fall
+      back on (gfx9 has no scalar 16-bit atomic add), so the choice is
+      split_k=1 or the two-stage f32-workspace path. Promote to two-stage and
+      keep the parallelism -- collapsing the reduction axis of a wgrad whose
+      K_wg is N*Ho*Wo is the expensive way out.
+    """
+    spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
+    wg_M = p.K // p.groups
+    wg_N = spatial * (p.C // p.groups)
+    if spec.split_k != -1:
+        requested = spec.split_k
+    else:
+        from rocke.helpers.split_k import select_split_k_wgrad
+
+        requested = select_split_k_wgrad(
+            wg_M=wg_M,
+            wg_N=wg_N,
+            wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
+            tile_m=spec.tile_m,
+            tile_n=spec.tile_n,
+            tile_k=spec.tile_k,
+            arch=spec.arch,
+            groups=p.groups,
+            block_size=_block(spec)[0],
+        ).split_k
+    # The helper already keeps groups*split_k inside the z limit on the auto
+    # path; this clamp still has to run for an explicitly requested split_k.
+    split_k = max(1, min(requested, _MAX_GRID_DIM_Z // max(1, p.groups)))
+    # When the packed-atomic epilogue cannot represent this problem, two-stage
+    # is the only way to keep split_k > 1. Delegate rather than re-deriving the
+    # rule: a local copy is exactly how the dispatcher came to hand the builder
+    # a spec the builder then rejected. force_deterministic asks for the same
+    # path for a different reason (bitwise reproducibility).
+    # vector_size_c is None here by construction: to_wgrad_spec never sets it,
+    # so the epilogue derives the store width from the channel dims.
+    _atomic_ok, _ = _wgrad_atomic_epilogue_available(p, spec.dtype.lower(), None)
+    two_stage = (spec.force_deterministic or not _atomic_ok) and split_k > 1
+    if two_stage and p.groups * split_k * wg_M * wg_N * 4 > _MAX_WGRAD_WS_BYTES:
+        two_stage = False
+        split_k = 1
+    return split_k, two_stage, requested
+
+
 def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     assert isinstance(req, ConvGroupedRequest)
     p = _problem(req)
@@ -652,23 +707,9 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
     cpg = p.C // p.groups
     wg_M = kpg  # per-group output channels
     wg_N = spatial * cpg  # per-group filter spatial × input channel
-    wg_K = p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1)  # output spatial positions
     gx = (wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (wg_M + spec.tile_m - 1) // spec.tile_m
-    if spec.split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
-
-        split_k = select_split_k_wgrad(
-            wg_M=wg_M,
-            wg_N=wg_N,
-            wg_K=wg_K,
-            tile_m=spec.tile_m,
-            tile_n=spec.tile_n,
-            tile_k=spec.tile_k,
-            arch=spec.arch,
-        ).split_k
-    else:
-        split_k = spec.split_k
+    split_k, _two_stage, _requested = _resolve_wgrad_split_k(spec, p)
     # The group index rides on block_id_z alongside the K-slice: z = groups*
     # split_k, decoded in-kernel as group = z // split_k, slice = z % split_k.
     # For G==1 this reduces to (gx, gy, split_k); for split_k==1 to (gx, gy, groups).
@@ -753,7 +794,7 @@ def _make_gfx950_fwd_candidate() -> KernelCandidate:
             return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "fwd":
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _fwd_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -863,7 +904,7 @@ def _make_gfx1250_fwd_candidate() -> KernelCandidate:
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
         if int(req.G) != 1:
             return False, "WMMA conv on gfx1250 supports only groups=1"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _fwd_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -966,7 +1007,7 @@ def _make_gfx942_fwd_candidate() -> KernelCandidate:
             return False, f"gfx942 candidate requires arch=gfx942 (got {req.arch!r})"
         if req.direction != "fwd":
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _fwd_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1074,7 +1115,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx942 candidate requires arch=gfx942 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _wgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1223,7 +1264,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _wgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1362,7 +1403,7 @@ def _make_gfx950_dgrad_candidate() -> KernelCandidate:
             return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "dgrad":
             return False, f"candidate handles 'dgrad', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _dgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1421,9 +1462,12 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
 
     gfx1250's only fp16/bf16 atom is 16x16x32 (there is no 16x16x16). WMMA wgrad
     requires split_k=1 and the direct-store ('default') epilogue, so both are
-    forced here regardless of the request. Grouped Gm=1 is supported (the kernel
-    is validated dual-engine by test_gfx1250_grouped_wgrad_dual_engine); group
-    merging (Gm>1) is MFMA-only and is rejected by is_valid_wgrad_spec.
+    forced here regardless of the request. Grouped convolution is supported and
+    runs grid-per-group (the kernel is validated dual-engine by
+    test_gfx1250_grouped_wgrad_dual_engine). Group merging (``group_merge > 1``)
+    is MFMA-only and additionally needs split_k > 1 on the two-stage path, so it
+    is unreachable here on both counts: is_valid_wgrad_spec rejects it for
+    wave32 and for the split_k=1 this candidate forces.
     """
     name = "implicit_gemm_conv_wgrad_gfx1250"
     spec_id = "igemm_conv_wgrad_gfx1250_32x32"
@@ -1470,7 +1514,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx1250 candidate requires arch=gfx1250 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _wgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1641,6 +1685,22 @@ def dispatch_conv_grouped(
     candidate = registry.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
+    explanation = [
+        f"selected {candidate.name} ({req.direction}) on {req.arch}",
+        f"algorithm={candidate.algorithm}",
+        f"spec_id={candidate.spec_id}",
+        f"epilogue={spec.epilogue} (vec_size_c={_vec_size_c(req)})",
+        f"spec_hash={kid.spec_hash}",
+        f"request_hash={kid.request_hash}",
+    ]
+    if req.direction == "wgrad":
+        split_k, _two_stage, requested = _resolve_wgrad_split_k(spec, _problem(req))
+        if split_k != requested:
+            explanation.append(
+                f"split_k {requested} -> {split_k}: the two-stage workspace would "
+                f"exceed the {_MAX_WGRAD_WS_BYTES}-byte i32 limit, so the "
+                f"deterministic plain store is used instead"
+            )
     return DispatchResult(
         request=req,
         candidate=candidate,
@@ -1649,12 +1709,5 @@ def dispatch_conv_grouped(
         grid=candidate.grid(spec, req),
         block=candidate.block(spec),
         signature=tuple(candidate.signature(spec)),
-        explanation=(
-            f"selected {candidate.name} ({req.direction}) on {req.arch}",
-            f"algorithm={candidate.algorithm}",
-            f"spec_id={candidate.spec_id}",
-            f"epilogue={spec.epilogue} (vec_size_c={_vec_size_c(req)})",
-            f"spec_hash={kid.spec_hash}",
-            f"request_hash={kid.request_hash}",
-        ),
+        explanation=tuple(explanation),
     )
