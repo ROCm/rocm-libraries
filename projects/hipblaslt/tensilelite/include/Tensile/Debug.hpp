@@ -191,5 +191,17 @@ namespace TensileLite
 
         Debug();
     };
+
+    /**
+     * @brief Address of the Debug singleton as seen from inside the TensileLite
+     *        host library itself.
+     *
+     * Deliberately non-inline (defined in Debug.cpp) so a caller in another
+     * link unit -- libhipblaslt, or a test binary -- can compare it against the
+     * address it gets from its own `Debug::Instance()` call. If the two differ,
+     * the singleton has been duplicated across the DSO boundary and every piece
+     * of state routed through it silently stops propagating. See ROCM-31245.
+     */
+    TENSILELITEHOST_EXPORT const void* debugInstanceAddress();
 } // namespace TensileLite
 

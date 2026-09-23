@@ -36,7 +36,14 @@ namespace TensileLite
     class LazySingleton
     {
     public:
-        static Class& Instance()
+        // TENSILELITEHOST_EXPORT is required, not decorative. `Instance()` is an
+        // implicitly-inline member of a header-only template, and both
+        // libhipblaslt and libtensilelite-host are built with hidden visibility
+        // plus VISIBILITY_INLINES_HIDDEN. Without an explicit default-visibility
+        // attribute each shared object gets its OWN copy of `instance`, so state
+        // written through the singleton in one library is invisible in the other
+        // -- silently, with no link error. See ROCM-31245.
+        static TENSILELITEHOST_EXPORT Class& Instance()
         {
             static Class instance;
 
