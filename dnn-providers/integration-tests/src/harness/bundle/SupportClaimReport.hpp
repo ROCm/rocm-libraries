@@ -160,6 +160,10 @@ bool verifiedNothing(const SupportClaimCoverage& coverage);
 // is the harness losing a query it owed, which the summary reports separately -- the
 // invariant here is only that the sum cannot exceed the bodies it is drawn from.)
 //
+// Holds for a single pass only. found and withClaims are counted once at registration,
+// the rest once per test execution, so --gtest_repeat breaks the ladder with nothing
+// wrong.
+//
 // Nothing asserts this today; the relations live in the field comments above and in
 // the arithmetic printSupportClaimSummary() does on them. That is the fragile part:
 // a new skip path added to SetUp() without a counter to match, or two bumps keyed on

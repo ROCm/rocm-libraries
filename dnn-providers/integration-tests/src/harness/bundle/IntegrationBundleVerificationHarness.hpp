@@ -288,19 +288,14 @@ private:
     // was named to check against, and a sidecar exists. Deliberately free of the claim
     // mode -- what a broken claim costs is enforcedClaimFailure()'s question, and
     // reading it here too would make a run that cannot fail also unable to report.
-    // Ordered cheapest-first on purpose: carriesSidecar() stats the filesystem once per
-    // test body, and a run that named no engine must not pay.
+    // Ordered cheapest-first on purpose: carriesSidecar() stats the filesystem on every
+    // call, a few times per test, and a run that named no engine must not pay.
     bool shouldObserveClaims() const
     {
         return _engineUnderTest.has_value() && carriesSidecar();
     }
 
-    // "There is a sidecar here", and nothing more -- no engine. The run's
-    // verified-nothing guard counts against this rather than shouldObserveClaims()
-    // because the two disagree in precisely the case worth catching: a build whose
-    // engine plugin never loaded queries nothing while the sidecars sit untouched.
-    // Factored out rather than repeated so the guard's denominator cannot drift
-    // away from the predicate that decides whether the query happens.
+    // "There is a sidecar here", and nothing more -- no engine.
     bool carriesSidecar() const
     {
         return !_claimLocator.sidecarPath.empty()

@@ -143,11 +143,13 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
     {
         os << "\n  WARNING: the counters above do not nest (each should be a subset of "
               "the one\n"
-              "  before it), so the harness is miscounting and the attribution lines "
-              "that would\n"
-              "  follow are suppressed. The verdicts below are unaffected -- they come "
-              "from the\n"
-              "  claim records, not from these counters.\n";
+              "  before it), so the attribution lines that would follow are "
+              "suppressed.\n"
+              "  Expected under --gtest_repeat, which re-counts every test but not the "
+              "registration;\n"
+              "  otherwise the harness is miscounting. The verdicts below are "
+              "unaffected -- they\n"
+              "  come from the claim records, not from these counters.\n";
     }
 
     // A graph that never opened ran and failed; it is not a graph the filter left
