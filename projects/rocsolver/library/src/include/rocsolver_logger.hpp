@@ -125,16 +125,16 @@ ROCSOLVER_BEGIN_NAMESPACE
         auto const max_x_grid = 2147483647;                                                         \
         auto const max_y_grid = 64 * 1024;                                                          \
         auto const max_z_grid = 64 * 1024;                                                          \
-        bool const isvalid_grid = (0 <= grid_.x) && (grid_.x <= max_x_grid) && (0 <= grid_.y)       \
-            && (grid_.y <= max_y_grid) && (0 <= grid_.z) && (grid_.z <= max_z_grid);                \
+        bool const isvalid_grid = (1 <= grid_.x) && (grid_.x <= max_x_grid) && (1 <= grid_.y)       \
+            && (grid_.y <= max_y_grid) && (1 <= grid_.z) && (grid_.z <= max_z_grid);                \
         if(!isvalid_grid)                                                                           \
         {                                                                                           \
             std::cerr << "grid( " << grid_.x << " , " << grid_.y << " , " << grid_.z << " )"        \
                       << std::endl;                                                                 \
         }                                                                                           \
         assert(isvalid_grid);                                                                       \
-        bool const isvalid_block = (0 <= block_.x) && (block_.x <= 1024) && (0 <= block_.y)         \
-            && (block_.y <= 1024) && (0 <= block_.z) && (block_.z <= 1024)                          \
+        bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
+            && (block_.y <= 1024) && (1 <= block_.z) && (block_.z <= 1024)                          \
             && ((block_.x + block_.y + block_.z) <= 1024);                                          \
         if(!isvalid_block)                                                                          \
         {                                                                                           \
