@@ -18,9 +18,12 @@ GENERAL = "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB{group}ZPU8X_UserArgs_MT64x160x6
 DIRECTORY = Path(__file__).parents[2] / "CustomKernels"
 
 
-@pytest.mark.parametrize("group,suffix", [(32, ""), (32, "_W4"), (128, "")])
-def test_decode_selection_bounds(group, suffix):
-    config = readCustomKernelConfig(NAME.format(group=group, suffix=suffix), DIRECTORY)
+@pytest.mark.parametrize("group,suffix,encoding", [
+    (32, "", "ExLlama"), (32, "_W4", "ExLlama"), (128, "", "ExLlama"),
+    (32, "_W4", "UnsignedBias8"),
+])
+def test_decode_selection_bounds(group, suffix, encoding):
+    config = readCustomKernelConfig(NAME.format(group=group, suffix=suffix).replace("ExLlama", encoding), DIRECTORY)
     equal = ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", config["AssertSizeEqual"]))
     positive_k = ProblemPredicate.FromOriginalKeyPair(
         ("AssertSizeGreaterThan", config["AssertSizeGreaterThan"]))
@@ -39,13 +42,17 @@ def test_decode_selection_bounds(group, suffix):
     assert not support["SupportCustomStaggerU"]
 
 
-@pytest.mark.parametrize("group,suffix", [(32, ""), (32, "_W4"), (128, "")])
-def test_decode_universal_arguments_match_matrix_kernel(group, suffix):
+@pytest.mark.parametrize("group,suffix,encoding", [
+    (32, "", "ExLlama"), (32, "_W4", "ExLlama"), (128, "", "ExLlama"),
+    (32, "_W4", "UnsignedBias8"),
+])
+def test_decode_universal_arguments_match_matrix_kernel(group, suffix, encoding):
     def metadata(name):
         config, _ = getCustomKernelConfigAndAssembly(name, DIRECTORY)
         return yaml.safe_load(config)["amdhsa.kernels"][0]
 
-    decode, general = metadata(NAME.format(group=group, suffix=suffix)), metadata(GENERAL.format(group=group))
+    decode, general = metadata(NAME.format(group=group, suffix=suffix).replace("ExLlama", encoding)), metadata(GENERAL.format(group=group).replace(
+        "ZPU8X", "ZPU8" if encoding == "UnsignedBias8" else "ZPU8X"))
     # HIP compilation must preserve the universal layout that the existing
     # host library supplies, including unused fields and trailing offsets.
     for key in (".kernarg_segment_size", ".kernarg_segment_align"):
@@ -53,19 +60,23 @@ def test_decode_universal_arguments_match_matrix_kernel(group, suffix):
     assert [(arg[".offset"], arg[".size"]) for arg in decode[".args"]] == [
         (arg[".offset"], arg[".size"]) for arg in general[".args"]
     ]
-    config = readCustomKernelConfig(NAME.format(group=group, suffix=suffix), DIRECTORY)
+    config = readCustomKernelConfig(NAME.format(group=group, suffix=suffix).replace("ExLlama", encoding), DIRECTORY)
     x, y, z = config["WorkGroup"]
     assert x * y * z == decode[".max_flat_workgroup_size"]
 
 
-def test_q27b_equality_dispatch_keys():
+@pytest.mark.parametrize("code,encoding,decode_encoding", [
+    ("U8X", "UnsignedBias8ExLlama", "ExLlama"),
+    ("U8", "UnsignedBias8", "UnsignedBias8"),
+])
+def test_q27b_equality_dispatch_keys(code, encoding, decode_encoding):
     from types import SimpleNamespace
 
     from Tensile.SolutionLibrary import MatchingLibrary
 
     path = DIRECTORY.parents[2] / (
         "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
-        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_Q27B.yaml"
+        f"gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZP{code}_Q27B.yaml"
     )
     logic = yaml.safe_load(path.read_text())
     solutions = {s["SolutionIndex"]: SimpleNamespace(index=s["SolutionIndex"])
@@ -87,7 +98,8 @@ def test_q27b_equality_dispatch_keys():
     for row in serialized["table"]:
         solution = logic["Solutions"][row["index"]]
         if row["key"][1] == 1:
-            assert solution["CustomKernelName"] == NAME.format(group=32, suffix="_W4")
+            assert solution["CustomKernelName"] == NAME.format(group=32, suffix="_W4").replace(
+                "ExLlama", decode_encoding)
         else:
             assert solution["EnableMatrixInstruction"]
             assert solution["WorkGroupMapping"] in (1, 4)
@@ -105,4 +117,63 @@ def test_q27b_equality_dispatch_keys():
                 assert solution["MacroTile1"] == 256
                 assert solution["WorkGroupMapping"] == 1
     assert logic["ProblemType"]["ScaleBlockSizeA"] == 32
-    assert logic["ProblemType"]["Int4EncodingA"] == "UnsignedBias8ExLlama"
+    assert logic["ProblemType"]["Int4EncodingA"] == encoding
+
+
+def test_q27b_unsigned_bias8_preserves_tuning_configuration():
+    directory = DIRECTORY.parents[2] / (
+        "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality")
+    stem = "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZP{}_Q27B.yaml"
+    exllama = yaml.safe_load((directory / stem.format("U8X")).read_text())
+    sequential = yaml.safe_load((directory / stem.format("U8")).read_text())
+    assert [row[0] for row in exllama["ExactLogic"]] == [
+        row[0] for row in sequential["ExactLogic"]]
+    assert [row[1][0] for row in exllama["ExactLogic"]] == [
+        row[1][0] for row in sequential["ExactLogic"]]
+    for old, new in zip(exllama["Solutions"], sequential["Solutions"]):
+        for key in ("MacroTile0", "MacroTile1", "DepthU", "WorkGroup", "MIWaveTile",
+                    "MIWaveGroup", "WorkGroupMapping", "PrefetchGlobalRead",
+                    "PrefetchLocalRead", "ScheduleIterAlg", "1LDSBuffer"):
+            assert old.get(key) == new.get(key), key
+
+
+def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    from Tensile.LibraryIO import prepareLibraryLogicDict
+    from Tensile.SolutionLibrary import MasterSolutionLibrary
+
+    class IndexOnlySolution:
+        @staticmethod
+        def FromSolutionStruct(solution, *_args):
+            return SimpleNamespace(index=solution["SolutionIndex"])
+
+    path = DIRECTORY.parents[2] / (
+        "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
+        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_Q27B.yaml")
+    original = yaml.safe_load(path.read_text())
+    merged = None
+    for group, zero_point, encoding in [
+        (32, True, "UnsignedBias8"),
+        (32, True, "UnsignedBias8ExLlama"),
+        (128, True, "UnsignedBias8"),
+        (32, False, "UnsignedBias8"),
+    ]:
+        logic = deepcopy(original)
+        logic["ProblemType"].update(
+            ScaleBlockSizeA=group, ScaleZeroPointA=zero_point, Int4EncodingA=encoding)
+        prepareLibraryLogicDict(logic)
+        library, _ = MasterSolutionLibrary.FromOriginalState(
+            logic, logic["Solutions"], False, False, False, None, {}, True,
+            solutionClass=IndexOnlySolution)
+        if merged is None:
+            merged = library
+        else:
+            merged.merge(library)
+    assert len(merged.lazyLibraries) == 4
+    for library in merged.lazyLibraries.values():
+        table = state(library.library)["rows"][0]["library"]["table"]
+        assert len(table) == 10
+        assert len({tuple(row["key"]) for row in table}) == 10
+        assert all(row["index"] in library.solutions for row in table)

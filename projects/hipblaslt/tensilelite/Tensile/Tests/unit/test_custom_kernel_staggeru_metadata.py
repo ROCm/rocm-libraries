@@ -486,11 +486,14 @@ def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
 # by a human rather than joining the exception quietly.
 #
 # The four gfx950 entries got there by editing a staggering kernel's declaration
-# down afterwards.  The fourteen gfx1151 w4a16 entries did not: they were generated
+# down afterwards.  The seventeen gfx1151 w4a16 entries did not: they were generated
 # with StaggerU 0, and the wrap site is present only because
 # SupportCustomStaggerU emits the runtime path unconditionally.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     {
+        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
@@ -516,7 +519,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 143,
+    "kernels": 147,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -527,7 +530,7 @@ EXPECTED_CENSUS = {
     # Includes the six kernels built outside Tensile (aiter, ck, rocroller,
     # triton, wave), which declare StaggerU: 0 because they do not implement
     # the in-loop wrap at all; the disassembly confirms none of them staggers.
-    "declaredZero": 83,
+    "declaredZero": 87,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 32,
 }
