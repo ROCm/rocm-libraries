@@ -151,11 +151,11 @@ endfunction()
 #   the wheel that produced it. ROCKE_COMGR_LIB, if set, is forwarded to the
 #   tool environment.
 #
-#   PACK_JOBS caps the worker processes one pack may spawn. Omitted, the packer
-#   sizes itself against the machine, which fits a root large enough to repay the
-#   startup cost. Every root here is a separate custom target with no ordering
-#   edge between them, so the generator runs them at once and unbounded pools
-#   multiply. 1 selects the packer's serial path.
+#   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
+#   serial path. Omitted, the packer sizes its pool against the machine. Roots have
+#   no ordering edge between them, so the generator runs them at once: the test
+#   roots name a small cap so their pools do not multiply, and the product root
+#   omits it because it is the only root large enough to repay a full pool.
 #
 #   NAME is the source label written into every descriptor's provenance. NAME, the
 #   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
@@ -1246,8 +1246,7 @@ function(hkp_add_packaging)
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
-            ${_rocke_args}
-            PACK_JOBS 2)
+            ${_rocke_args})
     else()
         # Every dormant reason passes through here, so none can reach a message(STATUS)
         # while leaving 'product' looking misspelled to hkp_register_census_tests().
