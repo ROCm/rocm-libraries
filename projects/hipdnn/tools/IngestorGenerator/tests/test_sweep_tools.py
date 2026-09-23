@@ -562,6 +562,16 @@ class TestPluginAttribution:
         assert result.returncode == 0, result.stdout + result.stderr
         assert all(sweep.gates(result).values())
 
+    def test_an_install_tree_whose_lib_is_a_symlink_is_this_arm(self, sweep):
+        """The loader logs, and the rows report, the path through the symlink; both
+        gates compare the engines directory it resolves to."""
+        real_lib = sweep.root.parent / "real-lib"
+        (sweep.install / "lib").rename(real_lib)
+        (sweep.install / "lib").symlink_to(real_lib, target_is_directory=True)
+        result = sweep.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert all(sweep.gates(result).values())
+
     @pytest.mark.parametrize(
         "spelling", ["sibling_file", "sibling_directory", "nested"]
     )
