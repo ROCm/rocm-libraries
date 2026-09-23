@@ -373,6 +373,9 @@ each lane is whatever
 `HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG` is set to in
 `cmake/HipdnnIntegrationTestHelpers.cmake`.
 
+`--write-support-claims` records the support a run observed and never removes a
+claim. Retracting a claim is a deliberate, reviewed change.
+
 > Golden `.bin` blobs are DVC-managed. A tree that has not run `dvc pull` in
 > `integration-test-bundles/` registers zero validation tests and says so.
 
