@@ -138,7 +138,8 @@ BenchmarkProblems:
         - DepthU: [64]                  # 2*MI_K = 2*32
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -238,7 +239,8 @@ BenchmarkProblems:
         - DepthU: [128, 192]            # > 2*MI_K; K must be mult of LCM(128,192)=384
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -289,7 +291,8 @@ BenchmarkProblems:
         - DepthU: [64]                  # 2*MI_K = 2*32
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -345,7 +348,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -395,7 +399,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -440,7 +445,8 @@ BenchmarkProblems:
         - DepthU: [64, 256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -497,7 +503,8 @@ BenchmarkProblems:
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -551,7 +558,8 @@ BenchmarkProblems:
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -604,7 +612,8 @@ BenchmarkProblems:
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -655,7 +664,8 @@ BenchmarkProblems:
         - ActivationFuncCall: [false]
         - DepthU: [64, 128]
         - TransposeLDS: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]

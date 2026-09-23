@@ -22,11 +22,8 @@ GlobalParameters:
   ForceGenerateKernel: True
 
 BenchmarkProblems:
-  #######################################
-  # TN - standard
-  #######################################
   -
-    - # ProblemType, TN
+    -
       OperationType: GEMM
       DataType: F8
       DestDataType: s
@@ -42,10 +39,7 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Force StreamK to use persistent DP only, with no SK region.
-      # MXFP8 sibling of sk_mxf4_force_dp_only.yaml: same Force-DP-Only shape,
-      # but sized and swept like the other gfx1250 MXFP8 tests
-      # (see sk_mxf8gemm_tdm.yaml) rather than inheriting the mxf4 point case.
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -53,10 +47,10 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
-          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
-          - [16, 16, 128, 1,  1,  1, 1,  2, 1]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 1]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -69,9 +63,10 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [True, False]
+        - LDSTrInst: [False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
+        - PrefetchAcrossPersistent: [1]
         - ScheduleIterAlg: [0, 4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
@@ -85,8 +80,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
@@ -95,28 +90,31 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
+        # 2-D shapes are the reason this file exists alongside the 1-D set: with
+        # Ck > 1 the PAP mask refresh keeps both MulticastMaskA and MulticastMaskB
+        # live (papDropsSelfOnlyMaskA only drops the self-only maskA on 1-D), so
+        # PAP + 2-D is the tightest SGPR case in the PR and needs numerical, not
+        # just codegen, coverage.
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # Size set shared with sk_mxf8_force_dp_only_pap.yaml, so that file is
-          # this one plus PrefetchAcrossPersistent and nothing else.
-          # 127/128/129 straddle the 128-wide tile boundary (under, exact, over)
-          # at both a DepthU multiple (1024) and a non-multiple (1056).
-          - Exact: [127, 127, 1, 1024]
-          - Exact: [128, 128, 1, 1024]
-          - Exact: [129, 129, 1, 1024]
-          - Exact: [127, 127, 1, 1056]
-          - Exact: [128, 128, 1, 1056]
-          - Exact: [129, 129, 1, 1056]
-          # 2048/2056 straddle the tile boundary (exact, over) and K 2048/2080/2112
-          # cover a DepthU multiple and two K-tails at the MXFP8 K scale.
+          - Exact: [512, 512, 1, 256]
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [256, 256, 2, 256]
+          - Exact: [256, 256, 1, 1920]
+          - Exact: [2048, 256, 1, 1024]
+          - Exact: [2048, 512, 1, 1056]
+          - Exact: [1280, 1280, 1, 256]
+          - Exact: [320, 320, 1, 512]
+          - Exact: [96, 96, 3, 256]
+          - Exact: [256, 256, 1, 1056]
+          - Exact: [512, 512, 1, 1056]
           - Exact: [2048, 256, 1, 2048]
           - Exact: [2048, 256, 1, 2080]
-          - Exact: [2048, 2048, 1, 2048]
-          - Exact: [2048, 2048, 1, 2112]
-          - Exact: [2056, 2056, 1, 2048]
           - Exact: [1280, 1280, 1, 1024]
           - Exact: [320, 320, 3, 1056]
         - ActivationArgs:

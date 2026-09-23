@@ -82,7 +82,8 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 2,  4,1 ]
@@ -181,7 +182,8 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
@@ -277,7 +279,7 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - DirectToVgprB: [true]
         - UseSgprForGRO: [0,1]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
@@ -375,7 +377,8 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
@@ -731,7 +734,7 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - DirectToVgprB: [true]
         - UseSgprForGRO: [0,1]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
@@ -823,7 +826,7 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
@@ -908,7 +911,8 @@ BenchmarkProblems:
         - SourceSwap: [false, true]
         - DirectToVgprB: [true]
         - UseSgprForGRO: [0,1]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  1,4 ]
@@ -994,7 +998,7 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]

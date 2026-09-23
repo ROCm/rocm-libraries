@@ -53,7 +53,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - TransposeLDS: [1]
         - StaggerU: [0]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - DirectToLds: [1,2,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -81,7 +81,8 @@ BenchmarkProblems:
         - TransposeLDS: [1]
         - StaggerU: [0]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - DirectToLds: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -128,7 +129,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - StaggerU: [0]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - DirectToLds: [1, 2, 3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -681,7 +683,8 @@ BenchmarkProblems:
         - LDSTrInst: [false, true]
         - SourceSwap: [true]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -741,7 +744,8 @@ BenchmarkProblems:
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - 1LDSBuffer: [-1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [true]
         - UseSgprForGRO: [1]
         - SourceSwap: [true]
@@ -829,7 +833,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - SourceSwap: [true]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - DtlPlusLdsBuf: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -912,7 +917,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1, 2]
         - SourceSwap: [true]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1082,7 +1088,8 @@ BenchmarkProblems:
         - SourceSwap: [true]
         - LDSTrInst: [false, true]
         - TailloopInNll: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1180,7 +1187,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [2]
         - ClusterLocalRead: [0]#[0,1]
         - DirectToLds: [1, 2, 3]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LdsPadA: [0] #[-1]
         - LdsPadB: [8] #[-1]
         - StaggerU: [0]
@@ -1228,8 +1236,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
         - ClusterLocalRead: [0]
         - DirectToLds: [1]
-        - StreamK: [3]
-        - StreamKXCCMapping: [8]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - PersistentXCCMapping: [8]
         - StaggerU: [0]
         - WorkGroupMapping: [8]
         - WorkGroupMappingXCC: [4]

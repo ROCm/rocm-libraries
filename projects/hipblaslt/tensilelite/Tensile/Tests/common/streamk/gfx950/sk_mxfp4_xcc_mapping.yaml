@@ -22,7 +22,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Test StreamKXCCMapping: 0, 2, 4, 8
+  # Test PersistentXCCMapping: 0, 2, 4, 8
   # For multi-chip GPU optimization
   # TN transpose only
   #######################################
@@ -57,8 +57,9 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [false]
         - DirectToLds: [1]
-        - StreamK: [3]
-        - StreamKXCCMapping: [0, 2, 4, 8]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - PersistentXCCMapping: [0, 2, 4, 8]
         - StaggerU: [0]
         - WavefrontSize: [64]
         - WorkGroupMapping: [1]

@@ -30,7 +30,7 @@
 #                                    Solution.py auto-derives dataDU=128
 #   ScheduleIterAlg:      [3]      → SIA3
 #   DirectToLds:          [1]      → DTL=1
-#   StreamK:              [3]      → SK3
+#   TileProcessingStrategy: [StreamK]      → StreamK/StaticGrid
 #   StaggerU:             [0]      → SU0
 #   UseSubtileImpl:       [1]
 #   WorkGroupMapping:     [1]      → WGM1
@@ -135,7 +135,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
         - WorkGroupMapping: [1]

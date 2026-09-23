@@ -22,8 +22,11 @@ GlobalParameters:
   ForceGenerateKernel: True
 
 BenchmarkProblems:
+  #######################################
+  # TN - Force DP only + PrefetchAcrossPersistent
+  #######################################
   -
-    -
+    - # ProblemType, TN
       OperationType: GEMM
       DataType: F8
       DestDataType: s
@@ -39,7 +42,9 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    -
+    - # data_parallel_static_mxf8.yaml plus PrefetchAcrossPersistent: [1]. Every other
+      # parameter and every problem size is identical to that file, so a diff
+      # between the two isolates the effect of PAP on the Force-DP-Only kernel.
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -47,10 +52,10 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
-          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
-          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
-          - [16, 16, 128, 1, 1, 1, 1, 2, 1]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 1]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -63,9 +68,10 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [False]
+        - LDSTrInst: [True, False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
+        - PrefetchAcrossPersistent: [1]
         - ScheduleIterAlg: [0, 4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
@@ -79,8 +85,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
@@ -89,26 +95,22 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 256]
-          - Exact: [256, 256, 1, 256]
-          - Exact: [128, 128, 1, 512]
-          - Exact: [256, 256, 2, 256]
-          - Exact: [256, 256, 1, 1920]
-          - Exact: [2048, 256, 1, 1024]
-          - Exact: [2048, 512, 1, 1056]
-          - Exact: [1280, 1280, 1, 256]
-          - Exact: [320, 320, 1, 512]
-          - Exact: [96, 96, 3, 256]
-          - Exact: [256, 256, 1, 1056]
-          - Exact: [512, 512, 1, 1056]
+          - Exact: [127, 127, 1, 1024]
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [129, 129, 1, 1024]
+          - Exact: [127, 127, 1, 1056]
+          - Exact: [128, 128, 1, 1056]
+          - Exact: [129, 129, 1, 1056]
           - Exact: [2048, 256, 1, 2048]
           - Exact: [2048, 256, 1, 2080]
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2048, 2048, 1, 2112]
+          - Exact: [2056, 2056, 1, 2048]
           - Exact: [1280, 1280, 1, 1024]
           - Exact: [320, 320, 3, 1056]
         - ActivationArgs:

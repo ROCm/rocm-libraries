@@ -17,16 +17,16 @@ GlobalParameters:
   Architecture: gfx950
   PrintLevel: 2
   ISA: [[9, 5, 0]]
-  # Exercise BOTH deterministic SK5 hybrid sub-paths under PAP in one run:
-  #   0 -> static (SK3-like) work assignment  -> PAP static next-tile handoff
+  # Exercise BOTH deterministic StreamK/Hybrid hybrid sub-paths under PAP in one run:
+  #   0 -> static (StreamK/StaticGrid-like) work assignment  -> PAP static next-tile handoff
   #   1 -> dynamic per-XCD work-queue path    -> PAP pop-and-prime handoff
   # Each base problem is replayed once per value, so reference vs kernel
   # numerical validation runs for both PAP sub-paths and confirms equivalence.
-  StreamKHybridMode: [0, 1]
+  HybridAssignmentPolicy: [Default, DynamicWorkQueue]
 
 BenchmarkProblems:
   #######################################
-  # SGEMM NT - StreamK Hybrid (SK5) PrefetchAcrossPersistent
+  # SGEMM NT - StreamK Hybrid (StreamK/Hybrid) PrefetchAcrossPersistent
   #######################################
   -
     - # ProblemType
@@ -42,7 +42,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [5]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [Hybrid]
         - GlobalSplitU: [0]
         - WavefrontSize: [64]
         - DepthU: [16]

@@ -51,8 +51,8 @@ namespace
     {
         auto device = TensileLite::testing::makeDevice(
             TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_CPX_CU, "mi350cpx");
-        device.skDynamicGrid = 0;
-        device.skFixedGrid = grid;
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid = grid;
         return device;
     }
 

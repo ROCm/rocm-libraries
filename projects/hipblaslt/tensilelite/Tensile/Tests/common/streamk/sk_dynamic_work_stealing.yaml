@@ -21,7 +21,7 @@ GlobalParameters:
   # Variable per-WG delay drains queues unevenly so the next-neighbor steal fires under contention.
   SleepPercent: 50
 
-# Shared SK4-dynamic fork entries; StreamKWorkStealing forked over [0, 1] to
+# Shared StreamK/DynamicWorkQueue-dynamic fork entries; WorkQueueStealing forked over [0, 1] to
 # validate both the stealing-off and stealing-on paths.
 .SkDynamicCommonFork: &sk_dynamic_common_fork
   - KernelLanguage: ["Assembly"]
@@ -34,8 +34,9 @@ GlobalParameters:
   - ScheduleIterAlg: [3]
   - SourceSwap: [True]
   - StoreRemapVectorWidth: [0]
-  - StreamK: [4]
-  - StreamKWorkStealing: [0, 1]
+  - TileProcessingStrategy: [StreamK]
+  - WorkAssignment: [DynamicWorkQueue]
+  - WorkQueueStealing: [0, 1]
   - TransposeLDS: [0]
   - WorkGroupMapping: [1]
 
