@@ -8,16 +8,20 @@ from collections import deque
 import re
 from typing import Any, Iterable, List, Optional
 
-from rocisa.code import Module
-from rocisa.container import MUBUFModifiers, accvgpr, sgpr, vgpr
+from rocisa.code import Label, Module
+from rocisa.container import MUBUFModifiers, VOP3PModifiers, accvgpr, sgpr, vgpr
 from rocisa.instruction import (
     BufferStoreB128,
+    SBranch,
+    SCBranchSCC0,
+    SCmpEQU32,
     VAccvgprReadB32,
     VCvtPkF32toBF16,
     VAddU32,
     VAddLShiftLeftU32,
     VLShiftLeftB32,
-    VMulF32,
+    VMovB32,
+    VMulPKF32,
     VMulLOU32,
 )
 
@@ -128,11 +132,13 @@ def emitSubtileStoreInNLLAddressInit(writer, kernel) -> Module:
         return module
 
     vaddr = writer.vgprPool.checkOut(1, "subtileStoreInNLLVaddr")
-    data = writer.vgprPool.checkOutAligned(8, 4, "subtileStoreInNLLData")
+    data = writer.vgprPool.checkOutAligned(16, 4, "subtileStoreInNLLData")
     stride = writer.vgprPool.checkOut(1, "subtileStoreInNLLStride")
+    alpha = writer.vgprPool.checkOutAligned(2, 2, "subtileStoreInNLLAlpha")
     writer.states.subtileStoreInNLLVaddr = vaddr
     writer.states.subtileStoreInNLLData = data
     writer.states.subtileStoreInNLLStride = stride
+    writer.states.subtileStoreInNLLAlpha = alpha
     strideD1 = "StrideD%s" % writer.states.indexChars[kernel["PackedC1IndicesX"][0]]
     module.add(VMulLOU32(
         dst=vgpr(vaddr),
@@ -152,6 +158,12 @@ def emitSubtileStoreInNLLAddressInit(writer, kernel) -> Module:
         shiftHex=hex(1),
         src=sgpr(strideD1),
         comment="folded-store BF16 D column stride in bytes"))
+    module.add(VMovB32(
+        dst=vgpr(alpha), src=sgpr("Alpha"),
+        comment="duplicate folded-store alpha for packed multiply"))
+    module.add(VMovB32(
+        dst=vgpr(alpha + 1), src=sgpr("Alpha"),
+        comment="duplicate folded-store alpha for packed multiply"))
     return module
 
 
@@ -166,10 +178,13 @@ def cleanupSubtileStoreInNLL(writer) -> None:
     if hasattr(writer.states, "subtileStoreInNLLStride"):
         writer.vgprPool.checkIn(writer.states.subtileStoreInNLLStride)
         del writer.states.subtileStoreInNLLStride
+    if hasattr(writer.states, "subtileStoreInNLLAlpha"):
+        writer.vgprPool.checkIn(writer.states.subtileStoreInNLLAlpha)
+        del writer.states.subtileStoreInNLLAlpha
 
 
-def _store_unit(writer, kernel, dtileInfo, column: int) -> list:
-    """Return one eight-row wide BF16 store for a SourceSwap output column."""
+def _column_accumulators(writer, dtileInfo, column: int) -> list:
+    """Return the eight accumulator indices owned by one output column."""
     tiles_m = dtileInfo.localMMATileGrid[0]
     tile_n = column % dtileInfo.localMMATileGrid[1]
     component = column // dtileInfo.localMMATileGrid[1]
@@ -181,21 +196,32 @@ def _store_unit(writer, kernel, dtileInfo, column: int) -> list:
         regs.append(tile.regList.indices[component])
     if len(regs) != 8:
         raise RuntimeError(f"SubtileStoreInNLL expected 8 accumulators, got {len(regs)}")
+    return regs
+
+
+def _store_unit(writer, kernel, dtileInfo, column: int) -> list:
+    """Return one eight-row wide BF16 store for a SourceSwap output column."""
+    regs = _column_accumulators(writer, dtileInfo, column)
 
     flags = nonTemporalDFlags(kernel["NonTemporalD"])
     mubuf = lambda offset: MUBUFModifiers(
         offen=True, offset12=offset, glc=flags["glc"], slc=flags["slc"], nt=flags["nt"])
     vaddr = writer.states.subtileStoreInNLLVaddr
     data = writer.states.subtileStoreInNLLData
+    alpha = writer.states.subtileStoreInNLLAlpha
     insts = []
 
     for row, reg in enumerate(regs):
         insts.append(VAccvgprReadB32(
             dst=vgpr(data + row), src=accvgpr(reg),
             comment=f"fold C column {column} row {row}: acc -> vgpr"))
-        insts.append(VMulF32(
-            dst=vgpr(data + row), src0=sgpr("Alpha"), src1=vgpr(data + row),
-            comment="apply alpha before folded BF16 store"))
+    for row in range(0, 8, 2):
+        insts.append(VMulPKF32(
+            dst=vgpr(data + row, 2),
+            src0=vgpr(alpha, 2),
+            src1=vgpr(data + row, 2),
+            vop3=VOP3PModifiers(op_sel_hi=[0, 1, 1]),
+            comment="apply alpha to two folded-store rows"))
     for pair in range(4):
         insts.append(VCvtPkF32toBF16(
             dst=vgpr(data + pair),
@@ -218,13 +244,82 @@ def _store_unit(writer, kernel, dtileInfo, column: int) -> list:
     return insts
 
 
+def _alpha_one_store_pairs(writer, kernel, dtileInfo, columns: list) -> list:
+    """Pipeline no-multiply stores in pairs after the final MFMA."""
+    flags = nonTemporalDFlags(kernel["NonTemporalD"])
+    mubuf = lambda: MUBUFModifiers(
+        offen=True, offset12=0, glc=flags["glc"], slc=flags["slc"], nt=flags["nt"])
+    data_base = writer.states.subtileStoreInNLLData
+    vaddr = writer.states.subtileStoreInNLLVaddr
+    insts = []
+
+    for pair_start in range(0, len(columns), 2):
+        pair = columns[pair_start:pair_start + 2]
+        for bank, column in enumerate(pair):
+            data = data_base + bank * 8
+            for row, reg in enumerate(
+                    _column_accumulators(writer, dtileInfo, column)):
+                insts.append(VAccvgprReadB32(
+                    dst=vgpr(data + row), src=accvgpr(reg),
+                    comment=f"fast fold C column {column} row {row}: acc -> vgpr"))
+        for bank, column in enumerate(pair):
+            data = data_base + bank * 8
+            for packed_pair in range(4):
+                insts.append(VCvtPkF32toBF16(
+                    dst=vgpr(data + packed_pair),
+                    src0=vgpr(data + 2 * packed_pair),
+                    src1=vgpr(data + 2 * packed_pair + 1),
+                    comment="pack alpha-one folded BF16 rows"))
+            insts.append(BufferStoreB128(
+                src=vgpr(data, 4),
+                vaddr=vgpr(vaddr),
+                saddr=sgpr("SrdD", 4),
+                soffset=0,
+                mubuf=mubuf(),
+                comment=f"fast folded D store column {column}"))
+            if column != 31:
+                insts.append(VAddU32(
+                    dst=vgpr(vaddr), src0=vgpr(vaddr),
+                    src1=vgpr(writer.states.subtileStoreInNLLStride),
+                    comment="advance folded-store address by one BF16 D column"))
+    return insts
+
+
+def _emit_deferred_store_paths(writer, kernel, dtileInfo,
+                               columns: list) -> Module:
+    """Emit one runtime alpha branch for the post-MFMA store drain."""
+    module = Module("SubtileStoreInNLLDeferred")
+    if not columns:
+        return module
+    general = Label(
+        writer.labels.getNameInc("SubtileStoreInNLLGeneralAlpha"), "")
+    done = Label(
+        writer.labels.getNameInc("SubtileStoreInNLLDeferredDone"), "")
+    module.add(SCmpEQU32(
+        src0=sgpr("Alpha"), src1=1.0,
+        comment="use pipelined store drain when alpha is one"))
+    module.add(SCBranchSCC0(
+        labelName=general.getLabelName(),
+        comment="alpha != 1.0"))
+    module.addItems(_alpha_one_store_pairs(
+        writer, kernel, dtileInfo, columns))
+    module.add(SBranch(
+        labelName=done.getLabelName(),
+        comment="skip general-alpha store drain"))
+    module.add(general)
+    for column in columns:
+        module.addItems(_store_unit(writer, kernel, dtileInfo, column))
+    module.add(done)
+    return module
+
+
 def interleaveSubtileStoreInNLL(
     module: Module,
     writer,
     kernel,
     dtileInfo,
     minMfmaGap: int = 4,
-    issueRate: int = 6,
+    issueRate: int = 8,
 ) -> Module:
     """Pace completed output-column stores through a scheduled NLL MFMA stream."""
     if not kernel.get("SubtileStoreInNLL", 0):
@@ -250,8 +345,13 @@ def interleaveSubtileStoreInNLL(
         producer = max(last_producer[(tile_m, tile_n)]
                        for tile_m in range(dtileInfo.localMMATileGrid[0]))
         release = min(producer + minMfmaGap, last_seq)
-        units.append((release, deque(
-            _store_unit(writer, kernel, dtileInfo, column))))
+        units.append({
+            "release": release,
+            "column": column,
+            "instructions": deque(
+                _store_unit(writer, kernel, dtileInfo, column)),
+            "started": False,
+        })
 
     out = Module(module.name)
     pending = deque()
@@ -262,24 +362,30 @@ def interleaveSubtileStoreInNLL(
         if not _MFMA_TILE_RE.search(str(item)):
             continue
         mfma_seq += 1
-        while next_unit < len(units) and units[next_unit][0] <= mfma_seq:
-            pending.append(units[next_unit][1])
+        while (next_unit < len(units)
+               and units[next_unit]["release"] <= mfma_seq):
+            pending.append(units[next_unit])
             next_unit += 1
 
         budget = issueRate
         while pending and budget:
             unit = pending[0]
-            out.add(unit.popleft())
+            unit["started"] = True
+            out.add(unit["instructions"].popleft())
             budget -= 1
-            if not unit:
+            if not unit["instructions"]:
                 pending.popleft()
 
         if mfma_seq == last_seq:
             while next_unit < len(units):
-                pending.append(units[next_unit][1])
+                pending.append(units[next_unit])
                 next_unit += 1
-            while pending:
+            while pending and pending[0]["started"]:
                 unit = pending.popleft()
-                while unit:
-                    out.add(unit.popleft())
+                while unit["instructions"]:
+                    out.add(unit["instructions"].popleft())
+            out.add(_emit_deferred_store_paths(
+                writer, kernel, dtileInfo,
+                [unit["column"] for unit in pending]))
+            pending.clear()
     return out
