@@ -19,7 +19,7 @@
 #
 # Coverage:
 #   - data tensors A and B (non-MX), TLU and non-TLU layouts
-#   - MX scale tensors MXSA / MXSB (mxUnit = MatrixInstK / MXBlock)
+#   - MX scale tensors MXSA / MXSB (MX1xK and MX128xK layouts)
 #   - FP8 (bpe=1) and FP4 (bpe=0.5) element sizes, including mixed A/B dtypes
 #   - ClusterDim != [1,1]: gl2-prefetch is emitted whenever PrefetchGL2 is set,
 #     but the cooperative fan-out only engages for a real cluster, so every config
@@ -151,6 +151,7 @@ class GL2Config:
                               # cluster exercises A and B cooperatively at once.
     matrix_inst_k: int = 128
     mx_block: int = 32
+    mx_block_free: int = 1
     size_i: int = None        # free-dim size (M) override for A-type; None => clean M*MT
     size_j: int = None        # free-dim size (N) override for B-type; None => clean N*MT
     pgr: int = 2              # PrefetchGlobalRead. PGR>1 makes calculateStartAddr
@@ -245,7 +246,8 @@ def tensor_dims(spec, cfg):
         # DepthU/_DepthU{A,B}; bpe is always 1 (already byte-granular)
         coal, perp = (spec.mt * M, cfg.depth_u_metadata) if spec.tlu else (cfg.depth_u_metadata, spec.mt * M)
     elif spec.is_mx:
-        coal = spec.mt * M * cfg.matrix_inst_k // cfg.mx_block
+        mx_unit = cfg.matrix_inst_k // cfg.mx_block
+        coal = ((spec.mt * M + cfg.mx_block_free - 1) // cfg.mx_block_free) * mx_unit
         perp = cfg.depth_u // cfg.matrix_inst_k
     else:
         du = data_depth_u(spec, cfg)
@@ -505,6 +507,14 @@ CONFIGS = [
     # folded stride, so one shared chunk shift across tensors fails here.
     GL2Config("gsu2_mx_cluster", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
               depth_u=256, mx_block=32, cluster=(2, 2), gsu=2, gsuc=True, k_iters=7),
+    # MX1x128 with GSU and a [4,4] cooperative cluster.
+    GL2Config("gsu2_mx1x128_cluster", [_A(True, 128), _B(True, 64), _MXSA(128), _MXSB(64)],
+              depth_u=512, mx_block=128, mx_block_free=1, cluster=(4, 4),
+              gsu=2, gsuc=True, k_iters=14),
+    # MX128x128 with asymmetric MT and cluster shapes for MXSA and MXSB.
+    GL2Config("gsu2_mx128x128_cluster", [_A(True, 64), _B(True, 192), _MXSA(64), _MXSB(192)],
+              depth_u=512, mx_block=128, mx_block_free=128, cluster=(4, 2),
+              gsu=2, gsuc=True, k_iters=14),
 ]
 
 
@@ -543,6 +553,8 @@ def _make_kernel(cfg):
             "UseInitialStridesAB": True,
             "MXBlockA": cfg.mx_block if has_mxa else 0,
             "MXBlockB": cfg.mx_block if has_mxb else 0,
+            "MXBlockFreeA": cfg.mx_block_free if has_mxa else 1,
+            "MXBlockFreeB": cfg.mx_block_free if has_mxb else 1,
             "TLUA": _subtc_attr(cfg, "A", "tlu", True),
             "TLUB": _subtc_attr(cfg, "B", "tlu", True),
             "Sparse": cfg.sparse,
@@ -922,7 +934,7 @@ def inc_bytes(spec, cfg):
     """Per-iteration K (summation) address increment in bytes, matching
     GL2Prefetch.setIncrement. Advancing the prefetch by one iteration moves a
     full DepthU along the summation axis; in bytes this is:
-      - MX:       SizeFree * (DepthU // MXBlock)              (* bpe == 1)
+      - MX:       SizeFree * (DepthU // MXBlock) / MXBlockFree (* bpe == 1)
       - Metadata: StrideMetadataL(=coal_m) * DepthUMetadata if TLUMetadata,
                   else DepthUMetadata                          (bpe == 1)
       - TLU:      StrideUnroll(=coal) * (_DepthU{A,B} * bpe)
@@ -930,7 +942,8 @@ def inc_bytes(spec, cfg):
     """
     bpe = spec.bpe
     if spec.is_mx:
-        return free_dim_size(cfg, spec.subtc) * round(cfg.depth_u // cfg.mx_block * bpe)
+        return (free_dim_size(cfg, spec.subtc)
+                * round(cfg.depth_u // cfg.mx_block * bpe)) // cfg.mx_block_free
     if spec.is_m:
         coal, _, _, _ = tensor_dims(spec, cfg)
         return round(coal * cfg.depth_u_metadata) if spec.tlu else round(cfg.depth_u_metadata)
@@ -973,8 +986,9 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
     size_free = free_dim_size(cfg, spec.subtc)
     if spec.is_mx:
         mx_unit = cfg.matrix_inst_k // cfg.mx_block
-        perp_stride = size_free * mx_unit
-        edge = (size_free - 1) * mx_unit
+        scale_rows = (size_free + cfg.mx_block_free - 1) // cfg.mx_block_free
+        perp_stride = scale_rows * mx_unit
+        edge = (scale_rows - 1) * mx_unit
     else:
         perp_stride = coal            # StrideAL (TLU) / StrideAI (nTLU): the folded leading dim
         edge = size_free - 1
