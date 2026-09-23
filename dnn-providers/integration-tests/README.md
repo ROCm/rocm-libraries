@@ -263,7 +263,7 @@ that graph on a given arch and platform. `--enforce-support-claims` (which requi
 `--test-engine`) turns a broken promise into a test failure instead of a silent
 skip, and prints a summary of every verdict. Claims are checked for the single
 engine under test. Enforcement is on by default, so the CTest registrations and a
-run by hand behave alike; pass `--no-enforce-support-claims` to keep the summary
+run by hand behave alike; pass `--enforce-support-claims=false` to keep the summary
 but let a broken claim stay green. See
 [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
 

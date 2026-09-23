@@ -17,10 +17,10 @@ it is published.
 > device has no claim to enforce and nothing goes red on its account.
 >
 > Running the binary by hand behaves the same way -- enforcement is the default.
-> `--no-enforce-support-claims` opts out: the sidecar is still queried and the summary
+> `--enforce-support-claims=false` opts out: the sidecar is still queried and the summary
 > still printed, but a broken claim no longer fails the test.
 >
-> Enforcement requires `--test-engine`. Typing `--enforce-support-claims` with no
+> Enforcement requires `--test-engine`. Typing `--enforce-support-claims` (or `=true`) with no
 > engine named exits 1 rather than degrading to "enforced nothing, exit 0"; inheriting
 > the default with no engine named quietly reports instead, since nothing was asked
 > for that cannot be delivered.

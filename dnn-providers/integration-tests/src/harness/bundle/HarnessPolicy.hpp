@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 #include "harness/TestConfig.hpp"
@@ -37,16 +38,33 @@ enum class ClaimMode : std::uint8_t
     ENFORCE, ///< query and publish; a broken claim fails the test
 };
 
+/// The value spelled after --enforce-support-claims=. Only the two words are accepted:
+/// anything else throws rather than falling back to a default, because a value the
+/// parser does not recognise is exactly how an opt-out ends up silently enforcing.
+inline bool parseEnforceClaimsValue(const std::string& value)
+{
+    if(value == "true")
+    {
+        return true;
+    }
+    if(value == "false")
+    {
+        return false;
+    }
+    throw std::invalid_argument("--enforce-support-claims expects 'true' or 'false', got '" + value
+                                + "'.");
+}
+
 /// The command-line inputs that decide the claim mode.
 ///
-/// Named fields rather than four positional bools: every combination is legal to
+/// Named fields rather than positional arguments: every combination is legal to
 /// write, so a transposed argument would compile and quietly pick the wrong mode.
 struct ClaimModeRequest
 {
-    /// --enforce-support-claims was typed. Its value is always true (it defaults on),
-    /// so whether it was typed is the only thing it says.
-    bool enforceAsked = false;
-    bool enforceRefused = false; ///< --no-enforce-support-claims
+    /// --enforce-support-claims as typed: empty when it was not typed at all. Kept
+    /// apart from "typed true" because enforcement defaults on, and only a lane that
+    /// asked for it is owed an error when it cannot be delivered.
+    std::optional<bool> enforce;
     bool writing = false; ///< --write-support-claims
     bool hasEngine = false; ///< --test-engine named one
 };
@@ -66,13 +84,8 @@ struct ClaimModeResolution
 /// this is a pure function with every combination pinned by a test.
 inline ClaimModeResolution resolveClaimMode(const ClaimModeRequest& request)
 {
-    if(request.enforceAsked && request.enforceRefused)
-    {
-        return {ClaimMode::WARN,
-                "--enforce-support-claims and --no-enforce-support-claims are "
-                "mutually exclusive.\n"};
-    }
-    if(request.enforceAsked && request.writing)
+    const bool enforceAsked = request.enforce.value_or(false);
+    if(enforceAsked && request.writing)
     {
         return {ClaimMode::WARN,
                 "--write-support-claims is mutually exclusive with "
@@ -80,7 +93,7 @@ inline ClaimModeResolution resolveClaimMode(const ClaimModeRequest& request)
     }
     // Silently degrading an asked-for enforcement to "enforced nothing, exit 0" is
     // the exact failure --enforce-support-claims exists to prevent.
-    if(request.enforceAsked && !request.hasEngine)
+    if(enforceAsked && !request.hasEngine)
     {
         return {ClaimMode::WARN,
                 "Error: --enforce-support-claims requires --test-engine; there is no "
@@ -88,7 +101,7 @@ inline ClaimModeResolution resolveClaimMode(const ClaimModeRequest& request)
                 "       check sidecar claims against.\n"};
     }
 
-    const bool enforce = !request.enforceRefused && !request.writing && request.hasEngine;
+    const bool enforce = request.enforce.value_or(true) && !request.writing && request.hasEngine;
     return {enforce ? ClaimMode::ENFORCE : ClaimMode::WARN, std::nullopt};
 }
 

@@ -156,21 +156,23 @@ int main(int argc, char** argv) noexcept
         // protected. Passing it explicitly is still meaningful -- it is the difference
         // between "check if you can" and "check, and say so if you cannot", which is
         // what the --test-engine requirement below keys on.
+        //
+        // An optional value rather than a bare switch: a switch cannot be turned off,
+        // and one takes no value, so "=false" would be split off, handed to GTest as a
+        // stray argument, and leave enforcement on without a word.
         parser.add_argument("--enforce-support-claims")
             .default_value(true)
-            .implicit_value(true)
+            .nargs(argparse::nargs_pattern::optional)
+            .metavar("true|false")
+            .action(hipdnn_integration_tests::bundle::parseEnforceClaimsValue)
             .help("Enforce engine support claims from .support.json sidecars (default). "
                   "A broken claim (engine no longer supports a claimed graph) becomes "
                   "a test FAIL instead of a silent SKIP. Passing this explicitly also "
                   "makes a missing --test-engine an error rather than a quiet "
-                  "downgrade to reporting.");
-        // argparse has no automatic --no- negation, so the opt-out is its own flag.
-        parser.add_argument("--no-enforce-support-claims")
-            .default_value(false)
-            .implicit_value(true)
-            .help("Turn off support claim enforcement. Claims are still read and the "
-                  "summary is still printed -- a broken claim is reported instead of "
-                  "failing the test.");
+                  "downgrade to reporting. Use --enforce-support-claims=false to "
+                  "turn enforcement off: claims are still read and the summary is "
+                  "still printed, but a broken claim is reported instead of failing "
+                  "the test.");
         parser.add_argument("--write-support-claims")
             .default_value(false)
             .implicit_value(true)
@@ -324,12 +326,13 @@ int main(int argc, char** argv) noexcept
         const bool writeSupportClaims = parser.get<bool>("--write-support-claims");
 
         hipdnn_integration_tests::bundle::ClaimModeRequest claimRequest;
-        // Enforcement defaults on, so the positive flag's *value* is always true and
-        // says nothing. What it is asked for here is whether it was typed: that is the
-        // only thing separating a lane that means to enforce from one that merely
-        // inherited the default, and resolveClaimMode() owes those two different answers.
-        claimRequest.enforceAsked = parser.is_used("--enforce-support-claims");
-        claimRequest.enforceRefused = parser.get<bool>("--no-enforce-support-claims");
+        // Enforcement defaults on, so the flag's value alone cannot tell a lane that
+        // typed it from one that inherited the default; only whether it was typed can,
+        // and resolveClaimMode() owes those two different answers.
+        if(parser.is_used("--enforce-support-claims"))
+        {
+            claimRequest.enforce = parser.get<bool>("--enforce-support-claims");
+        }
         claimRequest.writing = writeSupportClaims;
         claimRequest.hasEngine = engineName.has_value();
 

@@ -1,22 +1,26 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// resolveClaimMode() has four boolean inputs, so the whole input space is sixteen
-// rows and every one is pinned here. A wrong answer in this function does not crash
-// anything -- it quietly runs a lane in WARN that was meant to ENFORCE -- so no row
-// is left to be inferred from its neighbours.
+// resolveClaimMode() has three inputs -- the enforce flag (not typed, false, true) and
+// two booleans -- so the whole input space is twelve rows and every one is pinned
+// here. A wrong answer in this function does not crash anything -- it quietly runs a
+// lane in WARN that was meant to ENFORCE -- so no row is left to be inferred from its
+// neighbours.
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <bitset>
 #include <cstddef>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 #include "harness/bundle/HarnessPolicy.hpp"
 
 using hipdnn_integration_tests::bundle::ClaimMode;
 using hipdnn_integration_tests::bundle::ClaimModeRequest;
+using hipdnn_integration_tests::bundle::parseEnforceClaimsValue;
 using hipdnn_integration_tests::bundle::resolveClaimMode;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -24,16 +28,14 @@ using hipdnn_integration_tests::bundle::resolveClaimMode;
 namespace
 {
 
-// Each refusal names the flag that makes it a refusal and no other refusal does, so
-// a substring identifies which of the three fired without pinning the wording.
-constexpr const char* REFUSED_CONFLICT = "--no-enforce-support-claims";
+// Each refusal names the flag that makes it a refusal and the other does not, so a
+// substring identifies which one fired without pinning the wording.
 constexpr const char* WRITE_CONFLICT = "--write-support-claims";
 constexpr const char* NO_ENGINE = "--test-engine";
 
 struct Row
 {
-    bool enforceAsked;
-    bool enforceRefused;
+    std::optional<bool> enforce;
     bool writing;
     bool hasEngine;
     ClaimMode mode; // ignored when an error is expected
@@ -41,47 +43,52 @@ struct Row
 };
 
 // clang-format off
-constexpr std::array<Row, 16> TRUTH_TABLE = {{
-    // asked  refused writing engine  mode               error
-    {false,  false,  false,  false,  ClaimMode::WARN,    nullptr},
-    {false,  false,  false,  true,   ClaimMode::ENFORCE, nullptr}, // the CI lane, default on
-    {false,  false,  true,   false,  ClaimMode::WARN,    nullptr},
-    {false,  false,  true,   true,   ClaimMode::WARN,    nullptr},
-    {false,  true,   false,  false,  ClaimMode::WARN,    nullptr},
-    {false,  true,   false,  true,   ClaimMode::WARN,    nullptr},
-    {false,  true,   true,   false,  ClaimMode::WARN,    nullptr},
-    {false,  true,   true,   true,   ClaimMode::WARN,    nullptr},
-    {true,   false,  false,  false,  ClaimMode::WARN,    NO_ENGINE},
-    {true,   false,  false,  true,   ClaimMode::ENFORCE, nullptr}, // the CI lane, typed
-    {true,   false,  true,   false,  ClaimMode::WARN,    WRITE_CONFLICT},
-    {true,   false,  true,   true,   ClaimMode::WARN,    WRITE_CONFLICT},
-    {true,   true,   false,  false,  ClaimMode::WARN,    REFUSED_CONFLICT},
-    {true,   true,   false,  true,   ClaimMode::WARN,    REFUSED_CONFLICT},
-    {true,   true,   true,   false,  ClaimMode::WARN,    REFUSED_CONFLICT},
-    {true,   true,   true,   true,   ClaimMode::WARN,    REFUSED_CONFLICT},
+constexpr std::array<Row, 12> TRUTH_TABLE = {{
+    // enforce       writing engine  mode               error
+    {std::nullopt,  false,  false,  ClaimMode::WARN,    nullptr},
+    {std::nullopt,  false,  true,   ClaimMode::ENFORCE, nullptr}, // the CI lane, default on
+    {std::nullopt,  true,   false,  ClaimMode::WARN,    nullptr},
+    {std::nullopt,  true,   true,   ClaimMode::WARN,    nullptr},
+    {false,         false,  false,  ClaimMode::WARN,    nullptr},
+    {false,         false,  true,   ClaimMode::WARN,    nullptr}, // the opt-out
+    {false,         true,   false,  ClaimMode::WARN,    nullptr},
+    {false,         true,   true,   ClaimMode::WARN,    nullptr},
+    {true,          false,  false,  ClaimMode::WARN,    NO_ENGINE},
+    {true,          false,  true,   ClaimMode::ENFORCE, nullptr}, // the CI lane, typed
+    {true,          true,   false,  ClaimMode::WARN,    WRITE_CONFLICT},
+    {true,          true,   true,   ClaimMode::WARN,    WRITE_CONFLICT},
 }};
 // clang-format on
 
+// 0 not typed, 1 typed false, 2 typed true.
+std::size_t enforceIndex(const Row& row)
+{
+    if(!row.enforce.has_value())
+    {
+        return 0U;
+    }
+    return *row.enforce ? 2U : 1U;
+}
+
 std::string describe(const Row& row)
 {
-    return std::string("asked=") + (row.enforceAsked ? "1" : "0")
-           + " refused=" + (row.enforceRefused ? "1" : "0")
+    constexpr std::array<const char*, 3> ENFORCE_NAMES = {"unset", "false", "true"};
+    return std::string("enforce=") + ENFORCE_NAMES.at(enforceIndex(row))
            + " writing=" + (row.writing ? "1" : "0") + " engine=" + (row.hasEngine ? "1" : "0");
 }
 
 std::size_t inputIndex(const Row& row)
 {
-    return (row.enforceAsked ? 8U : 0U) | (row.enforceRefused ? 4U : 0U) | (row.writing ? 2U : 0U)
-           | (row.hasEngine ? 1U : 0U);
+    return (enforceIndex(row) * 4U) + (row.writing ? 2U : 0U) + (row.hasEngine ? 1U : 0U);
 }
 
 } // namespace
 
-// Sixteen rows is not enough on its own -- std::array zero-fills a missing row, and a
-// duplicated row fills the count too. Sixteen distinct inputs is every input.
+// Twelve rows is not enough on its own -- a duplicated row fills the count as well as
+// a distinct one does. Twelve distinct inputs is every input.
 TEST(TestClaimModeResolution, TruthTableCoversEveryInputCombination)
 {
-    std::bitset<16> seen;
+    std::bitset<12> seen;
     for(const Row& row : TRUTH_TABLE)
     {
         EXPECT_FALSE(seen.test(inputIndex(row))) << "duplicate row: " << describe(row);
@@ -97,8 +104,7 @@ TEST(TestClaimModeResolution, EveryInputCombinationResolvesAsTabled)
         SCOPED_TRACE(describe(row));
 
         ClaimModeRequest request;
-        request.enforceAsked = row.enforceAsked;
-        request.enforceRefused = row.enforceRefused;
+        request.enforce = row.enforce;
         request.writing = row.writing;
         request.hasEngine = row.hasEngine;
 
@@ -118,36 +124,42 @@ TEST(TestClaimModeResolution, EveryInputCombinationResolvesAsTabled)
     }
 }
 
-// The substring check above only identifies a refusal if no other refusal's message
-// also names that flag; this is what keeps it from passing on the wrong one.
+// The substring check above only identifies a refusal if the other refusal's message
+// does not also name that flag; this is what keeps it from passing on the wrong one.
 TEST(TestClaimModeResolution, EachRefusalNamesOnlyItsOwnFlag)
 {
-    ClaimModeRequest refused;
-    refused.enforceAsked = true;
-    refused.enforceRefused = true;
-    refused.hasEngine = true;
-
     ClaimModeRequest writing;
-    writing.enforceAsked = true;
+    writing.enforce = true;
     writing.writing = true;
     writing.hasEngine = true;
 
     ClaimModeRequest noEngine;
-    noEngine.enforceAsked = true;
+    noEngine.enforce = true;
 
-    const std::string refusedError = resolveClaimMode(refused).error.value_or("");
     const std::string writingError = resolveClaimMode(writing).error.value_or("");
     const std::string noEngineError = resolveClaimMode(noEngine).error.value_or("");
-    ASSERT_FALSE(refusedError.empty());
     ASSERT_FALSE(writingError.empty());
     ASSERT_FALSE(noEngineError.empty());
 
-    EXPECT_EQ(writingError.find(REFUSED_CONFLICT), std::string::npos);
-    EXPECT_EQ(noEngineError.find(REFUSED_CONFLICT), std::string::npos);
-    EXPECT_EQ(refusedError.find(WRITE_CONFLICT), std::string::npos);
     EXPECT_EQ(noEngineError.find(WRITE_CONFLICT), std::string::npos);
-    EXPECT_EQ(refusedError.find(NO_ENGINE), std::string::npos);
     EXPECT_EQ(writingError.find(NO_ENGINE), std::string::npos);
+}
+
+TEST(TestClaimModeResolution, FlagValueAcceptsTrueAndFalse)
+{
+    EXPECT_TRUE(parseEnforceClaimsValue("true"));
+    EXPECT_FALSE(parseEnforceClaimsValue("false"));
+}
+
+// A value that is not recognised must stop the run, not fall back to the default:
+// the default is "on", so falling back is how a typo'd opt-out silently enforces.
+TEST(TestClaimModeResolution, FlagValueRejectsAnythingElse)
+{
+    for(const char* value : {"", "TRUE", "False", "1", "0", "yes", "no", "off", "tru"})
+    {
+        SCOPED_TRACE(value);
+        EXPECT_THROW(parseEnforceClaimsValue(value), std::invalid_argument);
+    }
 }
 
 // NOLINTEND(readability-identifier-naming)
