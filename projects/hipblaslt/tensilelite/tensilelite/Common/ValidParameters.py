@@ -908,6 +908,14 @@ validParameters = { # we need to make sure this matches develop
     # Suggest optimum value: fp32 = [2,4], fp16 or bf16 = [4,8] (dwordx2 and dowrdx4)
     # -1:  Use dwordx2 if support SRVW, or set SRVW to 0
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
+    # StoreRemapTensorStore: how a StoreRemapVectorWidth round is flushed from LDS to D.
+    #   -1 = auto: tensor_store_from_lds wherever it is supported, else ds_read + buffer_store
+    #    0 = always ds_read + buffer_store (the original path)
+    #    1 = force tensor_store_from_lds; rejected if the kernel cannot use it
+    # Only the full-tile store to D is ever flushed by the DMA -- edge batches and the GSU
+    # f32-workspace branch always take the ds_read + buffer_store path, whatever this says.
+    # Ignored unless StoreRemapVectorWidth > 0.
+    "StoreRemapTensorStore": [-1, 0, 1],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],
     # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs in the f32 source/MAC inner
