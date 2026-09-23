@@ -46,9 +46,15 @@ __device__ inline COMPUTE_TYPE toAccum(T x)
 // --- fromAccum: convert accumulation result back to output type ---
 
 template <typename T>
-__device__ inline T fromAccum(COMPUTE_TYPE x, T* /*tag*/)
+__device__ inline T fromAccum(COMPUTE_TYPE x)
 {
     return safeConvert<T>(x);
+}
+
+template <typename T>
+__device__ inline T fromAccum(COMPUTE_TYPE x, T* /*tag*/)
+{
+    return fromAccum<T>(x);
 }
 
 // --- fabs overloads ---

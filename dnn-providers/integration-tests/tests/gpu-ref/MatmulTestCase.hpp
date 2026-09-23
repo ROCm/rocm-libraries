@@ -15,11 +15,8 @@
 namespace gpu_matmul_ref_test
 {
 
-namespace
-{
-
-std::vector<int64_t> calculateCDims(const std::vector<int64_t>& aDims,
-                                    const std::vector<int64_t>& bDims)
+inline std::vector<int64_t> calculateCDims(const std::vector<int64_t>& aDims,
+                                           const std::vector<int64_t>& bDims)
 {
     if(aDims.size() != bDims.size())
     {
@@ -56,8 +53,6 @@ std::vector<int64_t> calculateCDims(const std::vector<int64_t>& aDims,
     out.push_back(bDims[bDims.size() - 1]);
     return out;
 }
-
-} // namespace
 
 struct MatmulTestCase
 {

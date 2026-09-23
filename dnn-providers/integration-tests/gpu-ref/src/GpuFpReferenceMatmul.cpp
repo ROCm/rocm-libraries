@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <cstring>
+
 #include <hip/amd_detail/amd_hip_runtime.h>
 #include <hipdnn-gpu-ref/GpuFpReferenceMatmul.hpp>
 
@@ -21,6 +23,7 @@ void launchKernel(hipFunction_t function,
                   int64_t mTiles,
                   int64_t nTiles,
                   int64_t tileSize,
+                  int64_t batches,
                   void* argsPtr,
                   size_t argsSize)
 {
@@ -29,7 +32,7 @@ void launchKernel(hipFunction_t function,
     const int64_t ylocalsize = tileSize;
     const int64_t ygridsize = nTiles;
     const int64_t zlocalsize = 1;
-    const int64_t zgridsize = 1;
+    const int64_t zgridsize = batches;
 
     // Check the device limits for grid size
     detail::assertValidGridSize(xgridsize, ygridsize, zgridsize);
@@ -74,7 +77,20 @@ void GpuFpReferenceMatmul::launchMatmul(const void* aPtr,
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefMatmul.cpp", defines, "MatmulRef");
 
+    if(aDims.size() > 5 || aStrides.size() > 5 || bDims.size() > 5 || bStrides.size() > 5
+       || cDims.size() > 5 || cStrides.size() > 5)
+    {
+        throw std::runtime_error(
+            "Rank of dimensions and/or strides for A, B and/or C is too large");
+    }
+
     MatmulArgs args{};
+    static_assert(std::size(args.aDims) == 5);
+    static_assert(std::size(args.aStrides) == 5);
+    static_assert(std::size(args.bDims) == 5);
+    static_assert(std::size(args.bStrides) == 5);
+    static_assert(std::size(args.cDims) == 5);
+    static_assert(std::size(args.cStrides) == 5);
     args.a = aPtr;
     args.b = bPtr;
     args.c = cPtr;
@@ -88,7 +104,13 @@ void GpuFpReferenceMatmul::launchMatmul(const void* aPtr,
     auto mTiles = (aDims[aDims.size() - 2] + tileSize - 1) / tileSize;
     auto nTiles = (bDims[bDims.size() - 1] + tileSize - 1) / tileSize;
 
-    launchKernel(kernel.function(), mTiles, nTiles, tileSize, &args, sizeof(args));
+    int64_t batches = 1;
+    for(size_t i = 0; i < cDims.size() - 2; ++i)
+    {
+        batches *= cDims[i];
+    }
+
+    launchKernel(kernel.function(), mTiles, nTiles, tileSize, batches, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

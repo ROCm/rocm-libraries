@@ -21,7 +21,6 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::matmul;
 using namespace hipdnn_gpu_ref;
-using namespace gpu_matmul_ref_test;
 
 template <typename ADataType,
           typename BDataType = ADataType,

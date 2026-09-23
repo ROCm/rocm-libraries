@@ -5,6 +5,7 @@
 #include "MatmulShapeCatalog.hpp"
 #include "hipdnn-gpu-ref/GpuFpReferenceMatmul.hpp"
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -116,6 +117,26 @@ TEST(TestGpuMatmulRefValidation, ThrowsOnOutputRankMismatch)
     Tensor<float> a({2, 3, 2});
     Tensor<float> b({2, 2, 3});
     Tensor<float> c({3, 3});
+
+    EXPECT_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c), std::invalid_argument);
+}
+
+TEST(TestGpuMatmulRefValidation, ThrowsOnZeroBatchDimensions)
+{
+    SKIP_IF_NO_DEVICES();
+    ShallowTensor<float> a(nullptr, {0, 3, 2}, {6, 2, 1});
+    ShallowTensor<float> b(nullptr, {0, 2, 3}, {6, 3, 1});
+    ShallowTensor<float> c(nullptr, {2, 3, 3}, {9, 3, 1});
+
+    EXPECT_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c), std::invalid_argument);
+}
+
+TEST(TestGpuMatmulRefValidation, ThrowsOnZeroMatrixDimensions)
+{
+    SKIP_IF_NO_DEVICES();
+    ShallowTensor<float> a(nullptr, {2, 0, 2}, {0, 2, 1});
+    ShallowTensor<float> b(nullptr, {2, 2, 3}, {6, 3, 1});
+    ShallowTensor<float> c(nullptr, {2, 0, 3}, {0, 3, 1});
 
     EXPECT_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c), std::invalid_argument);
 }
@@ -431,63 +452,6 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuMatmulRefUpcastBfp16,
                          ::testing::ValuesIn(getMatmulLargeTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefPureFp32, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmallTestCases();
-                             auto m = getMatmulMediumTestCases();
-                             auto l = getMatmulLargeTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefPureFp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmallTestCases();
-                             auto m = getMatmulMediumTestCases();
-                             auto l = getMatmulLargeTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefPureBfp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmallTestCases();
-                             auto m = getMatmulMediumTestCases();
-                             auto l = getMatmulLargeTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefMixedFp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmallTestCases();
-                             auto m = getMatmulMediumTestCases();
-                             auto l = getMatmulLargeTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefMixedBfp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmallTestCases();
-                             auto m = getMatmulMediumTestCases();
-                             auto l = getMatmulLargeTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefUpcastFp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmallTestCases();
-                             auto m = getMatmulMediumTestCases();
-                             auto l = getMatmulLargeTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefUpcastBfp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmallTestCases();
-                             auto m = getMatmulMediumTestCases();
-                             auto l = getMatmulLargeTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
 
 // ============================================================================
 // Edge case tests with DISABLED_ prefix to avoid running in CI.

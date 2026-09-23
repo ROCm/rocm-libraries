@@ -21,19 +21,14 @@ template <typename ADataType,
           typename CDataType,
           typename ComputeDataType,
           unsigned int TileSize>
-inline std::vector<std::string> buildMatmulDefines(const std::vector<int64_t>& aDims,
-                                                   const std::vector<int64_t>& bDims)
+inline std::vector<std::string> buildMatmulDefines(size_t rank)
 {
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DA_TYPE=") + HipRtcTypeName<ADataType>::VALUE);
     defines.emplace_back(std::string("-DB_TYPE=") + HipRtcTypeName<BDataType>::VALUE);
     defines.emplace_back(std::string("-DC_TYPE=") + HipRtcTypeName<CDataType>::VALUE);
     defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
-    defines.emplace_back(std::string("-DMATMUL_K=") + std::to_string(aDims[aDims.size() - 1]));
-    defines.emplace_back(std::string("-DMATMUL_M=") + std::to_string(aDims[aDims.size() - 2]));
-    defines.emplace_back(std::string("-DMATMUL_N=") + std::to_string(bDims[bDims.size() - 1]));
-    defines.emplace_back(std::string("-DMATMUL_BATCH_DIM_COUNT=")
-                         + std::to_string(aDims.size() - 2));
+    defines.emplace_back(std::string("-DMATMUL_BATCH_DIM_COUNT=") + std::to_string(rank - 2));
     defines.emplace_back(std::string("-DTILE_SIZE=") + std::to_string(TileSize));
     return defines;
 }
@@ -49,11 +44,11 @@ public:
     template <class ADataType, class BDataType, class CDataType, class ComputeDataType = float>
     static void matmul(TensorBase<ADataType>& a, TensorBase<BDataType>& b, TensorBase<CDataType>& c)
     {
-        validateMatmul(a, b, c);
+        validateMatmul<ADataType, BDataType, CDataType, ComputeDataType>(a, b, c);
 
         auto defines = detail::
             buildMatmulDefines<ADataType, BDataType, CDataType, ComputeDataType, TILE_SIZE>(
-                a.dims(), b.dims());
+                a.dims().size());
 
         launchMatmul(a.rawDeviceData(),
                      a.dims(),
@@ -78,6 +73,12 @@ private:
         = std::is_same_v<T, float> || std::is_same_v<T, hipdnn_data_sdk::types::half>
           || std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>;
 
+    template <class T>
+    static constexpr bool IS_SUPPORTED_COMPUTE_DATA_TYPE
+        = std::is_same_v<T, double> || std::is_same_v<T, float>
+          || std::is_same_v<T, hipdnn_data_sdk::types::half>
+          || std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>;
+
     static void validateConsistentDimensions(const std::vector<int64_t>& aDims,
                                              const std::vector<int64_t>& bDims,
                                              const std::vector<int64_t>& cDims)
@@ -90,6 +91,15 @@ private:
         if(aDims.size() < 2 || aDims.size() > 5)
         {
             throw std::invalid_argument("Matmul requires A and B tensor ranks to be 2, 3, 4 or 5.");
+        }
+
+        for(size_t i = 0; i < aDims.size(); ++i)
+        {
+            if(aDims[i] <= 0 || bDims[i] <= 0)
+            {
+                throw std::invalid_argument(
+                    "Matmul requires A and B tensors to have positive dimensions.");
+            }
         }
 
         std::vector<int64_t> aBatchDims(aDims.begin(), aDims.end() - 2);
@@ -126,7 +136,7 @@ private:
         }
     }
 
-    template <class ADataType, class BDataType, class CDataType>
+    template <class ADataType, class BDataType, class CDataType, class ComputeDataType>
     static void validateMatmul(const TensorBase<ADataType>& a,
                                const TensorBase<BDataType>& b,
                                TensorBase<CDataType>& c)
@@ -141,6 +151,8 @@ private:
                       "Matmul supports only float, half and bfloat16 B data types.");
         static_assert(IS_SUPPORTED_DATA_TYPE<CDataType>,
                       "Matmul supports only float, half and bfloat16 C data types.");
+        static_assert(IS_SUPPORTED_COMPUTE_DATA_TYPE<ComputeDataType>,
+                      "Matmul supports only double, float, half and bfloat16 compute data types.");
     }
 
     // --- Kernel launcher (defined in GpuFpReferenceMatmul.cpp) ---
