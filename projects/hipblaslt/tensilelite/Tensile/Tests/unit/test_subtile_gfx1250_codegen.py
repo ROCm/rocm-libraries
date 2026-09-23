@@ -366,6 +366,7 @@ def _fp4_tdm_kernel():
         "NonTemporalMXSA": 0,
         "NonTemporalMXSB": 0,
         "TDMInst": 3,
+        "SourceSwap": False,
         "ProblemType": {
             "DataTypeA": dtype,
             "DataTypeB": dtype,
@@ -566,6 +567,43 @@ class TestGfx1250MxSubtileTdm:
         assert "B: laneId % 16" in asm
         assert "TDM wave partition" in asm
         assert "rotation" not in asm.lower()
+
+    def test_mma_emits_wmma_scale_32x16x128_f4(self):
+        """32x16 MXF4 uses the gfx1250 WMMA opcode, not gfx950 16x16 op_sel."""
+        from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
+        kernel = _fp4_tdm_kernel()
+        writer, *_ = _create_writer_gfx1250_mx(kernel)
+        tA = SimpleNamespace(regList=SimpleNamespace(indices=list(range(0, 16)), pool=writer.vgprPool))
+        tB = SimpleNamespace(regList=SimpleNamespace(indices=list(range(16, 24)), pool=writer.vgprPool))
+        tC = SimpleNamespace(regList=SimpleNamespace(indices=list(range(32, 48)), pool=writer.vgprPool))
+        tD = SimpleNamespace(regList=SimpleNamespace(indices=list(range(32, 48)), pool=writer.vgprPool))
+        asm = str(emitMfmaInstruction(
+            writer, kernel, tA, tB, tC, tD,
+            scaleAVgpr=100, scaleBVgpr=101, scaleAsel=1, scaleBsel=1,
+        ))
+        assert "v_wmma_scale_f32_32x16x128_f4" in asm
+        assert "v_mfma_scale" not in asm
+        assert "16x16x128" not in asm
+        assert "op_sel" not in asm
+        assert "matrix_a_scale:1" in asm
+        assert "matrix_b_scale:1" in asm
+        assert "v[0:15]" in asm and "v[16:23]" in asm
+        assert "v[32:47]" in asm
+        assert "v100" in asm and "v101" in asm
+
+    def test_mma_unit_scale_fallback_keeps_32x16_opcode(self):
+        from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
+        kernel = _fp4_tdm_kernel()
+        kernel["_subtileUnitScaleVgpr"] = 250
+        writer, *_ = _create_writer_gfx1250_mx(kernel)
+        tA = SimpleNamespace(regList=SimpleNamespace(indices=list(range(0, 16)), pool=writer.vgprPool))
+        tB = SimpleNamespace(regList=SimpleNamespace(indices=list(range(16, 24)), pool=writer.vgprPool))
+        tC = SimpleNamespace(regList=SimpleNamespace(indices=list(range(32, 48)), pool=writer.vgprPool))
+        tD = SimpleNamespace(regList=SimpleNamespace(indices=list(range(32, 48)), pool=writer.vgprPool))
+        asm = str(emitMfmaInstruction(writer, kernel, tA, tB, tC, tD))
+        assert "v_wmma_scale_f32_32x16x128_f4" in asm
+        assert "op_sel" not in asm
+        assert "v250" in asm
 
 
 # ---------------------------------------------------------------------------

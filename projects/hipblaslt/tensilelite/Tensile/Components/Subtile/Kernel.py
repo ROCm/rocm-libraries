@@ -1101,6 +1101,34 @@ def _selectF8F6F4InstType(kernel):
   raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
 
 
+def _miVariant(kernel):
+  """MFMA/WMMA variant [M, N, K, B] from the kernel, not a hardcoded 16x16."""
+  miK = kernel["MatrixInstK"]
+  miB = int(kernel.get("MatrixInstB", 1))
+  miBlock = kernel.get("MIBlock")
+  if miBlock and len(miBlock) >= 4:
+    return [int(miBlock[0]), int(miBlock[1]), int(miK), int(miBlock[3])]
+  return [int(kernel.get("MatrixInstM", 16)), int(kernel.get("MatrixInstN", 16)), int(miK), miB]
+
+
+def _isGfx1250(kernel):
+  isa = kernel.get("ISA")
+  return tuple(isa) == (12, 5, 0) if isa is not None else False
+
+
+def _mxScaleInstType(dtype):
+  if dtype is None:
+    return InstType.INST_F32
+  toAbbrev = getattr(dtype, "toNameAbbrev", None)
+  if not callable(toAbbrev):
+    return InstType.INST_F32
+  from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType
+  try:
+    return dataTypeNameAbbrevToInstType(toAbbrev())
+  except Exception:
+    return InstType.INST_F32
+
+
 ##################################################
 # Subroutine to generate MMA Instruction
 # Given RegisterTileInfo inputs for A,B,C,D operands
@@ -1129,21 +1157,35 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
   aOperand = vgpr(vgprBStart,opBSize) if kernel["SourceSwap"] else vgpr(vgprAStart,opASize)
   bOperand = vgpr(vgprAStart,opASize) if kernel["SourceSwap"] else vgpr(vgprBStart,opBSize)
 
-  miK = kernel["MatrixInstK"]
+  variant = _miVariant(kernel)
+  miK = variant[2]
 
   if miK == 128:
-    # MX FP4: 16x16x128
     mxInstType = _selectF8F6F4InstType(kernel)
+    pt = kernel["ProblemType"]
+    block = max(int(pt.get("MXBlockA") or 0), int(pt.get("MXBlockB") or 0))
+    mxKw = {}
+    if block:
+      mxKw["block"] = block
+    if _isGfx1250(kernel):
+      # gfx1250: matrix_*_scale instruction fields, not gfx950 op_sel nibbles.
+      mxKw["mxScaleAType"] = _mxScaleInstType(pt.get("DataTypeMXSA"))
+      mxKw["mxScaleBType"] = _mxScaleInstType(pt.get("DataTypeMXSB"))
+      if scaleAsel >= 0:
+        mxKw["mxScaleASel"] = int(scaleAsel) % 2
+      if scaleBsel >= 0:
+        mxKw["mxScaleBSel"] = int(scaleBsel) % 2
+    elif scaleAVgpr >= 0 and scaleBVgpr >= 0:
+      mxKw["vop3"] = VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2],
+                                    op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2])
     if scaleAVgpr >= 0 and scaleBVgpr >= 0:
-      # Use actual loaded scale VGPRs
-      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
-                                   acc=dAccAlias(vgprDStart,opDSize), \
-                                   a=aOperand, \
-                                   b=bOperand, \
-                                   acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
-                                   comment=comment))
+      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=variant,
+                                   acc=dAccAlias(vgprDStart,opDSize),
+                                   a=aOperand,
+                                   b=bOperand,
+                                   acc2=cAccAlias(vgprCStart,opCSize),
+                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr),
+                                   comment=comment, **mxKw))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
       # Initialized once in mainLoop() before emitMainAndExitLoops() — VMovB32 cannot live here
@@ -1151,16 +1193,15 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
       unitScaleVgpr = kernel.get("_subtileUnitScaleVgpr", -1)
       assert unitScaleVgpr >= 0, \
           "emitMfmaInstruction: plain FP8 fallback requires _subtileUnitScaleVgpr in kernel dict"
-      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
-                                   acc=dAccAlias(vgprDStart,opDSize), \
-                                   a=aOperand, \
-                                   b=bOperand, \
-                                   acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(unitScaleVgpr), mxsb=vgpr(unitScaleVgpr), \
-                                   comment=comment))
+      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=variant,
+                                   acc=dAccAlias(vgprDStart,opDSize),
+                                   a=aOperand,
+                                   b=bOperand,
+                                   acc2=cAccAlias(vgprCStart,opCSize),
+                                   mxsa=vgpr(unitScaleVgpr), mxsb=vgpr(unitScaleVgpr),
+                                   comment=comment, **mxKw))
   else:
-    # BF16: 16x16x32
-    module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[16,16,miK,1], mfma1k=False, \
+    module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=variant, mfma1k=False, \
                                acc=dAccAlias(vgprDStart,opDSize), \
                                a=aOperand, \
                                b=bOperand, \
