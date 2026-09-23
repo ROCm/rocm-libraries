@@ -179,7 +179,7 @@ def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
     # non-DP-only: the AddressFlags compare is present (path unchanged).
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
 
-    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="PersistentIteration")
+    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="NextTile")
     assert _instruction_indices(nodp_items, SCmpGeU32, src_contains="PersistentIteration")
 
 
@@ -215,7 +215,7 @@ def test_subtile_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
     nodp_items = _pap_items(monkeypatch, dp_only=False, subtile=True)
 
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
-    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="PersistentIteration")
+    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="NextTile")
 
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
     assert _instruction_indices(nodp_items, SCmpGeU32, src_contains="PersistentIteration")
@@ -589,7 +589,7 @@ def test_non_dp_only_kernel_asm_retains_workspace_and_local_sgpr_symbols(
 
 
 # ---------------------------------------------------------------------------
-# 10. peekTileBatch: the batch of the tile at PersistentIteration, with none of the
+# 10. peekTileBatch: the batch of the tile at NextTile, with none of the
 #     side effects that would make it unsafe where ReuseAcrossPersistent
 #     needs it.
 # ---------------------------------------------------------------------------
@@ -614,8 +614,8 @@ def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it(monkeypatch):
     monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: _processing())
     rendered = str(StaticGrid().peekTileBatch(writer, kernel, "RAPResidentBatch"))
 
-    # PersistentIteration names pending work; activation advances it only when claimed.
-    assert "s[sgprPersistentIteration]" in rendered
+    # NextTile names pending work; activation advances it only when claimed.
+    assert "s[sgprNextTile]" in rendered
     # Tiles per batch, the divisor that turns a tile index into a batch.
     assert "s[sgprNumWorkGroups0], s[sgprNumWorkGroups1]" in rendered
     assert "s[sgprRAPResidentBatch]" in rendered

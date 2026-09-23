@@ -290,7 +290,11 @@ class SignatureDefault(Signature):
                 signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
 
-        if hasDynamicAssignment(kernel):
+        if isDataParallel(kernel):
+            signature.addArg("ItersPerTile", SVK.SIG_VALUE, "u32")
+            signature.addArg("PersistentGrid", SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 8
+        elif hasDynamicAssignment(kernel):
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
             signature.addArg("TotalItems",                         SVK.SIG_VALUE, "u32")
             signature.addArg("SKTiles",                            SVK.SIG_VALUE, "u32")
@@ -357,6 +361,11 @@ class SignatureDefault(Signature):
         for idxChar in kernel["PackedC0IdxChars"][:-1]:
             signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
             signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
+
+        if isDataParallel(kernel):
+            for idxChar in kernel["PackedC1IdxChars"][:-1]:
+                signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,           "u32")
+                signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,           "u32")
 
         # These are fixed sizes
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize

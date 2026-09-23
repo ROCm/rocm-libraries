@@ -11,8 +11,9 @@ import pytest
 from config_harness import _isolated_globals_with_isa, _toolchain_for
 from Tensile import LibraryIO
 from Tensile.ExecutionPolicy import (
-    ALIASES, SELECTORS, normalize_execution_policy_with_defaults,
+    ALIASES, SELECTORS, normalize_execution_policy, normalize_execution_policy_with_defaults,
 )
+from Tensile.ExperimentalLibrary import _apply_overrides
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.TensileMergeLibrary import addKernel, reNameSolutions
 
@@ -59,7 +60,9 @@ def test_library_parser_preserves_legacy_policy_identity(mode, force, strategy, 
     assert legacy["TileProcessingStrategy"] == strategy
     assert legacy["WorkAssignment"] == assignment
     assert "StreamK" not in legacy and "StreamKForceDPOnly" not in legacy
-    assert legacy["InternalSupportParams"]["PersistentLoopArgsVersion"] == 0
+    assert legacy["InternalSupportParams"]["PersistentLoopArgsVersion"] == int(strategy == "DataParallel")
+    if strategy == "DataParallel":
+        assert legacy["InternalSupportParams"]["KernArgsVersion"] == 3
     assert getSolutionNameFull(legacy, False) == getSolutionNameFull(canonical, False)
 
 
@@ -142,3 +145,90 @@ def test_merge_naming_uses_file_defaults_before_global_defaults():
     assert inherited["Solutions"][0]["SolutionNameMin"] == explicit["Solutions"][0]["SolutionNameMin"]
     assert inherited["Solutions"][0]["KernelNameMin"] == explicit["Solutions"][0]["KernelNameMin"]
     assert "GlobalSplitU" not in inherited["Solutions"][0]
+
+
+
+
+@pytest.fixture
+def native_data_parallel_state():
+    solution = _parse(_logic({"TileProcessingStrategy": "DataParallel"}))
+    assert solution["Valid"] and solution["AssignedDerivedParameters"]
+    assert solution["InternalSupportParams"]["PersistentLoopArgsVersion"] == 1
+    return dict(solution)
+
+
+_NATIVE_OVERRIDES = (
+    ({"TileProcessingStrategy": "StreamK"}, "StreamK", "StaticGrid"),
+    ({"TileProcessingStrategy": "StreamK", "WorkAssignment": "Hybrid"}, "StreamK", "Hybrid"),
+    ({"TileProcessingStrategy": "None", "WorkAssignment": "Hybrid", "GlobalSplitU": 1}, "None", "StaticGrid"),
+    ({"StreamKForceDPOnly": 0}, "StreamK", "StaticGrid"),
+    ({"StreamK": 0, "StreamKForceDPOnly": 0, "GlobalSplitU": 1}, "None", "StaticGrid"),
+)
+
+
+@pytest.mark.parametrize("override,strategy,assignment", _NATIVE_OVERRIDES)
+@pytest.mark.parametrize("boundary", ("patch", "defaults"))
+def test_native_generated_layout_is_rederived_after_selector_override(
+    native_data_parallel_state, override, strategy, assignment, boundary
+):
+    if boundary == "patch":
+        result = deepcopy(native_data_parallel_state)
+        _apply_overrides(result, [(name, [value]) for name, value in override.items()])
+    else:
+        result = normalize_execution_policy_with_defaults(override, native_data_parallel_state)
+    assert result["TileProcessingStrategy"] == strategy
+    assert result["WorkAssignment"] == assignment
+    assert result["InternalSupportParams"]["PersistentLoopArgsVersion"] == 0
+    assert result["AssignedDerivedParameters"] is False
+    assert result["AssignedProblemIndependentDerivedParameters"] is False
+
+    # Re-enter the library parser to verify that the changed policy derives a
+    # usable solution, including the defaults path used by real logic files.
+    data = _logic({})
+    data["Solutions"] = [result if boundary == "patch" else override]
+    if boundary == "defaults":
+        data["DefaultSolution"] = native_data_parallel_state
+    regenerated = _parse(data)
+    assert regenerated["Valid"]
+    assert regenerated["AssignedDerivedParameters"]
+    assert regenerated["TileProcessingStrategy"] == strategy
+    assert regenerated["WorkAssignment"] == assignment
+    assert regenerated["InternalSupportParams"]["PersistentLoopArgsVersion"] == 0
+
+
+@pytest.mark.parametrize("selector", ({"TileProcessingStrategy": "StreamK"}, {"StreamKForceDPOnly": 0}))
+@pytest.mark.parametrize("support,reason", (
+    ({"KernArgsVersion": 3, "PersistentLoopArgsVersion": 1}, "requires DataParallel/StaticGrid"),
+    ({"KernArgsVersion": 3, "PersistentLoopArgsVersion": 2}, "Unsupported PersistentLoopArgsVersion"),
+    ({"KernArgsVersion": 4, "PersistentLoopArgsVersion": 0}, "Unsupported KernArgsVersion"),
+))
+@pytest.mark.parametrize("boundary", ("patch", "defaults"))
+def test_native_selector_override_preserves_explicit_layout_errors(
+    native_data_parallel_state, selector, support, reason, boundary
+):
+    override = dict(selector, InternalSupportParams=support)
+    source = deepcopy(native_data_parallel_state)
+    with pytest.raises(ValueError, match=reason):
+        if boundary == "patch":
+            _apply_overrides(source, [(name, [value]) for name, value in override.items()])
+        else:
+            normalize_execution_policy_with_defaults(override, source)
+    assert source == native_data_parallel_state
+
+
+@pytest.mark.parametrize("custom", ({"CustomKernelName": "prebuilt_dp"}, {"CustomKernel": {"name": "prebuilt_dp"}}))
+def test_handwritten_native_layout_is_not_changed_by_selector_override(native_data_parallel_state, custom):
+    source = dict(native_data_parallel_state, **custom)
+    with pytest.raises(ValueError, match="requires DataParallel/StaticGrid"):
+        _apply_overrides(source, [("TileProcessingStrategy", ["StreamK"])])
+    with pytest.raises(ValueError, match="requires DataParallel/StaticGrid"):
+        normalize_execution_policy_with_defaults({"TileProcessingStrategy": "StreamK"}, source)
+
+
+def test_native_layout_is_strict_for_prebuilt_or_explicit_config(native_data_parallel_state):
+    state = dict(native_data_parallel_state, TileProcessingStrategy="StreamK")
+    state.pop("_PersistentLoop")
+    with pytest.raises(ValueError, match="requires DataParallel/StaticGrid"):
+        normalize_execution_policy(state, explicit_keys={"TileProcessingStrategy"}, regenerate=False)
+    with pytest.raises(ValueError, match="requires DataParallel/StaticGrid"):
+        normalize_execution_policy(state)

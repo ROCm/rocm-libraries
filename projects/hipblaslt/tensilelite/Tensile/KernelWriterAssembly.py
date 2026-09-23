@@ -20726,9 +20726,9 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("PAP reset TDM descriptor for tail")
     resetDescriptor = Label(self.labels.getNameInc("PapResetTailDescriptor"), "")
     done = Label(self.labels.getNameInc("PapTailDescriptorDone"), "")
-    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0,
+    mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0,
                       comment="did PAP actually prefetch a persistent tile?"))
-    mod.add(SCBranchSCC1(labelName=resetDescriptor.getLabelName(),
+    mod.add(SCBranchSCC0(labelName=resetDescriptor.getLabelName(),
                          comment="normal tail keeps current-tile descriptor addressing"))
     # Falls through: rebuild the descriptor only after a PAP handoff.
     with self.allocTmpSgpr(1) as waveIdxSgprRes:
@@ -20742,9 +20742,9 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["LdsOffsetA_Blk"] == 0:
       mod.add(done)
       return mod
-    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0,
+    mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0,
                       comment="normal tail requires no PAP bank override"))
-    mod.add(SCBranchSCC1(labelName=done.getLabelName(),
+    mod.add(SCBranchSCC0(labelName=done.getLabelName(),
                          comment="keep normal tail LDS bank"))
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -20818,8 +20818,8 @@ class KernelWriterAssembly(KernelWriter):
     if blkOffset == 0:
       return mod
 
-    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="primed?"))
-    mod.add(SCBranchSCC1(labelName=skipLbl.getLabelName(), comment="not primed, skip bank restore"))
+    mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="primed?"))
+    mod.add(SCBranchSCC0(labelName=skipLbl.getLabelName(), comment="not primed, skip bank restore"))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       papBankSgpr = tmpSgprRes.idx
@@ -20890,8 +20890,8 @@ class KernelWriterAssembly(KernelWriter):
     if blkMask == 0:
       return mod
 
-    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="primed?"))
-    mod.add(SCBranchSCC1(labelName=skipLbl.getLabelName(), comment="not primed, skip DTL bank restore"))
+    mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="primed?"))
+    mod.add(SCBranchSCC0(labelName=skipLbl.getLabelName(), comment="not primed, skip DTL bank restore"))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       papBankSgpr = tmpSgprRes.idx
@@ -20940,8 +20940,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCmpEQU32(src0=sgpr(dstSgpr), src1=0, comment="PAP wrote bank 0?"))
     mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=blkOffset, src1=0,
                        comment="tail uses opposite physical LDS bank"))
-    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="no PAP primed?"))
-    mod.add(SCMovB32(dst=sgpr(dstSgpr), src=0, comment="no primed PAP, keep tail in bank 0"))
+    mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP data ready?"))
+    mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=sgpr(dstSgpr), src1=0, comment="no primed PAP, keep tail in bank 0"))
     return mod
 
   def papTdmSetTailLdsBank(self, kernel: Mapping, ldsAddrSgprName: str, tailBankSgpr: int) -> Module:
@@ -21651,7 +21651,7 @@ class KernelWriterAssembly(KernelWriter):
       # Bias the counter instead of branching, to keep the loop body one basic block.
       with self.allocTmpSgpr(1, tag="graIncrementMask_notPrimed") as tmpSgprRes:
         biasedCounter = sgpr(tmpSgprRes.idx)
-        mod.add(SCmpLgU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP primed?"))
+        mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP primed?"))
         mod.add(SCSelectB32(dst=biasedCounter, src0=2, \
           src1=self.loopCounter(kernel, self.states.unrollIdx), \
           comment="keep increments live for the StreamK tail once primed"))

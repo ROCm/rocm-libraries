@@ -52,16 +52,21 @@ _METADATA_NAME_TO_SEMANTIC = {
     "AddressFlags":           "AddressFlags",
     "alpha":                  "Alpha",
     "beta":                   "Beta",
+    "betapad":                "Beta",
     "AddressScaleA":          "AddressScaleA",
     "AddressScaleB":          "AddressScaleB",
     "AddressScaleC":          "AddressScaleC",
     "AddressScaleD":          "AddressScaleD",
     "AddressMXScaleA":        "AddressMXScaleA",
     "AddressMXScaleB":        "AddressMXScaleB",
+    "MXSA":                   "AddressMXScaleA",
+    "MXSB":                   "AddressMXScaleB",
     "AddressScaleAlphaVec":   "AddressScaleAlphaVec",
     "bias":                   "AddressBias",
     "biasType":               "BiasType",
     "StrideBias":             "StrideBias",
+    "gate":                   "AddressGateResidual",
+    "gateType":               "GateResidualType",
     "factorDim":              "FactorDim",
     "E":                      "AddressE",
     "activationType":         "ActivationTypeArg",
@@ -72,12 +77,17 @@ _METADATA_NAME_TO_SEMANTIC = {
     "Synchronizer":           "Synchronizer",
     "GSUSync":                "GSUSync",
     "ItersPerTile":           "ItersPerTile",
+    "PersistentGrid":         "PersistentGrid",
     "MagicNumberItersPerTile": "MagicNumberItersPerTile",
     "MagicShiftItersPerTile": "MagicShiftItersPerTile",
     "TotalIters":             "TotalIters",
     "SKItersPerWG":           "SKItersPerWG",
     "skGrid":                 "SKGrid",
     "skTiles":                "SKTilesAndSplit",
+    "batchOffsetD":           "BatchOffsetD",
+    "batchOffsetC":           "BatchOffsetC",
+    "batchOffsetA":           "BatchOffsetA",
+    "batchOffsetB":           "BatchOffsetB",
 }
 
 _ACTIVATION_ARG_INDEX = {
@@ -236,6 +246,8 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
 
     if valueKind == "global_buffer":
         argType = "address"
+    elif name in ("batchOffsetD", "batchOffsetC", "batchOffsetA", "batchOffsetB"):
+        argType = "uint64"
     elif size == 8:
         argType = "float64"
     else:
@@ -263,11 +275,16 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
 
     m = re.match(r"stride([A-Z])(\d+)", name)
     if m:
-        return {"type": argType, "semantic": "Stride%s%s" % (m.group(1), m.group(2))}
+        tensor = "Gate" if m.group(1) == "G" else m.group(1)
+        return {"type": argType, "semantic": "Stride%s%s" % (tensor, m.group(2))}
 
     m = re.match(r"strideMetadata(\d+)", name)
     if m:
         return {"type": argType, "semantic": "StrideMetadata%s" % m.group(1)}
+
+    m = re.match(r"strideMXS([AB])(\d+)", name)
+    if m:
+        return {"type": argType, "semantic": "StrideScale%s%s" % (m.group(1), m.group(2))}
 
     m = re.match(r"StrideE(\d+)", name)
     if m:
@@ -290,6 +307,43 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
 _HEADER_SEMANTIC_ORDER = {
     "GemmInfo": 0, "InternalArgs": 1, "InternalArgs1": 2, "NumWorkGroups": 3,
 }
+
+def validateCustomPersistentArgs(kernelConfig):
+    """Require a native descriptor before accepting a custom DP layout claim."""
+    version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
+    if type(version) is not int or version not in (0, 1):
+        raise ValueError("Unsupported PersistentLoopArgsVersion")
+    outer_version = kernelConfig.get("InternalSupportParams", {}).get("KernArgsVersion", 3)
+    if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
+        raise ValueError("Unsupported KernArgsVersion")
+    if version == 1 and outer_version != 3:
+        raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
+    descriptor = kernelConfig.get("CustomKernel")
+    if not isinstance(descriptor, dict) or not descriptor.get("name"):
+        if version == 1 and kernelConfig.get("CustomKernelName"):
+            raise ValueError("Native persistent custom kernels require an argument descriptor")
+        return
+    args = descriptor.get("args", [])
+    native = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
+    if version == 0:
+        if native:
+            raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
+        return
+    legacy = {"MagicNumberItersPerTile", "MagicShiftItersPerTile", "TotalIters",
+              "SKItersPerWG", "SKGrid", "SKTilesAndSplit", "AddressWorkspace", "AddressFlags",
+              "AddressSynchronizer", "Synchronizer", "GSUSync"}
+    scheduling = [(i, arg) for i, arg in enumerate(args)
+                  if arg.get("semantic") in legacy | {"ItersPerTile", "PersistentGrid"}]
+    if (len(scheduling) != 2
+            or [arg.get("semantic") for _, arg in scheduling] != ["ItersPerTile", "PersistentGrid"]
+            or scheduling[1][0] != scheduling[0][0] + 1
+            or any(arg.get("type") != "uint32" or arg.get("padding", 0) for _, arg in scheduling)):
+        raise ValueError("Native persistent custom arguments must be adjacent uint32 ItersPerTile and PersistentGrid")
+    if (descriptor.get("workspaceType", "None") != "None"
+            or descriptor.get("workspaceSizePerElemC", 0)
+            or descriptor.get("workspaceSizePerElemBias", 0)):
+        raise ValueError("Native DataParallel custom kernels cannot require partial workspace")
+
 
 def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     """Build a CustomKernel dict from the amdgpu_metadata and custom.config sections."""
@@ -343,7 +397,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
 
     hasNumWGArg = any(a.get("semantic") == "NumWorkGroups" for a in args)
 
-    if isDataParallel(kernelConfig):
+    if isDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) == 1:
         grid = ["PersistentGrid", "One", "One"]
     elif isPersistent(kernelConfig):
         batched = kernelConfig.get("ProblemType", {}).get("Batched", False)
@@ -394,15 +448,12 @@ def getCustomKernelConfig(
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'KernArgsVersion'")
 
     kernelIsp = kernelConfig["InternalSupportParams"]
-    # Missing metadata describes the existing prebuilt scheduling payload.
+    # Missing metadata describes a prebuilt legacy payload, even when the
+    # consuming solution was regenerated with the native DP layout selected.
     kernelIsp.setdefault("PersistentLoopArgsVersion", 0)
     for key in internalSupportParams:
         if key not in kernelIsp:
             kernelIsp[key] = internalSupportParams[key]
-
-    version = kernelIsp["PersistentLoopArgsVersion"]
-    if type(version) is not int or version != 0:
-        raise ValueError("Unsupported PersistentLoopArgsVersion")
 
     from .ExecutionPolicy import ALIASES, SELECTORS, normalize_execution_policy
     if SELECTORS.intersection(kernelConfig):
@@ -445,6 +496,8 @@ def getCustomKernelConfig(
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemC", 0)
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemBias", 0)
     kernelConfig["CustomKernelName"] = kernelName
+
+    validateCustomPersistentArgs(kernelConfig)
 
     return kernelConfig
 

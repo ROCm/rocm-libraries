@@ -1032,6 +1032,31 @@ namespace TensileLite
         return packedIndices;
     }
 
+    namespace
+    {
+        template <typename KA>
+        void appendLegacyDataParallelSchedulingArgs(ContractionSolution const& solution,
+                                                   ContractionSolution::Problem const& problem,
+                                                   KA& args,
+                                                   uint32_t itersPerTile,
+                                                   uint32_t grid)
+        {
+            // Prebuilt DP layout v0: six u32 slots, no workspace/flag pointer.
+            // Native whole-tile execution never uses these scheduling fields.
+            uint32_t magicShift = 0;
+            const uint32_t magic = solution.magicNumber(2, itersPerTile, &magicShift);
+            if(solution.internalArgsSupport.perTileExtraIters
+               && problem.getParams().uniformSummationOrder())
+                magicShift |= 0x20000000u;
+            args.template append<uint32_t>("itersPerTile", itersPerTile);
+            args.template append<uint32_t>("magicNumberItersPerTile", magic);
+            args.template append<uint32_t>("magicShiftItersPerTile", magicShift);
+            args.template append<uint32_t>("SKItersPerWG", 0);
+            args.template append<uint32_t>("skGrid", grid);
+            args.template append<uint32_t>("skTiles", 0);
+        }
+    }
+
     template <bool T_Debug, bool insertKernelArgs, typename KA>
     void ContractionSolution::singleCallArgs(ContractionSolution::Problem const& problem,
                                              ContractionInputs const&            inputs,
@@ -1040,7 +1065,7 @@ namespace TensileLite
                                              dim3 const&            problemNumGroupTiles,
                                              dim3 const&            numWorkGroups,
                                              KA&                    args,
-                                             PersistentLaunchSettings const& sk,
+                                             PersistentLaunchSettings const& launch,
                                              size_t resolvedGlobalAccumulation) const
     {
         validatePersistentLoopArgs();
@@ -1063,9 +1088,9 @@ namespace TensileLite
             = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
-            = calculateAutoWGM(problem, hardware, sk.grid);
+            = calculateAutoWGM(problem, hardware, launch.grid);
         auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
-            = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
+            = calculateAutoStaggerU(problem, hardware, launch.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
         AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, hardware);
@@ -1106,7 +1131,7 @@ namespace TensileLite
             }
             else if(problemType.stridedBatched)
             {
-                if(sizeMapping.isStreamK() && sk.reduction == origami::reduction_t::parallel)
+                if(sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel)
                 {
                     args.template append<void const*>("ws_d",
                                                       (uint8_t*)inputs.ws + workspaceOffsetInByte);
@@ -1165,15 +1190,9 @@ namespace TensileLite
             // Additional check for General Batched GEMM until GSU and StreamK are supported
             // in General Batched GEMM
             //
-            // StreamKForceDPOnly (SK3 DP-first, gfx1250) always reduces via the tree path
-            // (getSKReduction returns tree, Flags == Synchronizer, never parallel) and never
-            // touches the workspace partials/fixup path, so AddressWS/AddressFlags are dead.
-            // The device kernel drops them from the SGPR define and .kd metadata, so we must
-            // not append ws/Flags here or the positional kernarg layout would corrupt the
-            // downstream (StridesD/Alpha/...) offsets. Keep appending for every other
-            // streamK>0 && atomic==0 kernel (layout unchanged).
-            if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0
-                && !sizeMapping.isDataParallel())
+            // Only non-atomic StreamK uses partial workspace and flags.
+            // DataParallel writes final tiles without either pointer.
+            if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0)
             {
                 // Assert hardware is not null
                 // For now grouped gemm is not supported and passes nullptr
@@ -1184,7 +1203,7 @@ namespace TensileLite
                 // which is what keeps two concurrent Stream-K kernels from clearing
                 // each other's flags.
                 args.template append<void const*>("ws", inputs.ws);
-                if(sk.reduction == origami::reduction_t::parallel)
+                if(launch.reduction == origami::reduction_t::parallel)
                     args.template append<void*>("Flags", nullptr);
                 else
                     args.template append<void*>("Flags", inputs.Synchronizer);
@@ -1200,7 +1219,7 @@ namespace TensileLite
             bool gsuWSStride
                 = gsu > 1 && resolvedGlobalAccumulation != 3 && !sizeMapping.isStreamK();
             bool skWSStride
-                = sizeMapping.isStreamK() && sk.reduction == origami::reduction_t::parallel;
+                = sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel;
             // Additional check for General Batched GEMM until GSU and StreamK are supported
             // in General Batched GEMM
             if(gsuWSStride || skWSStride)
@@ -1265,17 +1284,15 @@ namespace TensileLite
             if(problemType.sparse)
                 args.template append<unsigned char const*>("metadata", inputs.metadata);
 
-            // See the version < 3 branch above for why streamKForceDPOnly must not
-            // append ws/Flags. In ver3 only Flags stays here; ws is appended after
-            // alpha/beta.
-            if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0
-                && !sizeMapping.isDataParallel())
+            // In outer version 3 only Flags stays here; StreamK's workspace
+            // pointer is appended after alpha/beta. DataParallel has neither.
+            if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0)
             {
                 // Assert hardware is not null
                 // For now grouped gemm is not supported and passes nullptr
                 TENSILE_ASSERT_EXC(hardware != nullptr);
 
-                if(sk.reduction == origami::reduction_t::parallel)
+                if(launch.reduction == origami::reduction_t::parallel)
                     args.template append<void*>("Flags", nullptr);
                 else
                     args.template append<void*>("Flags", inputs.Synchronizer);
@@ -1318,18 +1335,13 @@ namespace TensileLite
         if(sizeMapping.isDataParallel())
         {
             const uint32_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
-            // Legacy DP layout v0: six u32 slots, no workspace/flag pointer.
-            // Only this ABI adapter retains the historical slot spellings.
-            uint32_t magicShift = 0;
-            const uint32_t magic = magicNumber(2, itersPerTile, &magicShift);
-            if(internalArgsSupport.perTileExtraIters && problem.getParams().uniformSummationOrder())
-                magicShift |= 0x20000000u; // Preserve prebuilt v0's packed capability bit.
-            args.template append<uint32_t>("itersPerTile", itersPerTile);
-            args.template append<uint32_t>("magicNumberItersPerTile", magic);
-            args.template append<uint32_t>("magicShiftItersPerTile", magicShift);
-            args.template append<uint32_t>("SKItersPerWG", 0);
-            args.template append<uint32_t>("skGrid", sk.grid);
-            args.template append<uint32_t>("skTiles", 0);
+            if(internalArgsSupport.persistentLoopArgsVersion == 1)
+            {
+                args.template append<uint32_t>("ItersPerTile", itersPerTile);
+                args.template append<uint32_t>("PersistentGrid", launch.grid);
+            }
+            else
+                appendLegacyDataParallelSchedulingArgs(*this, problem, args, itersPerTile, launch.grid);
         }
         else if(sizeMapping.isStreamK())
         {
@@ -1375,7 +1387,7 @@ namespace TensileLite
                 args.template append<uint32_t>("SKTiles", skTiles);
                 args.template append<uint32_t>("SKSplit", skSplit);
                 args.template append<uint32_t>("SKItersPerWI", skItersPerWI);
-                args.template append<uint32_t>("SKGrid", sk.grid);
+                args.template append<uint32_t>("SKGrid", launch.grid);
             }
             else if(sizeMapping.hasHybridAssignment())
             {
@@ -1434,7 +1446,7 @@ namespace TensileLite
                     args.template append<uint32_t>("SKSplit", sk4_skSplit);
                     args.template append<uint32_t>("SKItersPerWI",
                                                    sk4_skItersPerWI);
-                    args.template append<uint32_t>("SKGrid", sk.grid);
+                    args.template append<uint32_t>("SKGrid", launch.grid);
                 }
                 else
                 {
@@ -1457,10 +1469,10 @@ namespace TensileLite
 
                     uint32_t sk3_skItersPerWG;
                     uint32_t sk3_skTiles;
-                    if(sk.reduction == origami::reduction_t::parallel)
+                    if(launch.reduction == origami::reduction_t::parallel)
                     {
                         uint32_t skSplit
-                            = static_cast<uint32_t>(sk.grid / sk3_tiles);
+                            = static_cast<uint32_t>(launch.grid / sk3_tiles);
                         sk3_skItersPerWG
                             = static_cast<uint32_t>(sk3_itersPerTile) / skSplit;
                         sk3_skTiles = skSplit;
@@ -1470,9 +1482,9 @@ namespace TensileLite
                         const StreamKStaticSplit sk3_split = streamKStaticSplit(
                             sk3_tiles,
                             sk3_itersPerTile,
-                            sk.grid,
+                            launch.grid,
                             pAMDGPU->skFullTiles,
-                            sizeMapping.isDataParallel());
+                            false);
                         sk3_skTiles      = sk3_split.skTiles;
                         sk3_skItersPerWG = sk3_split.skItersPerWG;
                     }
@@ -1486,7 +1498,7 @@ namespace TensileLite
                     args.template append<uint32_t>("SKItersPerWG",
                                                    sk3_skItersPerWG);
                     args.template append<uint32_t>("skGrid",
-                                                   static_cast<uint32_t>(sk.grid));
+                                                   static_cast<uint32_t>(launch.grid));
                     args.template append<uint32_t>("skTiles", sk3_skTiles);
                 }
             }
@@ -1534,14 +1546,14 @@ namespace TensileLite
                 }
 
                 // Stream-K 3 uses the two-tile ABI.
-                if(sk.reduction == origami::reduction_t::parallel)
+                if(launch.reduction == origami::reduction_t::parallel)
                 {
                     uint32_t skSplit
-                        = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
+                        = launch.grid / tiles; // skTiles is skSplit in parallel reduction path
                     uint32_t skItersPerWG = itersPerTile / skSplit;
 
                     args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skGrid", launch.grid);
                     args.template append<uint32_t>("skTiles", skSplit);
                 }
                 else
@@ -1552,12 +1564,12 @@ namespace TensileLite
                     const StreamKStaticSplit split
                         = streamKStaticSplit(tiles,
                                              itersPerTile,
-                                             sk.grid,
+                                             launch.grid,
                                              pAMDGPU->skFullTiles,
-                                             sizeMapping.isDataParallel());
+                                             false);
 
                     args.template append<uint32_t>("SKItersPerWG", split.skItersPerWG);
-                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skGrid", launch.grid);
                     args.template append<uint32_t>("skTiles", split.skTiles);
                 }
             }
@@ -1590,8 +1602,7 @@ namespace TensileLite
             }
 
             // ver3 places AddressWS after alpha/beta, see the StreamK block above.
-            if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0
-                && !sizeMapping.isDataParallel())
+            if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0)
             {
                 args.template append<void const*>("ws", inputs.ws);
             }
@@ -1621,7 +1632,7 @@ namespace TensileLite
             }
             else if(problemType.stridedBatched)
             {
-                if(sizeMapping.isStreamK() && sk.reduction == origami::reduction_t::parallel)
+                if(sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel)
                 {
                     args.template append<void const*>("ws_d",
                                                       (uint8_t*)inputs.ws + workspaceOffsetInByte);
@@ -1652,7 +1663,7 @@ namespace TensileLite
             bool gsuWSStride
                 = gsu > 1 && resolvedGlobalAccumulation != 3 && !sizeMapping.isStreamK();
             bool skWSStride
-                = sizeMapping.isStreamK() && sk.reduction == origami::reduction_t::parallel;
+                = sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel;
             // Additional check for General Batched GEMM until GSU and StreamK are supported
             // in General Batched GEMM
             if(gsuWSStride || skWSStride)
@@ -2603,7 +2614,7 @@ namespace TensileLite
         ContractionSolution::generateSingleCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
                                                 Hardware const&                     hardware,
-                                                PersistentLaunchSettings const&              sk,
+                                                PersistentLaunchSettings const&              launch,
                                                 GSUSettings const&                  gsuSettings) const
     {
         KernelInvocation rv;
@@ -2630,20 +2641,20 @@ namespace TensileLite
             if(sizeMapping.isDataParallel()
                && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1))
             {
-                // ForceDPOnly cluster multicast [Cs, Ck]: launch a grid spanning
+                // DataParallel cluster multicast [Cs, Ck]: launch a grid spanning
                 // the full M x N tile space -- gridX = nWG0 (M-tiles), gridY = nWG1
-                // (N-tiles), gridZ = batch -- so the kernel's StreamKIdx fold
-                // (StreamK.preLoop) gives each work-group exactly one tile and the
+                // (N-tiles), gridZ = batch -- so the common spatial tile mapping
+                // gives each work-group exactly one tile and the
                 // Cs X-peers of a cluster always land M-adjacent (sharing B). A 1-D
                 // [Cs, 1] cluster is the Ck == 1 case of the same launch. The
-                // round-up below pads non-multiple extents; sk.grid == tiles here.
+                // round-up below pads non-multiple extents; launch.grid == tiles here.
                 rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
                 // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
             }
             else
             {
-                // Linear Stream-K launch (no cluster, or ForceDPOnly=0).
-                rv.numWorkGroups.x = sk.grid;
+                // Linear persistent launch outside the spatial DP cluster path.
+                rv.numWorkGroups.x = launch.grid;
                 rv.numWorkGroups.y = 1;
                 rv.numWorkGroups.z = 1;
             }
@@ -2665,16 +2676,16 @@ namespace TensileLite
         // The HIP driver rejects a cluster launch whose grid is not divisible by
         // clusterDim, so round up. The grid set above holds the REAL extents and
         // need not be a cluster multiple. The extra padded work-groups early-exit
-        // in the kernel prologue (StreamK.streamKClusterPadEarlyExit on the
-        // ForceDPOnly cluster path) BEFORE the -3 cluster barrier, so their
+        // in the DP tile-mapping prologue (persistentClusterPadEarlyExit)
+        // BEFORE the -3 cluster barrier, so their
         // WAVEDONE decrements the barrier's live member count, and the surviving
         // peers' broadcast masks are trimmed to the present lanes
         // (computeMulticastMaskReduction).
         //
-        // Only the ForceDPOnly cluster multicast needs this: it is the path whose
+        // Only the DataParallel cluster multicast needs this: it is the path whose
         // grid spans the real M x N tile space and whose padded peers have a
-        // pad-exit. A ForceDPOnly==0 Stream-K cluster keeps develop's launch --
-        // its 1-D sk.grid is not a tile space and it has no pad-exit, so rounding
+        // pad-exit. A StreamK cluster keeps the existing launch --
+        // its 1-D launch.grid is not a tile space and it has no pad-exit, so rounding
         // up would only add work-groups that run the whole Stream-K prologue
         // before falling out on an empty iteration range.
         bool persistentSpatialCluster = sizeMapping.isPersistent()
@@ -2694,9 +2705,9 @@ namespace TensileLite
         if(internalArgsSupport.useUniversalArgs)
         {
             auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
-                = calculateAutoWGM(problem, &hardware, sk.grid);
+                = calculateAutoWGM(problem, &hardware, launch.grid);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
-                = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
+                = calculateAutoStaggerU(problem, &hardware, launch.grid, autoWGM);
             if(T_Debug)
             {
                 std::cout << "OCCUPANCY: " << sizeMapping.CUOccupancy << std::endl;
@@ -2752,7 +2763,7 @@ namespace TensileLite
                                       problemNumGroupTiles,
                                       rv.numWorkGroups,
                                       rv.args,
-                                      sk,
+                                      launch,
                                       gsuSettings.globalAccumulation);
 
         if(gsuSettings.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
@@ -2804,7 +2815,7 @@ namespace TensileLite
     KernelInvocation ContractionSolution::generateCustomCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
                                                 Hardware const&                     hardware,
-                                                PersistentLaunchSettings const&              sk) const
+                                                PersistentLaunchSettings const&              launch) const
     {
         validatePersistentLoopArgs();
         KernelInvocation rv;
@@ -2830,18 +2841,20 @@ namespace TensileLite
         // for small/low-tile problems).
         size_t adaptiveGlobalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
-        uint32_t skItersPerTile            = 0;
+        const uint32_t itersPerTile = launch.grid > 0
+            ? static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping))) : 0;
+        // Legacy/custom scheduling adapter. Native DP descriptors use only
+        // ItersPerTile and PersistentGrid and never compute iteration splits.
         uint32_t skTotalIters              = 0;
         uint32_t skMagicNumberItersPerTile = 0;
         uint32_t skMagicShiftItersPerTile  = 0;
         uint32_t skItersPerWG              = 0;
         uint32_t skTotalTiles              = 0;
-        if(sk.grid > 0)
+        if(launch.grid > 0 && internalArgsSupport.persistentLoopArgsVersion == 0)
         {
             size_t numTiles = tiles.x * tiles.y * tiles.z;
-            skItersPerTile  = static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping)));
-            skTotalIters    = static_cast<uint32_t>(numTiles * skItersPerTile);
-            skMagicNumberItersPerTile = magicNumber(2, skItersPerTile, &skMagicShiftItersPerTile);
+            skTotalIters    = static_cast<uint32_t>(numTiles * itersPerTile);
+            skMagicNumberItersPerTile = magicNumber(2, itersPerTile, &skMagicShiftItersPerTile);
 
             bool twoTileStreamK = sizeMapping.isStreamK()
                                   || customKernel.workspaceType == CustomWorkspaceType::StreamK
@@ -2849,29 +2862,29 @@ namespace TensileLite
 
             if(twoTileStreamK) // Two-tile K partitioning
             {
-                if(sk.reduction == origami::reduction_t::parallel)
+                if(launch.reduction == origami::reduction_t::parallel)
                 {
-                    uint32_t skSplit = static_cast<uint32_t>(sk.grid / numTiles);
-                    skItersPerWG     = skItersPerTile / max(skSplit, uint32_t(1));
+                    uint32_t skSplit = static_cast<uint32_t>(launch.grid / numTiles);
+                    skItersPerWG     = itersPerTile / max(skSplit, uint32_t(1));
                     skTotalTiles     = skSplit;
                 }
                 else
                 {
                     int  fullTiles = pAMDGPU->skFullTiles;
-                    bool bigEnough = numTiles > sk.grid;
+                    bool bigEnough = numTiles > launch.grid;
 
                     // skTotalTiles is the number of Stream-K tiles to complete.
                     // Two-tile SK gives each WG an even number of Stream-K iterations,
                     // followed by an even number of data-parallel tiles.
-                    skTotalTiles   = static_cast<uint32_t>(sk.grid);
-                    if(numTiles % sk.grid != 0)
+                    skTotalTiles   = static_cast<uint32_t>(launch.grid);
+                    if(numTiles % launch.grid != 0)
                     {
                         // If tiles are not evenly divisible, determine the number of
                         // Stream-K tiles and cap it at the total tile count.
-                        size_t skT = bigEnough ? sk.grid * fullTiles + numTiles % sk.grid : numTiles;
+                        size_t skT = bigEnough ? launch.grid * fullTiles + numTiles % launch.grid : numTiles;
                         skTotalTiles = static_cast<uint32_t>(min(skT, numTiles));
                     }
-                    skItersPerWG = skTotalTiles * skItersPerTile / max(uint32_t(1), static_cast<uint32_t>(sk.grid));
+                    skItersPerWG = skTotalTiles * itersPerTile / max(uint32_t(1), static_cast<uint32_t>(launch.grid));
                 }
             }
         }
@@ -2922,14 +2935,14 @@ namespace TensileLite
                     // generateCustomCall is only used for handwritten/external
                     // custom kernels; Tensile-generated kernels are routed to
                     // generateSingleCall in solve().  For a batched handwritten
-                    // Stream-K custom kernel, sk.grid is per-batch and must be
+                    // Stream-K custom kernel, launch.grid is per-batch and must be
                     // expanded by the batch tile count.
-                    dim = sk.grid * tiles.z;
+                    dim = launch.grid * tiles.z;
                     break;
                 case CustomGridSize::PersistentNoBatch:
                 case CustomGridSize::PersistentGrid:
                 case CustomGridSize::StreamKNoBatch:
-                    dim = sk.grid;
+                    dim = launch.grid;
                     break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
@@ -2942,6 +2955,14 @@ namespace TensileLite
         assignGridSize(rv.numWorkGroups.z, customKernel.grid.z);
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
+        {
+            // Native DP cluster kernels decode spatial workgroup coordinates.
+            // Match the generated-kernel launch, including padded boundary peers.
+            rv.numWorkGroups.x = RoundUpToMultiple(tiles.x, sizeMapping.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(tiles.y, sizeMapping.clusterDim.y);
+            rv.numWorkGroups.z = tiles.z;
+        }
         bool hasNumWorkGroupsArg = std::any_of(
             customKernel.args.begin(), customKernel.args.end(),
             [](auto const& a) { return a.semantic == CustomArgSemantic::NumWorkGroups; });
@@ -2966,8 +2987,8 @@ namespace TensileLite
         rv.sharedMemBytes = 0;
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
-            = calculateAutoWGM(problem, &hardware, sk.grid);
-        auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift] = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
+            = calculateAutoWGM(problem, &hardware, launch.grid);
+        auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift] = calculateAutoStaggerU(problem, &hardware, launch.grid, autoWGM);
         AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, &hardware);
         uint32_t internalArg0 = 0;
         uint32_t internalArg1 = 0;
@@ -2984,9 +3005,16 @@ namespace TensileLite
         bool gsuWSStride
             = gsu > 1 && sizeMapping.globalAccumulation != 3 && !sizeMapping.isStreamK();
         bool skWSStride
-            = sizeMapping.isStreamK() && sk.reduction == origami::reduction_t::parallel;
+            = sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel;
         bool useWSStride = gsuWSStride || skWSStride;
         size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
+        const bool nativePersistent = internalArgsSupport.persistentLoopArgsVersion == 1;
+        const size_t descriptorStrideAB = nativePersistent && problemType.useInitialStridesAB ? 0 : 1;
+        const size_t descriptorStrideCD = nativePersistent ? startStrideCD : 1;
+        auto const& descriptorA = nativePersistent && problemType.sparse == 1 ? problem.compressed() : problem.a();
+        auto const& descriptorB = nativePersistent && problemType.sparse == 2 ? problem.compressed() : problem.b();
+        const bool pointerArrayBatch
+            = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
 
         auto wsStrideForIdx = [&](size_t idx) -> size_t {
             // Mirrors the develop accumulator: stride[startStrideCD] = sizes[0],
@@ -3046,85 +3074,94 @@ namespace TensileLite
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideA0:
-                    rv.args.appendCustomType("StrideA0", problem.a().strides()[1], arg.type);
+                    rv.args.appendCustomType("StrideA0", descriptorA.strides()[descriptorStrideAB], arg.type);
                     break;
                 case CustomArgSemantic::StrideA1:
-                    rv.args.appendCustomType("StrideA1", problem.a().strides()[2], arg.type);
+                    rv.args.appendCustomType("StrideA1", descriptorA.strides()[descriptorStrideAB + 1], arg.type);
                     break;
                 case CustomArgSemantic::StrideA2:
-                    rv.args.appendCustomType("StrideA2", problem.a().strides()[3], arg.type);
+                    rv.args.appendCustomType("StrideA2", descriptorA.strides()[descriptorStrideAB + 2], arg.type);
                     break;
                 case CustomArgSemantic::StrideB0:
-                    rv.args.appendCustomType("StrideB0", problem.b().strides()[1], arg.type);
+                    rv.args.appendCustomType("StrideB0", descriptorB.strides()[descriptorStrideAB], arg.type);
                     break;
                 case CustomArgSemantic::StrideB1:
-                    rv.args.appendCustomType("StrideB1", problem.b().strides()[2], arg.type);
+                    rv.args.appendCustomType("StrideB1", descriptorB.strides()[descriptorStrideAB + 1], arg.type);
                     break;
                 case CustomArgSemantic::StrideB2:
-                    rv.args.appendCustomType("StrideB2", problem.b().strides()[3], arg.type);
+                    rv.args.appendCustomType("StrideB2", descriptorB.strides()[descriptorStrideAB + 2], arg.type);
                     break;
                 case CustomArgSemantic::StrideC0:
                     rv.args.appendCustomType("StrideC0",
-                        useWSStride ? wsStrideForIdx(1) : problem.c().strides()[1],
+                        useWSStride ? wsStrideForIdx(1) : problem.c().strides()[descriptorStrideCD],
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideC1:
                     rv.args.appendCustomType("StrideC1",
-                        useWSStride ? wsStrideForIdx(2) : problem.c().strides()[2],
+                        useWSStride ? wsStrideForIdx(2) : problem.c().strides()[descriptorStrideCD + 1],
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideC2:
                     rv.args.appendCustomType("StrideC2",
-                        useWSStride ? wsStrideForIdx(3) : problem.c().strides()[3],
+                        useWSStride ? wsStrideForIdx(3) : problem.c().strides()[descriptorStrideCD + 2],
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideD0:
                     rv.args.appendCustomType("StrideD0",
-                        useWSStride ? wsStrideForIdx(1) : problem.d().strides()[1],
+                        useWSStride ? wsStrideForIdx(1) : problem.d().strides()[descriptorStrideCD],
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideD1:
                     rv.args.appendCustomType("StrideD1",
-                        useWSStride ? wsStrideForIdx(2) : problem.d().strides()[2],
+                        useWSStride ? wsStrideForIdx(2) : problem.d().strides()[descriptorStrideCD + 1],
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideD2:
                     rv.args.appendCustomType("StrideD2",
-                        useWSStride ? wsStrideForIdx(3) : problem.d().strides()[3],
+                        useWSStride ? wsStrideForIdx(3) : problem.d().strides()[descriptorStrideCD + 2],
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideE0:
-                    rv.args.appendCustomType("StrideE0", problem.tensor(ContractionProblemGemm::TENSOR::E).strides()[1], arg.type);
+                    rv.args.appendCustomType("StrideE0", problem.tensor(ContractionProblemGemm::TENSOR::E).strides()[descriptorStrideCD], arg.type);
                     break;
                 case CustomArgSemantic::StrideE1:
-                    rv.args.appendCustomType("StrideE1", problem.tensor(ContractionProblemGemm::TENSOR::E).strides()[2], arg.type);
+                    rv.args.appendCustomType("StrideE1", problem.tensor(ContractionProblemGemm::TENSOR::E).strides()[descriptorStrideCD + 1], arg.type);
+                    break;
+                case CustomArgSemantic::StrideE2:
+                    rv.args.appendCustomType("StrideE2", problem.tensor(ContractionProblemGemm::TENSOR::E).strides().at(descriptorStrideCD + 2), arg.type);
                     break;
                 case CustomArgSemantic::StrideScaleA0:
                 {
-                    size_t scaleStride = problem.mxsa().strides()[1];
+                    size_t scaleStride = problem.mxsa().strides()[descriptorStrideAB];
                     rv.args.appendCustomType("StrideScaleA0", scaleStride, arg.type);
                     break;
                 }
                 case CustomArgSemantic::StrideScaleA1:
                 {
-                    size_t batchStride
-                        = preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1");
+                    size_t batchStride = nativePersistent ? problem.mxsa().strides()[descriptorStrideAB + 1]
+                        : preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1");
                     rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                     break;
                 }
                 case CustomArgSemantic::StrideScaleB0:
                 {
-                    size_t scaleStride = problem.mxsb().strides()[1];
+                    size_t scaleStride = problem.mxsb().strides()[descriptorStrideAB];
                     rv.args.appendCustomType("StrideScaleB0", scaleStride, arg.type);
                     break;
                 }
                 case CustomArgSemantic::StrideScaleB1:
                 {
-                    size_t batchStride
-                        = preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1");
+                    size_t batchStride = nativePersistent ? problem.mxsb().strides()[descriptorStrideAB + 1]
+                        : preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1");
                     rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                     break;
                 }
+                case CustomArgSemantic::StrideScaleA2:
+                    rv.args.appendCustomType("StrideScaleA2", problem.mxsa().strides().at(descriptorStrideAB + 2), arg.type);
+                    break;
+                case CustomArgSemantic::StrideScaleB2:
+                    rv.args.appendCustomType("StrideScaleB2", problem.mxsb().strides().at(descriptorStrideAB + 2), arg.type);
+                    break;
                 case CustomArgSemantic::StrideA0Bytes:
                     rv.args.appendCustomType("StrideA0Bytes",
                         problem.a().strides()[1] * problem.a().elementBytes(), arg.type);
@@ -3142,10 +3179,13 @@ namespace TensileLite
                         problem.d().strides()[1] * problem.d().elementBytes(), arg.type);
                     break;
                 case CustomArgSemantic::StrideMetadata0:
-                    rv.args.appendCustomType("StrideMetadata0", problem.metadata().strides()[1], arg.type);
+                    rv.args.appendCustomType("StrideMetadata0", problem.metadata().strides()[descriptorStrideAB], arg.type);
                     break;
                 case CustomArgSemantic::StrideMetadata1:
-                    rv.args.appendCustomType("StrideMetadata1", problem.metadata().strides()[2], arg.type);
+                    rv.args.appendCustomType("StrideMetadata1", problem.metadata().strides()[descriptorStrideAB + 1], arg.type);
+                    break;
+                case CustomArgSemantic::StrideMetadata2:
+                    rv.args.appendCustomType("StrideMetadata2", problem.metadata().strides().at(descriptorStrideAB + 2), arg.type);
                     break;
                 case CustomArgSemantic::StrideCK:
                 {
@@ -3164,7 +3204,10 @@ namespace TensileLite
                     rv.args.append("alpha", inputs.alpha, problem.alphaType());
                     break;
                 case CustomArgSemantic::Beta:
-                    rv.args.append("beta", inputs.beta, problem.betaType());
+                    if(internalArgsSupport.persistentLoopArgsVersion == 1 && !problemType.useBeta)
+                        rv.args.append("beta", 0.0f, problem.betaType());
+                    else
+                        rv.args.append("beta", inputs.beta, problem.betaType());
                     break;
                 case CustomArgSemantic::SplitK:
                 {
@@ -3204,10 +3247,22 @@ namespace TensileLite
 
                 // ---- Pointer args ----
                 case CustomArgSemantic::AddressA:
-                    rv.args.template append<void const*>("AddressA", inputs.a);
+                    rv.args.template append<void const*>(
+                        "AddressA",
+                        nativePersistent
+                            ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchA)
+                                   ? static_cast<void const*>(inputs.batchA)
+                                   : problemType.sparse == 1 ? inputs.compressed : inputs.a)
+                            : inputs.a);
                     break;
                 case CustomArgSemantic::AddressB:
-                    rv.args.template append<void const*>("AddressB", inputs.b);
+                    rv.args.template append<void const*>(
+                        "AddressB",
+                        nativePersistent
+                            ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchB)
+                                   ? static_cast<void const*>(inputs.batchB)
+                                   : problemType.sparse == 2 ? inputs.compressed : inputs.b)
+                            : inputs.b);
                     break;
                 case CustomArgSemantic::AddressC:
                 {
@@ -3222,12 +3277,15 @@ namespace TensileLite
                             useWsC = true;
                     }
                     if(sizeMapping.isStreamK()
-                       && sk.reduction == origami::reduction_t::parallel)
+                       && launch.reduction == origami::reduction_t::parallel)
                         useWsC = true;
                     if(useWsC)
                         rv.args.template append<void const*>("AddressC", inputs.ws);
                     else
-                        rv.args.template append<void const*>("AddressC", inputs.c);
+                        rv.args.template append<void const*>(
+                            "AddressC",
+                            nativePersistent && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchC))
+                                ? static_cast<void const*>(inputs.batchC) : inputs.c);
                     break;
                 }
                 case CustomArgSemantic::AddressD:
@@ -3243,12 +3301,15 @@ namespace TensileLite
                             useWsD = true;
                     }
                     if(sizeMapping.isStreamK()
-                       && sk.reduction == origami::reduction_t::parallel)
+                       && launch.reduction == origami::reduction_t::parallel)
                         useWsD = true;
                     if(useWsD)
                         rv.args.template append<void const*>("AddressD", inputs.ws);
                     else
-                        rv.args.template append<void const*>("AddressD", inputs.d);
+                        rv.args.template append<void const*>(
+                            "AddressD",
+                            nativePersistent && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchD))
+                                ? static_cast<void const*>(inputs.batchD) : inputs.d);
                     break;
                 }
                 case CustomArgSemantic::AddressE:
@@ -3261,7 +3322,7 @@ namespace TensileLite
                     rv.args.template append<void const*>(toString(arg.semantic), inputs.ws);
                     break;
                 case CustomArgSemantic::AddressFlags:
-                    if(sk.reduction == origami::reduction_t::parallel)
+                    if(launch.reduction == origami::reduction_t::parallel)
                         rv.args.template append<void*>("AddressFlags", nullptr);
                     else
                         rv.args.template append<void*>("AddressFlags", inputs.Synchronizer);
@@ -3299,8 +3360,36 @@ namespace TensileLite
                        && inputs.bias != nullptr)
                         rv.args.template append<void const*>("AddressBias", inputs.ws);
                     else
-                        rv.args.template append<void const*>("AddressBias", inputs.bias);
+                        rv.args.template append<void const*>(
+                            "AddressBias",
+                            nativePersistent && !problemType.stridedBatched
+                                ? static_cast<void const*>(inputs.batchBias) : inputs.bias);
                     break;
+                case CustomArgSemantic::AddressGateResidual:
+                    if(problemType.stridedBatched)
+                        rv.args.template append<void const*>("gateResidual", inputs.gateResidual);
+                    else
+                        rv.args.template append<void const* const*>("batchGateResidual", inputs.batchGateResidual);
+                    break;
+                case CustomArgSemantic::GateResidualType:
+                    rv.args.template append<uint32_t>(
+                        "gate_type",
+                        static_cast<uint32_t>(
+                            problem.useGateResidual()
+                                ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                                : problemType.gateResidualDataTypeWhiteList.at(0)));
+                    break;
+                case CustomArgSemantic::StrideGate0:
+                case CustomArgSemantic::StrideGate1:
+                case CustomArgSemantic::StrideGate2:
+                {
+                    auto index = startStrideCD + static_cast<size_t>(arg.semantic)
+                                 - static_cast<size_t>(CustomArgSemantic::StrideGate0);
+                    auto const& gate = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+                    rv.args.template append<uint32_t>(toString(arg.semantic),
+                                                       problem.useGateResidual() ? gate.strides().at(index) : 0);
+                    break;
+                }
                 case CustomArgSemantic::AddressAmaxOut:
                     rv.args.template append<void const*>("AddressAmaxOut", inputs.amaxD);
                     break;
@@ -3343,9 +3432,9 @@ namespace TensileLite
                 case CustomArgSemantic::InternalArgs:
                 {
                     auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
-                        = calculateAutoWGM(problem, &hardware, sk.grid);
+                        = calculateAutoWGM(problem, &hardware, launch.grid);
                     auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
-                        = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
+                        = calculateAutoStaggerU(problem, &hardware, launch.grid, autoWGM);
                     kernelArgs<T_Debug, true>(1, 0, rv.args, getNumWorkGroups(rv),
                                              &hardware, problem.getParams(),
                                              autoWGM, autoWGMXCC, autoWGMXCCCHUNK,
@@ -3370,10 +3459,14 @@ namespace TensileLite
                         rv.args.appendCustomType("NumWorkGroups", getNumWorkGroups(rv), arg.type);
                     break; // handled by InternalArgs via kernelArgs when present
 
-                // ---- StreamK scheduling args ----
+                // ---- Native persistent scheduling args ----
                 case CustomArgSemantic::ItersPerTile:
-                    rv.args.template append<uint32_t>("ItersPerTile", skItersPerTile);
+                    rv.args.template append<uint32_t>("ItersPerTile", itersPerTile);
                     break;
+                case CustomArgSemantic::PersistentGrid:
+                    rv.args.template append<uint32_t>("PersistentGrid", static_cast<uint32_t>(launch.grid));
+                    break;
+                // ---- Legacy/custom scheduling adapter ----
                 case CustomArgSemantic::MagicNumberItersPerTile:
                     rv.args.template append<uint32_t>("MagicNumberItersPerTile", skMagicNumberItersPerTile);
                     break;
@@ -3387,7 +3480,7 @@ namespace TensileLite
                     rv.args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
                     break;
                 case CustomArgSemantic::SKGrid:
-                    rv.args.template append<uint32_t>("SKGrid", static_cast<uint32_t>(sk.grid));
+                    rv.args.template append<uint32_t>("SKGrid", static_cast<uint32_t>(launch.grid));
                     break;
                 case CustomArgSemantic::SKTilesAndSplit:
                     rv.args.appendCustomType(toString(arg.semantic), skTotalTiles, arg.type);
@@ -3446,6 +3539,18 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::GSUSync:
                     rv.args.template append<uint32_t>("GSUSync", 0);
+                    break;
+                case CustomArgSemantic::BatchOffsetD:
+                    rv.args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+                    break;
+                case CustomArgSemantic::BatchOffsetC:
+                    rv.args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+                    break;
+                case CustomArgSemantic::BatchOffsetA:
+                    rv.args.template append<int64_t>("batchOffsetA", inputs.batchOffsetA);
+                    break;
+                case CustomArgSemantic::BatchOffsetB:
+                    rv.args.template append<int64_t>("batchOffsetB", inputs.batchOffsetB);
                     break;
 
                 // ---- Random seed args ----
@@ -4799,10 +4904,60 @@ namespace TensileLite
     void ContractionSolution::validatePersistentLoopArgs() const
     {
         sizeMapping.validateExecutionPolicy();
-        if(internalArgsSupport.version < 0 || internalArgsSupport.version > 3)
+        const int version = internalArgsSupport.persistentLoopArgsVersion;
+        const int outerVersion = internalArgsSupport.version;
+        if(outerVersion < 0 || outerVersion > 3)
             throw std::runtime_error("Unsupported kernel argument protocol version");
-        if(internalArgsSupport.persistentLoopArgsVersion != 0)
-            throw std::runtime_error("Unsupported persistent loop argument layout");
+        if(version < 0 || version > 1 || (version == 1 && !sizeMapping.isDataParallel()))
+            throw std::runtime_error("Invalid persistent loop argument layout for execution policy");
+        if(version == 1 && outerVersion != 3)
+            throw std::runtime_error("Native DataParallel requires kernel argument protocol version 3");
+        if(customKernel.name.empty())
+            return;
+
+        const std::array<CustomArgSemantic, 2> native{
+            CustomArgSemantic::ItersPerTile, CustomArgSemantic::PersistentGrid};
+        size_t count = 0, previous = 0;
+        for(size_t i = 0; i < customKernel.args.size(); ++i)
+        {
+            const auto& arg = customKernel.args[i];
+            if(version == 0)
+            {
+                if(arg.semantic == CustomArgSemantic::PersistentGrid)
+                    throw std::runtime_error("PersistentGrid requires persistent loop argument layout 1");
+                continue;
+            }
+            switch(arg.semantic)
+            {
+            case CustomArgSemantic::MagicNumberItersPerTile:
+            case CustomArgSemantic::MagicShiftItersPerTile:
+            case CustomArgSemantic::TotalIters:
+            case CustomArgSemantic::SKItersPerWG:
+            case CustomArgSemantic::SKGrid:
+            case CustomArgSemantic::SKTilesAndSplit:
+            case CustomArgSemantic::AddressWorkspace:
+            case CustomArgSemantic::AddressFlags:
+            case CustomArgSemantic::AddressSynchronizer:
+            case CustomArgSemantic::Synchronizer:
+            case CustomArgSemantic::GSUSync:
+                throw std::runtime_error("Native DataParallel descriptor contains legacy scheduling or workspace arguments");
+            case CustomArgSemantic::ItersPerTile:
+            case CustomArgSemantic::PersistentGrid:
+                if(count >= native.size() || arg.semantic != native[count]
+                   || arg.type != CustomArgType::uint32 || arg.padding != 0
+                   || (count != 0 && i != previous + 1))
+                    throw std::runtime_error("Invalid native DataParallel scheduling arguments");
+                previous = i;
+                ++count;
+                break;
+            default:
+                break;
+            }
+        }
+        if(version == 1
+           && (count != native.size() || customKernel.workspaceType != CustomWorkspaceType::None
+               || customKernel.workspaceSizePerElemC != 0 || customKernel.workspaceSizePerElemBias != 0))
+            throw std::runtime_error("Native DataParallel descriptor requires two scheduling arguments and no partial workspace");
     }
 
     PersistentLaunchSettings ContractionSolution::resolvePersistentSettings(
@@ -4926,16 +5081,16 @@ namespace TensileLite
                 rv.push_back(generateBetaOnlyCall<false>(problem, inputs));
         }
 
-        PersistentLaunchSettings sk;
+        PersistentLaunchSettings launch;
         bool customStreamK = customKernel.workspaceType == CustomWorkspaceType::StreamK || customKernel.workspaceType == CustomWorkspaceType::StreamKWithReduction;
         sizeMapping.validateExecutionPolicy();
         if(sizeMapping.isDataParallel())
         {
             if(gsu > 1)
                 throw std::runtime_error("DataParallel persistent execution does not support GlobalSplitU > 1");
-            sk = resolvePersistentSettings(problem, hardware);
+            launch = resolvePersistentSettings(problem, hardware);
             if(Debug::Instance().printStreamKLaunchSummary())
-                printPersistentLaunchSummary(std::cerr, problem, sk);
+                printPersistentLaunchSummary(std::cerr, problem, launch);
         }
         else if(sizeMapping.isStreamK() || customStreamK)
         {
@@ -5005,7 +5160,7 @@ namespace TensileLite
             // reports on, and additionally applies streamKReconcileReduction()
             // (see the note there for the SK4 / SK5-dynamic caveat, where query
             // and launch can still differ).
-            sk = resolveStreamKSettings(
+            launch = resolveStreamKSettings(
                 problem, hardware, sizeMapping.hasHybridAssignment() ? &effectiveDynamic : nullptr);
 
             // Defense in depth: resolveStreamKSettings() demotes every
@@ -5015,7 +5170,7 @@ namespace TensileLite
             //
             // Deliberate behavior change: tiles == 0 throws here instead of
             // dividing by zero (grouped-GEMM callers report 0 tiles).
-            if(sk.reduction == origami::reduction_t::parallel && (tiles == 0 || sk.grid / tiles < 2))
+            if(launch.reduction == origami::reduction_t::parallel && (tiles == 0 || launch.grid / tiles < 2))
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
@@ -5030,9 +5185,9 @@ namespace TensileLite
             if(Debug::Instance().printStreamKLaunchSummary())
             {
                 StreamKDecisions skDecisions = computeStreamKDecisions(problem, hardware);
-                skDecisions.finalGrid = sk.grid;
-                skDecisions.skGrid    = sk.grid;
-                skDecisions.reduction = sk.reduction;
+                skDecisions.finalGrid = launch.grid;
+                skDecisions.skGrid    = launch.grid;
+                skDecisions.reduction = launch.reduction;
                 printStreamKLaunchSummary(std::cerr, problem, skDecisions);
             }
         }
@@ -5042,10 +5197,10 @@ namespace TensileLite
 
         // Evaluated immediately before dispatch: this is the first point at which
         // every value the kernel will see is final. The StreamK block above can
-        // still rewrite sk.grid and sk.reduction, and globalAccumulation is only
+        // still rewrite launch.grid and launch.reduction, and globalAccumulation is only
         // resolved on the line above.
         checkUniformSummationOrder(
-            problem, hardware, sk, gsuSettings.globalAccumulation, gsu, inputs.Synchronizer);
+            problem, hardware, launch, gsuSettings.globalAccumulation, gsu, inputs.Synchronizer);
 
         // Temporary gating: only genuine handwritten/external custom kernels use
         // the generic generateCustomCall path (they have no other path). All
@@ -5058,27 +5213,27 @@ namespace TensileLite
         if(useCustomCall)
         {
             if(debug)
-                rv.push_back(generateCustomCall<true>(problem, inputs, hardware, sk));
+                rv.push_back(generateCustomCall<true>(problem, inputs, hardware, launch));
             else
-                rv.push_back(generateCustomCall<false>(problem, inputs, hardware, sk));
+                rv.push_back(generateCustomCall<false>(problem, inputs, hardware, launch));
         }
         else
         {
             if(debug)
-                rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk, gsuSettings));
+                rv.push_back(generateSingleCall<true>(problem, inputs, hardware, launch, gsuSettings));
             else
-                rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk, gsuSettings));
+                rv.push_back(generateSingleCall<false>(problem, inputs, hardware, launch, gsuSettings));
         }
 
         if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
-           || sk.reduction == origami::reduction_t::parallel)
+           || launch.reduction == origami::reduction_t::parallel)
         {
             if(debug)
                 rv.push_back(generateOutputConversionCall<true>(
-                    problem, inputs, sk, autoGsuVal, gsuSettings.globalAccumulation));
+                    problem, inputs, launch, autoGsuVal, gsuSettings.globalAccumulation));
             else
                 rv.push_back(generateOutputConversionCall<false>(
-                    problem, inputs, sk, autoGsuVal, gsuSettings.globalAccumulation));
+                    problem, inputs, launch, autoGsuVal, gsuSettings.globalAccumulation));
         }
 
         // The reduction of A is done in ConversionKernel when GSU > 1 in MultipleBuffer mode
@@ -6261,7 +6416,7 @@ namespace TensileLite
         if(!problem.getParams().uniformSummationOrder())
             return true;
 
-        StreamKSettings sk;
+        PersistentLaunchSettings launch;
         uint32_t        gsu        = 0;
         size_t          resolvedGA = 0;
 
@@ -6279,7 +6434,8 @@ namespace TensileLite
         {
             const uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
             gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
-            sk  = resolveStreamKSettings(problem, hardware);
+            launch = sizeMapping.isDataParallel() ? resolvePersistentSettings(problem, hardware)
+                                                   : resolveStreamKSettings(problem, hardware);
             resolvedGA = problem.getAccumulation(hardware, sizeMapping, gsu);
         }
 
@@ -6295,7 +6451,7 @@ namespace TensileLite
         // unless TENSILE_DB bit 0x400000 is set and never changes the verdict.
         char const*       obstacleToken = nullptr;
         const std::string obstacle      = uniformSummationOrderLaunchObstacle(
-            problem, hardware, sk, resolvedGA, gsu, nullptr, false, &obstacleToken);
+            problem, hardware, launch, resolvedGA, gsu, nullptr, false, &obstacleToken);
 
         if(Debug::Instance().printNoSolutionUniformSummationOrder())
         {
@@ -6345,7 +6501,7 @@ namespace TensileLite
     std::string ContractionSolution::uniformSummationOrderLaunchObstacle(
         Problem const&         problem,
         Hardware const&        hardware,
-        PersistentLaunchSettings const& sk,
+        PersistentLaunchSettings const& launch,
         size_t                 resolvedGlobalAccumulation,
         uint32_t               gsu,
         void const*            synchronizer,
@@ -6377,7 +6533,7 @@ namespace TensileLite
             // Load-bearing rather than defensive: the grouped-GEMM callers pass
             // a default-constructed StreamKSettings, so this is what stands
             // between them and a division by zero below.
-            if(sk.grid == 0)
+            if(launch.grid == 0)
                 return refuse("StreamKGridZero", "the resolved StreamK grid is 0");
 
             // StreamK=5 hybrid runs the static (SK3) packing unless its
@@ -6394,21 +6550,21 @@ namespace TensileLite
             // resolution and the kernel-arg packing both use.
             const size_t tiles = problem.getNumTiles(sizeMapping, 1);
 
-            if(sk.reduction == origami::reduction_t::parallel)
+            if(launch.reduction == origami::reduction_t::parallel)
             {
                 // Parallel packs AddressFlags == 0 and does not use the tree
                 // static-split model. Admit only when the shared helper proves
                 // the launch is row-uniform; otherwise fail closed.
                 if(!streamKParallelReductionRowUniform(
-                       sk, sizeMapping.streamKAtomic, staticTwoTilePacking, tiles))
+                       launch, sizeMapping.streamKAtomic, staticTwoTilePacking, tiles))
                     return refuse(
                         "ParallelReductionNotRowUniform",
                         "the resolved StreamK parallel reduction is not row-uniform: tiles="
-                            + std::to_string(tiles) + " grid=" + std::to_string(sk.grid)
+                            + std::to_string(tiles) + " grid=" + std::to_string(launch.grid)
                             + " streamKAtomic=" + std::to_string(sizeMapping.streamKAtomic)
                             + " staticTwoTilePacking=" + (staticTwoTilePacking ? "1" : "0"));
             }
-            else if(sk.reduction == origami::reduction_t::tree)
+            else if(launch.reduction == origami::reduction_t::tree)
             {
                 if(staticTwoTilePacking)
                 {
@@ -6427,7 +6583,7 @@ namespace TensileLite
                     const StreamKStaticSplit split
                         = streamKStaticSplit(tiles,
                                              itersPerTile,
-                                             sk.grid,
+                                             launch.grid,
                                              pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
                                              sizeMapping.isDataParallel());
 
@@ -6444,20 +6600,20 @@ namespace TensileLite
                     if(!streamKStaticSplitRowUniform(split,
                                                      tiles,
                                                      itersPerTile,
-                                                     sk.grid,
+                                                     launch.grid,
                                                      internalArgsSupport.perTileExtraIters,
                                                      problem.getParams().uniformSummationOrder()))
                         return refuse(
                             "StaticSplitNotRowUniform",
                             "the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
                                 + " itersPerTile=" + std::to_string(itersPerTile)
-                                + " grid=" + std::to_string(sk.grid)
+                                + " grid=" + std::to_string(launch.grid)
                                 + " skTiles=" + std::to_string(split.skTiles)
                                 + " skItersPerWG=" + std::to_string(split.skItersPerWG)
                                 + " extraIters=" + std::to_string(split.extraIters)
                                 + " perTileExtraIters=" + (perTileActive ? "1" : "0"));
                 }
-                else if(tiles % sk.grid != 0)
+                else if(tiles % launch.grid != 0)
                 {
                     // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
                     // the derivation above does not describe. They are additionally
@@ -6465,7 +6621,7 @@ namespace TensileLite
                     // redundant for them, but redundant and fail-closed is the
                     // right side to err on.
                     return refuse("GridDoesNotDivideTiles",
-                                  "StreamK grid " + std::to_string(sk.grid)
+                                  "StreamK grid " + std::to_string(launch.grid)
                                       + " does not divide the tile count "
                                       + std::to_string(tiles));
                 }
@@ -6518,9 +6674,9 @@ namespace TensileLite
         // Recomputes exactly what generateSingleCall() packs. The clamp in
         // calculateAutoStaggerU() should already have forced this to 0; checking
         // it anyway is what catches a future path that bypasses the clamp.
-        const int32_t autoWGM = std::get<0>(calculateAutoWGM(problem, &hardware, sk.grid));
+        const int32_t autoWGM = std::get<0>(calculateAutoWGM(problem, &hardware, launch.grid));
         const size_t  resolvedStaggerU
-            = std::get<1>(calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM));
+            = std::get<1>(calculateAutoStaggerU(problem, &hardware, launch.grid, autoWGM));
         if(resolvedStaggerU != 0)
             return refuse("ResolvedStaggerU",
                           "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
@@ -6558,7 +6714,7 @@ namespace TensileLite
 
     void ContractionSolution::checkUniformSummationOrder(Problem const&         problem,
                                                          Hardware const&        hardware,
-                                                         PersistentLaunchSettings const& sk,
+                                                         PersistentLaunchSettings const& launch,
                                                          size_t      resolvedGlobalAccumulation,
                                                          uint32_t    gsu,
                                                          void const* synchronizer) const
@@ -6567,7 +6723,7 @@ namespace TensileLite
             return;
 
         const std::string reason = uniformSummationOrderLaunchObstacle(
-            problem, hardware, sk, resolvedGlobalAccumulation, gsu, synchronizer, true);
+            problem, hardware, launch, resolvedGlobalAccumulation, gsu, synchronizer, true);
         if(!reason.empty())
         {
             throw UniformSummationOrderError(
@@ -6619,10 +6775,7 @@ namespace TensileLite
                 return sk5DynamicValue;
             };
 
-            size_t     skGrid    = tiles; // Fallback
-            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-            if(streamKDP)
-                skGrid = tiles;
+            size_t     grid    = tiles; // Fallback
 
             // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
             size_t z = 1;
@@ -6631,17 +6784,17 @@ namespace TensileLite
                 z *= problem.boundSize(i);
             }
             if(z == 0)
-                skGrid = tiles;
+                grid = tiles;
 
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
 
             assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
             size_t cuCount = pAMDGPU->computeUnitCount;
 
-            // User-specified grid size for Stream-K kernel.
+            // User-specified grid size for persistent execution.
             if(pAMDGPU->skFixedGrid > 0)
             {
-                skGrid = pAMDGPU->skFixedGrid;
+                grid = pAMDGPU->skFixedGrid;
                 if(outFixedGridUsed)
                     *outFixedGridUsed = true;
             }
@@ -6663,7 +6816,7 @@ namespace TensileLite
                     // For now, all work items are full tiles
                     auto workItems = tiles;
                     // Select grid to use all CUs, unless number of work items is less
-                    skGrid = std::min(workItems, maxGrid);
+                    grid = std::min(workItems, maxGrid);
                 }
                 else
                 {
@@ -6690,13 +6843,13 @@ namespace TensileLite
                     // smCountTarget and skMaxCUs each use 0 to mean "no cap"; take the
                     // tighter (minimum) positive cap so the analytical path honors both.
                     auto   smt       = problem.getParams().smCountTarget(); // int, 0 = no cap
-                    auto   skm       = pAMDGPU->skMaxCUs;                   // int, 0 = no cap
+                    auto   maxCUs       = pAMDGPU->skMaxCUs;                   // int, 0 = no cap
                     size_t budget    = 0;                                  // 0 = use all CUs
                     if(smt > 0)
                         budget = static_cast<size_t>(smt);
-                    if(skm > 0)
-                        budget = (budget == 0) ? static_cast<size_t>(skm)
-                                               : std::min(budget, static_cast<size_t>(skm));
+                    if(maxCUs > 0)
+                        budget = (budget == 0) ? static_cast<size_t>(maxCUs)
+                                               : std::min(budget, static_cast<size_t>(maxCUs));
 
                     origami::problem_t origami_problem = {
                         .size        = {x, y, z},
@@ -6740,39 +6893,39 @@ namespace TensileLite
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
-                    skGrid = origami::streamk::select_grid_size(
+                    grid = origami::streamk::select_grid_size(
                         origami_problem,
                         *(hipAMDGPU->analyticalHardware),
                         origami_config,
                         static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
                 }
             }
-            // Limit the CUs Stream-K is launched on either max or the specified,
+            // Limit the CUs persistent execution uses to the hardware or specified maximum,
             // whichever is minimum.
             else if(pAMDGPU->skMaxCUs > 0)
             {
-                skGrid = std::min(cuCount, static_cast<size_t>(pAMDGPU->skMaxCUs));
+                grid = std::min(cuCount, static_cast<size_t>(pAMDGPU->skMaxCUs));
             }
 
             // Multiply the cuCount with a constant factor (c), and launch
-            // c * cuCount number of workgroups for Stream-K.
+            // c * cuCount number of persistent workgroups.
             else if(pAMDGPU->skGridMultiplier > 1)
             {
-                skGrid = cuCount * pAMDGPU->skGridMultiplier;
+                grid = cuCount * pAMDGPU->skGridMultiplier;
             }
 
             // If no option is specified, launch exactly cuCount worth of workgroups.
             else
             {
-                skGrid = cuCount;
+                grid = cuCount;
             }
 
             if(self.sizeMapping.isDataParallel())
             {
-                if(outSelectedGrid) *outSelectedGrid = skGrid;
+                if(outSelectedGrid) *outSelectedGrid = grid;
                 if(self.sizeMapping.clusterDim.x * self.sizeMapping.clusterDim.y > 1)
                 {
-                    skGrid = tiles;
+                    grid = tiles;
                     if(outClusterDPGridClamp) *outClusterDPGridClamp = true;
                 }
                 else
@@ -6785,13 +6938,13 @@ namespace TensileLite
                                                       * self.sizeMapping.workGroupSize.z;
                     const size_t maxGrid = std::numeric_limits<uint32_t>::max()
                                            / std::max(threadsPerWorkGroup, size_t{1});
-                    if(skGrid > maxGrid)
+                    if(grid > maxGrid)
                     {
                         const size_t occupancy = std::max(self.sizeMapping.CUOccupancy, 1);
-                        skGrid = std::min(cuCount * occupancy, maxGrid);
+                        grid = std::min(cuCount * occupancy, maxGrid);
                     }
                 }
-                return skGrid;
+                return grid;
             }
 
             // Under uniform-summation-order + static two-tile packing, snap the chain output
@@ -6802,7 +6955,7 @@ namespace TensileLite
             // run before the magic-division guard below so that guard still
             // validates the final grid (a snap after it can emit out-of-range
             // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
-            if(problem.getParams().uniformSummationOrder() && tiles > 0 && skGrid > 0)
+            if(problem.getParams().uniformSummationOrder() && tiles > 0 && grid > 0)
             {
                 const bool effectiveDynamic
                     = (self.sizeMapping.hasHybridAssignment())
@@ -6814,7 +6967,7 @@ namespace TensileLite
                       || (self.sizeMapping.hasHybridAssignment() && !effectiveDynamic);
                 if(staticTwoTilePacking)
                 {
-                    const size_t g0 = skGrid;
+                    const size_t g0 = grid;
                     // Same clamp as the packer / gate: K==0 yields I==0 otherwise.
                     const size_t I
                         = std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping));
@@ -6830,7 +6983,7 @@ namespace TensileLite
 
                     // The flag-region bound is a constraint ON this selection, not
                     // a correction applied after it. Every grid this snap can emit
-                    // for F >= 2 is tiles * F > tiles, so tiles % skGrid == tiles
+                    // for F >= 2 is tiles * F > tiles, so tiles % grid == tiles
                     // != 0 and the flag clamp below would fire on exactly these
                     // grids -- rewriting tiles * F to StreamKFlagElements, which is
                     // not in general a multiple of tiles and so is refused by
@@ -6842,10 +6995,10 @@ namespace TensileLite
                     //
                     // Conditioned on the same three predicates the clamp uses, so a
                     // launch that never touches the flag region is not constrained
-                    // by its size. The clamp's fourth predicate (tiles % skGrid !=
+                    // by its size. The clamp's fourth predicate (tiles % grid !=
                     // 0) is implied for every F >= 2 candidate and so is omitted.
-                    // The all-full grid (F == 1, skGrid == tiles) satisfies
-                    // tiles % skGrid == 0, uses no flag region at all, and is
+                    // The all-full grid (F == 1, grid == tiles) satisfies
+                    // tiles % grid == 0, uses no flag region at all, and is
                     // therefore admissible at any tile count -- which is what keeps
                     // FStar = 1 a valid floor even when tiles itself exceeds the
                     // bound.
@@ -6879,18 +7032,18 @@ namespace TensileLite
                             FStar = F;
                             break;
                         }
-                        skGrid = tiles * FStar;
+                        grid = tiles * FStar;
                     }
                     else if(g0 < tiles)
                     {
-                        skGrid = tiles;
+                        grid = tiles;
                     }
 
-                    if(skGrid != g0
+                    if(grid != g0
                        && (pAMDGPU->skFixedGrid > 0 || pAMDGPU->skMaxCUs > 0
                            || pAMDGPU->skGridMultiplier > 1))
                     {
-                        warnStreamKUniformityGridSnapOnce(g0, skGrid);
+                        warnStreamKUniformityGridSnapOnce(g0, grid);
                     }
                 }
             }
@@ -6908,15 +7061,15 @@ namespace TensileLite
             // warnStreamKUniformityGridSnapOnce() note when it overrides an
             // explicitly requested grid, so the override is still observable.
             if(outSelectedGrid)
-                *outSelectedGrid = skGrid;
+                *outSelectedGrid = grid;
 
             // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
             // If we exceed those bounds, fall back to DP.
             if(reductionStrat == origami::reduction_t::tree)
             {
                 size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
-                size_t itersPerWG   = tiles * itersPerTile / skGrid;
-                // numWorkItems = skGrid * threadsPerWorkGroup
+                size_t itersPerWG   = tiles * itersPerTile / grid;
+                // numWorkItems = grid * threadsPerWorkGroup
                 // the largest grid this fallback can express is
                 // UINT32_MAX / threadsPerWorkGroup -- 2^24 tiles at 256 threads
                 // but 2^25 at 128 and 2^22 at 1024.
@@ -6931,24 +7084,10 @@ namespace TensileLite
                 {
                     const size_t occupancy
                     = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1));
-                    skGrid = (tiles >= maxTiles) ? cuCount * occupancy : tiles;
+                    grid = (tiles >= maxTiles) ? cuCount * occupancy : tiles;
                     if(outTreeBoundsFallback)
                         *outTreeBoundsFallback = true;
                 }
-            }
-
-            // StreamK ForceDPOnly cluster multicast (gfx1250, ClusterDim-driven):
-            // one work-group per output tile (not a K-split), so skGrid == tiles.
-            // The launch pads up to the cluster dims and the boundary peers
-            // pad-exit (StreamK.preLoop) when the size is not a cluster multiple.
-            if(self.sizeMapping.hasStaticAssignment() && self.sizeMapping.isDataParallel()
-               && (static_cast<size_t>(self.sizeMapping.clusterDim.x)
-                   * static_cast<size_t>(self.sizeMapping.clusterDim.y))
-                      > 1)
-            {
-                skGrid = tiles;
-                if(outClusterDPGridClamp)
-                    *outClusterDPGridClamp = true;
             }
 
             // The flag region holds one int per Stream-K workgroup. The static
@@ -6958,7 +7097,7 @@ namespace TensileLite
             // ~1742 and ~4033) off a base that already skips the work-queue
             // counters. Either way a grid wider than what that indexing reaches
             // would have workgroups writing past the end of their own block.
-            // Every caller reaches skGrid through here and this is the last
+            // Every caller reaches grid through here and this is the last
             // write, so it is the one place the bound has to hold.
             //
             // Only the launches that actually reach the flags are bounded:
@@ -6967,24 +7106,24 @@ namespace TensileLite
             //     (see the Flags kernarg in singleCallArgs)
             //   - parallel reduction is passed Flags == nullptr, and the kernel
             //     branches on that to skip the flag protocol
-            //   - tiles % skGrid == 0 spreads the tiles evenly over the
+            //   - tiles % grid == 0 spreads the tiles evenly over the
             //     workgroups, so no partial tiles exist to fix up. This is the
             //     same test the workspace sizing uses to decide whether partials
             //     exist, and it is what excludes every data-parallel path: they
-            //     all arrive at skGrid == tiles, whether from K == 0, from the
+            //     all arrive at grid == tiles, whether from K == 0, from the
             //     tree-fixup bound above, or from the data-parallel debug knob.
             //
             // Clamping outside those cases would shrink a grid that has no flag
             // region to overrun, and against the data-parallel fallbacks it
-            // would do real harm: the tree-fixup bound sets skGrid = tiles
+            // would do real harm: the tree-fixup bound sets grid = tiles
             // precisely to leave Stream-K behind, and cutting that back would
-            // return the launch to the K-split it was escaping. skGrid defaults
+            // return the launch to the K-split it was escaping. grid defaults
             // to the CU count, well inside the bound on a 256-CU gfx950, but
             // TENSILE_STREAMK_GRID_MULTIPLIER scales it with no cap of its own.
             const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
                                         && !self.sizeMapping.isDataParallel()
                                         && reductionStrat != origami::reduction_t::parallel
-                                        && skGrid > 0 && (tiles % skGrid) != 0;
+                                        && grid > 0 && (tiles % grid) != 0;
 
             // SK4 and the SK4 sub-path of SK5 start their flags after the
             // per-XCD work-queue counters, so they index fewer entries than the
@@ -7009,20 +7148,20 @@ namespace TensileLite
                     flagEntries -= prefixEntries;
             }
 
-            if(usesFlagRegion && skGrid > flagEntries)
+            if(usesFlagRegion && grid > flagEntries)
             {
                 if(Debug::Instance().printPropertyEvaluation())
                 {
                     std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
-                              << "' StreamK grid " << skGrid << " exceeds the " << flagEntries
+                              << "' StreamK grid " << grid << " exceeds the " << flagEntries
                               << " usable entries of the " << StreamKFlagElements
                               << "-entry flag region (tiles=" << tiles
                               << "); clamping the grid to " << flagEntries << ".\n";
                 }
-                skGrid = flagEntries;
+                grid = flagEntries;
             }
 
-            return skGrid;
+            return grid;
         }
     } // namespace
 

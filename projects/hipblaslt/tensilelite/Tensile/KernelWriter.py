@@ -25,6 +25,8 @@
 from Tensile.ExecutionPolicy import isPersistent, isDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
+from rocisa.instruction import SBitcmp1B32
+
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
@@ -50,6 +52,7 @@ from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.PersistentLoop import PersistentKernelState
+from .Components.StreamK import StreamKKernelState
 from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.Subtile.Kernel import *
@@ -566,7 +569,7 @@ class ExternClasses:
 ################################################################################
 # Kernel Writer
 ################################################################################
-class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
+class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCMeta):
   #__metaclass__=abc.ABCMeta
 
   ##############################################################################
@@ -3359,8 +3362,8 @@ class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
         usePrimedSkip = self.isPrefetchAcrossPersistentEnabled(kernel)
         lbl_prefetchPrimedMerge = Label(self.labels.getNameInc("SK_PrefetchPrimedMerge"), "")
         if usePrimedSkip:
-          module.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="tail prefetch already issued first PGR group?"))
-          module.add(SCBranchSCC0(labelName=lbl_prefetchPrimedMerge.getLabelName(), comment="skip first PGR group if primed"))
+          module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="tail prefetch already issued first PGR group?"))
+          module.add(SCBranchSCC1(labelName=lbl_prefetchPrimedMerge.getLabelName(), comment="skip first PGR group if primed"))
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st)
         module.add(replaceHolder(moduleTmp, 0))
 
@@ -7261,6 +7264,10 @@ class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
   ##############################################################################
   def _initKernel(self, kernel, tensorParametersA, tensorParametersB):
     assert kernel["KernelLanguage"] == "Assembly"
+    if isDataParallel(kernel):
+      support = kernel["InternalSupportParams"]
+      if support.get("PersistentLoopArgsVersion", 0) != 1 or support["KernArgsVersion"] != 3:
+        raise ValueError("Native DataParallel code generation requires PersistentLoopArgsVersion=1 and KernArgsVersion=3")
     self.language   = "ASM"
     # ISA version, such as 803
     version = tuple(kernel["ISA"])
@@ -9956,8 +9963,12 @@ class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
         self.defineSgpr("AddressFlags", numSgprAddressFlags)
         self.states.numSgprPersistent += numSgprAddressFlags
 
-    # Persistent scheduling uses the existing six-word ABI.
-    if hasDynamicAssignment(kernel):
+    # Persistent scheduling ABI.
+    if isDataParallel(kernel):
+      self.defineSgpr("ItersPerTile", 1)
+      self.defineSgpr("PersistentGrid", 1)
+      self.states.numSgprPersistent += 2
+    elif hasDynamicAssignment(kernel):
       self.defineSgpr("ItersPerTile", 1)
       self.defineSgpr("TotalItems", 1)
       self.defineSgpr("skTiles", 1)
@@ -11691,12 +11702,15 @@ class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
     # -- Alpha / Beta ----------------------------------------------------------
     numSgprAlpha = max(1, int(self.states.bpeCinternal / 4))
     _reg("float64" if numSgprAlpha > 1 else "uint32", "Alpha")
-    if kernel["ProblemType"]["UseBeta"]:
+    if kernel["ProblemType"]["UseBeta"] or isDataParallel(kernel):
       numSgprBeta = max(1, int(self.states.bpeCinternal / 4))
       _reg("float64" if numSgprBeta > 1 else "uint32", "Beta")
 
     # -- StreamK scalar args ---------------------------------------------------
-    if isPersistent(kernel):
+    if isDataParallel(kernel):
+      _reg("uint32", "ItersPerTile")
+      _reg("uint32", "PersistentGrid")
+    elif isStreamK(kernel):
       _reg("uint32", "ItersPerTile")
       _reg("uint32", "MagicNumberItersPerTile")
       _reg("uint32", "MagicShiftItersPerTile")
@@ -11704,6 +11718,29 @@ class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
       if isPersistent(kernel):
         _reg("uint32", "SKGrid")
         _reg("uint32", "SKTilesAndSplit")
+
+    if isDataParallel(kernel):
+      # The native payload uses outer3, including its permanent beta slot.
+      # Preserve argument order inside each group (strides and packed indices).
+      def nativePrefixOrder(arg):
+        name = arg["semantic"]
+        fixed = {
+          "GemmInfo": 0, "InternalArgs": 1, "InternalArgs1": 2, "NumWorkGroups": 3,
+          "DebugBuffer": 6, "AddressA": 7, "AddressMXScaleA": 8,
+          "AddressB": 9, "AddressMXScaleB": 10, "AddressMetadata": 16,
+          "ItersPerTile": 17, "PersistentGrid": 18, "Alpha": 19, "Beta": 20,
+          "AddressD": 21, "AddressC": 22,
+        }
+        if name in fixed:
+          return fixed[name]
+        for prefix, rank in (("SizeFree", 4), ("SizeSum", 5), ("StrideA", 11),
+                             ("StrideScaleA", 12), ("StrideB", 13), ("StrideScaleB", 14),
+                             ("StrideMetadata", 15), ("StrideD", 23), ("StrideC", 24),
+                             ("MagicNumberSize", 25), ("MagicShiftSize", 25)):
+          if name.startswith(prefix):
+            return rank
+        raise ValueError("Unknown native persistent argument: " + name)
+      self.kernelArgDefs.sort(key=nativePrefixOrder)
 
     # -- Scale addresses -------------------------------------------------------
     if kernel["ProblemType"]["UseScaleAB"]:
@@ -11721,6 +11758,12 @@ class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
       if self.states.needBiasType:
         _reg("uint32", "BiasType")
         _reg("uint32", "StrideBias")
+
+    if isDataParallel(kernel) and self.states.useGateResidual:
+      _reg("address", "AddressGateResidual")
+      _reg("uint32", "GateResidualType")
+      for i in range(self.states.gate.numSgprStrides):
+        _reg("uint32", "StrideGate%d" % i)
 
     # -- FactorDim -------------------------------------------------------------
     enableFactorDim = False
@@ -11760,6 +11803,10 @@ class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
       _reg("address", "Synchronizer")
       _reg("uint32", "GSUSync")
 
+    if isDataParallel(kernel) and not kernel["ProblemType"]["GroupedGemm"]:
+      for tensor in ("D", "C", "A", "B"):
+        _reg("uint64", "BatchOffset" + tensor)
+
   def _getKernelSource(self, kernel: Solution):
     """
     Returns the source of the kernel, either C++ or assembly.
@@ -11792,6 +11839,23 @@ class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
       (error, kb) = self.kernelBodySubtile(kernel, tensorParametersA, tensorParametersB)
 
     fileString += str(kb)
+
+    if isDataParallel(kernel):
+      # rocisa emits the outer ABI version. Native scheduling must also carry
+      # its policy and payload version when this assembly is reused as a
+      # prebuilt custom kernel without its original solution record.
+      legacyMetadata = "custom.config:\n  InternalSupportParams:\n    KernArgsVersion: 3\n"
+      nativeMetadata = (
+        "custom.config:\n"
+        "  TileProcessingStrategy: DataParallel\n"
+        "  WorkAssignment: StaticGrid\n"
+        "  InternalSupportParams:\n"
+        "    KernArgsVersion: 3\n"
+        "    PersistentLoopArgsVersion: 1\n"
+      )
+      if legacyMetadata not in fileString:
+        raise ValueError("Native persistent kernel is missing its outer3 assembly metadata")
+      fileString = fileString.replace(legacyMetadata, nativeMetadata, 1)
 
     if error != 0:
       if self.debugConfig.forceGenerateKernel:

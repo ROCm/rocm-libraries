@@ -242,7 +242,7 @@ namespace
         {"StreamK", "Hybrid", 5, 0},
     }};
 
-    TEST(PersistentExecutionPolicyTest, NonPersistentAssignmentsDoNotActivateScheduling)
+    TEST(PersistentExecutionPolicyTest, NonPersistentAssignmentsDoNotActivateSchedulingOrNativeABI)
     {
         for(auto assignment : {WorkAssignment::StaticGrid,
                                WorkAssignment::DynamicWorkQueue,
@@ -605,11 +605,41 @@ namespace
         }
     }
 
+    TEST_F(PersistentExecutionPolicySerializationTest, NativeArgumentLayoutRequiresDataParallel)
+    {
+        internalArgs["persistentLoopArgsVersion"] = object(1);
+        internalArgs["version"]                   = object(3);
+        for(const auto& policy : policies)
+        {
+            canonical(policy);
+            if(std::string(policy.strategy) == "DataParallel")
+                EXPECT_EQ(readSolution()->internalArgsSupport.persistentLoopArgsVersion, 1);
+            else
+                EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, NativeArgumentLayoutRequiresOuterProtocolThree)
+    {
+        canonical(policies[1]);
+        internalArgs["persistentLoopArgsVersion"] = object(1);
+        for(int version : {0, 1, 2})
+        {
+            SCOPED_TRACE(version);
+            internalArgs["version"] = object(version);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        internalArgs["version"] = object(3);
+        auto decoded = readSolution();
+        EXPECT_EQ(decoded->internalArgsSupport.version, 3);
+        EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 1);
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, UnknownArgumentLayoutVersionsAreRejected)
     {
         canonical(policies[1]);
         internalArgs["version"] = object(3);
-        for(int version : {-1, 1, 2, 10})
+        for(int version : {-1, 2, 10})
         {
             internalArgs["persistentLoopArgsVersion"] = object(version);
             EXPECT_THROW(readSolution(), std::runtime_error);

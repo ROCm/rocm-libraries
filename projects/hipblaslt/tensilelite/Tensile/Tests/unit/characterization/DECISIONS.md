@@ -521,3 +521,11 @@ policy-field migration in generated names, derived solution state, parameter
 registries, and serialized defaults. The scoped codegen updates preserve
 fixture membership, kernel counts, and emission return codes. Explicit names
 for prebuilt kernels remain part of the compatibility contract.
+
+## D30 — Native DataParallel scheduling arguments
+
+[ADR 0015](adr/0015-native-data-parallel-arguments.md) supersedes ADR 0014's
+retained six-word payload for generated DataParallel kernels. Generated DP uses
+two scheduling words and a tile cursor; prebuilt version-zero layouts retain
+their recorded argument contract. ABI, emitted-control-flow, and numerical
+tests carry the evidence for this change.

@@ -20,24 +20,24 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from Tensile.ExecutionPolicy import isPersistent, isDataParallel, hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import isPersistent, isDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
+
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
-from ..Common import print2, ceilDivide, log2
+
+from ..Common import IsaVersion, print2, ceilDivide, log2
 from ..Component import Component
 from .TileProcessingStrategy import TileProcessingStrategy, TileWork
 from .WorkAssignment import QueuePartition, StaticPartition
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
 import abc
+
 from copy import deepcopy
-
-
-
 
 
 # ----------------------------------------------------------------------------
@@ -4232,3 +4232,57 @@ class StreamKHybrid(StreamK):
         # Per-queue atomic_inc auto-resets; no kernelEnd reset needed.
 
         return module
+
+
+class StreamKKernelState:
+  def isPersistentConstantsToVgprEnabled(self, kernel):
+    # Variants that mark keepsConstantsInSgpr=True (the dynamic
+    # per-XCD path references SK kernarg constants directly) cannot
+    # cache them in VGPRs on gfx1250.
+    return not isDataParallel(kernel) and kernel["ISA"] == IsaVersion(12,5,0) and not self.states.tileProcessing.keepsConstantsInSgpr
+
+  def acquirePersistentConstSgpr(self, kernel, name):
+    if self.isPersistentConstantsToVgprEnabled(kernel):
+      idx = self.sgprPool.checkOut(1, name, preventOverflow=False)
+      if idx + 1 > self.states.regCaps["MaxSgpr"]:
+        self.states.overflowedResources = 2
+      return idx
+    return name
+
+  def releasePersistentConstSgpr(self, nameOrIdx):
+    if isinstance(nameOrIdx, int):
+      self.sgprPool.checkIn(nameOrIdx)
+
+  def movePersistentConstantsToVgpr(self, kernel):
+    """Move StreamK constant SGPRs (kernel args) to VGPRs to reduce SGPR pressure.
+
+    Uses statically allocated VGPRs (startVgprPersistentConsts) that don't overlap with
+    MXS/ValuAB/ValuC regions. At usage sites, v_readfirstlane_b32 brings values
+    back to temp SGPRs as needed.
+    """
+    module = Module("Move StreamK constants to VGPRs")
+    self.states.persistentConstVgprs = {}
+
+    consts = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
+    if hasStaticAssignment(kernel):
+      consts += ["skGrid", "skTiles"]
+
+    baseVgpr = self.states.startVgprPersistentConsts
+    for i, name in enumerate(consts):
+      v = baseVgpr + i
+      self.states.persistentConstVgprs[name] = v
+      module.add(VMovB32(dst=vgpr(v), src=sgpr(name), comment="Save %s to VGPR v%u" % (name, v)))
+
+    # Fully free the SGPR slots so defineVariableSgprs can reuse them.
+    # undefineSgpr checks them back into sgprPool (Available) AND emits
+    # .set UNDEF so the assembler catches any stale references.
+    # addSgprVarToPool would only put them in freeSgprVarPool which
+    # defineSgpr intentionally blocks from reuse (see defineSgpr lines 514-518).
+    for name in consts:
+      module.add(self.undefineSgpr(name))
+
+    # PersistentWorkGroupIndex is a var (not kernel arg) — value set later in preLoop
+    v = baseVgpr + len(consts)
+    self.states.persistentConstVgprs["PersistentWorkGroupIndex"] = v
+
+    return module

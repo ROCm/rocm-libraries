@@ -237,14 +237,32 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     support = dict(result.get("InternalSupportParams", {}))
     version = support.get("PersistentLoopArgsVersion", 0)
     outer_version = support.get("KernArgsVersion", 3)
-    if type(version) is not int or version != 0:
+    if type(version) is not int or version not in (0, 1):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
-    # Generation and prebuilt loading retain the existing scheduling payload.
-    support["PersistentLoopArgsVersion"] = 0
-    if regenerate and legacy:
+    custom = result.get("CustomKernel")
+    handwritten = (not custom.get("generated", False)
+                   if isinstance(custom, dict) and custom.get("name")
+                   else bool(result.get("CustomKernelName")))
+    if version == 1 and not policy.data_parallel:
+        # Selector overrides inherit the source's generated layout. Recompute
+        # it below, while preserving explicit and prebuilt layout contracts.
+        if not regenerate or handwritten or "InternalSupportParams" in explicit:
+            raise ValueError("PersistentLoopArgsVersion=1 requires DataParallel/StaticGrid")
+    if version == 1 and outer_version != 3 and (not regenerate or handwritten):
+        raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
+    if regenerate and not handwritten:
+        # Native whole-tile scheduling and the verified outer protocol are
+        # generator capabilities. Regenerating known older logic upgrades both;
+        # handwritten/prebuilt artifacts retain the layout they declare.
+        support["PersistentLoopArgsVersion"] = 1 if policy.data_parallel else 0
+        if policy.data_parallel:
+            support["KernArgsVersion"] = 3
+    if regenerate and (legacy or support.get("PersistentLoopArgsVersion", 0) != version
+                       or support.get("KernArgsVersion", outer_version) != outer_version):
         result["AssignedDerivedParameters"] = False
         result["AssignedProblemIndependentDerivedParameters"] = False
+    support.setdefault("PersistentLoopArgsVersion", 0)
     result["InternalSupportParams"] = support
     return result

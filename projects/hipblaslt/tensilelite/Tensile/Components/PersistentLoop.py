@@ -7,12 +7,11 @@ from contextlib import contextmanager
 from copy import deepcopy
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr
-from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBarrier, SLShiftRightB32, SLongBranchNegative
-from Tensile.ExecutionPolicy import isPersistent, hasStaticAssignment
+from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative
+from Tensile.ExecutionPolicy import isPersistent
 from math import ceil, log2
 from ..Component import Component
 import abc
-from ..Common import IsaVersion
 
 class PersistentKernelState:
     """Emitter state and borrowed registers for the persistent loop lifecycle."""
@@ -399,58 +398,6 @@ class PersistentKernelState:
               if kernel["ReuseAcrossPersistent"] else 0
       return start, self.states.lastValuMXSAB - start
 
-    def isPersistentConstantsToVgprEnabled(self, kernel):
-      # Variants that mark keepsConstantsInSgpr=True (the dynamic
-      # per-XCD path references SK kernarg constants directly) cannot
-      # cache them in VGPRs on gfx1250.
-      return kernel["ISA"] == IsaVersion(12,5,0) and not self.states.tileProcessing.keepsConstantsInSgpr
-
-    def acquirePersistentConstSgpr(self, kernel, name):
-      if self.isPersistentConstantsToVgprEnabled(kernel):
-        idx = self.sgprPool.checkOut(1, name, preventOverflow=False)
-        if idx + 1 > self.states.regCaps["MaxSgpr"]:
-          self.states.overflowedResources = 2
-        return idx
-      return name
-
-    def releasePersistentConstSgpr(self, nameOrIdx):
-      if isinstance(nameOrIdx, int):
-        self.sgprPool.checkIn(nameOrIdx)
-
-    def movePersistentConstantsToVgpr(self, kernel):
-      """Move StreamK constant SGPRs (kernel args) to VGPRs to reduce SGPR pressure.
-
-      Uses statically allocated VGPRs (startVgprPersistentConsts) that don't overlap with
-      MXS/ValuAB/ValuC regions. At usage sites, v_readfirstlane_b32 brings values
-      back to temp SGPRs as needed.
-      """
-      module = Module("Move StreamK constants to VGPRs")
-      self.states.persistentConstVgprs = {}
-
-      consts = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
-      if hasStaticAssignment(kernel):
-        consts += ["skGrid", "skTiles"]
-
-      baseVgpr = self.states.startVgprPersistentConsts
-      for i, name in enumerate(consts):
-        v = baseVgpr + i
-        self.states.persistentConstVgprs[name] = v
-        module.add(VMovB32(dst=vgpr(v), src=sgpr(name), comment="Save %s to VGPR v%u" % (name, v)))
-
-      # Fully free the SGPR slots so defineVariableSgprs can reuse them.
-      # undefineSgpr checks them back into sgprPool (Available) AND emits
-      # .set UNDEF so the assembler catches any stale references.
-      # addSgprVarToPool would only put them in freeSgprVarPool which
-      # defineSgpr intentionally blocks from reuse (see defineSgpr lines 514-518).
-      for name in consts:
-        module.add(self.undefineSgpr(name))
-
-      # PersistentWorkGroupIndex is a var (not kernel arg) — value set later in preLoop
-      v = baseVgpr + len(consts)
-      self.states.persistentConstVgprs["PersistentWorkGroupIndex"] = v
-
-      return module
-
 class PersistentLoop(Component):
     """
     Persistent loop code.
@@ -555,12 +502,9 @@ class PersistentLoop(Component):
         assignment = Component.WorkAssignment.find(writer)
         skip = Label(writer.labels.getNameInc("PersistentSkipSubtilePrefetch" if subtile else "PersistentSkipPrefetch"), "")
         module.add(processing.prefetchEligibility(writer, kernel, skip))
-        if subtile:
-            # Preserve the existing subtile static-range check during extraction.
-            from .WorkAssignment import StaticGrid
-            module.add(StaticGrid.reserveNext(assignment, writer, kernel, skip))
-        else:
-            module.add(assignment.reserveNext(writer, kernel, skip))
+        module.add(assignment.reserveNext(writer, kernel, skip))
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="Next assignment data already issued?"))
+        module.add(SCBranchSCC1(labelName=skip.getLabelName(), comment="Do not prefetch a reservation twice"))
         if not skipBarrier:
             module.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch" if subtile else "PAP: sync before next-tile prefetch"))
         with writer.allocPapTileIdentity(kernel, subtile=subtile) as previous:
