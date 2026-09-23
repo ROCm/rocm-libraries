@@ -1230,36 +1230,6 @@ def _build_implicit_gemm_conv_impl(
             rsrc=b_rsrc,
         )
 
-    def emit_global_read(k_off: Value) -> tuple:
-        """Issue only the global memory reads (buffer_load_vN) for one K tile.
-
-        Returns ``(k_off, a_staged, b_staged)`` — the tile offset and the two
-        lists of ``(row, col, v)`` triples from :meth:`CoalescedTileLoader.load_global`.
-        The caller must later call :func:`emit_lds_write` to commit these values
-        to LDS. Only valid on the sync (non-async-DMA) path; CK pipeline_basic
-        uses this to overlap VMEM latency with MFMA compute.
-        """
-        k_off_capture[0] = k_off
-        a_staged = a_sync_loader.load_global(
-            b, tid=tid, descriptor=a_descriptor, rsrc=a_rsrc
-        )
-        b_staged = b_sync_loader.load_global(
-            b, tid=tid, descriptor=b_descriptor, rsrc=b_rsrc
-        )
-        return k_off, a_staged, b_staged
-
-    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
-        """Commit previously-staged VGPR values to LDS (smem_store_vN).
-
-        ``staged_tuple`` is the value returned by :func:`emit_global_read`.
-        Restores ``k_off_capture`` so the descriptor sees the correct k offset
-        even though the global read and LDS write happen in different loop positions.
-        """
-        k_off, a_staged, b_staged = staged_tuple
-        k_off_capture[0] = k_off
-        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
-        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
-
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -1614,18 +1584,6 @@ def _build_implicit_gemm_conv_impl(
             b.sync()
 
         final_accs = current_accs
-    elif spec.pipeline == "basic":
-        # Runtime K-loop (single buffer, no Python unroll). Uses the same
-        # emit_load_phase + sync + emit_mfma_phase + sync structure as the
-        # plain "mem" path so IR size stays bounded regardless of K_gemm.
-        for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            emit_load_phase(k0, A_smem, B_smem)
-            b.sync()
-            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
-            b.sync()
-            b.scf_yield(*new_accs)
-        final_accs = for_op.results
     elif not spec.async_dma:
         for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):

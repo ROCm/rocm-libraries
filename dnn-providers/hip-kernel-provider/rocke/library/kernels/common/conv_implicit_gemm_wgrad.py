@@ -1946,44 +1946,6 @@ def build_implicit_gemm_conv_wgrad(
             return _dy_kouter, _x_kouter
         return dy_descriptor, x_descriptor
 
-    def emit_global_read(k_off: Value) -> tuple:
-        """Issue only the global reads (buffer_load_vN) for one K tile.
-
-        Returns ``(k_off, a_staged, b_staged)`` -- the tile offset plus the two
-        lists of ``(row, col, v)`` triples from
-        :meth:`CoalescedTileLoader.load_global`. The caller commits them later
-        with :func:`emit_lds_write`. Sync path only; this is what lets the
-        CK pipeline_basic loop overlap VMEM latency with MFMA compute.
-
-        ``k_off`` is carried in the tuple because wgrad's offsets are
-        ``add(k_lo, const)`` -- a real emitted op, unlike the forward conv's
-        cached ``const_i32`` -- so re-deriving it in :func:`emit_lds_write`
-        would strand an extra add after the barrier.
-        """
-        k_off_capture[0] = k_off
-        a_desc_fn, b_desc_fn = _split_desc_fns()
-        a_staged = a_sync_loader.load_global(
-            b, tid=tid, descriptor=a_desc_fn, rsrc=dy_rsrc
-        )
-        b_staged = b_sync_loader.load_global(
-            b, tid=tid, descriptor=b_desc_fn, rsrc=x_rsrc
-        )
-        return k_off, a_staged, b_staged
-
-    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
-        """Commit previously staged VGPR values to LDS.
-
-        Restores ``k_off_capture`` so any descriptor consulted here sees the
-        offset the values were read at, even though the read and the write sit
-        in different loop positions. ``store_lds`` funnels through the same
-        ``_store_tile`` as the fused loader, so ``vector_axis="row"`` replays
-        the transpose-on-store scatter unchanged.
-        """
-        k_off, a_staged, b_staged = staged_tuple
-        k_off_capture[0] = k_off
-        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
-        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
-
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -2194,17 +2156,6 @@ def build_implicit_gemm_conv_wgrad(
             b.sync()
 
         final_accs = current_accs
-    elif spec.pipeline == "basic":
-        # Runtime K-loop (single buffer, no Python unroll). Mirrors the plain
-        # "mem" path so IR size stays bounded regardless of K_gemm / split_k.
-        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            emit_load_phase(k0, A_smem, B_smem)
-            b.sync()
-            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
-            b.sync()
-            b.scf_yield(*new_accs)
-        final_accs = for_op.results
     elif not spec.async_dma:
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
