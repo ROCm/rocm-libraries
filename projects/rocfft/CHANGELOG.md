@@ -5,6 +5,12 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.41
 
+### Added
+
+* Extended the optional RCCL backend to the single-device multi-GPU gather/scatter fallback
+  (uniform `ncclGather`/`ncclScatter`, or grouped send/recv for mixed brick sizes). MPI gather/scatter
+  is still used when an RCCL communicator is not created.
+
 ### Resolved issues
 
 * Fixed possible failures of `rocfft_plan_create` for multi-device plans.

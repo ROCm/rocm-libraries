@@ -407,11 +407,11 @@ struct rocfft_plan_t
     rocfft_plan_description_t desc;
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // RCCL communicator used by GlobalTransposeRCCL.  Populated only
-    // when the plan runs in a single process (local_comm_size == 1)
-    // and has >= 2 local devices; empty otherwise, in which case
-    // GlobalTransposeP2P / GlobalTransposeA2A handle the transpose.
-    // Value-semantic handle; copies share state via shared_ptr<Impl>.
+    // RCCL communicator used by GlobalTransposeRCCL and by the
+    // single-device gather/scatter fallback.  Populated only when the
+    // plan runs in a single process (local_comm_size == 1) and has
+    // >= 2 local devices; empty otherwise. Value-semantic handle;
+    // copies share state via shared_ptr<Impl>.
     rocfft_rccl_comm_t rccl;
 #endif
 
@@ -561,6 +561,25 @@ private:
         CreateOutputScatteringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
                                             const rocfft_location_t&   exec_plan_location,
                                             const std::vector<size_t>& antecedents);
+
+#ifdef ROCFFT_RCCL_ENABLE
+    // Append RCCL items for a many-to-one / one-to-many move.
+    // Returns an empty vector when there is no communicator, no remote
+    // traffic, or RCCL setup failed; the caller then uses CommGather /
+    // CommScatter.
+    std::vector<size_t> BuildRCCLGather(const rocfft_location_t&                 destLocation,
+                                        BufferPtr                                destPtr,
+                                        rocfft_array_type                        arrayType,
+                                        const std::vector<CommGather::GatherOp>& ops,
+                                        const std::vector<size_t>&               antecedents,
+                                        const std::string&                       description);
+    std::vector<size_t> BuildRCCLScatter(const rocfft_location_t&                   srcLocation,
+                                         BufferPtr                                  srcPtr,
+                                         rocfft_array_type                          arrayType,
+                                         const std::vector<CommScatter::ScatterOp>& ops,
+                                         const std::vector<size_t>&                 antecedents,
+                                         const std::string&                         description);
+#endif
 
     // Transform (complex-complex FFT) a whole field along specified
     // dimensions.  Input and output ptrs are provided as a vector of
