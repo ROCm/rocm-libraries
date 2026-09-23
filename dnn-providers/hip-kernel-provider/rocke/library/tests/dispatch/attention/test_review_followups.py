@@ -50,12 +50,8 @@ class TestReviewFollowups(unittest.TestCase):
         # sq=4, sk=8, window=3. Non-causal window is right-aligned:
         # first = max(0, qi + (sk-sq) - window + 1), last = sk-1.
         # Pairs: 3+4+5+6 = 18. Causal last is qi+(sk-sq): 3+3+3+3 = 12.
-        self.assertEqual(
-            attended_pairs(4, 8, causal=False, sliding_window=3), 18
-        )
-        self.assertEqual(
-            attended_pairs(4, 8, causal=True, sliding_window=3), 12
-        )
+        self.assertEqual(attended_pairs(4, 8, causal=False, sliding_window=3), 18)
+        self.assertEqual(attended_pairs(4, 8, causal=True, sliding_window=3), 12)
 
     def test_gfx950_3d_graph_replay_is_opt_in(self):
         problem = _problem(_req(arch="gfx950", seqlen_q=1, seqlen_k=4096))
@@ -80,9 +76,7 @@ class TestReviewFollowups(unittest.TestCase):
         def pipeline(_vals, _cfgs, *, stream):
             calls.append(("pipe", stream))
 
-        prepared = SimpleNamespace(
-            pipeline=pipeline, seg_config=1, red_config=2
-        )
+        prepared = SimpleNamespace(pipeline=pipeline, seg_config=1, red_config=2)
 
         class _Fence:
             def __enter__(self):
@@ -106,9 +100,7 @@ class TestReviewFollowups(unittest.TestCase):
         self.assertEqual(au.gfx942_4warp_launch_grid(plain), (32, 2, 1))
 
         candidate = next(
-            c
-            for c in ATTENTION_EXECUTION_REGISTRY.candidates()
-            if "4warp" in c.name
+            c for c in ATTENTION_EXECUTION_REGISTRY.candidates() if "4warp" in c.name
         )
         pinned = replace(
             _req(sliding_window=16),
@@ -165,12 +157,8 @@ class TestReviewFollowups(unittest.TestCase):
             if c.name.startswith("attention_gfx950_u2d_narrow")
         )
         self.assertTrue(tuning.opt_in)
-        pinned = replace(
-            auto, algorithm=tuning.algorithm, spec_id=tuning.spec_id
-        )
-        visible = {
-            c.name for c in ATTENTION_EXECUTION_REGISTRY.supported(pinned)
-        }
+        pinned = replace(auto, algorithm=tuning.algorithm, spec_id=tuning.spec_id)
+        visible = {c.name for c in ATTENTION_EXECUTION_REGISTRY.supported(pinned)}
         self.assertIn(tuning.name, visible)
 
     def test_dispatch_result_stores_the_opt_in_probe(self):
@@ -180,9 +168,7 @@ class TestReviewFollowups(unittest.TestCase):
             for c in ATTENTION_EXECUTION_REGISTRY.candidates()
             if c.name.startswith("attention_gfx950_u2d_narrow")
         )
-        pinned = replace(
-            auto, algorithm=candidate.algorithm, spec_id=candidate.spec_id
-        )
+        pinned = replace(auto, algorithm=candidate.algorithm, spec_id=candidate.spec_id)
         spec = candidate.select_spec(pinned)
         result = attention_dispatch_result(auto, candidate, spec)
         self.assertEqual(result.request.algorithm, candidate.algorithm)
@@ -208,9 +194,7 @@ class TestReviewFollowups(unittest.TestCase):
         old = au._RESOLVED_ATTENTION_ARCH
         try:
             au._RESOLVED_ATTENTION_ARCH = "gfx950"
-            ok, _why = au._explicit_path_supported(
-                problem, SimpleNamespace(), "2d"
-            )
+            ok, _why = au._explicit_path_supported(problem, SimpleNamespace(), "2d")
             self.assertFalse(ok)
             ok, why = au._explicit_path_supported(
                 problem, SimpleNamespace(allow_unsupported=True), "2d"

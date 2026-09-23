@@ -261,9 +261,7 @@ def _dense_opted_in(
     return True, "ok"
 
 
-def _dense_spec(
-    req: OperatorRequest, variant: Gfx950DenseVariant | None = None
-):
+def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None):
     """Build the launch-ready ``Gfx950AttentionDenseSpec`` for ``variant``.
 
     Tile, persist, and wide-DMA come from the frozen variant. ``persist_decode``

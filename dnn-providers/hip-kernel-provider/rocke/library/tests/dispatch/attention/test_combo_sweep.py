@@ -178,9 +178,7 @@ class TestComboSweepLifecycle(unittest.TestCase):
                 type(result), "build", return_value=SimpleNamespace(name="k")
             ),
             mock.patch("rocke.core.verify.verify_or_raise"),
-            mock.patch.object(
-                sweep, "_lower_kernel", side_effect=RuntimeError("boom")
-            ),
+            mock.patch.object(sweep, "_lower_kernel", side_effect=RuntimeError("boom")),
         ):
             reason = sweep.host_validate(result)
         self.assertIsNotNone(reason)
@@ -208,7 +206,9 @@ class TestComboSweepLifecycle(unittest.TestCase):
         for module in (sweep, dense_prefill_table_sweep, decode_table_sweep):
             with self.subTest(module=module.__name__):
                 with (
-                    mock.patch.object(sys, "argv", [module.__name__, "--dtype", "fp32"]),
+                    mock.patch.object(
+                        sys, "argv", [module.__name__, "--dtype", "fp32"]
+                    ),
                     self.assertRaises(SystemExit) as raised,
                 ):
                     module.main()

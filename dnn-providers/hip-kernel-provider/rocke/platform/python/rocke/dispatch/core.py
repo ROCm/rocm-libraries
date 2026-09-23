@@ -794,7 +794,9 @@ class CandidateRegistry:
             if c.capability is not None and arch in c.capability.arches
         )
 
-    def _auto_visible(self, request: OperatorRequest, candidate: KernelCandidate) -> bool:
+    def _auto_visible(
+        self, request: OperatorRequest, candidate: KernelCandidate
+    ) -> bool:
         """Opt-in candidates stay out of production auto selection.
 
         An explicit ``algorithm`` pin equal to the candidate's algorithm still

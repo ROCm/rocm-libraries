@@ -3690,7 +3690,9 @@ def _explicit_path_supported(
     A tuning spec is a knob combination, not proof the problem is runnable.
     ``allow_unsupported=True`` is the only bypass, and it is visible on the spec.
     """
-    if tuning_spec is not None and bool(getattr(tuning_spec, "allow_unsupported", False)):
+    if tuning_spec is not None and bool(
+        getattr(tuning_spec, "allow_unsupported", False)
+    ):
         return True, f"explicit {kind} tuning spec (unsupported override)"
     if kind == "3d":
         return supports_native_unified_attention_3d_tiled(problem)
@@ -3757,9 +3759,7 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
         # torch.cuda.graph wins.
         if not _recommend_graph_replay(problem):
             return False
-        env = (
-            __import__("os").environ.get("HIPDNN_GFX950_3D_GRAPH", "").strip().lower()
-        )
+        env = __import__("os").environ.get("HIPDNN_GFX950_3D_GRAPH", "").strip().lower()
         return env in ("1", "on", "enable", "enabled", "yes", "true")
     return False
 
