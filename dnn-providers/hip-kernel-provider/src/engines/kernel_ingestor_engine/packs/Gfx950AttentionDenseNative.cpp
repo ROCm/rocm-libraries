@@ -47,10 +47,12 @@
  *
  * The catalog has two families, identified by the `ragged` flag:
  *
- *  - **Aligned (132)**: ragged=0. Runtime batch/seqlen_q/seqlen_kv.
- *    Any valid B/Sq/Skv with Sq divisible by 256 and Skv divisible by 64.
- *  - **Tail (17)**: ragged=1. Exact B/Sq/Skv from metadata.
- *    Dense self-attention where Sq is not a tile multiple; boundary tiles handled on-chip.
+ *  - **Aligned**: ragged=0. Runtime batch/seqlen_q/seqlen_kv. Each candidate carries
+ *    its own (block_m, block_n) tile and serves any valid B/Sq/Skv with Sq divisible by
+ *    ITS block_m and Skv divisible by ITS block_n.
+ *  - **Tail**: ragged=1. Exact B/Sq/Skv from metadata.
+ *    Dense self-attention where Sq is not a multiple of the candidate's tile; boundary
+ *    tiles handled on-chip.
  *
  * Key invariants:
  *
@@ -62,8 +64,11 @@
  *     skip metadata B/Sq/Skv equality for these. Tail rows must match exactly.
  *  d. **hipDNN has no `causal` boolean.** Derive from left_bound/right_bound/deprecated
  *     booleans via maskTypeFor(). The deprecated booleans are wrong for shipped bundles.
- *  e. **Tile divisibility is conditional on `ragged`.** An aligned variant requires
- *     Sq % 256 == 0 and Skv % 64 == 0. A ragged variant serves non-multiples.
+ *  e. **The tile is per candidate.** block_m/block_n are completed KMD fields (legacy
+ *     records omit them and complete to 256/64). They are validated against the tile
+ *     rules before anything divides by them; a candidate without a supported tile is
+ *     declined, never launched with a substituted one. block_m sizes the launch;
+ *     block_n only decides applicability.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -80,10 +85,10 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
 
-// KMD fields (10-field schema). The KMD carries only what varies between candidates, so
-// block_m/block_n/waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every
-// shipped variant holds them at one value. A variant that moved any of them would have to
-// add it here first, or the candidates collide on the catalog key and the loader drops one.
+// KMD fields (12-field schema). The KMD carries only what varies between candidates, so
+// waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every shipped variant
+// holds them at one value. A variant that moved any of them would have to add it here
+// first, or the candidates collide on the catalog key and the loader drops one.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
@@ -94,9 +99,12 @@ constexpr std::string_view BATCH_FIELD = "batch";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
+constexpr std::string_view BLOCK_M_FIELD = "block_m";
+constexpr std::string_view BLOCK_N_FIELD = "block_n";
 
-// Fixed BN64 constant shared by all variants. Not a knob; not in the KMD.
-constexpr int64_t GFX950_ATTENTION_DENSE_BLOCK_N = 64;
+/// The tile every legacy record completes to, and the one cold selection prefers.
+constexpr int64_t BASELINE_BLOCK_M = 256;
+constexpr int64_t BASELINE_BLOCK_N = 64;
 
 constexpr std::string_view Q_TOKEN = "gfx950_attention_dense.q.uid";
 constexpr std::string_view K_TOKEN = "gfx950_attention_dense.k.uid";
@@ -592,6 +600,59 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound)
     return binding;
 }
 
+/// A candidate's (block_m, block_n) tile, read from its completed metadata.
+struct AttentionDenseTile
+{
+    int64_t blockM = 0;
+    int64_t blockN = 0;
+};
+
+/**
+ * @brief The candidate's tile, or nullopt when it has none this engine can launch.
+ *
+ * Both fields must be present, hold an integer, and together with the candidate's own
+ * head_size satisfy isSupportedGfx950AttentionDenseTile -- which includes the LDS budget,
+ * so a D128 block_n 256 record is declined like any other unbuildable tile. Legacy
+ * records omit block_m/block_n in their raw form and reach here completed to 256/64, so
+ * an absent field means an uncompleted or malformed record: it is declined rather than
+ * given a default here, because a substituted tile launches a binary with another
+ * binary's grid.
+ *
+ * Every reader that divides by a tile goes through this first.
+ */
+std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel)
+{
+    const auto integerField = [&kernel](std::string_view field) -> std::optional<int64_t> {
+        const auto it = kernel.metadata.find(std::string(field));
+        if(it == kernel.metadata.end())
+        {
+            return std::nullopt;
+        }
+        const auto* value = std::get_if<int64_t>(&it->second);
+        if(value == nullptr)
+        {
+            return std::nullopt;
+        }
+        return *value;
+    };
+
+    const auto headSize = integerField(HEAD_SIZE_FIELD);
+    const auto blockM = integerField(BLOCK_M_FIELD);
+    const auto blockN = integerField(BLOCK_N_FIELD);
+    if(!headSize.has_value() || !blockM.has_value() || !blockN.has_value()
+       || !isSupportedGfx950AttentionDenseTile(*headSize, *blockM, *blockN))
+    {
+        return std::nullopt;
+    }
+    return AttentionDenseTile{*blockM, *blockN};
+}
+
+/// Does @p tile divide both of the graph's sequence lengths?
+bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& problem)
+{
+    return problem.seqLenQ % tile.blockM == 0 && problem.seqLenKv % tile.blockN == 0;
+}
+
 /**
  * @brief Kernel-scoped applicability: does THIS candidate's baked metadata fit?
  *
@@ -600,10 +661,12 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound)
  * same head/dtype configuration. Skip metadata shape equality for these. Tail rows
  * (ragged==1) bake the shape, so exact equality is required there.
  *
- * THE TILE RULE IS CONDITIONAL ON `ragged`. An aligned variant requires
- * `Sq % 256 == 0` and `Skv % 64 == 0`. A ragged variant is compiled with on-chip
- * boundary padding and a ceil'd grid, so it serves the non-multiple lengths an aligned
- * binary cannot.
+ * THE TILE IS THE CANDIDATE'S OWN. It is validated before anything divides by it; a
+ * candidate without a supported tile declines. An aligned candidate requires
+ * `Sq % block_m == 0` and `Skv % block_n == 0` for ITS tile, so one graph can admit
+ * some tiles of a cohort and not others. A tail is compiled with on-chip boundary
+ * padding and a ceil'd grid; it serves only its exact authored self-attention shape,
+ * and only where that shape is not a multiple of its own tile.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
@@ -623,6 +686,13 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
     const auto problem = problemFor(*q, *k);
+
+    // Before any comparison that could divide by it.
+    const auto tile = candidateTile(kernel);
+    if(!tile.has_value())
+    {
+        return false;
+    }
 
     const auto dataTypeName = supportedDataTypeName(problem.dataType);
     if(!dataTypeName.has_value()
@@ -668,33 +738,60 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
-    // Tile divisibility, conditional on the variant's own ragged flag.
-    // block_n is not in the KMD; all variants share BN64.
-    // Whether THIS GRAPH is ragged, derived exactly as the dispatcher derives it
-    // (dispatch/attention/gfx950.py::_dense_spec):
-    //     ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % block_n != 0))
-    const bool aligned = problem.seqLenQ % GFX950_ATTENTION_DENSE_BLOCK_M == 0
-                         && problem.seqLenKv % GFX950_ATTENTION_DENSE_BLOCK_N == 0;
-    const bool graphIsRagged = problem.seqLenQ == problem.seqLenKv && !aligned;
-    if(graphIsRagged != kernelIsRagged)
+    // Tile divisibility against THIS candidate's tile.
+    const bool aligned = tileDivides(*tile, problem);
+    if(!kernelIsRagged)
     {
-        return false;
+        return aligned;
     }
-    // An aligned candidate additionally requires the tile to divide both lengths.
-    return kernelIsRagged || aligned;
+    // A tail serves the graph the dispatcher would build a ragged spec for, derived
+    // exactly as dispatch/attention/gfx950.py::_dense_spec does against the tail's tile:
+    //     ragged = (sq == sk) and ((sq % block_m != 0) or (sk % block_n != 0))
+    return problem.seqLenQ == problem.seqLenKv && !aligned;
 }
+
+/// Scores for the cold ranking. Every alternative scores `ALTERNATIVE_CEILING - key /
+/// KEY_SPAN`, which lies strictly between zero and ALTERNATIVE_CEILING, so the baseline
+/// sits strictly above the whole alternative band.
+constexpr double BASELINE_TILE_SCORE = 2.0;
+constexpr double ALTERNATIVE_CEILING = 1.0;
+/// Weight of block_m in the lexicographic key; exceeds every legal block_n (block_n
+/// divides block_m, so it is at most 256).
+constexpr int64_t BLOCK_M_KEY_WEIGHT = 512;
+/// Exceeds every key a legal tile produces (256 * 512 + 256), so an alternative's score
+/// stays positive. Powers of two keep every score exactly representable.
+constexpr double KEY_SPAN = 262144.0; // 2^18
+/// Below every legal candidate: only a tile kernelMatches already declined gets it.
+constexpr double UNSUPPORTED_TILE_SCORE = 0.0;
 
 /**
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
- * All variants share fixed BN64 tuning; no competing tuning variants exist in this
- * catalog. Return a neutral constant -- ranking has no effect on the shipped set.
+ * A stable fallback order for cold selection, not a performance model:
+ *
+ *  1. The baseline 256/64 tile -- every legacy record's -- above every alternative, so
+ *     untuned selection is unchanged wherever the baseline applies.
+ *  2. The alternatives in ascending lexicographic (block_m, block_n) order: 128/32,
+ *     128/64, 128/128, 256/32, 256/128, 256/256.
+ *
+ * Every distinct tile gets a distinct score, so the selector's descriptor-id tie-break
+ * never decides between two tiles. Exhaustive benchmarking still times every candidate.
  */
 double scoreKernel(const MatchContext& /*context*/,
                    const BoundTokens& /*bound*/,
-                   const KernelDefinition& /*kernel*/)
+                   const KernelDefinition& kernel)
 {
-    return 1.0;
+    const auto tile = candidateTile(kernel);
+    if(!tile.has_value())
+    {
+        return UNSUPPORTED_TILE_SCORE;
+    }
+    if(tile->blockM == BASELINE_BLOCK_M && tile->blockN == BASELINE_BLOCK_N)
+    {
+        return BASELINE_TILE_SCORE;
+    }
+    const int64_t key = tile->blockM * BLOCK_M_KEY_WEIGHT + tile->blockN;
+    return ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
 }
 
 // ---------------------------------------------------------------------------
@@ -811,6 +908,18 @@ public:
                 "bakes that layout and takes no stride arguments");
         }
 
+        // kernel_match declines a candidate without a supported tile, so this is the same
+        // defence in depth: the grid and CTA below come from block_m, and there is no
+        // tile to substitute that would not launch this binary with another's geometry.
+        const auto tile = candidateTile(kernel);
+        if(!tile.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_dense: kernel '" + toString(kernel.kernelId)
+                    + "' declares no supported block_m/block_n tile");
+        }
+
         // KernelCompileOptions dereferences the tensor it is handed UNCONDITIONALLY and
         // throws for any 4D stride order that is neither NCHW nor NHWC. BSHD attention
         // memory is neither, so passing the real query tensor throws at prepare() time.
@@ -847,12 +956,16 @@ public:
         const auto* k = findTensor(context, binding.k);
         const auto problem = problemFor(*q, *k);
 
-        // Grid from the GRAPH PROBLEM, not from descriptor metadata.
-        // Aligned: metadata carries canonical build inputs (B=1, Sq=Skv=512), not
-        // runtime constraints.  Tail: metadata carries exact baked shape, which matches
-        // the problem (enforced by kernelMatches), so problem values are equally correct.
-        const auto geometry = gfx950AttentionDenseGeometry(
-            problem.seqLenQ, problem.numQueryHeads, problem.batch, toString(kernel.kernelId));
+        // Grid from the SELECTED CANDIDATE'S block_m and the GRAPH PROBLEM, not from
+        // descriptor shape metadata. Aligned: metadata carries canonical build inputs
+        // (B=1, Sq=Skv=512), not runtime constraints.  Tail: metadata carries the exact
+        // baked shape, which matches the problem (enforced by kernelMatches), so problem
+        // values are equally correct. block_n does not enter the launch.
+        const auto geometry = gfx950AttentionDenseGeometry(tile->blockM,
+                                                           problem.seqLenQ,
+                                                           problem.numQueryHeads,
+                                                           problem.batch,
+                                                           toString(kernel.kernelId));
 
         code.setBlockSize(geometry.blockX, 1, 1);
         code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
