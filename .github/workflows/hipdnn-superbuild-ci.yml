@@ -203,14 +203,6 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          cache=build/CMakeCache.txt
-          test -f "$cache" || { echo "no CMakeCache.txt at $cache" >&2; exit 1; }
-          # The engine's subdirectory is only added when the option is on, so an
-          # off build produces no archives and there is nothing to assert.
-          if ! grep -qxE 'ENABLE_ASM_SDPA_ENGINE:BOOL=(ON|TRUE|YES|1)' "$cache"; then
-            echo "ENABLE_ASM_SDPA_ENGINE is off; no ASM SDPA archives expected"
-            exit 0
-          fi
           kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
@@ -428,14 +420,6 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          cache=build/CMakeCache.txt
-          test -f "$cache" || { echo "no CMakeCache.txt at $cache" >&2; exit 1; }
-          # The engine's subdirectory is only added when the option is on, so an
-          # off build produces no archives and there is nothing to assert.
-          if ! grep -qxE 'ENABLE_ASM_SDPA_ENGINE:BOOL=(ON|TRUE|YES|1)' "$cache"; then
-            echo "ENABLE_ASM_SDPA_ENGINE is off; no ASM SDPA archives expected"
-            exit 0
-          fi
           kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
