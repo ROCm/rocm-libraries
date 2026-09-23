@@ -31,6 +31,14 @@ occurrences**. Inspect real dims/strides, attributes and UID topology, not filen
 Distinguish unsupported, malformed/unrepresentable and missing-variant outcomes, and
 never reduce the denominator to successful timing rows.
 
+Every population, count and outcome is bound to the identities it was produced under:
+source revision (with a dirty-state or source-content fingerprint for uncommitted
+source), engine, descriptor catalog digest, families/arches and the tested artifact's
+digest. Derive counts from the catalogs and reports themselves, not a hand-maintained
+table. A report whose identities do not match the current catalog is historical, not
+current proof. [RUNBOOK.md](RUNBOOK.md)'s *Handoff* cover sheet records these bindings
+and each claim's proof rung.
+
 ## Applicability and reference contract
 
 rocKE profiles scope the candidate registry to the actual kernel family/algorithm and

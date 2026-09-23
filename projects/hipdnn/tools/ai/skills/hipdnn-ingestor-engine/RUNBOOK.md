@@ -127,6 +127,31 @@ Generate into an empty scratch directory, never over the live engine:
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED"
 ```
 
+Run both against the revision you are about to splice, after the last edit to `$CONFIG`
+and anything it draws on; a render from an earlier revision is not evidence for this one.
+The config loader rejects a YAML mapping that repeats a key — including a repeated `<<` —
+and names the key with its source position. Anchors, aliases and explicit overrides of
+merged keys remain valid. Fix the authored file; there is no later-wins fallback.
+
+When the engine already ships a catalog — an extension, or a regeneration of a shipped
+config — compare the scratch render with that catalog **before splicing**. The target is
+the live authored root (see **Descriptor placement**): for a packaged engine, its
+authored source root `descriptors/<producer>/<bundle>/`, never the packed tree, whose
+`kernel_source` is lowered to kpack; for `direct_load`, its live
+`test_descriptors/<set>/<slug>/` root. Compare semantics, not bytes: resolve
+KDP → UED → KMD by UUID within each tree separately, then
+compare descriptor names, completed metadata (KMD defaults and types filled in),
+`kernel_source` and the families each tree carries. Every difference is either an
+intended, reviewed change or a defect in the authored input; an unexplained difference
+blocks the splice. Minted UUIDs differ on every run and are the only values normalized
+away. They stay in scratch: never copy them over live descriptors, native sources or
+tests. [extend.md](extend.md)'s *Addition-only splicing* owns how scratch references map
+onto retained IDs.
+
+`verify_variant_sets.py` (below, and in full mode in stage 4) checks its own documented
+rungs on one tree. It supplements this comparison and does not replace it: it never
+compares the authored render with what ships.
+
 The verification root follows the configured dialect (see **Descriptor placement**):
 `direct_load` emits under `test_descriptors/`, `packaged` under `descriptors/`. A root
 holding no `*.kdp.json` is a hard failure, so the wrong root fails immediately:
@@ -275,7 +300,8 @@ If the profile declares a launch-surface audit, also run:
 "$PY" "$GEN/tools/launch_surface.py" "$PROFILE" --check
 ```
 
-**Gate:** final authored inventory, completed hooks and source/test splices, no
+**Gate:** a current-revision dry-run and render, every difference from any shipped
+catalog explained, final authored inventory, completed hooks and source/test splices, no
 selected-path placeholders, and reviewed structural/field/ABI results. None proves
 native loading or numerical dispatch.
 
@@ -649,3 +675,47 @@ Report [SKILL.md](SKILL.md)'s completion evidence and exact limitations. Keep ex
 copies and probes disposable and retain their inputs/results in the evidence directory
 defined under **Paths and interpreters**. For blocked work, name the last completed
 stage and missing prerequisite; do not substitute a proposed command or queued job for proof.
+
+Open the handoff with a scope/proof cover sheet. It binds each claim to the reports that
+prove it; it is not another report, and it has no schema or tool of its own:
+
+- **Source.** The exact commit SHA. For an uncommitted candidate, add a fingerprint of
+  its dirty state or source content — for example digests of the diff against `HEAD`
+  and of every untracked input. `HEAD` alone does not identify the tested source.
+- **Engine and scope.** The installed engine ID (`$ENGINE`) and the families and
+  architectures the claims cover.
+- **Catalog and artifact.** A digest of the descriptor catalog the claims are about, and,
+  recorded separately, the digest of each tested artifact (packed archive, installed
+  plugin). The authored catalog and the artifact that ran are distinct identities. The
+  catalog digest is the sha256 over the path-sorted `sha256sum` lines
+  (`<sha256>  ./<relative path>`) of every `*.json` under the compared root; the artifact
+  digest is the `sha256sum` of each tested archive or plugin file:
+
+  ```bash
+  (cd "$ROOT" && find . -name '*.json' -type f -print0 | sort -z | xargs -0 sha256sum) | sha256sum
+  ```
+- **Evidence.** Links to the authoritative reports and logs, unchanged — the tools'
+  original outputs, never edited or summarized copies. Every count is derived from those
+  catalogs and reports, never retyped into a hand-maintained table.
+- **Proof rung per claim.** Constructed/static, compiled, loaded/censused or GPU-served:
+  the rung the linked evidence actually observed for that claim. A rung not run is
+  written as not run; a missing report is missing, not implied by a lower or older one.
+- **Outcome accounting.** Served, skipped and declined counts taken from the reports,
+  with each intentional decline named as intentional.
+
+A report's identities are those recorded beside it in the handoff/evidence directory
+when it was produced; the existing tools do not record them. A report is current proof
+only when those identities — source, engine, catalog digest, families/arches and
+artifact digest — match the current candidate. A report whose identities do not match
+the current catalog is historical: cite it as such, never as proof of the current
+catalog.
+
+When the change alters generator output or its spelling — a template, fragment, helper
+or emitted CMake — the handoff also inventories every cross-format caller of that
+output, each with its owner: helper references, emitted fragments, CMake callers,
+examples (including runbook and README snippets) and consumer tests. Targeted searches
+at change time build the inventory; it is evidence for this change, not a permanent
+source-text test. Consumption is proved by rendering and running the real consumer —
+configure the CMake, then list and run its CTest entries — never by assertions on
+source strings. A test pinning an obsolete spelling is removed, not repinned to the new
+one.

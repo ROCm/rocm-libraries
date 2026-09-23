@@ -1,3 +1,29 @@
+{#
+  Template-maintainer note; a Jinja comment, so none of it reaches the rendered fragment.
+
+  Cache ownership follows the dispatch handler's routing, not the dialect. A handler
+  that routes through buildIngestorKernelCode hands it a KpackKernelLoader, and the
+  shipped packs build that loader over a process-lifetime KpackModuleCache defined in
+  their own native file. That pack owns the cache, so its row names a reset function and
+  resetIngestorModuleCachesForTesting reaches it through resetModuleCache. The shipped
+  hipkernel:Pointwise and hipkernel:ConvFwd packs both route this way and both carry a
+  reset, Pointwise although its unit kernels are embedded_source.
+
+  This template sees only the dialect. The packaged branch names a reset function,
+  declared by ingestor_packs_hpp.j2 and defined as a stub by native.cpp.j2; the
+  direct_load branch leaves resetModuleCache null and emits no cache. A direct-load
+  implementation that caches modules owns that cache and supplies its own reset:
+  define it outside the pack's anonymous namespace, declare it in IngestorPacks.hpp and
+  replace the null field at the splice. README.md ("The five CMake/registration splice
+  points") states the same rule for authors.
+
+  The emitted rows are the fragment's contract: three fields, both branches, the null
+  direct-load default and cpp_escape on the label. tests/test_fragment_contracts.py
+  reads the first table row and the first reset reference in the rendered text, so the
+  emitted comment lines may state the ownership rule but must never contain row text: no
+  opening brace-quote, no ampersand-symbol-comma and no ampersand reset...ModuleCache
+  reference.
+#}
 ## Splice point 4b: .../kernel_ingestor_engine/IngestorPacks.cpp
 ## Add this row to the s_packs table. Both this edit AND the IngestorPacks.hpp declaration
 ## edit (ingestor_packs.hpp.txt) are required -- see that fragment.
@@ -5,7 +31,9 @@
 ## The struct is (label, registerSymbols, resetModuleCache). A row is valid with either
 ## reset value, so nothing downstream reports the wrong one:
 ##   * packaged/kpack kernels  -> &reset<Name>ModuleCache
-##   * embedded_source kernels -> nullptr (no archive, nothing to drop)
+##   * direct_load/embedded_source kernels -> nullptr, the default for a pack that caches
+##     nothing; a pack whose implementation caches modules supplies its own reset (see
+##     README.md "The five CMake/registration splice points")
 ## A packaged engine left at `nullptr` ships green and never drops its module cache.
 ## Check the IngestorPack struct before splicing: this row must match it field for field.
 {% if config.is_packaged -%}
@@ -14,6 +42,8 @@
 ## namespace and declare it in IngestorPacks.hpp beside the register function.
         {"{{ config.engine.name | cpp_escape }}", &{{ config.register_symbols_fn }}, &reset{{ config.engine.pascal_name }}ModuleCache},
 {% else -%}
-## direct_load/embedded_source: no archive is held, so there is nothing to drop.
+## direct_load/embedded_source: nullptr is the default for a pack that caches nothing. A
+## pack whose implementation caches modules supplies its own reset (see README.md
+## "The five CMake/registration splice points").
         {"{{ config.engine.name | cpp_escape }}", &{{ config.register_symbols_fn }}, nullptr},
 {% endif -%}

@@ -214,6 +214,20 @@ in the header but missing from the `.cpp` `s_packs` table silently vanishes from
 unit-test binary (the static-archive linker drops an unreferenced object) while still
 working in the plugin `.so`.
 
+**The `s_packs` row's `resetModuleCache` follows cache ownership, and ownership follows
+the dispatch handler's routing, not the dialect.** A handler that routes through
+`buildIngestorKernelCode` hands it a `KpackKernelLoader`; the shipped packs build that
+loader over a process-lifetime `KpackModuleCache` in their own native file, so the pack
+owns the cache and its row names a reset function that
+`resetIngestorModuleCachesForTesting()` calls. The shipped `hipkernel:Pointwise` and
+`hipkernel:ConvFwd` packs both route this way and both carry a reset -- Pointwise
+although its `unit/pointwise/` kernels are `embedded_source`. The generator sees only
+the dialect: a packaged engine's row names a reset that the `.hpp` fragment declares and
+the native stub defines, and a `direct_load` engine's row leaves `resetModuleCache` null
+and emits no cache. A direct-load implementation that caches modules owns that cache and
+supplies its own reset: define it outside the pack's anonymous namespace, declare it in
+`IngestorPacks.hpp`, and replace the null field in the spliced row.
+
 ## The generate -> validate round trip
 
 `hipdnn_validate_descriptors` requires a build configured with
