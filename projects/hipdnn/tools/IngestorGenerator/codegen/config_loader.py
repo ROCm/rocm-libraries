@@ -13,6 +13,7 @@ import itertools
 import posixpath
 import re
 import warnings as _warnings
+from collections.abc import Hashable
 from pathlib import Path, PureWindowsPath
 
 import yaml
@@ -54,6 +55,63 @@ class ConfigError(Exception):
     pass
 
 
+#: Stands in for every ``<<`` key while explicit keys are compared, so two merge
+#: declarations collide with each other and never with an authored ``"<<"`` string.
+_MERGE_KEY = object()
+
+
+class _DuplicateKeySafeLoader(yaml.SafeLoader):
+    """``SafeLoader`` that refuses a mapping declaring the same key twice.
+
+    Stock construction keeps the last of two equal keys and drops the first
+    without a word, so a key repeated while editing a long config silently
+    replaces the value the author sees first. Each mapping node's own authored
+    keys, ``<<`` included, are compared once, before ``SafeLoader.flatten_mapping``
+    splices merged keys into it: an explicit key overriding a merged one, and
+    precedence within one ``<<`` sequence, stay stock behaviour. Keys are built
+    by the stock constructor, so two spellings YAML resolves to one value (``0x10``
+    and ``16``) collide, and ``"off"`` and ``off`` (a string and ``False``) do not.
+    """
+
+    def __init__(self, stream):
+        super().__init__(stream)
+        # A merge source reached through several aliases is one node, already
+        # flattened after its first visit; comparing it again would treat its
+        # inherited keys as authored ones.
+        self._keys_compared = set()
+
+    def flatten_mapping(self, node):
+        if node not in self._keys_compared:
+            self._keys_compared.add(node)
+            self._reject_repeated_keys(node)
+        super().flatten_mapping(node)
+
+    def _reject_repeated_keys(self, node) -> None:
+        first_seen = {}
+        for key_node, _ in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                key, shown = _MERGE_KEY, "<<"
+            elif key_node.tag == "tag:yaml.org,2002:value":
+                # Stock flattening retags a plain ``=`` key as a string before
+                # construction; no constructor exists for the value tag itself.
+                key = shown = self.construct_scalar(key_node)
+            else:
+                key = shown = self.construct_object(key_node)
+            if not isinstance(key, Hashable):
+                # Stock construction reports the unhashable key itself.
+                continue
+            first, first_shown = first_seen.setdefault(key, (key_node, shown))
+            if first is not key_node:
+                raise yaml.constructor.ConstructorError(
+                    f"while constructing a mapping, key {first_shown!r} is first "
+                    f"declared",
+                    first.start_mark,
+                    f"found duplicate key {shown!r}; YAML would silently keep only "
+                    f"this later value",
+                    key_node.start_mark,
+                )
+
+
 #: Private, never authored: an expanded kernel dict carries the
 #: ``(where, mapping)`` of the authored ``kernel_source`` it was built from, so
 #: the closed per-kind vocabulary is applied to the author's keys and reported
@@ -79,11 +137,14 @@ def load_config(path: Path) -> IngestorConfig:
     """Load and validate a YAML config file, returning an ``IngestorConfig``.
 
     A ``.gz`` path is decompressed transparently. Raises ``ConfigError`` on any
-    structural problem or failed pre-mint check; no UUID is minted here.
+    structural problem or failed pre-mint check; no UUID is minted here. Input
+    that is not safe YAML, or a mapping declaring one key twice, raises the
+    parser's ``yaml.YAMLError`` carrying the source marks.
     """
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt") as f:
-        raw = yaml.safe_load(f)
+        # _DuplicateKeySafeLoader subclasses yaml.SafeLoader; safe_load takes no Loader.
+        raw = yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
 
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: YAML document must be a top-level mapping.")
