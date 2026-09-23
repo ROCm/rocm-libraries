@@ -306,7 +306,8 @@ bool rocke_matmul_nbits_validate_common_spec(const rocke_matmul_nbits_spec_t* sp
                                          ROCKE__WMMA_C_DTYPE,
                                          t->warp_tile_m,
                                          t->warp_tile_n,
-                                         t->warp_tile_k)
+                                         t->warp_tile_k,
+                                         nullptr)
            == NULL)
         {
             ROCKE_NBITS_REJECT("unsupported fp16 warp_tile (%d, %d, %d) on %s",

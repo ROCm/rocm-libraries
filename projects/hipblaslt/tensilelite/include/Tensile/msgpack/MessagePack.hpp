@@ -173,6 +173,35 @@ namespace TensileLite
                 }
             }
 
+            // Hands back a view of a BIN value without converting it to a C++
+            // type. Used for the indexed library format's solution blob, which
+            // is copied wholesale and deliberately left unparsed.
+            //
+            // This cannot go through input()/mapRequired(): SequenceTraits is
+            // specialized for every std::vector<T> below, so a byte vector
+            // would be read as a msgpack ARRAY rather than a BIN.
+            bool mapRawBytes(const char* key, const uint8_t*& ptr, size_t& size)
+            {
+                if(objectMap.empty())
+                    objectToMap(object, objectMap);
+
+                auto iterator = objectMap.find(key);
+                if(iterator == objectMap.end())
+                    return false;
+
+                auto const& value = iterator->second;
+                if(value.type != msgpack::type::object_type::BIN)
+                    return false;
+
+                ptr  = reinterpret_cast<const uint8_t*>(value.via.bin.ptr);
+                size = value.via.bin.size;
+
+                if(TensileLite::Debug::Instance().printDataInit())
+                    usedKeys.insert(key);
+
+                return true;
+            }
+
             template <typename T>
             void input(T& obj)
             {
@@ -319,6 +348,45 @@ namespace TensileLite
             static void mapOptional(MessagePackInput& io, const char* key, T& obj)
             {
                 io.mapOptional(key, obj);
+            }
+
+            static bool
+                mapRawBytes(MessagePackInput& io, const char* key, const uint8_t*& ptr, size_t& size)
+            {
+                return io.mapRawBytes(key, ptr, size);
+            }
+
+            // Builds the callable a SolutionBlobCache uses to parse one solution
+            // out of the blob, long after this load has returned.
+            //
+            // The sub-input is given a null context on purpose. Only library
+            // node traits consult the context, and the LibraryIOContext driving
+            // this load lives on the loader's stack -- capturing it would
+            // dangle the first time a query materializes a solution.
+            template <typename MySolution>
+            static std::function<std::shared_ptr<MySolution>(const uint8_t*, size_t)>
+                solutionDeserializer(MessagePackInput& io)
+            {
+                return [](const uint8_t* data, size_t size) -> std::shared_ptr<MySolution> {
+                    try
+                    {
+                        auto handle
+                            = msgpack::unpack(reinterpret_cast<const char*>(data), size);
+
+                        MessagePackInput            sub(handle.get(), nullptr);
+                        std::shared_ptr<MySolution> solution;
+                        PointerMappingTraits<MySolution, MessagePackInput>::mapping(sub, solution);
+
+                        if(!sub.error.empty())
+                            return nullptr;
+
+                        return solution;
+                    }
+                    catch(std::exception const&)
+                    {
+                        return nullptr;
+                    }
+                };
             }
 
             static bool outputting(MessagePackInput& io)
