@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,10 +37,6 @@
 #include <algorithm>
 #include <hipsparse.h>
 #include <string>
-
-#if(!defined(CUDART_VERSION))
-#include <rocsparse/rocsparse.h>
-#endif
 
 using namespace hipsparse;
 using namespace hipsparse_test;
@@ -330,18 +326,18 @@ void testing_csr2hyb(Arguments argus)
         const int*  d_coo_row_ind;
         const int*  d_coo_col_ind;
         const void* d_coo_val;
-        CHECK_ROCSPARSE_ERROR(rocsparse_hyb_mat_get_info((rocsparse_hyb_mat)hyb,
-                                                         &h_m,
-                                                         &h_n,
-                                                         nullptr,
-                                                         &h_ell_nnz,
-                                                         &h_ell_width,
-                                                         &d_ell_col_ind,
-                                                         &d_ell_val,
-                                                         &h_coo_nnz,
-                                                         &d_coo_row_ind,
-                                                         &d_coo_col_ind,
-                                                         &d_coo_val));
+        CHECK_HIPSPARSE_ERROR(hipsparseHybMatGetInfo(hyb,
+                                                     &h_m,
+                                                     &h_n,
+                                                     nullptr,
+                                                     &h_ell_nnz,
+                                                     &h_ell_width,
+                                                     &d_ell_col_ind,
+                                                     &d_ell_val,
+                                                     &h_coo_nnz,
+                                                     &d_coo_row_ind,
+                                                     &d_coo_col_ind,
+                                                     &d_coo_val));
 
         // Check if sizes match
         unit_check_general(1, 1, 1, &m, &h_m);

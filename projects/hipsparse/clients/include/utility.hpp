@@ -40,10 +40,6 @@
 
 #include <iostream>
 
-#if(!defined(CUDART_VERSION))
-#include <rocsparse/rocsparse.h>
-#endif
-
 #ifdef GOOGLE_TEST
 #include "gtest/gtest.h"
 #endif
@@ -271,28 +267,6 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     } while(0)
 #endif
 #define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
-
-#if(!defined(CUDART_VERSION))
-// CHECK_ROCSPARSE_ERROR
-// Used only by AMD-backend test code that calls the rocsparse accessor API
-// directly (e.g. rocsparse_hyb_mat_get_info/rocsparse_hyb_mat_set_info),
-// instead of reinterpreting the opaque hipsparseHybMat_t as a raw struct.
-#ifdef GOOGLE_TEST
-#define CHECK_ROCSPARSE_ERROR2(ERROR) ASSERT_EQ(ERROR, rocsparse_status_success)
-#else
-#define CHECK_ROCSPARSE_ERROR2(ERROR)                                                        \
-    do                                                                                       \
-    {                                                                                        \
-        rocsparse_status status = ERROR;                                                     \
-        if(status != rocsparse_status_success)                                               \
-        {                                                                                    \
-            fprintf(stderr, "rocSPARSE error: '%d' at %s:%d\n", status, __FILE__, __LINE__); \
-            exit(EXIT_FAILURE);                                                              \
-        }                                                                                    \
-    } while(0)
-#endif
-#define CHECK_ROCSPARSE_ERROR(ERROR) CHECK_ROCSPARSE_ERROR2(ERROR)
-#endif
 
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST

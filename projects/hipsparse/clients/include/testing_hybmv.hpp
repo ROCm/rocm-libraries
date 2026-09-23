@@ -62,18 +62,18 @@ void testing_hybmv_bad_arg(const Arguments& argus)
     const int     h_n       = safe_size;
     const int64_t h_ell_nnz = safe_size;
     const int     h_coo_nnz = safe_size;
-    CHECK_ROCSPARSE_ERROR(rocsparse_hyb_mat_set_info((rocsparse_hyb_mat)hyb,
-                                                     &h_m,
-                                                     &h_n,
-                                                     nullptr,
-                                                     &h_ell_nnz,
-                                                     nullptr,
-                                                     nullptr,
-                                                     nullptr,
-                                                     &h_coo_nnz,
-                                                     nullptr,
-                                                     nullptr,
-                                                     nullptr));
+    CHECK_HIPSPARSE_ERROR(hipsparseHybMatSetInfo(hyb,
+                                                 &h_m,
+                                                 &h_n,
+                                                 nullptr,
+                                                 &h_ell_nnz,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 &h_coo_nnz,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr));
 
     auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     auto dy_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
@@ -226,18 +226,18 @@ void testing_hybmv(Arguments argus)
         const int*  d_coo_row_ind;
         const int*  d_coo_col_ind;
         const void* d_coo_val;
-        CHECK_ROCSPARSE_ERROR(rocsparse_hyb_mat_get_info((rocsparse_hyb_mat)hyb,
-                                                         nullptr,
-                                                         nullptr,
-                                                         nullptr,
-                                                         &ell_nnz,
-                                                         &ell_width,
-                                                         &d_ell_col_ind,
-                                                         &d_ell_val,
-                                                         &coo_nnz,
-                                                         &d_coo_row_ind,
-                                                         &d_coo_col_ind,
-                                                         &d_coo_val));
+        CHECK_HIPSPARSE_ERROR(hipsparseHybMatGetInfo(hyb,
+                                                     nullptr,
+                                                     nullptr,
+                                                     nullptr,
+                                                     &ell_nnz,
+                                                     &ell_width,
+                                                     &d_ell_col_ind,
+                                                     &d_ell_val,
+                                                     &coo_nnz,
+                                                     &d_coo_row_ind,
+                                                     &d_coo_col_ind,
+                                                     &d_coo_val));
 
         std::vector<int> hell_col(ell_nnz);
         std::vector<T>   hell_val(ell_nnz);
