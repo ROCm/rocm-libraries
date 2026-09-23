@@ -3725,18 +3725,23 @@ class GlobalAtomicIncU32Saddr(CommonInstruction):
 
 
 # --- Gfx1250 vector conversions ---
+# All of these are ``VCvtInstruction`` in rocisa's cvt.hpp, so they must be here
+# too: KernelWriterAssembly's epilogue store rearrange loop places the
+# ``s_wait_loadcnt`` in front of the first ``VCvtInstruction`` it sees. Deriving
+# from CommonInstruction instead made the isinstance check miss, so the wait
+# landed after the convert -- reading the loaded VGPR before the load retired.
 # logicalIR: VCvtPkF32toF16
-VCvtPkF32toF16 = _make_scalar_alu_class("VCvtPkF32toF16", "v_cvt_pk_f16_f32", InstType.INST_NOTYPE)
+VCvtPkF32toF16 = _make_scalar_alu_class("VCvtPkF32toF16", "v_cvt_pk_f16_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
 # logicalIR: VCvtF64toU32
-VCvtF64toU32 = _make_scalar_unary_class("VCvtF64toU32", "v_cvt_u32_f64", InstType.INST_U32)
+VCvtF64toU32 = _make_scalar_unary_class("VCvtF64toU32", "v_cvt_u32_f64", InstType.INST_U32, base=VCvtInstruction)
 # logicalIR: VCvtU32toF64
-VCvtU32toF64 = _make_scalar_unary_class("VCvtU32toF64", "v_cvt_f64_u32", InstType.INST_F64)
+VCvtU32toF64 = _make_scalar_unary_class("VCvtU32toF64", "v_cvt_f64_u32", InstType.INST_F64, base=VCvtInstruction)
 # logicalIR: PVCvtBF16toFP32
-PVCvtBF16toFP32 = _make_scalar_unary_class("PVCvtBF16toFP32", "v_cvt_f32_bf16", InstType.INST_F32)
+PVCvtBF16toFP32 = _make_scalar_unary_class("PVCvtBF16toFP32", "v_cvt_f32_bf16", InstType.INST_F32, base=VCvtInstruction)
 # logicalIR: VCvtPkF32toFP16
-VCvtPkF32toFP16 = _make_scalar_alu_class("VCvtPkF32toFP16", "v_cvt_pk_f16_f32", InstType.INST_NOTYPE)
+VCvtPkF32toFP16 = _make_scalar_alu_class("VCvtPkF32toFP16", "v_cvt_pk_f16_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
 # logicalIR: VCvtFP8toF16
-VCvtFP8toF16 = _make_scalar_unary_class("VCvtFP8toF16", "v_cvt_f16_fp8", InstType.INST_F16)
+VCvtFP8toF16 = _make_scalar_unary_class("VCvtFP8toF16", "v_cvt_f16_fp8", InstType.INST_F16, base=VCvtInstruction)
 
 
 # ==========================================================================
