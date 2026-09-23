@@ -159,8 +159,7 @@ declared independent reference with `passed: true`, `execution_success: true` an
 `tolerance_match: true`. A failed/missing comparison, malformed result, nonzero command
 exit, unavailable reference, NaN or unwritten output fails the gate, and
 reference-provider rows without comparison evidence are not validated graphs. Only a
-row with an explicit `role: reference` is reference evidence: a requested-provider row
-that omits `role` is an engine row, so it cannot satisfy the reference gate.
+row with an explicit `role: reference` satisfies the reference gate.
 
 Select a reference capable of the actual graph semantics: neither current CPU nor GPU SDPA
 reference supports a sink UID, and an unsupported reference means **BLOCKED**, not a CPU

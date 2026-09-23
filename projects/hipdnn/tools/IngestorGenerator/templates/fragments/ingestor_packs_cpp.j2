@@ -5,9 +5,11 @@
 ## The struct is (label, registerSymbols, resetModuleCache). Check the IngestorPack struct
 ## before splicing: this row must match it field for field.
 {% if config.is_packaged -%}
-## resetModuleCache: the generated reset; see README.md "The five CMake/registration splice points".
+## resetModuleCache: the generated reset, whose stub must clear the module cache; see
+## IngestorGenerator/README.md "The five CMake/registration splice points".
         {"{{ config.engine.name | cpp_escape }}", &{{ config.register_symbols_fn }}, &reset{{ config.engine.pascal_name }}ModuleCache},
 {% else -%}
-## resetModuleCache: nullptr unless the implementation caches modules; see README.md "The five CMake/registration splice points".
+## resetModuleCache: nullptr unless the implementation caches modules; see
+## IngestorGenerator/README.md "The five CMake/registration splice points".
         {"{{ config.engine.name | cpp_escape }}", &{{ config.register_symbols_fn }}, nullptr},
 {% endif -%}

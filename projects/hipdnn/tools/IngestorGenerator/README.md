@@ -215,10 +215,12 @@ unit-test binary (the static-archive linker drops an unreferenced object) while 
 working in the plugin `.so`.
 
 **The `s_packs` row's `resetModuleCache` follows cache ownership, not the dialect.** A
-packaged row names the generated reset. A `direct_load` row is `nullptr` unless the
-implementation caches modules, as `hipkernel:Pointwise` does although its `unit/pointwise/`
-kernels are `embedded_source`; that implementation defines its reset outside the pack's
-anonymous namespace, declares it in `IngestorPacks.hpp` and names it in the spliced row.
+packaged row names `reset<Name>ModuleCache`, whose generated stub the implementation fills
+in to clear its module cache; a packaged row set to `nullptr` still links and passes, and
+the cache is never dropped. A `direct_load` row is `nullptr` unless the implementation
+caches modules, as `hipkernel:Pointwise` does although its `unit/pointwise/` kernels are
+`embedded_source`; that implementation defines its reset outside the pack's anonymous
+namespace, declares it in `IngestorPacks.hpp` and names it in the spliced row.
 
 ## The generate -> validate round trip
 

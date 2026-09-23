@@ -15,6 +15,7 @@ import re
 import warnings as _warnings
 from collections.abc import Hashable
 from pathlib import Path, PureWindowsPath
+from typing import Any
 
 import yaml
 
@@ -133,12 +134,12 @@ def _unique_arch(raw_arch, where: str) -> list[str]:
     return list(dict.fromkeys(_require_sequence(raw_arch, where, what="arch ids")))
 
 
-def read_yaml(path: Path):
+def read_yaml(path: Path) -> Any:
     """Parse one YAML file and return the document unvalidated.
 
-    A ``.gz`` path is decompressed transparently. Input that is not safe YAML, or
-    a mapping declaring one key twice, raises the parser's ``yaml.YAMLError``
-    carrying the source marks.
+    An empty file returns ``None``. A ``.gz`` path is decompressed transparently.
+    Input that is not safe YAML, or a mapping declaring one key twice, raises the
+    parser's ``yaml.YAMLError`` carrying the source marks.
     """
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt") as f:
@@ -149,7 +150,7 @@ def read_yaml(path: Path):
 def load_config(path: Path) -> IngestorConfig:
     """Load and validate a YAML config file, returning an ``IngestorConfig``.
 
-    Parses with `read_yaml`, so its ``yaml.YAMLError`` propagates. Raises
+    Parses with ``read_yaml``, so its ``yaml.YAMLError`` propagates. Raises
     ``ConfigError`` on any structural problem or failed pre-mint check; no UUID
     is minted here.
     """

@@ -680,8 +680,8 @@ proving it:
     printf '%s\n' "$lines" | sha256sum
   )
   ```
-- **Evidence.** Links to the reports and logs; every count is derived from them, never
-  retyped into a hand-maintained table.
+- **Evidence.** Links to the tools' unedited reports and logs; every count is derived
+  from them, never retyped into a hand-maintained table.
 - **Proof rung per claim.** Constructed/static, compiled, loaded/censused or GPU-served:
   the rung the linked evidence observed for that claim. A rung not run is written as not
   run; a missing report is missing, not implied by a lower or older one.
