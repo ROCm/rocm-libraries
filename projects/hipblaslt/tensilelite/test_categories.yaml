@@ -81,6 +81,38 @@ test_categories:
       - "full"
       - "all"
 
+  # Common-GEMM tests on real hardware, matching Math CI's `preliminary` stage
+  # (`tox -e py3 -- Tensile/Tests -m common`). Selected by TheRock's
+  # tensilelite-common job, which pins this category via TEST_CATEGORY.
+  #
+  # Unlike the emulation categories below, arch selection here is opt-out:
+  # configMarks() tags every config `common` from its path and turns each
+  # config's declared skip-gfxNNNN marks into skips for the arch that
+  # rocm_agent_enumerator reports. Selecting on a concrete gfx target instead
+  # would match almost nothing, so do not use {AMDGPU_TARGETS} here.
+  #
+  # --gpu-targets is deliberately absent. Hardware detection also sets
+  # PyTestBuildArchNames, which Tensile reads as the build architecture, so a
+  # gfx120X runner builds for whichever of gfx1200/gfx1201 it actually has.
+  hw-common:
+    description: "Common GEMM tests on real hardware"
+    test_paths:
+      - "Tensile/Tests/common"
+    pytest_markers:
+      - "common"
+    # assign_gpu_to_worker() maps workers onto GPUs with worker_num % num_gpus,
+    # and worker_lock_path hands out a per-worker lock, so on a 1-GPU runner
+    # every worker shares GPU 0 with no mutual exclusion. 4 is what Math CI
+    # runs (tox default); the 16 used by the FFM categories assumes one
+    # emulator per worker.
+    parallel_workers: 4
+    pytest_args:
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++"
+    labels:
+      - "hw-common"
+
   # Common-GEMM tests (GPU emulation). These are the only tests that
   # build/run kernels through the client, so they require the TensileLite-specific
   # conftest options passed via `pytest_args` below. {AMDGPU_TARGETS} is
@@ -154,6 +186,9 @@ execution_settings:
     standard: 2700        # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
+    # Hang guard only; Math CI runs this suite with no per-test timeout. The
+    # slowest config seen there (streamk/sk_I8gemm_quick.yaml) took 3173s.
+    hw-common: 5400       # 90 minutes
     ffm-quick: 2700       # 45 minutes
     emu-fast: 2400        # 40 minutes
     emu-full: 28800       # 8 hours
