@@ -46,7 +46,7 @@ govern what you commit and how you describe it.
   recording benchmark methodology or results must be the document's or section's primary
   purpose.
   Every compared kernel arm must pass an on-silicon numeric gate in the measured run:
-  outputs and any mutated state against an independent fp32 reference, at a declared input
+  outputs and any mutated state against an independent reference, at a declared input
   dtype and tolerance. Byte-identity, compilation, or successful launch alone is not a
   correctness gate. State the result, workload and relevant axes, baseline implementation
   and version, hardware target, measurement method, reproducible provenance, and material
@@ -63,7 +63,8 @@ govern what you commit and how you describe it.
   stale and are difficult to review in context.
 - **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
   other products/software. Do not make unsupported marketing, general superiority,
-  availability, or roadmap claims. Scoped technical comparisons that satisfy the evidence
+- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
+  other products/software. Do not make unsupported marketing, general superiority, performance,
   rule above are permitted; marketing language is not. **Protect AMD.**
 - **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
   external Git issue links are OK.
