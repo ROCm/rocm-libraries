@@ -16,6 +16,17 @@
 
 #define CK_TILE_FMHA_HANDLE_XOR_LENGTH_FOLD 0
 
+// Number of XCDs the workgroups are dispatched round-robin across, used by the
+// head-major decode to remap the grid into contiguous per-XCD segments.
+// 0 disables the remap. Only enabled where it has been measured (gfx1250).
+#if !defined(CK_TILE_FMHA_FWD_NUM_XCDS)
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+#define CK_TILE_FMHA_FWD_NUM_XCDS 8
+#else
+#define CK_TILE_FMHA_FWD_NUM_XCDS 0
+#endif
+#endif
+
 #if !defined(CK_TILE_FMHA_FORCE_HEAD_MAJOR)
 #if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx11__) || defined(__gfx12__))
 #define CK_TILE_FMHA_FORCE_HEAD_MAJOR 1
@@ -1547,8 +1558,42 @@ struct FmhaFwdKernel
                 const index_t num_tile_total   = has_padded_seqlen_k ? gridDim.z : gridDim.y;
                 const index_t num_head         = gridDim.x;
                 const index_t blocks_per_batch = num_head * num_tile_total;
-                const index_t linear_id =
-                    blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+                index_t linear_id = blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+
+#if CK_TILE_FMHA_FWD_NUM_XCDS
+                // The m-tiles of one (batch, head) are consecutive in linear_id and
+                // read the same K/V, but block L is dispatched to XCD
+                // L % kNumXcds, which scatters them over every L2. Remap the ids to
+                // contiguous per-XCD segments so they share one, the same bijection
+                // as GemmSpatiallyLocalTilePartitioner::RemapXCD in branch-free form:
+                // segment x starts at x * per + min(x, rem) and holds
+                // per + (x < rem) ids.
+                //
+                // Only when every (batch, head) has the same work. The grid is sized
+                // by the longest sequence, so with per-batch lengths (group mode, or
+                // cu_seqlen_q/k in batch mode) the short batches' blocks exit early
+                // and whole-batch segments leave the XCDs unbalanced; the plain
+                // round-robin spreads every batch over all of them.
+                const bool uniform_work = [&] {
+                    if constexpr(kIsGroupMode)
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        return kargs.cu_seqlen_q_ptr == nullptr && kargs.cu_seqlen_k_ptr == nullptr;
+                    }
+                }();
+                if(uniform_work)
+                {
+                    constexpr index_t kNumXcds = CK_TILE_FMHA_FWD_NUM_XCDS;
+                    const index_t n_total      = gridDim.x * gridDim.y * gridDim.z;
+                    const index_t per          = n_total / kNumXcds;
+                    const index_t rem          = n_total - per * kNumXcds;
+                    const index_t xcd          = linear_id % kNumXcds;
+                    linear_id                  = xcd * per + min(xcd, rem) + linear_id / kNumXcds;
+                }
+#endif
 
                 const index_t i_batch = linear_id / blocks_per_batch;
                 const index_t rem0    = linear_id - i_batch * blocks_per_batch;
@@ -1603,6 +1648,9 @@ struct FmhaFwdKernel
             const index_t num_tile_n1 =
                 ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
 
+            // NOTE: no XCD remap on this path (e.g. bshd inputs). Dispatch order is
+            // blockIdx.x (head) fastest, so the m-tiles of one head are not
+            // consecutive and the remap above would not group them.
             const index_t i_block = blockIdx.y; // blockIdx.x
             const index_t i_nhead = blockIdx.x; // blockIdx.y
             const index_t i_batch = blockIdx.z;
