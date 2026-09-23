@@ -3,6 +3,8 @@
 ArchitectureName: gfx1151
 CUCount: null
 DefaultSolution:
+  ISA: [11, 5, 1]
+  Valid: true
   1LDSBuffer: 0
   ActivationAlt: false
   ActivationFuncCall: true
