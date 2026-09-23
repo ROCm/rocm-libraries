@@ -27,7 +27,6 @@ from config_harness import (
     benchmark_problem_fingerprint,
     emit_kernels_from_config,
     golden_digest,
-    solutions_from_config,
 )
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
@@ -52,9 +51,6 @@ _CONFIG = os.path.join(
     "gfx950",
     "subtile3_gr_variants.yaml",
 )
-
-_MULTI_PROBLEM_CONFIG = "Tensile/Tests/common/gemm/use_beta_false.yaml"
-
 
 def _pin_rocisa(arch, wavefront):
     from rocisa import rocIsa
@@ -180,17 +176,20 @@ def test_config_emit_smoke_rejects_unexpected_error(monkeypatch):
         assert_config_emits("unused.yaml", "gfx942")
 
 
-def test_config_harness_selects_problem_entry():
-    first = solutions_from_config(
-        _MULTI_PROBLEM_CONFIG, arch="gfx942", limit_solutions=1, problem_index=0
-    )
-    second = solutions_from_config(
-        _MULTI_PROBLEM_CONFIG, arch="gfx942", limit_solutions=1, problem_index=1
-    )
+def test_config_emit_smoke_rejects_wrong_kernel_count(monkeypatch):
+    results = [("kernel-a", "", 0), ("kernel-b", "", 0)]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
 
-    assert first and second
-    assert first[0]["ProblemType"]["UseScaleCD"] is False
-    assert second[0]["ProblemType"]["UseScaleCD"] is True
+    with pytest.raises(AssertionError, match="expected 1 kernels, got 2"):
+        assert_config_emits("unused.yaml", "gfx942", expected_count=1)
+
+
+def test_config_harness_selects_problem_entry():
+    first = [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}]
+    second = [{"OperationType": "GEMM", "DataType": "H"}, {"ForkParameters": []}]
+
+    assert _select_benchmark_problem([first, second], "config.yaml", 0, None) == first
+    assert _select_benchmark_problem([first, second], "config.yaml", 1, None) == second
 
 
 def test_problem_fingerprint_selection_survives_reordering():
@@ -204,8 +203,9 @@ def test_problem_fingerprint_selection_survives_reordering():
 
 def test_problem_fingerprint_selection_rejects_missing_group():
     entries = [[{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}]]
+    available = benchmark_problem_fingerprint(entries[0])
 
-    with pytest.raises(ValueError, match="does not exist"):
+    with pytest.raises(ValueError, match=rf"does not exist.*{available}"):
         _select_benchmark_problem(entries, "config.yaml", 0, "not-present")
 
 
@@ -216,5 +216,4 @@ def test_emit_golden_digest(snapshot):
     process-global MMA-scheduler state); coverage comes from running the emit.
     """
     results = emit_kernels_from_logic(_LOGIC)
-    digests = [{"basename": b, "err": e} for (b, _s, e) in results]
-    assert digests == snapshot
+    assert golden_digest(results) == snapshot

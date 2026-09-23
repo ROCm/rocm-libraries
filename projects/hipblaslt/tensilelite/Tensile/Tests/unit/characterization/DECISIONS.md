@@ -514,12 +514,13 @@ Configuration, asymmetric aligned layouts in segment_interleave, consolidated
 derived-state cases in Solution, LDS token selection in Component, and focused
 reduction/fixup paths in GSU and StreamK.
 
-## D29 — Refresh config-driven emit results after develop changes
+## D29 — Remove unstable set-cover basename snapshots
 
-**ADR:** [`adr/0014-refresh-config-emit-results-after-develop.md`](adr/0014-refresh-config-emit-results-after-develop.md)
+**ADR:** [`adr/0026-remove-setcover-basename-snapshots.md`](adr/0026-remove-setcover-basename-snapshots.md)
 
-**Decision:** Re-record the 75 set-cover emit nodes against current `develop`
-and an in-tree `rocisa` build. Seventy-one nodes retain their kernel counts and
-emitter return codes. Four reviewed nodes change count, and every retained
-kernel still emits with return code `0`; ADR 0014 records those cases and the
-upstream cause.
+**Decision:** Remove the three basename-only set-cover saved-result files.
+Preserve each selected problem group's exact kernel count and expected emitter
+status directly, capture derivation rejection reasons, and use focused source
+patterns for representative MX-fp6, dot2, and swizzled-addressing behavior.
+Self-warm both assembly harnesses per call so their output is independent of
+test order. ADR 0014 remains as superseded history of the intermediate refresh.

@@ -52,11 +52,6 @@ _RANDOM_LABEL_SUFFIX = re.compile(r"_[A-Z0-9]{16}\b")
 # key on the stable structure. Documented as a pinned finding in resistance.md.
 _MATRIX_REUSE = re.compile(r" matrix_[ab]_reuse\b")
 
-# Set once the emitter has been driven through one throwaway kernel (see
-# emit_kernels_from_logic) so every returned emit is the warm steady-state.
-_WARMED = False
-
-
 def canonicalize_asm(text):
     """Return ``text`` with random label suffixes replaced by stable ids.
 
@@ -227,15 +222,12 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(asm, DebugConfig())
 
-        # Steady-state warm-up: the emitter accumulates process-global scheduler
-        # state (e.g. WMMA matrix-reuse tracking) so the very first emit in a
-        # process differs from all subsequent ones. Production always emits in
-        # the warm state; emit one throwaway kernel once so every *returned*
-        # result is the stable steady-state, independent of suite ordering.
-        global _WARMED
-        if not _WARMED and kernels:
+        # Self-warm every call. The emitter accumulates scheduler state while a
+        # kernel is generated, so a process-global one-time warm-up makes output
+        # depend on which test ran first. Warming with this call's first kernel
+        # makes isolated and shared-worker runs observe the same steady state.
+        if kernels:
             _emit(kwa, kernels[0])
-            _WARMED = True
 
         for kernel in kernels:
             results.append(_emit(kwa, kernel))

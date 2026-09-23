@@ -21,15 +21,16 @@ Trip-cases were verified line-by-line under ``sys.settrace`` before authoring
 currently-missing Solution.py line. The BufferLoad=0 guards are a chain of
 ``reject(); return`` statements, so each is reached by one config that clears
 the earlier guards; the MBSK epilogue guards do not early-return, so a single
-maximal-violation config trips several. The golden pins the deterministic
-derivation outcome (Valid plus a few reject-relevant scalars) per case; every
-case asserts ``Valid is False`` since these configs are genuinely invalid.
+maximal-violation config trips several. The golden pins the ordered rejection
+reasons together with deterministic reject-relevant state; every case asserts
+``Valid is False`` since these configs are genuinely invalid.
 
 Runs under global-state isolation (derivation mutates globalParameters /
 validParameters) so it does not leak into other suites.
 """
 
 import copy
+import importlib
 import os
 
 import pytest
@@ -38,6 +39,9 @@ from codegen_harness import _isolated_globals  # shared isolation context
 
 import Tensile.LibraryIO as LibraryIO
 from Tensile.SolutionStructs.Solution import Solution as _Solution
+from Tensile.SolutionStructs.Utilities import reject as _reject
+
+_solution_module = importlib.import_module("Tensile.SolutionStructs.Solution")
 
 pytestmark = pytest.mark.unit
 
@@ -102,27 +106,37 @@ def _apply(state, overrides):
             state[k] = v
 
 
-def _derive(state, isa_info_map, rocm):
+def _derive(state, isa_info_map, rocm, monkeypatch):
     state = copy.deepcopy(state)
     state["AssignedDerivedParameters"] = False
     state["AssignedProblemIndependentDerivedParameters"] = False
+    rejection_reasons = []
+
+    def record_reject(rejected_state, _print_reason=True, *args):
+        rejection_reasons.append(" ".join(str(arg) for arg in args))
+        return _reject(rejected_state, False, *args)
+
+    monkeypatch.setattr(_solution_module, "reject", record_reject)
     try:
         _Solution.assignDerivedParameters(
             state, False, False, False, isa_info_map, rocm
         )
-        return {k: state.get(k) for k in _KEYS}
+        result = {k: state.get(k) for k in _KEYS}
+        result["rejections"] = rejection_reasons
+        return result
     except Exception as exc:  # rejection-by-exception is real covered behaviour
-        return {"exception": type(exc).__name__}
+        return {"exception": type(exc).__name__, "rejections": rejection_reasons}
 
 
 @pytest.mark.parametrize("case", sorted(_TRIPS.keys()))
-def test_setcover_reject_other(case, reject_bases, isa_info_map, assembler, snapshot):
+def test_setcover_reject_other(case, reject_bases, isa_info_map, assembler, monkeypatch, snapshot):
     label, overrides = _TRIPS[case]
     base = reject_bases[label]
     rocm = assembler.rocm_version
     with _isolated_globals():
         s = copy.deepcopy(base)
         _apply(s, overrides)
-        out = _derive(s, isa_info_map, rocm)
+        out = _derive(s, isa_info_map, rocm, monkeypatch)
     assert out.get("Valid") is False
+    assert out["rejections"]
     assert out == snapshot

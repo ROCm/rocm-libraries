@@ -131,6 +131,7 @@ def _select_benchmark_problem(benchmark_problems, config_path, problem_index, fi
     if not benchmark_problems:
         return None
     if fingerprint is not None:
+        available = [benchmark_problem_fingerprint(problem) for problem in benchmark_problems]
         matches = [
             problem
             for problem in benchmark_problems
@@ -138,7 +139,8 @@ def _select_benchmark_problem(benchmark_problems, config_path, problem_index, fi
         ]
         if not matches:
             raise ValueError(
-                f"BenchmarkProblems fingerprint {fingerprint!r} does not exist in {config_path}"
+                f"BenchmarkProblems fingerprint {fingerprint!r} does not exist in "
+                f"{config_path}; available fingerprints: {available}"
             )
         return matches[0]
     if not 0 <= problem_index < len(benchmark_problems):
@@ -428,6 +430,7 @@ def assert_config_emits(
     validate_source=False,
     problem_index=0,
     problem_fingerprint=None,
+    expected_count=None,
     required_source_patterns=(),
 ):
     """Emit one configuration once and check its declared observable behavior.
@@ -445,6 +448,10 @@ def assert_config_emits(
         problem_fingerprint=problem_fingerprint,
     )
     assert results, f"expected >=1 kernel, got {len(results)}"
+    if expected_count is not None:
+        assert len(results) == expected_count, (
+            f"expected {expected_count} kernels, got {len(results)}"
+        )
 
     if all_ok:
         errors = [(base, err) for base, _src, err in results if err != 0]
@@ -482,6 +489,7 @@ def assert_config_emits_golden(
     validate_source=False,
     problem_index=0,
     problem_fingerprint=None,
+    expected_count=None,
     required_source_patterns=(),
 ):
     """Check emitted behavior, then record kernel identity and status."""
@@ -493,6 +501,7 @@ def assert_config_emits_golden(
         validate_source=validate_source,
         problem_index=problem_index,
         problem_fingerprint=problem_fingerprint,
+        expected_count=expected_count,
         required_source_patterns=required_source_patterns,
     )
     assert golden_digest(results) == snapshot

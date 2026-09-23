@@ -8,6 +8,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'Currently does not accept ActivationAlt.',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[af0em_nohpa]
@@ -19,6 +22,12 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      '''
+        Matrix instructions for half, bf16 (or i8) types are natively accumulated in fp32 (or i32) precision. Please add the following config:
+         - HighPrecisionAccumulate: True
+      ''',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[convertafterds]
@@ -30,6 +39,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'one of DataTypeA or DataTypeB need to be float8/float8_fnuz or both are fp32',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[interleave_alpha]
@@ -41,6 +53,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      "Matrix instruction doesn't support InterleaveAlpha",
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[mbsk_maxviol]
@@ -52,6 +67,12 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBufferSingleKernel',
+    'rejections': list([
+      'too many store at MultipleBufferSingleKernel direct reject',
+      'MultipleBufferSingleKernel not support UseScaleCD yet',
+      'MultipleBufferSingleKernel not support UseE yet',
+      'MultipleBufferSingleKernel not support BiasSrc not D yet',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[nobuf_dtva]
@@ -63,6 +84,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'DirectToVgprA requires BufferLoad',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[nobuf_dtvb]
@@ -74,6 +98,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'DirectToVgprB requires BufferLoad',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[nobuf_gg]
@@ -85,6 +112,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'BufferLoad=0 does not support GroupedGemm',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[nobuf_pgr2]
@@ -96,6 +126,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'BufferLoad=0 does not support PrefetchGlobalRead>=2',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[nobuf_sparse]
@@ -107,6 +140,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'BufferLoad=0 does not support Sparse due to VGPR pressure from non-SRD addressing',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[nobuf_subdword]
@@ -118,6 +154,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'BufferLoad=0 does not support sub-dword data types (flat addressing not validated)',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[nobuf_usebias]
@@ -129,6 +168,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'BufferLoad=0 does not support UseBias due to no suppress no load.',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[srmap_sourceswap]
@@ -140,6 +182,9 @@
     'StoreRemapVectorWidth': 4,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'SourceSwap not compatible with StoreRemap',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[ucms_tailloop]
@@ -151,6 +196,9 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'UseCustomMainLoopSchedule=1 but CMS is not supported',
+    ]),
   })
 # ---
 # name: test_setcover_reject_other[wf32_source]
@@ -162,5 +210,8 @@
     'StoreRemapVectorWidth': 0,
     'Valid': False,
     '_GlobalAccumulation': 'MultipleBuffer',
+    'rejections': list([
+      'WavefrontSize=32 not supported for ISA (9, 4, 2)',
+    ]),
   })
 # ---
