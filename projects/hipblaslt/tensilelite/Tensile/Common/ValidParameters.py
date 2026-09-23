@@ -574,6 +574,8 @@ validParameters = { # we need to make sure this matches develop
     #      from here: it replaces rather than adds to the s_set_vgpr_msb state
     #      Components/Subtile emitted, so it is a condition of running the
     #      pipeline rather than one of the features layered on top.
+    #   2  + InsertCoexecHazard and Gfx1250HazardModule: s_wait_xcnt coverage,
+    #      which Components/Subtile emits none of.
     #
     # Higher levels each add one more pass and are enabled in their own change,
     # once that pass has been measured on hardware on its own.
@@ -586,7 +588,7 @@ validParameters = { # we need to make sure this matches develop
     # s_waitcnt / s_wait_alu it emits.
     #
     # gfx1250 + UseSubtileImpl only; forced to 0 elsewhere.
-    "StinkySubtile": [0, 1],
+    "StinkySubtile": [0, 1, 2],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
