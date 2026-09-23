@@ -2588,6 +2588,11 @@ public:
             std::cerr << "Error: Can't call run() before calling set_items()\n";
             exit(EXIT_FAILURE);
         }
+        if(m_has_run)
+        {
+            std::cerr << "Error: Can't call run() twice\n";
+            exit(EXIT_FAILURE);
+        }
         m_has_run = true;
 
         std::string name            = m_meta.serialize_name();
@@ -2716,8 +2721,9 @@ private:
 
         elapsed_gpu_secs += batch_gpu_secs;
 
-        double bytes_per_batch = m_read_write_bytes * m_kernels_per_batch;
-        double bytes_per_sec   = bytes_per_batch / batch_gpu_secs;
+        double bytes_per_batch  = m_read_write_bytes * m_kernels_per_batch;
+        double bytes_per_sec    = bytes_per_batch / batch_gpu_secs;
+        m_last_bytes_per_second = bytes_per_sec;
 
         double items_per_batch = m_items * m_kernels_per_batch;
         double items_per_sec   = items_per_batch / batch_gpu_secs;
@@ -3683,6 +3689,14 @@ public:
         return m_last_bytes_per_second;
     }
 
+    /**
+     * \brief Returns a vector containing all bytes per second
+     */
+    std::vector<double> get_all_bytes_per_second()
+    {
+        return m_all_bytes_per_second;
+    }
+
 private:
     /// Parse optional arguments.
     void parse()
@@ -3987,6 +4001,7 @@ private:
                 auto state = new_state(algo, meta, specialization_index);
                 b->run(state);
                 m_last_bytes_per_second = state.get_last_bytes_per_second();
+                m_all_bytes_per_second.push_back(m_last_bytes_per_second);
             }
 
             specialization_index++;
@@ -4074,6 +4089,8 @@ private:
     detail::cli m_cli; ///< Command-line argument parser.
 
     double m_last_bytes_per_second = 0.0; /**< Last bytes per second */
+    std::vector<double>
+        m_all_bytes_per_second; /**< Vector that stores all run's bytes per second. Useful for some Kernel Tuning algorithms */
 
     std::unique_ptr<detail::stream_blocker>
         m_stream_blocker; ///< Stream blocker to serialize output.

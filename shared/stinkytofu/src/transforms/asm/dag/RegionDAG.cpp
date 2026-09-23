@@ -102,7 +102,8 @@ RegionDAG buildRegisterDependencyDAG(IRList::iterator regionStart, IRList::itera
     return buildRegisterDependencyDAGImpl(instructions);
 }
 
-void dumpDAGGraph(const RegionDAG& dag, std::ostream& os) {
+void dumpDAGGraph(const RegionDAG& dag, std::ostream& os,
+                  const std::set<std::pair<unsigned, unsigned>>& hardConstraintEdges) {
     os << "DAG nodes:\n";
     for (const DAGNode& node : dag.nodes) {
         os << node.id << ": ";
@@ -113,7 +114,11 @@ void dumpDAGGraph(const RegionDAG& dag, std::ostream& os) {
     for (unsigned fromId = 0; fromId < dag.graph.size(); ++fromId) {
         std::vector<unsigned> successors(dag.graph[fromId].begin(), dag.graph[fromId].end());
         std::sort(successors.begin(), successors.end());
-        for (unsigned toId : successors) os << fromId << " -> " << toId << '\n';
+        for (unsigned toId : successors) {
+            os << fromId << " -> " << toId;
+            if (hardConstraintEdges.contains({fromId, toId})) os << "  (hard constraint)";
+            os << '\n';
+        }
     }
     os << '\n';
 }

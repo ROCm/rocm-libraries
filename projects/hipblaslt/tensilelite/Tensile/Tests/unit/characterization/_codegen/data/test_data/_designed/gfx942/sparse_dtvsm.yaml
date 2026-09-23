@@ -49,6 +49,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         # SMFMA [16,16,32,1] is a valid gfx942 sparse half-half shape.
         # MIWaveTile [2,2] gives MIWaveTile[0]=2 > 1 so the graMetadataTileAssignment

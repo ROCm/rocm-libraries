@@ -15,12 +15,14 @@
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -48,12 +50,7 @@ protected:
 
     void SetUp() override
     {
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("bundle_discovery_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir.emplace(claimScratchDirectory("bundle_discovery"));
         _tempDir = _scopedDir->path();
     }
 
@@ -857,6 +854,30 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundl
     EXPECT_EQ(loaded.suiteName, discovered.front().suiteName);
     EXPECT_EQ(loaded.testName, discovered.front().testName);
     ASSERT_NE(loaded.bundle, nullptr);
+
+    EXPECT_EQ(loaded.claimLocator.sidecarPath,
+              supportJsonPath(discovered.front().diagnosticPath()));
+    EXPECT_TRUE(loaded.claimLocator.caseId.empty());
+    EXPECT_FALSE(loaded.claimLocator.isSweep());
+}
+
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleSetsLocatorForSweepCase)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+        {{"fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
+    auto& loaded = std::get<detail::LoadedBundle>(outcome);
+
+    EXPECT_EQ(loaded.claimLocator.sidecarPath,
+              discovered.front().jsonPath.parent_path() / "support.json");
+    EXPECT_EQ(loaded.claimLocator.caseId, "fp32_nchw");
+    EXPECT_TRUE(loaded.claimLocator.isSweep());
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from

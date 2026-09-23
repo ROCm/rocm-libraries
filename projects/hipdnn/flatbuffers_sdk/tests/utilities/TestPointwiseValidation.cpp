@@ -172,7 +172,9 @@ TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
                                                                PointwiseMode::CMP_GT,
                                                                PointwiseMode::RELU_BWD,
                                                                PointwiseMode::SIGMOID_BWD,
-                                                               PointwiseMode::TANH_BWD};
+                                                               PointwiseMode::TANH_BWD,
+                                                               PointwiseMode::MAX_OP,
+                                                               PointwiseMode::MIN_OP};
 
     // Check all binary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)

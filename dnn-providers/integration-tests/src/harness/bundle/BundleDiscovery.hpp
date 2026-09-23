@@ -221,6 +221,10 @@ inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
 // structure. Discovery imposes no semantic folder schema so "drop a folder, it
 // runs" works for ad-hoc bundles; structural validation belongs to the bundle
 // verifier, not registration.
+//
+// Op family is the second path segment by convention (tier/OpFamily/…), not
+// stored as bundle metadata. Consumers that need it (e.g. the offline support
+// matrix renderer) derive it from the canonical directory layout.
 inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
                                       const std::filesystem::path& bundleDir)
 {
@@ -345,6 +349,10 @@ inline std::vector<std::string> readSweepCaseIds(const std::filesystem::path& sw
         }
 
         const auto caseId = caseJson.at("id").get<std::string>();
+        if(caseId.empty())
+        {
+            throw std::runtime_error("Sweep case has empty id in " + sweepPath.string());
+        }
         if(!seenIds.insert(caseId).second)
         {
             throw std::runtime_error("Duplicate sweep case id '" + caseId + "' in "

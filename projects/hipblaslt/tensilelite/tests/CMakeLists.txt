@@ -23,6 +23,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CustomKernel_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
@@ -41,6 +42,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/StreamKLaunchSummary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
 )
@@ -54,6 +56,9 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/CompressedLibraryLoad_test.cpp"
+            # The indexed library layout is msgpack-only: its solution blob is a
+            # msgpack BIN, and mapRawBytes has no YAML implementation.
+            "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
     )
 endif()
 

@@ -398,6 +398,9 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
     ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
     ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT    = 105,
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE                 = 106,
+#endif
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -588,6 +591,11 @@ struct RocblasltContractionProblem
 
     hipStream_t stream;
     void*       Synchronizer;
+    // Stream-K flag region, private to this (stream, problem index) pair. Not a
+    // constructor parameter: the object API builds the problem before it knows
+    // its stream, so this is assigned once the stream is available rather than
+    // threaded through a 60-argument constructor that every caller spells out.
+    void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
     hipblasLtBatchMode_t batchMode;   

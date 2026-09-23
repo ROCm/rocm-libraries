@@ -923,6 +923,9 @@ bool ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC::IsApplicable(
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
+    if(igemm_tensor_size_exceeds_asm_gtc_addressing(problem))
+        return false;
+
     if(!problem.IsFp32() && !problem.IsFp16() &&
        !(problem.IsBfp16() &&
          (device_name == "gfx90a" || device_name == "gfx942" || StartsWith(device_name, "gfx95"))))

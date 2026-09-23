@@ -29,6 +29,18 @@ currently land on the same pool sizes (93/97/101/105 of 106); FP4 is covered bec
 it reaches them through a different allocation path -- different global-read widths,
 LDS layout and scale-block bookkeeping -- that could drift away from FP8.
 
+NOTE on the tight corner: PGL1/SKFDPO0/PGR1/SIA0 sits at 105 of 106, i.e. one
+spare SGPR. The uniform-summation-order selector (bit 29 of
+``MagicShiftItersPerTile``, which chooses between the historical global "first-E"
+Stream-K K-split mapping and the per-tile extra-iters mapping) deliberately does
+NOT consume one: it is tested in place with ``s_bitcmp1_b32`` at each of the three
+divergence sites in ``Components/StreamK.py`` rather than held in a persistent
+register. On this VGPR-cache path the ``v_readfirstlane_b32`` target is a transient
+released before ``skTiles``/``skGrid`` are acquired, so it does not raise the peak
+either. The assertions below deliberately pin only ``<= MaxSgpr`` and
+``overflowedResources == 0``, never the exact sizes, but headroom here is one
+register: anything that adds two persistent SGPRs on this path will overflow.
+
 CPU-only: no GPU required.
 """
 
@@ -225,6 +237,39 @@ def test_streamk_tdm_prefetchgl2_emits_real_kernel_bodies(emitted):
             f"{variant}: .amdhsa_next_free_sgpr={m.group(1)} exceeds "
             f"MaxSgpr={r['maxSgpr']}"
         )
+
+
+def test_streamk_tdm_general_batch_dereferences_inputs_before_first_load(emitted):
+    """Wave-separated TDM loads A[batch]/B[batch] before the first tensor load."""
+    for r in emitted:
+        src, variant = r["src"], r["variant"]
+        first_load = src.index("tensor_load_to_lds")
+        prologue = src[:first_load]
+        for tc in ("A", "B"):
+            pointer_load = f"load {tc} matrix address from pointer array"
+            assert pointer_load in prologue, (
+                f"{variant}: TDM {tc} loads the selected matrix from the pointer array"
+            )
+            batch_offset_load = f"load batchOffset{tc} from kernel args"
+            batch_offset_apply = f"apply batchOffset{tc} (low)"
+            assert batch_offset_load in prologue
+            assert batch_offset_apply in prologue
+            assert prologue.index(pointer_load) < prologue.index(batch_offset_load)
+            assert prologue.index(batch_offset_load) < prologue.index(batch_offset_apply)
+        pointer_loads = sum(
+            prologue.count(f"load {tc} matrix address from pointer array")
+            for tc in ("A", "B")
+        )
+        suppressed_strides = prologue.count(
+            "general batch uses an already-dereferenced matrix base"
+        )
+        assert suppressed_strides == pointer_loads, (
+            f"{variant}: {suppressed_strides} suppressed batch strides for "
+            f"{pointer_loads} dereferenced A/B pointers; MXSA/MXSB must retain "
+            "their direct-pointer batch strides"
+        )
+        for tc in ("MXSA", "MXSB"):
+            assert f"load {tc} matrix address from pointer array" not in prologue
 
 
 def test_streamk_tdm_no_waveidx_read_after_undefine(emitted):

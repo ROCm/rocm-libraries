@@ -32,6 +32,7 @@ byte-identical AMDGPU backend flags -- a prerequisite for fair A/B parity.
 """
 
 from __future__ import annotations
+from dispatcher_common import unified_framework_flags
 
 import ctypes
 import multiprocessing
@@ -95,7 +96,7 @@ def _repeat_ok(
 # GPU architecture resolution (never default to gfx942)
 # ============================================================================
 
-_SUPPORTED_ARCHES: Tuple[str, ...] = ("gfx90a", "gfx942", "gfx950")
+_SUPPORTED_ARCHES: Tuple[str, ...] = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
 # Byte size of each C output dtype as the compiled kernel writes it
 # (sizeof(CDataType)). The host numpy buffer is memcpy'd verbatim to/from the
@@ -604,6 +605,7 @@ def _build_batched_compile_jobs(
         "-D__HIP_PLATFORM_AMD__",
         f"--offload-arch={gfx_arch}",
         f'-DGFX_ARCH="{gfx_arch}"',
+        *unified_framework_flags(gfx_arch),
         # Byte-identical AMDGPU backend flags to the single-problem bridge and
         # Old-TE (see gemm_utils._tile_engine_codegen_flags) -- required for a
         # fair A/B parity comparison.

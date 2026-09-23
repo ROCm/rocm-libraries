@@ -44,14 +44,6 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
-if(BUILD_WITH_CSC_TRSV)
-  add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
-endif()
-
-if(BUILD_WITH_CSC_TRSM)
-  add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
-endif()
-
 #
 # Client matrices.
 #
@@ -239,6 +231,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_check_matrix_hyb.cpp
   test_check_spmat.cpp
   test_bsrpad_value.cpp
+  test_spildlt0.cpp
 )
 
 if(BUILD_ROCSPARSE_DEBUGGING)
@@ -247,8 +240,10 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     )
 endif()
 
-if(BUILD_WITH_ILDLT0)
-  list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_spsv_ell.cpp
+    test_sptrsv_ell.cpp)
 endif()
 
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
@@ -417,11 +412,14 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_matrix_hyb.cpp
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
+../testings/testing_spildlt0.cpp
 rocsparse_test_listeners.cpp
   )
 
-if(BUILD_WITH_ILDLT0)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_spsv_ell.cpp
+    ../testings/testing_sptrsv_ell.cpp)
 endif()
 
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)

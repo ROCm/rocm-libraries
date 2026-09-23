@@ -262,7 +262,6 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
     case 1: SetObject<miopen::solver::conv::ConvAsm3x3U>(); break;
     case 2: SetObject<miopen::solver::conv::ConvAsm1x1U>(); break;
     case 3: SetObject<miopen::solver::conv::ConvAsm1x1UV2>(); break;
-    case 11: SetObject<miopen::solver::conv::ConvHipDirectFwd>(); break;
     case 16: SetObject<miopen::solver::conv::ConvAsmBwdWrW3x3>(); break;
     case 17: SetObject<miopen::solver::conv::ConvAsmBwdWrW1x1>(); break;
     case 26: SetObject<miopen::solver::conv::ConvHipImplicitGemmV4R1Fwd>(); break;
@@ -271,8 +270,6 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
     case 53: SetObject<miopen::solver::conv::ConvBinWinoRxS<2, 3>>(); break;
     case 54: SetObject<miopen::solver::conv::ConvHipImplicitGemmV4R4Fwd>(); break;
     case 55: SetObject<miopen::solver::conv::ConvHipImplicitGemmBwdDataV1R1>(); break;
-    case 56: SetObject<miopen::solver::conv::ConvHipImplicitGemmBwdDataV4R1>(); break;
-    case 57: SetObject<miopen::solver::conv::ConvHipImplicitGemmBwdDataV1R1Xdlops>(); break;
     case 60: SetObject<miopen::solver::conv::ConvHipImplicitGemmBwdDataV4R1Xdlops>(); break;
     case 61: SetObject<miopen::solver::conv::ConvHipImplicitGemmV4R4WrW>(); break;
     case 64: SetObject<miopen::solver::conv::ConvHipImplicitGemmForwardV4R4Xdlops>(); break;
@@ -296,7 +293,6 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
     case 107: SetObject<miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC>(); break;
     case 108: SetObject<miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC>(); break;
     case 110: SetObject<miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC>(); break;
-    case 114: SetObject<miopen::solver::conv::ConvCkIgemmFwdV6r1DlopsNchw>(); break;
     case 127: SetObject<miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC>(); break;
     case 137: SetObject<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops>(); break;
     case 138: SetObject<miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops>(); break;
@@ -306,6 +302,25 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
     case 156: SetObject<miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>(); break;
     case 185: SetObject<miopen::solver::conv::ConvDepthwiseFwd2D>(); break;
     case 186: SetObject<miopen::solver::conv::ConvDepthwiseBwdData2D>(); break;
+    case 210: SetObject<miopen::solver::conv::TransposedConvBinWinoRxS<2, 3>>(); break;
+    case 211: SetObject<miopen::solver::conv::TransposedConvBinWinoRxS<3, 2>>(); break;
+    case 212:
+        SetObject<miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<2, 3>>();
+        break;
+    case 213:
+        SetObject<miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<3, 3>>();
+        break;
+    case 214:
+        SetObject<miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<4, 3>>();
+        break;
+    case 215:
+        SetObject<miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<5, 3>>();
+        break;
+    case 216:
+        SetObject<miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<6, 3>>();
+        break;
+    case 218: SetObject<miopen::solver::conv::ConvHipDirectFwd>(); break;
+    case 220: SetObject<miopen::solver::conv::ConvHipConv>(); break;
     // New tunable solver should be added here
     default:
         MIOPEN_THROW(miopenStatusInternalError, "Unknown solver ID (" + std::to_string(id) + ")");
@@ -501,7 +516,7 @@ struct SolverToPrimitive<BatchNormSolver>
 template <class Solver>
 const std::vector<Solver>& GetAllSolvers()
 {
-    static const auto solvers = [] {
+    static const auto solvers = []() -> std::vector<Solver> {
         const auto& ids = GetSolversByPrimitive(SolverToPrimitive<Solver>::GetPrimitive());
         std::vector<Solver> solvers;
         solvers.reserve(ids.size());

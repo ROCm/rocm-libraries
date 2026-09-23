@@ -25,6 +25,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/wmma_scale_internal.h"
 
 namespace ckc
 {
@@ -35,6 +36,7 @@ namespace ckc
 static void _op_tile_wmma_f32_16x16x16_f16(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_wmma_f32_16x16x16_bf16(rocke_lower_t* L, const rocke_op_t* op);
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id);
+static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* op);
@@ -133,6 +135,10 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
          * reject (Python ISABackend.emit_wmma raises NotImplementedError). The
          * gfx12-specific op_ids ("wmma_gfx12_*") can only occur on RDNA4. */
     }
+    else if(rocke_gfx1250_scaled_wmma(op_id))
+    {
+        _emit_wmma_scale(L, op);
+    }
     else if(strncmp(op_id, "wmma_", 5) == 0)
     {
         if(L->backend && L->backend->kind == ROCKE_LL_ISA_RDNA)
@@ -162,6 +168,93 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "tile.mma: unsupported op_id '%s'", op_id);
     }
+}
+
+/* Emit the gfx1250 scaled-WMMA intrinsic using the resolved operand contract.
+ * The contract supplies packed carrier types, matrix and scale format selectors,
+ * and the declaration identity. This instruction family requires LLVM 23. */
+static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* intrinsic;
+    const char* decl_key;
+    const char* scale_ty;
+    const char* op_name;
+
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    const rocke_mma_op_t* atom = rocke_gfx1250_scaled_wmma_from_op(op);
+    if(!atom)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
+    }
+    const rocke_scaled_wmma_op_t contract = rocke_scaled_wmma_contract(atom);
+    const rocke_scaled_wmma_op_t* spec = &contract;
+    char concrete_name[160];
+    snprintf(concrete_name, sizeof(concrete_name), "tile.%s", spec->op_id);
+    op_name = concrete_name;
+    if(!L->backend || strcmp(L->backend->gfx, "gfx1250") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "%s is only available on gfx1250 (got %s)",
+                      op_name,
+                      L->backend ? L->backend->gfx : "(unknown)");
+    }
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "%s requires llvm23 (ROCm 7.13+), got %s",
+                      op_name,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+    if(op->num_operands != 5)
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "%s expects 5 operands, got %d", op_name, op->num_operands);
+    }
+
+    char packed_type[8];
+    snprintf(packed_type, sizeof(packed_type), "i%d", rocke_scale_word_bits(&spec->scales));
+    scale_ty = packed_type;
+    if(strcmp(op->operands[3]->type->name, scale_ty) != 0
+       || strcmp(op->operands[4]->type->name, scale_ty) != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s expects %s scale operands, got %s/%s",
+                      op_name,
+                      scale_ty,
+                      op->operands[3]->type->name,
+                      op->operands[4]->type->name);
+    }
+
+    // Physical declaration identity comes from the resolved backend contract.
+    decl_key = spec->declaration_key;
+    intrinsic = spec->intrinsic;
+    rocke_ll_need(L, decl_key);
+    rocke_ll_emitf(L,
+                   "  %s = call <8 x float> @%s("
+                   "i32 %d, <%d x i32> %s, i32 %d, <%d x i32> %s, "
+                   "i16 0, <8 x float> %s, i32 0, i32 %d, %s %s, "
+                   "i32 0, i32 %d, %s %s, i1 false, i1 false)",
+                   mma_result_name(L, op),
+                   intrinsic,
+                   spec->matrix_formats[0],
+                   spec->matrix_words[0],
+                   rocke_ll_operand(L, op->operands[0]),
+                   spec->matrix_formats[1],
+                   spec->matrix_words[1],
+                   rocke_ll_operand(L, op->operands[1]),
+                   rocke_ll_operand(L, op->operands[2]),
+                   spec->scale_formats[0],
+                   scale_ty,
+                   rocke_ll_operand(L, op->operands[3]),
+                   spec->scale_formats[1],
+                   scale_ty,
+                   rocke_ll_operand(L, op->operands[4]));
 }
 
 /* ====================================================================== */

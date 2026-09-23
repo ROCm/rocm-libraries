@@ -170,6 +170,12 @@ set(rocsolver_lapack_source
   lapack/roclapack_sygst_hegst.cpp
   lapack/roclapack_sygst_hegst_batched.cpp
   lapack/roclapack_sygst_hegst_strided_batched.cpp
+  lapack/roclapack_gehd2.cpp
+  lapack/roclapack_gehd2_batched.cpp
+  lapack/roclapack_gehd2_strided_batched.cpp
+  lapack/roclapack_gehrd.cpp
+  lapack/roclapack_gehrd_batched.cpp
+  lapack/roclapack_gehrd_strided_batched.cpp
   #### Singular Value Decomposition ####
   ######################################
   #- classic
@@ -534,6 +540,9 @@ endif()
 if(ROCSOLVER_ENABLE_EIG_2STAGE)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
 endif()
+if(ROCSOLVER_ENABLE_HESSENBERG)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
+endif()
 
 target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16
@@ -543,6 +552,11 @@ target_compile_definitions(rocsolver PRIVATE
 )
 
 add_armor_flags(rocsolver "${ARMOR_LEVEL}")
+
+# Embed PE version metadata (VERSIONINFO) into the DLL
+if(WIN32 AND BUILD_SHARED_LIBS)
+  target_sources(rocsolver PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
 
 if(WIN32)
   if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)

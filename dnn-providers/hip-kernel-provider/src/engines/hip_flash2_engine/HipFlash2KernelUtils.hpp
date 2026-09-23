@@ -128,35 +128,35 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
 struct Flash2KernelArgs
 {
     // Input tensors (device pointers, FP16)
-    const void* ptr_q = nullptr;
-    const void* ptr_k = nullptr;
-    const void* ptr_v = nullptr;
+    const void* ptrQ = nullptr;
+    const void* ptrK = nullptr;
+    const void* ptrV = nullptr;
     // Output tensor (device pointer, FP16)
-    void* ptr_o = nullptr;
+    void* ptrO = nullptr;
 
     // Attention geometry
     int batch = 1;
-    int num_heads_q = 32;
-    int num_heads_k = 32;
-    int seq_len_q = 2048;
-    int seq_len_kv = 2048;
-    int head_dim = 128; // compile-time template in kernel, but kept for reference
+    int numHeadsQ = 32;
+    int numHeadsK = 32;
+    int seqLenQ = 2048;
+    int seqLenKv = 2048;
+    int headDim = 128; // compile-time template in kernel, but kept for reference
     float scale = 0.0f;
     int causal = 0; // bool as int
 
     // Strides (in elements, not bytes) -- BHSD layout [B, H, S, D]
-    int q_stride_batch = 0;
-    int q_stride_head = 0;
-    int q_stride_seq = 0;
-    int k_stride_batch = 0;
-    int k_stride_head = 0;
-    int k_stride_seq = 0;
-    int v_stride_batch = 0;
-    int v_stride_head = 0;
-    int v_stride_seq = 0;
-    int o_stride_batch = 0;
-    int o_stride_head = 0;
-    int o_stride_seq = 0;
+    int qStrideBatch = 0;
+    int qStrideHead = 0;
+    int qStrideSeq = 0;
+    int kStrideBatch = 0;
+    int kStrideHead = 0;
+    int kStrideSeq = 0;
+    int vStrideBatch = 0;
+    int vStrideHead = 0;
+    int vStrideSeq = 0;
+    int oStrideBatch = 0;
+    int oStrideHead = 0;
+    int oStrideSeq = 0;
 };
 
 // =============================================================================
@@ -241,14 +241,20 @@ inline const char* flash2KernelName(int headDim)
 #define HIP_FLASH2_KERNEL_DIR "/opt/rocm/lib/hipdnn/engines/hip_flash2_kernels"
 #endif
 
-inline std::string flash2CoPath(const std::string& archId)
+inline std::string flash2CoPath(const std::string& archId, const std::string& variantTag = "")
 {
     // Prefer runtime env override so tests and non-standard installs work.
     const char* envDir = std::getenv("HIP_FLASH2_KERNEL_DIR");
     std::string dir = (envDir != nullptr && envDir[0] != '\0') ? envDir : HIP_FLASH2_KERNEL_DIR;
     if(!dir.empty() && dir.back() != '/')
+    {
         dir += '/';
-    return dir + "hip_flash2_fwd_" + archId + ".co";
+    }
+    if(variantTag.empty())
+    {
+        return dir + "hip_flash2_fwd_" + archId + ".co";
+    }
+    return dir + "hip_flash2_fwd_" + archId + "_" + variantTag + ".co";
 }
 
 } // namespace hip_flash2_engine

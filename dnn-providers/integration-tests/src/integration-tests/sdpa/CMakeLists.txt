@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 add_cpp_graph_test_sources(
+    IntegrationCpuSdpaFwdBwdChained.cpp
     IntegrationGpuSdpaBackward.cpp
     IntegrationGpuSdpaFwdInference.cpp
 )

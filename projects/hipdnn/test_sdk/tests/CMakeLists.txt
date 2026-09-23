@@ -21,6 +21,7 @@ add_executable(
     utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
     utilities/TestCpuFpReferenceResampleFwd.cpp
+    utilities/TestCpuFpReferenceResampleBwd.cpp
     utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
@@ -51,6 +52,7 @@ add_executable(
     utilities/TestLogRecorder.cpp
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
+    utilities/TestScratchDirectory.cpp
     utilities/TestSeeds.cpp
     utilities/TestTensorDiff.cpp
     utilities/TestVectorLoggingUtils.cpp
@@ -91,6 +93,8 @@ add_executable(
     utilities/cpu_graph_executor/TestReductionSignatureKey.cpp
     utilities/cpu_graph_executor/TestResampleFwdPlan.cpp
     utilities/cpu_graph_executor/TestResampleFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestResampleBwdPlan.cpp
+    utilities/cpu_graph_executor/TestResampleBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormBwdPlan.cpp

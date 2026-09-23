@@ -143,8 +143,8 @@ srun --partition=defq --constraint=GFX1151 --gres=gpu:1 --time=00:15:00 \
          -w <stage>/ck_pkg $ROCKE_DOCKER_EXTRA_FLAGS \
          $ROCKE_DOCKER_IMAGE /bin/bash -lc "
            cd <stage>/ck_pkg
-           export PYTHONPATH=<stage>/ck_pkg:\$PYTHONPATH
-           python3 -m rocke.run_manifest <hsaco> <manifest> --shape M,N,K --verify"'
+          export PYTHONPATH=<stage>/ck_pkg:<stage>/ck_lib:\$PYTHONPATH
+          python3 -m rocke.run_manifest <hsaco> <manifest> --shape M,N,K --verify"'
 ```
 
 `--constraint` uses the `AVAIL_FEATURES` token (`GFX942` / `GFX1151`) so any
@@ -156,6 +156,7 @@ matching idle node gets picked; `--gres=gpu:1` requests one GPU. The
 ```
 $ROCKE_REMOTE_STAGE/
 ├── ck_pkg/rocke/...     # slim mirror of python/rocke/ used as PYTHONPATH
+├── ck_lib/...            # library/ (builders, kernels) for runner_module adapters
 ├── gfx942/               # hsaco + manifest + run_spec.json + srun.{out,err}
 └── gfx1151/
 ```
@@ -168,3 +169,15 @@ Edit `config.py::ARCHES` — each entry binds an arch to a module that:
 
 Both currently-wired examples (`rocke.examples.gfx942.gemm_demo` and
 `rocke.examples.gfx1151.wmma_gemm_verify`) already satisfy this contract.
+
+Library kernels (pack/check outside `rocke.instances`) also need:
+
+- a torch-free `run_*_manifest_problem` registered via
+  `register_manifest_runner`, and `runner_module` on the emitted manifest
+  so `run_manifest` can import that adapter on the node
+- `--shape` as three ints; put extra geometry on the manifest
+
+gfx942 fused KDA is wired that way: point `example_module` at
+`builders.gfx942.kda.kda_chunk_fused` and pass `--m B --n H --k T`
+(B, H, T — not GEMM M,N,K). Local GPU experiments stay on
+`kda_chunk_fused.check` / `test_kda_chunkwise_gfx942_numeric.py`.

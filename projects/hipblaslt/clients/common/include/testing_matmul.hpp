@@ -3875,16 +3875,12 @@ void testing_matmul_with_bias(const Arguments& arg,
     // as batch_count for reusing existing GroupedGEMM code for General Batched GEMM
     batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? gemm_count = arg.batch_count : gemm_count;
     // C to Cpp API for GG
-    std::vector<std::vector<void*>> da(block_count, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> db(block_count, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> dc(block_count, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> dd(block_count, std::vector<void*>(gemm_count));
+    const auto groupedGemmBlockCount = do_grouped_gemm ? block_count : 0;
+    std::vector<std::vector<void*>> da(groupedGemmBlockCount, std::vector<void*>(gemm_count));
+    std::vector<std::vector<void*>> db(groupedGemmBlockCount, std::vector<void*>(gemm_count));
+    std::vector<std::vector<void*>> dc(groupedGemmBlockCount, std::vector<void*>(gemm_count));
+    std::vector<std::vector<void*>> dd(groupedGemmBlockCount, std::vector<void*>(gemm_count)); 
 
-    std::vector<std::vector<uint64_t*>> da1(block_count, std::vector<uint64_t*>(gemm_count));
-    std::vector<std::vector<uint64_t*>> db1(block_count, std::vector<uint64_t*>(gemm_count));
-    std::vector<std::vector<uint64_t*>> dc1(block_count, std::vector<uint64_t*>(gemm_count));
-    std::vector<std::vector<uint64_t*>> dd1(block_count, std::vector<uint64_t*>(gemm_count));
-   
     std::vector<uint64_t*> dda, ddb, ddc, ddd;
     if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
@@ -4054,37 +4050,30 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
     }
-    else
+    else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
-        for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-        {
-            for(int32_t b = 0; b < block_count; b++)
-            {
-                da1[b][gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dA[gemmIdx].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA));
-                db1[b][gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dB[gemmIdx].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB));
-                dc1[b][gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dC[gemmIdx].as<char>()) + b * size_C[0] * realDataTypeSize(To));
-                dd1[b][gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (*dDp)[gemmIdx].as<char>() + b * size_D[0] * realDataTypeSize(To));
-            }
-        }
-    }
-
-    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-    {
-        //Copy The pointer arrays to Device [General Batched GEMM]
+        std::vector<uint64_t*> da1(gemm_count), db1(gemm_count), dc1(gemm_count), dd1(gemm_count);
         for(int32_t b = 0; b < block_count; b++)
         {
+            for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+            {
+                da1[gemmIdx] = reinterpret_cast<uint64_t*>(
+                    (dA[gemmIdx].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA));
+                db1[gemmIdx] = reinterpret_cast<uint64_t*>(
+                    (dB[gemmIdx].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB));
+                dc1[gemmIdx] = reinterpret_cast<uint64_t*>(
+                    (dC[gemmIdx].as<char>()) + b * size_C[0] * realDataTypeSize(To));
+                dd1[gemmIdx] = reinterpret_cast<uint64_t*>(
+                    (*dDp)[gemmIdx].as<char>() + b * size_D[0] * realDataTypeSize(To));
+            }
             CHECK_HIP_ERROR(hipMemcpy(
-                dda[b], da1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                dda[b], da1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddb[b], db1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddb[b], db1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddc[b], dc1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddc[b], dc1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddd[b], dd1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddd[b], dd1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
         }
     }
 

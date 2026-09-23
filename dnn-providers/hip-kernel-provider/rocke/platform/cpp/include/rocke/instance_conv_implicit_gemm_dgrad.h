@@ -98,6 +98,11 @@ typedef struct rocke_dgrad_conv_spec
     bool async_dma; /* default false */
     bool unroll_k; /* default false */
 
+    /* Mirrors DgradConvSpec.lds_k_outer. Strictly additive: default false, and
+     * the B tile only. A (dY, NHWK) already has a stride-1 reduction axis, so
+     * only B pays a transpose-on-store. */
+    bool lds_k_outer; /* default false */
+
     bool has_lds_k_pad; /* false => Python None */
     int lds_k_pad;
     void* lds_layout; /* NULL => Python None */
@@ -129,6 +134,11 @@ typedef struct rocke_dgrad_conv_spec
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
+/* Row stride pad, in elements, for the K-outer B tile. Mirrors _KOUTER_PAD in
+ * conv_implicit_gemm_dgrad.py: the stride must not be a multiple of the
+ * 32-dword LDS bank period or the transpose read degenerates. */
+#define ROCKE_DGRAD_KOUTER_PAD 8
+
 rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void);
 
 /* ---- DgradConvSpec @property analogues (pure int arithmetic) ---- */

@@ -26,6 +26,27 @@ inline std::vector<int64_t> tensorDims(const data_objects::TensorAttributes& ten
     return toStdVector(tensor.dims());
 }
 
+inline int64_t dimAt(const data_objects::TensorAttributes* tensor, size_t index)
+{
+    return tensor->dims()->Get(static_cast<flatbuffers::uoffset_t>(index));
+}
+
+inline int64_t strideAt(const data_objects::TensorAttributes* tensor, size_t index)
+{
+    return tensor->strides()->Get(static_cast<flatbuffers::uoffset_t>(index));
+}
+
+inline const char* getIndexTypeString(const data_objects::TensorAttributes* index)
+{
+    if(index == nullptr || index->data_type() == data_objects::DataType::INT32)
+    {
+        return "int32_t";
+    }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Resample index tensor must have INT32 data type.");
+}
+
 inline void validateSpatialVector(const std::vector<int64_t>& values,
                                   size_t spatialDims,
                                   const std::string& operationName,
@@ -67,18 +88,18 @@ inline void validateResampleSpatialParameters(const std::vector<int64_t>& prePad
     validateSpatialVector(window, spatialDims, operationName, "window", false);
 }
 
-inline void validateResampleTensorRanks(const std::vector<int64_t>& xDims,
-                                        const std::vector<int64_t>& yDims,
+inline void validateResampleTensorRanks(const std::vector<int64_t>& inputDims,
+                                        const std::vector<int64_t>& outputDims,
                                         const std::string& operationName)
 {
-    if(xDims.size() != yDims.size())
+    if(inputDims.size() != outputDims.size())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            operationName + " x and y tensors must have the same rank.");
+            operationName + " requires input and output tensors to have the same rank.");
     }
 
-    if(xDims.size() < 4 || xDims.size() > 5)
+    if(inputDims.size() < 4 || inputDims.size() > 5)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, operationName + " supports 4D and 5D tensors.");
@@ -90,20 +111,19 @@ inline void validateResampleOutputShape(const std::vector<int64_t>& xDims,
                                         const std::vector<int64_t>& prePadding,
                                         const std::vector<int64_t>& postPadding,
                                         const std::vector<int64_t>& stride,
-                                        const std::vector<int64_t>& window,
-                                        const std::string& operationName)
+                                        const std::vector<int64_t>& window)
 {
-    validateResampleTensorRanks(xDims, yDims, operationName);
+    validateResampleTensorRanks(xDims, yDims, "ResampleFwd");
 
     const auto spatialDims = xDims.size() - 2;
     validateResampleSpatialParameters(
-        prePadding, postPadding, stride, window, spatialDims, operationName);
+        prePadding, postPadding, stride, window, spatialDims, "ResampleFwd");
 
     if(xDims[0] != yDims[0] || xDims[1] != yDims[1])
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            operationName + " preserves the batch and channel dimensions.");
+            "ResampleFwd preserves the batch and channel dimensions.");
     }
 
     for(size_t i = 0; i < spatialDims; ++i)
@@ -114,7 +134,41 @@ inline void validateResampleOutputShape(const std::vector<int64_t>& xDims,
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                operationName + " y spatial dimensions must match the resample parameters.");
+                "ResampleFwd y spatial dimensions must match the resample parameters.");
+        }
+    }
+}
+
+inline void validateResampleBwdOutputShape(const std::vector<int64_t>& dyDims,
+                                           const std::vector<int64_t>& dxDims,
+                                           const std::vector<int64_t>& prePadding,
+                                           const std::vector<int64_t>& postPadding,
+                                           const std::vector<int64_t>& stride,
+                                           const std::vector<int64_t>& window)
+{
+    validateResampleTensorRanks(dyDims, dxDims, "ResampleBwd");
+
+    const auto spatialDims = dyDims.size() - 2;
+    validateResampleSpatialParameters(
+        prePadding, postPadding, stride, window, spatialDims, "ResampleBwd");
+
+    if(dyDims[0] != dxDims[0] || dyDims[1] != dxDims[1])
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleBwd preserves the batch and channel dimensions.");
+    }
+
+    for(size_t i = 0; i < spatialDims; ++i)
+    {
+        const auto expectedDy
+            = (dxDims[i + 2] + prePadding[i] + postPadding[i] - window[i]) / stride[i] + 1;
+        if(expectedDy <= 0 || dyDims[i + 2] != expectedDy)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "ResampleBwd dx and dy spatial dimensions must be compatible with the resample "
+                "parameters.");
         }
     }
 }

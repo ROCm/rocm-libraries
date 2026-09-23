@@ -326,6 +326,43 @@ class TestSetup:
 class TestMain:
     """Test main function"""
 
+    def test_main_loads_bundled_known_bugs_only_when_requested(self):
+        """The bundled resource requires the explicit parser sentinel."""
+        from Tensile.TensileLogic.ParseArguments import BUNDLED_KNOWN_BUGS
+        from Tensile.TensileLogic.Run import main
+
+        with patch('Tensile.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
+             patch('Tensile.TensileLogic.Run.load_bundled_known_bugs') as mock_load_bundled, \
+             patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_file, \
+             patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
+             patch('Tensile.TensileLogic.Run.reset_reported_failures'), \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
+             patch('warnings.filterwarnings'):
+
+            mock_args = Mock()
+            mock_args.Verbose = 2
+            mock_args.KnownBugs = BUNDLED_KNOWN_BUGS
+            mock_args.Architecture = "all"
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                test_file = Path(tmpdir) / "logic.yaml"
+                test_file.write_text("dummy")
+                mock_setup.return_value = (
+                    4, {}, Path(tmpdir), [test_file],
+                    Check(OnlyCustomKernels=False, All=True),
+                    mock_args
+                )
+                known_bugs = frozenset({("logic.yaml", 7)})
+                mock_load_bundled.return_value = known_bugs
+                mock_corpus_check.return_value = []
+                mock_parallel_map.return_value = [(5, 5, 0, 0, 0)]
+
+                main()
+
+                mock_load_bundled.assert_called_once_with()
+                mock_load_file.assert_not_called()
+                assert mock_parallel_map.call_args.args[0].args[3] == known_bugs
+
     def test_main_basic_execution(self):
         """main should execute full workflow"""
         from Tensile.TensileLogic.Run import main
@@ -334,6 +371,7 @@ class TestMain:
              patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'):
 
             # Mock setup
@@ -355,6 +393,7 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
+                mock_corpus_check.return_value = []
                 # ParallelMap2 returns list of
                 # (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
                 mock_parallel_map.return_value = [(5, 5, 0, 0, 0)]
@@ -379,6 +418,7 @@ class TestMain:
              patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -396,6 +436,7 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
+                mock_corpus_check.return_value = []
                 # 3 kept out of 5 total = 2 rejects
                 mock_parallel_map.return_value = [(3, 5, 0, 0, 0)]
 
@@ -412,6 +453,7 @@ class TestMain:
              patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -429,6 +471,7 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
+                mock_corpus_check.return_value = []
                 # keep=5, total=5, known_bug_skips=0, chip_id_failures=1, stale_known_bugs=0
                 mock_parallel_map.return_value = [(5, 5, 0, 1, 0)]
 
@@ -444,6 +487,7 @@ class TestMain:
         with patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -456,12 +500,50 @@ class TestMain:
                 mock_args
             )
 
+            mock_corpus_check.return_value = []
             mock_load_bugs.side_effect = ValueError("Invalid YAML")
 
             with pytest.raises(SystemExit) as exc_info:
                 main()
 
             assert exc_info.value.code == 1
+
+    def test_main_fails_fast_on_corpus_violations_without_running_the_loop(self):
+        """main should exit 1 immediately on corpus-invariant violations,
+        without loading known-bugs or running the (expensive) per-solution
+        ParallelMap2 loop -- these are unconditional hard failures with no
+        known-bugs escape hatch (see ValidCorpusConsistency's docstring)."""
+        from Tensile.TensileLogic.Run import main
+
+        with patch('Tensile.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
+             patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
+             patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
+             patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
+             patch('warnings.filterwarnings'):
+
+            mock_args = Mock()
+            mock_args.Verbose = 2
+            mock_args.KnownBugs = None
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                test_file = Path(tmpdir) / "logic.yaml"
+                test_file.write_text("dummy")
+
+                mock_setup.return_value = (
+                    4, {}, Path(tmpdir), [test_file],
+                    Check(OnlyCustomKernels=False, All=True),
+                    mock_args
+                )
+
+                mock_corpus_check.return_value = ["some corpus violation"]
+
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+
+                assert exc_info.value.code == 1
+                mock_load_bugs.assert_not_called()
+                mock_parallel_map.assert_not_called()
 
     def test_main_aggregates_multiple_batches(self):
         """main should aggregate results from multiple batches"""
@@ -471,6 +553,7 @@ class TestMain:
              patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -488,6 +571,7 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
+                mock_corpus_check.return_value = []
                 # Multiple batch results
                 # (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
                 mock_parallel_map.return_value = [
@@ -511,6 +595,7 @@ class TestMain:
              patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'), \
              patch('threading.Thread') as mock_thread:
 
@@ -529,6 +614,7 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
+                mock_corpus_check.return_value = []
                 mock_parallel_map.return_value = [(5, 5, 0, 0, 0)]
 
                 try:
@@ -547,6 +633,7 @@ class TestMain:
              patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -565,6 +652,7 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
+                mock_corpus_check.return_value = []
                 # No rejects, no chip-id failures, but 2 stale known-bug entries
                 # now pass validation -> strict mode must fail.
                 mock_parallel_map.return_value = [(5, 5, 0, 0, 2)]
@@ -582,6 +670,7 @@ class TestMain:
              patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -600,6 +689,7 @@ class TestMain:
                 )
 
                 mock_load_bugs.return_value = frozenset()
+                mock_corpus_check.return_value = []
                 # Stale entries present but strict mode off -> warn only, success.
                 mock_parallel_map.return_value = [(5, 5, 0, 0, 2)]
 

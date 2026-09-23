@@ -62,7 +62,7 @@ const vector<vector<int>> matrix_size_range = {
 const vector<vector<int>> large_matrix_size_range = {
     {152, 152, 152},
     {640, 640, 640},
-    {1000, 1024, 1024},
+    {1023, 1024, 1025},
 };
 
 Arguments sygst_setup_arguments(sygst_tuple tup)

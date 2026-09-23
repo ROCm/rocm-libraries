@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "ued-attention",
+  "name": "test_fixture:attention",
+  "heuristic": "uhd-attention",
+  "metadata": "kmd-attention"
+}

@@ -161,7 +161,7 @@
     HalfPLRB: false
     ISA: [12, 5, 0]
     InitCIterWmma: 1
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
     Kernel: true
     LDSSegInterleaveOffsets: null
     LDSTrInst: true
@@ -424,7 +424,7 @@
     HalfPLRB: false
     ISA: [12, 5, 0]
     InitCIterWmma: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
     Kernel: true
     LDSSegInterleaveOffsets: null
     LDSTrInst: true

@@ -38,23 +38,51 @@ struct rocfft_spirv_cb_t
     rocfft_spirv_cb_t() = default;
     void set(const char* _symbol_name, const void* _bitcode_data, size_t _bitcode_len_bytes)
     {
-        symbol_name       = _symbol_name;
-        bitcode_data      = _bitcode_data;
-        bitcode_len_bytes = _bitcode_len_bytes;
+
+        if(!_symbol_name)
+            symbol_name.clear();
+        else
+        {
+            validate_symbol_name(_symbol_name);
+            symbol_name = _symbol_name;
+        }
+
+        if(!_bitcode_data || _bitcode_len_bytes == 0)
+            bitcode_data.clear();
+        else
+            bitcode_data.assign(static_cast<const char*>(_bitcode_data),
+                                static_cast<const char*>(_bitcode_data) + _bitcode_len_bytes);
     }
     bool enabled() const
     {
-        return symbol_name && bitcode_data && bitcode_len_bytes;
+        return !symbol_name.empty() && !bitcode_data.empty();
     }
 
     // return a stringified hash of the callback, or empty string if
     // the callback was not specified
     std::string get_hash() const;
 
-    // Non-owning pointers to data provided by users
-    const char* symbol_name       = nullptr;
-    const void* bitcode_data      = nullptr;
-    size_t      bitcode_len_bytes = 0;
+    // Copies of data provided by users
+    std::string       symbol_name;
+    std::vector<char> bitcode_data;
+
+private:
+    // throws if the symbol is not valid
+    static void validate_symbol_name(const char* name)
+    {
+        if(!name || name[0] == '\0' || std::isdigit(static_cast<unsigned char>(name[0])))
+            throw std::invalid_argument("invalid symbol name");
+
+        static constexpr auto legal_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+        constexpr auto legal_chars_end = legal_chars + std::char_traits<char>::length(legal_chars);
+
+        const char* end = name + strlen(name);
+        if(!std::all_of(name, end, [=](unsigned char c) {
+               return std::isdigit(c)
+                      || std::find(legal_chars, legal_chars_end, c) != legal_chars_end;
+           }))
+            throw std::invalid_argument("invalid symbol name");
+    }
 };
 
 struct LoadOps

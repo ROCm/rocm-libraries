@@ -22,8 +22,9 @@
 
 import pytest
 
+from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Common.ValidParameters import validParameters
+from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
 from Tensile.SolutionStructs.Solution import (
     validateParameterTypes,
     mergeMismatchRecords,
@@ -74,6 +75,25 @@ class TestGetExpectedTypes:
 
     def test_streamk_valid_modes_exclude_removed_modes(self):
         assert validParameters["StreamK"] == [0, 3, 4, 5]
+
+    def test_max_occupancy_valid_range_is_1_to_64(self):
+        """MaxOccupancy was widened from 40 to 64 wg/CU to cover archs with
+        higher per-CU occupancy than CDNA's 40 wavefront slots."""
+        assert validParameters["MaxOccupancy"] == list(range(1, 65))
+
+    def test_max_occupancy_boundary_64_is_accepted(self):
+        # Must not raise: 64 is now within range.
+        checkParametersAreValid(("MaxOccupancy", [64]), validParameters)
+
+    def test_max_occupancy_boundary_65_is_rejected(self):
+        with pytest.raises(Exception) as excinfo:
+            checkParametersAreValid(("MaxOccupancy", [65]), validParameters)
+        assert "Invalid parameter value: MaxOccupancy = 65" in str(excinfo.value)
+
+    def test_max_occupancy_default_raised_to_64(self):
+        """The default was raised alongside the range widening (was 40)."""
+        assert {"MaxOccupancy": [64]} in defaultBenchmarkCommonParameters
+        checkParametersAreValid(("MaxOccupancy", [64]), validParameters)
 
 
 class TestValidateParameterTypes:

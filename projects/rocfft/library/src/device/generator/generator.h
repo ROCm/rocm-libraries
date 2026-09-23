@@ -2123,7 +2123,7 @@ static Function make_callback_realcomplex(const Function&                f,
 {
     auto visitor = MakeCallbackRealComplexVisitor(
         cbtype,
-        (loadOps && loadOps->has_spirv()) ? loadOps->spirv_cb.symbol_name : nullptr,
-        (storeOps && storeOps->has_spirv()) ? storeOps->spirv_cb.symbol_name : nullptr);
+        (loadOps && loadOps->has_spirv()) ? loadOps->spirv_cb.symbol_name.c_str() : nullptr,
+        (storeOps && storeOps->has_spirv()) ? storeOps->spirv_cb.symbol_name.c_str() : nullptr);
     return visitor(f);
 }

@@ -2,6 +2,9 @@
 
 Top-level re-exports from `rocke` and `rocke.helpers`. Use this as a quick lookup when reading other docs.
 
+For `MmaOp` fields, scale layouts, and `MmaCatalog` selection rules, see
+[MMA metadata and queries](mma_metadata.md).
+
 ## `from rocke import ...`
 
 ```text
@@ -395,6 +398,6 @@ pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
 ```text
 python -m rocke # list discoverable entry points
 python -m rocke.run_manifest # numpy + HIP manifest runner
-python -m rocke.examples.common.bake_off_implicit_gemm # example generator
+python -m builders.common.bake_off_implicit_gemm # example generator
 python -m rocke.sweep_bench # benchmark a sweep manifest
 ```

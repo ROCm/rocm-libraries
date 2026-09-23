@@ -10,31 +10,19 @@ Using SPIR-V with rocPRIM
 
 rocPRIM supports building with target-agnostic SPIR-V.
 
-.. note::
-
-    SPIR-V is in an early access state. Using it in production is not recommended.
-
-To build with SPIR-V, set the ``ROCPRIM_EXPERIMENTAL_SPIRV`` parameter to any non-zero value, and set ``--offload-arch`` to ``amdgcnspirv``.
+To build with SPIR-V, set ``--offload-arch`` to ``amdgcnspirv``.
 
 For example, with hipcc:
 
 .. code:: shell
 
-    hipcc -DROCPRIM_EXPERIMENTAL_SPIRV=1 --offload-arch=amdgcnspirv
+    hipcc --offload-arch=amdgcnspirv
 
 For example, with cmake:
 
 .. code:: shell
 
-    cmake -DCMAKE_CXX_FLAGS="-DROCPRIM_EXPERIMENTAL_SPIRV=1 --offload-arch=amdgcnspirv"
-
-
-.. note::
-
-    rocPRIM does not support mixed compilation targets. No other target can be set when ``--offload-arch=amdgcnspirv`` is used.
-    
-    Setting ``ROCPRIM_EXPERIMENTAL_SPIRV`` will disable all config dispatching.
-
+    cmake --offload-arch=amdgcnspirv"
 
 When targeting SPIR-V, the hardware wavefront size (also known as warp size) is not known
 at compile time. 

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <unordered_map>
 #include <vector>
@@ -252,58 +253,6 @@ flatbuffers::FlatBufferBuilder createCustomOpGraph()
     return builder;
 }
 
-// Creates a minimal graph with a BatchnormInference node (unsupported by GPU executor).
-flatbuffers::FlatBufferBuilder createBatchnormInferenceGraph()
-{
-    flatbuffers::FlatBufferBuilder builder;
-
-    const std::vector<int64_t> dims = {1, 2, 3, 4};
-    const std::vector<int64_t> strides = {24, 12, 4, 1};
-
-    const std::vector<int64_t> perChannelDims = {1, 2, 1, 1};
-    const std::vector<int64_t> perChannelStrides = {2, 1, 1, 1};
-
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(
-        CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &strides, &dims));
-    tensors.push_back(CreateTensorAttributesDirect(
-        builder, 2, "mean", DataType::FLOAT, &perChannelStrides, &perChannelDims));
-    tensors.push_back(CreateTensorAttributesDirect(
-        builder, 3, "inv_variance", DataType::FLOAT, &perChannelStrides, &perChannelDims));
-    tensors.push_back(CreateTensorAttributesDirect(
-        builder, 4, "scale", DataType::FLOAT, &perChannelStrides, &perChannelDims));
-    tensors.push_back(CreateTensorAttributesDirect(
-        builder, 5, "bias", DataType::FLOAT, &perChannelStrides, &perChannelDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(builder, 6, "y", DataType::FLOAT, &strides, &dims));
-
-    auto bnAttrs = CreateBatchnormInferenceAttributes(builder,
-                                                      1, // x_tensor_uid
-                                                      2, // mean_tensor_uid
-                                                      3, // inv_variance_tensor_uid
-                                                      4, // scale_tensor_uid
-                                                      5, // bias_tensor_uid
-                                                      6); // y_tensor_uid
-
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(builder,
-                                     "bn_inference_node",
-                                     DataType::FLOAT,
-                                     NodeAttributes::BatchnormInferenceAttributes,
-                                     bnAttrs.Union()));
-
-    auto graph = CreateGraphDirect(builder,
-                                   "BnInferenceTestGraph",
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
-
-    builder.Finish(graph);
-    return builder;
-}
-
 inline size_t elementCount(const std::vector<int64_t>& dims)
 {
     size_t count = 1;
@@ -404,6 +353,79 @@ void runConvFwdExecutorVsCpu(const std::vector<int64_t>& xDims,
     {
         EXPECT_NEAR(static_cast<float>(gpuYData[i]), static_cast<float>(cpuResult[i]), tolerance)
             << "Mismatch at index " << i;
+    }
+}
+
+template <typename IOType, typename ComputeType = float>
+void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
+                               const std::vector<int64_t>& outDims,
+                               hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode)
+{
+    constexpr int64_t IN_UID = 1;
+    constexpr int64_t OUT_UID = 2;
+
+    const auto inStrides = generateStrides(inDims);
+    const auto outStrides = generateStrides(outDims);
+
+    // Build the reduction flatbuffer graph
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    const auto ioDataType = hipdnn_test_sdk::utilities::nativeTypeToDataType<IOType>();
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, IN_UID, "input", ioDataType, &inStrides, &inDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, OUT_UID, "output", ioDataType, &outStrides, &outDims));
+
+    auto reductionAttr = hipdnn_flatbuffers_sdk::data_objects::CreateReductionAttributes(
+        builder, mode, IN_UID, OUT_UID);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    const auto computeDataType = hipdnn_test_sdk::utilities::nativeTypeToDataType<ComputeType>();
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "reduction_node",
+        computeDataType,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes,
+        reductionAttr.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
+                                                                               "ReductionTestGraph",
+                                                                               computeDataType,
+                                                                               computeDataType,
+                                                                               ioDataType,
+                                                                               &tensorAttributes,
+                                                                               &nodes);
+    builder.Finish(graphOffset);
+
+    // Prepare tensors and fill input with random values
+    hipdnn_data_sdk::utilities::Tensor<IOType> inputTensor(inDims, inStrides);
+    hipdnn_data_sdk::utilities::Tensor<IOType> outputTensor(outDims, outStrides);
+    inputTensor.fillWithRandomValues(static_cast<IOType>(-1.0f), static_cast<IOType>(1.0f), 42);
+
+    // Run GPU Graph executor
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_UID] = inputTensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    outputTensor.markDeviceModified();
+
+    // Run CPU reference reduction
+    hipdnn_data_sdk::utilities::Tensor<IOType> refOutputTensor(outDims, outStrides);
+    hipdnn_test_sdk::utilities::CpuFpReferenceReduction::reduce<IOType, IOType, ComputeType>(
+        inputTensor, refOutputTensor, mode);
+
+    // Compare GPU output against CPU reference
+    const auto* outputHost = static_cast<const IOType*>(outputTensor.rawHostData());
+    const auto* refOutputHost = static_cast<const IOType*>(refOutputTensor.rawHostData());
+    const auto tolerance = hipdnn_test_sdk::utilities::reduction::getTolerance<IOType>();
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(
+            static_cast<float>(outputHost[i]), static_cast<float>(refOutputHost[i]), tolerance)
+            << "Mismatch in output at index " << i;
     }
 }
 
@@ -565,8 +587,8 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 {
     SKIP_IF_NO_DEVICES();
 
-    // BatchnormInference has no GPU plan yet - should throw
-    auto builder = createBatchnormInferenceGraph();
+    // ResampleBwd has no GPU plan yet - should throw
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 
@@ -837,6 +859,344 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinaryExecutes)
         const float expected = static_cast<float*>(input0Tensor.rawHostData())[i]
                                + static_cast<float*>(input1Tensor.rawHostData())[i];
         EXPECT_EQ(expected, static_cast<float*>(outputTensor.rawHostData())[i])
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutor, RMSNormFwdIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, RMSNormFwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(strides, dims);
+
+    std::vector<int64_t> scaleDims(dims);
+    scaleDims[0] = 1;
+    auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(
+        scaleDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> yTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> scaleTensor(scaleDims, scaleStrides);
+
+    xTensor.fillWithRandomValues(-1.0f, 1.0f);
+    scaleTensor.fillWithRandomValues(0.5f, 1.5f);
+    yTensor.fillWithValue(0);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = xTensor.rawDeviceData();
+    variantPack[2] = yTensor.rawDeviceData();
+    variantPack[3] = scaleTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    yTensor.markDeviceModified();
+
+    // Validate against CPU reference implementation
+    hipdnn_data_sdk::utilities::Tensor<float> refYTensor(dims, strides);
+    hipdnn_test_sdk::utilities::CpuFpReferenceRMSNorm::forward(
+        xTensor, scaleTensor, refYTensor, 1e-5);
+
+    auto* yHost = static_cast<float*>(yTensor.rawHostData());
+    auto* refYHost = static_cast<float*>(refYTensor.rawHostData());
+    for(size_t i = 0; i < yTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(
+            yHost[i], refYHost[i], hipdnn_test_sdk::utilities::rmsnorm::getTolerance<float>())
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutor, RMSNormBwdIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, RMSNormBwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(strides, dims, true);
+
+    std::vector<int64_t> scaleDims(dims);
+    scaleDims[0] = 1;
+    auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(
+        scaleDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    std::vector<int64_t> statDims(dims.size(), 1);
+    statDims[0] = dims[0];
+    auto statStrides = hipdnn_data_sdk::utilities::generateStrides(
+        statDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    hipdnn_data_sdk::utilities::Tensor<float> dyTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> scaleTensor(scaleDims, scaleStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> dxTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> dscaleTensor(scaleDims, scaleStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> dbiasTensor(scaleDims, scaleStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> invRmsTensor(statDims, statStrides);
+
+    dyTensor.fillWithRandomValues(-1.0f, 1.0f);
+    xTensor.fillWithRandomValues(-1.0f, 1.0f);
+    scaleTensor.fillWithRandomValues(0.5f, 1.5f);
+    invRmsTensor.fillWithRandomValues(0.1f, 1.0f);
+    dxTensor.fillWithValue(0);
+    dscaleTensor.fillWithValue(0);
+    dbiasTensor.fillWithValue(0);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = dyTensor.rawDeviceData();
+    variantPack[2] = xTensor.rawDeviceData();
+    variantPack[3] = scaleTensor.rawDeviceData();
+    variantPack[4] = dxTensor.rawDeviceData();
+    variantPack[5] = dscaleTensor.rawDeviceData();
+    variantPack[6] = invRmsTensor.rawDeviceData();
+    variantPack[7] = dbiasTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    dxTensor.markDeviceModified();
+    dscaleTensor.markDeviceModified();
+    dbiasTensor.markDeviceModified();
+
+    // Validate against CPU reference implementation
+    hipdnn_data_sdk::utilities::Tensor<float> refDxTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> refDscaleTensor(scaleDims, scaleStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> refDbiasTensor(scaleDims, scaleStrides);
+    hipdnn_test_sdk::utilities::CpuFpReferenceRMSNorm::backward(dyTensor,
+                                                                xTensor,
+                                                                scaleTensor,
+                                                                invRmsTensor,
+                                                                refDxTensor,
+                                                                refDscaleTensor,
+                                                                &refDbiasTensor);
+
+    auto* dxHost = static_cast<float*>(dxTensor.rawHostData());
+    auto* refDxHost = static_cast<float*>(refDxTensor.rawHostData());
+    const auto tolerance = hipdnn_test_sdk::utilities::rmsnorm::getTolerance<float>();
+    for(size_t i = 0; i < dxTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(dxHost[i], refDxHost[i], tolerance) << "dx mismatch at index " << i;
+    }
+
+    auto* dscaleHost = static_cast<float*>(dscaleTensor.rawHostData());
+    auto* refDscaleHost = static_cast<float*>(refDscaleTensor.rawHostData());
+    auto* dbiasHost = static_cast<float*>(dbiasTensor.rawHostData());
+    auto* refDbiasHost = static_cast<float*>(refDbiasTensor.rawHostData());
+    for(size_t i = 0; i < dscaleTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(dscaleHost[i], refDscaleHost[i], tolerance) << "dscale mismatch at index " << i;
+        EXPECT_NEAR(dbiasHost[i], refDbiasHost[i], tolerance) << "dbias mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutor, ReductionIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ReductionExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runReductionExecutorVsCpu<float>(
+        {4, 16, 28, 28}, {4, 16, 1, 1}, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MAX);
+}
+
+TEST(TestGpuReferenceGraphExecutorFp16, ReductionExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runReductionExecutorVsCpu<hipdnn_data_sdk::types::half>(
+        {4, 16, 28, 28}, {1, 1, 28, 28}, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MUL);
+}
+
+TEST(TestGpuReferenceGraphExecutorBfp16, ReductionExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runReductionExecutorVsCpu<hipdnn_data_sdk::types::bfloat16>(
+        {4, 16, 28, 28},
+        {1, 16, 1, 28},
+        hipdnn_flatbuffers_sdk::data_objects::ReductionMode::NORM2);
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ReductionWithDoubleComputeTypeExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runReductionExecutorVsCpu<float, double>(
+        {4, 16, 28, 28}, {4, 16, 1, 1}, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::AVG);
+}
+
+TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfWithActivationIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, BatchnormFwdInfExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+    const std::vector<int64_t> perChannelDims = {1, dims[1], 1, 1};
+    auto perChannelStrides = generateStrides(perChannelDims);
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(strides, dims);
+
+    hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> yTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> scaleTensor(perChannelDims, perChannelStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> biasTensor(perChannelDims, perChannelStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> meanTensor(perChannelDims, perChannelStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> invVarianceTensor(perChannelDims, perChannelStrides);
+
+    xTensor.fillWithRandomValues(-1.0f, 1.0f);
+    scaleTensor.fillWithRandomValues(0.5f, 1.5f);
+    biasTensor.fillWithRandomValues(-1.0f, 1.0f);
+    meanTensor.fillWithRandomValues(-0.5f, 0.5f);
+    invVarianceTensor.fillWithRandomValues(0.1f, 1.0f);
+    yTensor.fillWithValue(0);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = xTensor.rawDeviceData();
+    variantPack[2] = yTensor.rawDeviceData();
+    variantPack[3] = scaleTensor.rawDeviceData();
+    variantPack[4] = biasTensor.rawDeviceData();
+    variantPack[5] = meanTensor.rawDeviceData();
+    variantPack[6] = invVarianceTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    yTensor.markDeviceModified();
+
+    hipdnn_data_sdk::utilities::Tensor<float> refYTensor(dims, strides);
+    hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInference(
+        xTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, refYTensor);
+
+    auto* yHost = static_cast<float*>(yTensor.rawHostData());
+    auto* refYHost = static_cast<float*>(refYTensor.rawHostData());
+    for(size_t i = 0; i < yTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(yHost[i],
+                    refYHost[i],
+                    hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<float>())
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfVarianceIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfVarianceWithActivationIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
+
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, BatchnormFwdInfVarianceExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+    const std::vector<int64_t> perChannelDims = {1, dims[1], 1, 1};
+    auto perChannelStrides = generateStrides(perChannelDims);
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(strides, dims);
+
+    hipdnn_data_sdk::utilities::Tensor<float> xTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> yTensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> scaleTensor(perChannelDims, perChannelStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> biasTensor(perChannelDims, perChannelStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> meanTensor(perChannelDims, perChannelStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> varianceTensor(perChannelDims, perChannelStrides);
+
+    xTensor.fillWithRandomValues(-1.0f, 1.0f);
+    scaleTensor.fillWithRandomValues(0.5f, 1.5f);
+    biasTensor.fillWithRandomValues(-1.0f, 1.0f);
+    meanTensor.fillWithRandomValues(-0.5f, 0.5f);
+    varianceTensor.fillWithRandomValues(0.1f, 1.0f);
+    yTensor.fillWithValue(0);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = xTensor.rawDeviceData();
+    variantPack[2] = yTensor.rawDeviceData();
+    variantPack[3] = scaleTensor.rawDeviceData();
+    variantPack[4] = biasTensor.rawDeviceData();
+    variantPack[5] = meanTensor.rawDeviceData();
+    variantPack[6] = varianceTensor.rawDeviceData();
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    yTensor.markDeviceModified();
+
+    hipdnn_data_sdk::utilities::Tensor<float> refYTensor(dims, strides);
+    hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
+        xTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, refYTensor, 1e-5);
+
+    auto* yHost = static_cast<float*>(yTensor.rawHostData());
+    auto* refYHost = static_cast<float*>(refYTensor.rawHostData());
+    for(size_t i = 0; i < yTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(
+            yHost[i],
+            refYHost[i],
+            hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<float>())
             << "Mismatch at index " << i;
     }
 }

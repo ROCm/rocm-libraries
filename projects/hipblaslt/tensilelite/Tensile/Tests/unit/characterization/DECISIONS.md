@@ -282,4 +282,234 @@ field tuple position.
 
 **ADR:** [`adr/0002-knownbugs-key-on-solution-name.md`](adr/0002-knownbugs-key-on-solution-name.md)
 
-**Decision:** `TensileLogic.KnownBugs` now keys documented `--check-all` skips on `(path, solution_name)` instead of positional `(path, solution_index)`, which shifts on re-tuning; `solution_index` support is dropped. Intended behavior change, not a pinned bug. Motivating context: ROCM-7144.
+**Decision:** `TensileLogic.KnownBugs` now keys documented `--check-all` skips on
+`(path, solution_name)` (the solution's stable `SolutionNameMin`) instead of the
+positional `(path, solution_index)`; `solution_index` support is dropped. The
+`test_knownbugs_char.py` goldens for `test_is_known_bug_hit_and_miss` and
+`test_load_roundtrip_multi` were re-recorded to match. This is an intended
+behavior change (not a pinned bug): positional indices shift on re-tuning and
+forced manual edits to `known_bugs.yaml`, whereas the content-derived name is
+stable and self-invalidating. Motivating context: ROCM-7144.
+
+**Note:** the two golden nodes were hand-edited to match syrupy's amber format
+and must be confirmed byte-identical via `--snapshot-update` in a build
+environment; the `-m unit` lane needs the compiled rocisa module, which is not
+available where this change was authored.
+
+## D21 — `test_bigfile_capped_emit` decoupled from live `library/src` tuning data
+
+**ADR:** [`adr/0012-decouple-bigfile-tests-from-library-src.md`](adr/0012-decouple-bigfile-tests-from-library-src.md)
+
+**Decision:** Replace the 10 `_BIG` entries' live `library/src` tuning-data references with vendored, trimmed, self-contained fixtures under `_codegen/data/bigfiles/`; add `test_no_library_src_dependency_char.py` as a standing AST-scan regression guard against the coupling reappearing.
+
+## D22 — `test_bigfile_capped_emit` basename churn from upstream StreamK/GSU codegen changes
+
+**Context:** After rebasing D21's fixtures onto current `develop`, 3 of the 10 `test_bigfile_capped_emit` cases (`equality_gfx950_HSS_big`, `gfx950_origami_MX`, `gfx1201_I8II`) failed on basename only — `err` stayed `0` and each fixture's solution count matched its `cap` exactly (6 solutions in, 6 emitted), so the affected kernels are unchanged in identity, just renamed. Root cause: `Tensile/Components/GSU.py`, `GlobalWriteBatch.py`, `StreamK.py`, and `KernelWriterAssembly.py` changed on `develop` (notably #9401 "enable PrefetchAcrossPersistent for SK4 and SK5" and #11245 "CompactLoopStore for D-store, MBSK, and StreamK") between when these fixtures were baselined and now, shifting the content-derived `MinNaming` hash for a subset of solutions that happen to hit those codegen paths. Same category as D16/D17.
+
+**Decision:** Re-recorded only the 3 affected snapshot nodes via `--snapshot-update`; verified locally beforehand that both old and new basenames refer to the same 6 vendored solutions per fixture (no solution added/dropped/reordered-in-or-out of the capped set), and that assembly still emits cleanly (`err == 0`) for all of them.
+
+## D23 — Canonical code-object linker input order
+
+**ADR:** [`adr/0013-canonical-code-object-link-order.md`](adr/0013-canonical-code-object-link-order.md)
+
+**Decision:** Sort every code object's input paths immediately before linking,
+so default and explicitly grouped code objects share one deterministic physical
+kernel order even though their inputs originate from different collection types.
+
+## D24 — CustomKernels: re-target at `_readEmbeddedYaml` after Gemm-From-Anywhere removed `getCustomKernelConfigAndAssembly`
+
+**ADR:** [`adr/0002-custom-kernels-embedded-yaml-parsing.md`](adr/0002-custom-kernels-embedded-yaml-parsing.md).
+
+**Context:** `test_custom_kernels_char.py` (added on `develop` by #7989) pinned
+`getCustomKernelConfigAndAssembly`, a raw `---`/`...` line-splitter returning
+`(config_text, assembly_text)`. The Gemm-From-Anywhere branch's rewrite of
+`CustomKernels.py` (proper `.amdgpu_metadata` YAML parsing for the external-
+kernel `custom.config` schema) dropped that function in favor of a private
+`_readEmbeddedYaml` returning a parsed dict — the two branches diverged before
+#7989 merged to `develop`, so this was never reconciled. The stale import
+caused a pytest **collection** error, which (per pytest's default behavior)
+aborted the entire `-m unit` run before any test executed — silently hiding
+every other test in the suite behind this one file, not just this module.
+
+**Decision:** Point the test at the real replacement (`_readEmbeddedYaml`,
+pinning its parsed-dict return) instead of restoring the removed function.
+Also gave `test_get_custom_kernel_config_ok` its own fixture with a minimal
+`amdhsa.kernels` entry (`_VALID_S_WITH_KERNEL_META`), matching the convention
+in `Tests/unit/test_CustomKernelMetadata.py::write_kernel`, since
+`getCustomKernelConfig`'s new no-explicit-`CustomKernel` auto-infer path
+requires one (real kernel `.s` files always have one; only the bare-minimum
+test fixture didn't).
+
+**Why:** Same-purpose replacement (pin how the module reads its embedded
+YAML), not a scope cut; add-only (no production code touched); private-helper
+characterization already has precedent in this same branch
+(`test_CustomKernelMetadata.py` imports `_parse_tensile_yaml`/`_read_asm_file`
+directly).
+
+**Rejected alternatives:**
+- *Restore `getCustomKernelConfigAndAssembly`* — rejected per explicit
+  direction: don't reintroduce what Gemm-From-Anywhere deliberately removed.
+- *Delete the test instead of replacing it* — rejected: loses real coverage of
+  the embedded-YAML parsing path with no offsetting gain.
+
+**Validation:** `test_custom_kernels_char.py` — 11 passed, byte-identical
+`.ambr` across two additional `--snapshot-update`-free re-runs.
+
+**Residual scope (not fixed here):** unblocking collection let the full
+`-m unit` suite actually run for the first time on this branch's diff, and it
+surfaced 12 pre-existing failures unrelated to this file. Triaged and closed
+in D24 below.
+
+## D25 — Triage of the 12 failures D23 unblocked: 2 real regressions fixed, 10 stale-fixture goldens/asserts updated
+
+**Context:** D23 fixed a pytest *collection* error that had aborted the entire
+`-m unit` run before any test executed, on this branch's diff, since it
+diverged from `develop`. With collection fixed, the suite ran for the first
+time and surfaced 12 failures across 6 files, all in code this branch itself
+touched. Each was triaged individually per the "did you intend to change this
+behavior?" protocol in `README.md` — no blanket `--snapshot-update`, no
+fixing-via-the-test of anything that was a real code bug.
+
+**Two were real regressions; fixed the source, not the tests/goldens:**
+
+- **`TensileLogic/HandleCustomKernel.hasCustomKernel`** — the line-scanner's
+  marker pattern was changed from `CustomKernelName:` (legacy flat key) to
+  `name:` (matching the new `CustomKernel:` mapping's nested name field), but
+  `handleCustomKernel()` itself still explicitly accepts *either* shape
+  (`sol["CustomKernel"]["name"]` or `sol.get("CustomKernelName", "")`). The
+  narrowed scanner is reachable from a live gating call site
+  (`TensileLogic/Run.py:105`, `if check.OnlyCustomKernels and
+  hasCustomKernel(file): ...`) that decides whether a logic file's solutions
+  get loaded at all under `--only-custom-kernels`-style checks — so a legacy
+  `CustomKernelName:`-keyed logic file would have its custom-kernel solutions
+  silently dropped from that check. Fixed by matching *both*
+  `CustomKernelName:` and `CustomKernel:` (the distinctive parent keys for
+  each schema — not the generic, collision-prone bare `name:`), restoring the
+  original (unchanged) golden's expectation. Added
+  `test_has_custom_kernel_true_new_style_mapping` since the new-style path had
+  zero prior coverage.
+- **`Toolchain.Component.Assembler._retargetAssemblySource`** — new,
+  unconditional preprocessing step on every single assembly compile (rewrites
+  a mismatched `.amdgcn_target`/`amdhsa.target` directive in the source to
+  match the actual build target — the mechanism the `CustomKernels/README.md`
+  Triton section describes). It called `path.read_text()` with no handling
+  for a missing/unreadable file (only `UnicodeDecodeError` was caught), so any
+  `srcPath` that doesn't exist yet crashes `Assembler.__call__` with a
+  confusing traceback instead of reaching the actual compiler invocation
+  right after, which would raise its own clear "no such file" error through
+  the already-exercised `_invoke`/`CalledProcessError` path. Widened the catch
+  to `(UnicodeDecodeError, OSError)`. Also added
+  `test_retarget_assembly_source_rewrites_mismatched_target` and
+  `..._leaves_matching_target_untouched` — the regex rewrite itself had zero
+  test coverage anywhere in the repo before this.
+
+**Everything else was a stale test double, not a code bug — production
+behavior is correct; the fixtures just don't auto-default new fields the way
+their real counterparts do:**
+
+- **`ValidParameters::test_valid_parameters_{key_roster,structure}`** — clean,
+  intentional, single-line-diff changes in `Common/ValidParameters.py`:
+  `CustomKernelName` renamed to `CustomKernel` (matches the mapping-typed
+  parameter everywhere else in this branch), and
+  `AssertFree0/1ElementMultiple` / `AssertSummationElementMultiple` extended
+  with `64`/`128`/`256` (larger custom-kernel tile sizes). Updated both
+  goldens; reviewed the diff line-by-line (see the `.ambr` diff in the PR).
+- **`TensileMain::test_arg_updated_global_parameters_*`** and
+  **`PublicInputSurface::test_platform_*_branch_*`** — two independently
+  hand-rolled fake-`args` builders (`_args()` / `_make_args()`, one using
+  `SimpleNamespace`, one using `argparse.Namespace` directly) both predate the
+  new `--validate-metadata` flag (`Tensile.py`'s `argUpdatedGlobalParameters`
+  now reads `args.ValidateMetadata`). A *real* `argparse` parser always
+  supplies a `store_true` flag's default (`False`), so this can't happen
+  outside a test; added `ValidateMetadata=False` to both builders. Extended
+  `TensileMain`'s "all overrides" test to actually cover
+  `ValidateMetadata=True` (previously untested) and added a explicit
+  default-omitted case; `PublicInputSurface`'s file is narrowly scoped to the
+  unrelated `platform` predicate per its own docstring, so left it at the
+  minimal fixture fix.
+- **`TensileCreateLibraryRun::test_pass_post_kernel_info_to_solution`** — same
+  shape of issue: `KernelCodeGenResult` gained a `customKernelDef:
+  Optional[dict] = None` field (a real instance always has it via the
+  `NamedTuple` default), but the test's `SimpleNamespace` stand-in doesn't
+  auto-default missing attributes the way a `NamedTuple` does. Added
+  `customKernelDef=None`/`=<a dict>` to the two cases and a new test,
+  `..._carries_custom_kernel_def`, pinning the previously-uncovered
+  `solution._state["CustomKernel"] = result.customKernelDef` assignment.
+
+**Validation:** every touched file re-run individually (all green) plus two
+full, `--snapshot-update`-free `-m unit` runs of the whole suite (see the PR
+description for the exact before/after counts).
+
+**Rejected alternatives:**
+- *Blanket `--snapshot-update` across the whole suite* — forbidden by this
+  file's own cardinal rule; would have silently accepted the two real
+  regressions above instead of fixing them.
+- *Leave `hasCustomKernel`/`_retargetAssemblySource` as-is and just fix the
+  two tests* — rejected: both are reachable from real call sites, and
+  "fixing" the test to assert the buggy behavior would have pinned a real
+  regression as if it were intended, exactly what this suite exists to catch.
+
+## D26 — LibraryIO characterization: add-only mutation-kill snapshot cases
+**Decision:** The LibraryIO mutation-hardening slice pins additional *current*
+LibraryIO behavior by appending new syrupy cases to three existing goldens
+(`test_parse_integration_char.ambr`, `test_serializers_char.ambr`,
+`test_writesolutions_char.ambr`); no existing snapshot value is re-recorded.
+**Classification:** category (a) intended behavior capture -- new cases pinning
+previously-unsnapshotted read/write/parse behavior to raise mutation kill power,
+not a change to any pinned behavior. The diffs are insertion-only (+258/-0,
++9/-0, +54/-0) and confined to the LibraryIO node, so no ADR is required (nothing
+behavior-changing or known-wrong is pinned); this registry line is the record.
+The parse_integration additions begin in the mutation infra base and continue
+in this slice.
+**Re-run:** goldens byte-identical on two further no-update runs; `-m unit` green.
+
+## D27 — Solution.py mutation kill: pickle-free `.ambr` derivation golden
+**Decision:** Kill the `Solution.assignDerivedParameters` mutant giant with a
+syrupy `.ambr` full-derived-state golden regenerated from in-tree designed YAML
+configs, committing no pickle. See ADR 0003.
+**Why:** the giant (~18820 mutants across the `depthU`/`adp` families) is only
+observable by asserting the complete derived `_state`; a pickle golden is opaque,
+version-coupled, and undiffable, against the suite's add-only diffable-golden
+discipline. Unlike the LibraryIO add-only cases in D24, this introduces a new
+golden *vehicle* with a non-obvious regeneration mechanism, so it lands with an
+ADR (0003), not just this registry line.
+**Equivalence evidence:** verified kill-equivalent to the interim pickle corpus
+over 8 stratified windows (lines 1567-2857, 684 mutants, 0 per-key exit-code
+divergence). Byte-stability confirmed by two further no-update runs.
+**Harness fixes (not source):** derivation moved out of collection (a
+collection-time try/except was swallowing raising mutants); `_sanitize` now
+recurses into any `Mapping` so `ProblemType` is deep-compared, closing 4
+`MirrorDimsMetadata` mutants a `str()`-only render missed.
+**Regeneration:** on an intentional derivation/config change, rerun with
+`--snapshot-update`, confirm byte-stability with two clean runs, and log the
+regeneration here.
+
+## D28 — Per-file ratchet audit after wave-2 (r8 + HUX crossover)
+**Decision:** Keep the current `develop` floors for the six files flagged in
+review, except for two reproducible increases: raise `Configuration.py` from
+91.18% to 92.53% and `StreamK.py` from 82.18% to 82.24%. Do not import the
+higher floors measured on `users/davidd-amd/mut-v2-coverage` at e69017042cf.
+
+**Evidence:** The local combined report and the uploaded #11967 report agree to
+two decimal places: Configuration 92.53%, segment_interleave 94.41%, Solution
+70.40%, Component 93.49%, GSU 73.72%, and StreamK 82.24%. The gate passes all
+172 files with the existing one-point tolerance. No floor is lowered;
+Solution.py remains at 70.55% even though the current measurement is 0.15 points
+lower.
+
+The e69017042cf report was produced from a different source and test tree. That
+tree has 101 test files absent from this layer, while this layer has 58 other
+test files and 198 modified tests. Relative to that tree, segment_interleave,
+Solution, GSU, and StreamK also changed substantially. The old 99.25%, 100.00%,
+74.58%, 97.20%, 75.86%, and 84.29% values therefore cannot be used as floors for
+this earlier stack layer.
+
+**Classification:** None of the six reported drops is run-to-run measurement
+noise; repeated local and hosted runs reproduce the current values. Configuration
+and Component lost indirect execution supplied by the other test tree.
+segment_interleave, Solution, GSU, and StreamK combine a different test set with
+source growth. Restoring the old floors requires new tests rather than another
+baseline reduction: cover ExpressionEvaluator and reverse-operator branches in
+Configuration, asymmetric aligned layouts in segment_interleave, consolidated
+derived-state cases in Solution, LDS token selection in Component, and focused
+reduction/fixup paths in GSU and StreamK.

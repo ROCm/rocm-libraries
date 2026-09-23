@@ -91,7 +91,8 @@ from the standard library plus the packages above.
 |---|---|
 | `pr-merge-sync-patches.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
 | `pr-merge-sync-patches-manual.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
-| `therock-ci.yml` / `therock-multi-arch-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
+| `therock-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
+| `therock-multi-arch-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
 | `component-ci.yml` | `component_ci.py` |
 | `therock-ci-nightly.yml` | `check_wheel_freshness.py` |
 | `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |

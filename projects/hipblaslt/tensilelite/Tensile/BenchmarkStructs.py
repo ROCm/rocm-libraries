@@ -30,7 +30,7 @@ from Tensile.Common import print1, print2, hasParam, printExit
 from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters, globalParameters, \
                                             defaultBatchedBenchmarkFinalProblemSizes, \
                                             defaultBenchmarkFinalProblemSizes
-from Tensile.Common.ValidParameters import validParameters
+from Tensile.Common.ValidParameters import validParameters, validParametersForArch
 from Tensile.SolutionStructs.Problem import ProblemType
 
 from .CustomKernels import getAllCustomKernelNames
@@ -124,7 +124,7 @@ class BenchmarkProcess:
     """Representation of benchmarking parameters and resulting steps"""
 
     def __init__(self, problemTypeConfig, problemSizeGroupConfig, printIndexAssignmentInfo: bool,
-                 keyPathPrefix: str = "", srcFile: str = ""):
+                 keyPathPrefix: str = "", srcFile: str = "", gfxName: str = ""):
         """Create from the two sections of a config for a BenchmarkProblem.
 
         ``keyPathPrefix`` (e.g. ``BenchmarkProblems[i][1+groupIdx]``) and
@@ -133,6 +133,8 @@ class BenchmarkProcess:
         key. Both are optional; an empty prefix produces the unqualified
         keypath used by ad-hoc callers and tests.
         """
+        # Read in getConfigParameters, which picks the parameter table.
+        self.gfxName = gfxName
         self.problemType = ProblemType(problemTypeConfig, printIndexAssignmentInfo)
         self.isBatched = "Batched" in problemTypeConfig and problemTypeConfig["Batched"]
         print2("# BenchmarkProcess beginning {}".format(self.problemType))
@@ -258,14 +260,18 @@ class BenchmarkProcess:
                        else "BenchmarkCommonParameters"
         forkPrefix = f"{keyPathPrefix}.ForkParameters" if keyPathPrefix else "ForkParameters"
 
+        # Only a gfx1250 config may name what the gfx1250 LDS padding solver
+        # reports; every other architecture reads the table it always read.
+        archValidParameters = validParametersForArch(self.gfxName)
+
         for param in benchmarkCommonParams.items():
             checkParametersAreValid(
-                param, validParameters,
+                param, archValidParameters,
                 keyPathPrefix=commonPrefix, srcFile=srcFile,
             )
         for param in forkParams.items():
             checkParametersAreValid(
-                param, validParameters,
+                param, archValidParameters,
                 keyPathPrefix=forkPrefix, srcFile=srcFile,
             )
 
@@ -275,7 +281,7 @@ class BenchmarkProcess:
                 groupsPrefix = f"{forkPrefix}.Groups[{gIdx}][{eIdx}]"
                 for k, v in group.items():
                     checkParametersAreValid(
-                        (k, [v]), validParameters,
+                        (k, [v]), archValidParameters,
                         keyPathPrefix=groupsPrefix, srcFile=srcFile,
                     )
 
