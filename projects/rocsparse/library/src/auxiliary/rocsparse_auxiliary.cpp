@@ -1365,6 +1365,156 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief Get the internal fields of a HYB matrix, without exposing its layout.
+ *******************************************************************************/
+rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
+                                            rocsparse_int*           m,
+                                            rocsparse_int*           n,
+                                            rocsparse_hyb_partition* partition,
+                                            int64_t*                 ell_nnz,
+                                            rocsparse_int*           ell_width,
+                                            const rocsparse_int**    ell_col_ind,
+                                            const void**             ell_val,
+                                            rocsparse_int*           coo_nnz,
+                                            const rocsparse_int**    coo_row_ind,
+                                            const rocsparse_int**    coo_col_ind,
+                                            const void**             coo_val)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, hyb);
+
+    if(m != nullptr)
+    {
+        *m = hyb->m;
+    }
+    if(n != nullptr)
+    {
+        *n = hyb->n;
+    }
+    if(partition != nullptr)
+    {
+        *partition = hyb->partition;
+    }
+    if(ell_nnz != nullptr)
+    {
+        *ell_nnz = hyb->ell_nnz;
+    }
+    if(ell_width != nullptr)
+    {
+        *ell_width = hyb->ell_width;
+    }
+    if(ell_col_ind != nullptr)
+    {
+        *ell_col_ind = hyb->ell_col_ind;
+    }
+    if(ell_val != nullptr)
+    {
+        *ell_val = hyb->ell_val;
+    }
+    if(coo_nnz != nullptr)
+    {
+        *coo_nnz = hyb->coo_nnz;
+    }
+    if(coo_row_ind != nullptr)
+    {
+        *coo_row_ind = hyb->coo_row_ind;
+    }
+    if(coo_col_ind != nullptr)
+    {
+        *coo_col_ind = hyb->coo_col_ind;
+    }
+    if(coo_val != nullptr)
+    {
+        *coo_val = hyb->coo_val;
+    }
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief Set the internal fields of a HYB matrix, without exposing its layout.
+ *******************************************************************************/
+rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
+                                            const rocsparse_int*           m,
+                                            const rocsparse_int*           n,
+                                            const rocsparse_hyb_partition* partition,
+                                            const int64_t*                 ell_nnz,
+                                            const rocsparse_int*           ell_width,
+                                            rocsparse_int* const*          ell_col_ind,
+                                            void* const*                   ell_val,
+                                            const rocsparse_int*           coo_nnz,
+                                            rocsparse_int* const*          coo_row_ind,
+                                            rocsparse_int* const*          coo_col_ind,
+                                            void* const*                   coo_val)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, hyb);
+
+    if(m != nullptr)
+    {
+        hyb->m = *m;
+    }
+    if(n != nullptr)
+    {
+        hyb->n = *n;
+    }
+    if(partition != nullptr)
+    {
+        hyb->partition = *partition;
+    }
+    if(ell_nnz != nullptr)
+    {
+        hyb->ell_nnz = *ell_nnz;
+    }
+    if(ell_width != nullptr)
+    {
+        hyb->ell_width = *ell_width;
+    }
+    if(ell_col_ind != nullptr)
+    {
+        hyb->ell_col_ind = *ell_col_ind;
+    }
+    if(ell_val != nullptr)
+    {
+        hyb->ell_val = *ell_val;
+    }
+    if(coo_nnz != nullptr)
+    {
+        hyb->coo_nnz = *coo_nnz;
+    }
+    if(coo_row_ind != nullptr)
+    {
+        hyb->coo_row_ind = *coo_row_ind;
+    }
+    if(coo_col_ind != nullptr)
+    {
+        hyb->coo_col_ind = *coo_col_ind;
+    }
+    if(coo_val != nullptr)
+    {
+        hyb->coo_val = *coo_val;
+    }
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_mat_info is a structure holding the matrix info data that is
  * gathered during the analysis routines. It must be initialized by calling
  * rocsparse_create_mat_info() and the returned info structure must be passed
