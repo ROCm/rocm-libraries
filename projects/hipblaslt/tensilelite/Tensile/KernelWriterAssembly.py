@@ -1991,11 +1991,11 @@ class KernelWriterAssembly(KernelWriter):
       module.addComment0("2GB limit - set offsets to -1 to exceed this and clamp")
       module.add(ValueSet("BufferLimit", 0xffffffff, format=1))
       # BufferOOB: Offset value used for out-of-bounds threads.
-      # Set to maximum 32-bit value to ensure hardware rejects OOB writes.
-      # With correctly-sized buffer descriptors (M*N*bpe), offset 0xffffffff
-      # will exceed the buffer size and the hardware check will reject the write.
-      # This prevents both memory corruption and data corruption.
-      module.add(ValueSet("BufferOOB", 0xffffffff, format=1))
+      # Set to 0xfffff000 to reserve 4KB safety margin for instruction offsets (max 4095).
+      # This prevents 32-bit overflow: 0xfffff000 + 4095 = 0xffffffff (stays in range).
+      # With correctly-sized buffer descriptors (stride*N*bpe), this offset will exceed
+      # the buffer size and hardware will reject OOB writes, preventing memory corruption.
+      module.add(ValueSet("BufferOOB", 0xfffff000, format=1))
 
       srdUpperValue = SrdUpperValue(self.states.version)
       module.addComment2("Bits 127:96 of SRD.\n" + srdUpperValue.desc())
@@ -14297,15 +14297,16 @@ class KernelWriterAssembly(KernelWriter):
     tmpsgpr3 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpsgpr3", preventOverflow=False)
     module.addComment0("calculate SrdTD address")
 
-    # Calculate actual D buffer size: SizeI * SizeJ * bpe
-    # This ensures BufferOOB offset (0) won't be treated as valid for OOB threads
+    # Calculate actual D buffer size: StrideD * N * bpe
+    # Must use stride (leading dimension) not just M, as buffer may have padding
+    # This ensures BufferOOB offset won't be treated as valid for OOB threads
     bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
-    module.addComment1("Calculate D buffer size = M * N * bpe")
-    module.add(SMulI32(dst=sgpr(tmpsgpr2+0), src0=sgpr("SizeI"), src1=sgpr("SizeJ"),
-                       comment="size = M * N"))
-    module.add(SMulHIU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("SizeI"), src1=sgpr("SizeJ")))
+    module.addComment1("Calculate D buffer size = StrideD * N * bpe (accounts for padding)")
+    module.add(SMulI32(dst=sgpr(tmpsgpr2+0), src0=sgpr("StrideD1J"), src1=sgpr("SizeJ"),
+                       comment="size = StrideD * N"))
+    module.add(SMulHIU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("StrideD1J"), src1=sgpr("SizeJ")))
     module.add(SLShiftLeftB64(dst=sgpr(tmpsgpr2, 2), src=sgpr(tmpsgpr2, 2),
-                              shiftHex=log2(bpe), comment="size_bytes = M * N * bpe"))
+                              shiftHex=log2(bpe), comment="size_bytes = StrideD * N * bpe"))
 
     # If size exceeds 32-bit, use BufferLimit; otherwise use actual size
     module.add(SCmpEQU32(src0=sgpr(tmpsgpr2+1), src1=0, comment="Does size fit in 32-bit?"))
@@ -14624,20 +14625,22 @@ class KernelWriterAssembly(KernelWriter):
     module.add(GeneralBatchedGemmSrdInitiation_End)
 
     # Calculate actual buffer size for C/D matrices to enable proper OOB detection
-    # For C matrix, use same dimensions as D (SizeI * SizeJ * bpe)
+    # Must use stride (leading dimension) not just M, as buffer may have padding
     if ch in ["C", "D"]:
       tmpsgprSize = self.sgprPool.checkOutAligned(2, 2, tag="Srd%s_size"%ch, preventOverflow=False)
       if ch == "C":
         bpe = int(self.states.bpr * kernel["ProblemType"]["ComputeDataType"].numRegisters())
+        stride = "StrideC1J"
       else:
         bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
+        stride = "StrideD1J"
 
-      module.addComment1("Calculate %s buffer size = M * N * bpe" % ch)
-      module.add(SMulI32(dst=sgpr(tmpsgprSize+0), src0=sgpr("SizeI"), src1=sgpr("SizeJ"),
-                         comment="size = M * N"))
-      module.add(SMulHIU32(dst=sgpr(tmpsgprSize+1), src0=sgpr("SizeI"), src1=sgpr("SizeJ")))
+      module.addComment1("Calculate %s buffer size = Stride%s * N * bpe (accounts for padding)" % (ch, ch))
+      module.add(SMulI32(dst=sgpr(tmpsgprSize+0), src0=sgpr(stride), src1=sgpr("SizeJ"),
+                         comment="size = Stride%s * N" % ch))
+      module.add(SMulHIU32(dst=sgpr(tmpsgprSize+1), src0=sgpr(stride), src1=sgpr("SizeJ")))
       module.add(SLShiftLeftB64(dst=sgpr(tmpsgprSize, 2), src=sgpr(tmpsgprSize, 2),
-                                shiftHex=log2(bpe), comment="size_bytes = M * N * bpe"))
+                                shiftHex=log2(bpe), comment="size_bytes = Stride%s * N * bpe" % ch))
 
       # Use actual size if fits in 32-bit, else BufferLimit
       module.add(SCmpEQU32(src0=sgpr(tmpsgprSize+1), src1=0, comment="Does size fit in 32-bit?"))
