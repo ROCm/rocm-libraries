@@ -24,6 +24,18 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0 64
 #endif
 
+// headdim floors for the same choice. V in registers costs
+// kN0 * kVHeaddim / kBlockSize VGPRs, so the kM0 gate alone cannot separate
+// d=128 (128 regs, ~16 of 1024 free) from d=32/64 (32/64 regs, 614/444 free).
+// Measured on gfx1250: d=32 wants V resident under both masks (+1.5..3.4%),
+// d=64 only under a mask (+3.6..6.0% causal, -2.2..2.9% nomask), d=128 neither.
+#ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM
+#define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM 128
+#endif
+#ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM_NOMASK
+#define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM_NOMASK 64
+#endif
+
 // Sink the next iteration's Q/LSE loads past gemm_4, so their live ranges do
 // not span it. dO/D are already loaded after gemm_4; Q/LSE were the odd ones
 // out. Safe: gemm_4 touches neither, and nothing between gemm_4 and the dO/D
@@ -244,7 +256,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     static constexpr bool kDVInReg =
         CK_TILE_FMHA_BWD_DV_IN_REG && (kM0 >= CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0);
     static constexpr bool kVNonResident =
-        CK_TILE_FMHA_BWD_V_NONRESIDENT && (kM0 >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0);
+        CK_TILE_FMHA_BWD_V_NONRESIDENT && (kM0 >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0) &&
+        (BlockFmhaShape::kVHeaddim >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM ||
+         (!FmhaMask::IsMasking &&
+          BlockFmhaShape::kVHeaddim >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM_NOMASK));
     static constexpr index_t kN0        = BlockFmhaShape::kN0;
     static constexpr index_t kK0        = BlockFmhaShape::kK0;
     static constexpr index_t kK1        = BlockFmhaShape::kK1;
