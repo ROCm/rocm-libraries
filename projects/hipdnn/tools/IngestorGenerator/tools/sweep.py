@@ -498,6 +498,20 @@ def descriptor_count(arm):
     return count
 
 
+def _from_plugin_dir(reported, plugin_dir):
+    """True when a result row's plugin_path attributes it to this arm's engines dir.
+
+    Benchmarks spell the same fact two ways: some report the individual plugin they
+    loaded, whose parent is the engines directory, and some echo back the directory
+    they were handed. Both mean "this row came from this arm"; nothing looser does, so
+    a sibling tree sharing a name prefix and a plugin nested below the engines
+    directory both fail attribution.
+    """
+    resolved = Path(reported).resolve()
+    target = Path(plugin_dir).resolve()
+    return resolved == target or resolved.parent == target
+
+
 def _positive(value):
     return type(value) in (int, float) and math.isfinite(value) and value > 0
 
@@ -631,9 +645,8 @@ def evaluate_phase(
                 or (observed_id & ((1 << 64) - 1)) != engine_id
             ):
                 entry.update(outcome="ambiguous", reason="engine name/ID disagreement")
-            elif (
-                row.get("plugin_path")
-                and Path(row["plugin_path"]).resolve().parent != plugin_dir
+            elif row.get("plugin_path") and not _from_plugin_dir(
+                row["plugin_path"], plugin_dir
             ):
                 entry.update(
                     outcome="ambiguous",

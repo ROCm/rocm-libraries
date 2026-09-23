@@ -148,14 +148,19 @@ Result inventory must account for the staged graph identities without merging du
 names or accepting unknown/missing rows. Timing credits only `status: success` rows with
 finite positive `mean_ms` for the **exact** configured engine, counting unique graphs
 against `min_served`; `role: reference` and other-engine rows cannot satisfy it, and an
-omitted `role` means engine. Failures stay in the outcome ledger, and benchmark
+omitted `role` means engine. An engine row reporting `plugin_path` is attributed to the
+arm only when, with both paths resolved, it names the arm's `lib/hipdnn_plugins/engines`
+directory itself or a plugin directly inside it; a sibling tree or a deeper descendant
+makes that graph ambiguous. Failures stay in the outcome ledger, and benchmark
 `graph_name` is the graph JSON name or file stem.
 
 With correctness enabled, every claimed served graph needs a real comparison against the
 declared independent reference with `passed: true`, `execution_success: true` and
 `tolerance_match: true`. A failed/missing comparison, malformed result, nonzero command
 exit, unavailable reference, NaN or unwritten output fails the gate, and
-reference-provider rows without comparison evidence are not validated graphs.
+reference-provider rows without comparison evidence are not validated graphs. Only a
+row with an explicit `role: reference` is reference evidence: a requested-provider row
+that omits `role` is an engine row, so it cannot satisfy the reference gate.
 
 Select a reference capable of the actual graph semantics: neither current CPU nor GPU SDPA
 reference supports a sink UID, and an unsupported reference means **BLOCKED**, not a CPU

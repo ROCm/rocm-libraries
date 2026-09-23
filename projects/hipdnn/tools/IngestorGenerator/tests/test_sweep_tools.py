@@ -83,6 +83,16 @@ if log and not scenario.get("skip_provenance"):
 elif log:
     Path(log).write_text("info: no plugin was loaded\\n")
 
+# How the rows spell the plugin they came from: the loaded file, the engines directory
+# the benchmark was handed, or a path from some other tree.
+reported_plugin = {
+    "file": plugin_dir / "engine.so",
+    "directory": plugin_dir,
+    "sibling_file": plugin_dir.parent / (plugin_dir.name + "-foreign") / "engine.so",
+    "sibling_directory": plugin_dir.parent / (plugin_dir.name + "-foreign"),
+    "nested": plugin_dir / "nested" / "engine.so",
+}[scenario.get("plugin_path", "file")]
+
 stats = {"mean_ms": 1.5, "median_ms": 1.5, "std_ms": 0.0, "min_ms": 1.4,
          "max_ms": 1.6, "p95_ms": 1.6, "p99_ms": 1.6, "total_ms": 3.0}
 served_limit = scenario.get("served", len(graphs))
@@ -95,7 +105,7 @@ for index, path in enumerate(graphs):
         row = {"provider": "{engine}", "engine_id": engine_id,
                "engine_name": "{engine}", "engine_version": "1.0",
                "started_at": "2026-01-01T00:00:00+00:00", "status": "success",
-               "plugin_path": str(plugin_dir / "engine.so"),
+               "plugin_path": str(reported_plugin),
                "cpu_build_time_ms": 2.0, "host_stats": stats,
                "elapsed_time_ms": 9.0}
         timing = scenario.get("timing", "ok")
@@ -139,6 +149,8 @@ for index, path in enumerate(graphs):
                          "started_at": "2026-01-01T00:00:00+00:00",
                          "role": "reference", "status": "skipped",
                          "skip_reason": "torch is not available"}
+        if scenario.get("reference") == "unlabelled":
+            del reference["role"]
         rows.append(reference)
     results.append({"graph_name": name, "graph_path": path, "results": rows})
 
@@ -537,6 +549,37 @@ class TestGatesFailIndependently:
 
 
 @_needs_posix_exec
+class TestPluginAttribution:
+    """An engine row is this arm's evidence only when its plugin_path names the arm's
+    engines directory or a plugin directly inside it. The file spelling is the default
+    scenario, covered by `test_a_clean_timing_sweep_completes`."""
+
+    def test_a_row_naming_the_engines_directory_is_attributed(self, sweep):
+        """Some benchmarks echo back the directory they were handed rather than the
+        plugin they loaded; that is the same arm."""
+        sweep.scenario(plugin_path="directory")
+        result = sweep.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert all(sweep.gates(result).values())
+
+    @pytest.mark.parametrize(
+        "spelling", ["sibling_file", "sibling_directory", "nested"]
+    )
+    def test_a_row_from_another_tree_is_not_attributed(self, sweep, spelling):
+        """A sibling sharing the engines directory's name as a prefix, and a plugin
+        nested below it, are not this arm: every row is unattributed, so nothing is
+        served."""
+        sweep.scenario(plugin_path=spelling)
+        result = sweep.run()
+        assert result.returncode == 1
+        gates = sweep.gates(result)
+        assert {name for name, value in gates.items() if not value} == {
+            "served",
+            "outcomes",
+        }
+
+
+@_needs_posix_exec
 class TestCorrectnessEvidenceIsRequiredNotOptional:
     def test_a_tolerance_mismatch_fails_the_correctness_phase(self, tmp_path):
         staged = Sweep(tmp_path, correctness=True)
@@ -563,6 +606,17 @@ class TestCorrectnessEvidenceIsRequiredNotOptional:
         assert result.returncode == 1
         gates = staged.gates(result, "correctness")
         assert gates["reference"] is False
+
+    def test_an_unlabelled_reference_row_is_not_reference_evidence(self, tmp_path):
+        """Only an explicit `role: reference` makes a row the reference. A successful
+        row from the requested provider without it is classified as an engine row, and
+        not this engine's, so no comparison is attested."""
+        staged = Sweep(tmp_path, correctness=True)
+        staged.scenario(reference="unlabelled")
+        result = staged.run()
+        assert result.returncode == 1
+        gates = staged.gates(result, "correctness")
+        assert {name for name, value in gates.items() if not value} == {"reference"}
 
     def test_a_timing_only_run_never_claims_validation(self, sweep):
         result = sweep.run()
