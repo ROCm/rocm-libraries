@@ -533,6 +533,9 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     res = rocke_h_name(lw, op->results[0]);
     const int64_t byte_count = vec * (rocke_dtype_info(elem_name)->encoded_bits / 8);
     const int64_t align = mem_attr_int(op, "align", vec * 2);
+    if(align <= 0 || (align & (align - 1)))
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "global_load_vN: alignment must be a positive power of two");
     if(align < byte_count)
     {
         /* Do not strengthen the IR's alignment through a vector-pointer cast. */

@@ -253,8 +253,12 @@ bool rocke_matrix_fragment_layout_init(rocke_matrix_fragment_layout_t* out,
 bool rocke_matrix_fragment_coord(
     const rocke_matrix_fragment_layout_t* p, int lane, uint64_t slot, uint64_t* row, uint64_t* k)
 {
-    if(!p || !row || !k || lane < 0 || p->lanes_per_group <= 0 || p->lane_groups <= 0
-       || p->chunk_elements <= 0 || uint64_t(lane) >= uint64_t(p->lane_groups) * p->lanes_per_group
+    // Public C descriptors can be constructed without going through init().
+    rocke_matrix_fragment_layout_t checked;
+    if(!p || !row || !k || lane < 0
+       || !rocke_matrix_fragment_layout_init(
+           &checked, &p->fragment, p->chunk_elements, p->lane_groups, p->lanes_per_group)
+       || uint64_t(lane) >= uint64_t(p->lane_groups) * p->lanes_per_group
        || slot >= p->fragment.count)
         return false;
     uint64_t chunk;

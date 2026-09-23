@@ -180,3 +180,14 @@ def test_hip_compiler_preserves_fragment_load_alignment(dtype, copy_bytes, align
     ]
     assert source_alignments, "expected unaligned-safe fragment payload copies"
     assert all(value <= alignment for value in source_alignments), source_alignments
+
+
+@pytest.mark.parametrize("alignment", [0, -1, -16, 3, 24])
+def test_hip_rejects_invalid_vector_load_alignment(alignment):
+    b = IRBuilder("invalid_alignment")
+    ptr = b.param("A", PtrType(I8, "global"))
+    value = b.global_load_vN(ptr, b.const_i32(0), I8, 16)
+    # Serialized/custom IR can bypass the builder's default alignment handling.
+    value.op.attrs["align"] = alignment
+    with pytest.raises(ValueError, match="alignment must be a positive power of two"):
+        lower_kernel_to_hip(b.kernel, arch="gfx1250")

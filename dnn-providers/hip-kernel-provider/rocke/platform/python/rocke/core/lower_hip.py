@@ -489,6 +489,10 @@ class _Lowerer:
         prefix = _vec_prefix(elem_name, "global_load_vN")
         byte_count = vec * (dtype_info(elem_name).encoded_bits // 8)
         align = int(op.attrs.get("align", vec * 2))
+        if align <= 0 or align & (align - 1):
+            raise ValueError(
+                "global_load_vN: alignment must be a positive power of two"
+            )
         if align < byte_count:
             # A vector-pointer dereference would promise natural alignment.
             # Copy the payload using only the alignment guaranteed by the IR.

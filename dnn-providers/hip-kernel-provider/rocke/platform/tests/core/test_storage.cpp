@@ -118,6 +118,54 @@ int main(int argc, char** argv)
         return emit(argv[2], false);
     if(argc == 3 && strcmp(argv[1], "--hip") == 0)
         return emit(argv[2], true);
+    for(int alignment : {0, -1, -16, 3, 24})
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "invalid_alignment") == ROCKE_OK);
+        auto* ptr = rocke_b_param(&b, "A", rocke_ptr_type(&b, rocke_i8(), "global"), NULL);
+        auto* value = rocke_b_global_load_vN(&b, ptr, rocke_b_const_i32(&b, 0), rocke_i8(), 16, 16);
+        CHECK(value);
+        // Exercise raw IR, including alignments normalized by the builder.
+        rocke_attr_set_int(&b, &value->op->attrs, "align", alignment);
+        rocke_strbuf_t text;
+        CHECK(rocke_strbuf_init(&text, 256) == 0);
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx1250";
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_ERR_VALUE);
+        rocke_strbuf_free(&text);
+        rocke_ir_builder_free(&b);
+    }
+    const auto layout = rocke_scaled_matrix_layout("fp6", 16);
+    uint64_t row, k;
+    CHECK(rocke_matrix_fragment_coord(&layout, 31, 63, &row, &k));
+    CHECK(row == 15 && k == 127);
+    // C callers can construct or mutate public descriptors without init().
+    for(int defect = 0; defect < 6; ++defect)
+    {
+        auto invalid = layout;
+        switch(defect)
+        {
+        case 0:
+            invalid.fragment.packing.element_bits = 0;
+            break;
+        case 1:
+            invalid.fragment.packing.slot_bits = 4;
+            break;
+        case 2:
+            invalid.fragment.carrier_bits = 7;
+            break;
+        case 3:
+            invalid.fragment.carrier_count = 1;
+            break;
+        case 4:
+            invalid.chunk_elements = 3;
+            break;
+        case 5:
+            invalid.chunk_elements = 2;
+            break; // 12 bits: not byte aligned.
+        }
+        CHECK(!rocke_matrix_fragment_coord(&invalid, 0, 0, &row, &k));
+    }
     for(int bits : {4, 6, 8, 16, 32, 64})
     {
         rocke_bit_packing_t packing;
