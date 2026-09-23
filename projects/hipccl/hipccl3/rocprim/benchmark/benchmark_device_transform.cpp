@@ -44,6 +44,9 @@
 
 #define CREATE_BENCHMARK_BINARY(T) executor.queue<device_transform_benchmark<T, false, true>>();
 
+#define CREATE_BENCHMARK_PREDICATED(T) \
+    executor.queue<device_transform_benchmark<T, false, false, true>>();
+
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
@@ -71,10 +74,17 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK_BINARY(int8_t)
     CREATE_BENCHMARK_BINARY(rocprim::int128_t)
 
+    CREATE_BENCHMARK_PREDICATED(int32_t)
+    CREATE_BENCHMARK_PREDICATED(float)
+    CREATE_BENCHMARK_PREDICATED(int8_t)
+    CREATE_BENCHMARK_PREDICATED(rocprim::int128_t)
+
     // Not tuned custom types
     CREATE_BENCHMARK(custom_f32_f32)
     CREATE_BENCHMARK(custom_f64_f64)
     CREATE_BENCHMARK_BINARY(custom_f64_f64)
+    CREATE_BENCHMARK_PREDICATED(custom_f32_f32)
+    CREATE_BENCHMARK_PREDICATED(custom_f64_f64)
     #endif
 #endif
 

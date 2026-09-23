@@ -39,6 +39,15 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+struct always_true_predicate
+{
+    template<class T>
+    constexpr bool ROCPRIM_DEVICE ROCPRIM_INLINE operator()(T const&) const
+    {
+        return true;
+    }
+};
+
 template<class Function, class... Ts>
 struct unpack_nary_op
 {
@@ -93,11 +102,13 @@ template<bool                VectorLoadStore,
          class ResultType,
          class InputIterator,
          class OutputIterator,
+         class Predicate,
          class UnaryFunction>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 auto transform_kernel_impl(InputIterator  input,
                            const size_t   input_size,
                            OutputIterator output,
+                           Predicate      predicate,
                            UnaryFunction  transform_op) ->
     typename std::enable_if<VectorLoadStore, void>::type
 {
@@ -107,6 +118,7 @@ auto transform_kernel_impl(InputIterator  input,
         typename std::conditional<std::is_void<output_type>::value, ResultType, output_type>::type;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    constexpr bool is_always_true_predicate = std::is_same_v<Predicate, always_true_predicate>;
 
     const unsigned int flat_id             = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id       = ::rocprim::detail::block_id<0>();
@@ -123,13 +135,24 @@ auto transform_kernel_impl(InputIterator  input,
                                              input + block_offset,
                                              input_values,
                                              valid_in_last_block);
+        // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
+        if constexpr(!is_always_true_predicate)
+        {
+            block_load_direct_striped<BlockSize>(flat_id,
+                                                 output + block_offset,
+                                                 output_values,
+                                                 valid_in_last_block);
+        }
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             if(BlockSize * i + flat_id < valid_in_last_block)
             {
-                output_values[i] = transform_op(input_values[i]);
+                if(predicate(input_values[i]))
+                {
+                    output_values[i] = transform_op(input_values[i]);
+                }
             }
         }
 
@@ -141,17 +164,27 @@ auto transform_kernel_impl(InputIterator  input,
     else
     {
         using vec_input_type = dynamic_size_type<input_type, ItemsPerThread>;
+        using vec_output_type = dynamic_size_type<output_type, ItemsPerThread>;
         block_load_direct_blocked_cast<vec_input_type, LoadType>(flat_id,
                                                                  input + block_offset,
                                                                  input_values);
+        // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
+        if constexpr(!is_always_true_predicate)
+        {
+            block_load_direct_blocked_cast<vec_output_type, LoadType>(flat_id,
+                                                                      output + block_offset,
+                                                                      output_values);
+        }
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output_values[i] = transform_op(input_values[i]);
+            if(predicate(input_values[i]))
+            {
+                output_values[i] = transform_op(input_values[i]);
+            }
         }
 
-        using vec_output_type = dynamic_size_type<output_type, ItemsPerThread>;
         block_store_direct_blocked_cast<vec_output_type>(flat_id,
                                                          output + block_offset,
                                                          output_values);
@@ -165,11 +198,13 @@ template<bool                VectorLoadStore,
          class ResultType,
          class InputIterator,
          class OutputIterator,
+         class Predicate,
          class UnaryFunction>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 auto transform_kernel_impl(InputIterator  input,
                            const size_t   input_size,
                            OutputIterator output,
+                           Predicate      predicate,
                            UnaryFunction  transform_op) ->
     typename std::enable_if<!VectorLoadStore, void>::type
 {
@@ -179,6 +214,7 @@ auto transform_kernel_impl(InputIterator  input,
         typename std::conditional<std::is_void<output_type>::value, ResultType, output_type>::type;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    constexpr bool is_always_true_predicate = std::is_same_v<Predicate, always_true_predicate>;
 
     const unsigned int flat_id             = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id       = ::rocprim::detail::block_id<0>();
@@ -195,13 +231,24 @@ auto transform_kernel_impl(InputIterator  input,
                                              input + block_offset,
                                              input_values,
                                              valid_in_last_block);
+        // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
+        if constexpr(!is_always_true_predicate)
+        {
+            block_load_direct_striped<BlockSize>(flat_id,
+                                                 output + block_offset,
+                                                 output_values,
+                                                 valid_in_last_block);
+        }
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             if(BlockSize * i + flat_id < valid_in_last_block)
             {
-                output_values[i] = transform_op(input_values[i]);
+                if(predicate(input_values[i]))
+                {
+                    output_values[i] = transform_op(input_values[i]);
+                }
             }
         }
 
@@ -213,11 +260,19 @@ auto transform_kernel_impl(InputIterator  input,
     else
     {
         block_load_direct_striped<BlockSize>(flat_id, input + block_offset, input_values);
+        // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
+        if constexpr(!is_always_true_predicate)
+        {
+            block_load_direct_striped<BlockSize>(flat_id, output + block_offset, output_values);
+        }
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output_values[i] = transform_op(input_values[i]);
+            if(predicate(input_values[i]))
+            {
+                output_values[i] = transform_op(input_values[i]);
+            }
         }
 
         block_store_direct_striped<BlockSize>(flat_id, output + block_offset, output_values);

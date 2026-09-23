@@ -53,10 +53,12 @@ template<bool IsPointer,
          class Selector,
          class InputIterator,
          class OutputIterator,
+         class Predicate,
          class UnaryFunction>
 inline hipError_t transform_impl(InputIterator     input,
                                  OutputIterator    output,
                                  const size_t      size,
+                                 Predicate         predicate,
                                  UnaryFunction     transform_op,
                                  const hipStream_t stream,
                                  bool              debug_synchronous)
@@ -116,6 +118,7 @@ inline hipError_t transform_impl(InputIterator     input,
                                           result_type>(input + offset,
                                                        current_size,
                                                        output + offset,
+                                                       predicate,
                                                        transform_op);
         };
 
@@ -207,14 +210,105 @@ inline hipError_t transform(InputIterator     input,
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using selector   = detail::transform_config_selector<input_type, is_pointer>;
 
-    return detail::
-        transform_impl<is_pointer, Config, selector, InputIterator, OutputIterator, UnaryFunction>(
-            input,
-            output,
-            size,
-            transform_op,
-            stream,
-            debug_synchronous);
+    return detail::transform_impl<is_pointer, Config, selector>(input,
+                                                                output,
+                                                                size,
+                                                                detail::always_true_predicate{},
+                                                                transform_op,
+                                                                stream,
+                                                                debug_synchronous);
+}
+
+/// \brief Parallel transform primitive for device level.
+///
+/// transform function selectively performs a device-wide transformation operation
+/// using unary \p transform_op operator on elements for which \p predicate is true.
+///
+/// \par Overview
+/// * Ranges specified by \p input and \p output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p transform_config or a class derived from it.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam UnaryFunction type of unary function used for transform.
+///
+/// \param [in] input iterator to the first element in the range to transform.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] predicate unary selection function object used to select input values to transform.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] transform_op unary operation function object that will be used for transform.
+/// The signature of the function should be equivalent to the following:
+/// <tt>U f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level transform operation is performed on an array of
+/// integer values (<tt>short</tt>s are transformed into <tt>int</tt>s).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // custom predicate
+/// auto predicate =
+///     [] (int a) -> bool
+///     {
+///         return (a > 0);
+///     };
+///
+/// // custom transform function
+/// auto transform_op =
+///     [] (int a) -> int
+///     {
+///         return a + 5;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;    // e.g., 8
+/// short * input;        // e.g., [-1, 2, -3, 4, -5, 6, -7, 8]
+/// int * output;         // e.g. array of 8 elements initialized to 0
+///
+/// // perform transform
+/// rocprim::transform(
+///     input, output, input_size, predicate, transform_op
+/// );
+/// // output: [0, 2, 0, 4, 0, 6, 0, 8]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class InputIterator,
+         class OutputIterator,
+         class Predicate,
+         class UnaryFunction>
+inline hipError_t transform(InputIterator     input,
+                            OutputIterator    output,
+                            const size_t      size,
+                            Predicate         predicate,
+                            UnaryFunction     transform_op,
+                            const hipStream_t stream            = 0,
+                            bool              debug_synchronous = false)
+{
+    constexpr bool is_pointer
+        = std::is_pointer<InputIterator>::value && std::is_pointer<OutputIterator>::value;
+
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using selector   = detail::transform_config_selector<input_type, is_pointer>;
+
+    return detail::transform_impl<is_pointer, Config, selector>(input,
+                                                                output,
+                                                                size,
+                                                                predicate,
+                                                                transform_op,
+                                                                stream,
+                                                                debug_synchronous);
 }
 
 /// \brief Parallel device-level transform primitive for two inputs.
@@ -366,6 +460,97 @@ inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
         ::rocprim::make_zip_iterator(input_iters),
         output,
         size,
+        detail::unpack_nary_op<TransformOp,
+                               typename std::iterator_traits<InputIterators>::value_type...>(
+            transform_op),
+        stream,
+        debug_synchronous);
+}
+
+/// \brief Parallel device-level transform primitive for an arbitrary amount of inputs.
+///
+/// transform function selectively performs a device-wide transformation operation
+/// on n input ranges using binary \p transform_op operator on tuple elements for
+/// which \p predicate is true.
+///
+/// \par Overview
+/// * Ranges specified by \p output and all iterators in \p input_iters must have at least \p size elements.
+///
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `transform_config`.
+/// \tparam InputIterators all the random-access iterator types of the input range. These types must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction type of binary function used for transform.
+///
+/// \param [in] input_iters a tuple of iterators to the input sequences where num_items elements are read from each.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] predicate n-ary selection function object used to select input values to transform, where n is
+/// the number of input sequences.
+/// The function object must not modify the object passed to it.
+/// \param [in] transform_op an n-ary function object used for the transform, where n is the number of input sequences.
+/// The function object must not modify the object passed to it.
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level transform operation is performed on three arrays of
+/// integer values (element-wise sum is performed).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // custom predicate
+/// auto predicate =
+///     [] (int a, int b, int c) -> bool
+///     {
+///         return (a > 0) && (b > 0) && (c > 0);
+///     };
+///
+/// // custom transform function
+/// auto transform_op =
+///     [] (int a, int b, int c) -> int
+///     {
+///         return a + b + c;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;   // e.g., 8
+/// int* input1;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* input2;   // e.g., [-1, 2, -3, 4, -5, 6, -7, 8]
+/// int* input3;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* output;   // e.g. array of 8 elements initialized to 0
+///
+/// // perform transform
+/// rocprim::transform(
+///     rocprim::tuple(input1, input2, input3), output, input1.size(), predicate, transform_op
+/// );
+/// // output: [0, 4, 0, 8, 0, 12, 0, 16]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class... InputIterators,
+         class OutputIterator,
+         class Predicate,
+         class TransformOp>
+inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
+                            OutputIterator                    output,
+                            const size_t                      size,
+                            Predicate                         predicate,
+                            TransformOp                       transform_op,
+                            const hipStream_t                 stream            = 0,
+                            bool                              debug_synchronous = false)
+{
+    return transform<Config>(
+        ::rocprim::make_zip_iterator(input_iters),
+        output,
+        size,
+        detail::unpack_nary_op<Predicate,
+                               typename std::iterator_traits<InputIterators>::value_type...>(
+            predicate),
         detail::unpack_nary_op<TransformOp,
                                typename std::iterator_traits<InputIterators>::value_type...>(
             transform_op),

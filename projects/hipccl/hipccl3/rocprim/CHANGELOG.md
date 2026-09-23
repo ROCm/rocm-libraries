@@ -11,6 +11,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added support for large number of segments to `rocprim::device_segmented_reduce`.
 * Added support for large sizes to `rocprim::device_run_length_encode` and `rocprim::device_run_length_encode_non_trivial_runs`.
 * Added support for partial `rocprim::warp_scan::inclusive_scan`, `rocprim::warp_scan::exclusive_scan` and `rocprim::warp_scan::scan`.
+* Added support for predicated `rocprim::device_transform`.
 
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
