@@ -303,8 +303,6 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        // Known upstream rocBLAS/Tensile ASAN failure.
-        SKIP_IF_ASAN();
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
         Graph graphObj;

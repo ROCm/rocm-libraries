@@ -83,9 +83,6 @@ public:
 protected:
     void runGraphTest() override
     {
-        // Known upstream rocBLAS/Tensile ASAN failure.
-        SKIP_IF_ASAN();
-
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase] = testCase;
 

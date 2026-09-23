@@ -225,17 +225,6 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
 {
     for(const auto& bundle : bundles)
     {
-#ifdef ADDRESS_SANITIZER // (SKIP_IF_ASAN())
-        // Known upstream rocBLAS/Tensile ASAN failure.
-        if(isConvolutionBwdBundle(bundle.suiteName))
-        {
-            registerSkippedUnderAsan(bundle.suiteName,
-                                     bundle.testName,
-                                     "Disable this test when ASAN is Enabled: known upstream "
-                                     "rocBLAS/Tensile ASAN failure");
-            continue;
-        }
-#endif
         ::testing::RegisterTest(bundle.suiteName.c_str(),
                                 bundle.testName.c_str(),
                                 nullptr,
