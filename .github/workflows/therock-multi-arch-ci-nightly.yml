@@ -111,6 +111,10 @@ jobs:
       projects_to_test: >-
         hipblas,hipdnn
       test_type: "standard"
+      # Cross-repo call: pin the reusable workflow's own repo/ref so its
+      # checkout finds TheRock scripts (defaults to the caller otherwise).
+      repository: ROCm/TheRock
+      ref: users/jainprad/codecoverage-workflows-therock
     permissions:
       contents: read
       id-token: write
