@@ -366,6 +366,8 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
                                                   const char* arch,
                                                   char* reason,
                                                   size_t reason_cap);
+rocke_status_t rocke_direct_depthwise_spatial_validate(
+    const rocke_direct_depthwise_spatial_spec_t* spec, char* reason, size_t reason_cap);
 
 /* ===================================================================== *
  *  DirectConvDgradSpec  (grouped dgrad: scalar FMA, any cpg/kpg, stride>=1)

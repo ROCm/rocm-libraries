@@ -1162,13 +1162,21 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv") */
+    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv",
+     *                  flags={"bf16": dtype=="bf16"}) */
     snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
     snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bw_buf;
     parts[2] = bwv_buf;
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names[1] = {"bf16"};
+        int flag_on[1];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec_t* spec,
@@ -1182,6 +1190,19 @@ rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "DirectDepthwiseSpec: unsupported dtype '%s'; expected fp16 or bf16",
+                         dt);
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -1302,11 +1323,18 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bwv{block_waves}") */
+    /* kernel_name_join(name, p.short(), f"bwv{block_waves}", flags={"bf16": dtype=="bf16"}) */
     snprintf(bwv_buf, sizeof(bwv_buf), "bwv%d", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bwv_buf;
-    return rocke_kernel_name_join(spec->name, parts, 2, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names[1] = {"bf16"};
+        int flag_on[1];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 2, flag_names, flag_on, 1, out, out_cap, NULL);
+    }
 }
 
 bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_spatial_spec_t* spec,
@@ -1372,6 +1400,45 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
         reason[reason_cap - 1] = '\0';
     }
     return true;
+}
+
+rocke_status_t rocke_direct_depthwise_spatial_validate(
+    const rocke_direct_depthwise_spatial_spec_t* spec, char* reason, size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+    if(spec == NULL)
+        return ROCKE_ERR_VALUE;
+    p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "DirectDepthwiseSpatialSpec: unsupported dtype '%s'; "
+                         "expected fp16 or bf16",
+                         dt);
+            return ROCKE_ERR_VALUE;
+        }
+    }
+    if(p->cpg != 1 || p->kpg != 1)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseSpatialSpec requires cpg=kpg=1 (got cpg=%d, kpg=%d)",
+                     p->cpg,
+                     p->kpg);
+        return ROCKE_ERR_VALUE;
+    }
+    if(reason && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return ROCKE_OK;
 }
 
 /* ===================================================================== *
@@ -1595,13 +1662,21 @@ rocke_status_t rocke_direct_depthwise_dgrad_kernel_name(
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv") */
+    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv",
+     *                  flags={"bf16": dtype=="bf16"}) */
     snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
     snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bw_buf;
     parts[2] = bwv_buf;
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names[1] = {"bf16"};
+        int flag_on[1];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_depthwise_dgrad_validate(
@@ -1613,16 +1688,17 @@ rocke_status_t rocke_direct_depthwise_dgrad_validate(
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
-    /* if p.dtype != "fp16": raise ValueError(...) — depthwise kernels are fp16-only */
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0)
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             if(reason && reason_cap > 0)
                 snprintf(reason,
                          reason_cap,
-                         "DirectDepthwiseDgradSpec: bf16 not supported; "
-                         "depthwise kernels are fp16-only");
+                         "DirectDepthwiseDgradSpec: unsupported dtype '%s'; "
+                         "expected fp16 or bf16",
+                         dt);
             return ROCKE_ERR_VALUE;
         }
     }

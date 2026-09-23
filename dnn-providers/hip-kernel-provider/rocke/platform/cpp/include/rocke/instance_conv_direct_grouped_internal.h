@@ -596,6 +596,7 @@ typedef struct rocke_dconv_dw_ctx
     int Ho; /* output height: (H + 2*PAD - KH) / stride + 1 */
     int Wo; /* output width:  (W + 2*PAD - KW) / stride + 1 */
     int c_stride_dw; /* p.stride (kept as int for flush-loop modulo) */
+    int is_bf16; /* 1 when p.dtype == "bf16", 0 otherwise */
 
     rocke_value_t* A;
     rocke_value_t* Bp;

@@ -4050,13 +4050,14 @@ class DirectDepthwiseDgradSpec:
             p.short(),
             f"bw{self.block_w}",
             f"bw{self.block_waves}wv",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
-        if p.dtype != "fp16":
+        if p.dtype not in ("fp16", "bf16"):
             raise ValueError(
-                f"DirectDepthwiseDgradSpec: bf16 not supported; depthwise kernels are fp16-only"
+                f"DirectDepthwiseDgradSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16"
             )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
@@ -4075,6 +4076,11 @@ def is_valid_depthwise_dgrad_spec(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"DirectDepthwiseDgradSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16",
+        )
     if p.cpg != 1 or p.kpg != 1:
         return False, f"requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
     return True, "ok"
@@ -4119,9 +4125,10 @@ def build_direct_depthwise_dgrad(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -4171,7 +4178,11 @@ def build_direct_depthwise_dgrad(
                 b, k=ch, r=b.const_i32(r_const), s=b.const_i32(s_const), c=c0
             )
             safe_w = b.select(ch_in_range, b.mul(w_off, c_half_bytes), oob_sentinel)
-            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
+            w_h = (
+                b.buffer_load_bf16(b_rsrc, safe_w, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(b_rsrc, safe_w, c0)
+            )
             row.append(b.select(ch_in_range, b.cast_to_f32(w_h), zero_f32))
         weights_f32.append(row)
 
@@ -4234,7 +4245,11 @@ def build_direct_depthwise_dgrad(
 
                     dy_off, _ = dy_desc.offset(b, n=n, ho=ho, wo=wo, ch=ch)
                     safe_dy = b.select(valid, b.mul(dy_off, c_half_bytes), oob_sentinel)
-                    dy_h = b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                    dy_h = (
+                        b.buffer_load_bf16(a_rsrc, safe_dy, c0)
+                        if p.dtype == "bf16"
+                        else b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                    )
                     dy_f32 = b.select(valid, b.cast_to_f32(dy_h), zero_f32)
                     acc = b.fma(weights_f32[r_const][s_const], dy_f32, acc)
 
@@ -4243,7 +4258,10 @@ def build_direct_depthwise_dgrad(
             safe_d = b.select(
                 b.land(ch_in_range, wi_ok), b.mul(d_off, c_half_bytes), oob_sentinel
             )
-            b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc))
+            if p.dtype == "bf16":
+                b.buffer_store_bf16(d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc))
+            else:
+                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc))
 
         b.scf_yield(dummy_in)
 
@@ -4305,13 +4323,14 @@ class DirectDepthwiseDgradStreamSpec:
             p.short(),
             f"bw{self.block_w}",
             f"bw{self.block_waves}wv",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
-        if p.dtype != "fp16":
+        if p.dtype not in ("fp16", "bf16"):
             raise ValueError(
-                f"DirectDepthwiseDgradStreamSpec: bf16 not supported; depthwise kernels are fp16-only"
+                f"DirectDepthwiseDgradStreamSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16"
             )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
@@ -4330,6 +4349,11 @@ def is_valid_depthwise_dgrad_stream_spec(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"DirectDepthwiseDgradStreamSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16",
+        )
     if p.cpg != 1 or p.kpg != 1:
         return False, f"requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
     return True, "ok"
@@ -4373,9 +4397,10 @@ def build_direct_depthwise_dgrad_streaming(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -4427,7 +4452,11 @@ def build_direct_depthwise_dgrad_streaming(
                 b, k=ch, r=b.const_i32(r_const), s=b.const_i32(s_const), c=c0
             )
             safe_w = b.select(ch_ok, b.mul(w_off, c_half_bytes), oob_sentinel)
-            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
+            w_h = (
+                b.buffer_load_bf16(b_rsrc, safe_w, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(b_rsrc, safe_w, c0)
+            )
             row.append(b.select(ch_ok, b.cast_to_f32(w_h), zero_f32))
         weights_f32.append(row)
 
@@ -4492,7 +4521,11 @@ def build_direct_depthwise_dgrad_streaming(
                     safe_dy = b.select(
                         tap_valid, b.mul(dy_off, c_half_bytes), oob_sentinel
                     )
-                    dy_h = b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                    dy_h = (
+                        b.buffer_load_bf16(a_rsrc, safe_dy, c0)
+                        if p.dtype == "bf16"
+                        else b.buffer_load_f16(a_rsrc, safe_dy, c0)
+                    )
                     dy_f32 = b.select(tap_valid, b.cast_to_f32(dy_h), zero_f32)
 
                     acc_slots[slot][j] = b.fma(
@@ -4519,9 +4552,14 @@ def build_direct_depthwise_dgrad_streaming(
                 safe_d = b.select(
                     b.land(ch_ok, wi_ok), b.mul(d_off, c_half_bytes), oob_sentinel
                 )
-                b.buffer_store_f16(
-                    d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_slots[slot][j])
-                )
+                if p.dtype == "bf16":
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc_slots[slot][j])
+                    )
+                else:
+                    b.buffer_store_f16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_slots[slot][j])
+                    )
                 # Reset slot for future use.
                 acc_slots[slot][j] = zero_f32
 
@@ -4580,13 +4618,14 @@ class DirectDepthwiseSpec:
             p.short(),
             f"bw{self.block_w}",
             f"bw{self.block_waves}wv",
+            flags={"bf16": p.dtype == "bf16"},
         )
 
     def validate(self) -> None:
         p = self.problem
-        if p.dtype != "fp16":
+        if p.dtype not in ("fp16", "bf16"):
             raise ValueError(
-                f"DirectDepthwiseSpec: bf16 not supported; depthwise kernels are fp16-only"
+                f"DirectDepthwiseSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16"
             )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
@@ -4610,6 +4649,11 @@ def is_valid_depthwise_spec(
         return False, str(e)
 
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"DirectDepthwiseSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16",
+        )
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
     return True, "ok"
@@ -4660,9 +4704,10 @@ def build_direct_depthwise(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -4749,7 +4794,11 @@ def build_direct_depthwise(
                 c=c0,
             )
             safe_w_off = b.select(ch_in_range, b.mul(w_off, c_half_bytes), oob_sentinel)
-            w_h = b.buffer_load_f16(b_rsrc, safe_w_off, c0)
+            w_h = (
+                b.buffer_load_bf16(b_rsrc, safe_w_off, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(b_rsrc, safe_w_off, c0)
+            )
             w_f32 = b.select(ch_in_range, b.cast_to_f32(w_h), zero_f32)
             row.append(w_f32)
         weights_f32.append(row)
@@ -4784,7 +4833,11 @@ def build_direct_depthwise(
                     safe_off = b.select(
                         load_ok, b.mul(a_off, c_half_bytes), oob_sentinel
                     )
-                    a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    a_h = (
+                        b.buffer_load_bf16(a_rsrc, safe_off, c0)
+                        if p.dtype == "bf16"
+                        else b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    )
                     a_f32 = b.select(load_ok, b.cast_to_f32(a_h), zero_f32)
                     for r_const in range(p.KH):
                         p_idx = (y - r_const + p.KH) % p.KH
@@ -4807,9 +4860,14 @@ def build_direct_depthwise(
                     safe_d = b.select(
                         out_q_ok, b.mul(d_off, c_half_bytes), oob_sentinel
                     )
-                    b.buffer_store_f16(
-                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[w_out][P_FLUSH])
-                    )
+                    if p.dtype == "bf16":
+                        b.buffer_store_bf16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc[w_out][P_FLUSH])
+                        )
+                    else:
+                        b.buffer_store_f16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[w_out][P_FLUSH])
+                        )
             for w_out in range(BLOCK_W):
                 acc[w_out][P_FLUSH] = zero_f32
 
@@ -4854,7 +4912,11 @@ def build_direct_depthwise(
                         safe_off = b.select(
                             ok, b.mul(a_off, c_half_bytes), oob_sentinel
                         )
-                        a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                        a_h = (
+                            b.buffer_load_bf16(a_rsrc, safe_off, c0)
+                            if p.dtype == "bf16"
+                            else b.buffer_load_f16(a_rsrc, safe_off, c0)
+                        )
                         a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
                         for r_const in range(p.KH):
                             p_idx = (j - r_const + p.KH) % p.KH  # STATIC slot
@@ -4888,7 +4950,14 @@ def build_direct_depthwise(
                     safe_d = b.select(
                         store_ok, b.mul(d_off, c_half_bytes), oob_sentinel
                     )
-                    b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
+                    if p.dtype == "bf16":
+                        b.buffer_store_bf16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc_val)
+                        )
+                    else:
+                        b.buffer_store_f16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val)
+                        )
 
                 for w_out in range(BLOCK_W):
                     new_accs[P_FLUSH_j * BLOCK_W + w_out] = zero_f32
@@ -4945,13 +5014,18 @@ class DirectDepthwiseSpatialSpec:
         from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
-        return kernel_name_join(self.name, p.short(), f"bwv{self.block_waves}")
+        return kernel_name_join(
+            self.name,
+            p.short(),
+            f"bwv{self.block_waves}",
+            flags={"bf16": p.dtype == "bf16"},
+        )
 
     def validate(self) -> None:
         p = self.problem
-        if p.dtype != "fp16":
+        if p.dtype not in ("fp16", "bf16"):
             raise ValueError(
-                f"DirectDepthwiseSpatialSpec: bf16 not supported; depthwise kernels are fp16-only"
+                f"DirectDepthwiseSpatialSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16"
             )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
@@ -4981,6 +5055,11 @@ def is_valid_depthwise_spatial_spec(
         return False, str(e)
 
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"DirectDepthwiseSpatialSpec: unsupported dtype {p.dtype!r}; expected fp16 or bf16",
+        )
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
     if p.groups > spec.wave_size:
@@ -5020,9 +5099,10 @@ def build_direct_depthwise_spatial(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    io_type = _io_type(p.dtype)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -5088,7 +5168,11 @@ def build_direct_depthwise_spatial(
                 b, k=ch, r=b.const_i32(r_const), s=b.const_i32(s_const), c=c0
             )
             safe_w = b.select(w_valid, b.mul(w_off, c_half_bytes), oob_sentinel)
-            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
+            w_h = (
+                b.buffer_load_bf16(b_rsrc, safe_w, c0)
+                if p.dtype == "bf16"
+                else b.buffer_load_f16(b_rsrc, safe_w, c0)
+            )
             row.append(b.select(w_valid, b.cast_to_f32(w_h), zero_f32))
         weights_f32.append(row)
 
@@ -5103,7 +5187,11 @@ def build_direct_depthwise_spatial(
                 )
                 ok = b.land(valid, q_ok)
                 safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
-                a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                a_h = (
+                    b.buffer_load_bf16(a_rsrc, safe_off, c0)
+                    if p.dtype == "bf16"
+                    else b.buffer_load_f16(a_rsrc, safe_off, c0)
+                )
                 a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
                 for r_const in range(p.KH):
                     p_idx = (y - r_const + p.KH) % p.KH
@@ -5118,9 +5206,14 @@ def build_direct_depthwise_spatial(
                         b, n=n, h=b.const_i32(ho_row), w=q_out, k=ch
                     )
                     safe_d = b.select(q_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
-                    b.buffer_store_f16(
-                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[P_FLUSH])
-                    )
+                    if p.dtype == "bf16":
+                        b.buffer_store_bf16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc[P_FLUSH])
+                        )
+                    else:
+                        b.buffer_store_f16(
+                            d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[P_FLUSH])
+                        )
             acc[P_FLUSH] = zero_f32
 
     else:
@@ -5151,7 +5244,11 @@ def build_direct_depthwise_spatial(
                     )
                     ok = b.land(b.land(valid, j_valid), q_ok)
                     safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
-                    a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    a_h = (
+                        b.buffer_load_bf16(a_rsrc, safe_off, c0)
+                        if p.dtype == "bf16"
+                        else b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    )
                     a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
                     for r_const in range(p.KH):
                         p_idx = (j - r_const + p.KH) % p.KH  # STATIC
@@ -5179,7 +5276,12 @@ def build_direct_depthwise_spatial(
                 acc_val = new_accs[P_FLUSH_j]  # STATIC index
                 d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=q_out, k=ch)
                 safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
-                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
+                if p.dtype == "bf16":
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc_val)
+                    )
+                else:
+                    b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
 
                 new_accs[P_FLUSH_j] = zero_f32  # unconditional static reset
 
