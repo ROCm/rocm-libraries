@@ -1,0 +1,19 @@
+## Splice point 4b: .../kernel_ingestor_engine/IngestorPacks.cpp
+## Add this row to the s_packs table. Both this edit AND the IngestorPacks.hpp declaration
+## edit (ingestor_packs.hpp.txt) are required -- see that fragment.
+##
+## The struct is (label, registerSymbols, resetModuleCache). A row is valid with either
+## reset value, so nothing downstream reports the wrong one:
+##   * packaged/kpack kernels  -> &reset<Name>ModuleCache
+##   * embedded_source kernels -> nullptr (no archive, nothing to drop)
+## A packaged engine left at `nullptr` ships green and never drops its module cache.
+## Check the IngestorPack struct before splicing: this row must match it field for field.
+{% if config.is_packaged -%}
+## Packaged dialect: this engine owns a kpack module cache, so it must drop it.
+## Define reset{{ config.engine.pascal_name }}ModuleCache outside the pack's anonymous
+## namespace and declare it in IngestorPacks.hpp beside the register function.
+        {"{{ config.engine.name | cpp_escape }}", &{{ config.register_symbols_fn }}, &reset{{ config.engine.pascal_name }}ModuleCache},
+{% else -%}
+## direct_load/embedded_source: no archive is held, so there is nothing to drop.
+        {"{{ config.engine.name | cpp_escape }}", &{{ config.register_symbols_fn }}, nullptr},
+{% endif -%}
