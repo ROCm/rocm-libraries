@@ -310,6 +310,23 @@ function(create_device_library)
     elseif(HIPBLASLT_PYTHON_DEPS)
         list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
     endif()
+
+    # Both codegen steps glob their inputs at run time, so without an explicit
+    # file list nothing invalidates the stamps and edits ship stale kernels.
+    # CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches edits.
+    file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
+         "${_cdl_LOGIC_PATH}/*.yaml")
+    file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
+         "${_codegen_dir}/Tensile/*.py")
+    # Tests is pytest, not codegen input, and is 3/4 of the .py under Tensile/.
+    list(FILTER _codegen_sources EXCLUDE REGEX "/Tensile/Tests/")
+    # Coarser than each step's import closure on purpose: that closure is not
+    # statically obvious, and guessing it short reintroduces the same staleness.
+    list(APPEND _codegen_dependencies
+         ${_logic_files}
+         ${_codegen_sources}
+         "${_codegen_dir}/Tensile/bin/TensileLogic")
+
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
