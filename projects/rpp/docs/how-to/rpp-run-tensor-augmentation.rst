@@ -2,9 +2,9 @@
   :description: Call an RPP tensor augmentation from C++
   :keywords: RPP, ROCm, tensor, augmentation, rppt_brightness, rppCreate, HIP, HOST
 
-********************************************************************
+*************************************
 Run an RPP tensor augmentation
-********************************************************************
+*************************************
 
 Tensor augmentations in ROCm Performance Primitives (RPP) take a source buffer, a destination buffer, and tensor descriptors. They also take per-image parameter tensors, a region of interest, an RPP handle, and a backend.
 
