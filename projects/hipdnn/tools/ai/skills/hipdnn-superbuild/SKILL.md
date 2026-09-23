@@ -117,11 +117,11 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
 
 8. If the build fails with a stale CMake cache error such as `does not match the source`, clean the selected build directory once, reconfigure with the same `-B <build-dir>` command, and retry once. Do not loop.
 
-9. On Windows, always stage the wheel's `amd_comgr.dll` app-local into `<build-dir>/bin` after a successful build:
+9. On Windows, always stage the wheel's System32-shadowed DLLs (`amd_comgr.dll` and the HIP runtime `amdhip64_<N>.dll`) app-local into `<build-dir>/bin` after a successful build:
    ```bash
-   python3 <scripts>/comgr_stage.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
+   python3 <scripts>/stage_shadowed_dlls.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
    ```
-   The AMD driver leaves an old `amd_comgr.dll` in `C:\Windows\System32` that outranks the wheel's copy on PATH, so MIOpen otherwise loads stale comgr and can fail to JIT-build kernels at runtime (GCN-assembly Winograd solvers are the common example, but the mismatch is not limited to them). Do this on every Windows build rather than only when a specific kernel path is expected. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares the wheel comgr's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The test runner (`cmake_run.py`) stages comgr on its own as well, so this build step is belt-and-suspenders that makes the app-local copy present immediately after build.
+   The AMD driver leaves old copies of `amd_comgr.dll` and `amdhip64_<N>.dll` in `C:\Windows\System32` that outrank the wheel's copies on PATH. Stale comgr makes MIOpen fail to JIT-build kernels at runtime (GCN-assembly Winograd solvers are the common example, but the mismatch is not limited to them); a stale HIP runtime makes the wheel's rocBLAS fault with an access violation (`SEH exception with code 0xc0000005`) in MIOpen's GEMM conv solvers, after which the test process can hang. Do this on every Windows build rather than only when a specific kernel path is expected. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares each wheel DLL's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The build's `stage_shadowed_rocm_dlls` target and the test runner (`cmake_run.py`) stage the same DLLs on their own as well, so this build step is belt-and-suspenders that makes the app-local copies present immediately after build.
 
 ## Report
 
@@ -135,7 +135,7 @@ Summarize:
 
 ## Notes
 
-- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is available for interactive users.
-- `comgr_stage.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` app-local and emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present (it shadows PATH and is why the app-local copy is needed).
+- `scripts/windows_rocm_setup.py` and `scripts/stage_shadowed_dlls.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is available for interactive users.
+- `stage_shadowed_dlls.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` and `amdhip64_<N>.dll` app-local and emits a diagnostic for each one also present in `C:\Windows\System32` (those copies shadow PATH and are why the app-local copies are needed).
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.
