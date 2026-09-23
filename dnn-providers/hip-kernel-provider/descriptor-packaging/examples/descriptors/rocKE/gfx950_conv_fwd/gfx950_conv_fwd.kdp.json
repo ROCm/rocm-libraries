@@ -7,6 +7,131 @@
   ],
   "engine": "29423f05-8c7b-468a-930b-9e88ca7c99ee",
   "dispatch": "d71abd4b-3fea-4c48-a3a1-577a5acb34eb",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "29423f05-8c7b-468a-930b-9e88ca7c99ee",
+          "kmd_id": "fb2104d3-bae8-40b7-9a6f-4f7bc7ced8c7",
+          "metadata_fields": [
+            "N",
+            "Hi",
+            "Wi",
+            "C",
+            "K",
+            "Y",
+            "X",
+            "sH",
+            "sW",
+            "pH",
+            "pW",
+            "dH",
+            "dW",
+            "dtype",
+            "layout",
+            "groups",
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "warp_m",
+            "warp_n",
+            "warp_tile_m",
+            "warp_tile_n",
+            "warp_tile_k",
+            "wave_size",
+            "pipeline",
+            "epilogue"
+          ],
+          "matcher_only_fields": [],
+          "bindings": {
+            "N": {
+              "field": "N"
+            },
+            "Hi": {
+              "field": "Hi"
+            },
+            "Wi": {
+              "field": "Wi"
+            },
+            "C": {
+              "field": "C"
+            },
+            "K": {
+              "field": "K"
+            },
+            "Y": {
+              "field": "Y"
+            },
+            "X": {
+              "field": "X"
+            },
+            "sH": {
+              "field": "sH"
+            },
+            "sW": {
+              "field": "sW"
+            },
+            "pH": {
+              "field": "pH"
+            },
+            "pW": {
+              "field": "pW"
+            },
+            "dH": {
+              "field": "dH"
+            },
+            "dW": {
+              "field": "dW"
+            },
+            "dtype": {
+              "field": "dtype"
+            },
+            "layout": {
+              "field": "layout"
+            },
+            "groups": {
+              "field": "groups"
+            },
+            "tile_m": {
+              "field": "tile_m"
+            },
+            "tile_n": {
+              "field": "tile_n"
+            },
+            "tile_k": {
+              "field": "tile_k"
+            },
+            "warp_m": {
+              "field": "warp_m"
+            },
+            "warp_n": {
+              "field": "warp_n"
+            },
+            "warp_tile_m": {
+              "field": "warp_tile_m"
+            },
+            "warp_tile_n": {
+              "field": "warp_tile_n"
+            },
+            "warp_tile_k": {
+              "field": "warp_tile_k"
+            },
+            "wave_size": {
+              "field": "wave_size"
+            },
+            "pipeline": {
+              "field": "pipeline"
+            },
+            "epilogue": {
+              "field": "epilogue"
+            }
+          },
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
   "kernelDescriptors": [
     {
       "version": "1.0",

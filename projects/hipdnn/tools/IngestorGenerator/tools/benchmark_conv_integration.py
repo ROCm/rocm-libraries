@@ -793,7 +793,7 @@ def run(args: argparse.Namespace, report: dict) -> dict:
     from rocke import compile_kernel
     from rocke.core.ir_print import print_ir
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_implicit_gemm import build_implicit_gemm_conv
+    from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
     from rocke.runtime.comgr import resolved_lib_path
     from rocke.runtime.launcher import (
         KernelLauncher,

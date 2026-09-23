@@ -305,6 +305,19 @@ void requireOutput(const MatchContext& context, const MatchedProblem& matched)
     }
 }
 
+/// The kernel ABI buildIngestorKernelCode verifies the loaded symbol against:
+/// build_implicit_gemm_conv emits (A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32).
+/// Names and offsets are unused for this comparison; see requireSignatureMatch.
+const std::vector<KernelArgument>& gfx950ConvFwdKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const KernelArgument s_bytes{"by_value", static_cast<uint32_t>(sizeof(int32_t)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{
+        s_buffer, s_buffer, s_buffer, s_bytes, s_bytes, s_bytes};
+    return s_signature;
+}
+
 class PreparedConvFwd : public PreparedDispatch
 {
 public:
@@ -315,9 +328,11 @@ public:
     {
     }
 
-    const compilation::IRunnableKernel& kernel() const
+    /// A hipModule_t belongs to the device it loaded on, so the kernel is resolved per
+    /// launch stream rather than held as one pointer.
+    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
     {
-        return *_code.kernel;
+        return _code.kernelForStream(stream);
     }
     const Binding& binding() const
     {
@@ -378,7 +393,8 @@ public:
         const compilation::KernelCompileOptions options(
             flatbuffers::GetRoot<data_objects::TensorAttributes>(builder.GetBufferPointer()),
             context.deviceProperties.gcnArchName);
-        auto code = buildIngestorKernelCode(_compiler, _loader, context, kernel, options);
+        auto code = buildIngestorKernelCode(
+            _compiler, _loader, context, kernel, options, gfx950ConvFwdKernelSignature());
         const auto launch = conv::launchGeometry(matched->problem,
                                                  matched->geometry,
                                                  kernel.getIntMetadata("tile_m"),
@@ -387,9 +403,9 @@ public:
                                                  kernel.getIntMetadata("warp_n"),
                                                  kernel.getIntMetadata("wave_size"));
         // kernelFits checked this exact geometry before loading the archive.
-        code.kernel->setBlockSize(launch->blockX, 1, 1);
-        code.kernel->setGridSize(launch->gridX, launch->gridY, launch->gridZ);
-        code.kernel->setSharedMemBytes(0);
+        code.setBlockSize(launch->blockX, 1, 1);
+        code.setGridSize(launch->gridX, launch->gridY, launch->gridZ);
+        code.setSharedMemBytes(0);
         return std::make_unique<PreparedConvFwd>(
             std::move(code), matched->binding, matched->geometry.tensorBytes);
     }
@@ -434,8 +450,8 @@ public:
         }
         // build_implicit_gemm_conv, conv_implicit_gemm.py: A*, B*, D*, A_bytes:i32,
         // B_bytes:i32, D_bytes:i32. These are storage byte sizes, not element counts.
-        convPrepared.kernel().launch(
-            handle.getStream(), a.ptr, b.ptr, d.ptr, bytes[0], bytes[1], bytes[2]);
+        convPrepared.kernelForStream(handle.getStream())
+            .launch(handle.getStream(), a.ptr, b.ptr, d.ptr, bytes[0], bytes[1], bytes[2]);
     }
 
 private:

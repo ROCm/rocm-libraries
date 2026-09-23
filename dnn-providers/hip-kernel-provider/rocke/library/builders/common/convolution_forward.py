@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, replace
 
 from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
 from rocke.core.ir import KernelDef
-from rocke.instances.common import conv_implicit_gemm as _conv
+from kernels.common import conv_implicit_gemm as _conv
 
 _ARCH = "gfx950"
 _INT32_MAX = (1 << 31) - 1

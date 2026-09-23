@@ -79,10 +79,45 @@ kmd_fields:
   type: string
 kernel_source_kind: rocke
 workspace_policy: none
-delegates_to_existing_plan: false
 graph_match:
   shape: shared_shape
   discriminator: none
+# Every metadata field is baked into the kernel at compile time: the builder's
+# Gfx950ConvFwdSpec consumes all 27, so the whole geometry and every tuning value
+# is part of the specialization contract and none of them are matcher-only.
+specialization:
+  metadata_fields:
+    [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue]
+  matcher_only_fields: []
+  bindings:
+    N: {field: N}
+    Hi: {field: Hi}
+    Wi: {field: Wi}
+    C: {field: C}
+    K: {field: K}
+    Y: {field: Y}
+    X: {field: X}
+    sH: {field: sH}
+    sW: {field: sW}
+    pH: {field: pH}
+    pW: {field: pW}
+    dH: {field: dH}
+    dW: {field: dW}
+    dtype: {field: dtype}
+    layout: {field: layout}
+    groups: {field: groups}
+    tile_m: {field: tile_m}
+    tile_n: {field: tile_n}
+    tile_k: {field: tile_k}
+    warp_m: {field: warp_m}
+    warp_n: {field: warp_n}
+    warp_tile_m: {field: warp_tile_m}
+    warp_tile_n: {field: warp_tile_n}
+    warp_tile_k: {field: warp_tile_k}
+    wave_size: {field: wave_size}
+    pipeline: {field: pipeline}
+    epilogue: {field: epilogue}
+
 packs:
 - name: gfx950_conv_fwd
   arch:
