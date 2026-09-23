@@ -34,39 +34,57 @@ HIPSOLVER_EXPORT hipsolverStatus_t
     hipsolverGetDeterministicMode(hipsolverHandle_t handle, hipsolverDeterministicMode_t* mode);
 
 // floating-point emulation
+//
+// The functions below configure cuSOLVER's floating-point emulation (BF16x9 for FP32,
+// Ozaki-scheme fixed-point for FP64) on the NVIDIA backend. The rocSOLVER backend has no
+// equivalent and every one of them returns HIPSOLVER_STATUS_NOT_SUPPORTED. See
+// hipsolverMathMode_t and hipsolverEmulationStrategy_t for the per-CUDA-version availability.
+
+/*! \brief Sets the floating-point emulation math mode on the handle. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetMathMode(hipsolverHandle_t   handle,
                                                         hipsolverMathMode_t mode);
 
+/*! \brief Queries the floating-point emulation math mode set on the handle. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetMathMode(hipsolverHandle_t    handle,
                                                         hipsolverMathMode_t* mode);
 
+/*! \brief Sets the emulation strategy (when to take the emulated path) on the handle. */
 HIPSOLVER_EXPORT hipsolverStatus_t
     hipsolverSetEmulationStrategy(hipsolverHandle_t handle, hipsolverEmulationStrategy_t strategy);
 
+/*! \brief Queries the emulation strategy set on the handle. */
 HIPSOLVER_EXPORT hipsolverStatus_t
     hipsolverGetEmulationStrategy(hipsolverHandle_t handle, hipsolverEmulationStrategy_t* strategy);
 
+/*! \brief Sets how the mantissa bit count is chosen for FP64 Ozaki fixed-point emulation. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetFixedPointEmulationMantissaControl(
     hipsolverHandle_t handle, hipsolverEmulationMantissaControl_t control);
 
+/*! \brief Queries the FP64 fixed-point emulation mantissa control set on the handle. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetFixedPointEmulationMantissaControl(
     hipsolverHandle_t handle, hipsolverEmulationMantissaControl_t* control);
 
+/*! \brief Sets the maximum mantissa bit count for FP64 Ozaki fixed-point emulation. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetFixedPointEmulationMaxMantissaBitCount(
     hipsolverHandle_t handle, int mantissaBitCount);
 
+/*! \brief Queries the maximum mantissa bit count for FP64 fixed-point emulation. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetFixedPointEmulationMaxMantissaBitCount(
     hipsolverHandle_t handle, int* mantissaBitCount);
 
+/*! \brief Sets the mantissa bit offset for FP64 dynamic fixed-point emulation. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetFixedPointEmulationMantissaBitOffset(
     hipsolverHandle_t handle, int mantissaBitOffset);
 
+/*! \brief Queries the mantissa bit offset for FP64 dynamic fixed-point emulation. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetFixedPointEmulationMantissaBitOffset(
     hipsolverHandle_t handle, int* mantissaBitOffset);
 
+/*! \brief Sets the mask of IEEE special values FP64 emulation must propagate. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSetEmulationSpecialValuesSupport(
     hipsolverHandle_t handle, hipsolverEmulationSpecialValuesSupport_t mask);
 
+/*! \brief Queries the special-values support mask set on the handle. */
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverGetEmulationSpecialValuesSupport(
     hipsolverHandle_t handle, hipsolverEmulationSpecialValuesSupport_t* mask);
 

@@ -217,11 +217,13 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
-// The fixed-point mantissa and special-values emulation API was introduced in CUDA 13.0 but was
-// non-functional (the FP64 fixed-point path never worked) and NVIDIA removed the entire surface in
-// CUDA 13.1. These forward to cuSOLVER only on 13.0.x; on 13.1+ (and pre-13.0) they return
-// NOT_SUPPORTED. MathMode and EmulationStrategy above survive in 13.1 and keep the >= 13000 gate.
-#define HIPSOLVER_HAS_FIXEDPOINT_EMULATION (CUDART_VERSION >= 13000 && CUDART_VERSION < 13010)
+// The fixed-point mantissa and special-values emulation API was introduced in CUDA 13.0, removed
+// in 13.1 (the FP64 fixed-point path was non-functional there), and reintroduced in 13.2 where it
+// works (present through 13.4). These forward to cuSOLVER across that window; on 13.1.x (and
+// pre-13.0) they return NOT_SUPPORTED. Shares HIPSOLVER_CUDA_HAS_FP64_EMULATION with the FP64
+// math-mode enum mapping in hipsolver_conversions so both stay in lockstep. MathMode and
+// EmulationStrategy above survive 13.1 and keep the plain >= 13000 gate.
+#define HIPSOLVER_HAS_FIXEDPOINT_EMULATION HIPSOLVER_CUDA_HAS_FP64_EMULATION
 
 hipsolverStatus_t
     hipsolverSetFixedPointEmulationMantissaControl(hipsolverHandle_t                   handle,

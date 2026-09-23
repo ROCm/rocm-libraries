@@ -92,3 +92,27 @@ hipsolverDeterministicMode_t
 -----------------------------
 .. doxygenenum:: hipsolverDeterministicMode_t
 
+.. _mathMode_t:
+
+hipsolverMathMode_t
+--------------------
+.. doxygenenum:: hipsolverMathMode_t
+
+.. _emulationStrategy_t:
+
+hipsolverEmulationStrategy_t
+-----------------------------
+.. doxygenenum:: hipsolverEmulationStrategy_t
+
+.. _emulationMantissaControl_t:
+
+hipsolverEmulationMantissaControl_t
+-------------------------------------
+.. doxygenenum:: hipsolverEmulationMantissaControl_t
+
+.. _emulationSpecialValuesSupport_t:
+
+hipsolverEmulationSpecialValuesSupport_t
+------------------------------------------
+.. doxygenenum:: hipsolverEmulationSpecialValuesSupport_t
+

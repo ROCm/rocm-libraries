@@ -75,6 +75,63 @@ hipsolverGetDeterministicMode()
 
 
 
+Floating-point emulation manipulation
+=======================================
+
+.. contents:: List of floating-point emulation functions
+   :local:
+   :backlinks: top
+
+hipsolverSetMathMode()
+---------------------------------
+.. doxygenfunction:: hipsolverSetMathMode
+
+hipsolverGetMathMode()
+---------------------------------
+.. doxygenfunction:: hipsolverGetMathMode
+
+hipsolverSetEmulationStrategy()
+---------------------------------
+.. doxygenfunction:: hipsolverSetEmulationStrategy
+
+hipsolverGetEmulationStrategy()
+---------------------------------
+.. doxygenfunction:: hipsolverGetEmulationStrategy
+
+hipsolverSetFixedPointEmulationMantissaControl()
+--------------------------------------------------
+.. doxygenfunction:: hipsolverSetFixedPointEmulationMantissaControl
+
+hipsolverGetFixedPointEmulationMantissaControl()
+--------------------------------------------------
+.. doxygenfunction:: hipsolverGetFixedPointEmulationMantissaControl
+
+hipsolverSetFixedPointEmulationMaxMantissaBitCount()
+------------------------------------------------------
+.. doxygenfunction:: hipsolverSetFixedPointEmulationMaxMantissaBitCount
+
+hipsolverGetFixedPointEmulationMaxMantissaBitCount()
+------------------------------------------------------
+.. doxygenfunction:: hipsolverGetFixedPointEmulationMaxMantissaBitCount
+
+hipsolverSetFixedPointEmulationMantissaBitOffset()
+----------------------------------------------------
+.. doxygenfunction:: hipsolverSetFixedPointEmulationMantissaBitOffset
+
+hipsolverGetFixedPointEmulationMantissaBitOffset()
+----------------------------------------------------
+.. doxygenfunction:: hipsolverGetFixedPointEmulationMantissaBitOffset
+
+hipsolverSetEmulationSpecialValuesSupport()
+---------------------------------------------
+.. doxygenfunction:: hipsolverSetEmulationSpecialValuesSupport
+
+hipsolverGetEmulationSpecialValuesSupport()
+---------------------------------------------
+.. doxygenfunction:: hipsolverGetEmulationSpecialValuesSupport
+
+
+
 .. _gesvdj_info:
 
 Gesvdj parameter manipulation

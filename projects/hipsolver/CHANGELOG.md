@@ -6,6 +6,19 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ## (Unreleased) hipSOLVER
 
 ### Added
+
+* Floating-point emulation configuration API (NVIDIA/cuSOLVER backend; returns `HIPSOLVER_STATUS_NOT_SUPPORTED` on the rocSOLVER backend)
+  * Math mode
+    * hipsolverSetMathMode / hipsolverGetMathMode (and hipsolverDn* aliases)
+  * Emulation strategy
+    * hipsolverSetEmulationStrategy / hipsolverGetEmulationStrategy
+  * FP64 Ozaki-scheme fixed-point tuning
+    * hipsolverSetFixedPointEmulationMantissaControl / hipsolverGetFixedPointEmulationMantissaControl
+    * hipsolverSetFixedPointEmulationMaxMantissaBitCount / hipsolverGetFixedPointEmulationMaxMantissaBitCount
+    * hipsolverSetFixedPointEmulationMantissaBitOffset / hipsolverGetFixedPointEmulationMantissaBitOffset
+    * hipsolverSetEmulationSpecialValuesSupport / hipsolverGetEmulationSpecialValuesSupport
+  * Client (test/benchmark) controls: `--math_mode`, `--emulation_strategy`, `--mantissa_control`, `--mantissa_bits`, `--mantissa_bit_offset`
+
 ### Changed
 ### Removed
 ### Optimized

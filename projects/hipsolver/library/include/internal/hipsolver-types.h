@@ -132,34 +132,53 @@ typedef enum
     HIPSOLVER_ALLOW_NON_DETERMINISTIC_RESULTS = 242,
 } hipsolverDeterministicMode_t;
 
+/*! \brief Selects the floating-point emulation math mode for a handle. Forwards to cuSOLVER on
+ *  the CUDA backend; every mode other than #HIPSOLVER_DEFAULT_MATH returns HIPSOLVER_STATUS_NOT_SUPPORTED
+ *  on the rocSOLVER backend.
+ ********************************************************************************/
 typedef enum
 {
-    HIPSOLVER_DEFAULT_MATH                  = 251,
-    HIPSOLVER_FP32_EMULATED_BF16X9_MATH     = 252,
-    HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH = 253,
-    HIPSOLVER_FP32_FP64_EMULATED_MATH       = 254,
+    HIPSOLVER_DEFAULT_MATH
+    = 251, /**< No emulation; use native precision (Tensor Cores when available). */
+    HIPSOLVER_FP32_EMULATED_BF16X9_MATH
+    = 252, /**< FP32 computed via BF16x9 emulation (CUDA >= 13.0). */
+    HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH
+    = 253, /**< FP64 computed via the Ozaki-scheme fixed-point emulation (CUDA >= 13.2). */
+    HIPSOLVER_FP32_FP64_EMULATED_MATH
+    = 254, /**< Combination of BF16x9 FP32 and Ozaki FP64 emulation (CUDA >= 13.2). */
 } hipsolverMathMode_t;
 
+/*! \brief Controls when the FP32/FP64 emulation path is taken. Applies only when an emulation
+ *  math mode is active. NVIDIA backend only; ignored (NOT_SUPPORTED) on rocSOLVER.
+ ********************************************************************************/
 typedef enum
 {
-    HIPSOLVER_EMULATION_STRATEGY_DEFAULT    = 261,
-    HIPSOLVER_EMULATION_STRATEGY_PERFORMANT = 262,
-    HIPSOLVER_EMULATION_STRATEGY_EAGER      = 263,
+    HIPSOLVER_EMULATION_STRATEGY_DEFAULT    = 261, /**< Backend-chosen default strategy. */
+    HIPSOLVER_EMULATION_STRATEGY_PERFORMANT = 262, /**< Emulate only when a speedup is predicted. */
+    HIPSOLVER_EMULATION_STRATEGY_EAGER      = 263, /**< Emulate whenever the mode allows it. */
 } hipsolverEmulationStrategy_t;
 
+/*! \brief Selects how the mantissa bit count is chosen for FP64 Ozaki-scheme fixed-point emulation.
+ *  NVIDIA backend only (CUDA >= 13.2); ignored (NOT_SUPPORTED) on rocSOLVER.
+ ********************************************************************************/
 typedef enum
 {
-    HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC = 271,
-    HIPSOLVER_EMULATION_MANTISSA_CONTROL_FIXED   = 272,
+    HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC
+    = 271, /**< Mantissa bit count chosen automatically per problem. */
+    HIPSOLVER_EMULATION_MANTISSA_CONTROL_FIXED = 272, /**< Use a fixed mantissa bit count. */
 } hipsolverEmulationMantissaControl_t;
 
-// Bit-mask semantics; values mirror the cuSOLVER backend so masks compose.
+/*! \brief Bit-mask selecting which IEEE special values FP64 emulation must propagate. Values mirror
+ *  the cuSOLVER backend so masks compose with bitwise OR. NVIDIA backend only (CUDA >= 13.2);
+ *  ignored (NOT_SUPPORTED) on rocSOLVER.
+ ********************************************************************************/
 typedef enum
 {
-    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT  = 0xFFFF,
-    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NONE     = 0,
-    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY = 1,
-    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NAN      = 2,
+    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT
+    = 0xFFFF, /**< Backend default (all supported). */
+    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NONE     = 0, /**< No special-value propagation. */
+    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY = 1, /**< Propagate infinities. */
+    HIPSOLVER_EMULATION_SPECIAL_VALUES_SUPPORT_NAN      = 2, /**< Propagate NaNs. */
 } hipsolverEmulationSpecialValuesSupport_t;
 
 // Aliases for hipBLAS enums

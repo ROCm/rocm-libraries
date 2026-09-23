@@ -260,10 +260,10 @@ cusolverMathMode_t hip2cuda_mathmode(hipsolverMathMode_t mode)
         return CUSOLVER_DEFAULT_MATH;
     case HIPSOLVER_FP32_EMULATED_BF16X9_MATH:
         return CUSOLVER_FP32_EMULATED_BF16X9_MATH;
-        // The FP64 emulation modes were declared in CUDA 13.0 but never functional (cuSOLVER returned
-        // INVALID_VALUE) and were removed from cusolverMathMode_t in CUDA 13.1. Map them only where the
-        // backend enum still exists; otherwise reject as an unsupported enum.
-#if(CUDART_VERSION < 13010)
+        // The FP64 (Ozaki-scheme) emulation modes were declared in CUDA 13.0, removed from
+        // cusolverMathMode_t in 13.1, and reintroduced in 13.2 (present through 13.4). Map them
+        // only where the backend enum exists; otherwise reject as an unsupported enum.
+#if HIPSOLVER_CUDA_HAS_FP64_EMULATION
     case HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH:
         return CUSOLVER_FP64_EMULATED_FIXEDPOINT_MATH;
     case HIPSOLVER_FP32_FP64_EMULATED_MATH:
@@ -282,7 +282,7 @@ hipsolverMathMode_t cuda2hip_mathmode(cusolverMathMode_t mode)
         return HIPSOLVER_DEFAULT_MATH;
     case CUSOLVER_FP32_EMULATED_BF16X9_MATH:
         return HIPSOLVER_FP32_EMULATED_BF16X9_MATH;
-#if(CUDART_VERSION < 13010)
+#if HIPSOLVER_CUDA_HAS_FP64_EMULATION
     case CUSOLVER_FP64_EMULATED_FIXEDPOINT_MATH:
         return HIPSOLVER_FP64_EMULATED_FIXEDPOINT_MATH;
     case CUSOLVER_FP32_FP64_EMULATED_MATH:

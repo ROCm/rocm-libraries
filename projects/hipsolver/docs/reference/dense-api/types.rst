@@ -59,6 +59,22 @@ hipsolverDeterministicMode_t
 -----------------------------
 See :ref:`hipsolverDeterministicMode_t <deterministicMode_t>`.
 
+hipsolverMathMode_t
+--------------------
+See :ref:`hipsolverMathMode_t <mathMode_t>`.
+
+hipsolverEmulationStrategy_t
+-----------------------------
+See :ref:`hipsolverEmulationStrategy_t <emulationStrategy_t>`.
+
+hipsolverEmulationMantissaControl_t
+-------------------------------------
+See :ref:`hipsolverEmulationMantissaControl_t <emulationMantissaControl_t>`.
+
+hipsolverEmulationSpecialValuesSupport_t
+------------------------------------------
+See :ref:`hipsolverEmulationSpecialValuesSupport_t <emulationSpecialValuesSupport_t>`.
+
 hipsolverDnFunction_t
 ---------------------
 .. doxygenenum:: hipsolverDnFunction_t

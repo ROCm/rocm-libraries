@@ -64,6 +64,14 @@ cusolverDeterministicMode_t hip2cuda_deterministic(hipsolverDeterministicMode_t 
 hipsolverDeterministicMode_t cuda2hip_deterministic(cusolverDeterministicMode_t mode);
 #endif
 
+// The FP64 fixed-point (Ozaki-scheme) emulation surface (the FP64 math-mode enum values
+// plus the mantissa-control and special-values APIs) was declared in CUDA 13.0, removed in
+// 13.1, and reintroduced in 13.2 (present through 13.4). Its availability is every 13.x
+// except the 13.1.x gap. The BF16x9 FP32 math mode and the emulation strategy API survived
+// 13.1 and stay on the plain >= 13000 gate.
+#define HIPSOLVER_CUDA_HAS_FP64_EMULATION \
+    ((CUDART_VERSION >= 13000 && CUDART_VERSION < 13010) || CUDART_VERSION >= 13020)
+
 #if(CUDART_VERSION >= 13000)
 cusolverMathMode_t hip2cuda_mathmode(hipsolverMathMode_t mode);
 

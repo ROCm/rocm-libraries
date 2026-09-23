@@ -76,6 +76,63 @@ hipsolverDnGetDeterministicMode()
 
 
 
+Floating-point emulation manipulation
+=======================================
+
+.. contents:: List of floating-point emulation functions
+   :local:
+   :backlinks: top
+
+hipsolverDnSetMathMode()
+---------------------------------
+.. doxygenfunction:: hipsolverDnSetMathMode
+
+hipsolverDnGetMathMode()
+---------------------------------
+.. doxygenfunction:: hipsolverDnGetMathMode
+
+hipsolverDnSetEmulationStrategy()
+---------------------------------
+.. doxygenfunction:: hipsolverDnSetEmulationStrategy
+
+hipsolverDnGetEmulationStrategy()
+---------------------------------
+.. doxygenfunction:: hipsolverDnGetEmulationStrategy
+
+hipsolverDnSetFixedPointEmulationMantissaControl()
+----------------------------------------------------
+.. doxygenfunction:: hipsolverDnSetFixedPointEmulationMantissaControl
+
+hipsolverDnGetFixedPointEmulationMantissaControl()
+----------------------------------------------------
+.. doxygenfunction:: hipsolverDnGetFixedPointEmulationMantissaControl
+
+hipsolverDnSetFixedPointEmulationMaxMantissaBitCount()
+--------------------------------------------------------
+.. doxygenfunction:: hipsolverDnSetFixedPointEmulationMaxMantissaBitCount
+
+hipsolverDnGetFixedPointEmulationMaxMantissaBitCount()
+--------------------------------------------------------
+.. doxygenfunction:: hipsolverDnGetFixedPointEmulationMaxMantissaBitCount
+
+hipsolverDnSetFixedPointEmulationMantissaBitOffset()
+------------------------------------------------------
+.. doxygenfunction:: hipsolverDnSetFixedPointEmulationMantissaBitOffset
+
+hipsolverDnGetFixedPointEmulationMantissaBitOffset()
+------------------------------------------------------
+.. doxygenfunction:: hipsolverDnGetFixedPointEmulationMantissaBitOffset
+
+hipsolverDnSetEmulationSpecialValuesSupport()
+-----------------------------------------------
+.. doxygenfunction:: hipsolverDnSetEmulationSpecialValuesSupport
+
+hipsolverDnGetEmulationSpecialValuesSupport()
+-----------------------------------------------
+.. doxygenfunction:: hipsolverDnGetEmulationSpecialValuesSupport
+
+
+
 .. _dense_gesvdj_info:
 
 Gesvdj parameter manipulation
