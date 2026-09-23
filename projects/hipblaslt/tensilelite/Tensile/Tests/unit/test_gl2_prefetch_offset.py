@@ -69,12 +69,18 @@
 # tolerates the benign replication of the whole-cluster scheme (overlapping
 # cooperative-thread slices, and nc < cooperative threads, e.g. MX scales).
 #
+# test_gl2_prefetch_codegen runs without a device: it only generates and
+# assembles each config's kernel, so CPU-only runners (including the coverage
+# lane) still exercise GL2Prefetch's codegen paths.
+#
 # Usage:
 #   pytest test_gl2_prefetch_offset.py -v -s
 #   python test_gl2_prefetch_offset.py --debug
 ################################################################################
 
 import os
+import shutil
+import subprocess
 import sys
 import struct
 import tempfile
@@ -106,7 +112,8 @@ from gpu_test_helpers import (  # noqa: E402
 # ---------------------------------------------------------------------------
 # GPU target (this test is gfx1250-only)
 # ---------------------------------------------------------------------------
-HAS_GFX1250 = GFX_TARGET == "gfx1250"
+TARGET = "gfx1250"
+HAS_GFX1250 = GFX_TARGET == TARGET
 WAVESIZE = 32
 GLOBAL_PREFETCH_SIZE = 256
 
@@ -639,7 +646,7 @@ def build_kernel(cfg):
     from rocisa.instruction import SMovB32, SCmpLeU32, SCBranchSCC1
     from Tensile.KernelWriterAssembly import GL2PrefetchLoad
 
-    init_rocisa(wavesize=WAVESIZE)
+    init_rocisa(target=TARGET, wavesize=WAVESIZE)
     kernel = _make_kernel(cfg)
     w = _make_writer(kernel)
     comp = GL2PrefetchLoad()
@@ -875,7 +882,7 @@ def build_kernel(cfg):
     max_s = max(sgprs | {0}) + 1
 
     asm = f"""\
-.amdgcn_target "amdgcn-amd-amdhsa--{GFX_TARGET}"
+.amdgcn_target "amdgcn-amd-amdhsa--{TARGET}"
 {set_dir}
 .text
 .protected test_kernel
@@ -1109,6 +1116,33 @@ class TestGL2PrefetchOffset:
     def test_gl2_prefetch_offset(self, cfg, tmp_path):
         errors = run_config(cfg, str(tmp_path))
         assert not errors, f"Config {cfg.name}: " + "; ".join(errors)
+
+
+def _assemble_for_target(asm, obj_path):
+    """Assemble for TARGET without a device present. assemble_kernel targets the
+    detected GPU, which a CPU-only runner does not have."""
+    clang = shutil.which("amdclang++")
+    if clang is None:
+        pytest.skip("amdclang++ not found")
+    proc = subprocess.run(
+        [clang, "-x", "assembler", "--target=amdgcn-amd-amdhsa", f"-mcpu={TARGET}",
+         "-mcode-object-version=5", "-o", obj_path, "-"],
+        input=asm, capture_output=True, text=True)
+    if proc.returncode != 0 and "not a recognized processor" in proc.stderr:
+        pytest.skip(f"amdclang++ in this environment does not support {TARGET}")
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.parametrize("cfg", CONFIGS, ids=lambda c: c.name)
+def test_gl2_prefetch_codegen(cfg, tmp_path):
+    """Generate and assemble every config's kernel, on CPU.
+
+    The address check above needs a gfx1250 device, so CPU-only runners (the
+    coverage lane among them) skip it. This half keeps every codegen path in
+    GL2Prefetch exercised there, and still catches register-model mismatches
+    (build_kernel asserts gl2nc/gl2nl) and assembly the target rejects."""
+    asm, _, _ = build_kernel(cfg)
+    _assemble_for_target(asm, str(tmp_path / f"gl2_{cfg.name}.o"))
 
 
 # ---------------------------------------------------------------------------
