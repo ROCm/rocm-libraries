@@ -1122,6 +1122,22 @@
           "sha256": "d648aa314e033c8e6324fc366d9935fb86d3d51c4a707ee7525edf9828f45205",
           "status": "ok"
         },
+        "lightning_indexer/gfx942/mfma_deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 11959,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "c39f3f286736a41f3f934662c858e49d1168954368df31d0095b7ac179ab0654",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 11959,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "4fb5a098bf5633907d6b008cbfa0a7a5f32f60fbd9d8f0f2418ff127d65b6387",
+          "status": "ok"
+        },
         "lightning_indexer/gfx942/small": {
           "arch": "gfx942",
           "bytes": 10798,
@@ -2349,6 +2365,22 @@
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q8_K64_b256",
           "sha256": "e4173c1c9619bbb205630ecbf29dc6e5e08ce2c8cf9d1d9e697d2a7942f90304",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 11966,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "904b22cc9e59f153f803886922a1fab3b06f7d0cfa92bec61e5c6cb99fdd30c2",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 11966,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "43991c2cfd09d34bfaa44c20179352bfd828274e58a94c41aaebed36ed2f7a47",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {
@@ -3610,6 +3642,22 @@
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q8_K64_b256",
           "sha256": "1558096974e804789a9e3499191be7b9f5cca9d43d6579126901871f152b8c2d",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 11970,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "2ff401781bb1fa1f30c6212b47d91da7ce5e3ac9a8fced266b714eab4aea5f0b",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 11970,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "70f8b7ecb9cd78c6172867b3769b43016ca23aebebbb146cfc6e029d16db050d",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {

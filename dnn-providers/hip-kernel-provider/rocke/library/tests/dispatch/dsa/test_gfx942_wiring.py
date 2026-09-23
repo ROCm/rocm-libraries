@@ -38,9 +38,11 @@ def _req(**over) -> IndexerRequest:
 
 
 class TestRegistration(unittest.TestCase):
-    def test_single_candidate_registered(self):
-        names = [c.name for c in indexer_candidates()]
-        self.assertEqual(names, ["lightning_indexer_gfx942"])
+    def test_both_candidates_registered(self):
+        names = {c.name for c in indexer_candidates()}
+        self.assertEqual(
+            names, {"lightning_indexer_gfx942_mfma", "lightning_indexer_gfx942"}
+        )
 
     def test_candidate_has_builder(self):
         for c in indexer_candidates():
@@ -51,22 +53,36 @@ class TestRegistration(unittest.TestCase):
 
 
 class TestRouting(unittest.TestCase):
-    def test_selects_indexer(self):
-        res = dispatch_lightning_indexer(_req())
+    def test_aligned_selects_mfma(self):
+        res = dispatch_lightning_indexer(_req(seqlen_q=16, seqlen_k=64, index_head_dim=128))
+        self.assertEqual(res.candidate.name, "lightning_indexer_gfx942_mfma")
+        self.assertEqual(res.candidate.algorithm, "mfma_v1")
+        self.assertEqual(res.spec.body, "mfma")
+        self.assertEqual(res.grid, (1, 4, 1))  # (seqlen_q/16, seqlen_k/16, 1)
+        self.assertEqual(res.block, (64, 1, 1))
+
+    def test_unaligned_falls_back_to_scalar(self):
+        # seqlen_q=8 is not a multiple of 16, so the MFMA candidate is filtered out.
+        res = dispatch_lightning_indexer(_req(seqlen_q=8))
         self.assertEqual(res.candidate.name, "lightning_indexer_gfx942")
         self.assertEqual(res.candidate.algorithm, "scalar_v1")
-
-    def test_spec_grid_signature(self):
-        res = dispatch_lightning_indexer(_req(seqlen_q=8))
+        self.assertEqual(res.spec.body, "scalar")
         self.assertEqual(res.grid, (8, 1, 1))
-        self.assertEqual(res.block, (64, 1, 1))
-        self.assertEqual(
-            [s["name"] for s in res.signature],
-            ["index_q", "index_k", "w", "scores", "q_pos_base"],
-        )
 
-    def test_sweep_space_size_one(self):
-        self.assertEqual(len(indexer_sweep_space(_req())), 1)
+    def test_signature_stable_across_bodies(self):
+        for req in (_req(seqlen_q=16, index_head_dim=128), _req(seqlen_q=8)):
+            res = dispatch_lightning_indexer(req)
+            self.assertEqual(
+                [s["name"] for s in res.signature],
+                ["index_q", "index_k", "w", "scores", "q_pos_base"],
+            )
+
+    def test_sweep_space(self):
+        # aligned: both candidates admit; unaligned: only scalar.
+        self.assertEqual(
+            len(indexer_sweep_space(_req(seqlen_q=16, index_head_dim=128))), 2
+        )
+        self.assertEqual(len(indexer_sweep_space(_req(seqlen_q=8))), 1)
 
 
 class TestGates(unittest.TestCase):

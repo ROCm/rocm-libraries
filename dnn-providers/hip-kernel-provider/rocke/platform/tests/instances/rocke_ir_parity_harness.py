@@ -3096,12 +3096,15 @@ def cases():
             build_kda_chunkwise_gfx942(_kind, "gfx942", **_over),
         )
 
-    # gfx942 lightning indexer (DSA scoring, scalar-v1 bf16): two model-shaped
-    # cases (DeepSeek H_I=64, GLM H_I=32) at D_I=128, plus a small case.
+    # gfx942 lightning indexer (DSA scoring, bf16): scalar-v1 model-shaped cases
+    # (DeepSeek H_I=64, GLM H_I=32) at D_I=128 plus a small case, and the MFMA
+    # (matrix-core) body on 16-aligned shapes.
     for _case_id, _over in (
         ("deepseek_hi64", {"n_index_heads": 64, "index_head_dim": 128, "seqlen_q": 8, "seqlen_k": 64}),
         ("glm_hi32", {"n_index_heads": 32, "index_head_dim": 128, "seqlen_q": 8, "seqlen_k": 64}),
         ("small", {"n_index_heads": 4, "index_head_dim": 16, "seqlen_q": 8, "seqlen_k": 32, "block_size": 64}),
+        ("mfma_deepseek_hi64", {"n_index_heads": 64, "index_head_dim": 128, "seqlen_q": 16, "seqlen_k": 64, "body": "mfma", "block_size": 64}),
+        ("mfma_glm_hi32", {"n_index_heads": 32, "index_head_dim": 128, "seqlen_q": 16, "seqlen_k": 64, "body": "mfma", "block_size": 64}),
     ):
         add(
             "lightning_indexer",

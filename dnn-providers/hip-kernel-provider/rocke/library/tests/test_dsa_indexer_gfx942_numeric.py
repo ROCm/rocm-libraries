@@ -50,14 +50,17 @@ _TOL = 3e-2
 
 
 @pytest.mark.parametrize(
-    "Q,Sk,HI,D,block,q_pos_base",
+    "Q,Sk,HI,D,block,q_pos_base,body",
     [
-        (8, 64, 4, 16, 64, 0),      # small, decode-like base
-        (8, 128, 32, 128, 256, 0),  # GLM-shaped H_I=32, D_I=128
-        (4, 96, 8, 128, 128, 50),   # nonzero causal offset
+        (8, 64, 4, 16, 64, 0, "scalar"),      # small, decode-like base
+        (8, 128, 32, 128, 256, 0, "scalar"),  # GLM-shaped H_I=32, D_I=128
+        (4, 96, 8, 128, 128, 50, "scalar"),   # nonzero causal offset
+        (16, 64, 32, 128, 64, 0, "mfma"),     # MFMA, GLM-shaped, 16-aligned
+        (32, 128, 64, 128, 64, 0, "mfma"),    # MFMA, DeepSeek-shaped, multi-tile
+        (16, 96, 8, 128, 64, 48, "mfma"),     # MFMA, nonzero causal offset
     ],
 )
-def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base):
+def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
     from rocke.helpers.compile import compile_kernel
     from rocke.run_manifest import run_manifest
 
@@ -74,6 +77,7 @@ def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base):
         index_head_dim=D,
         seqlen_q=Q,
         seqlen_k=Sk,
+        body=body,
         tile=IndexerTileSpec(block_size=block),
     )
     artifact = compile_kernel(build_lightning_indexer(spec, arch=_ARCH), arch=_ARCH)

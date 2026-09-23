@@ -82,6 +82,7 @@ def make_lightning_indexer_manifest(
             "runner_module": RUNNER_MODULE,
             "index_head_dim": int(spec.index_head_dim),
             "q_pos_base": int(q_pos_base),
+            "body": str(getattr(spec, "body", "scalar")),
             "verify_tol": _DEFAULT_TOL,
         },
     )
@@ -108,6 +109,8 @@ def run_lightning_indexer_manifest_problem(
     signature = list(manifest["args_signature"])
     threads = int(manifest["threads_per_block"])
 
+    body = str(manifest.get("body", "scalar"))
+
     ins = make_inputs(Q, HI, D_I, Sk, seed=0)
     index_q_bits = f32_to_bf16_bits(ins["index_q"])
     index_k_bits = f32_to_bf16_bits(ins["index_k"])
@@ -115,7 +118,9 @@ def run_lightning_indexer_manifest_problem(
     scores = np.zeros((Q, Sk), dtype=np.float32)
     ref = ref_indexer_scores(ins["index_q"], ins["index_k"], w, q_pos_base)
 
-    grid = (Q, 1, 1)
+    # The MFMA body launches one wave64 per (16-query, 16-key) output block; the
+    # scalar body one workgroup per query row. Must match lightning_indexer_grid.
+    grid = (Q // 16, Sk // 16, 1) if body == "mfma" else (Q, 1, 1)
     block = (threads, 1, 1)
     # Two flops per (q, key, head, dim): one multiply, one add in the dot.
     flop = 2.0 * Q * Sk * HI * D_I

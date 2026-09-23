@@ -111,5 +111,47 @@ class TestBuildAndLower(unittest.TestCase):
             build_lightning_indexer(_spec(), arch="gfx950")
 
 
+class TestMfmaBody(unittest.TestCase):
+    def _mfma(self, **over) -> IndexerSpec:
+        base = dict(n_index_heads=32, index_head_dim=128, seqlen_q=16, seqlen_k=64,
+                    body="mfma", tile=IndexerTileSpec(block_size=64))
+        base.update(over)
+        return IndexerSpec(**base)
+
+    def test_accepts_aligned(self):
+        ok, why = is_valid_spec(self._mfma(), arch=_ARCH)
+        self.assertTrue(ok, why)
+
+    def test_requires_wave_block(self):
+        ok, why = is_valid_spec(self._mfma(tile=IndexerTileSpec(block_size=256)), arch=_ARCH)
+        self.assertFalse(ok)
+        self.assertIn("block_size", why)
+
+    def test_requires_aligned_seqlen(self):
+        ok, why = is_valid_spec(self._mfma(seqlen_q=15), arch=_ARCH)
+        self.assertFalse(ok)
+        self.assertIn("multiples of 16", why)
+
+    def test_requires_aligned_dim(self):
+        ok, why = is_valid_spec(self._mfma(index_head_dim=24), arch=_ARCH)
+        self.assertFalse(ok)
+        self.assertIn("index_head_dim", why)
+
+    def test_name_has_mfma_tag(self):
+        self.assertIn("mfma", self._mfma().kernel_name())
+
+    def test_grid_is_query_by_key_tiles(self):
+        # seqlen_q=32, seqlen_k=64 -> (32/16, 64/16, 1)
+        self.assertEqual(lightning_indexer_grid(self._mfma(seqlen_q=32)), (2, 4, 1))
+
+    def test_builds_and_lowers(self):
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        kd = build_lightning_indexer(self._mfma(), arch=_ARCH)
+        for flavor in ("llvm20", "llvm22"):
+            ir = _lower_kernel_to_llvm_python(kd, arch=_ARCH, llvm_flavor=flavor)
+            self.assertIn("define", ir, f"no define in MFMA IR for {flavor}")
+
+
 if __name__ == "__main__":
     unittest.main()

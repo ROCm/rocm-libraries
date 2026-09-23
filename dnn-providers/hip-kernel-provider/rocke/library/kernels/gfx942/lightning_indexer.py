@@ -89,11 +89,12 @@ class IndexerSpec:
     seqlen_q: int = 1
     seqlen_k: int = 1
     dtype: str = "bf16"
+    body: str = "scalar"
     tile: IndexerTileSpec = field(default_factory=IndexerTileSpec)
     name: str = "rocke_lightning_indexer"
 
     def kernel_name(self) -> str:
-        return kernel_name_join(
+        parts = [
             self.name,
             f"HI{self.n_index_heads}",
             f"D{self.index_head_dim}",
@@ -101,11 +102,17 @@ class IndexerSpec:
             f"Q{self.seqlen_q}",
             f"K{self.seqlen_k}",
             self.tile.name_parts(),
-        )
+        ]
+        # Only a non-default body appends a tag, so the scalar kernel_name (and
+        # its already-blessed golden) stays unchanged.
+        if self.body != "scalar":
+            parts.append(self.body)
+        return kernel_name_join(*parts)
 
     def lds_bytes(self) -> int:
-        # Scalar v1 uses no shared memory. The MFMA/fused forms will return the
-        # indexer tile plus the top-k candidate reserve here.
+        # Both bodies use no shared memory: the scalar reduction has no tiles,
+        # and the MFMA score body runs register-to-register (score-only, no value
+        # path means no P->LDS round-trip). LDS enters only with the fused top-k.
         return 0
 
 
@@ -141,6 +148,21 @@ def is_valid_spec(spec: IndexerSpec, arch: str = "gfx942") -> Tuple[bool, str]:
         return False, f"block_size {bs} not a multiple of wave_size {wave} for {arch}"
     if spec.lds_bytes() > LDS_LIMIT:
         return False, f"lds_bytes {spec.lds_bytes()} exceeds {LDS_LIMIT} on {arch}"
+    if spec.body not in ("scalar", "mfma"):
+        return False, f"unknown body {spec.body!r} (scalar | mfma)"
+    if spec.body == "mfma":
+        # The 16x16x16 bf16 atom uses one wave64 and 16-wide Q/K/score tiles, and
+        # v1 has no tile-tail masking, so shapes must be 16-aligned. Unaligned
+        # requests fall to the scalar candidate.
+        if bs != wave:
+            return False, f"mfma body requires block_size == wave_size {wave} (got {bs})"
+        if spec.index_head_dim % 16 != 0:
+            return False, f"mfma body requires index_head_dim % 16 == 0 (got {spec.index_head_dim})"
+        if spec.seqlen_q % 16 != 0 or spec.seqlen_k % 16 != 0:
+            return False, (
+                f"mfma body requires seqlen_q/seqlen_k multiples of 16 "
+                f"(got {spec.seqlen_q}, {spec.seqlen_k})"
+            )
     return True, "ok"
 
 
@@ -170,38 +192,17 @@ def _emit_score(b: IRBuilder, scores, out_idx, value) -> None:
     b.global_store(scores, out_idx, value, align=4)
 
 
-def build_lightning_indexer(spec: IndexerSpec, *, arch: str = "gfx942") -> KernelDef:
-    """Build the IR for one lightning-indexer forward instance.
+def _emit_scalar_body(b, spec, index_q, index_k, w, scores, q_pos_base):
+    """Scalar-reduction score loop (correctness-first v1).
 
-    Kernel signature::
-
-        (index_q: ptr<bf16, global>,   # [seqlen_q, H_I, D_I], projected + RoPE'd
-         index_k: ptr<bf16, global>,   # [seqlen_k, D_I], shared across heads
-         w:       ptr<f32,  global>,   # [H_I] per-head indexer weights
-         scores:  ptr<f32,  global>,   # [seqlen_q, seqlen_k] output score matrix
-         q_pos_base: i32)              # causal base: pos(q) = q_pos_base + q
-
-    Grid ``(seqlen_q, 1, 1)``; ``block_id_x`` is the query row. Each thread owns
-    keys ``tid, tid + block_size, ...`` and, per key, sums the per-head
-    ReLU-weighted dot products, applies the causal bound, and emits the score.
+    One workgroup per query row; threads stride the key range and, per key, sum
+    the per-head ReLU-weighted dot products over D_I, apply the causal bound, and
+    emit the score. No matrix cores, no LDS.
     """
-    ok, why = is_valid_spec(spec, arch=arch)
-    if not ok:
-        raise ValueError(f"invalid lightning_indexer spec for {arch}: {why}")
-
     H_I = spec.n_index_heads
     D_I = spec.index_head_dim
     Sk = spec.seqlen_k
     bs = spec.tile.block_size
-
-    b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = bs
-
-    index_q = b.param("index_q", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
-    index_k = b.param("index_k", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
-    w = b.param("w", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
-    scores = b.param("scores", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
-    q_pos_base = b.param("q_pos_base", I32)
 
     c_DI = b.const_i32(D_I)
     c_Sk = b.const_i32(Sk)
@@ -211,9 +212,6 @@ def build_lightning_indexer(spec: IndexerSpec, *, arch: str = "gfx942") -> Kerne
     c_neg_inf = b.const_f32(NEG_INF_SCORE)
 
     q = b.block_id_x()
-    # pos(q) is the query's absolute position for the causal bound. In decode
-    # q_pos_base is the context length (one query); in single-sequence prefill
-    # it is 0 so pos(q) == q.
     q_pos = b.add(q_pos_base, q)
     q_row_base = b.mul(q, b.const_i32(H_I * D_I))
     scores_row_base = b.mul(q, c_Sk)
@@ -242,18 +240,141 @@ def build_lightning_indexer(spec: IndexerSpec, *, arch: str = "gfx942") -> Kerne
             w_h = b.global_load_f32(w, h)
             b.scf_yield(b.fma(w_h, relu, score))
         score = head_loop.results[0]
-        # Causal: a query only scores keys at or before its position; future
-        # keys are driven to the sentinel so top-k never selects them.
         causal_ok = b.cmp_le(s, q_pos)
         out = b.select(causal_ok, score, c_neg_inf)
         _emit_score(b, scores, b.add(scores_row_base, s), out)
+
+
+def _emit_mfma_body(b, spec, index_q, index_k, w, scores, q_pos_base):
+    """MFMA (matrix-core) score body.
+
+    Per head h, scores_h[16, 16] = Q_h[16, D_I] @ K[16, D_I]^T over the 16x16x16
+    bf16 atom (D_I contracts in D_I/16 accumulated MMA steps), then a per-element
+    ReLU, the per-head weight, and a head sum accumulate the running score tile.
+    Score-only means no value matmul, so no P->LDS round-trip and no LDS at all:
+    the whole thing runs register-to-register. Head-streamed with the shared
+    index-key tile loaded once per key tile and reused across heads.
+
+    One wave64 per output block; requires 16-aligned seqlens (validator-gated).
+    Lane decode: m_in_atom = lane%16 (A/B operand row), m_blk = lane//16 (output
+    row block and the 4-K slot). Output cell r is matrix (row = m_blk*4 + r,
+    col = m_in_atom).
+    """
+    from rocke.helpers.atoms import MfmaAtom
+
+    H_I = spec.n_index_heads
+    D_I = spec.index_head_dim
+    atom = MfmaAtom.bf16_16x16x16()
+    apl = atom.a_per_lane
+    cpl = atom.c_per_lane
+    n_katoms = D_I // atom.k
+
+    c16 = b.const_i32(16)
+    c_zero_f = b.const_f32(0.0)
+    c_neg_inf = b.const_f32(NEG_INF_SCORE)
+    c_DI = b.const_i32(D_I)
+    c_Sk = b.const_i32(spec.seqlen_k)
+    c_apl = b.const_i32(apl)
+    c_atomk = b.const_i32(atom.k)
+    c_cpl = b.const_i32(cpl)
+    c_qrow_stride = b.const_i32(H_I * D_I)
+
+    lane = b.thread_id_x()
+    m_in_atom = b.mod(lane, c16)
+    m_blk = b.div(lane, c16)
+    k_lane_start = b.mul(m_blk, c_apl)
+
+    # Each workgroup owns one (16-query, 16-key) output block: block_id_x is the
+    # query tile, block_id_y the key tile. This parallelizes over both dimensions
+    # (grid = seqlen_q/16 x seqlen_k/16) rather than looping the key range
+    # serially in one workgroup.
+    q_tile_base = b.mul(b.block_id_x(), c16)
+    k_tile_base = b.mul(b.block_id_y(), c16)
+    q_row_base = b.mul(b.add(q_tile_base, m_in_atom), c_qrow_stride)
+    k_row_base = b.mul(b.add(k_tile_base, m_in_atom), c_DI)
+
+    # Shared index-key: one tile load, reused across all heads.
+    k_vecs = []
+    for ka in range(n_katoms):
+        d_start = b.add(b.mul(b.const_i32(ka), c_atomk), k_lane_start)
+        k_vecs.append(
+            b.global_load_vN(index_k, b.add(k_row_base, d_start), BF16, apl, align=apl * 2)
+        )
+    head_loop = b.scf_for_iter(
+        b.const_i32(0),
+        b.const_i32(H_I),
+        b.const_i32(1),
+        [(f"acc{r}", c_zero_f) for r in range(cpl)],
+        iv_name="h",
+    )
+    with head_loop as (h, acc_cells):
+        q_head_base = b.add(q_row_base, b.mul(h, c_DI))
+        score = atom.zero_acc(b)
+        for ka in range(n_katoms):
+            d_start = b.add(b.mul(b.const_i32(ka), c_atomk), k_lane_start)
+            q_vec = b.global_load_vN(
+                index_q, b.add(q_head_base, d_start), BF16, apl, align=apl * 2
+            )
+            score = b.mfma_f32_16x16x16_bf16(q_vec, k_vecs[ka], score)
+        w_h = b.global_load_f32(w, h)
+        new_cells = []
+        for r in range(cpl):
+            relu = b.fmax(b.vec_extract(score, r), c_zero_f)
+            new_cells.append(b.fadd(acc_cells[r], b.fmul(w_h, relu)))
+        b.scf_yield(*new_cells)
+    acc = head_loop.results
+    # Causal bound + write. Output cell r is matrix (row = m_blk*4 + r,
+    # col = m_in_atom); k_col is the same for all r cells of this lane.
+    k_col = b.add(k_tile_base, m_in_atom)
+    for r in range(cpl):
+        row_q = b.add(q_tile_base, b.add(b.mul(m_blk, c_cpl), b.const_i32(r)))
+        pos = b.add(q_pos_base, row_q)
+        out = b.select(b.cmp_le(k_col, pos), acc[r], c_neg_inf)
+        _emit_score(b, scores, b.add(b.mul(row_q, c_Sk), k_col), out)
+
+
+def build_lightning_indexer(spec: IndexerSpec, *, arch: str = "gfx942") -> KernelDef:
+    """Build the IR for one lightning-indexer forward instance.
+
+    Kernel signature::
+
+        (index_q: ptr<bf16, global>,   # [seqlen_q, H_I, D_I], projected + RoPE'd
+         index_k: ptr<bf16, global>,   # [seqlen_k, D_I], shared across heads
+         w:       ptr<f32,  global>,   # [H_I] per-head indexer weights
+         scores:  ptr<f32,  global>,   # [seqlen_q, seqlen_k] output score matrix
+         q_pos_base: i32)              # causal base: pos(q) = q_pos_base + q
+
+    The scalar body (default) runs one workgroup per query row; the MFMA body
+    runs one wave64 per 16-query tile over the matrix cores. Both emit the same
+    signature and score matrix.
+    """
+    ok, why = is_valid_spec(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid lightning_indexer spec for {arch}: {why}")
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = spec.tile.block_size
+
+    index_q = b.param("index_q", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+    index_k = b.param("index_k", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+    w = b.param("w", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
+    scores = b.param("scores", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
+    q_pos_base = b.param("q_pos_base", I32)
+
+    if spec.body == "mfma":
+        _emit_mfma_body(b, spec, index_q, index_k, w, scores, q_pos_base)
+    else:
+        _emit_scalar_body(b, spec, index_q, index_k, w, scores, q_pos_base)
 
     b.ret()
     return b.kernel
 
 
 def lightning_indexer_grid(spec: IndexerSpec) -> Tuple[int, int, int]:
-    """Launch grid: one workgroup per query row."""
+    """Launch grid: scalar = one workgroup per query row; mfma = one wave64 per
+    (16-query, 16-key) output block, parallelized over both dimensions."""
+    if spec.body == "mfma":
+        return (spec.seqlen_q // 16, spec.seqlen_k // 16, 1)
     return (spec.seqlen_q, 1, 1)
 
 

@@ -64,6 +64,27 @@ def _cases() -> dict[str, Callable]:
                 tile=IndexerTileSpec(block_size=64),
             )
         ),
+        # MFMA body (matrix-core), 16-aligned shapes, one wave64.
+        "dsa_indexer_gfx942/mfma_deepseek_hi64": lambda: build_lightning_indexer(
+            IndexerSpec(
+                n_index_heads=64,
+                index_head_dim=128,
+                seqlen_q=16,
+                seqlen_k=64,
+                body="mfma",
+                tile=IndexerTileSpec(block_size=64),
+            )
+        ),
+        "dsa_indexer_gfx942/mfma_glm_hi32": lambda: build_lightning_indexer(
+            IndexerSpec(
+                n_index_heads=32,
+                index_head_dim=128,
+                seqlen_q=16,
+                seqlen_k=64,
+                body="mfma",
+                tile=IndexerTileSpec(block_size=64),
+            )
+        ),
     }
 
 
