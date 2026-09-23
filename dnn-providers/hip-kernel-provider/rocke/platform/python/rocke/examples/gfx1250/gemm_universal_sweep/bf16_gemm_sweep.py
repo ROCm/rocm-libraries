@@ -62,6 +62,8 @@ def _make_spec(
     lds_k_pad: int = 0,
     direct_to_lds: bool = False,
     dtl_prefetch: bool = False,
+    tdm: bool = False,
+    tdm_depth: int = 1,
 ) -> UniversalGemmSpec:
     target = config["target"]
     warp_tile_m, warp_tile_n, warp_tile_k = target["warp_tile"]
@@ -91,6 +93,8 @@ def _make_spec(
             lds_k_pad=lds_k_pad,
             direct_to_lds=direct_to_lds,
             dtl_prefetch=dtl_prefetch,
+            tdm=tdm,
+            tdm_depth=tdm_depth,
         ),
         data=DataSpec(
             dtype_a=dtype,
@@ -158,6 +162,42 @@ def enumerate_tile_configs(config: Dict[str, Any]) -> List[UniversalGemmSpec]:
     return _dedupe_valid(specs, arch=config["target"]["arch"])
 
 
+def _load_paths(traits: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The global->LDS mechanisms to try, as trait overrides.
+
+    The three paths are mutually exclusive, so they are enumerated as a list
+    rather than multiplied out: pairing ``dtl_prefetch`` with
+    ``direct_to_lds=False``, or ``tdm_depth`` with ``tdm=False``, would inflate
+    the grid with combinations ``is_valid_spec`` rejects anyway.
+    """
+    paths: List[Dict[str, Any]] = []
+    for direct_to_lds in traits.get("direct_to_lds", [False]):
+        for dtl_prefetch in traits.get("dtl_prefetch", [False]):
+            if dtl_prefetch and not direct_to_lds:
+                continue
+            paths.append(
+                {
+                    "direct_to_lds": direct_to_lds,
+                    "dtl_prefetch": dtl_prefetch,
+                    "tdm": False,
+                    "tdm_depth": 1,
+                }
+            )
+    for tdm in traits.get("tdm", [False]):
+        if not tdm:
+            continue
+        for depth in traits.get("tdm_depth", [1]):
+            paths.append(
+                {
+                    "direct_to_lds": False,
+                    "dtl_prefetch": False,
+                    "tdm": True,
+                    "tdm_depth": int(depth),
+                }
+            )
+    return paths
+
+
 def enumerate_trait_configs(
     config: Dict[str, Any], finalists: Sequence[UniversalGemmSpec]
 ) -> List[UniversalGemmSpec]:
@@ -170,28 +210,22 @@ def enumerate_trait_configs(
                     for waves_per_eu in traits["waves_per_eu"]:
                         for lds_swizzle in traits["lds_swizzle"]:
                             for lds_k_pad in traits["lds_k_pad"]:
-                                for direct_to_lds in traits.get(
-                                    "direct_to_lds", [False]
-                                ):
-                                    for dtl_prefetch in traits.get(
-                                        "dtl_prefetch", [False]
-                                    ):
-                                        specs.append(
-                                            replace(
-                                                base,
-                                                trait=replace(
-                                                    base.trait,
-                                                    pipeline=pipeline,
-                                                    scheduler=scheduler,
-                                                    epilogue=epilogue,
-                                                    waves_per_eu=waves_per_eu,
-                                                    lds_swizzle=lds_swizzle,
-                                                    lds_k_pad=lds_k_pad,
-                                                    direct_to_lds=direct_to_lds,
-                                                    dtl_prefetch=dtl_prefetch,
-                                                ),
-                                            )
+                                for path in _load_paths(traits):
+                                    specs.append(
+                                        replace(
+                                            base,
+                                            trait=replace(
+                                                base.trait,
+                                                pipeline=pipeline,
+                                                scheduler=scheduler,
+                                                epilogue=epilogue,
+                                                waves_per_eu=waves_per_eu,
+                                                lds_swizzle=lds_swizzle,
+                                                lds_k_pad=lds_k_pad,
+                                                **path,
+                                            ),
                                         )
+                                    )
     return _dedupe_valid(specs, arch=config["target"]["arch"])
 
 
@@ -954,6 +988,8 @@ _CONFIG_OVERRIDES: Tuple[Tuple[str, Tuple[str, ...], Any, str], ...] = (
         _csv(_flag),
         "DirectToLDS prefetch ping-pong",
     ),
+    ("--tdm", ("trait_config", "tdm"), _csv(_flag), "tensor-descriptor mover path"),
+    ("--tdm-depth", ("trait_config", "tdm_depth"), _csv(int), "TDM pipeline depth"),
     ("--tile-finalists", ("selection", "tile_finalists"), int, "tiles kept after screening"),
     ("--final-timed", ("selection", "final_timed"), int, "candidates re-timed out-of-process"),
     ("--tolerance", ("selection", "tolerance"), float, "verification tolerance"),
