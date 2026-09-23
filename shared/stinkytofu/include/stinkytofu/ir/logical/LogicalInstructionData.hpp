@@ -186,6 +186,20 @@ struct SWaitAluLogicalData {
 };
 
 /**
+ * @brief Data for SBarrier instructions (logical IR)
+ *
+ * Preserves rocisa's split-barrier form and cluster scope through logical IR.
+ */
+struct SBarrierLogicalData {
+    bool separate;
+    bool wait;
+    bool clusterBarrier;
+
+    SBarrierLogicalData(bool separate_ = false, bool wait_ = false, bool clusterBarrier_ = false)
+        : separate(separate_), wait(wait_), clusterBarrier(clusterBarrier_) {}
+};
+
+/**
  * @brief Data for Label instructions (logical IR)
  * Note: Different from asm::LabelData which is a modifier
  */
