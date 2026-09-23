@@ -4220,9 +4220,11 @@ class GlobalWriteBatchWriter:
     tdm = TensorDataMoverStore()
     tdm.setMemToken([self.parentWriter.states.memTokenLdsBuffer0])
     kw  = self.parentWriter
-    with kw.allocTmpSgpr(12, tag="tdmStoreDesc") as descRes:
-      g0 = descRes.idx        # group0: 4 sgpr
-      g1 = descRes.idx + 4    # group1: 8 sgpr
+    # tensor_store_from_lds needs group1 (8 sgpr) 8-aligned + group0 (4 sgpr) 4-aligned: allocate the
+    # block 8-aligned with group1 FIRST at the aligned base (see _emitTensorStore for the rationale).
+    with kw.allocTmpSgpr(12, alignment=8, tag="tdmStoreDesc") as descRes:
+      g1 = descRes.idx        # group1: 8 sgpr (8-aligned base)
+      g0 = descRes.idx + 8    # group0: 4 sgpr (base+8 => 4-aligned)
       # Zero + set count/type/data_size/dims/tiles first (initOperands writes all of g0,g1).
       module.add(tdm.initOperands(g0, g1))
       module.add(tdm.setDataType(self.kernel["ProblemType"]["DestDataType"], g1))
@@ -4406,9 +4408,13 @@ class GlobalWriteBatchWriter:
     tdm = TensorDataMoverStore()
     tdm.setMemToken([self.parentWriter.states.memTokenLdsBuffer0])
     kw  = self.parentWriter
-    with kw.allocTmpSgpr(12, tag="tensorStoreDesc") as descRes:
-      g0 = descRes.idx        # group0: 4 sgpr
-      g1 = descRes.idx + 4    # group1: 8 sgpr
+    # tensor_store_from_lds needs group0 (4 sgpr) 4-aligned and group1 (8 sgpr) 8-aligned. Allocate the
+    # block 8-aligned and place the 8-sgpr group1 FIRST at the aligned base; group0 at base+8 is then
+    # 8-aligned (hence 4-aligned). A naive g0=idx,g1=idx+4 breaks group1's 8-alignment when the base is
+    # odd (e.g. under bias/SAV/activation SGPR pressure -> assembler "invalid register alignment").
+    with kw.allocTmpSgpr(12, alignment=8, tag="tensorStoreDesc") as descRes:
+      g1 = descRes.idx        # group1: 8 sgpr (8-aligned base)
+      g0 = descRes.idx + 8    # group0: 4 sgpr (base+8 => 4-aligned)
       module.add(tdm.initOperands(g0, g1))
       module.add(tdm.setDataType(self.kernel["ProblemType"]["DestDataType"], g1))
       with kw.allocTmpSgpr(2, tag="tensorStoreAddr") as addrRes:
