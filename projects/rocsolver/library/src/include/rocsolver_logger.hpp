@@ -89,6 +89,8 @@ ROCSOLVER_BEGIN_NAMESPACE
             _log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);   \
         }                                                                                     \
     } while(0)
+
+#ifdef NDEBUG
 #define ROCSOLVER_LAUNCH_KERNEL(name, ...)                                                          \
     do                                                                                              \
     {                                                                                               \
@@ -99,7 +101,63 @@ ROCSOLVER_BEGIN_NAMESPACE
             _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
         }                                                                                           \
         hipLaunchKernelGGL((name), __VA_ARGS__);                                                    \
+        hipError_t status = hipGetLastError();                                                      \
+        if(status != hipSuccess)                                                                    \
+        {                                                                                           \
+            hipStream_t stream;                                                                     \
+            rocblas_get_stream(handle, &stream);                                                    \
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));                                       \
+        }                                                                                           \
     } while(0)
+#else
+// ---------------------------------------------------------
+// debug build to explicitly check for valid grid and block in launch
+// configuration since hipGetLastError() may not correctly detect invalid launch
+// configuration on some architectures such as gfx1030
+// ---------------------------------------------------------
+#define ROCSOLVER_LAUNCH_KERNEL(name, grid_, block_, ...)                                           \
+    do                                                                                              \
+    {                                                                                               \
+        std::unique_ptr<rocsolver_logger::scope_guard<T>> _kernel_log_token;                        \
+        if(rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
+        {                                                                                           \
+            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name);                     \
+            _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
+        }                                                                                           \
+        auto const max_x_grid = 2147483647;                                                         \
+        auto const max_y_grid = 64 * 1024;                                                          \
+        auto const max_z_grid = 64 * 1024;                                                          \
+        bool const isvalid_grid = (0 <= grid_.x) && (grid_.x <= max_x_grid) && (0 <= grid_.y)       \
+            && (grid_.y <= max_y_grid) && (0 <= grid_.z) && (grid_.z <= max_z_grid);                \
+        if(!isvalid_grid)                                                                           \
+        {                                                                                           \
+            std::cerr << "grid( " << grid_.x << " , " << grid_.y << " , " << grid_.z << " )"        \
+                      << std::endl;                                                                 \
+        }                                                                                           \
+        assert(isvalid_grid);                                                                       \
+        bool const isvalid_block = (0 <= block_.x) && (block_.x <= 1024) && (0 <= block_.y)         \
+            && (block_.y <= 1024) && (0 <= block_.z) && (block_.z <= 1024)                          \
+            && ((block_.x + block_.y + block_.z) <= 1024);                                          \
+        if(!isvalid_block)                                                                          \
+        {                                                                                           \
+            std::cerr << "block( " << block_.x << " , " << block_.y << " , " << block_.z << " ) "   \
+                      << std::endl;                                                                 \
+        }                                                                                           \
+        assert(isvalid_block);                                                                      \
+        hipLaunchKernelGGL((name), grid_, block_, __VA_ARGS__);                                     \
+        auto const status = hipGetLastError();                                                      \
+        if(status != hipSuccess)                                                                    \
+        {                                                                                           \
+            std::cerr << "hipGetLastError() " << hipGetErrorString(status) << "( " << status        \
+                      << ") " << std::endl;                                                         \
+            assert(status == hipSuccess);                                                           \
+            hipStream_t stream;                                                                     \
+            rocblas_get_stream(handle, &stream);                                                    \
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));                                       \
+        }                                                                                           \
+    } while(0)
+
+#endif
 
 /***************************************************************************
  * The rocsolver_log_entry struct records function data for trace and
