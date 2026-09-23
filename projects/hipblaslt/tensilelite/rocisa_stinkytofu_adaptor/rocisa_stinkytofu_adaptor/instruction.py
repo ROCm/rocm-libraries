@@ -1671,7 +1671,12 @@ class SBarrier(Instruction):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SBarrier(self.comment)
+        return _st.SBarrier(
+            self.separate,
+            self.wait_flag,
+            self.cluster_barrier,
+            self.comment,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
