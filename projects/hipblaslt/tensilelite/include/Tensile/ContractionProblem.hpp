@@ -861,9 +861,6 @@ namespace TensileLite
             /// there is no zero-point tensor; nibbles in K order. This is the
             /// GPTQ / compressed-tensors checkpoint encoding.
             UnsignedBias8 = 1,
-            /// UnsignedBias8 with the 8 nibbles of each dword interleaved
-            /// [0,2,4,6,1,3,5,7] (the ExLlama / ExLlamaV2 shuffle).
-            UnsignedBias8ExLlama = 2,
         };
 
         void setInt4EncodingA(Int4Encoding encoding)

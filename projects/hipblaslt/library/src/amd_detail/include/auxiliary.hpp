@@ -259,15 +259,13 @@ constexpr const char* hipblaslt_int4_encoding_to_string(hipblasLtInt4Encoding_t 
         return "signed";
     case HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT:
         return "unsigned_bias8";
-    case HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXLLAMA_EXT:
-        return "unsigned_bias8_exllama";
     default:
         return "invalid";
     }
 }
 
 //! Accepted --int4_encoding spellings, for help text and error messages.
-constexpr const char* c_int4_encoding_names = "signed, unsigned_bias8, unsigned_bias8_exllama";
+constexpr const char* c_int4_encoding_names = "signed, unsigned_bias8";
 
 //! Returns HIPBLASLT_INT4_ENCODING_END_EXT when `value` names no encoding. The
 //! bare numerals are accepted so pre-existing scripts keep working.
@@ -280,8 +278,6 @@ constexpr hipblasLtInt4Encoding_t string_to_int4_encoding(std::string_view value
         return HIPBLASLT_INT4_ENCODING_SIGNED_EXT;
     if(value == "unsigned_bias8" || value == "1")
         return HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT;
-    if(value == "unsigned_bias8_exllama" || value == "2")
-        return HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXLLAMA_EXT;
     return HIPBLASLT_INT4_ENCODING_END_EXT;
 }
 

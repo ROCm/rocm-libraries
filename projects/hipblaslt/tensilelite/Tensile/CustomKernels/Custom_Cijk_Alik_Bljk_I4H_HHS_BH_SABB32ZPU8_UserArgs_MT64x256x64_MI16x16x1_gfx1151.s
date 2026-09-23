@@ -1,6 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Packed FP16 dequantization adapted from the ExLlama kernel (generator 108edb6c5f0).
+// Packed FP16 dequantization for sequential unsigned int4 weights.
 // Sequential U8 nibbles lift as (0,4),(1,5),(2,6),(3,7); byte permutations
 // restore (0,1),(2,3),(4,5),(6,7) after the exact subtract and FP16 multiply.
 // MIWaveTile 2x4, MIWaveGroup 2x4, DU64, PGR1, PLR0, SIA3,

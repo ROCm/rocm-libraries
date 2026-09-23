@@ -10,11 +10,8 @@
 #ifndef W4A16_LOAD_WIDTH
 #define W4A16_LOAD_WIDTH 8
 #endif
-#ifndef W4A16_EXLLAMA
-#define W4A16_EXLLAMA 1
-#endif
 #ifndef W4A16_KERNEL_NAME
-#define W4A16_KERNEL_NAME Custom_W4A16_Decode_G128_ExLlama_gfx1151
+#define W4A16_KERNEL_NAME Custom_W4A16_Decode_G128_UnsignedBias8_gfx1151
 #endif
 
 // The assembly generated from this source uses the Tensile universal argument
@@ -80,9 +77,6 @@ namespace
 #endif
                 unsigned q = packed[j];
                 const uint4 packedActivation = *reinterpret_cast<const uint4*>(b + kk + j * 8);
-#if W4A16_EXLLAMA
-                const uint4 activation = packedActivation;
-#else
                 // Sequential nibbles pair K offsets (0,4), (1,5), (2,6), (3,7)
                 // in the dequantizer below. Match the activation pairs to them.
                 const uint4 activation = {
@@ -90,9 +84,8 @@ namespace
                     (packedActivation.x >> 16) | (packedActivation.z & 0xffff0000),
                     (packedActivation.y & 0xffff) | (packedActivation.w << 16),
                     (packedActivation.y >> 16) | (packedActivation.w & 0xffff0000)};
-#endif
 
-                // ExLlama pairs adjacent K elements across the two halves of a dword.
+                // Extract pairs across the two halves of each packed dword.
                 // The integer lifts/subtractions are exact; scaling rounds to fp16
                 // before the fp32 dot product, matching the matrix kernel's contract.
                 const unsigned p0 = dequantize((q & 0x000f000f) | 0x64006400,

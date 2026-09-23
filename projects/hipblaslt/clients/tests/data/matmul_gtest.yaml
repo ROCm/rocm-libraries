@@ -2854,18 +2854,11 @@ Tests:
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1009, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1010, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, scale_type: f32_r}
-    # The two unsigned weight encodings, which only the descriptor attribute
-    # distinguishes -- the scale mode is the same as the row above.
+    # Unsigned weights selected by the descriptor encoding attribute.
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 1, scale_type: f32_r}
-    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 2, scale_type: f32_r}
-    # ExLlama at a group size of 32 (scale mode 1009), where the scale pointer
-    # advances 2 elements per K iteration rather than 1 -- the other direction
-    # of the DepthU/group-size relation from the 1011 rows above.
-    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 2, scale_type: f32_r}
     # fp16 activations, which carry an fp16 scale.
     - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1008, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 2, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 2, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 1, scale_type: f32_r}
   matrix_size:
     - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
     # Odd M exercises the ragged last row pair of the zero-point packing.
@@ -2889,8 +2882,8 @@ Tests:
   function:
     matmul:
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1008, scale_type: f32_r}
-    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 2, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 2, scale_type: f32_r}
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 1, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 1, scale_type: f32_r}
   matrix_size:
     - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
   use_ext: [1]
