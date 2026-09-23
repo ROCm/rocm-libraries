@@ -5,7 +5,6 @@
 #include <miopen/datatype.hpp>
 #include <miopen/solver/conv_direct_naive_conv.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
-#include <miopen/tensor_layout.hpp>
 
 #include <cassert>
 #include <sstream>
@@ -84,34 +83,6 @@ std::string RefCompileOptions(miopenDataType_t data_type)
     return ss.str();
 }
 
-// Get layout string and spatial dims from a tensor descriptor.
-void GetLayoutInfo(const TensorDescriptor& desc,
-                   bool& is_default_layout,
-                   bool& is_2d,
-                   std::string& layout_str)
-{
-    const auto num_dims = desc.GetNumDims();
-    is_2d               = (num_dims == 4);
-
-    std::string layout_default = tensor_layout_get_default(num_dims);
-    std::string actual_layout  = desc.GetLayout(layout_default);
-
-    if(actual_layout == "NCHW" || actual_layout == "NCDHW")
-    {
-        is_default_layout = true;
-        layout_str        = is_2d ? "nchw" : "ncdhw";
-    }
-    else if(actual_layout == "NHWC" || actual_layout == "NDHWC")
-    {
-        is_default_layout = false;
-        layout_str        = is_2d ? "nhwc" : "ndhwc";
-    }
-    else
-    {
-        MIOPEN_THROW("GpuConvReference: unsupported layout " + actual_layout);
-    }
-}
-
 // Compute grid size per batch for a 2D direction/layout combination.
 size_t
 ComputeGridSizePerBatch(bool is_fwd, bool is_default_layout, int k, int c, int n, int ho, int hi)
@@ -158,14 +129,33 @@ size_t ComputeGridSizePerBatch3D(bool is_fwd,
     }
 }
 
-// Build a ProblemDescription from raw descriptors. Needed for GetGroupStrideIndex.
+// Layout token for the kernel name. MakeProblem() has already rejected anything else.
+std::string LayoutName(const ProblemDescription& problem)
+{
+    if(problem.IsLayoutDefault())
+        return problem.Is2d() ? "nchw" : "ncdhw";
+    return problem.Is2d() ? "nhwc" : "ndhwc";
+}
+
+// Build a ProblemDescription and reject layouts the naive kernels cannot address.
 ProblemDescription MakeProblem(const TensorDescriptor& xDesc,
                                const TensorDescriptor& wDesc,
                                const TensorDescriptor& yDesc,
                                const ConvolutionDescriptor& conv,
                                miopen::conv::Direction dir)
 {
-    return {xDesc, wDesc, yDesc, conv, dir};
+    ProblemDescription problem{xDesc, wDesc, yDesc, conv, dir};
+
+    if(!problem.IsLayoutDefault() && !problem.IsLayoutNHWC())
+    {
+        MIOPEN_THROW(miopenStatusNotImplemented,
+                     "GpuConvReference: only the NCHW/NCDHW and NHWC/NDHWC layouts are supported, "
+                     "got in=" +
+                         problem.GetInLayout() + ", wei=" + problem.GetWeightsLayout() +
+                         ", out=" + problem.GetOutLayout());
+    }
+
+    return problem;
 }
 
 } // anonymous namespace
@@ -183,10 +173,9 @@ void GpuConvReference::RunFwd(const Handle& handle,
 {
     auto problem = MakeProblem(xDesc, wDesc, yDesc, conv, miopen::conv::Direction::Forward);
 
-    bool is_default_layout = true;
-    bool is_2d             = true;
-    std::string layout_str;
-    GetLayoutInfo(xDesc, is_default_layout, is_2d, layout_str);
+    const bool is_default_layout = problem.IsLayoutDefault();
+    const bool is_2d             = problem.Is2d();
+    const std::string layout_str = LayoutName(problem);
 
     const auto data_type = xDesc.GetType();
 
@@ -384,10 +373,9 @@ void GpuConvReference::RunBwd(const Handle& handle,
     // BWD: input gradient is dx (output of this function), output gradient is dy (input)
     auto problem = MakeProblem(dxDesc, wDesc, dyDesc, conv, miopen::conv::Direction::BackwardData);
 
-    bool is_default_layout = true;
-    bool is_2d             = true;
-    std::string layout_str;
-    GetLayoutInfo(dxDesc, is_default_layout, is_2d, layout_str);
+    const bool is_default_layout = problem.IsLayoutDefault();
+    const bool is_2d             = problem.Is2d();
+    const std::string layout_str = LayoutName(problem);
 
     const auto data_type = dxDesc.GetType();
 
@@ -564,10 +552,9 @@ void GpuConvReference::RunWrw(const Handle& handle,
     auto problem =
         MakeProblem(xDesc, dwDesc, dyDesc, conv, miopen::conv::Direction::BackwardWeights);
 
-    bool is_default_layout = true;
-    bool is_2d             = true;
-    std::string layout_str;
-    GetLayoutInfo(xDesc, is_default_layout, is_2d, layout_str);
+    // WRW needs no is_default_layout: its grid size is layout-independent.
+    const bool is_2d             = problem.Is2d();
+    const std::string layout_str = LayoutName(problem);
 
     const auto data_type = xDesc.GetType();
 
