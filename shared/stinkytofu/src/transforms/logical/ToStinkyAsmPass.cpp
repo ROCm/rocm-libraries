@@ -510,6 +510,9 @@ class ToStinkyAsmPassImpl : public Pass {
 
             if (irNode->getType() == IRBase::IRType::LogicalIR) {
                 LogicalInstruction* logicalInst = cast<LogicalInstruction>(irNode);
+                std::optional<SBarrierLogicalData> barrierData;
+                if (const SBarrierLogicalData* data = logicalInst->asSBarrier())
+                    barrierData = *data;
 
                 // Lower to assembly
                 StinkyInstruction* asmInst = createAsmFromIR(logicalInst, arch);
@@ -563,7 +566,13 @@ class ToStinkyAsmPassImpl : public Pass {
                         // (before the asm pipeline) is also required so the workgroup
                         // s_barrier_wait -1 exists as a distinct instruction for
                         // InsertClusterBarrierPass to anchor its Rule 3/4 handshakes on.
-                        legalizeBarrier(asmInst, irBuilder, arch);
+                        if (barrierData) {
+                            const int barrierId = barrierData->clusterBarrier ? -3 : -1;
+                            legalizeBarrier(asmInst, irBuilder, arch, barrierId,
+                                            barrierData->separate, barrierData->wait);
+                        } else {
+                            legalizeBarrier(asmInst, irBuilder, arch);
+                        }
                     } else if (asmInst->is(InstFlag::IF_VCmpX)) {
                         // gfx10/11/12 (RDNA, CMPXWritesSGPR=false) have no
                         // scheduler-visible exec-writing v_cmpx form; split into
