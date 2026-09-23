@@ -9,12 +9,13 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <vector>
 
-using hipblaslt_ext::experimental::GenerateOptions;
+using TensileLiteOptions = hipblaslt_ext::experimental::jit::tensilelite::Options;
 
 namespace
 {
@@ -275,13 +276,18 @@ namespace
             }
         }
     };
-    void runNormal(Problem& p, const GenerateOptions& options)
+    void runPublicGemm(Problem& p, const TensileLiteOptions& options)
     {
         using namespace hipblaslt_ext;
-        experimental::JitGemmInfo        info;
+        experimental::jit::Diagnostics   info;
         hipblasLtMatmulHeuristicResult_t selected;
-        auto                             select = [&](const GenerateOptions& generation) {
-            const auto status = experimental::getJitGemmAlgo(p.handle,
+        auto                             select = [&](const TensileLiteOptions& generation) {
+            experimental::jit::Backend backend;
+            require(experimental::jit::tensilelite::createBackend(generation, backend, info)
+                        == HIPBLAS_STATUS_SUCCESS,
+                    info.message.c_str());
+            experimental::jit::Request request;
+            auto                       status = experimental::jit::makeGemmRequest(p.handle,
                                                              p.desc,
                                                              &p.alpha,
                                                              p.a,
@@ -293,23 +299,30 @@ namespace
                                                              p.cLayout,
                                                              p.d,
                                                              p.dLayout,
-                                                             generation,
-                                                             std::numeric_limits<size_t>::max(),
-                                                             selected,
+                                                             request,
                                                              info);
-            require(status == HIPBLAS_STATUS_SUCCESS, ("JIT selection: " + info.error).c_str());
+            require(status == HIPBLAS_STATUS_SUCCESS, info.message.c_str());
+            int device;
+            check(hipGetDevice(&device), "Get current device");
+            experimental::jit::Solution solution;
+            status = experimental::jit::getJitAlgo(
+                device, request, backend, std::numeric_limits<size_t>::max(), solution, info);
+            require(status == HIPBLAS_STATUS_SUCCESS, info.message.c_str());
+            status = experimental::jit::getGemmAlgo(solution, selected, info);
+            require(status == HIPBLAS_STATUS_SUCCESS, ("JIT selection: " + info.message).c_str());
         };
         select(options);
-        std::cout << "Normal API manifest: " << info.manifestPath << '\n';
+        std::cout << "Public GEMM API manifest: " << (options.outputPath + "/bundle/manifest.json")
+                  << '\n';
         hipblasLtMatmulAlgo_t algo;
         std::memcpy(&algo, &selected.algo, sizeof(algo));
         require(getIndexFromAlgo(algo) == -1, "JIT algorithm exposed a prebuilt index");
-        require(getKernelNameFromAlgo(p.handle, algo) == info.kernelName,
+        require(!getKernelNameFromAlgo(p.handle, algo).empty(),
                 "JIT algorithm kernel name mismatch");
         require(!getSolutionNameFromAlgo(p.handle, algo).empty(), "JIT solution name missing");
         const auto workspaceBytes = selected.workspaceSize;
         if(workspaceBytes)
-            check(hipMalloc(&p.workspace, workspaceBytes), "Allocate normal workspace");
+            check(hipMalloc(&p.workspace, workspaceBytes), "Allocate GEMM workspace");
         auto runC = [&](const hipblasLtMatmulAlgo_t& chosen, size_t bytes) {
             return hipblasLtMatmul(p.handle,
                                    p.desc,
@@ -342,20 +355,19 @@ namespace
             const auto status = runC(algo, workspaceBytes - 1);
             if(allowWorkspaceFallback)
             {
-                check(status, "Normal workspace fallback");
-                p.verify("Normal workspace fallback");
+                check(status, "GEMM workspace fallback");
+                p.verify("GEMM workspace fallback");
             }
             else
-                require(status != HIPBLAS_STATUS_SUCCESS,
-                        "Normal C accepted insufficient workspace");
+                require(status != HIPBLAS_STATUS_SUCCESS, "C API accepted insufficient workspace");
         }
         for(int run = 0; run < 2; ++run)
         {
             if(run)
                 p.changeInputs();
             p.reset();
-            check(runC(algo, workspaceBytes), "Normal C matmul");
-            p.verify(run ? "Normal C copied algorithm repeat" : "Normal C copied algorithm");
+            check(runC(algo, workspaceBytes), "C API matmul");
+            p.verify(run ? "C API copied algorithm repeat" : "C API copied algorithm");
         }
         Gemm   gemm(p.handle,
                   p.desc,
@@ -370,21 +382,21 @@ namespace
                   p.d,
                   p.dLayout);
         size_t required = 0;
-        check(gemm.isAlgoSupported(algo, required), "Normal extension support");
-        require(required == workspaceBytes, "Normal workspace queries disagree");
+        check(gemm.isAlgoSupported(algo, required), "C++ Gemm support");
+        require(required == workspaceBytes, "GEMM workspace queries disagree");
         require(gemm.isAlgoSupported(invalid, required) != HIPBLAS_STATUS_SUCCESS,
                 "Unknown JIT algorithm passed extension support");
         gemm.setMaxWorkspaceBytes(workspaceBytes);
-        check(gemm.initialize(algo, p.workspace, false, p.stream), "Normal extension initialize");
+        check(gemm.initialize(algo, p.workspace, false, p.stream), "C++ Gemm initialize");
         require(!gemm.getKernelName().empty() && !gemm.getSolutionName().empty(),
-                "Normal extension lost JIT names");
+                "C++ Gemm lost JIT names");
         for(int run = 0; run < 2; ++run)
         {
             if(run)
                 p.changeInputs();
             p.reset();
-            check(gemm.run(p.stream), "Normal extension run");
-            p.verify(run ? "Normal extension repeat" : "Normal extension");
+            check(gemm.run(p.stream), "C++ Gemm run");
+            p.verify(run ? "C++ Gemm repeat" : "C++ Gemm");
         }
         // Fresh bundles use the same symbols and basenames. The first retained
         // algorithm must remain runnable after a second private adapter is loaded.
@@ -430,7 +442,7 @@ namespace
             check(hipMemsetAsync(p.workspace, 0xa5, workspaceBytes, p.stream),
                   "Set workspace sentinel");
             require(runC(selected.algo, workspaceBytes) != HIPBLAS_STATUS_SUCCESS,
-                    "Normal C accepted a missing later helper");
+                    "C API accepted a missing later helper");
             unchanged();
             const auto previousName = gemm.getKernelName();
             require(gemm.initialize(selected.algo, p.workspace, false, p.stream)
@@ -444,7 +456,7 @@ namespace
             check(gemm.run(p.stream), "Retained extension after helper failure");
             p.verify("Retained extension after helper failure");
             std::cout
-                << "Normal C/extension missing-helper preflight left D/workspace unchanged PASS\n";
+                << "C API/extension missing-helper preflight left D/workspace unchanged PASS\n";
             return;
         }
         p.reset();
@@ -489,12 +501,12 @@ int main(int argc, char** argv)
     {
         std::cerr << "Usage: " << argv[0]
                   << " PYTHON TENSILE_SOURCE PYTHONPATH YAML FRESH_OUTPUT ARCH COMPILER "
-                     "[--m M --n N --k K --trans-b N|T --amax 0|1] [--normal-api both]\n";
+                     "[--m M --n N --k K --trans-b N|T --amax 0|1]\n";
         return 2;
     }
     try
     {
-        GenerateOptions options;
+        TensileLiteOptions options;
         options.pythonExecutable       = argv[1];
         options.tensileSourceDirectory = argv[2];
         options.pythonPath             = argv[3];
@@ -513,9 +525,7 @@ int main(int argc, char** argv)
         {
             require(i + 1 < argc, "Option requires a value");
             std::string key(argv[i]), value(argv[i + 1]);
-            if(key == "--normal-api")
-                require(value == "both", "--normal-api requires both");
-            else if(key == "--workspace-fallback")
+            if(key == "--workspace-fallback")
                 allowWorkspaceFallback = integer(value) != 0;
             else if(key == "--second-yaml")
                 secondConfig = value;
@@ -543,7 +553,7 @@ int main(int argc, char** argv)
                 "Sample dimensions must satisfy 0<M,N<=1024 and 0<K<=8192");
         Problem problem;
         problem.create();
-        runNormal(problem, options);
+        runPublicGemm(problem, options);
         return 0;
     }
     catch(const std::exception& e)
