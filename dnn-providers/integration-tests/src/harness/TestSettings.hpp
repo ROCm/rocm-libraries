@@ -45,6 +45,7 @@ enum class ValidatorOverrideKind
 {
     ALLCLOSE,
     RMS,
+    ALLCLOSE_MATCHING_INFINITIES,
 };
 
 struct ValidatorOverride
@@ -74,6 +75,11 @@ struct ValidatorOverride
 //   validator     = "rms"
 //   rms_threshold = 1e-4
 //
+//   [[validator_overrides]]
+//   filters   = ["*SdpaFwd*Masked*"]
+//   tensors   = ["*::LSE"]
+//   validator = "allclose_matching_infinities"
+//
 //   [[test_skips]]
 //   archs     = ["gfx1100", "gfx1101"]
 //   platforms = ["windows"]                       # optional
@@ -93,9 +99,16 @@ struct ValidatorOverride
 // label (its name, or "uid=N" when the graph did not name it). Later entries
 // take precedence. Absent any match, allclose is used — allclose is the default
 // and nothing else can select a validator.
-// Validator entries are parsed strictly: 'rms' requires a positive 'rms_threshold'
-// and 'allclose' must not carry one, because an entry that does not say exactly
-// what it means is a load error rather than a silent fall-back to allclose.
+// 'validator' is one of "allclose", "allclose_matching_infinities" or "rms".
+// "allclose_matching_infinities" grades exactly as "allclose" does, at the same
+// resolved atol/rtol, except that an element that is infinite with the same sign in
+// both the reference and the device output compares equal; NaN, opposite-signed
+// infinities and finite-versus-infinite disagreements still fail. It is defined for
+// float, half, bfloat16 and double outputs only.
+// Validator entries are parsed strictly: 'rms' requires a positive 'rms_threshold',
+// and neither "allclose" nor "allclose_matching_infinities" may carry one, because
+// an entry that does not say exactly what it means is a load error rather than a
+// silent fall-back to allclose.
 // For test_skips, an entry matches when ALL of:
 //   - 'archs' is omitted/empty (any arch), OR any 'archs' value is a
 //     substring of the device's raw gcnArchName.
@@ -400,26 +413,35 @@ private:
             throw std::runtime_error(std::string(K_SECTION) + " entry missing 'validator'");
         }
 
-        if(*validator == "allclose")
+        const bool isAllClose = (*validator == "allclose");
+        const bool isMatchingInfinities = (*validator == "allclose_matching_infinities");
+        const bool isRms = (*validator == "rms");
+
+        // The name is checked before its content. Hoisting the threshold guard above
+        // this would answer an unrecognised name with a complaint about
+        // 'rms_threshold', sending an operator to fix the line that is not wrong.
+        if(!isAllClose && !isMatchingInfinities && !isRms)
         {
-            // A threshold on an allclose entry means the file does not say what its
-            // author meant — either 'validator' was edited and the threshold left
-            // behind, or the reverse. Ignoring it silently is how an override quietly
-            // stops being the check someone thinks it is.
+            throw std::runtime_error(
+                std::string(K_SECTION) + " entry has unknown validator '" + *validator
+                + R"~(' (expected "allclose", "allclose_matching_infinities" or "rms"))~");
+        }
+
+        if(!isRms)
+        {
+            // A threshold on an entry whose validator has none means the file does not
+            // say what its author meant — either 'validator' was edited and the
+            // threshold left behind, or the reverse. Ignoring it silently is how an
+            // override quietly stops being the check someone thinks it is.
             if((*table)["rms_threshold"])
             {
-                throw std::runtime_error(
-                    std::string(K_SECTION)
-                    + R"~( entry with validator = "allclose" also sets 'rms_threshold')~");
+                throw std::runtime_error(std::string(K_SECTION) + R"~( entry with validator = ")~"
+                                         + *validator + R"~(" also sets 'rms_threshold')~");
             }
-            parsed.kind = ValidatorOverrideKind::ALLCLOSE;
+            parsed.kind = isAllClose ? ValidatorOverrideKind::ALLCLOSE
+                                     : ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES;
             parsed.rmsThreshold = 0.0f;
             return parsed;
-        }
-        if(*validator != "rms")
-        {
-            throw std::runtime_error(std::string(K_SECTION) + " entry has unknown validator '"
-                                     + *validator + R"~(' (expected "allclose" or "rms"))~");
         }
 
         parsed.kind = ValidatorOverrideKind::RMS;

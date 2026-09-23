@@ -46,7 +46,7 @@
  *     in that order, and declares the three shape params unconditionally.
  *   _has_shape_params      (attention_dense.py:2062-2075) gates the shape tail on
  *     `not spec.persistent`, so only a persistent body takes the 5-argument
- *     form. Every one of the 149 variants in gfx950_attention_dense.kdp.json declares
+ *     form. Every variant in gfx950_attention_dense.kdp.json declares
  *     `persistent: false`, `use_sinks: false`, `varlen: false` and `paged: false`, so the
  *     8-argument form is the only one that ships and the sink / cu_seqlens / page-table
  *     tails of attention_dense_signature are unreachable from this catalog. The

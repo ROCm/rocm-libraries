@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -111,6 +112,14 @@ ComparisonTolerance exact()
 }
 
 constexpr float K_RMS_THRESHOLD = 1e-4f;
+
+constexpr float K_INF = std::numeric_limits<float>::infinity();
+constexpr float K_NAN = std::numeric_limits<float>::quiet_NaN();
+
+ComparisonTolerance exactMatchingInfinities()
+{
+    return ComparisonTolerance::allCloseMatchingInfinities(0.0f, 0.0f);
+}
 
 } // namespace
 
@@ -466,6 +475,199 @@ TEST(TestOutputComparison, UnhandledValidatorKindIsRefused)
     EXPECT_THROW(
         makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, "y_out", bogus),
         std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// ALLCLOSE_MATCHING_INFINITIES. An output whose correct value is infinite on both
+// sides — a fully masked SDPA forward log-sum-exp row — cannot be graded by
+// |ref - impl|, which is NaN for two infinities and so fails a tensor that is right.
+// The kind relaxes exactly that element and nothing else.
+// ---------------------------------------------------------------------------
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesAcceptsSameSignedInfinities)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+    auto actual = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+
+    EXPECT_FALSE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+                     .has_value())
+        << "both sides are -inf and both are right";
+
+    // The two answers on one pair of tensors are the fact worth pinning: this kind is
+    // only worth having because the default disagrees with it here.
+    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exact(), "b").has_value())
+        << "plain allclose computes |ref - impl| = NaN for two infinities and rejects";
+}
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsOppositeSignedInfinities)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
+    auto actual = floatTensor3(attrs, K_INF, 1.0f, 1.0f);
+
+    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+                    .has_value())
+        << "the sign is part of the match; +inf where -inf belongs is a real disagreement";
+}
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsNaN)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
+    auto actual = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
+
+    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+                    .has_value())
+        << "a NaN is not an infinity: matching NaNs stay a failure on both sides";
+}
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsFiniteVersusInfinite)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
+    auto actual = floatTensor3(attrs, -1e30f, 1.0f, 1.0f);
+
+    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+                    .has_value())
+        << "a very large finite value is not an infinity, however large";
+}
+
+// The relaxation is one element's verdict, not the tensor's. Everything finite is
+// still graded, at the atol/rtol the harness resolved.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillGradesFiniteElementsByAtolRtol)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
+    auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
+
+    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+                    .has_value())
+        << "the matched infinity must not carry the drifted element through with it";
+
+    EXPECT_FALSE(compareTensor(K_UID_B,
+                               attrs,
+                               *expected,
+                               *actual,
+                               ComparisonTolerance::allCloseMatchingInfinities(0.2f, 0.0f),
+                               "b")
+                     .has_value())
+        << "atol still decides the finite elements";
+}
+
+// One graph, two outputs, two validators — what a TOML 'tensors' glob drives. Both
+// tensors hold -inf, so the kind alone decides which of them passes.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesIsChosenPerTensor)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& map = wrapper.getTensorMap();
+
+    OutputTensors expected;
+    expected[K_UID_A] = floatTensor(*map.at(K_UID_A), -K_INF);
+    expected[K_UID_B] = floatTensor(*map.at(K_UID_B), -K_INF);
+
+    OutputTensors actual;
+    actual[K_UID_A] = floatTensor(*map.at(K_UID_A), -K_INF);
+    actual[K_UID_B] = floatTensor(*map.at(K_UID_B), -K_INF);
+
+    std::vector<std::string> labelsSeen;
+    const auto mismatches = compareOutputs(
+        wrapper,
+        {K_UID_A, K_UID_B},
+        actual,
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
+        [&](const std::string& label, auto) {
+            labelsSeen.push_back(label);
+            return label == "uid=4" ? exactMatchingInfinities() : exact();
+        },
+        "Bundle: b");
+
+    EXPECT_EQ(labelsSeen, (std::vector<std::string>{"y_out", "uid=4"}))
+        << "the lookup must be given the label a TOML glob would match on";
+    ASSERT_EQ(mismatches.size(), 1u)
+        << "uid 4 accepts its matched infinities; y_out is still graded by plain allclose";
+    EXPECT_EQ(mismatches[0].uid, K_UID_A);
+}
+
+// Integers have no infinity, so this kind is undefined for them — the same shape of
+// over-matched glob RMS already has, and the same answer: a named failure the operator
+// can act on, not an exception unwinding out of the test body.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnAnUnsupportedDataTypeIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
+
+    auto expected = intTensor(attrs, 7);
+    auto actual = intTensor(attrs, 7);
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(
+        mismatch = compareTensor(
+            K_UID_INT, attrs, *expected, *actual, exactMatchingInfinities(), "Bundle: b"));
+
+    // Equal tensors, so this is not a numerical verdict: it reports that the override
+    // could not be honoured at all.
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(mismatch->label, "counts");
+    EXPECT_NE(mismatch->report.find("counts"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("INT32"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("validator_overrides"), std::string::npos)
+        << "the operator has to be told which config section over-matched";
+    EXPECT_NE(mismatch->report.find("allclose_matching_infinities"), std::string::npos)
+        << "and which of the three validators that section named";
+    // The only sentence in the message that says what to do about it. A refactor that
+    // shares this text between two validators can drop it and stay green everywhere else.
+    EXPECT_NE(mismatch->report.find("Narrow that entry's 'tensors' glob"), std::string::npos);
+}
+
+// Unlike RMS, this kind does not replace what decided the verdict: atol and rtol are
+// exactly what graded every finite element, so the report keeps printing them.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, 1.0f, 2.0f, 3.0f);
+    auto actual = floatTensor3(attrs, 1.0f, 2.5f, 3.0f);
+
+    const auto mismatch
+        = compareTensor(K_UID_B,
+                        attrs,
+                        *expected,
+                        *actual,
+                        ComparisonTolerance::allCloseMatchingInfinities(1e-3f, 1e-3f),
+                        "b");
+
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_NE(mismatch->report.find("atol="), std::string::npos);
+    EXPECT_EQ(mismatch->report.find("relative RMS"), std::string::npos)
+        << "no threshold decided this failure; reporting one would name a check that did not run";
 }
 
 // NOLINTEND(readability-identifier-naming)

@@ -41,9 +41,12 @@
  *
  * gfx950-specific behaviors covered:
  *   - LAYOUT: every operand's stride spelling is set independently, so each tensor's clause
- *     of the layout gate is pinned by a case that flips that tensor and nothing else. All
- *     four operands are gated in graph_match; prepare() re-checks the output as defence in
- *     depth for a caller that reaches the handler without having matched.
+ *     of the layout gate is pinned by a case that flips that tensor and nothing else. Q, K
+ *     and V are gated together; O is gated from the O-dimension conditional instead, so
+ *     that an output whose extents were never accepted declines before its own layout
+ *     arithmetic runs. All four are gated in graph_match either way; prepare() re-checks
+ *     the output as defence in depth for a caller that reaches the handler without having
+ *     matched.
  *   - SHAPE: per-operand dimension overrides sit beside the layout fields, so a single
  *     operand can disagree with the problem shape on one axis while staying dense BSHD for
  *     its own extents. That is what makes the cross-operand agreement clauses reachable.
@@ -174,6 +177,13 @@ struct GraphSpec
     std::optional<int64_t> oSeqLen;
     std::optional<int64_t> oHeadSize;
 
+    // O's stride vector, written out instead of derived from O's extents. The layout
+    // fields above cannot spell a graph whose extents are too large to multiply together:
+    // stridesFor would have to evaluate the very product the matcher must not evaluate.
+    // A spec that sets this carries the strides verbatim and the fixture computes nothing
+    // from O's dims.
+    std::optional<std::vector<int64_t>> oStridesOverride;
+
     // Mask. Defaults to top-left causal.
     std::optional<int64_t> leftBound = -1;
     std::optional<int64_t> rightBound = 0;
@@ -234,7 +244,12 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const auto qStrides = stridesFor(spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
     const auto kStrides = stridesFor(spec.kLayout, spec.numKvHeads, spec.seqLenKv, spec.headSize);
     const auto vStrides = stridesFor(spec.vLayout, spec.numKvHeads, spec.seqLenKv, spec.headSizeV);
-    const auto oStrides = stridesFor(spec.oLayout, outputHeads, outputSeqLen, outputHeadSize);
+    // A ternary, not value_or: value_or evaluates its argument, and for an overriding spec
+    // that argument is the product of extents chosen precisely because it does not fit.
+    const std::vector<int64_t> oStrides
+        = spec.oStridesOverride.has_value()
+              ? *spec.oStridesOverride
+              : stridesFor(spec.oLayout, outputHeads, outputSeqLen, outputHeadSize);
 
     const std::vector<int64_t>* const qStridesPtr = spec.omitStrides ? nullptr : &qStrides;
     const std::vector<int64_t>* const kStridesPtr = spec.omitStrides ? nullptr : &kStrides;
@@ -835,10 +850,13 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedSequenceStride)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdOutput)
 {
-    // The layout gate covers all four operands. The kernel bakes BSHD for the epilogue
-    // exactly as it does for the inputs, so a differently-strided output is outside the
-    // capability set and declines here -- leaving the graph free for another engine
-    // rather than being claimed and then faulted on in prepare().
+    // O is gated from the O-dimension conditional rather than the Q/K/V layout gate, but
+    // it is gated. The kernel bakes BSHD for the epilogue exactly as it does for the
+    // inputs, so a differently-strided output is outside the capability set and declines
+    // here -- leaving the graph free for another engine rather than being claimed and then
+    // faulted on in prepare(). O's extents are untouched, so the four dimension compares
+    // all pass and the layout clause they short-circuit is the only thing left that can
+    // reject this graph.
     GraphSpec spec;
     spec.oLayout = StrideLayout::BHSD;
     EXPECT_FALSE(matchGraph(spec).has_value());
@@ -921,7 +939,8 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
 // Each case perturbs exactly one axis of one operand and leaves that operand's strides
 // dense BSHD for its own extents, so the layout gate passes and the cross-tensor clause
 // named in the comment is the only thing that can decline the graph. Each is paired
-// with the unperturbed spec as its positive control.
+// with the unperturbed spec as its positive control. The last case is the exception that
+// proves the ordering: its extents are too large to derive strides from at all.
 // ---------------------------------------------------------------------------
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputBatchMismatch)
@@ -973,6 +992,39 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputHeadSizeMismatch)
     GraphSpec mismatched = spec;
     mismatched.oHeadSize = 64;
     EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOverflowingOutputExtents)
+{
+    // Holds the domain that makes the O clause order matter, and pins the decline over
+    // it. O's extents here are positive and rank-4, so the well-formedness predicate
+    // passes them through, but S * H * D for those extents is 2^63 -- one past
+    // INT64_MAX. That product is exactly what hasBshdStrides forms to derive the batch
+    // stride it expects, so a matcher evaluating O's layout before dimension agreement
+    // would form it on extents it has not accepted, in the signed type the graph
+    // declares. As ordered, the head-count compare rejects the graph and short-circuits
+    // that arithmetic away.
+    //
+    // This case CANNOT distinguish the two orderings, and no case can. Every check
+    // between the layout gate and the O-dimension compare returns nullopt on failure, so
+    // moving O's layout clause changes which check declines a graph and never whether one
+    // does -- the accept sets are identical. The ordering therefore rests on that
+    // short-circuit argument rather than on a red/green result, and what this case is for
+    // is keeping the overflow-capable domain reachable and declined, so the argument
+    // stays about a shape the suite actually exercises.
+    //
+    // O's strides are the ordinary dense BSHD spelling of the PROBLEM shape, the vector a
+    // real output carries, so no stride value is what rejects this graph -- and, being
+    // written out rather than derived, the fixture forms no oversized product either.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec overflowing = spec;
+    overflowing.oNumHeads = int64_t{1} << 16;
+    overflowing.oSeqLen = int64_t{1} << 31;
+    overflowing.oHeadSize = int64_t{1} << 16;
+    overflowing.oStridesOverride = bshdStrides(HEADS, SEQ, HEAD_SIZE);
+    EXPECT_FALSE(matchGraph(overflowing).has_value());
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyBatchMismatch)
