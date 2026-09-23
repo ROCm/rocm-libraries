@@ -32,11 +32,23 @@ auto GetConvTestCases(miopenDataType_t datatype)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
-    return std::vector{
+    auto cases = std::vector{
         // clang-format off
         TestCase{{1, 16, 14, 14}, {48, 16, 5, 5}, {2, 2}, {1, 1}, {1, 1}, datatype},
         // clang-format on
     };
+
+    // Cross-block tiling needs an fp32 output and spatial > WRW_SPATIAL_TILING_THRESHOLD, so only
+    // the fp32 suite can reach it. n=8, 200x200, 3x3 pad=1 s=1 -> ho=wo=200, spatial = 320000.
+    if(datatype == miopenFloat)
+    {
+        cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {8, 3, 200, 200}},
+                                    {datatype, miopenTensorNCHW, {4, 3, 3, 3}},
+                                    datatype,
+                                    {{1, 1}, {1, 1}, {1, 1}}});
+    }
+
+    return cases;
 }
 
 auto GetConvTestCasesFull(miopenDataType_t datatype)
