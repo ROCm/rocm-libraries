@@ -181,8 +181,9 @@ comparison path is a prerequisite for it. Every early return inside
 routing) would otherwise leave that graph's claims undecided while the run still
 exited 0.
 
-It returns an empty observation, touching nothing, when no engine was injected, no
-sidecar exists, or enforcement is off.
+It returns an empty observation, touching nothing, when no engine was injected or no
+sidecar exists. Whether the run enforces claims does not change whether the query
+happens, only what a broken claim costs.
 
 Neither `openGraph()` nor `observeSupportClaims()` is virtual — **the harness has no
 virtual members at all.** Everything needing a GPU, a handle, a loaded plugin, or
@@ -211,11 +212,11 @@ Two facts, deliberately not derived from each other:
   A sidecar that claims another arch, another platform, another sweep case, or only
   other engines leaves zero verdicts but was still read in full, and must count as
   covered.
-- **Per-graph invariant.** If a sidecar exists on disk and enforcement is on but the
-  query did not happen, the test fails. The run-level guard only fires when *no*
-  graph anywhere was queried, so a partial gap slips past it; this makes any future
-  short-circuit above the query loud immediately instead of surviving behind one
-  healthy bundle.
+- **Per-graph invariant.** If a sidecar exists on disk but the query did not happen,
+  the test fails, whether or not the run enforces claims. The run-level guard only
+  fires when *no* graph anywhere was queried, so a partial gap slips past it; this
+  makes any future short-circuit above the query loud immediately instead of
+  surviving behind one healthy bundle.
 
 ### A broken claim is terminal
 
