@@ -356,12 +356,19 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
 
     // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
     //
-    // All four operands are held to the same rule here, O included. The kernel bakes
-    // BSHD for the epilogue exactly as it does for the inputs, so a differently-strided
-    // output is outside the capability set and a DECLINE is the honest answer: another
-    // engine may serve the graph. Accepting it and faulting later would claim a graph
-    // this engine cannot execute.
-    if(!hasBshdStrides(*q) || !hasBshdStrides(*k) || !hasBshdStrides(*v) || !hasBshdStrides(*o))
+    // Three operands here: Q, K and V. O is held to the same rule, but at §5, on the
+    // conditional that compares its extents against the problem shape. The ordering is
+    // deliberate. hasBshdStrides multiplies an operand's OWN extents together to derive
+    // the stride it expects, and until dimension agreement has accepted O's extents they
+    // are whatever the graph claimed -- so that arithmetic must not run on a shape this
+    // engine has not yet agreed it can address.
+    //
+    // The answer is the same wherever the clause sits: the kernel bakes BSHD for the
+    // epilogue exactly as it does for the inputs, so a differently-strided output is
+    // outside the capability set and a DECLINE is the honest answer -- another engine may
+    // serve the graph, whereas accepting it and faulting later would claim a graph this
+    // engine cannot execute.
+    if(!hasBshdStrides(*q) || !hasBshdStrides(*k) || !hasBshdStrides(*v))
     {
         return std::nullopt;
     }
@@ -394,11 +401,14 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     {
         return std::nullopt;
     }
-    // O is Q's shape: the epilogue reuses the query base and stride verbatim.
+    // O is Q's shape: the epilogue reuses the query base and stride verbatim. O's layout
+    // clause rides on the same conditional, AFTER the four dimension compares, so that
+    // short-circuit evaluation keeps O's layout arithmetic off any set of extents the
+    // compares have already rejected -- see §4.
     if(o->dims()->Get(BATCH_AXIS) != problem.batch
        || o->dims()->Get(HEAD_AXIS) != problem.numQueryHeads
        || o->dims()->Get(SEQ_AXIS) != problem.seqLenQ
-       || o->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
+       || o->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize || !hasBshdStrides(*o))
     {
         return std::nullopt;
     }
