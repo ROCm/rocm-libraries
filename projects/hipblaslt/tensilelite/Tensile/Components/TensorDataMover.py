@@ -89,6 +89,10 @@ class TensorDataMoverLoad(TensorDataMover):
             depthU: int = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc0}"]
         else:
             depthU: int = kernel["DepthU"]
+
+        if (kernel["ProblemType"]["Sparse"] == 1 and tp["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tp["isB"]) or tp["isM"]:
+            depthU = depthU // 2
+
         gsuOffsetBytes: int = round(depthU * bpe)
 
         mod.addComment(f"TDM calc start addr of {tc}")
@@ -152,9 +156,10 @@ class TensorDataMoverLoad(TensorDataMover):
                                            "general batch uses an already-dereferenced matrix base"))
                         batchIdx = sgpr(waveOffsetSgprIdx)
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
+                    batchBpe: float = 1 if tp["isM"] else bpe
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), batchIdx, comment="Batch: Stride*WG"))
                     with writer.allocTmpSgpr(1, tag="TensorDataMoverLoad_tmpSgprBpe") as bpeTmp:
-                        mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
+                        mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, batchBpe, bpeTmp.idx, comment="scale by bpe"))
                     mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
                     mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
                 else:
@@ -183,7 +188,7 @@ class TensorDataMoverLoad(TensorDataMover):
         du: int = kernel["DepthU"]
         tile1Size: int = du if tlu else mt
         tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
-        if tlu and ((kernel["ProblemType"]["Sparse"] == 1 and tc.endswith("A")) or (kernel["ProblemType"]["Sparse"] == 2 and tc.endswith("B"))):
+        if tlu and ((kernel["ProblemType"]["Sparse"] == 1 and tp["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tp["isB"])):
             tile1Size = tile1Size // 2
         if ("MXS" in tc):
             subTc = tc[3]
@@ -192,6 +197,10 @@ class TensorDataMoverLoad(TensorDataMover):
             depthU: int = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         else:
             depthU: int = kernel["DepthU"]
+
+        if (kernel["ProblemType"]["Sparse"] == 1 and tp["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tp["isB"]) or tp["isM"]:
+            depthU = depthU // 2
+
         gsuOffsetBytes: int = round(depthU * bpe)
 
         mod.addComment(f"TDM wave separated calc start addr of {tc}")
@@ -259,9 +268,10 @@ class TensorDataMoverLoad(TensorDataMover):
                                            "general batch uses an already-dereferenced matrix base"))
                         batchIdx = sgpr(waveOffsetSgprIdx)
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
+                    batchBpe: float = 1 if tp["isM"] else bpe
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), batchIdx, comment="Batch: Stride*WG"))
                     with writer.allocTmpSgpr(1, tag="TensorDataMoverLoadWaveSeparated_tmpSgprBpe") as bpeTmp:
-                        mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, bpe, bpeTmp.idx, comment="scale by bpe"))
+                        mod.add(scalarMultiply64Bpe(tmpSgprIdx, tmpSgprIdx, batchBpe, bpeTmp.idx, comment="scale by bpe"))
                     if dstGroup0 is not None:
                         # For wave-separated path: descriptor was set from base AddressA before this runs.
                         # Add batch offset directly to descriptor to match where tile offset goes.

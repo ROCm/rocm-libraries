@@ -163,6 +163,20 @@ def _build_shape_args(args) -> list[str]:
     return a
 
 
+def _build_implicit_only_args(args) -> list[str]:
+    """Args that apply only to implicit-GEMM and must not be forwarded to direct-conv."""
+    a: list[str] = []
+    if args.sample is not None:
+        a += ["--sample", str(args.sample)]
+    if args.seed != 0:
+        a += ["--seed", str(args.seed)]
+    if args.split_k != -1:
+        a += ["--split-k", str(args.split_k)]
+    if args.split_k_prune is not None:
+        a += ["--split-k-prune", str(args.split_k_prune)]
+    return a
+
+
 def _build_miopen_args(args) -> list[str]:
     """MIOpen input args forwarded to both scripts."""
     a: list[str] = [
@@ -184,16 +198,6 @@ def _build_miopen_args(args) -> list[str]:
     elif args.miopen_file:
         a += ["--miopen-file", args.miopen_file]
     return a
-
-
-def _append_implicit_gemm_args(args, implicit_args: list[str]) -> None:
-    """Append implicit-GEMM-only args (split-k, sample, seed, split-k-prune)."""
-    implicit_args += ["--split-k", str(args.split_k)]
-    if args.sample is not None:
-        implicit_args += ["--sample", str(args.sample)]
-    implicit_args += ["--seed", str(args.seed)]
-    if args.split_k_prune is not None:
-        implicit_args += ["--split-k-prune", str(args.split_k_prune)]
 
 
 def _print_summary(
@@ -281,21 +285,14 @@ def main() -> int:
         "Flags forwarded only to benchmark_implicit_gemm_conv.py.",
     )
     implicit_grp.add_argument(
-        "--split-k",
-        type=int,
-        default=-1,
-        dest="split_k",
-        metavar="N",
-        help=(
-            "wgrad split-K degree: 0=sweep, 1=disabled, >1=fixed, -1=auto (default: -1)"
-        ),
-    )
-    implicit_grp.add_argument(
         "--sample",
         type=float,
         default=None,
         metavar="FRAC",
-        help="randomly sample FRAC of candidate combinations before sweeping",
+        help=(
+            "randomly sample FRAC of the candidate combinations before sweeping "
+            "(e.g. 0.1 for ~10%%). Forwarded to implicit-GEMM only."
+        ),
     )
     implicit_grp.add_argument(
         "--seed",
@@ -304,13 +301,25 @@ def main() -> int:
         help="RNG seed used by --sample (default: 0)",
     )
     implicit_grp.add_argument(
+        "--split-k",
+        type=int,
+        default=-1,
+        dest="split_k",
+        metavar="N",
+        help=(
+            "wgrad split-K degree forwarded to implicit-GEMM "
+            "(-1 = off, 0 = auto-sweep, N>0 = fixed). Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
         "--split-k-prune",
         type=float,
         default=None,
         dest="split_k_prune",
         metavar="PCT",
         help=(
-            "prune split-K sweep when TFLOPS drops by >=PCT%% (only with --split-k 0)"
+            "prune split-K sweep when perf drops by PCT%% relative to the best so far. "
+            "Only effective with --split-k 0. Forwarded to implicit-GEMM only."
         ),
     )
 
@@ -349,17 +358,21 @@ def main() -> int:
 
     using_miopen = args.miopen_cmd is not None or args.miopen_file is not None
 
+    implicit_only = _build_implicit_only_args(args)
+
     if using_miopen:
         shared_args = _build_miopen_args(args)
         direct_args = list(shared_args)
-        implicit_args = list(shared_args)
-        _append_implicit_gemm_args(args, implicit_args)
+        implicit_args = list(shared_args) + implicit_only
     else:
         shared_args = _build_shape_args(args)
         direct_args = list(shared_args)
         # implicit-GEMM needs --dtype (always fp16 for comparison)
-        implicit_args = list(shared_args) + ["--dtype", "fp16", "--direction", "fwd"]
-        _append_implicit_gemm_args(args, implicit_args)
+        implicit_args = (
+            list(shared_args)
+            + ["--dtype", "fp16", "--direction", "fwd"]
+            + implicit_only
+        )
 
         # Validate cpg constraints for direct conv up-front so we can skip
         # gracefully rather than propagating errors through the subprocess.

@@ -985,6 +985,98 @@ def build_direct_depthwise(
     return _build
 
 
+def build_direct_conv_dgrad(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    cpg,
+    kpg,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    *,
+    block_q=16,
+    block_groups=8,
+):
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvDgradSpec,
+            DirectConvProblem,
+            build_direct_conv_dgrad as _build_dgrad,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+        )
+        spec = DirectConvDgradSpec(
+            problem=p,
+            name=name,
+            block_q=block_q,
+            block_groups=block_groups,
+        )
+        return _build_dgrad(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_depthwise_dgrad(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    *,
+    block_w=8,
+    block_waves=1,
+):
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseDgradSpec,
+            build_direct_depthwise_dgrad as _build_dw_dgrad,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+        )
+        spec = DirectDepthwiseDgradSpec(
+            problem=p,
+            name=name,
+            block_w=block_w,
+            block_waves=block_waves,
+        )
+        return _build_dw_dgrad(spec, arch=arch)
+
+    return _build
+
+
 def build_grouped_gemm_case(name, arch, m, n, k, e):
     def _build():
         from rocke.instances.gfx950.grouped_gemm import (
@@ -1586,8 +1678,8 @@ def cases():
             epilogue="cshuffle",
         ),
     )
-    # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
-    # block-diagonal dW IR against silent drift. MFMA-only, so gfx942/gfx950.
+    # Grouped wgrad, grid-per-group (groups=4, cpg=kpg=16). Guards the per-group
+    # dW IR against silent drift. MFMA-only, so gfx942/gfx950.
     add(
         "conv_wgrad",
         "conv_wgrad/gfx942/n1h8c64k64r3_g4",
@@ -2558,7 +2650,10 @@ def cases():
     # The gfx950 16c cases exercise fold_k32=True (uses mfma_f32_16x16x32_f16).
     # The gfx942 16c case uses fold_k32=False (mfma_f32_16x16x16_f16 only).
     #
-    # C++ engine parity: not tracked — no C++ implementation exists yet.
+    # C++ engine parity: tracked for conv_direct_dgrad (see cases below);
+    # the 16c/4c/8c/32c/depthwise fprop variants have a C++ port but their
+    # golden is pinned to the Python emitter only (no separate cpp-vs-python
+    # differential gate for the fprop families in this harness).
 
     # --- 16c, gfx950, fold_k32=True (matches parity emit idx=0 and idx=1) ---
     add(
@@ -2765,6 +2860,94 @@ def cases():
             KW=3,
             PAD=1,
             block_w=16,
+            block_waves=1,
+        ),
+    )
+
+    # --- conv_direct_dgrad: grouped dgrad (scalar FMA, any cpg/kpg) ---
+    # Mirrors parity emit indices 12-14.  Both gfx950 and gfx942 are covered.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dgrad_n2h8_cpg16_bg8",
+        "gfx950",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_950_bg8",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            block_q=16,
+            block_groups=8,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dgrad_n2h8_cpg32_bg4",
+        "gfx950",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_950_cpg32_bg4",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=32,
+            kpg=32,
+            block_q=16,
+            block_groups=4,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx942/dgrad_n1h8_cpg16_bg8",
+        "gfx942",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_942_bg8",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            block_q=16,
+            block_groups=8,
+        ),
+    )
+    # --- conv_direct_dgrad: depthwise dgrad (cpg=kpg=1) ---
+    # Mirrors parity emit indices 15-16.  stride=2 exercises divisibility checks.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_n2h14_s1",
+        "gfx950",
+        build_direct_depthwise_dgrad(
+            "irhash_dw_dgrad_950_s1",
+            "gfx950",
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            stride=1,
+            block_w=8,
+            block_waves=1,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_n2h14_s2",
+        "gfx950",
+        build_direct_depthwise_dgrad(
+            "irhash_dw_dgrad_950_s2",
+            "gfx950",
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            stride=2,
+            block_w=8,
             block_waves=1,
         ),
     )

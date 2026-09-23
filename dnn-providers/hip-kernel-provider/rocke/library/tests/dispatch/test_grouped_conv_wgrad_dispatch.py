@@ -21,6 +21,7 @@ import unittest
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
+    _block,
     _problem,
     conv_grouped_candidates,
     dispatch_conv_grouped,
@@ -73,6 +74,8 @@ def _expected_grid(req, spec):
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=spec.arch,
+            groups=p.groups,
+            block_size=_block(spec)[0],
         ).split_k
     return (gx, gy, p.groups * split_k)
 
