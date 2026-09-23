@@ -526,6 +526,13 @@ class MasterSolutionLibrary:
                     placeholderName += '_SAB'
                 elif problemType.useScaleAB == "Vector":
                     placeholderName += '_SABV'
+                elif problemType.useScaleAB == "Block":
+                    # Matching tables key only on dimensions. Keep block-scale
+                    # variants in separate lazy libraries so identical shapes
+                    # cannot select an entry for another group size or encoding.
+                    placeholderName += ('_SABB' + str(problemType.scaleBlockSizeA)
+                                        + '_ZP' + str(int(problemType.scaleZeroPointA))
+                                        + '_' + problemType.int4EncodingA)
                 if problemType.useScaleCD:
                     placeholderName += '_SCD'
                 if problemType.useScaleAlphaVec:

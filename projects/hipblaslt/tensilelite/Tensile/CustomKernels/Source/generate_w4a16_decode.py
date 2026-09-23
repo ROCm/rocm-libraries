@@ -50,9 +50,13 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--group-size", type=int, choices=(32, 128), default=128)
     parser.add_argument("--load-width", type=int, choices=(4, 8), default=8)
+    parser.add_argument("--int4-encoding", choices=("unsigned_bias8_exllama", "unsigned_bias8"),
+                        default="unsigned_bias8_exllama")
     args = parser.parse_args()
     width_suffix = "_W4" if args.load_width == 4 else ""
-    name = f"Custom_W4A16_Decode_G{args.group_size}{width_suffix}_ExLlama_gfx1151"
+    exllama = args.int4_encoding == "unsigned_bias8_exllama"
+    encoding_suffix = "ExLlama" if exllama else "UnsignedBias8"
+    name = f"Custom_W4A16_Decode_G{args.group_size}{width_suffix}_{encoding_suffix}_gfx1151"
     source = Path(__file__).resolve().parent / "w4a16_decode.hip"
     output = args.output or source.parent.parent / f"{name}.s"
     with tempfile.TemporaryDirectory() as directory:
@@ -61,6 +65,7 @@ def main():
             [args.compiler, "-O3", "--offload-arch=gfx1151", "-mcode-object-version=4",
              "-fuse-cuid=none", f"-DW4A16_GROUP_SIZE={args.group_size}",
              f"-DW4A16_KERNEL_NAME={name}", f"-DW4A16_LOAD_WIDTH={args.load_width}",
+             f"-DW4A16_EXLLAMA={int(exllama)}",
              "--cuda-device-only", "-S", str(source), "-o", str(assembly)],
             check=True,
         )
