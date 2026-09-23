@@ -857,12 +857,12 @@ struct tile_window_with_static_distribution
     template <typename TDMConfig_,
               typename LdsTileWindow_,
               typename GatherIndexView_,
-              index_t i_access_ = -1,
+              index_t i_access_        = -1,
               bool RematerializeStride = false>
     CK_TILE_DEVICE auto tdm_load_to_lds(const TDMConfig_& tdm_config,
                                         LdsTileWindow_&& lds_tile,
                                         const GatherIndexView_& gather_index_view,
-                                        number<i_access_> = {},
+                                        number<i_access_>                  = {},
                                         bool_constant<RematerializeStride> = {}) const
     {
         using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
@@ -892,10 +892,7 @@ struct tile_window_with_static_distribution
             const index_t s = glb_tensor_descriptor.calculate_offset(unit);
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
             // Keep the clamped descriptor word local to this TDM issue.
-            asm volatile("s_max_i32 %0, %1, 1"
-                         : "=s"(global_strides(I0))
-                         : "s"(s)
-                         : "scc");
+            asm volatile("s_max_i32 %0, %1, 1" : "=s"(global_strides(I0)) : "s"(s) : "scc");
 #else
             global_strides(I0) = max(s, index_t{1});
 #endif

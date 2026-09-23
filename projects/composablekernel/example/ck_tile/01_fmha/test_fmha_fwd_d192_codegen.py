@@ -808,9 +808,11 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                         if render_filter
                         else _SUPPORTED_FEATURE_FILTER.replace("d*_", "d256_", 1)
                     ),
-                    filter_fn=(lambda trait: trait.pipeline_tag != _D192_PIPELINE)
-                    if render_filter
-                    else None,
+                    filter_fn=(
+                        (lambda trait: trait.pipeline_tag != _D192_PIPELINE)
+                        if render_filter
+                        else None
+                    ),
                 )
                 for mode, group in (("batch", 0), ("group", 1)):
                     fallback = self.fallback_id(dispatch, mode)

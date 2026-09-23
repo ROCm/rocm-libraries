@@ -484,9 +484,11 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                                 if missing
                                 else dispatch.expected_id(
                                     hdim=dim,
-                                    pipeline="qr_tdm_v128"
-                                    if dim == 128
-                                    else "qr_tdm_d192_v128",
+                                    pipeline=(
+                                        "qr_tdm_v128"
+                                        if dim == 128
+                                        else "qr_tdm_d192_v128"
+                                    ),
                                     **features,
                                 )
                             )
@@ -583,9 +585,9 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                             )
                             candidate = dispatch.expected_id(
                                 hdim=dim,
-                                pipeline="qr_tdm_v128"
-                                if dim == 128
-                                else "qr_tdm_d192_v128",
+                                pipeline=(
+                                    "qr_tdm_v128" if dim == 128 else "qr_tdm_d192_v128"
+                                ),
                                 **features,
                             )
                             fallback_fields = dict(
