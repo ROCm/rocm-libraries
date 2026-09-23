@@ -713,7 +713,7 @@ inline void exposure_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
                     dstPtrTemp += vectorIncrementPerChannel;
                 }
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECK(
+                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
                         (Rpp32f)((*srcPtrTemp) + 128) * multiplyingFactor - 128);
                     srcPtrTemp++;
                     dstPtrTemp++;
