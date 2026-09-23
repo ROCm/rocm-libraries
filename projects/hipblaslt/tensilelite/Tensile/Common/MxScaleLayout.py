@@ -83,21 +83,22 @@ def mxTdmKRowPitch(size: int, mxTile: int) -> int:
 
 
 def mxGl2CoalescedDim(mt: int, numTileWGs: int, mxUnit: int, mxTile: int = 1) -> int:
-    """Cluster coalesced e8s for MX GL2 prefetch.
+    """Return the MX GL2 coalesced size in e8s for all tile workgroups.
 
-    1D is MT * numTileWGs * mxUnit. 2D replaces MT with scale-rows
-    (ceil(MT/MXBlockFree)); otherwise a CD4_2 cluster along M prefetches
-    1024 1D-sized e8s from a 48-byte MXSA buffer.
+    The cluster free-dimension extent is converted to scale-row units.
     """
-    return mxTdmTileM(mt, mxTile) * max(1, int(numTileWGs)) * max(1, int(mxUnit))
+    clusterM = int(mt) * max(1, int(numTileWGs))
+    return mxTdmTileM(clusterM, mxTile) * max(1, int(mxUnit))
 
 
-def mxGl2TileStep(mt: int, mxUnit: int, mxTile: int = 1) -> int:
-    """e8s one macro-tile steps along the MXS free dim for GL2 MT offset.
+def mxGl2TileOffset(tileIdx: int, mt: int, mxUnit: int, mxTile: int = 1) -> int:
+    """Return the MXS GL2 free-dimension offset in e8s.
 
-    1D: mxUnit * MT. 2D: mxUnit * ceil(MT/MXBlockFree).
+    The macro-tile index is converted to the M/N coordinate and then to the
+    scale-row coordinate.
     """
-    return max(1, int(mxUnit)) * mxTdmTileM(mt, mxTile)
+    mxTile = max(1, int(mxTile))
+    return ((int(tileIdx) * int(mt)) // mxTile) * max(1, int(mxUnit))
 
 
 def mxLdsAlign(mxTile: int, macLdsAlign: int) -> int:

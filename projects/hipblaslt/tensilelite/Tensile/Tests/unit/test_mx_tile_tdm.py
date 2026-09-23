@@ -20,7 +20,7 @@ from Tensile.Common.MxScaleLayout import (
     mxTdmTile0,
     mxTdmTileM,
     mxGl2CoalescedDim,
-    mxGl2TileStep,
+    mxGl2TileOffset,
     mxTileSpanPartnerDelta,
 )
 
@@ -81,13 +81,28 @@ def test_mx_tdm_k_row_pitch_2d_matches_1d_size_over_free():
 def test_mx_gl2_2d_uses_scale_rows_not_mt():
     # 1D CD4_2 MXSA: 256*4*1 = 1024 coalesced e8s (OOB of a 48-byte 2D MXSA).
     assert mxGl2CoalescedDim(256, 4, 1, mxTile=1) == 1024
-    assert mxGl2TileStep(256, 1, mxTile=1) == 256
+    assert mxGl2TileOffset(1, 256, 1, mxTile=1) == 256
     # 2D: 2 scale-rows * 4 WGs = 8, tile step 2. Fits 4*12 MXSA.
     assert mxGl2CoalescedDim(256, 4, 1, mxTile=128) == 8
     assert mxGl2CoalescedDim(256, 2, 1, mxTile=128) == 4
-    assert mxGl2TileStep(256, 1, mxTile=128) == 2
+    assert mxGl2TileOffset(1, 256, 1, mxTile=128) == 2
     assert mxTdmKRowPitch(512, 128) * 2 == 8  # DepthU/MXBlock increment
     assert mxTdmKRowPitch(65536, 128) * 2 == 1024
+
+
+def test_mx_gl2_2d_rounds_the_whole_cluster_span():
+    # Four MT64 B tiles cover two MXBlockFree128 rows.
+    assert mxGl2CoalescedDim(64, 4, 1, mxTile=128) == 2
+    assert mxGl2CoalescedDim(64, 4, 4, mxTile=128) == 8
+
+
+def test_mx_gl2_2d_tile_offset_uses_original_free_coordinate():
+    # MT64 workgroups 0/1 use row 0, and workgroups 2/3 use row 1.
+    # The next four-workgroup cluster starts from row 2.
+    assert [mxGl2TileOffset(wg, 64, 1, 128) for wg in range(8)] == [
+        0, 0, 1, 1, 2, 2, 3, 3
+    ]
+    assert mxGl2TileOffset(4, 64, 4, 128) == 8
 
 
 def test_mx_tdm_tile0_2d_does_not_floor_to_zero():

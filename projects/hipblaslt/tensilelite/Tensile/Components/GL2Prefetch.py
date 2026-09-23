@@ -11,7 +11,7 @@ from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStati
     scalarStaticRemainder
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
-from ..Common.MxScaleLayout import mxFreeTile, mxTdmTileM
+from ..Common.MxScaleLayout import mxFreeTile, mxGl2CoalescedDim
 
 class GL2PrefetchLoad(GL2Prefetch):
     asmCaps = {"HasGlobalPrefetch": True}
@@ -48,8 +48,8 @@ class GL2PrefetchLoad(GL2Prefetch):
         if isMX:
             mxTile = mxFreeTile(kernel, tc)
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            # 1D: MT * numTileWGs * mxUnit. 2D: scale-rows * numTileWGs * mxUnit.
-            coalescedDim = mxTdmTileM(mt, mxTile) * numTileWGs * mxUnit
+            # Convert the cluster free-dimension extent to MX scale-row units.
+            coalescedDim = mxGl2CoalescedDim(mt, numTileWGs, mxUnit, mxTile)
             perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
         elif tp.get("isSwizzledTDM"):
             # Swizzled buffer is [tileO, kO, kM, tileI, kI]: each row (tileO) is contiguous in K, so
@@ -178,11 +178,22 @@ class GL2PrefetchLoad(GL2Prefetch):
             mod.add(SSubI32(sgpr(tmpSgprIdx0), sgpr(sgprTileWgName), sgpr(tmpSgprIdx3), \
                 comment="cluster base tile"))
             if isMX:
-                scaleRowsMT = mxTdmTileM(mt, mxTile)
-                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mxUnit * scaleRowsMT, \
-                    comment=f"clusterBaseTile * mxUnit({mxUnit}) * scaleRowsMT({scaleRowsMT})"))
                 if mxTile > 1:
-                    # Edge in scale-row units: ceil(Size/MXBlockFree)-1, not Size-1.
+                    # Convert the cluster macro-tile index to M/N coordinate,
+                    # then convert it to scale-row coordinate.
+                    mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt,
+                                    comment=f"clusterBaseTile * MT({mt})"))
+                    mod.add(SLShiftRightB32(sgpr(tmpSgprIdx0), hex(int(log2(mxTile))),
+                                           sgpr(tmpSgprIdx0),
+                                           f"MXS 2D: / MXBlockFree({mxTile})"))
+                    if mxUnit != 1:
+                        mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mxUnit,
+                                        comment=f"scale row * mxUnit({mxUnit})"))
+                else:
+                    mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mxUnit * mt,
+                                    comment=f"clusterBaseTile * mxUnit({mxUnit}) * MT({mt})"))
+                if mxTile > 1:
+                    # Maximum scale-row offset from the cluster base.
                     mod.add(SAddU32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), mxTile - 1,
                                     comment=f"ceil(Size/MXBlockFree({mxTile}))"))
                     mod.add(SLShiftRightB32(sgpr(tmpSgprIdx1), hex(int(log2(mxTile))),
