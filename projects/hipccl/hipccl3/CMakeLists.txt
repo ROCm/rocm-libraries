@@ -86,10 +86,7 @@ option(HIPCCL_BUILD_LIBHIPCXX "Build libhipcxx as part of the unified hipCCL bui
 # project" requirement.
 #
 # NOTE(hipccl3): deliberately does NOT include HIPCCL_BUILD_LIBHIPCXX, even
-# though the option is now functional (see above) - how far libhipcxx should
-# be integrated into hipccl beyond "buildable as a submodule" is still an
-# open question, so it stays opt-in only rather than being swept in by
-# "build everything".
+# though the option is now functional (see above).
 option(HIPCCL_BUILD_ALL "Build every hipCCL component (rocprim, hipcub, rocthrust)" OFF)
 if(HIPCCL_BUILD_ALL)
     set(HIPCCL_BUILD_ROCPRIM ON CACHE BOOL "" FORCE)
@@ -122,6 +119,24 @@ if(HIPCCL_BUILD_ROCTHRUST)
 endif()
 
 if(HIPCCL_BUILD_LIBHIPCXX)
+    # NOTE(hipccl3): libhipcxx is a git submodule (see ../.gitmodules) - an
+    # uninitialized submodule leaves this directory present but empty, which
+    # would otherwise surface as a confusing failure deep inside
+    # add_subdirectory(libhipcxx) (e.g. "add_subdirectory given source
+    # ... which is not an existing directory" or a missing-CMakeLists.txt
+    # error with no obvious cause). Check for a file only present once the
+    # submodule is actually checked out, and fail with an actionable message
+    # instead.
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libhipcxx/CMakeLists.txt")
+        message(FATAL_ERROR
+            "HIPCCL_BUILD_LIBHIPCXX is ON, but the libhipcxx submodule "
+            "(projects/hipccl/hipccl3/libhipcxx) does not look initialized. "
+            "Run 'git submodule update --init projects/hipccl/hipccl3/libhipcxx' "
+            "(or 'git submodule update --init --recursive' from the "
+            "repository root) and re-configure."
+        )
+    endif()
+
     add_subdirectory_with_message(
         COMPONENT libhipcxx
         PREFIX_PATH .
