@@ -47,6 +47,9 @@ bool gpu_ref_convolution_fwd(const tensor<Tin>& input,
     if(env::enabled(MIOPEN_DEBUG_TEST_DISABLE_GPU_REF))
         return false;
 
+    if(!miopen::GpuConvReference::IsSupportedFwd(input.desc, weights.desc, rout.desc, filter))
+        return false;
+
     auto&& handle = get_handle();
     auto in_dev   = handle.Write(input.data);
     auto wei_dev  = handle.Write(weights.data);
@@ -79,9 +82,12 @@ bool gpu_ref_convolution_bwd(tensor<Tin>& input,
         return false;
 
     auto&& handle = get_handle();
-    auto in_dev   = handle.Write(input.data);
-    auto wei_dev  = handle.Write(weights.data);
-    auto out_dev  = handle.Write(output.data);
+    if(!miopen::GpuConvReference::IsSupportedBwd(output.desc, weights.desc, input.desc, filter))
+        return false;
+
+    auto in_dev  = handle.Write(input.data);
+    auto wei_dev = handle.Write(weights.data);
+    auto out_dev = handle.Write(output.data);
 
     miopen::GpuConvReference::RunBwd(handle,
                                      output.desc,
@@ -110,9 +116,12 @@ bool gpu_ref_convolution_wrw(const tensor<Tin>& input,
         return false;
 
     auto&& handle = get_handle();
-    auto in_dev   = handle.Write(input.data);
-    auto wei_dev  = handle.Write(weights.data);
-    auto out_dev  = handle.Write(output.data);
+    if(!miopen::GpuConvReference::IsSupportedWrw(output.desc, input.desc, weights.desc, filter))
+        return false;
+
+    auto in_dev  = handle.Write(input.data);
+    auto wei_dev = handle.Write(weights.data);
+    auto out_dev = handle.Write(output.data);
 
     miopen::GpuConvReference::RunWrw(handle,
                                      output.desc,

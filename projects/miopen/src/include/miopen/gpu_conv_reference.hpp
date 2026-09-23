@@ -20,6 +20,23 @@ namespace miopen {
 /// to dual-purpose the naive conv solver as both a solver and a GPU reference.
 struct MIOPEN_INTERNALS_EXPORT GpuConvReference
 {
+    /// Whether the corresponding Run* call can handle this problem. Run* throws for anything
+    /// these reject, so callers with a fallback should query first rather than catch.
+    static bool IsSupportedFwd(const TensorDescriptor& xDesc,
+                               const TensorDescriptor& wDesc,
+                               const TensorDescriptor& yDesc,
+                               const ConvolutionDescriptor& conv);
+
+    static bool IsSupportedBwd(const TensorDescriptor& dyDesc,
+                               const TensorDescriptor& wDesc,
+                               const TensorDescriptor& dxDesc,
+                               const ConvolutionDescriptor& conv);
+
+    static bool IsSupportedWrw(const TensorDescriptor& dyDesc,
+                               const TensorDescriptor& xDesc,
+                               const TensorDescriptor& dwDesc,
+                               const ConvolutionDescriptor& conv);
+
     static void RunFwd(const Handle& handle,
                        const TensorDescriptor& xDesc,
                        ConstData_t x,

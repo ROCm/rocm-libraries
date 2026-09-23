@@ -137,7 +137,38 @@ std::string LayoutName(const ProblemDescription& problem)
     return problem.Is2d() ? "nhwc" : "ndhwc";
 }
 
-// Build a ProblemDescription and reject layouts the naive kernels cannot address.
+// Single source of truth for what this reference can run. Both the IsSupported* queries and the
+// Run* guard below go through it.
+bool IsSupported(const ProblemDescription& problem, miopen::conv::Direction dir)
+{
+    if(!problem.IsLayoutDefault() && !problem.IsLayoutNHWC())
+        return false;
+
+    // Every extent is passed to the kernel as int.
+    if(!problem.AllTensorsLengthsFitIntoInt())
+        return false;
+
+    // The kernel reads the raw stored type, so a cast would be silently ignored.
+    if(problem.IsTensorsCasted())
+        return false;
+
+    // Mirrors the naive_conv_* instantiations: fp32/fp16/bf16 for every direction, int8 forward
+    // only. These predicates also require all three tensors to share a type.
+    const bool is_fwd = (dir == miopen::conv::Direction::Forward);
+    return problem.IsFp32() || problem.IsFp16() || problem.IsBfp16() ||
+           (is_fwd && problem.IsInt8());
+}
+
+bool IsSupported(const TensorDescriptor& xDesc,
+                 const TensorDescriptor& wDesc,
+                 const TensorDescriptor& yDesc,
+                 const ConvolutionDescriptor& conv,
+                 miopen::conv::Direction dir)
+{
+    return IsSupported(ProblemDescription{xDesc, wDesc, yDesc, conv, dir}, dir);
+}
+
+// Build a ProblemDescription and reject what the naive kernels cannot address.
 ProblemDescription MakeProblem(const TensorDescriptor& xDesc,
                                const TensorDescriptor& wDesc,
                                const TensorDescriptor& yDesc,
@@ -146,19 +177,37 @@ ProblemDescription MakeProblem(const TensorDescriptor& xDesc,
 {
     ProblemDescription problem{xDesc, wDesc, yDesc, conv, dir};
 
-    if(!problem.IsLayoutDefault() && !problem.IsLayoutNHWC())
-    {
-        MIOPEN_THROW(miopenStatusNotImplemented,
-                     "GpuConvReference: only the NCHW/NCDHW and NHWC/NDHWC layouts are supported, "
-                     "got in=" +
-                         problem.GetInLayout() + ", wei=" + problem.GetWeightsLayout() +
-                         ", out=" + problem.GetOutLayout());
-    }
+    if(!IsSupported(problem, dir))
+        MIOPEN_THROW(miopenStatusNotImplemented, "GpuConvReference: unsupported problem");
 
     return problem;
 }
 
 } // anonymous namespace
+
+bool GpuConvReference::IsSupportedFwd(const TensorDescriptor& xDesc,
+                                      const TensorDescriptor& wDesc,
+                                      const TensorDescriptor& yDesc,
+                                      const ConvolutionDescriptor& conv)
+{
+    return IsSupported(xDesc, wDesc, yDesc, conv, miopen::conv::Direction::Forward);
+}
+
+bool GpuConvReference::IsSupportedBwd(const TensorDescriptor& dyDesc,
+                                      const TensorDescriptor& wDesc,
+                                      const TensorDescriptor& dxDesc,
+                                      const ConvolutionDescriptor& conv)
+{
+    return IsSupported(dxDesc, wDesc, dyDesc, conv, miopen::conv::Direction::BackwardData);
+}
+
+bool GpuConvReference::IsSupportedWrw(const TensorDescriptor& dyDesc,
+                                      const TensorDescriptor& xDesc,
+                                      const TensorDescriptor& dwDesc,
+                                      const ConvolutionDescriptor& conv)
+{
+    return IsSupported(xDesc, dwDesc, dyDesc, conv, miopen::conv::Direction::BackwardWeights);
+}
 
 void GpuConvReference::RunFwd(const Handle& handle,
                               const TensorDescriptor& xDesc,
