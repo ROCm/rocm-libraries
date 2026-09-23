@@ -52,6 +52,7 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
+from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
@@ -431,6 +432,10 @@ class StateValues:
   doFullPackCodePrefetch: bool           = False
   lockLdsReadTokenSwap: bool             = False
   useCommonSgprSwap: bool                = False
+
+  # w4a16 block dequantization: number of A global-load instructions, i.e. the
+  # number of per-load scale offset / scale value VGPRs. 0 when the mode is off.
+  numGlobalReadScaleA: int               = 0
 
   # Epilogue states
   preloadScaleA = False
@@ -8408,6 +8413,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numGlobalReadInstructionsA = int(numGlobalReadsA * tensorParametersA["bpeGR"])//\
           int(tensorParametersA["globalReadInstruction"].blockWidth * 4)
 
+      # w4a16: one scale offset VGPR and one loaded scale VGPR per A global-load
+      # instruction. BlockDequant.py pins one dword per load, so this equals
+      # NumLoadsCoalescedA * NumLoadsPerpendicularA.
+      self.states.numGlobalReadScaleA = numGlobalReadInstructionsA \
+          if kernel["ProblemType"]["UseScaleAB"] == "Block" else 0
+
       if kernel["enableTDMA"]:
         self.states.a.numVgprGlobalReadOffsets = 0
       elif kernel["BufferLoad"]:
@@ -8717,6 +8728,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
             vgprIdx += miWaveTile
           else:
             vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.m.numVgprGlobalReadOffsets
+        if kernel["ProblemType"]["UseScaleAB"] == "Block":
+          # One byte offset and one loaded scale per A global-load instruction.
+          # BlockDequant.py forces _UseSgprForGRO=0, so there is one A offset
+          # VGPR per load to derive these from.
+          self.startVgprGlobalReadOffsetScaleA = vgprIdx
+          vgprIdx += self.states.numGlobalReadScaleA
+          self.startVgprG2LScaleA = vgprIdx
+          vgprIdx += self.states.numGlobalReadScaleA
+          if kernel["ProblemType"]["ScaleZeroPointA"]:
+            self.startVgprG2LScaleZeroA = vgprIdx
+            vgprIdx += self.states.numGlobalReadScaleA
+            # Zero points pack adjacent M rows for each K group. Keep the
+            # nibble offset for dequantization and the loop-invariant byte
+            # offset for global loads; only the scalar SRD advances along K.
+            self.startVgprGlobalReadOffsetScaleZeroA = vgprIdx
+            vgprIdx += self.states.numGlobalReadScaleA
+            self.startVgprGlobalReadByteOffsetScaleZeroA = vgprIdx
+            vgprIdx += self.states.numGlobalReadScaleA
       else:
         # TODO: alignment hack, figure out a better solution
         vgprIdx = ((vgprIdx+1)//2)*2
@@ -9964,6 +9993,42 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if preloadScale:
           self.defineSgpr("AddressScale%s"%name, 2, 2)
           self.defineSgpr("Scale%s"%name, numSgprAlpha, numSgprAlpha if numSgprAlpha > 1 else 2)
+    elif kernel["ProblemType"]["UseScaleAB"] == "Block":
+      # w4a16: the scale is a per-K-group tensor consumed in the main loop
+      # (localWriteDo), not a scalar consumed in the epilogue, so both scale
+      # pointers must live in SGPRs from kernel entry. B has no block scale yet,
+      # but its pointer argument is still emitted by ContractionSolution, so
+      # preload it too and leave the epilogue out of the picture entirely.
+      self.states.preloadScaleA = True
+      self.states.preloadScaleB = True
+      self.defineSgpr("AddressScaleA", 2, 2)
+      self.defineSgpr("AddressScaleB", 2, 2)
+      # Row stride of the dense [M][ceil(K/ScaleBlockSizeA)] scale tensor, in
+      # scale *elements*, computed from SizeL at kernel entry (the tensor is
+      # dense, so it needs no stride kernel argument), plus its buffer SRD.
+      self.defineSgpr("StrideScaleA", 1)
+      self.defineSgpr("SrdScaleA", 4, 4)
+      if blockDequantPackedFp16A(kernel["ProblemType"]):
+        # The packed lowering fuses its mask and magic OR into one
+        # v_and_or_b32, which can carry only one literal -- so the magic lives
+        # here rather than inline. An SGPR, not a VGPR: the tile is already
+        # close to the 256-VGPR ceiling and this value is wave-uniform.
+        # Two per nibble position: the magic the lift ORs in, and its negation
+        # for the bias. Both are wave-uniform, and VOP3 has already spent its
+        # one literal on the nibble mask.
+        self.defineSgpr("ScaleAPkMagic", 4)
+        self.defineSgpr("ScaleAPkPermute", 2)
+      if blockDequantItersPerGroupA(kernel["ProblemType"], kernel["DepthU"]) > 1:
+        # DepthU < ScaleBlockSizeA: one group outlives the iteration, so the
+        # scale pointer only steps once every itersPerGroup iterations and
+        # needs a counter to know when. See blockScaleAIncrement.
+        self.defineSgpr("ScaleAKCnt", 1)
+      if kernel["ProblemType"]["ScaleZeroPointA"]:
+        # Asymmetric: a second kernel-argument pointer to the packed int4
+        # zero-points. The library derives it from scaleA + the scale-region
+        # size, so the public API is still a single pointer.
+        self.defineSgpr("AddressScaleZeroA", 2, 2)
+        self.defineSgpr("SrdScaleZeroA", 4, 4)
 
 
     self.states.numSgprToLoad = self.states.numSgprSizesFree + self.states.numSgprSizesSum + \

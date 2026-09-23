@@ -330,6 +330,9 @@ inline std::map<std::string, int>
 
     rv["HasPkF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_pk_f16_f32 v0, v1, v2", isDebug);
 
+    rv["HasPkBF16CVT"]
+        = tryAssembler(isaVersion, assemblerPath, "v_cvt_pk_bf16_f32 v0, v1, v2", isDebug);
+
     rv["Hascvtfp8_f16"] = tryAssembler(isaVersion,
                                        assemblerPath,
                                        "v_cvt_scalef32_pk_fp8_f16 v[0], v[1], 0 op_sel:[0,0,0,0]",

@@ -238,6 +238,10 @@ namespace TensileLite
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
+                ("scale-a-block",            po::value<int>()->default_value(0), "w4a16 group size: one A scale per this many K elements (0=off)")
+                ("scale-a-type",             po::value<rocisa::DataType>()->default_value(rocisa::DataType::BFloat16), "element type of the w4a16 group scale tensor")
+                ("scale-a-zero-point",       po::value<bool>()->default_value(false), "w4a16 asymmetric: a packed int4 zero-point per group")
+                ("int4-encoding-a",          po::value<std::string>()->default_value("Signed"), "w4a16 weight encoding: Signed | UnsignedBias8")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
                 ("sparse",                   po::value<int>()->default_value(0), "A or B matrix is sparse matrix.")
@@ -259,6 +263,7 @@ namespace TensileLite
                 ("init-beta",                po::value<InitMode>()->default_value(InitMode::Two), "Initialization for beta")
                 ("init-bias",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for bias")
                 ("init-scaleA",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleA")
+                ("init-scaleZeroA",          po::value<InitMode>()->default_value(InitMode::Random), "Initialization for the w4a16 zero-point tensor")
                 ("init-scaleB",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleB")
                 ("init-scaleC",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleC")
                 ("init-scaleD",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleD")
@@ -561,6 +566,7 @@ namespace TensileLite
             DUMP_OPT("init-beta", InitMode);
             DUMP_OPT("init-bias", InitMode);
             DUMP_OPT("init-scaleA", InitMode);
+            DUMP_OPT("init-scaleZeroA", InitMode);
             DUMP_OPT("init-scaleB", InitMode);
             DUMP_OPT("init-scaleC", InitMode);
             DUMP_OPT("init-scaleD", InitMode);

@@ -26,9 +26,9 @@ The ten `..._I4B_...` / `..._I4H_...` kernels are the w4a16 prototype: int4
 weights in A, bf16 or fp16 activations in B, and one 16-bit scale (optionally
 plus a packed int4 zero-point) per K group of a row of A. They are referenced
 from `library/.../Logic/asm_full/gfx1151/FreeSize/gfx1151_Cijk_Alik_Bljk_I4*.yaml`
-and are the only way to reach that path: the in-kernel dequantize is not part of
-TensileLite's code generator, so these are checked in as assembly rather than
-generated at build time.
+as pre-tuned choices. TensileLite also generates this path from ordinary
+solutions with `UseScaleAB: Block`; see `scripts/generate_q27b_w4a16.py` for
+reproducing the Q27B prefill configurations without custom assembly.
 
 The name encodes the configuration: `SABB<G><scale type>[ZP][U8]`, where `G`
 is the K-group size, the scale type is `B` (bf16) or `H` (fp16), `ZP` marks the

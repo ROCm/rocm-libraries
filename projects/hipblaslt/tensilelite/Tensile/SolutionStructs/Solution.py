@@ -67,6 +67,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
+from .Validators.BlockDequant import validateBlockDequantCombination
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -6173,8 +6174,17 @@ class Solution(collections.abc.Mapping):
     elif not (state.get("CustomKernelName") and state["WaveSplitK"]): # generated mac
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
       # Restrict GRVW/VW combos so shift-ptr logic will work
+      # The restriction above is only there to keep shift-ptr working. Block
+      # dequantization decouples the two widths outright -- A's global read
+      # feeds the dequantize, which writes LDS at its own width -- and with
+      # TLUA false the tile cannot be partial in A's vector direction anyway,
+      # so the path this guards is unreachable. B has no such conversion.
+      dequantDecouplesA = state["ProblemType"]["UseScaleAB"] == "Block" \
+          and state["ProblemType"]["ScaleBlockSizeA"] != 0 \
+          and state["GuaranteeNoPartialA"]
       if state["GlobalReadVectorWidthA"] > 1 \
-          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"]:
+          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"] \
+          and not dequantDecouplesA:
           reject(state, printRejectionReason, "GlobalReadVectorWidthA %u must be == VectorWidthA %u or == 1" % \
                   (state["GlobalReadVectorWidthA"], state["VectorWidthA"]))
       if state["GlobalReadVectorWidthB"] > 1 \
@@ -6231,6 +6241,11 @@ class Solution(collections.abc.Mapping):
               state["_VectorStore"] = 0
             else:
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
+
+    # w4a16 in-kernel dequantization (UseScaleAB="Block"). Runs here because it
+    # reads DepthU / GlobalReadVectorWidthA / UnrollMajorLDSA, all derived above.
+    if not validateBlockDequantCombination(state, printRejectionReason):
+      return
 
     state["AssignedDerivedParameters"] = True
 
