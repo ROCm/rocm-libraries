@@ -51,6 +51,16 @@
       "name": "seqlen_kv",
       "type": "int",
       "default_value": 512
+    },
+    {
+      "name": "block_m",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "block_n",
+      "type": "int",
+      "default_value": 64
     }
   ]
 }
