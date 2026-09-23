@@ -431,14 +431,23 @@ class StoreState:
         kw = self.kernelWriter
 
         if kernel["EnableMatrixInstruction"]:
-            matrixInstT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
-            matrixInstBM = kernel["MatrixInstM"] // matrixInstT
-            matrixInstBN = kernel["MatrixInstN"] // matrixInstT
+            nativeRectWmma = (kernel["WavefrontSize"] == 32
+                              and kernel["MatrixInstM"] == 32
+                              and kernel["MatrixInstN"] == 16)
+            if nativeRectWmma:
+                matrixInstM = kernel["MatrixInstM"]
+                matrixInstN = kernel["MatrixInstN"]
+                matrixInstBM = kernel["MatrixInstBM"]
+                matrixInstBN = kernel["MatrixInstBN"]
+            else:
+                matrixInstT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+                matrixInstBM = kernel["MatrixInstM"] // matrixInstT
+                matrixInstBN = kernel["MatrixInstN"] // matrixInstT
 
-            matrixInstM  = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else matrixInstT
-            matrixInstN  = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else matrixInstT
-            matrixInstBM = 1                                                if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"] * matrixInstBM
-            matrixInstBN = 1                                                if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"] * matrixInstBN
+                matrixInstM  = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else matrixInstT
+                matrixInstN  = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else matrixInstT
+                matrixInstBM = 1                                                if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"] * matrixInstBM
+                matrixInstBN = 1                                                if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"] * matrixInstBN
 
         for elementIdx in range(0, len(batchElements)):
 

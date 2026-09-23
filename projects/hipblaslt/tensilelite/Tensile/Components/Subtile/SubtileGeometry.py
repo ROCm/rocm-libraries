@@ -213,9 +213,10 @@ MFMA_SCALE_16x16_1B_MX32_8V = MMAScaleLayout(instM=16, blocks=1, vgprs=0.25, mxB
 
 # gfx1250 wave32 32x16x128 FP4 scale tiles (mxBlock=32):
 #   A: instM=32, 32x4x1B = 128B / 32 lanes = 4B = 1.0 VGPR per MMA scale tile
-#   B: instM=16 (N), 16x4x1B = 64B / 32 lanes = 2B = 0.5 VGPR per MMA scale tile
+#   B: the instruction consumes a distinct VGPR for each N tile even though
+#      only 2B/lane are populated by one 16x128 scale tile.
 WMMA_SCALE_32x16_W32_MX32_A = MMAScaleLayout(instM=32, blocks=1, vgprs=1.0, mxBlock=32, waveSize=32)
-WMMA_SCALE_32x16_W32_MX32_B = MMAScaleLayout(instM=16, blocks=1, vgprs=0.5, mxBlock=32, waveSize=32)
+WMMA_SCALE_32x16_W32_MX32_B = MMAScaleLayout(instM=16, blocks=1, vgprs=1.0, mxBlock=32, waveSize=32)
 
 
 ################################################################################
@@ -596,7 +597,7 @@ class MXScaleInputGeometry(TileGeometry):
     mmaTileSize = int(instM * instKScale * self.bpe)
     object.__setattr__(self, 'mmaTileShape',    (instM, instKScale))
     object.__setattr__(self, 'mmaTileSize',     mmaTileSize)
-    object.__setattr__(self, 'mmaTileRegCount', mmaTileSize / self.scaleLayout.waveSize / 4)
+    object.__setattr__(self, 'mmaTileRegCount', float(self.scaleLayout.vgprs))
 
   def globalMMATileGrid(self, macroTile: int, depthU: int) -> Tuple[int, int]:
     # depthU is in data elements; divide by instK (not instKScale) to get scale MMA K tiles.
@@ -638,7 +639,7 @@ class MXScaleLRGeometry(MXScaleInputGeometry):
   """LR geometry for MX scale factors.
 
   Default subtileShape is (2, 2) — gfx950 byte-packing (4 MMA tiles / VGPR).
-  gfx1250 32x16 overrides this: A (1, 1) one tile/VGPR; B (2, 1) TileSpan N-pair.
+  gfx1250 32x16 overrides this with (1, 1), one VGPR per A/B MMA tile.
   """
   subtileShape: Tuple[int, int] = (2, 2)
 

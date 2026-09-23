@@ -106,6 +106,8 @@ def _create_gfx1250_kernel(mt_a, mt_b, mi_wave_group=None, depth_u=64):
         "NonTemporalB": 0,
         "enableTDMA": True,
         "enableTDMB": True,
+        "LdsBlockSizePerPadA": 256,
+        "LdsBlockSizePerPadB": 256,
         "ProblemType": {
             "DataTypeA": dtype,
             "DataTypeB": dtype,
@@ -367,6 +369,8 @@ def _fp4_tdm_kernel():
         "MIArchVgpr": True,
         "enableTDMA": True,
         "enableTDMB": True,
+        "LdsBlockSizePerPadA": 256,
+        "LdsBlockSizePerPadB": 256,
         "NonTemporalMXSA": 0,
         "NonTemporalMXSB": 0,
         "TDMInst": 3,
@@ -539,6 +543,9 @@ class TestGfx1250MxSubtileTdm:
         assert asm.count("ds_load_b128") == 4
         for i in range(4):
             assert "read=%u" % i in asm
+        asmSecondM = str(emitSingleDsRead(tiA, 1, 0, 0, tile, swizzled=False))
+        assert "offset:4352" in asmSecondM
+        assert "offset:4608" not in asmSecondM
 
     def test_b_lr_dual_ds_load_b128(self):
         """32x16 B stays 8 VGPRs: two ds_load_b128 per MMA tile."""
@@ -559,7 +566,7 @@ class TestGfx1250MxSubtileTdm:
         assert "read=2" not in asm
 
     def test_lra_maps_a_instm32_and_b_instm16(self):
-        """A and B no longer share one instM; 32x16 needs %32 for A and %16 for B."""
+        """32x16 WMMA lanes pair rows and alternating K quarters."""
         from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
         kernel = _fp4_tdm_kernel()
         writer, tiA, tiB, *_ = _create_writer_gfx1250_mx(kernel)
@@ -567,8 +574,15 @@ class TestGfx1250MxSubtileTdm:
         tiA.allocOffsetRegisters(writer, kernel)
         tiB.allocOffsetRegisters(writer, kernel)
         asm = str(lraTileAssignment(writer, kernel))
-        assert "A: laneId % 32" in asm
-        assert "B: laneId % 16" in asm
+        assert "A: WMMA base row = laneId % 8" in asm
+        assert "A: identity-LDS row" in asm
+        assert "B: WMMA row = laneId % 16" in asm
+        assert "A: WMMA K quarter = laneId / 16" in asm
+        assert "A: WMMA read 0 byte offset" in asm
+        assert "A: WMMA read 7 byte offset" in asm
+        assert "B: WMMA read 3 byte offset" in asm
+        assert "A: accumulated LDS padding" in asm
+        assert "B: accumulated LDS padding" in asm
         assert "TDM wave partition" in asm
         assert "rotation" not in asm.lower()
 
@@ -620,8 +634,8 @@ class TestGfx1250MxSubtileTdm:
             "vectorWidth": 1, "numGroups": 1,
         }
 
-    def test_scale_lr_a_four_loads_b_tilespan_two(self):
-        """A: 4 ds_read_b32 (one per MMA). B TileSpan: 2 loads (N-pair x K)."""
+    def test_scale_lr_uses_one_load_per_mma_scale_tile(self):
+        """A and B use four ds_read_b32 loads, one per distinct MMA scale tile."""
         from Tensile.Components.Subtile.SubtileScaleEmit import localReadDoScaleSubtile
         kernel = _fp4_tdm_kernel()
         writer, _, _, tiSA, tiSB = _create_writer_gfx1250_mx(kernel)
@@ -633,12 +647,11 @@ class TestGfx1250MxSubtileTdm:
         asmA = str(localReadDoScaleSubtile("MXSA", writer, kernel))
         asmB = str(localReadDoScaleSubtile("MXSB", writer, kernel))
         assert asmA.count("ds_load_b32") == 4
-        assert asmB.count("ds_load_b32") == 2
+        assert asmB.count("ds_load_b32") == 4
         assert "scaleMXSA[group0]" in asmA and "scaleMXSA[group3]" in asmA
-        assert "scaleMXSB[group0]" in asmB and "scaleMXSB[group1]" in asmB
-        assert "scaleMXSB[group2]" not in asmB
+        assert "scaleMXSB[group0]" in asmB and "scaleMXSB[group3]" in asmB
 
-    def test_scale_lra_notes_tilespan_half_wave(self):
+    def test_scale_lra_uses_lane_byte_offset(self):
         from Tensile.Components.Subtile.SubtileScaleEmit import lraTileAssignmentScaleSwizzled
         kernel = _fp4_tdm_kernel()
         writer, _, _, tiSA, tiSB = _create_writer_gfx1250_mx(kernel)
@@ -646,24 +659,23 @@ class TestGfx1250MxSubtileTdm:
         tiSA.allocOffsetRegisters(writer, kernel)
         tiSB.allocOffsetRegisters(writer, kernel)
         asm = str(lraTileAssignmentScaleSwizzled(writer, kernel))
-        assert "TileSpan N partner in upper half-wave" in asm
         assert "laneId * 4" in asm
 
-    def test_store_two_16row_blocks_per_32row_mma_tile(self):
-        """32x16 C/D keeps MIOutputVW=8 and exposes two 16-row store blocks per MMA."""
+    def test_store_native_32row_mma_tile(self):
+        """32x16 C/D uses one native 16-output store block per MMA tile."""
         from Tensile.Components.NotLocalFullTileElements import NotLocalFullTileElementsMFMA
         kernel = {
             "MatrixInstM": 32, "MatrixInstN": 16, "MatrixInstBM": 1, "MatrixInstBN": 1,
             "WavefrontSize": 32, "MIWaveTile": [2, 2], "SourceSwap": False,
             "VectorWidthA": 1, "VectorWidthB": 1,
-            "MIOutputVectorWidth": 8, "StoreVectorWidth": 8, "_VectorStore": True,
+            "MIOutputVectorWidth": 16, "StoreVectorWidth": 16, "_VectorStore": True,
         }
-        writer = SimpleNamespace(maxGwvw=lambda k: 8)
+        writer = SimpleNamespace(maxGwvw=lambda k: 16)
         widths, elements = NotLocalFullTileElementsMFMA().getElements(writer, kernel)
-        assert widths[0] == 8
+        assert widths[0] == 16
         tt0s = sorted({e[1] for e in elements[0]})
-        assert tt0s == [0, 1, 2, 3]
-        assert len(elements[0]) == 8  # 2 N-tiles x (2 M-tiles x 2 store blocks)
+        assert tt0s == [0, 1]
+        assert len(elements[0]) == 4  # 2 N-tiles x 2 M-tiles
 
 
 # ---------------------------------------------------------------------------

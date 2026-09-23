@@ -349,9 +349,9 @@ MXSB_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXSc
 MXSA_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 
-# gfx1250 wave32 32x16x128 FP4 scale tiles (mxBlock=32): A=1.0 VGPR, B=0.5 VGPR.
-# A (instM=32): TileSpan is illegal — one ds_read_b32 / MMA tile, no matrix_a_scale.
-# B (instN=16): TileSpan packs two N tiles in one load; WMMA uses matrix_b_scale.
+# gfx1250 wave32 32x16x128 FP4 scale tiles (mxBlock=32): one scale VGPR
+# per A or B MMA tile.  matrix_b_scale selects a matrix scale row, not a
+# neighboring N tile, so B tiles must not share a VGPR.
 _MXS_B4_W32_A = dict(scaleLayout=WMMA_SCALE_32x16_W32_MX32_A, instK=128, bpe=1, supportedTypes=('fp4',))
 _MXS_B4_W32_B = dict(scaleLayout=WMMA_SCALE_32x16_W32_MX32_B, instK=128, bpe=1, supportedTypes=('fp4',))
 MXSA_B4_W32_M32 = MXScaleTilePair(
@@ -359,17 +359,16 @@ MXSA_B4_W32_M32 = MXScaleTilePair(
     lr=MXScaleLRGeometry(**_MXS_B4_W32_A, loadWidth=4, subtileShape=(1, 1)))
 MXSB_B4_W32_N16 = MXScaleTilePair(
     gr=MXScaleGRGeometry(**_MXS_B4_W32_B, loadWidth=16),
-    lr=MXScaleLRGeometry(**_MXS_B4_W32_B, loadWidth=4, subtileShape=(2, 1)))
+    lr=MXScaleLRGeometry(**_MXS_B4_W32_B, loadWidth=4, subtileShape=(1, 1)))
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
 # Wave32 f32 output: 8 VGPRs per lane (WMMA V3 gfx1250)
 CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=8))
-# Wave32 32x16 f32 accumulator: 16 VGPRs per lane, emitted as two 8-output
-# 16-row store blocks by the common store path.
+# Wave32 32x16 f32 accumulator: 16 contiguous outputs per lane.
 CD_F32_W32_M32 = CDTile_1x1(
     mmaLayout=WMMA_32x16_W32_CD_16V, bpe=4, supportedTypes=('f32',),
-    storeShape=LoadShape(m=1, k=8), instN=16,
+    storeShape=LoadShape(m=1, k=16), instN=16,
 )
 
 def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
@@ -510,10 +509,15 @@ class TileInfo:
       # Derived byte-counts for emit logic
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
-      # TDM path. We apply 16 Bytes padding to each row.
-      # TDM only exists on gfx1250, which is never swizzled (gfx950-only).
+      # TDM path. gfx1250 inserts a 16-byte pad after each configured LDS
+      # block (256 bytes for this MXF4 kernel), not after every matrix row.
       isTDM = kernel.get("enableTDM%s" % tc, False)
       self.ldsRowPadBytes = 16 if isTDM else 0
+      blockSizePerPad = int(kernel.get("LdsBlockSizePerPad%s" % tc, 0))
+      if isTDM and blockSizePerPad == 0 and kernel.get("WavefrontSize") == 32 \
+          and kernel.get("MatrixInstM") == 32:
+        blockSizePerPad = 256
+      self.ldsBlockSizePerPadBytes = blockSizePerPad if isTDM else 0
 
       # Convenience counts for scheduler / diagram
       self.mmaTileLocalTotalCount = self.localMMATileGrid[0] * self.localMMATileGrid[1]
@@ -561,6 +565,7 @@ class TileInfo:
       self.depthUBytes = int(self.scaleDepthU * self.macroTile * geometry.bpe) if isTDM \
           else int(self.scaleDepthU * geometry.bpe)
       self.ldsRowPadBytes = 0
+      self.ldsBlockSizePerPadBytes = 0
 
     elif isinstance(geometry, CDTileGeometry):
       self.gr = None
@@ -739,7 +744,7 @@ class TileInfo:
     self.vgprTiles = []
     numMMATiles = int(self.localMMATileGrid[0] * self.localMMATileGrid[1])
     # gfx950 MX: 0.25 VGPR/tile → 4 MMA tiles share one VGPR (byte op_sel).
-    # gfx1250 A: 1.0 VGPR/tile; B TileSpan: 0.5 VGPR/tile → 2 N tiles share one VGPR.
+    # gfx1250 32x16: one distinct scale VGPR per A/B MMA tile.
     numMMATilesPerReg = max(1, int(round(1 / self.mmaTileRegCount))) if self.mmaTileRegCount else 1
     numDword = int(math.ceil(self.mmaTileRegCount))
 
@@ -1271,7 +1276,7 @@ def emitMfmaCode(writer, kernel):
 
         if hasScaleA:
           # Scale group index: one VGPR per lrSubtileShape[0] M/N-tiles x lrSubtileShape[1] K-tiles.
-          # gfx1250 A is (1,1) (no TileSpan). B is (2,1): two N tiles share a VGPR; sBsel is matrix_b_scale.
+          # gfx1250 A and B are both (1,1); each MMA tile has a distinct scale VGPR.
           scaleMShapeA = tiMXSA.lrSubtileShape[0]
           scaleMShapeB = tiMXSB.lrSubtileShape[0]
           scaleKShapeA = tiMXSA.lrSubtileShape[1]

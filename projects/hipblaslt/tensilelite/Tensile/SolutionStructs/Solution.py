@@ -819,7 +819,8 @@ class Solution(collections.abc.Mapping):
     elif isaInfoMap[isa].asmCaps['HasWMMA_V1']:
         outputVectorWidth, RegsPerOut = 1, 1
     elif isaInfoMap[isa].asmCaps['HasWMMA_V2'] or isaInfoMap[isa].asmCaps['HasWMMA_V3']:
-        outputVectorWidth, RegsPerOut = 8, 1
+        outputVectorWidth = 16 if state.get("MatrixInstM") == 32 else 8
+        RegsPerOut = 1
     else:
       print("WARNING: unexpect code flow")
 

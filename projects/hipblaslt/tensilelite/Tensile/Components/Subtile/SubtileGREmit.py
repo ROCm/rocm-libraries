@@ -1223,7 +1223,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP, refresh=False):
   # see the same value.
   tileInfoForTc = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
   padAmountBytes = int(getattr(tileInfoForTc, "ldsRowPadBytes", 0))
-  padIntervalBytes = int(du * bpe) if padAmountBytes else 0
+  padIntervalBytes = int(getattr(tileInfoForTc, "ldsBlockSizePerPadBytes", 0)) if padAmountBytes else 0
 
   mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
   mod.add(comp.setDataType(dtype, descSgprName(1)))

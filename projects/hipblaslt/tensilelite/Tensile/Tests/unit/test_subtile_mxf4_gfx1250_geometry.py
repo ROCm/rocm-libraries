@@ -77,11 +77,11 @@ def test_select_scale_and_d_geometry_32x16_fp4():
     assert selectMXScaleGeometry(kernel, "MXSA") is MXSA_B4_W32_M32
     assert selectMXScaleGeometry(kernel, "MXSB") is MXSB_B4_W32_N16
     assert MXSA_B4_W32_M32.gr.mmaTileRegCount == 1.0
-    assert MXSB_B4_W32_N16.gr.mmaTileRegCount == 0.5
+    assert MXSB_B4_W32_N16.gr.mmaTileRegCount == 1.0
     assert selectDGeometry(kernel) is CD_F32_W32_M32
     assert CD_F32_W32_M32.mmaTileShape == (32, 16)
     assert CD_F32_W32_M32.mmaTileRegCount == 16
-    assert CD_F32_W32_M32.storeShape.k == 8
+    assert CD_F32_W32_M32.storeShape.k == 16
     assert CD_F32_W32.storeShape.k == 8
 
 
@@ -116,9 +116,9 @@ def test_tileinfo_grids_match_smoke_yaml():
     assert tiA.numLRPerSubtile == 8
     assert tiB.numLRPerSubtile == 4
     assert tiSA.lrSubtileShape == [1, 1]
-    assert tiSB.lrSubtileShape == [2, 1]
+    assert tiSB.lrSubtileShape == [1, 1]
     assert tiSA.lrLocalSubtileGrid == [2, 2]
-    assert tiSB.lrLocalSubtileGrid == [1, 2]
+    assert tiSB.lrLocalSubtileGrid == [2, 2]
 
 
 def test_tileinfo_mx_tdm_packed_bytes():
@@ -251,7 +251,7 @@ def test_smoke_yaml_solution_is_valid(_gp_gfx1250, gfx1250_iim, assembler, capsy
     assert sol.get("MatrixInstN") == 16
     assert sol.get("MacroTile0") == 128
     assert sol.get("MacroTile1") == 64
-    assert sol.get("MIOutputVectorWidth") == 8
+    assert sol.get("MIOutputVectorWidth") == 16
 
 
 def test_smoke_solution_emits_full_gfx1250_kernel(

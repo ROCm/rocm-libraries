@@ -403,8 +403,8 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
   writer.vgprPool.checkIn(waveIdVgpr)
   laneOffset = writer.vgprPool.checkOut(1, tag="_lraTileAssignmentScaleSwizzled_legacy_laneOffset")
   module.add(VAndB32(dst=vgpr(laneOffset), src0=vgpr("Serial"), src1=wavesize-1, comment="scale: laneId"))
-  # 4B/lane. gfx1250 MXSB TileSpan: lanes 0-15 hold N-tile 0, lanes 16-31 the partner (matrix_b_scale).
-  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset), comment="scale: laneId * 4 (TileSpan N partner in upper half-wave)"))
+  # 4B/lane. Each gfx1250 A/B MMA scale tile uses a distinct VGPR.
+  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset), comment="scale: laneId * 4"))
   module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiA_.sharedVgprLROffset[0]), comment="scaleA: lrOffset = laneId * 4"))
   module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiB_.sharedVgprLROffset[0]), comment="scaleB: lrOffset = laneId * 4"))
   writer.vgprPool.checkIn(laneOffset)
@@ -484,7 +484,7 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
   if tileInfo.mxBlock == 0:
     return module
 
-  # TileInfo LR subtile size is the packed group: gfx950 (2,2), gfx1250 A (1,1), B TileSpan (2,1).
+  # TileInfo LR subtile size is the packed group: gfx950 (2,2), gfx1250 (1,1).
   if hasattr(tileInfo, 'lrSubtileSize'):
     groupStride = int(tileInfo.lrSubtileSize)
   else:
@@ -507,7 +507,7 @@ def localReadDoScaleSubtile(tc, writer, kernel):
 
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
 
-  # One ds_read per LR scale subtile. gfx1250 A is (1,1); B TileSpan is (2,1).
+  # One ds_read per LR scale subtile. gfx1250 A and B are both (1,1).
   numScaleGroups = int(tileInfo.lrLocalSubtileGrid[0]) * int(tileInfo.lrLocalSubtileGrid[1])
   for gid in range(numScaleGroups):
     module.add(emitSubtileScaleDsRead(tc, writer, kernel, gid))
