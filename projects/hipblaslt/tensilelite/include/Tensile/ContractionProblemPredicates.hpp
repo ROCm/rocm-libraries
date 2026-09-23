@@ -3200,7 +3200,7 @@ namespace TensileLite
                     HasValue = true
                 };
                 // Serialized as the ProblemType string ("Signed",
-                // "UnsignedBias8", "UnsignedBias8ExLlama") so the logic files
+                // "UnsignedBias8") so the logic files
                 // stay readable.
                 std::string value;
 
@@ -3221,8 +3221,6 @@ namespace TensileLite
                     {
                     case ContractionProblemGemm::Int4Encoding::UnsignedBias8:
                         return "UnsignedBias8";
-                    case ContractionProblemGemm::Int4Encoding::UnsignedBias8ExLlama:
-                        return "UnsignedBias8ExLlama";
                     default:
                         return "Signed";
                     }

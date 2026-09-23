@@ -36,22 +36,11 @@ namespace w4a16
                               : static_cast<float>(static_cast<const hip_bfloat16*>(base)[idx]);
     }
 
-    /// Linear element index -> (byte, nibble). Signed and UnsignedBias8 share
-    /// an address; UnsignedBias8ExLlama interleaves each dword's nibbles as
-    /// [0,2,4,6,1,3,5,7], putting elements 2k and 2k+1 in its two halves.
-    inline void nibbleAddr(int32_t encoding, size_t idx, size_t& byteIdx, size_t& nibble)
+    /// Linear element index -> (byte, nibble), shared by both encodings.
+    inline void nibbleAddr(size_t idx, size_t& byteIdx, size_t& nibble)
     {
-        if(encoding != HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXLLAMA_EXT)
-        {
-            byteIdx = idx / 2;
-            nibble  = idx % 2;
-            return;
-        }
-        // Element j sits at byte (j%2)*2 + j/4 of the dword, nibble (j/2)%2.
-        const size_t dword = idx / 8;
-        const size_t j     = idx % 8;
-        byteIdx            = dword * 4 + (j % 2) * 2 + (j / 4);
-        nibble             = (j / 2) % 2;
+        byteIdx = idx / 2;
+        nibble  = idx % 2;
     }
 
     inline void writeNibble(uint8_t* base, size_t byteIdx, size_t nibble, uint8_t raw)
@@ -145,7 +134,7 @@ inline std::vector<float> generateW4A16Input(void*       packedA,
         {
             const int raw = nibbleDist(rng);
             size_t    byteIdx, nibble;
-            nibbleAddr(encoding, static_cast<size_t>(row) * lda + col, byteIdx, nibble);
+            nibbleAddr(static_cast<size_t>(row) * lda + col, byteIdx, nibble);
             writeNibble(weights, byteIdx, nibble, static_cast<uint8_t>(raw));
 
             const float  q  = unsignedEnc ? static_cast<float>(raw)

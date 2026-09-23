@@ -598,8 +598,7 @@ try
          value<std::string>(&int4_encoding)->default_value("signed"),
          "w4a16 only: encoding of the int4 weights in A (hipblasLtInt4Encoding_t). "
          "signed = two's complement, unsigned_bias8 = unsigned with an implicit "
-         "zero-point of 8 (GPTQ), unsigned_bias8_exllama = unsigned_bias8 with the "
-         "ExLlama [0,2,4,6,1,3,5,7] dword shuffle. The numerals 0, 1 and 2 are also accepted.")
+         "zero-point of 8 (GPTQ). The numerals 0 and 1 are also accepted.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),

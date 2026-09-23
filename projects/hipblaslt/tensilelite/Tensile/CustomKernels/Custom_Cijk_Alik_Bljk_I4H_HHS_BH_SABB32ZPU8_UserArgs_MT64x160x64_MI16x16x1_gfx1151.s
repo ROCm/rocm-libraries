@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 // Generated with W4A16 generator revision 108edb6c5f0.
-// Q27B unsigned_bias8: same tile and scheduling parameters as the ExLlama variant.
+// Q27B unsigned_bias8 custom prefill kernel.
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
 .protected Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151

@@ -2819,6 +2819,7 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{hipblaslt_int4_encoding_to_string(
                     static_cast<hipblasLtInt4Encoding_t>(HIPBLASLT_INT4_ENCODING_END_EXT))}
                 == "invalid");
+    ASSERT_TRUE(string_to_int4_encoding("2") == HIPBLASLT_INT4_ENCODING_END_EXT);
     ASSERT_TRUE(string_to_int4_encoding("nonsense") == HIPBLASLT_INT4_ENCODING_END_EXT);
     ASSERT_TRUE(string_to_int4_encoding("") == HIPBLASLT_INT4_ENCODING_END_EXT);
 

@@ -12,6 +12,9 @@
 #include "w4a16_datagen.hpp"
 
 #include <gtest/gtest.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
+
+#include <stdexcept>
 
 #include <cstdint>
 
@@ -92,5 +95,22 @@ TEST(w4a16_layout, allocation_covers_both_regions)
         // No zero-points, no padding.
         EXPECT_EQ(w4a16::scaleBytes(s.m, kGroups, false), scaleRegionBytes(s))
             << "m=" << s.m << " k=" << s.k << " g=" << s.groupSize;
+    }
+}
+
+TEST(w4a16_encoding, cpp_api_accepts_only_supported_encodings)
+{
+    hipblaslt_ext::GemmProblemType problem;
+    for(auto encoding : {HIPBLASLT_INT4_ENCODING_SIGNED_EXT,
+                         HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT})
+    {
+        problem.setInt4EncodingA(encoding);
+        EXPECT_EQ(problem.getInt4EncodingA(), encoding);
+    }
+    for(int value : {-1, 2, 3, 99})
+    {
+        EXPECT_THROW(problem.setInt4EncodingA(static_cast<hipblasLtInt4Encoding_t>(value)),
+                     std::invalid_argument);
+        EXPECT_EQ(problem.getInt4EncodingA(), HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT);
     }
 }

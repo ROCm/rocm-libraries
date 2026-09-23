@@ -30,10 +30,10 @@ and are the only way to reach that path: the in-kernel dequantize is not part of
 TensileLite's code generator, so these are checked in as assembly rather than
 generated at build time.
 
-The name encodes the configuration: `SABB<G><scale type>[ZP][U8|U8X]`, where `G`
+The name encodes the configuration: `SABB<G><scale type>[ZP][U8]`, where `G`
 is the K-group size, the scale type is `B` (bf16) or `H` (fp16), `ZP` marks the
-asymmetric variants, and `U8`/`U8X` mark the `UnsignedBias8` and
-`UnsignedBias8ExLlama` weight encodings (no suffix = `Signed`).
+asymmetric variants, and `U8` marks `UnsignedBias8` weights
+(no suffix = `Signed`).
 
 Each `.s` overrides `LocalReadVectorWidth{A,B}` back to `-1` in its
 `custom.config`. Every reader of a solution state re-runs

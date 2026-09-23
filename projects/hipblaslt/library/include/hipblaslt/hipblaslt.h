@@ -236,11 +236,6 @@ typedef enum
      *  words, viewed as bytes, put element ``2n`` in the low nibble of byte
      *  ``n``, so a checkpoint's ``qweight`` can be consumed without a repack. */
     HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT = 1,
-    /*! As ``HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT``, but the eight nibbles
-     *  of each 32-bit word are interleaved ``[0,2,4,6,1,3,5,7]`` (the ExLlama /
-     *  ExLlamaV2 shuffle), which places elements ``2k`` and ``2k+1`` in the low
-     *  and high halves of the word. */
-    HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXLLAMA_EXT = 2,
     HIPBLASLT_INT4_ENCODING_END_EXT
 } hipblasLtInt4Encoding_t;
 

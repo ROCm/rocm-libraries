@@ -486,8 +486,6 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
         "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Alik_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
@@ -499,11 +497,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
     }
 )
 
@@ -511,7 +505,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 140,
+    "kernels": 131,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -524,7 +518,7 @@ EXPECTED_CENSUS = {
     # kernels add four: none has a generated scalar StaggerU path. Their independent
     # per-row K rotation uses vector addresses, ignores the packed argument, and
     # remains excluded by the host's blanket custom-kernel uniform-order gate.
-    "declaredZero": 81,
+    "declaredZero": 72,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 31,
 }

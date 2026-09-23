@@ -419,8 +419,8 @@ def usesBlockDequantZeroPointA(problemType):
 
 # Encodings the int4 weights in A may use, and the suffix each contributes to
 # the kernel name. See the "Int4EncodingA" entry in defaultProblemType.
-INT4_ENCODINGS_A = ("Signed", "UnsignedBias8", "UnsignedBias8ExLlama")
-_INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8", "UnsignedBias8ExLlama": "U8X"}
+INT4_ENCODINGS_A = ("Signed", "UnsignedBias8")
+_INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
 
 
 def blockDequantUnsignedA(problemType):
@@ -428,10 +428,6 @@ def blockDequantUnsignedA(problemType):
     (the GPTQ / compressed-tensors checkpoint encoding)."""
     return usesBlockDequantA(problemType) and problemType["Int4EncodingA"] != "Signed"
 
-
-def blockDequantExLlamaA(problemType):
-    """True when A's nibbles use the ExLlama [0,2,4,6,1,3,5,7] dword shuffle."""
-    return usesBlockDequantA(problemType) and problemType["Int4EncodingA"] == "UnsignedBias8ExLlama"
 
 ################################################################################
 # ProblemType
@@ -483,11 +479,6 @@ _defaultProblemType = {
     #                          zero-point of 8 when ScaleZeroPointA is off.
     #                          Nibbles in K order. This is what GPTQ and
     #                          compressed-tensors checkpoints store natively.
-    #   "UnsignedBias8ExLlama" as UnsignedBias8, but the 8 nibbles of each dword
-    #                          are interleaved [0,2,4,6,1,3,5,7] (the ExLlama /
-    #                          ExLlamaV2 shuffle), which lands elements 2k and
-    #                          2k+1 in the two halves of the dword so one
-    #                          mask+or yields both.
     "Int4EncodingA": "Signed",
     "UseScaleCD": False,  # =True use scaleC, scaleD
     "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
