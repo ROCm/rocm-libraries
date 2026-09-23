@@ -1654,7 +1654,33 @@ class SBarrier(Instruction):
         self.separate = bool(separate)
         self.wait_flag = bool(wait)
         self.cluster_barrier = bool(clusterBarrier)
-        self.setInst("s_barrier")
+        # Mirror rocisa::SBarrier (common.hpp:1636-1673): on HasNewBarrier the
+        # instruction text carries the split-barrier code (-1 workgroup / -3
+        # cluster). Host passes discriminate cluster barriers by substring-
+        # matching "-3" in the instruction text (e.g. KernelWriter
+        # postMainLoopBarrierCheckAndReset preserves cluster handshakes), so a
+        # bare "s_barrier" here would misclassify cluster barriers as
+        # workgroup-scope and drop them. to_stinky_logical still forwards the
+        # typed flags; only the host-side text needs to match native.
+        from .base import getAsmCaps  # noqa: WPS433
+        try:
+            caps = getAsmCaps()
+        except RuntimeError:
+            # Constructed before init/setKernel (e.g. CustomSchedule import-time
+            # layout probes). Native capOrDefault yields 0 for every cap in that
+            # state, i.e. a bare "s_barrier"; mirror that with empty caps.
+            caps = {}
+        if caps.get("HasNewBarrier", 0):
+            code = -3 if (caps.get("HasClusterBarrier", 0) and self.cluster_barrier) else -1
+            if self.separate:
+                if self.wait_flag:
+                    self.setInst("s_barrier_wait " + str(code))
+                else:
+                    self.setInst("s_barrier_signal " + str(code))
+            else:
+                self.setInst("s_barrier_signal " + str(code) + "\ns_barrier_wait " + str(code))
+        else:
+            self.setInst("s_barrier")
 
     def getParams(self):
         return []
