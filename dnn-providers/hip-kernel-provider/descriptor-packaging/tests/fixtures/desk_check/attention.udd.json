@@ -1,0 +1,6 @@
+{
+  "version": "0.1",
+  "id": "udd-attention",
+  "name": "Attention dispatch",
+  "dispatch_symbol": "hipkernel.attention.dispatch"
+}
