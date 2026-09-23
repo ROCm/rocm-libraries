@@ -1,5 +1,13 @@
 # rocKE Data-Type Support Reference
 
+## Contents
+
+- [The canonical dtype set](#1-the-canonical-dtype-set)
+- [Coverage matrix](#2-coverage-matrix--support-status-by-layer)
+- [Conversions](#3-conversion-coverage-helpers-layer)
+- [Hardware atom support](#4-hardware-atom--dtype-support-the-hardware-ceiling)
+- [Kernel-family support](#5-per-family-support-snapshot)
+
 **What this is.** A source-backed record of which data types rocKE supports, at
 which layer, and what each gap consists of. It covers the **compiler** (the two
 byte-identical LLVM-IR engines), the **helpers** (conversions / I/O / quantization),
@@ -13,8 +21,8 @@ there is only ever one copy to keep current.
 
 | | |
 |---|---|
-| **Basis** | Verified against commit `c90f135be20b456c3449fca3a3d5021acf092a14` on 2026-09-17. |
-| **Method** | Read-only source exploration — no build, no execution, no GPU. Both engines were read side by side, so every claim holds for the Python and C++ emitters equally. Scores in §2.4 are assigned against the criteria in §2.2 using only facts locatable in the tree (§2.6 lists the anchors). Silicon claims come from the per-arch AMD ISA documentation via [`matrix_instructions_summary.md`](./matrix_instructions_summary.md); rocKE's declared capability comes from `core/arch/data/arch_specs.json`. |
+| **Basis** | Initial source review: [c90f135be20b456c3449fca3a3d5021acf092a14](https://github.com/ROCm/rocm-libraries/commit/c90f135be20b456c3449fca3a3d5021acf092a14), 2026-09-17. Review corrections checked against [7917434a5120f32400d7ef716529ece2b0a27ef1](https://github.com/ROCm/rocm-libraries/commit/7917434a5120f32400d7ef716529ece2b0a27ef1) and public ISA XML on 2026-09-23. |
+| **Method** | Initial review: source exploration of both engines. Scores in §2.4 use the criteria in §2.2 and source anchors in §2.6. Review corrections: public ISA XML and pinned LLVM source comparison, plus a Python host-side block-scale GEMM validator, signature, and IR-parameter probe. No GPU execution or numerical validation. Silicon claims come from [`matrix_instructions_summary.md`](./matrix_instructions_summary.md); declared atoms come from [arch_specs.json](../../python/rocke/core/arch/data/arch_specs.json). |
 | **Out of scope** | Runtime/dispatch dtype validation, the provider's C-api surface, and any measurement. |
 | **Keeping it current** | When a dtype's support changes at any layer, update the affected row(s) and the §2.6 anchors in the same change. The criteria (§2.2) and rubric (§2.3) are the stable part; the scores are not. |
 
@@ -62,21 +70,22 @@ reduced-precision compute, so a caller's TF32 request cannot be expressed at all
 
 Two facts must be kept apart, because they are easy to run together:
 
-1. **There is no TF32-class matrix instruction on either target arch.** AMD's
-   TF32-equivalent, **XF32**, is documented on gfx942 only, is removed on gfx950,
-   and is explicitly removed on gfx1250 (§4D). A hardware TF32 path is therefore
-   not available to be plumbed — it does not exist on the silicon rocKE targets.
-2. **The reduced-precision mode rocKE can offer is a BF16 compute mode.**
-   Truncating `f32` operands to `bf16` and running the existing bf16 MFMA/WMMA path
-   is the route, and given (1) it is the only route. It is *not* TF32 semantics and
-   this document does not claim it is: the reference TF32 form keeps **10** mantissa
+1. **Native XF32 is available on gfx942, a supported rocKE target.** It is
+   absent on gfx950 and gfx1250 (§4D), the focus of the reduced-precision proposal.
+   That focus does not define rocKE's supported target set. The catalog has no
+   XF32 atom even on gfx942.
+2. **A BF16 compute mode is one possible reduced-precision mode.**
+   Converting `f32` operands to `bf16` can use existing bf16 MFMA/WMMA atoms.
+   Native XF32 absence does not rule out software implementations of a different
+   precision contract. BF16 does not implement TF32 semantics: the reference
+   TF32 form keeps **10** mantissa
    bits (`truncateToTf32()` zeroes the bottom 13 bits of an `f32`,
    `GpuRefTypes.h:92-103`, gated by the `USE_TF32` compile define), while `bf16`
    keeps **7**. A value such as `1.0009765625` survives the 10-bit truncation and
    collapses to `1.0` in `bf16`.
 
 Accordingly this document names the capability a **BF16 compute mode over `f32`
-storage**, reached by a TF32 *request* at the API boundary, and rows and scores
+storage**; no API selector or TF32-request mapping currently exists. Rows and scores
 below are labelled `bf16-mode` rather than `tf32`. No choice of tolerance makes the
 two numerically equivalent; see §2.5.
 
@@ -223,10 +232,9 @@ is bf16-accurate and must be documented as such rather than as TF32 (§1).
 - **`i4` C1=0 / C3=3** — the inverse of the fp8 profile: not a `Type` at all,
   yet its conversion coverage is the *best* of any quantized type
   (`i4_dequant.py` targets i32, f32, f16, fp8, bf8). C2=1: `iu4` WMMA on RDNA
-  only. The ISA confirms this is a *silicon* limit, not a wiring one — INT4 is
-  absent from every CDNA generation through CDNA4 (§4A), so an i4 path on gfx950
-  is impossible by construction. gfx1250 is the one target arch that may carry
-  `iu4`, but the opcode is unconfirmed (§4A †), which is why C2 stays at 1.
+  only. No native INT4 matrix instruction is present on the MFMA targets in §4A;
+  software dequantization remains possible on gfx950. No gfx1250 `iu4` opcode
+  was located in the public XML (§4A †), which is why C2 stays at 1.
 - **`fp4` / `fp6` C5=0** — the widest silicon-to-software gap in the matrix. The
   gfx950 atoms exist (`mfma_f32_16x16x128_fp4`, `mfma_f32_16x16x96_fp6`) and the
   hipBLASLt provider already maps `FP4_E2M1`→`HIP_R_4F_E2M1` and
@@ -255,8 +263,8 @@ is bf16-accurate and must be documented as such rather than as TF32 (§1).
   **C6=1 — a naming obligation, not an unresolved design question.** The gpu-ref
   `USE_TF32` reference keeps 10 mantissa bits; `bf16` keeps 7. A bf16 route is
   therefore 3 mantissa bits coarser and **does not implement TF32 semantics**.
-  That is not a defect in the approach — XF32 is absent from both target arches
-  (§4D), so there is no TF32-semantics option available to choose instead. The
+  XF32 is absent on gfx950/gfx1250 but present on gfx942 (§4D); its absence
+  does not make BF16 the only possible software implementation. The
   obligation is to *describe* the mode accurately: it is a BF16 compute mode, its
   accuracy contract is bf16's, and `USE_TF32` gpu-ref output is not a valid
   bit-accuracy oracle for it (it remains a useful coarse reference for "reduced
@@ -264,9 +272,9 @@ is bf16-accurate and must be documented as such rather than as TF32 (§1).
   not make the two equivalent.
 - **`f64` / `u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected
   by the MIOpen provider, and not requested by any family. For `f64` specifically
-  the silicon is present: `V_MFMA_F64_*` ships on gfx90a/gfx942/gfx950 and
-  `V_WMMA_F64_16X16X4_F64` on gfx1250 (§4A), so f64 is unwired software rather
-  than missing hardware.
+  `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950, where f64 is unwired
+  software. gfx1250 has no F64 matrix instruction: LLVM gates
+  `V_WMMA_F64_16X16X4_F64` on `gfx1251-gemm-insts` (§4A).
 
 ### 2.6 Source anchors for the scores
 
@@ -282,7 +290,7 @@ families `instances/common/gemm_universal.py:43,643-659`,
 `library/kernels/common/fmha_fwd_fp8.py`; atoms
 `core/arch/data/arch_specs.json`, `helpers/atoms.py:302`,
 `cpp/core/lower_llvm/mma.cpp:571` (scalar f32 MFMA);
-**hardware ceiling and the H multiplier**
+**hardware ceiling**
 [`matrix_instructions_summary.md`](./matrix_instructions_summary.md)
 (per-arch VOP3P opcode tables transcribed from the official AMD ISA documentation —
 the index behind §4A, and behind the XF32, integer-MFMA, `IU8` and f64 findings);
@@ -338,17 +346,18 @@ corresponding architecture.
 | gfx950 | CDNA4 | MFMA + SMFMAC | ✅ | ✅ (+K-packed) | ✅ (+K-packed) | ✅ **OCP** | ✅ (+K64) | ❌ | ✅ `F8F6F4` | ✅ | ✅ | ❌ removed | ✅ |
 | gfx1151 | RDNA3.5 | WMMA | ❌ | ✅ | ✅ | ❌ | ✅ `iu8` | ✅ `iu4` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | gfx1201 | RDNA4 | WMMA + SWMMAC | ❌ | ✅ | ✅ | ✅ | ✅ `iu8` | ✅ `iu4` (+K32) | ❌ | ❌ | ❌ | ❌ | ✅ |
-| gfx1250 | GFX12 (CDNA-class) | WMMA + SWMMAC | ✅ | ✅ | ✅ | ✅ (K64/K128) | ✅ `iu8` | ❓ † | ✅ `F8F6F4` + `F4` | ✅ (+block-16) | ✅ | ❌ removed | ✅ |
+| gfx1250 | CDNA5 | WMMA + SWMMAC | ✅ | ✅ | ✅ | ✅ (K64/K128) | ✅ `iu8` | ❓ † | ✅ `F8F6F4` + `F4` | ✅ (+block-16) | ❌ | ❌ | ✅ |
 
-† gfx1250 INT4 appears as ✅ in the cross-architecture capability summary, but the
-dense opcode table enumerates only `V_WMMA_I32_16X16X64_IU8` /
+† The gfx1250 integer matrix entries enumerate `V_WMMA_I32_16X16X64_IU8` /
 `V_SWMMAC_I32_16X16X128_IU8` — no `IU4` form was located. Treat i4-on-gfx1250 as
 **unconfirmed** and check the official ISA document before relying on it.
 
-On the `gfx1250` ISA-gen label: rocKE's own SSOT classifies it as `family: "cdna"`
-with `target_family: "gfx12_cdna"` — a CDNA-class device on the GFX12 programming
-model (wave32, WMMA, no MFMA). This document uses that neutral label rather than a
-generation codename, matching `matrix_instructions_summary.md`.
+The ISA labels and instruction evidence follow the public AMD XML files linked
+in [the ISA reference](./matrix_instructions_summary.md#sources-and-reproduction).
+The gfx1250 source is `amdgpu_isa_cdna5.xml`; rocKE classifies the target as
+`family: "cdna"`, `target_family: "gfx12_cdna"` (wave32, WMMA, no MFMA).
+F64 WMMA is absent from that XML; the pinned LLVM target predicates restrict it
+to gfx1251, so this is not a missing gfx1250 atom.
 
 ### 4B. What rocKE declares — the atom catalog
 
@@ -378,8 +387,8 @@ Two points worth stating, because they are the ones most often mis-stated:
 
 ### 4C. Deltas — silicon capability vs. rocKE's declared atoms
 
-Five gaps separate §4A from §4B. Each is a *declaration* gap: the instruction
-exists on the part, and rocKE does not currently name it.
+The following gaps compare §4A with §4B. The first four concern atom declarations;
+f64 also lacks an IR type. The gfx942 XF32 declaration gap is covered in §4D.
 
 #### 4C.1 gfx1250 — fp4/fp6/bf6 block-scaled atoms are omitted (deliberately)
 The part carries `V_WMMA_F32_16X16X128_F8F6F4`, a dedicated
@@ -405,9 +414,9 @@ catalog declares no sparse atom on any arch, and no family requests one. No dtyp
 in §2.4 is blocked on it.
 
 #### 4C.5 f64 matrix is in silicon but undeclared
-`V_MFMA_F64_*` ships on gfx90a/gfx942/gfx950 and a `V_WMMA_F64_16X16X4_F64` on
-gfx1250. `f64` is not an IR type at all (§1), so the absence is at the vocabulary
-level, not the atom level.
+`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is not an IR type
+at all (§1), so those targets have a vocabulary gap as well as missing atoms.
+gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set
 
@@ -415,16 +424,16 @@ level, not the atom level.
 |---|---|
 | gfx90a (CDNA2) | ❌ never present |
 | gfx942 (CDNA3) | ✅ `V_MFMA_F32_16X16X8_XF32` (op 62), `V_MFMA_F32_32X32X4_XF32` (op 63) |
-| gfx950 (CDNA4) | ❌ removed — opcode slots 62/63 reused |
+| gfx950 (CDNA4) | ❌ absent from the public XML and LLVM target features |
 | gfx1151 / gfx1201 (RDNA3.5 / RDNA4) | ❌ never present |
-| gfx1250 (GFX12) | ❌ explicitly removed; the guide states TF32/XF32 WMMA support is removed |
+| gfx1250 (CDNA5) | ❌ absent from the public XML and LLVM target features |
 
-**Consequence for rocKE.** gfx942 is the only part that ever had a TF32-class
-matrix instruction, and it is not a current target. On **both** target arches —
-gfx950 and gfx1250 — there is no TF32 instruction to plumb. A caller's TF32 request
-must therefore be served by a different compute mode, and the one available is
-**bf16** (§1). This is a hardware constraint, not a design preference — which is why
-the capability is named a BF16 compute mode rather than TF32.
+**Consequence for rocKE.** gfx942 is a supported target: it has a catalog entry
+and block-scale GEMM accepts it for FP8/BF8. It provides native XF32, but rocKE
+does not declare XF32 atoms. gfx950/gfx1250 have no native XF32 instruction.
+A BF16 compute mode on those targets would need its own explicit precision
+contract; it cannot silently satisfy a TF32 request. Software approaches that
+meet a TF32 contract are not ruled out by native XF32 absence (§1).
 
 ### 4E. The FP8 encoding dialect (FNUZ vs OCP)
 
@@ -443,8 +452,8 @@ behind the `fp8*` C6=1 score (§2.5).
 
 The failure mode is silence: the same byte pattern decodes to values a power of two
 apart with no error raised anywhere. Today the FNUZ/OCP selection is guarded only
-in the attention path; nothing generalizes it. Both current target arches are OCP,
-so the exposure is narrow, but it is not zero.
+in the attention path; nothing generalizes it. gfx950/gfx1250 use OCP, while
+the supported gfx942 target uses FNUZ, so callers must account for both dialects.
 
 ---
 
@@ -457,7 +466,7 @@ scheduled to gain.
 |---|---|---|
 | Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum) | **fp8/bf8** — `NotImplementedError` at `:659` for any dtype that is not `F16`/`BF16` |
 | MFMA GEMM (`mfma_gemm.py`) | f16, bf16 | **fp8/bf8** — `:62-65` records that lane-decode and byte-wise A/B loads are absent |
-| Block-scale GEMM (`block_scale_gemm.py`) | fp8, bf8, i4 A/B → f16 out (CDNA) | non-f16 output; arches other than CDNA |
+| Block-scale GEMM ([block_scale_gemm.py](../../python/rocke/instances/common/block_scale_gemm.py)) | `abquant`, FP8/BF8 A/B → **f32** out on gfx942/gfx950 | `aquant`/`bquant`; `i4_fp8`/`i4_bf8`; non-f32 output; WMMA targets including gfx1250 |
 | MatMul-NBits (`_matmul_nbits_common.py`) | A=f16, B=int4, scale f16/f32 (RDNA only) | B widths other than 4-bit; CDNA arches |
 | Convolution (`_conv_implicit_gemm_common.py`) | f16, bf16, f32 | **reduced-precision compute over f32 storage** — no selector exists to request it (gpu-ref carries a `USE_TF32` switch; see §1); **fp8/bf8** |
 | Attention unified (`attention_unified.py`) | Q/V f16, bf16; f32 accum | fp8/bf8 K/V is **not uniform across instances**; no int8 Q/V |

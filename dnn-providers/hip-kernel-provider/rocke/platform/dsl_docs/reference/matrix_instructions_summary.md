@@ -1,423 +1,442 @@
 # AMD Matrix Instruction (MFMA / WMMA / SWMMA / SMFMAC) Support by Architecture
 
-Summary of matrix-multiply-accumulate instructions, transcribed from the AMD
-instruction-set-architecture documentation. **This file is a convenience index, not a
-source of truth — for any instruction, refer to the official AMD ISA document for the
-corresponding architecture.** Each table gives the **Opcode** (the VOP3P `OP` field,
-bits [22:16]) and the **page** where the instruction is defined in that document. A
-secondary page is given in each section header for the pseudocode and the
-opcode-encoding summary table.
+A convenience index of AMD matrix instructions. The public XML instruction and
+encoding records are the source of truth. The tables are not exhaustive and do
+not imply that rocKE exposes every instruction.
 
-Instruction naming convention: `V_<engine>_<Cfmt>_<M>X<N>X<K>_<ABfmt>`
-- **MFMA** – Matrix Fused Multiply-Add (CDNA / Instinct)
-- **SMFMAC** – Sparse MFMA with Compression (structured sparsity, CDNA3+)
-- **WMMA** – Wave Matrix Multiply-Accumulate (GFX10+ / GFX12)
-- **SWMMAC** – Sparse WMMA with Compression
+## Contents
 
-| Architecture | Engine(s) | Source |
+- [Sources and reproduction](#sources-and-reproduction)
+- [CDNA1](#cdna1)
+- [CDNA2](#cdna2)
+- [CDNA3](#cdna3)
+- [CDNA4](#cdna4)
+- [RDNA3](#rdna3)
+- [RDNA3.5](#rdna35)
+- [RDNA4](#rdna4)
+- [gfx1250](#gfx1250)
+- [Cross-architecture capability summary](#cross-architecture-capability-summary)
+
+## Sources and reproduction
+
+The [official AMD machine-readable ISA page](https://gpuopen.com/machine-readable-isa/)
+provides the [XML archive](https://gpuopen.com/download/machine-readable-isa/latest/).
+The archive checked on 2026-09-23 has XML `Document/ReleaseDate` **2026-08-03**,
+schema **1.2.0**, and SHA-256
+`82404f1126761b7877595b622afa7e1f311f2f41e89a3abe9aaf8ad045c082e2`.
+The `latest` URL changes over time; verify the hash when reproducing this index.
+All 232 numbered mnemonic/opcode rows below match the corresponding XML records,
+including official aliases. This check does not establish table completeness.
+
+| Architecture / target | Engine(s) | XML file in the public archive |
 |---|---|---|
-| CDNA1 | MFMA | official CDNA1 ISA documentation |
-| CDNA2 | MFMA (+F64) | official CDNA2 ISA documentation |
-| CDNA3 | MFMA, SMFMAC | official CDNA3 ISA documentation |
-| CDNA4 | MFMA, SMFMAC | official CDNA4 ISA documentation |
-| RDNA3 | WMMA | official RDNA3 ISA documentation |
-| RDNA3.5 | WMMA | official RDNA3.5 ISA documentation |
-| RDNA4 | WMMA, SWMMAC | official RDNA4 ISA documentation |
-| GFX12 (gfx1250-class) | WMMA, SWMMAC | official ISA / shader programming guide for that part |
+| CDNA1 | MFMA | `amdgpu_isa_cdna1.xml` |
+| CDNA2 | MFMA | `amdgpu_isa_cdna2.xml` |
+| CDNA3 / gfx942 | MFMA, SMFMAC | `amdgpu_isa_cdna3.xml` |
+| CDNA4 / gfx950 | MFMA, SMFMAC | `amdgpu_isa_cdna4.xml` |
+| RDNA3 | WMMA | `amdgpu_isa_rdna3.xml` |
+| RDNA3.5 / gfx1151 | WMMA | `amdgpu_isa_rdna3_5.xml` |
+| RDNA4 / gfx1201 | WMMA, SWMMAC | `amdgpu_isa_rdna4.xml` |
+| gfx1250 | WMMA, SWMMAC | `amdgpu_isa_cdna5.xml` |
 
-> Opcodes are taken from each document's authoritative "VOP3P Opcodes" table. Page
-> numbers are the page index within the source document, and are indicative only —
-> they shift between document revisions. Always confirm against the official ISA
-> document for the architecture you are targeting.
+The last XML identifies itself as **AMD CDNA 5** in
+`ISA/Architecture/ArchitectureName`. rocKE's gfx1250 catalog entry uses
+`family: "cdna"` and `target_family: "gfx12_cdna"`.
 
-**On the last row's label.** This document previously labelled the gfx1250-class part
-inconsistently ("RDNA5" in this table, "CDNA5" in the body). Neither label is used
-here now. rocKE's own architecture SSOT classifies it as `family: "cdna"` with
-`target_family: "gfx12_cdna"` (`core/arch/data/arch_specs.json`) — a CDNA-class device
-on the GFX12 programming model (wave32, WMMA, no MFMA) — and this file uses the
-neutral **GFX12 (gfx1250-class)** throughout to match.
+To locate a row, find its mnemonic under
+`ISA/Instructions/Instruction/InstructionName` (or an official alias), then read
+`InstructionEncodings/InstructionEncoding/Opcode` and `EncodingName`.
+The encoding layout is under `ISA/Encodings/Encoding`. These locators replace
+unversioned PDF page references. Scale helpers have separate encoding records.
+For gfx1250, `ENC_VOP3P` has an eight-bit `OP` field at **[23:16]**; use each
+architecture's encoding record rather than a universal seven-bit mask.
+
+Compiler target restrictions are cross-checked against public
+[ROCm LLVM commit 0586239bb02ac04051622636bcca1c6d34642ad2](https://github.com/ROCm/llvm-project/commit/0586239bb02ac04051622636bcca1c6d34642ad2):
+
+- [XF32 selection predicates](https://github.com/ROCm/llvm-project/blob/0586239bb02ac04051622636bcca1c6d34642ad2/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L1405)
+  and [gfx942 features](https://github.com/ROCm/llvm-project/blob/0586239bb02ac04051622636bcca1c6d34642ad2/llvm/lib/Target/AMDGPU/AMDGPU.td#L2106).
+- [F64 WMMA selection predicate](https://github.com/ROCm/llvm-project/blob/0586239bb02ac04051622636bcca1c6d34642ad2/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L2415)
+  and [gfx1250/gfx1251 features](https://github.com/ROCm/llvm-project/blob/0586239bb02ac04051622636bcca1c6d34642ad2/llvm/lib/Target/AMDGPU/AMDGPU.td#L2516).
+- [VOP3P encoding](https://github.com/ROCm/llvm-project/blob/0586239bb02ac04051622636bcca1c6d34642ad2/llvm/lib/Target/AMDGPU/VOPInstructions.td#L653).
+
+Instruction names follow `V_<engine>_<Cfmt>_<M>X<N>X<K>_<ABfmt>`.
+MFMA and WMMA are dense matrix operations; SMFMAC and SWMMAC are their sparse
+counterparts. Target support depends on processor features and selection
+predicates, not just the presence of an intrinsic.
 
 ---
 
-## CDNA1 — (official CDNA1 ISA documentation)
+## CDNA1
 
-Instruction list p.11; pseudocode pp.156–157; opcode table & definitions pp.258–260.
-
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 65 | V_MFMA_F32_16X16X1F32 | 259 |
-| 64 | V_MFMA_F32_32X32X1F32 | 259 |
-| 66 | V_MFMA_F32_4X4X1F32 | 259 |
-| 68 | V_MFMA_F32_32X32X2F32 | 259 |
-| 69 | V_MFMA_F32_16X16X4F32 | 259 |
-| 73 | V_MFMA_F32_16X16X4F16 | 259 |
-| 77 | V_MFMA_F32_16X16X16F16 | 259 |
-| 72 | V_MFMA_F32_32X32X4F16 | 259 |
-| 76 | V_MFMA_F32_32X32X8F16 | 259 |
-| 74 | V_MFMA_F32_4X4X4F16 | 259 |
-| 105 | V_MFMA_F32_16X16X2BF16 | 260 |
-| 109 | V_MFMA_F32_16X16X8BF16 | 260 |
-| 104 | V_MFMA_F32_32X32X2BF16 | 260 |
-| 108 | V_MFMA_F32_32X32X4BF16 | 260 |
-| 107 | V_MFMA_F32_4X4X2BF16 | 260 |
-| 81 | V_MFMA_I32_16X16X4I8 | 259 |
-| 85 | V_MFMA_I32_16X16X16I8 | 260 |
-| 80 | V_MFMA_I32_32X32X4I8 | 259 |
-| 84 | V_MFMA_I32_32X32X8I8 | 260 |
-| 82 | V_MFMA_I32_4X4X4I8 | 259 |
+| Opcode | Instruction |
+|---:|---|
+| 65 | V_MFMA_F32_16X16X1F32 |
+| 64 | V_MFMA_F32_32X32X1F32 |
+| 66 | V_MFMA_F32_4X4X1F32 |
+| 68 | V_MFMA_F32_32X32X2F32 |
+| 69 | V_MFMA_F32_16X16X4F32 |
+| 73 | V_MFMA_F32_16X16X4F16 |
+| 77 | V_MFMA_F32_16X16X16F16 |
+| 72 | V_MFMA_F32_32X32X4F16 |
+| 76 | V_MFMA_F32_32X32X8F16 |
+| 74 | V_MFMA_F32_4X4X4F16 |
+| 105 | V_MFMA_F32_16X16X2BF16 |
+| 109 | V_MFMA_F32_16X16X8BF16 |
+| 104 | V_MFMA_F32_32X32X2BF16 |
+| 108 | V_MFMA_F32_32X32X4BF16 |
+| 107 | V_MFMA_F32_4X4X2BF16 |
+| 81 | V_MFMA_I32_16X16X4I8 |
+| 85 | V_MFMA_I32_16X16X16I8 |
+| 80 | V_MFMA_I32_32X32X4I8 |
+| 84 | V_MFMA_I32_32X32X8I8 |
+| 82 | V_MFMA_I32_4X4X4I8 |
 
 **Data types:** F32 (from F32/F16/BF16 inputs), I32 (from I8 inputs). No F64. BF16 is the
 original 2-element (non-1K) form.
 
 ---
 
-## CDNA2 — (official CDNA2 ISA documentation)
+## CDNA2
 
-Pseudocode pp.156–157; opcode table & definitions pp.252–254. Adds **FP64** matrix ops
+Adds **FP64** matrix ops
 and the **BF16 "1K"** (full-width bf16) variants relative to CDNA1.
 
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 65 | V_MFMA_F32_16X16X1F32 | 253 |
-| 64 | V_MFMA_F32_32X32X1F32 | 253 |
-| 66 | V_MFMA_F32_4X4X1F32 | 253 |
-| 68 | V_MFMA_F32_32X32X2F32 | 253 |
-| 69 | V_MFMA_F32_16X16X4F32 | 253 |
-| 73 | V_MFMA_F32_16X16X4F16 | 253 |
-| 77 | V_MFMA_F32_16X16X16F16 | 254 |
-| 72 | V_MFMA_F32_32X32X4F16 | 253 |
-| 76 | V_MFMA_F32_32X32X8F16 | 254 |
-| 74 | V_MFMA_F32_4X4X4F16 | 253 |
-| 105 | V_MFMA_F32_16X16X2BF16 | 254 |
-| 109 | V_MFMA_F32_16X16X8BF16 | 254 |
-| 104 | V_MFMA_F32_32X32X2BF16 | 254 |
-| 108 | V_MFMA_F32_32X32X4BF16 | 254 |
-| 107 | V_MFMA_F32_4X4X2BF16 | 254 |
-| 100 | V_MFMA_F32_16X16X4BF16_1K | 254 |
-| 103 | V_MFMA_F32_16X16X16BF16_1K | 254 |
-| 99 | V_MFMA_F32_32X32X4BF16_1K | 254 |
-| 102 | V_MFMA_F32_32X32X8BF16_1K | 254 |
-| 101 | V_MFMA_F32_4X4X4BF16_1K | 254 |
-| 81 | V_MFMA_I32_16X16X4I8 | 254 |
-| 85 | V_MFMA_I32_16X16X16I8 | 254 |
-| 80 | V_MFMA_I32_32X32X4I8 | 254 |
-| 84 | V_MFMA_I32_32X32X8I8 | 254 |
-| 82 | V_MFMA_I32_4X4X4I8 | 254 |
-| 110 | V_MFMA_F64_16X16X4F64 | 254 |
-| 111 | V_MFMA_F64_4X4X4F64 | 254 |
+| Opcode | Instruction |
+|---:|---|
+| 65 | V_MFMA_F32_16X16X1F32 |
+| 64 | V_MFMA_F32_32X32X1F32 |
+| 66 | V_MFMA_F32_4X4X1F32 |
+| 68 | V_MFMA_F32_32X32X2F32 |
+| 69 | V_MFMA_F32_16X16X4F32 |
+| 73 | V_MFMA_F32_16X16X4F16 |
+| 77 | V_MFMA_F32_16X16X16F16 |
+| 72 | V_MFMA_F32_32X32X4F16 |
+| 76 | V_MFMA_F32_32X32X8F16 |
+| 74 | V_MFMA_F32_4X4X4F16 |
+| 105 | V_MFMA_F32_16X16X2BF16 |
+| 109 | V_MFMA_F32_16X16X8BF16 |
+| 104 | V_MFMA_F32_32X32X2BF16 |
+| 108 | V_MFMA_F32_32X32X4BF16 |
+| 107 | V_MFMA_F32_4X4X2BF16 |
+| 100 | V_MFMA_F32_16X16X4BF16_1K |
+| 103 | V_MFMA_F32_16X16X16BF16_1K |
+| 99 | V_MFMA_F32_32X32X4BF16_1K |
+| 102 | V_MFMA_F32_32X32X8BF16_1K |
+| 101 | V_MFMA_F32_4X4X4BF16_1K |
+| 81 | V_MFMA_I32_16X16X4I8 |
+| 85 | V_MFMA_I32_16X16X16I8 |
+| 80 | V_MFMA_I32_32X32X4I8 |
+| 84 | V_MFMA_I32_32X32X8I8 |
+| 82 | V_MFMA_I32_4X4X4I8 |
+| 110 | V_MFMA_F64_16X16X4F64 |
+| 111 | V_MFMA_F64_4X4X4F64 |
 
 **Data types:** F32, I32, **F64** (new), BF16 with 1K variants (new).
 
 ---
 
-## CDNA3 — (official CDNA3 ISA documentation)
+## CDNA3
 
-Instruction definitions pp.269–289; opcode summary table (Table) pp.541–542. Adds
-**XF32** (tf32-like), **FP8/BF8** inputs, and the **SMFMAC** sparse engine.
+Adds **XF32** (tf32-like), **FP8/BF8** inputs, and the **SMFMAC** sparse engine.
 
 ### MFMA
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 62 | V_MFMA_F32_16X16X8_XF32 | 269 |
-| 63 | V_MFMA_F32_32X32X4_XF32 | 270 |
-| 65 | V_MFMA_F32_16X16X1_4B_F32 | 271 |
-| 69 | V_MFMA_F32_16X16X4_F32 | 272 |
-| 64 | V_MFMA_F32_32X32X1_2B_F32 | 270 |
-| 68 | V_MFMA_F32_32X32X2_F32 | 271 |
-| 66 | V_MFMA_F32_4X4X1_16B_F32 | 271 |
-| 73 | V_MFMA_F32_16X16X4_4B_F16 | 273 |
-| 77 | V_MFMA_F32_16X16X16_F16 | 274 |
-| 72 | V_MFMA_F32_32X32X4_2B_F16 | 272 |
-| 76 | V_MFMA_F32_32X32X8_F16 | 273 |
-| 74 | V_MFMA_F32_4X4X4_16B_F16 | 273 |
-| 94 | V_MFMA_F32_16X16X4_4B_BF16 | 277 |
-| 97 | V_MFMA_F32_16X16X16_BF16 | 278 |
-| 93 | V_MFMA_F32_32X32X4_2B_BF16 | 276 |
-| 96 | V_MFMA_F32_32X32X8_BF16 | 278 |
-| 95 | V_MFMA_F32_4X4X4_16B_BF16 | 277 |
-| 112 | V_MFMA_F32_16X16X32_BF8_BF8 | 282 |
-| 113 | V_MFMA_F32_16X16X32_BF8_FP8 | 283 |
-| 114 | V_MFMA_F32_16X16X32_FP8_BF8 | 283 |
-| 115 | V_MFMA_F32_16X16X32_FP8_FP8 | 283 |
-| 116 | V_MFMA_F32_32X32X16_BF8_BF8 | 284 |
-| 117 | V_MFMA_F32_32X32X16_BF8_FP8 | 284 |
-| 118 | V_MFMA_F32_32X32X16_FP8_BF8 | 285 |
-| 119 | V_MFMA_F32_32X32X16_FP8_FP8 | 285 |
-| 81 | V_MFMA_I32_16X16X4_4B_I8 | 275 |
-| 87 | V_MFMA_I32_16X16X32_I8 | 276 |
-| 80 | V_MFMA_I32_32X32X4_2B_I8 | 274 |
-| 86 | V_MFMA_I32_32X32X16_I8 | 275 |
-| 82 | V_MFMA_I32_4X4X4_16B_I8 | 275 |
-| 110 | V_MFMA_F64_16X16X4_F64 | 281 |
-| 111 | V_MFMA_F64_4X4X4_4B_F64 | 282 |
+| Opcode | Instruction |
+|---:|---|
+| 62 | V_MFMA_F32_16X16X8_XF32 |
+| 63 | V_MFMA_F32_32X32X4_XF32 |
+| 65 | V_MFMA_F32_16X16X1_4B_F32 |
+| 69 | V_MFMA_F32_16X16X4_F32 |
+| 64 | V_MFMA_F32_32X32X1_2B_F32 |
+| 68 | V_MFMA_F32_32X32X2_F32 |
+| 66 | V_MFMA_F32_4X4X1_16B_F32 |
+| 73 | V_MFMA_F32_16X16X4_4B_F16 |
+| 77 | V_MFMA_F32_16X16X16_F16 |
+| 72 | V_MFMA_F32_32X32X4_2B_F16 |
+| 76 | V_MFMA_F32_32X32X8_F16 |
+| 74 | V_MFMA_F32_4X4X4_16B_F16 |
+| 94 | V_MFMA_F32_16X16X4_4B_BF16 |
+| 97 | V_MFMA_F32_16X16X16_BF16 |
+| 93 | V_MFMA_F32_32X32X4_2B_BF16 |
+| 96 | V_MFMA_F32_32X32X8_BF16 |
+| 95 | V_MFMA_F32_4X4X4_16B_BF16 |
+| 112 | V_MFMA_F32_16X16X32_BF8_BF8 |
+| 113 | V_MFMA_F32_16X16X32_BF8_FP8 |
+| 114 | V_MFMA_F32_16X16X32_FP8_BF8 |
+| 115 | V_MFMA_F32_16X16X32_FP8_FP8 |
+| 116 | V_MFMA_F32_32X32X16_BF8_BF8 |
+| 117 | V_MFMA_F32_32X32X16_BF8_FP8 |
+| 118 | V_MFMA_F32_32X32X16_FP8_BF8 |
+| 119 | V_MFMA_F32_32X32X16_FP8_FP8 |
+| 81 | V_MFMA_I32_16X16X4_4B_I8 |
+| 87 | V_MFMA_I32_16X16X32_I8 |
+| 80 | V_MFMA_I32_32X32X4_2B_I8 |
+| 86 | V_MFMA_I32_32X32X16_I8 |
+| 82 | V_MFMA_I32_4X4X4_16B_I8 |
+| 110 | V_MFMA_F64_16X16X4_F64 |
+| 111 | V_MFMA_F64_4X4X4_4B_F64 |
 
 ### SMFMAC (sparse)
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 98 | V_SMFMAC_F32_16X16X32_F16 | 278 |
-| 100 | V_SMFMAC_F32_32X32X16_F16 | 279 |
-| 102 | V_SMFMAC_F32_16X16X32_BF16 | 279 |
-| 104 | V_SMFMAC_F32_32X32X16_BF16 | 280 |
-| 106 | V_SMFMAC_I32_16X16X64_I8 | 280 |
-| 108 | V_SMFMAC_I32_32X32X32_I8 | 281 |
-| 120 | V_SMFMAC_F32_16X16X64_BF8_BF8 | 285 |
-| 121 | V_SMFMAC_F32_16X16X64_BF8_FP8 | 286 |
-| 122 | V_SMFMAC_F32_16X16X64_FP8_BF8 | 286 |
-| 123 | V_SMFMAC_F32_16X16X64_FP8_FP8 | 287 |
-| 124 | V_SMFMAC_F32_32X32X32_BF8_BF8 | 287 |
-| 125 | V_SMFMAC_F32_32X32X32_BF8_FP8 | 288 |
-| 126 | V_SMFMAC_F32_32X32X32_FP8_BF8 | 288 |
-| 127 | V_SMFMAC_F32_32X32X32_FP8_FP8 | 289 |
+| Opcode | Instruction |
+|---:|---|
+| 98 | V_SMFMAC_F32_16X16X32_F16 |
+| 100 | V_SMFMAC_F32_32X32X16_F16 |
+| 102 | V_SMFMAC_F32_16X16X32_BF16 |
+| 104 | V_SMFMAC_F32_32X32X16_BF16 |
+| 106 | V_SMFMAC_I32_16X16X64_I8 |
+| 108 | V_SMFMAC_I32_32X32X32_I8 |
+| 120 | V_SMFMAC_F32_16X16X64_BF8_BF8 |
+| 121 | V_SMFMAC_F32_16X16X64_BF8_FP8 |
+| 122 | V_SMFMAC_F32_16X16X64_FP8_BF8 |
+| 123 | V_SMFMAC_F32_16X16X64_FP8_FP8 |
+| 124 | V_SMFMAC_F32_32X32X32_BF8_BF8 |
+| 125 | V_SMFMAC_F32_32X32X32_BF8_FP8 |
+| 126 | V_SMFMAC_F32_32X32X32_FP8_BF8 |
+| 127 | V_SMFMAC_F32_32X32X32_FP8_FP8 |
 
 **Data types:** F32, F64, I32/I8, **XF32** (CDNA3-only among these parts), **FP8/BF8**;
 sparse via SMFMAC.
 
 ---
 
-## CDNA4 — (official CDNA4 ISA documentation)
+## CDNA4
 
-Instruction definitions pp.286–316; opcode summary Table 90 pp.596–597. Adds the
-**F8F6F4** mixed narrow-precision ops (with **scale** variants) and wider-K formats.
+Adds **F8F6F4** mixed narrow-precision ops (with **scale** variants) and wider-K formats.
 **Note:** CDNA4 does **not** provide XF32 — those opcode slots (62/63) are removed.
 
 ### MFMA
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 65 | V_MFMA_F32_16X16X1_4B_F32 | 293 |
-| 69 | V_MFMA_F32_16X16X4_F32 | 295 |
-| 64 | V_MFMA_F32_32X32X1_2B_F32 | 292 |
-| 68 | V_MFMA_F32_32X32X2_F32 | 294 |
-| 66 | V_MFMA_F32_4X4X1_16B_F32 | 293 |
-| 73 | V_MFMA_F32_16X16X4_4B_F16 | 296 |
-| 77 | V_MFMA_F32_16X16X16_F16 | 298 |
-| 84 | V_MFMA_F32_16X16X32_F16 | 301 |
-| 72 | V_MFMA_F32_32X32X4_2B_F16 | 296 |
-| 76 | V_MFMA_F32_32X32X8_F16 | 298 |
-| 85 | V_MFMA_F32_32X32X16_F16 | 302 |
-| 74 | V_MFMA_F32_4X4X4_16B_F16 | 297 |
-| 94 | V_MFMA_F32_16X16X4_4B_BF16 | 304 |
-| 97 | V_MFMA_F32_16X16X16_BF16 | 306 |
-| 53 | V_MFMA_F32_16X16X32_BF16 | 288 |
-| 93 | V_MFMA_F32_32X32X4_2B_BF16 | 304 |
-| 96 | V_MFMA_F32_32X32X8_BF16 | 305 |
-| 55 | V_MFMA_F32_32X32X16_BF16 | 289 |
-| 95 | V_MFMA_F32_4X4X4_16B_BF16 | 305 |
-| 112 | V_MFMA_F32_16X16X32_BF8_BF8 | 310 |
-| 113 | V_MFMA_F32_16X16X32_BF8_FP8 | 310 |
-| 114 | V_MFMA_F32_16X16X32_FP8_BF8 | 310 |
-| 115 | V_MFMA_F32_16X16X32_FP8_FP8 | 311 |
-| 116 | V_MFMA_F32_32X32X16_BF8_BF8 | 311 |
-| 117 | V_MFMA_F32_32X32X16_BF8_FP8 | 312 |
-| 118 | V_MFMA_F32_32X32X16_FP8_BF8 | 312 |
-| 119 | V_MFMA_F32_32X32X16_FP8_FP8 | 312 |
-| 45 | V_MFMA_F32_16X16X128_F8F6F4 | 286 |
-| 46 | V_MFMA_F32_32X32X64_F8F6F4 | 286 |
-| 81 | V_MFMA_I32_16X16X4_4B_I8 | 300 |
-| 87 | V_MFMA_I32_16X16X32_I8 | 302 |
-| 54 | V_MFMA_I32_16X16X64_I8 | 289 |
-| 80 | V_MFMA_I32_32X32X4_2B_I8 | 299 |
-| 86 | V_MFMA_I32_32X32X16_I8 | 302 |
-| 56 | V_MFMA_I32_32X32X32_I8 | 289 |
-| 82 | V_MFMA_I32_4X4X4_16B_I8 | 300 |
-| 110 | V_MFMA_F64_16X16X4_F64 | 309 |
-| 111 | V_MFMA_F64_4X4X4_4B_F64 | 309 |
+| Opcode | Instruction |
+|---:|---|
+| 65 | V_MFMA_F32_16X16X1_4B_F32 |
+| 69 | V_MFMA_F32_16X16X4_F32 |
+| 64 | V_MFMA_F32_32X32X1_2B_F32 |
+| 68 | V_MFMA_F32_32X32X2_F32 |
+| 66 | V_MFMA_F32_4X4X1_16B_F32 |
+| 73 | V_MFMA_F32_16X16X4_4B_F16 |
+| 77 | V_MFMA_F32_16X16X16_F16 |
+| 84 | V_MFMA_F32_16X16X32_F16 |
+| 72 | V_MFMA_F32_32X32X4_2B_F16 |
+| 76 | V_MFMA_F32_32X32X8_F16 |
+| 85 | V_MFMA_F32_32X32X16_F16 |
+| 74 | V_MFMA_F32_4X4X4_16B_F16 |
+| 94 | V_MFMA_F32_16X16X4_4B_BF16 |
+| 97 | V_MFMA_F32_16X16X16_BF16 |
+| 53 | V_MFMA_F32_16X16X32_BF16 |
+| 93 | V_MFMA_F32_32X32X4_2B_BF16 |
+| 96 | V_MFMA_F32_32X32X8_BF16 |
+| 55 | V_MFMA_F32_32X32X16_BF16 |
+| 95 | V_MFMA_F32_4X4X4_16B_BF16 |
+| 112 | V_MFMA_F32_16X16X32_BF8_BF8 |
+| 113 | V_MFMA_F32_16X16X32_BF8_FP8 |
+| 114 | V_MFMA_F32_16X16X32_FP8_BF8 |
+| 115 | V_MFMA_F32_16X16X32_FP8_FP8 |
+| 116 | V_MFMA_F32_32X32X16_BF8_BF8 |
+| 117 | V_MFMA_F32_32X32X16_BF8_FP8 |
+| 118 | V_MFMA_F32_32X32X16_FP8_BF8 |
+| 119 | V_MFMA_F32_32X32X16_FP8_FP8 |
+| 45 | V_MFMA_F32_16X16X128_F8F6F4 |
+| 46 | V_MFMA_F32_32X32X64_F8F6F4 |
+| 81 | V_MFMA_I32_16X16X4_4B_I8 |
+| 87 | V_MFMA_I32_16X16X32_I8 |
+| 54 | V_MFMA_I32_16X16X64_I8 |
+| 80 | V_MFMA_I32_32X32X4_2B_I8 |
+| 86 | V_MFMA_I32_32X32X16_I8 |
+| 56 | V_MFMA_I32_32X32X32_I8 |
+| 82 | V_MFMA_I32_4X4X4_16B_I8 |
+| 110 | V_MFMA_F64_16X16X4_F64 |
+| 111 | V_MFMA_F64_4X4X4_4B_F64 |
 
 ### MFMA with scale (F8F6F4 microscaling)
-Encoding uses the scale form; described pp.59, 64 (definitions p.286).
+See the scale encoding records in the XML.
 
-| Instruction | Ref. page |
-|---|---:|
-| V_MFMA_SCALE_F32_16X16X128_F8F6F4 | 59, 64 |
-| V_MFMA_SCALE_F32_32X32X64_F8F6F4 | 59, 64 |
+| Instruction |
+|---|
+| V_MFMA_SCALE_F32_16X16X128_F8F6F4 |
+| V_MFMA_SCALE_F32_32X32X64_F8F6F4 |
 
 ### SMFMAC (sparse)
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 98 | V_SMFMAC_F32_16X16X32_F16 | 306 |
-| 100 | V_SMFMAC_F32_32X32X16_F16 | 306 |
-| 90 | V_SMFMAC_F32_16X16X64_F16 | 303 |
-| 91 | V_SMFMAC_F32_32X32X32_F16 | 303 |
-| 102 | V_SMFMAC_F32_16X16X32_BF16 | 307 |
-| 104 | V_SMFMAC_F32_32X32X16_BF16 | 307 |
-| 57 | V_SMFMAC_F32_16X16X64_BF16 | 290 |
-| 70 | V_SMFMAC_F32_32X32X32_BF16 | 295 |
-| 106 | V_SMFMAC_I32_16X16X64_I8 | 308 |
-| 108 | V_SMFMAC_I32_32X32X32_I8 | 308 |
-| 58 | V_SMFMAC_I32_16X16X128_I8 | 290 |
-| 71 | V_SMFMAC_I32_32X32X64_I8 | 295 |
-| 120 | V_SMFMAC_F32_16X16X64_BF8_BF8 | 313 |
-| 121 | V_SMFMAC_F32_16X16X64_BF8_FP8 | 313 |
-| 122 | V_SMFMAC_F32_16X16X64_FP8_BF8 | 314 |
-| 123 | V_SMFMAC_F32_16X16X64_FP8_FP8 | 314 |
-| 124 | V_SMFMAC_F32_32X32X32_BF8_BF8 | 315 |
-| 125 | V_SMFMAC_F32_32X32X32_BF8_FP8 | 315 |
-| 126 | V_SMFMAC_F32_32X32X32_FP8_BF8 | 316 |
-| 127 | V_SMFMAC_F32_32X32X32_FP8_FP8 | 316 |
-| 59 | V_SMFMAC_F32_16X16X128_BF8_BF8 | 291 |
-| 60 | V_SMFMAC_F32_16X16X128_BF8_FP8 | 291 |
-| 61 | V_SMFMAC_F32_16X16X128_FP8_BF8 | 292 |
-| 67 | V_SMFMAC_F32_16X16X128_FP8_FP8 | 294 |
-| 75 | V_SMFMAC_F32_32X32X64_BF8_BF8 | 297 |
-| 78 | V_SMFMAC_F32_32X32X64_BF8_FP8 | 298 |
-| 79 | V_SMFMAC_F32_32X32X64_FP8_BF8 | 299 |
-| 83 | V_SMFMAC_F32_32X32X64_FP8_FP8 | 301 |
+| Opcode | Instruction |
+|---:|---|
+| 98 | V_SMFMAC_F32_16X16X32_F16 |
+| 100 | V_SMFMAC_F32_32X32X16_F16 |
+| 90 | V_SMFMAC_F32_16X16X64_F16 |
+| 91 | V_SMFMAC_F32_32X32X32_F16 |
+| 102 | V_SMFMAC_F32_16X16X32_BF16 |
+| 104 | V_SMFMAC_F32_32X32X16_BF16 |
+| 57 | V_SMFMAC_F32_16X16X64_BF16 |
+| 70 | V_SMFMAC_F32_32X32X32_BF16 |
+| 106 | V_SMFMAC_I32_16X16X64_I8 |
+| 108 | V_SMFMAC_I32_32X32X32_I8 |
+| 58 | V_SMFMAC_I32_16X16X128_I8 |
+| 71 | V_SMFMAC_I32_32X32X64_I8 |
+| 120 | V_SMFMAC_F32_16X16X64_BF8_BF8 |
+| 121 | V_SMFMAC_F32_16X16X64_BF8_FP8 |
+| 122 | V_SMFMAC_F32_16X16X64_FP8_BF8 |
+| 123 | V_SMFMAC_F32_16X16X64_FP8_FP8 |
+| 124 | V_SMFMAC_F32_32X32X32_BF8_BF8 |
+| 125 | V_SMFMAC_F32_32X32X32_BF8_FP8 |
+| 126 | V_SMFMAC_F32_32X32X32_FP8_BF8 |
+| 127 | V_SMFMAC_F32_32X32X32_FP8_FP8 |
+| 59 | V_SMFMAC_F32_16X16X128_BF8_BF8 |
+| 60 | V_SMFMAC_F32_16X16X128_BF8_FP8 |
+| 61 | V_SMFMAC_F32_16X16X128_FP8_BF8 |
+| 67 | V_SMFMAC_F32_16X16X128_FP8_FP8 |
+| 75 | V_SMFMAC_F32_32X32X64_BF8_BF8 |
+| 78 | V_SMFMAC_F32_32X32X64_BF8_FP8 |
+| 79 | V_SMFMAC_F32_32X32X64_FP8_BF8 |
+| 83 | V_SMFMAC_F32_32X32X64_FP8_FP8 |
 
 **Data types:** F32, F64, I32/I8, FP8/BF8, and **F8F6F4** mixed narrow formats with
 per-block **scaling** (microscaling / MX). **No XF32.**
 
 ---
 
-## RDNA3 — (official RDNA3 ISA documentation)
+## RDNA3
 
-First RDNA generation with WMMA. Encoding p.75; pseudocode pp.82–84; definitions
-pp.367–368.
+First RDNA generation with WMMA.
 
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 64 | V_WMMA_F32_16X16X16_F16 | 367 |
-| 65 | V_WMMA_F32_16X16X16_BF16 | 367 |
-| 66 | V_WMMA_F16_16X16X16_F16 | 367 |
-| 67 | V_WMMA_BF16_16X16X16_BF16 | 368 |
-| 68 | V_WMMA_I32_16X16X16_IU8 | 368 |
-| 69 | V_WMMA_I32_16X16X16_IU4 | 368 |
+| Opcode | Instruction |
+|---:|---|
+| 64 | V_WMMA_F32_16X16X16_F16 |
+| 65 | V_WMMA_F32_16X16X16_BF16 |
+| 66 | V_WMMA_F16_16X16X16_F16 |
+| 67 | V_WMMA_BF16_16X16X16_BF16 |
+| 68 | V_WMMA_I32_16X16X16_IU8 |
+| 69 | V_WMMA_I32_16X16X16_IU4 |
 
 **Data types:** F16, BF16, IU8, IU4. Single 16x16x16 shape. No sparsity.
 
 ---
 
-## RDNA3.5 — (official RDNA3.5 ISA documentation)
+## RDNA3.5
 
-Same WMMA set and opcodes as RDNA3. Encoding p.77; pseudocode pp.84–86; definitions
-pp.390–392.
+Same WMMA set and opcodes as RDNA3.
 
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 64 | V_WMMA_F32_16X16X16_F16 | 390 |
-| 65 | V_WMMA_F32_16X16X16_BF16 | 390 |
-| 66 | V_WMMA_F16_16X16X16_F16 | 391 |
-| 67 | V_WMMA_BF16_16X16X16_BF16 | 391 |
-| 68 | V_WMMA_I32_16X16X16_IU8 | 392 |
-| 69 | V_WMMA_I32_16X16X16_IU4 | 392 |
+| Opcode | Instruction |
+|---:|---|
+| 64 | V_WMMA_F32_16X16X16_F16 |
+| 65 | V_WMMA_F32_16X16X16_BF16 |
+| 66 | V_WMMA_F16_16X16X16_F16 |
+| 67 | V_WMMA_BF16_16X16X16_BF16 |
+| 68 | V_WMMA_I32_16X16X16_IU8 |
+| 69 | V_WMMA_I32_16X16X16_IU4 |
 
 **Data types:** F16, BF16, IU8, IU4. Identical WMMA capability to RDNA3.
 
 ---
 
-## RDNA4 — (official RDNA4 ISA documentation)
+## RDNA4
 
-Adds **FP8/BF8** WMMA, larger-K IU4, and the **SWMMAC** sparse engine. Encoding p.100;
-opcode table (Table 98) p.198; definitions pp.409–419.
+Adds **FP8/BF8** WMMA, larger-K IU4, and the **SWMMAC** sparse engine.
 
 ### WMMA
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 64 | V_WMMA_F32_16X16X16_F16 | 409 |
-| 65 | V_WMMA_F32_16X16X16_BF16 | 409 |
-| 66 | V_WMMA_F16_16X16X16_F16 | 410 |
-| 67 | V_WMMA_BF16_16X16X16_BF16 | 410 |
-| 68 | V_WMMA_I32_16X16X16_IU8 | 411 |
-| 69 | V_WMMA_I32_16X16X16_IU4 | 411 |
-| 70 | V_WMMA_F32_16X16X16_FP8_FP8 | 411 |
-| 71 | V_WMMA_F32_16X16X16_FP8_BF8 | 412 |
-| 72 | V_WMMA_F32_16X16X16_BF8_FP8 | 412 |
-| 73 | V_WMMA_F32_16X16X16_BF8_BF8 | 413 |
-| 74 | V_WMMA_I32_16X16X32_IU4 | 413 |
+| Opcode | Instruction |
+|---:|---|
+| 64 | V_WMMA_F32_16X16X16_F16 |
+| 65 | V_WMMA_F32_16X16X16_BF16 |
+| 66 | V_WMMA_F16_16X16X16_F16 |
+| 67 | V_WMMA_BF16_16X16X16_BF16 |
+| 68 | V_WMMA_I32_16X16X16_IU8 |
+| 69 | V_WMMA_I32_16X16X16_IU4 |
+| 70 | V_WMMA_F32_16X16X16_FP8_FP8 |
+| 71 | V_WMMA_F32_16X16X16_FP8_BF8 |
+| 72 | V_WMMA_F32_16X16X16_BF8_FP8 |
+| 73 | V_WMMA_F32_16X16X16_BF8_BF8 |
+| 74 | V_WMMA_I32_16X16X32_IU4 |
 
 ### SWMMAC (sparse)
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 80 | V_SWMMAC_F32_16X16X32_F16 | 414 |
-| 81 | V_SWMMAC_F32_16X16X32_BF16 | 414 |
-| 82 | V_SWMMAC_F16_16X16X32_F16 | 415 |
-| 83 | V_SWMMAC_BF16_16X16X32_BF16 | 415 |
-| 84 | V_SWMMAC_I32_16X16X32_IU8 | 416 |
-| 85 | V_SWMMAC_I32_16X16X32_IU4 | 416 |
-| 86 | V_SWMMAC_I32_16X16X64_IU4 | 417 |
-| 87 | V_SWMMAC_F32_16X16X32_FP8_FP8 | 417 |
-| 88 | V_SWMMAC_F32_16X16X32_FP8_BF8 | 418 |
-| 89 | V_SWMMAC_F32_16X16X32_BF8_FP8 | 419 |
-| 90 | V_SWMMAC_F32_16X16X32_BF8_BF8 | 419 |
+| Opcode | Instruction |
+|---:|---|
+| 80 | V_SWMMAC_F32_16X16X32_F16 |
+| 81 | V_SWMMAC_F32_16X16X32_BF16 |
+| 82 | V_SWMMAC_F16_16X16X32_F16 |
+| 83 | V_SWMMAC_BF16_16X16X32_BF16 |
+| 84 | V_SWMMAC_I32_16X16X32_IU8 |
+| 85 | V_SWMMAC_I32_16X16X32_IU4 |
+| 86 | V_SWMMAC_I32_16X16X64_IU4 |
+| 87 | V_SWMMAC_F32_16X16X32_FP8_FP8 |
+| 88 | V_SWMMAC_F32_16X16X32_FP8_BF8 |
+| 89 | V_SWMMAC_F32_16X16X32_BF8_FP8 |
+| 90 | V_SWMMAC_F32_16X16X32_BF8_BF8 |
 
 **Data types:** F16, BF16, IU8, IU4, **FP8/BF8** (new); **sparsity via SWMMAC** (new).
 No XF32.
 
 ---
 
-## GFX12 (gfx1250-class) — (official ISA / shader programming guide for that part)
+## gfx1250
 
 This part uses the **WMMA / SWMMAC** naming (not MFMA), consistent with rocKE's
 `arch_specs.json` entry for `gfx1250` (`family: "cdna"`, `target_family:
 "gfx12_cdna"`, `has_mfma: false`, `has_wmma: true`). It expands supported shapes and
-formats, adds **F64 WMMA**, **F8F6F4/FP4** with per-block scaling (`V_WMMA_SCALE*` /
-`V_WMMA_LD_SCALE*`). Instruction list pp.15–17; register/operation details pp.154–168;
-opcode summary table pp.330–331.
+formats, and adds **F8F6F4/FP4** with per-block scaling (`V_WMMA_SCALE*` /
+`V_WMMA_LD_SCALE*`).
 
-> This part **explicitly removes TF32/XF32 WMMA support** (p.10) and adds WMMA MXFP
-> block-size-16 support.
+> No native XF32 or F64 matrix instruction is present in this XML. LLVM gates
+> `V_WMMA_F64_16X16X4_F64` on `gfx1251-gemm-insts`, which gfx1250 lacks
+> (see the pinned sources above). It is not an unwired gfx1250 capability.
 
 ### WMMA (dense)
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 93 | V_WMMA_F32_16X16X4_F32 | 154 |
-| 96 | V_WMMA_F32_16X16X32_F16 | 154 |
-| 97 | V_WMMA_F16_16X16X32_F16 | 154 |
-| 98 | V_WMMA_F32_16X16X32_BF16 | 154 |
-| 99 | V_WMMA_BF16_16X16X32_BF16 | 154 |
-| 100 | V_WMMA_BF16F32_16X16X32_BF16 | 154 |
-| 114 | V_WMMA_I32_16X16X64_IU8 | 154 |
-| 106 | V_WMMA_F32_16X16X64_FP8_FP8 | 154 |
-| 107 | V_WMMA_F32_16X16X64_FP8_BF8 | 154 |
-| 108 | V_WMMA_F32_16X16X64_BF8_FP8 | 154 |
-| 109 | V_WMMA_F32_16X16X64_BF8_BF8 | 154 |
-| 110 | V_WMMA_F16_16X16X64_FP8_FP8 | 154 |
-| 111 | V_WMMA_F16_16X16X64_FP8_BF8 | 154 |
-| 112 | V_WMMA_F16_16X16X64_BF8_FP8 | 154 |
-| 113 | V_WMMA_F16_16X16X64_BF8_BF8 | 154 |
-| 128 | V_WMMA_F32_16X16X128_FP8_FP8 | 154 |
-| 129 | V_WMMA_F32_16X16X128_FP8_BF8 | 154 |
-| 130 | V_WMMA_F32_16X16X128_BF8_FP8 | 154 |
-| 131 | V_WMMA_F32_16X16X128_BF8_BF8 | 154 |
-| 132 | V_WMMA_F16_16X16X128_FP8_FP8 | 154 |
-| 133 | V_WMMA_F16_16X16X128_FP8_BF8 | 154 |
-| 134 | V_WMMA_F16_16X16X128_BF8_FP8 | 154 |
-| 135 | V_WMMA_F16_16X16X128_BF8_BF8 | 154 |
-| 51 | V_WMMA_F32_16X16X128_F8F6F4 | 155 |
-| 136 | V_WMMA_F32_32X16X128_F4 | 155 |
-| 91 | V_WMMA_F64_16X16X4_F64 | 154 |
+| Opcode | Instruction |
+|---:|---|
+| 93 | V_WMMA_F32_16X16X4_F32 |
+| 96 | V_WMMA_F32_16X16X32_F16 |
+| 97 | V_WMMA_F16_16X16X32_F16 |
+| 98 | V_WMMA_F32_16X16X32_BF16 |
+| 99 | V_WMMA_BF16_16X16X32_BF16 |
+| 100 | V_WMMA_BF16F32_16X16X32_BF16 |
+| 114 | V_WMMA_I32_16X16X64_IU8 |
+| 106 | V_WMMA_F32_16X16X64_FP8_FP8 |
+| 107 | V_WMMA_F32_16X16X64_FP8_BF8 |
+| 108 | V_WMMA_F32_16X16X64_BF8_FP8 |
+| 109 | V_WMMA_F32_16X16X64_BF8_BF8 |
+| 110 | V_WMMA_F16_16X16X64_FP8_FP8 |
+| 111 | V_WMMA_F16_16X16X64_FP8_BF8 |
+| 112 | V_WMMA_F16_16X16X64_BF8_FP8 |
+| 113 | V_WMMA_F16_16X16X64_BF8_BF8 |
+| 128 | V_WMMA_F32_16X16X128_FP8_FP8 |
+| 129 | V_WMMA_F32_16X16X128_FP8_BF8 |
+| 130 | V_WMMA_F32_16X16X128_BF8_FP8 |
+| 131 | V_WMMA_F32_16X16X128_BF8_BF8 |
+| 132 | V_WMMA_F16_16X16X128_FP8_FP8 |
+| 133 | V_WMMA_F16_16X16X128_FP8_BF8 |
+| 134 | V_WMMA_F16_16X16X128_BF8_FP8 |
+| 135 | V_WMMA_F16_16X16X128_BF8_BF8 |
+| 51 | V_WMMA_F32_16X16X128_F8F6F4 |
+| 136 | V_WMMA_F32_32X16X128_F4 |
 
 ### SWMMAC (sparse)
-| Opcode | Instruction | Def. page |
-|---:|---|---:|
-| 101 | V_SWMMAC_F32_16X16X64_F16 | 154 |
-| 102 | V_SWMMAC_F32_16X16X64_BF16 | 154 |
-| 103 | V_SWMMAC_F16_16X16X64_F16 | 154 |
-| 104 | V_SWMMAC_BF16_16X16X64_BF16 | 154 |
-| 105 | V_SWMMAC_BF16F32_16X16X64_BF16 | 154 |
-| 123 | V_SWMMAC_I32_16X16X128_IU8 | 154 |
-| 115 | V_SWMMAC_F32_16X16X128_FP8_FP8 | 154 |
-| 116 | V_SWMMAC_F32_16X16X128_FP8_BF8 | 154 |
-| 117 | V_SWMMAC_F32_16X16X128_BF8_FP8 | 154 |
-| 118 | V_SWMMAC_F32_16X16X128_BF8_BF8 | 154 |
-| 119 | V_SWMMAC_F16_16X16X128_FP8_FP8 | 154 |
-| 120 | V_SWMMAC_F16_16X16X128_FP8_BF8 | 154 |
-| 121 | V_SWMMAC_F16_16X16X128_BF8_FP8 | 154 |
-| 122 | V_SWMMAC_F16_16X16X128_BF8_BF8 | 154 |
+| Opcode | Instruction |
+|---:|---|
+| 101 | V_SWMMAC_F32_16X16X64_F16 |
+| 102 | V_SWMMAC_F32_16X16X64_BF16 |
+| 103 | V_SWMMAC_F16_16X16X64_F16 |
+| 104 | V_SWMMAC_BF16_16X16X64_BF16 |
+| 105 | V_SWMMAC_BF16F32_16X16X64_BF16 |
+| 123 | V_SWMMAC_I32_16X16X128_IU8 |
+| 115 | V_SWMMAC_F32_16X16X128_FP8_FP8 |
+| 116 | V_SWMMAC_F32_16X16X128_FP8_BF8 |
+| 117 | V_SWMMAC_F32_16X16X128_BF8_FP8 |
+| 118 | V_SWMMAC_F32_16X16X128_BF8_BF8 |
+| 119 | V_SWMMAC_F16_16X16X128_FP8_FP8 |
+| 120 | V_SWMMAC_F16_16X16X128_FP8_BF8 |
+| 121 | V_SWMMAC_F16_16X16X128_BF8_FP8 |
+| 122 | V_SWMMAC_F16_16X16X128_BF8_BF8 |
 
 ### WMMA scale helpers (F8F6F4 / microscaling — separate encoding)
-| Instruction | Ref. page |
-|---|---:|
-| V_WMMA_SCALE_F32_16X16X128_F8F6F4 | 163, 166 |
-| V_WMMA_SCALE_F32_32X16X128_F4 | 163, 166 |
-| V_WMMA_SCALE16_F32_16X16X128_F8F6F4 | 163, 166 |
-| V_WMMA_SCALE16_F32_32X16X128_F4 | 163, 166 |
-| V_WMMA_LD_SCALE_B32 | 167 |
-| V_WMMA_LD_SCALE_PAIRED_B32 | 167 |
-| V_WMMA_LD_SCALE16_B64 | 167 |
-| V_WMMA_LD_SCALE16_PAIRED_B64 | 167 |
+| Instruction |
+|---|
+| V_WMMA_SCALE_F32_16X16X128_F8F6F4 |
+| V_WMMA_SCALE_F32_32X16X128_F4 |
+| V_WMMA_SCALE16_F32_16X16X128_F8F6F4 |
+| V_WMMA_SCALE16_F32_32X16X128_F4 |
+| V_WMMA_LD_SCALE_B32 |
+| V_WMMA_LD_SCALE_PAIRED_B32 |
+| V_WMMA_LD_SCALE16_B64 |
+| V_WMMA_LD_SCALE16_PAIRED_B64 |
 
-**Data types:** F16, BF16, F32, **F64**, IU8, FP8/BF8, and **F8F6F4 & FP4** with
-per-block **scale** operands. **No XF32/TF32.** (p.15 also lists reduced-K legacy-shape
-16X16X16 / 16X16X32 variants for compatibility.)
+**Data types:** F16, BF16, F32, IU8, FP8/BF8, and **F8F6F4 & FP4** with
+per-block **scale** operands. **No native XF32/TF32 or F64 matrix instruction.**
 
 > **IU4 is not listed above on purpose.** The dense opcode table for this part
 > enumerates `V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8` only — no
@@ -428,7 +447,7 @@ per-block **scale** operands. **No XF32/TF32.** (p.15 also lists reduced-K legac
 
 ## Cross-architecture capability summary
 
-| Feature | CDNA1 | CDNA2 | CDNA3 | CDNA4 | RDNA3 | RDNA3.5 | RDNA4 | GFX12 (gfx1250-class) |
+| Feature | CDNA1 | CDNA2 | CDNA3 | CDNA4 | RDNA3 | RDNA3.5 | RDNA4 | gfx1250 |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | Engine | MFMA | MFMA | MFMA | MFMA | WMMA | WMMA | WMMA | WMMA |
 | F32 accum | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -436,7 +455,7 @@ per-block **scale** operands. **No XF32/TF32.** (p.15 also lists reduced-K legac
 | BF16 in | ✅ | ✅ (1K) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | INT8 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | INT4 | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❓ |
-| FP64 | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
+| FP64 | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **XF32 / TF32** | ❌ | ❌ | **✅** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | FP8/BF8 | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
 | F8F6F4 / FP4 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
@@ -445,12 +464,9 @@ per-block **scale** operands. **No XF32/TF32.** (p.15 also lists reduced-K legac
 
 `❓` = not located in the source document's opcode table; see the per-section note.
 
-**XF32 note:** XF32 (AMD's tf32-equivalent, `V_MFMA_F32_16X16X8_XF32` = opcode 62 and
-`V_MFMA_F32_32X32X4_XF32` = opcode 63) is documented **only in CDNA3**. CDNA4 removes
-it, and the gfx1250-class guide explicitly states TF32/XF32 WMMA support is removed.
-RDNA parts never had it. **There is therefore no TF32-class matrix instruction on any
-architecture rocKE currently targets.**
-
-*Opcodes are the VOP3P `OP` field from each ISA's opcode table. Page references are
-indicative page indices within the source document and shift between revisions —
-refer to the official AMD ISA document for the corresponding architecture.*
+**XF32 note:** `V_MFMA_F32_16X16X8_XF32` (opcode 62) and
+`V_MFMA_F32_32X32X4_XF32` (opcode 63) are present on gfx942, a supported rocKE
+target. The catalog does not yet expose XF32 atoms. gfx950 and gfx1250 have no
+native XF32 instruction in the public XML or pinned LLVM target features.
+BF16 compute has a different precision contract; native XF32 absence does not
+rule out software implementations of TF32 semantics.
