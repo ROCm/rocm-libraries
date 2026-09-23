@@ -46,10 +46,15 @@ CK_TILE_HOST_DEVICE constexpr index_t integer_log2_exact()
 // it picks the coarsest stride that still divides the row (80 -> 16 dwords).
 CK_TILE_HOST_DEVICE constexpr index_t qr_tdm_largest_pow2_divisor(index_t x) { return x & (-x); }
 
-// Compute the TDM LDS padding interval (in bytes) for a row of Cols elements,
-// mirroring gemm_universal_pipeline_ag_bg_cr_policy.hpp:GetLdsPaddingConfig.
-// banks_per_row uses 4-byte dwords; the interval is the largest pow2 divisor
-// of banks_per_row expressed back in bytes.
+// Compute the TDM LDS padding interval (in bytes) for a row of Cols elements.
+// This is a distinct formula from gemm_universal_pipeline_ag_bg_cr_policy.hpp:
+// GetLdsPaddingConfig, which uses floor(log2(banks_per_row)): for a 160-element
+// bf16 row (80 dwords) that yields 512B, which does not divide the 320B row and
+// so cannot be used here. We instead take the lowest set bit of banks_per_row
+// (qr_tdm_largest_pow2_divisor, x & -x) -- 80 dwords -> 64B, which evenly divides
+// 320B. Invariant: the returned interval must evenly divide the row byte width.
+// banks_per_row uses 4-byte dwords; the interval is that largest pow2 divisor
+// expressed back in bytes.
 template <index_t ElementBytes, index_t Cols>
 CK_TILE_HOST_DEVICE constexpr index_t qr_tdm_interval_bytes()
 {
