@@ -309,6 +309,20 @@ class LogicalInstruction : public IRBase {
     }
 
     /**
+     * @brief Get SBarrier data (returns nullptr for the default logical form)
+     */
+    SBarrierLogicalData* asSBarrier() {
+        return (opcode_ == logical::SBarrier) ? static_cast<SBarrierLogicalData*>(specialData_)
+                                              : nullptr;
+    }
+
+    const SBarrierLogicalData* asSBarrier() const {
+        return (opcode_ == logical::SBarrier)
+                   ? static_cast<const SBarrierLogicalData*>(specialData_)
+                   : nullptr;
+    }
+
+    /**
      * @brief Get Label data (returns nullptr if not Label)
      */
     LogicalLabelData* asLabel() {
@@ -360,6 +374,9 @@ class LogicalInstruction : public IRBase {
             case logical::SWaitAlu:
                 delete static_cast<SWaitAluLogicalData*>(specialData_);
                 break;
+            case logical::SBarrier:
+                delete static_cast<SBarrierLogicalData*>(specialData_);
+                break;
             case logical::SchedulingFence:
                 // No special data for SchedulingFence
                 break;
@@ -400,3 +417,20 @@ inline std::shared_ptr<LogicalInstruction> makeLogicalInstructionShared(LogicalI
 //
 // Note: The generated file has its own namespace stinkytofu block
 #include "stinkytofu/ir/logical/LogicalInstructions_generated.hpp"
+
+namespace stinkytofu {
+
+/**
+ * @brief SBarrier overload that preserves split/wait/cluster semantics.
+ *
+ * The generated comment-only overload remains the default logical barrier form.
+ */
+inline LogicalInstruction* SBarrier(bool separate, bool wait, bool clusterBarrier,
+                                    const std::string& comment = "") {
+    auto* inst = IRBase::createIR<LogicalInstruction>(logical::SBarrier);
+    inst->setSpecialData(new SBarrierLogicalData(separate, wait, clusterBarrier));
+    inst->comment = comment;
+    return inst;
+}
+
+}  // namespace stinkytofu

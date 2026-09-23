@@ -1304,6 +1304,23 @@ class TestSBarrierConstruction(unittest.TestCase):
         m.add(SBarrier())
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_explicit_barrier_semantics_survive_lowering(self):
+        cases = (
+            (SBarrier(True, False, True, "signal"), "s_barrier_signal -3"),
+            (SBarrier(True, True, True, "wait"), "s_barrier_wait -3"),
+            (SBarrier(True, False, False, "signal"), "s_barrier_signal -1"),
+            (SBarrier(True, True, False, "wait"), "s_barrier_wait -1"),
+        )
+        for barrier, expected in cases:
+            with self.subTest(expected=expected):
+                m = Module()
+                m.add(barrier)
+                text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+                self.assertIn(expected, text)
+                self.assertEqual(text.count("s_barrier_signal"), int("signal" in expected))
+                self.assertEqual(text.count("s_barrier_wait"), int("wait" in expected))
+
 
 class TestSGetRegB32Construction(unittest.TestCase):
     """SGetRegB32 is a unary scalar control instruction."""
