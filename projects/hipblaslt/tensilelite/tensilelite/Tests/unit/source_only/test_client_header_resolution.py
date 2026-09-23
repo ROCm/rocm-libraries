@@ -9,7 +9,7 @@ import pytest
 
 
 pytestmark = pytest.mark.unit
-_HIPBLASLT_ROOT = Path(__file__).resolve().parents[4]
+_HIPBLASLT_ROOT = Path(__file__).resolve().parents[5]
 
 
 def test_tensilelite_utility_header_uses_a_distinct_include_path():
