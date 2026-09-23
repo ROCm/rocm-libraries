@@ -159,21 +159,36 @@ def estimate_occupancy_detail(
     """Multi-limiter static occupancy from a compiled HSACO (no GPU).
 
     Unlike ``_occupancy_estimate`` (VGPR only), this takes the minimum across the
-    VGPR, AGPR, LDS, workgroup and hardware-wave limiters -- the same model the
-    ``probe_occupancy`` tool uses -- and reports the binding one. Reads the ELF
-    notes (incl. ``max_flat_workgroup_size`` for the per-workgroup wave count when
-    ``waves_per_wg`` is not supplied). Returns ``{}`` if the notes cannot be read or
+    VGPR, AGPR, LDS, workgroup and hardware-wave limiters and reports the binding
+    one. It is the same *shape* of model as the ``probe_occupancy`` tool, but with
+    the calibrated CDNA4 combined register pool -- ``probe_occupancy`` still models
+    gfx950 as separate VGPR/AGPR pools and folds in a ``waves_per_eu`` hint, so the
+    two disagree on AGPR-heavy gfx950 kernels until the caps move to
+    ``arch_specs.json`` (see the caps note above; TODO: converge there).
+
+    ``waves_per_wg``, when not supplied, is derived from ``max_flat_workgroup_size``
+    -- the *permitted maximum* (256 by default when a kernel does not pin
+    ``max_workgroup_size``), NOT the launch geometry. That biases the LDS limiter
+    optimistic for kernels that never pinned it, so a caller that knows the block
+    size should pass ``waves_per_wg`` explicitly.
+
+    Returns ``{}`` if the required notes (``vgpr``, ``lds_bytes``) are missing or
     ``arch`` has no caps entry.
 
-    Keys: ``waves_per_simd`` (achieved), ``waves_per_cu``, ``wgs_per_cu``,
-    ``limited_by`` in {VGPR, AGPR, "VGPR+AGPR", LDS, WAVES_PER_CU} ("VGPR+AGPR"
-    only on ``combined_reg_pool`` arches).
+    Keys: ``waves_per_simd`` (achieved, ``= waves_per_cu // simds_per_cu``; floors
+    to 0 for an LDS-bound kernel below 4 waves/CU -- gate on ``waves_per_cu`` if
+    that distinction matters), ``waves_per_cu``, ``wgs_per_cu``, ``limited_by`` in
+    {VGPR, AGPR, "VGPR+AGPR", LDS, WAVES_PER_CU} ("VGPR+AGPR" only on
+    ``combined_reg_pool`` arches).
     """
     caps = _ARCH_CAPS.get((arch or "").split(":", 1)[0])
     if caps is None:
         return {}
     f = parse_notes(hsaco_bytes)
-    if not f:
+    # Require the fields the model consumes: a partial parse (metadata-shape drift,
+    # a different readelf) would otherwise clamp a missing vgpr to 1 via max(..., 1)
+    # and report the arch maximum, passing the floor vacuously.
+    if not f or "vgpr" not in f or "lds_bytes" not in f:
         return {}
     vgpr = max(f.get("vgpr", 0), 1)
     agpr = f.get("agpr", 0)
@@ -218,6 +233,10 @@ def estimate_occupancy_detail(
     elif per_cu_from_lds <= caps["max_waves_per_cu"]:
         limited_by = "LDS"
     else:
+        # Unreachable while waves_per_simd * simds_per_cu == max_waves_per_cu for
+        # every arch (32 == 32): per_cu_from_regs can never exceed the cap, so the
+        # regs branch always claims it first. Kept for a future CDNA3 recalibration
+        # to 10 waves/SIMD (see the caps note above), which would break that tie.
         limited_by = "WAVES_PER_CU"
 
     return {

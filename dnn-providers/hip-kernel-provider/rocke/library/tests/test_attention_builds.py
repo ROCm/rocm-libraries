@@ -141,6 +141,14 @@ _KERNEL_RESOURCE_BUDGETS = {
     },
 }
 
+# Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
+# longer matches any built kernel (name drift from a re-tuned selector) becomes a
+# red test rather than a silently-orphaned entry -- see
+# ``test_every_declared_budget_was_exercised``. The scratch bound already fails
+# loud on drift (its default is 0); the occupancy floor defaults to no check, so
+# without this a renamed kernel would just stop being floored.
+_SEEN_KERNEL_NAMES: set = set()
+
 
 def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     """Assert the emitted HSACO fits ``arch``'s resource budget.
@@ -184,6 +192,8 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
             pytest.skip(f"HSACO introspection tool unavailable: {e}")
 
     name = kernel_name or "kernel"
+    if kernel_name:
+        _SEEN_KERNEL_NAMES.add(kernel_name)
     lds = res.lds_bytes
     if lds is None:  # pragma: no cover - metadata shape drift
         pytest.skip("could not parse group_segment_fixed_size from HSACO")
@@ -204,20 +214,28 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
             f"compiles but loses occupancy"
         )
     # Occupancy floor: for kernels tuned to a known wave count, assert the static
-    # VGPR-limited occupancy has not fallen below it. Complementary to the scratch
+    # multi-limiter occupancy has not fallen below it. Complementary to the scratch
     # bound above -- catches an occupancy drop the byte count cannot see.
     min_waves = budgets.get("min_waves_per_simd")
     if min_waves is not None:
         from rocke.benchmark.perf.occupancy import estimate_occupancy_detail
 
         det = estimate_occupancy_detail(hsaco, arch)
-        occ = det.get("waves_per_simd")
-        if occ is not None:  # {} only when notes unreadable / arch has no caps
-            assert occ >= min_waves, (
-                f"{name} achieves {occ} waves/SIMD on {arch} "
-                f"(limiter {det.get('limited_by')}, VGPR {res.vgpr_count}), below "
-                f"its tuned floor of {min_waves} -- occupancy regression"
+        if not det:
+            # A declared floor with no occupancy model for this arch is an author
+            # error, not an environment condition -- the readelf-unavailable case
+            # already pytest.skip'd above, so {} here means "arch not in _ARCH_CAPS"
+            # (e.g. a gfx1250 budget). Skip loudly rather than pass the floor silently.
+            pytest.skip(
+                f"no occupancy model for {arch}; cannot enforce the "
+                f"min_waves_per_simd floor for {name}"
             )
+        occ = det["waves_per_simd"]
+        assert occ >= min_waves, (
+            f"{name} achieves {occ} waves/SIMD on {arch} "
+            f"(limiter {det.get('limited_by')}, VGPR {res.vgpr_count}), below "
+            f"its tuned floor of {min_waves} -- occupancy regression"
+        )
 
 
 # The shipped 2D-tiled attention geometries the provider dispatches, spanning the
@@ -3563,6 +3581,25 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         self.assertTrue(hasattr(mod, "_time_lane_ms"))
         self.assertFalse(hasattr(mod, "_time_torch_call_loop"))
         self.assertFalse(hasattr(mod, "_time_rocke_call_loop"))
+
+
+# Module-level so it collects/runs after the class-based budget tests above.
+def test_every_declared_budget_was_exercised():
+    """A budget key that matches no built kernel (name drift from a re-tuned
+    selector -- these names carry tokens like wpe2 / persist256 / ksring that get
+    re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
+    test: every ``_KERNEL_RESOURCE_BUDGETS`` key must have been handed to
+    ``_assert_resources_fit`` by some test in this run.
+
+    Skips under a partial selection (``pytest -k``) that builds none of the
+    budgeted kernels, so the check is meaningful on a full-file / CI run without
+    false-failing an unrelated targeted run."""
+    if not _SEEN_KERNEL_NAMES:
+        pytest.skip("no budgeted kernels built in this selection")
+    orphaned = set(_KERNEL_RESOURCE_BUDGETS) - _SEEN_KERNEL_NAMES
+    assert (
+        not orphaned
+    ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"
 
 
 if __name__ == "__main__":

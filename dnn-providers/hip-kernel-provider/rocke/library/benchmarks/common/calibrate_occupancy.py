@@ -56,6 +56,7 @@ import argparse
 import csv
 import io
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -289,17 +290,15 @@ def predict(arch: Optional[str] = None) -> list[Prediction]:
 # ---------------------------------------------------------------------------
 # Pure parsing / comparison (unit-tested without a GPU).
 # ---------------------------------------------------------------------------
-def parse_measured_csv(
-    text: str, counter: str = MEAN_OCCUPANCY_COUNTER
-) -> dict[str, float]:
-    """Mean of ``counter`` per kernel from a rocprofv3 counter-collection CSV.
+def _accumulate_counter(
+    text: str, sums: dict[str, float], counts: dict[str, int], counter: str
+) -> None:
+    """Fold one CSV's per-kernel (sum, count) for ``counter`` into the running maps.
 
-    rocprofv3 emits one row per (dispatch, counter) with ``Kernel_Name`` /
-    ``Counter_Name`` / ``Counter_Value`` columns; we average the requested counter
-    across dispatches of the same kernel. Robust to extra columns and to the
-    counter being absent (that kernel is simply omitted)."""
-    sums: dict[str, float] = {}
-    counts: dict[str, int] = {}
+    Each call binds field names from its OWN header line, so concatenating files
+    with different schemas can never cross-map columns -- rows whose ``Counter_Name``
+    isn't ``counter`` (including a second file's header row, or an ``agent_info.csv``)
+    are simply skipped."""
     reader = csv.DictReader(io.StringIO(text))
     for row in reader:
         if (row.get("Counter_Name") or "").strip() != counter:
@@ -311,6 +310,29 @@ def parse_measured_csv(
             continue
         sums[name] = sums.get(name, 0.0) + val
         counts[name] = counts.get(name, 0) + 1
+
+
+def parse_measured_csv(
+    text: str, counter: str = MEAN_OCCUPANCY_COUNTER
+) -> dict[str, float]:
+    """Mean of ``counter`` per kernel from a single rocprofv3 counter CSV."""
+    return parse_measured_csvs([text], counter)
+
+
+def parse_measured_csvs(
+    texts: "list[str]", counter: str = MEAN_OCCUPANCY_COUNTER
+) -> dict[str, float]:
+    """Mean of ``counter`` per kernel across one or more counter CSVs.
+
+    rocprofv3 emits one row per (dispatch, counter) with ``Kernel_Name`` /
+    ``Counter_Name`` / ``Counter_Value`` columns. Accumulate (sum, count) across
+    ALL files before dividing, so a kernel dispatched by more than one run (e.g. a
+    reduce kernel present in both a prefill and a decode CSV) is averaged over every
+    dispatch rather than overwritten last-wins."""
+    sums: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for text in texts:
+        _accumulate_counter(text, sums, counts, counter)
     return {k: sums[k] / counts[k] for k in sums if counts[k]}
 
 
@@ -404,16 +426,16 @@ def _rocprofv3_measure(
                 "--output-format",
                 "csv",
                 "--",
-                *launcher.split(),
+                *shlex.split(launcher),
             ],
             check=True,
             timeout=timeout,
         )
-        parts = [
-            p.read_text()
-            for p in sorted(outdir.rglob("*counter_collection.csv"))
-            or sorted(outdir.rglob("*.csv"))
-        ]
+        # Only the counter-collection CSVs -- never the fallback *.csv sweep, which
+        # would pull in agent_info.csv etc. with a different schema. Same-schema
+        # counter files concatenate safely (a second header row fails the
+        # Counter_Name filter downstream).
+        parts = [p.read_text() for p in sorted(outdir.rglob("*counter_collection.csv"))]
         return "\n".join(parts)
 
 
@@ -493,6 +515,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "measure":
         try:
             text = _rocprofv3_measure(args.launcher, counter=args.counter)
+        except FileNotFoundError:
+            print(
+                "rocprofv3 not found on PATH -- run `measure` on a ROCm host "
+                "(predict/compare need no GPU and run anywhere).",
+                file=sys.stderr,
+            )
+            return 1
+        except subprocess.TimeoutExpired:
+            print(
+                "launcher exceeded the rocprofv3 timeout -- narrow the shape set "
+                "or lower the iteration count.",
+                file=sys.stderr,
+            )
+            return 1
         except subprocess.CalledProcessError as e:
             # rocprofv3 turns a GPU fault in the profiled app into a hard crash
             # (SIGSEGV). Almost always one of the launched kernels faulted, not the
@@ -511,11 +547,22 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.cmd == "compare":
         preds = [Prediction(**d) for d in json.loads(args.pred.read_text())]
-        measured: dict[str, float] = {}
-        for path in args.measured:
-            measured.update(parse_measured_csv(path.read_text()))
+        # Accumulate across all CSVs (not last-wins) so a kernel in more than one
+        # file is averaged over every dispatch.
+        measured = parse_measured_csvs([p.read_text() for p in args.measured])
         rows = compare(preds, measured, tol=args.tol)
         _print_comparisons(rows)
+        # Zero matches is the most likely operator error (mangled rocprofv3 names
+        # vs DSL symbols), and it must be the loudest outcome, not the quietest --
+        # otherwise a wrong-run CSV in a CI `&&` chain reads as calibration success.
+        matched = [r for r in rows if r.verdict != "NO_MEASUREMENT"]
+        if not matched:
+            print(
+                f"no predictions matched any measured kernel "
+                f"({len(rows)} predictions, {len(measured)} measured)",
+                file=sys.stderr,
+            )
+            return 2
         off = [r for r in rows if r.verdict in ("MODEL_LOW", "MODEL_HIGH")]
         return 1 if off else 0
 

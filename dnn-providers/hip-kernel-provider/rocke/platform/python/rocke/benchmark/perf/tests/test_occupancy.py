@@ -142,9 +142,13 @@ class TestEstimateOccupancyDetail(unittest.TestCase):
         self.assertEqual(det["limited_by"], "VGPR+AGPR")
 
     def test_waves_per_wg_override_beats_notes(self):
+        # Both paths label "LDS", so assert the VALUE: the note's 64//64=1 wave/WG
+        # gives 2*1 = 2 waves/CU (waves_per_simd 0); the override (8) gives 2*8 = 16
+        # (waves_per_simd 4). Dropping the parameter would fail these asserts.
         self._patch(vgpr=64, agpr=0, lds_bytes=80000, max_flat_workgroup_size=64)
         det = occupancy.estimate_occupancy_detail(b"x", "gfx950", waves_per_wg=8)
-        self.assertEqual(det["limited_by"], "LDS")  # override, not the note's 1 wave
+        self.assertEqual(det["waves_per_cu"], 16)
+        self.assertEqual(det["waves_per_simd"], 4)
 
     def test_unknown_arch_returns_empty(self):
         self._patch(vgpr=64, lds_bytes=2048)
@@ -152,6 +156,14 @@ class TestEstimateOccupancyDetail(unittest.TestCase):
 
     def test_empty_notes_returns_empty(self):
         self._patch()  # {}
+        self.assertEqual(occupancy.estimate_occupancy_detail(b"x", "gfx950"), {})
+
+    def test_missing_required_field_returns_empty(self):
+        # A partial parse (e.g. the vgpr regex stopped matching) must return {},
+        # not clamp the missing vgpr to 1 and report the arch maximum.
+        self._patch(lds_bytes=2048, agpr=0)  # no vgpr
+        self.assertEqual(occupancy.estimate_occupancy_detail(b"x", "gfx950"), {})
+        self._patch(vgpr=64)  # no lds_bytes
         self.assertEqual(occupancy.estimate_occupancy_detail(b"x", "gfx950"), {})
 
 

@@ -56,6 +56,17 @@ class TestParseMeasuredCsv(unittest.TestCase):
         text = "Kernel_Name,Counter_Name,Counter_Value\nfoo.kd,SQ_WAVES,3\n"
         self.assertEqual(C.parse_measured_csv(text), {})
 
+    def test_accumulates_across_files_not_last_wins(self):
+        # A kernel present in two CSVs is averaged over every dispatch across both,
+        # not overwritten by the last file.
+        f1 = "Kernel_Name,Counter_Name,Counter_Value\nk.kd,MeanOccupancyPerCU,10\n"
+        f2 = (
+            "Kernel_Name,Counter_Name,Counter_Value\n"
+            "k.kd,MeanOccupancyPerCU,4\nk.kd,MeanOccupancyPerCU,4\n"
+        )
+        got = C.parse_measured_csvs([f1, f2])
+        self.assertAlmostEqual(got["k.kd"], 6.0)  # (10+4+4)/3, not last-file 4.0
+
 
 class TestMatchMeasured(unittest.TestCase):
     def test_exact(self):
