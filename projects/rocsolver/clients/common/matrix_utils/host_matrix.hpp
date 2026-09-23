@@ -1209,7 +1209,8 @@ HostMatrix_<T, I> adjoint(const HostMatrix_<T, I>& A)
 }
 
 template <template <typename, typename> class HostMatrix_, typename T, typename I>
-auto qr(const HostMatrix_<T, I>& A) -> std::tuple<HostMatrix_<T, I> /* Q */, HostMatrix_<T, I> /* R */>
+auto qr(const HostMatrix_<T, I>& A)
+    -> std::tuple<HostMatrix_<T, I> /* Q */, HostMatrix_<T, I> /* R */>
 {
     I nrows = A.nrows();
     I ncols = A.ncols();
