@@ -108,3 +108,18 @@ covering ragged rows and multiple tiles; full-size prefill timings do not run
 the CPU reference. Use the benchmark command above with `--scaleA 1009`,
 the desired M/N/K/lda from the table, ldb=K and ldc=ldd=M. Omit any captured
 `--solution_index` and `--algo_method index` to exercise Equality dispatch.
+
+## Q27B unsigned_bias8 prefill
+
+`generate_w4a16_prefill_unsigned_bias8.py` regenerates the MT64x256x64
+unsigned_bias8 assembly from its checked-in ExLlama counterpart:
+
+```sh
+python generate_w4a16_prefill_unsigned_bias8.py
+```
+
+This kernel serves M=34816, N=2048, K=5120 in the group-32 Equality grid.
+It uses the same packed FP16 dequantization, then four byte permutations per
+eight weights to restore sequential nibble order before the LDS writes.
+The subtraction is exact and the scale multiplication rounds once to FP16.
+Tile dimensions, scheduling, LDS use, and VGPR allocation match ExLlama.

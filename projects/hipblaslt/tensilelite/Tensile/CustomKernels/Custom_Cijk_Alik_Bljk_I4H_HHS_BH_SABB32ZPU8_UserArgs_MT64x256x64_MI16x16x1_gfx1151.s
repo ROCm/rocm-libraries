@@ -1,7 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Generated with W4A16 generator revision 108edb6c5f0.
-// Q27B unsigned_bias8: same tile and scheduling parameters as the ExLlama variant.
+// Packed FP16 dequantization adapted from the ExLlama kernel (generator 108edb6c5f0).
+// Sequential U8 nibbles lift as (0,4),(1,5),(2,6),(3,7); byte permutations
+// restore (0,1),(2,3),(4,5),(6,7) after the exact subtract and FP16 multiply.
+// MIWaveTile 2x4, MIWaveGroup 2x4, DU64, PGR1, PLR0, SIA3,
+// single LDS buffer, store batch 1; Q27B M34816 N2048 K5120.
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
 .protected Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151
@@ -12,8 +15,8 @@
 .p2align 6
 .amdhsa_kernel Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  .amdhsa_next_free_vgpr 184 // vgprs
-  .amdhsa_next_free_sgpr 86 // sgprs
+  .amdhsa_next_free_vgpr 189 // vgprs
+  .amdhsa_next_free_sgpr 90 // sgprs
   .amdhsa_group_segment_fixed_size 46080 // lds bytes
   .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
@@ -25,9 +28,9 @@
   .amdhsa_float_denorm_mode_16_64 3
 .end_amdhsa_kernel
 .text
-/* Num VGPR   =184 */
+/* Num VGPR   =189 */
 /* Num AccVGPR=0 */
-/* Num SGPR   =86 */
+/* Num SGPR   =90 */
 .amdgpu_metadata
 ---
 custom.config:
@@ -202,9 +205,9 @@ amdhsa.kernels:
     .kernarg_segment_size:       160
     .max_flat_workgroup_size:    256
     .private_segment_fixed_size: 0
-    .sgpr_count:                 86
+    .sgpr_count:                 90
     .sgpr_spill_count:           0
-    .vgpr_count:                 184
+    .vgpr_count:                 189
     .vgpr_spill_count:           0
     .wavefront_size:             32
 ...
@@ -266,8 +269,9 @@ label_ASM_Start:
 .set sgprAddressScaleB, 50
 .set sgprStrideScaleA, 47
 .set sgprSrdScaleA, 52
-.set sgprAddressScaleZeroA, 56
-.set sgprSrdScaleZeroA, 60
+.set sgprScaleAPkMagic, 56
+.set sgprAddressScaleZeroA, 60
+.set sgprSrdScaleZeroA, 64
 .set sgprSizeI, sgprSizesFree+0
 .set sgprSizeJ, sgprSizesFree+1
 .set sgprSizeK, sgprSizesFree+2
@@ -324,64 +328,64 @@ s_mov_b32 s[sgprArgType], s21
 s_mov_b32 m0, 0xb400
 v_mov_b32 v[vgprSerial], v0
 s_mov_b32 vcc_hi, 0
-s_lshr_b32 s68, s[sgprWGM], 0x10
-s_ff1_i32_b32 s68, s68
-s_lshr_b32 s69, s[sgprWGM], 0x16
-s_cmp_gt_i32 s68, 0
+s_lshr_b32 s72, s[sgprWGM], 0x10
+s_ff1_i32_b32 s72, s72
+s_lshr_b32 s73, s[sgprWGM], 0x16
+s_cmp_gt_i32 s72, 0
 s_cbranch_scc0 label_skip_WGMXCC
-s_lshr_b32 s65, s23, s68
-s_lshl_b32 s65, s65, s68
-s_cmp_ge_u32 s[sgprWorkGroup0], s65
+s_lshr_b32 s69, s23, s72
+s_lshl_b32 s69, s69, s72
+s_cmp_ge_u32 s[sgprWorkGroup0], s69
 s_cbranch_scc1 label_skip_WGMXCC
-s_cmp_eq_u32 s69, 0
+s_cmp_eq_u32 s73, 0
 s_cbranch_scc0 label_XCCG_nonzero
-s_lshr_b32 s65, s[sgprWorkGroup0], s68
-s_bfm_b32 s66, s68, 0
-s_and_b32 s66, s[sgprWorkGroup0], s66
-s_lshr_b32 s67, s23, s68
-s_mul_i32 s66, s66, s67
-s_add_u32 s[sgprWorkGroup0], s65, s66
+s_lshr_b32 s69, s[sgprWorkGroup0], s72
+s_bfm_b32 s70, s72, 0
+s_and_b32 s70, s[sgprWorkGroup0], s70
+s_lshr_b32 s71, s23, s72
+s_mul_i32 s70, s70, s71
+s_add_u32 s[sgprWorkGroup0], s69, s70
 s_branch label_skip_WGMXCC
 label_XCCG_nonzero:
-v_cvt_f64_u32 v[6:7], s69
+v_cvt_f64_u32 v[6:7], s73
 v_rcp_f64 v[6:7], v[6:7]
 v_cvt_f64_u32 v[8:9], s[sgprWorkGroup0]
 v_mul_f64 v[6:7], v[6:7], v[8:9]
 v_cvt_u32_f64 v6, v[6:7]
-v_mul_lo_u32 v7, v6, s69
+v_mul_lo_u32 v7, v6, s73
 v_sub_nc_u32 v8, s[sgprWorkGroup0], v7
-v_cmp_ge_u32 vcc_lo, v8, s69
+v_cmp_ge_u32 vcc_lo, v8, s73
 s_mov_b32 exec_lo, vcc_lo
 v_add_nc_u32 v6, v6, 1
 s_mov_b32 exec_lo, -1
-v_mul_lo_u32 v7, v6, s69
+v_mul_lo_u32 v7, v6, s73
 v_sub_nc_u32 v8, s[sgprWorkGroup0], v7
-v_readfirstlane_b32 s65, v6
-v_readfirstlane_b32 s66, v8
-s_mul_i32 s65, s65, s69
-s_lshr_b32 s66, s66, s68
-s_add_u32 s65, s65, s66
-v_cvt_f64_u32 v[6:7], s69
+v_readfirstlane_b32 s69, v6
+v_readfirstlane_b32 s70, v8
+s_mul_i32 s69, s69, s73
+s_lshr_b32 s70, s70, s72
+s_add_u32 s69, s69, s70
+v_cvt_f64_u32 v[6:7], s73
 v_rcp_f64 v[6:7], v[6:7]
 v_cvt_f64_u32 v[8:9], s23
 v_mul_f64 v[6:7], v[6:7], v[8:9]
 v_cvt_u32_f64 v6, v[6:7]
-v_mul_lo_u32 v7, v6, s69
+v_mul_lo_u32 v7, v6, s73
 v_sub_nc_u32 v8, s23, v7
-v_cmp_ge_u32 vcc_lo, v8, s69
+v_cmp_ge_u32 vcc_lo, v8, s73
 s_mov_b32 exec_lo, vcc_lo
 v_add_nc_u32 v6, v6, 1
 s_mov_b32 exec_lo, -1
-v_readfirstlane_b32 s66, v6
-s_mul_i32 s66, s66, s69
-s_sub_u32 s67, s23, s66
-s_cmp_gt_u32 s[sgprWorkGroup0], s66
-s_cselect_b32 s66, s67, s69
-s_lshr_b32 s66, s66, s68
-s_bfm_b32 s67, s68, 0
-s_and_b32 s67, s[sgprWorkGroup0], s67
-s_mul_i32 s66, s66, s67
-s_add_u32 s[sgprWorkGroup0], s65, s66
+v_readfirstlane_b32 s70, v6
+s_mul_i32 s70, s70, s73
+s_sub_u32 s71, s23, s70
+s_cmp_gt_u32 s[sgprWorkGroup0], s70
+s_cselect_b32 s70, s71, s73
+s_lshr_b32 s70, s70, s72
+s_bfm_b32 s71, s72, 0
+s_and_b32 s71, s[sgprWorkGroup0], s71
+s_mul_i32 s70, s70, s71
+s_add_u32 s[sgprWorkGroup0], s69, s70
 label_skip_WGMXCC:
 s_cmp_eq_u32 s21, 3
 s_cbranch_scc1 label_ArgType3_Routed_To_ArgType0
@@ -509,63 +513,63 @@ s_and_b32 s16, s[sgprArgType], 0xff
 s_cmp_eq_u32 s16, 2
 s_cbranch_scc1 label_IsExternalValid
 s_mov_b32 s15, 112
-s_mul_i32 s70, s20, 4
-s_mov_b64 s[64:65], s[sgprKernArgAddress:sgprKernArgAddress+1]
+s_mul_i32 s74, s20, 4
+s_mov_b64 s[68:69], s[sgprKernArgAddress:sgprKernArgAddress+1]
 s_branch label_IsExternalValidEnd
 label_IsExternalValid:
 s_mov_b32 s15, 228
-s_mov_b32 s70, 0
-s_mov_b64 s[64:65], s[sgprKernArgAddress:sgprKernArgAddress+1]
+s_mov_b32 s74, 0
+s_mov_b64 s[68:69], s[sgprKernArgAddress:sgprKernArgAddress+1]
 label_IsExternalValidEnd:
 s_mov_b32 s14, 1
-s_mov_b32 s71, 0
-s_load_b128 s[24:27], s[64:65], s70
+s_mov_b32 s75, 0
+s_load_b128 s[24:27], s[68:69], s74
 s_cmpk_eq_u32 s20, 1
 s_cbranch_scc1 label_wgTable_noLoadLoop
 label_Loop_GemmCount:
 s_waitcnt lgkmcnt(0)
-s_lshr_b32 s68, s24, 6
-s_and_b32 s66, 63, s24
-s_addc_u32 s68, s68, 0
-s_lshr_b32 s69, s25, 8
-s_and_b32 s66, 255, s25
-s_addc_u32 s69, s69, 0
-s_mul_i32 s68, s68, s69
-s_mul_i32 s68, s68, s26
-s_and_b32 s69, s[sgprGSU], 0xfff
-s_mul_i32 s68, s68, s69
-s_add_u32 s71, s71, s68
-s_cmp_lt_u32 s[sgprWorkGroup0], s71
+s_lshr_b32 s72, s24, 6
+s_and_b32 s70, 63, s24
+s_addc_u32 s72, s72, 0
+s_lshr_b32 s73, s25, 8
+s_and_b32 s70, 255, s25
+s_addc_u32 s73, s73, 0
+s_mul_i32 s72, s72, s73
+s_mul_i32 s72, s72, s26
+s_and_b32 s73, s[sgprGSU], 0xfff
+s_mul_i32 s72, s72, s73
+s_add_u32 s75, s75, s72
+s_cmp_lt_u32 s[sgprWorkGroup0], s75
 s_cbranch_scc1 label_FOUND
-s_add_u32 s70, s70, s15
-s_load_b128 s[24:27], s[64:65], s70
+s_add_u32 s74, s74, s15
+s_load_b128 s[24:27], s[68:69], s74
 s_add_u32 s14, s14, 1
 s_cmp_lt_u32 s14, s20
 s_cbranch_scc1 label_Loop_GemmCount
 label_wgTable_noLoadLoop:
 s_waitcnt lgkmcnt(0)
-s_lshr_b32 s68, s24, 6
-s_and_b32 s66, 63, s24
-s_addc_u32 s68, s68, 0
-s_lshr_b32 s69, s25, 8
-s_and_b32 s66, 255, s25
-s_addc_u32 s69, s69, 0
-s_mul_i32 s68, s68, s69
-s_mul_i32 s68, s68, s26
-s_and_b32 s64, s[sgprGSU], 0xfff
-s_mul_i32 s68, s68, s64
-s_add_u32 s71, s71, s68
+s_lshr_b32 s72, s24, 6
+s_and_b32 s70, 63, s24
+s_addc_u32 s72, s72, 0
+s_lshr_b32 s73, s25, 8
+s_and_b32 s70, 255, s25
+s_addc_u32 s73, s73, 0
+s_mul_i32 s72, s72, s73
+s_mul_i32 s72, s72, s26
+s_and_b32 s68, s[sgprGSU], 0xfff
+s_mul_i32 s72, s72, s68
+s_add_u32 s75, s75, s72
 label_FOUND:
-s_sub_u32 s65, s14, 1
-s_sub_u32 s64, s71, s68
-s_sub_u32 s[sgprWorkGroup0], s[sgprWorkGroup0], s64
+s_sub_u32 s69, s14, 1
+s_sub_u32 s68, s75, s72
+s_sub_u32 s[sgprWorkGroup0], s[sgprWorkGroup0], s68
 s_and_b32 s16, s[sgprArgType], 0xff
 s_cmp_eq_u32 s16, 2
 s_cbranch_scc1 label_LoadExternalStruct
 s_lshl2_add_u32 s[sgprKernArgAddress], s20, s[sgprKernArgAddress]
 s_addc_u32 s[sgprKernArgAddress+1], s[sgprKernArgAddress+1], 0
-s_mul_i32 s65, s65, 112
-s_add_u32 s[sgprKernArgAddress], s[sgprKernArgAddress], s65
+s_mul_i32 s69, s69, 112
+s_add_u32 s[sgprKernArgAddress], s[sgprKernArgAddress], s69
 s_addc_u32 s[sgprKernArgAddress+1], s[sgprKernArgAddress+1], 0
 s_load_b512 s[28:43], s[sgprKernArgAddress:sgprKernArgAddress+1], 16
 s_load_b64 s[44:45], s[sgprKernArgAddress:sgprKernArgAddress+1], 80
@@ -574,8 +578,8 @@ s_load_b64 s[sgprAddressScaleB:sgprAddressScaleB+1], s[sgprKernArgAddress:sgprKe
 s_load_b64 s[sgprAddressScaleZeroA:sgprAddressScaleZeroA+1], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x68
 s_branch label_LoadExternalStructEnd
 label_LoadExternalStruct:
-s_mul_i32 s65, s65, 228
-s_add_u32 s[sgprKernArgAddress], s[sgprKernArgAddress], s65
+s_mul_i32 s69, s69, 228
+s_add_u32 s[sgprKernArgAddress], s[sgprKernArgAddress], s69
 s_addc_u32 s[sgprKernArgAddress+1], s[sgprKernArgAddress+1], 0
 s_load_b64 s[sgprAddressD:sgprAddressD+1], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x10
 s_load_b64 s[sgprAddressC:sgprAddressC+1], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x18
@@ -717,15 +721,15 @@ label_EarlyStop_if_wg_exceed:
 s_endpgm
 label_NoEarlyStop_wgExceed:
 label_MultiGemmEnd:
-.set sgprSrdA, 64
-.set sgprSrdB, 68
-.set sgprShadowLimitA, 58
-.set sgprShadowLimitB, 72
-.set sgprStaggerUIter, 74
-.set sgprWrapUA, 75
-.set sgprWrapUB, 77
-.set sgprGlobalReadIncsA, 79
-.set sgprGlobalReadIncsB, 80
+.set sgprSrdA, 68
+.set sgprSrdB, 72
+.set sgprShadowLimitA, 62
+.set sgprShadowLimitB, 76
+.set sgprStaggerUIter, 78
+.set sgprWrapUA, 79
+.set sgprWrapUB, 81
+.set sgprGlobalReadIncsA, 83
+.set sgprGlobalReadIncsB, 84
 s_and_b32 s16, s[sgprArgType], 0xff
 s_cmp_eq_u32 s16, 3
 s_cbranch_scc1 label_Skip_Address_Prepad_For_Pointer_Array
@@ -1026,6 +1030,10 @@ s_sub_u32 s[sgprSrdScaleA+2], s17, s16
 s_add_u32 s[sgprSrdScaleA+0], s[sgprAddressScaleA+0], s16
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprAddressScaleA+1], 0
 s_mov_b32 s[sgprSrdScaleA+3], Srd127_96
+s_mov_b32 s[sgprScaleAPkMagic+0], 0x64006400
+s_mov_b32 s[sgprScaleAPkMagic+2], 0xe400e400
+s_mov_b32 s[sgprScaleAPkMagic+1], 0x54005400
+s_mov_b32 s[sgprScaleAPkMagic+3], 0xd400d400
 s_mul_i32 s16, s[sgprWorkGroup0], 64
 s_lshr_b32 s16, s16, 1
 s_mul_i32 s16, s16, s[sgprStrideScaleA]
@@ -1341,14 +1349,14 @@ s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s17
 s_cmp_eq_u32 s[sgprShadowLimitB+1], 0
 s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit
 label_ShadowInitStart:
-s_and_b32 s81, s[sgprGSU], 0x3fff
-s_cmp_eq_u32 s81, 1
+s_and_b32 s85, s[sgprGSU], 0x3fff
+s_cmp_eq_u32 s85, 1
 s_cbranch_scc1 label_ArgTypeCheckD
 s_mov_b64 s[sgprSrdD+0:sgprSrdD+0+1], s[sgprAddressD+0:sgprAddressD+0+1]
 s_branch label_GeneralBatchedGemmSrdInitiationD_End
 label_ArgTypeCheckD:
-s_and_b32 s81, s[sgprArgType], 0xff
-s_cmp_eq_u32 s81, 3
+s_and_b32 s85, s[sgprArgType], 0xff
+s_cmp_eq_u32 s85, 3
 s_cbranch_scc0 label_RegularSrdInitializationD
 s_branch label_GeneralBatchedGemmSrdInitiationD
 label_RegularSrdInitializationD:
@@ -1359,14 +1367,14 @@ s_mov_b64 s[sgprSrdD+0:sgprSrdD+0+1], 0
 label_GeneralBatchedGemmSrdInitiationD_End:
 s_mov_b32 s[sgprSrdD+2], BufferOOB
 s_mov_b32 s[sgprSrdD+3], Srd127_96
-s_and_b32 s81, s[sgprGSU], 0x3fff
-s_cmp_eq_u32 s81, 1
+s_and_b32 s85, s[sgprGSU], 0x3fff
+s_cmp_eq_u32 s85, 1
 s_cbranch_scc1 label_ArgTypeCheckC
 s_mov_b64 s[sgprSrdC+0:sgprSrdC+0+1], s[sgprAddressC+0:sgprAddressC+0+1]
 s_branch label_GeneralBatchedGemmSrdInitiationC_End
 label_ArgTypeCheckC:
-s_and_b32 s81, s[sgprArgType], 0xff
-s_cmp_eq_u32 s81, 3
+s_and_b32 s85, s[sgprArgType], 0xff
+s_cmp_eq_u32 s85, 3
 s_cbranch_scc0 label_RegularSrdInitializationC
 s_branch label_GeneralBatchedGemmSrdInitiationC
 label_RegularSrdInitializationC:
@@ -1377,91 +1385,91 @@ s_mov_b64 s[sgprSrdC+0:sgprSrdC+0+1], 0
 label_GeneralBatchedGemmSrdInitiationC_End:
 s_mov_b32 s[sgprSrdC+2], BufferOOB
 s_mov_b32 s[sgprSrdC+3], Srd127_96
-s_mul_i32 s84, MT1, s[sgprWorkGroup1]
-s_and_b32 s83, s[sgprGSU], 0xfff
-s_mul_hi_u32 s83, s84, s[sgprStrideC1J]
-s_mul_i32 s82, s84, s[sgprStrideC1J]
-s_lshl_b64 s[82:83], s[82:83], s[sgprGSULog2BpeC]
-s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s82
-s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s83
-s_and_b32 s83, s[sgprGSU], 0xfff
-s_mul_hi_u32 s83, s84, s[sgprStrideD1J]
-s_mul_i32 s82, s84, s[sgprStrideD1J]
-s_lshl_b64 s[82:83], s[82:83], s[sgprGSULog2BpeD]
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83
-s_and_b32 s83, s[sgprGSU], 0xfff
-s_cmp_eq_u32 s83, 1
+s_mul_i32 s88, MT1, s[sgprWorkGroup1]
+s_and_b32 s87, s[sgprGSU], 0xfff
+s_mul_hi_u32 s87, s88, s[sgprStrideC1J]
+s_mul_i32 s86, s88, s[sgprStrideC1J]
+s_lshl_b64 s[86:87], s[86:87], s[sgprGSULog2BpeC]
+s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s86
+s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s87
+s_and_b32 s87, s[sgprGSU], 0xfff
+s_mul_hi_u32 s87, s88, s[sgprStrideD1J]
+s_mul_i32 s86, s88, s[sgprStrideD1J]
+s_lshl_b64 s[86:87], s[86:87], s[sgprGSULog2BpeD]
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87
+s_and_b32 s87, s[sgprGSU], 0xfff
+s_cmp_eq_u32 s87, 1
 s_cbranch_scc0 label_StridedBatchedGemmLoadC
-s_and_b32 s81, s[sgprArgType], 0xff
-s_cmp_eq_u32 s81, 3
+s_and_b32 s85, s[sgprArgType], 0xff
+s_cmp_eq_u32 s85, 3
 s_cbranch_scc1 label_GeneralBatchedGemmLoadC
 label_StridedBatchedGemmLoadC:
-s_mul_hi_u32 s83, s[sgprWorkGroup2], s[sgprStrideCK]
-s_mul_i32 s82, s[sgprWorkGroup2], s[sgprStrideCK]
-s_lshl_b64 s[82:83], s[82:83], s[sgprGSULog2BpeC]
-s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s82
-s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s83
+s_mul_hi_u32 s87, s[sgprWorkGroup2], s[sgprStrideCK]
+s_mul_i32 s86, s[sgprWorkGroup2], s[sgprStrideCK]
+s_lshl_b64 s[86:87], s[86:87], s[sgprGSULog2BpeC]
+s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s86
+s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s87
 s_branch label_GeneralBatchedGemmLoadC_End
 label_GeneralBatchedGemmLoadC:
-s_mul_i32 s82, 8, s[sgprWorkGroup2]
-s_add_u32 s82, s82, s[sgprAddressC+0]
-s_addc_u32 s83, s[sgprAddressC+1], 0
-s_load_b64 s[82:83], s[82:83], 0
+s_mul_i32 s86, 8, s[sgprWorkGroup2]
+s_add_u32 s86, s86, s[sgprAddressC+0]
+s_addc_u32 s87, s[sgprAddressC+1], 0
+s_load_b64 s[86:87], s[86:87], 0
 s_waitcnt lgkmcnt(0)
-s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s82
-s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s83
-s_load_b64 s[82:83], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x78
+s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s86
+s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s87
+s_load_b64 s[86:87], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x78
 s_waitcnt lgkmcnt(0)
-s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s82
-s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s83
+s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s86
+s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s87
 label_GeneralBatchedGemmLoadC_End:
-s_and_b32 s83, s[sgprGSU], 0xfff
-s_cmp_eq_u32 s83, 1
+s_and_b32 s87, s[sgprGSU], 0xfff
+s_cmp_eq_u32 s87, 1
 s_cbranch_scc0 label_StridedBatchedGemmLoadD
-s_and_b32 s81, s[sgprArgType], 0xff
-s_cmp_eq_u32 s81, 3
+s_and_b32 s85, s[sgprArgType], 0xff
+s_cmp_eq_u32 s85, 3
 s_cbranch_scc1 label_GeneralBatchedGemmLoadD
 label_StridedBatchedGemmLoadD:
-s_mul_hi_u32 s83, s[sgprWorkGroup2], s[sgprStrideDK]
-s_mul_i32 s82, s[sgprWorkGroup2], s[sgprStrideDK]
-s_lshl_b64 s[82:83], s[82:83], s[sgprGSULog2BpeD]
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83
+s_mul_hi_u32 s87, s[sgprWorkGroup2], s[sgprStrideDK]
+s_mul_i32 s86, s[sgprWorkGroup2], s[sgprStrideDK]
+s_lshl_b64 s[86:87], s[86:87], s[sgprGSULog2BpeD]
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87
 s_branch label_GeneralBatchedGemmLoadD_End
 label_GeneralBatchedGemmLoadD:
-s_mul_i32 s82, 8, s[sgprWorkGroup2]
-s_add_u32 s82, s82, s[sgprAddressD+0]
-s_addc_u32 s83, s[sgprAddressD+1], 0
-s_load_b64 s[82:83], s[82:83], 0
+s_mul_i32 s86, 8, s[sgprWorkGroup2]
+s_add_u32 s86, s86, s[sgprAddressD+0]
+s_addc_u32 s87, s[sgprAddressD+1], 0
+s_load_b64 s[86:87], s[86:87], 0
 s_waitcnt lgkmcnt(0)
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83
-s_load_b64 s[82:83], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x70
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87
+s_load_b64 s[86:87], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x70
 s_waitcnt lgkmcnt(0)
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87
 label_GeneralBatchedGemmLoadD_End:
-s_and_b32 s81, s[sgprGSU], 0xfff
-s_cmp_eq_u32 s81, 1
+s_and_b32 s85, s[sgprGSU], 0xfff
+s_cmp_eq_u32 s85, 1
 s_cbranch_scc1 label_GSU_2
-s_mul_hi_u32 s83, s[sgprSizesFree+0], s[sgprGSUSumIdx]
-s_mul_i32 s82, s[sgprSizesFree+0], s[sgprGSUSumIdx]
-s_sub_u32 s81, s[sgprSizesFree+1], 1
-s_mul_i32 s81, s81, s[sgprGSUSumIdx]
-s_mul_hi_u32 s84, s81, s[sgprStrideC1J]
-s_mul_i32 s81, s81, s[sgprStrideC1J]
-s_add_u32 s82, s82, s81
-s_addc_u32 s83, s83, s84
-s_sub_u32 s81, s[sgprSizesFree+2], 1
-s_mul_i32 s81, s81, s[sgprGSUSumIdx]
-s_mul_hi_u32 s84, s81, s[sgprStrideCK]
-s_mul_i32 s81, s81, s[sgprStrideCK]
-s_add_u32 s82, s82, s81
-s_addc_u32 s83, s83, s84
-s_lshl_b64 s[82:83], s[82:83], 2
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83
+s_mul_hi_u32 s87, s[sgprSizesFree+0], s[sgprGSUSumIdx]
+s_mul_i32 s86, s[sgprSizesFree+0], s[sgprGSUSumIdx]
+s_sub_u32 s85, s[sgprSizesFree+1], 1
+s_mul_i32 s85, s85, s[sgprGSUSumIdx]
+s_mul_hi_u32 s88, s85, s[sgprStrideC1J]
+s_mul_i32 s85, s85, s[sgprStrideC1J]
+s_add_u32 s86, s86, s85
+s_addc_u32 s87, s87, s88
+s_sub_u32 s85, s[sgprSizesFree+2], 1
+s_mul_i32 s85, s85, s[sgprGSUSumIdx]
+s_mul_hi_u32 s88, s85, s[sgprStrideCK]
+s_mul_i32 s85, s85, s[sgprStrideCK]
+s_add_u32 s86, s86, s85
+s_addc_u32 s87, s87, s88
+s_lshl_b64 s[86:87], s[86:87], 2
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87
 label_GSU_2:
 .set sgprGSULog2BpeC, UNDEF
 .set sgprAddressC, UNDEF
@@ -1531,102 +1539,66 @@ v_mov_b32 v[vgprValuC+62], 0
 v_mov_b32 v[vgprValuC+63], 0
 s_cmp_eq_u32 s[sgprLoopCounterL], 0
 s_cbranch_scc0 label_NoBranch_0
-s_getpc_b64 s[82:83]
-s_add_i32 s84, label_PrefetchGlobalLastIterEnd, 4
-s_add_u32 s82, s82, s84
-s_addc_u32 s83, s83, 0
-s_setpc_b64 s[82:83]
+s_getpc_b64 s[86:87]
+s_add_i32 s88, label_PrefetchGlobalLastIterEnd, 4
+s_add_u32 s86, s86, s88
+s_addc_u32 s87, s87, 0
+s_setpc_b64 s[86:87]
 label_NoBranch_0:
 s_waitcnt vmcnt(0)
-v_cvt_f32_f16 v182, v[vgprG2LScaleA+0]
-v_and_b32 v183, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
-v_lshlrev_b32 v183, 2, v183
-v_bfe_u32 v179, v[vgprG2LScaleZeroA+0], v183, 0x4
-v_cvt_f32_i32 v179, v179
-v_mul_f32 v183, v182, v179
-v_xor_b32 v183, 0x80000000, v183
+v_and_b32 v182, 0xffff, v[vgprG2LScaleA+0]
+v_lshl_or_b32 v182, v182, 16, v182
+v_and_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
+v_lshlrev_b32 v179, 2, v179
+v_bfe_u32 v179, v[vgprG2LScaleZeroA+0], v179, 0x4
+v_lshl_or_b32 v179, v179, 16, v179
+v_lshl_or_b32 v183, v179, 0, s[sgprScaleAPkMagic+2]
+v_lshl_or_b32 v184, v179, 4, s[sgprScaleAPkMagic+3]
 v_mov_b32 v181, v[vgprG2LA+2+0]
-v_bfe_u32 v179, v181, 0x0, 0x4
-v_bfe_u32 v180, v181, 0x4, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+0+0], v179, v180
-v_bfe_u32 v179, v181, 0x8, 0x4
-v_bfe_u32 v180, v181, 0xc, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+0+1], v179, v180
-v_bfe_u32 v179, v181, 0x10, 0x4
-v_bfe_u32 v180, v181, 0x14, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+0+2], v179, v180
-v_bfe_u32 v179, v181, 0x18, 0x4
-v_bfe_u32 v180, v181, 0x1c, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+0+3], v179, v180
+v_and_or_b32 v185, v181, 0xf000f, s[sgprScaleAPkMagic+0]
+v_and_or_b32 v186, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
+v_lshrrev_b32 v181, 0x8, v181
+v_and_or_b32 v187, v181, 0xf000f, s[sgprScaleAPkMagic+0]
+v_and_or_b32 v188, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
+v_pk_add_f16 v185, v185, v183
+v_pk_add_f16 v186, v186, v184
+v_pk_add_f16 v187, v187, v183
+v_pk_add_f16 v188, v188, v184
+v_pk_mul_f16 v185, v185, v182
+v_pk_mul_f16 v186, v186, v182
+v_pk_mul_f16 v187, v187, v182
+v_pk_mul_f16 v188, v188, v182
+v_perm_b32 v[vgprG2LA+0+0], v186, v185, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v188, v187, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v186, v185, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v188, v187, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0
-v_cvt_f32_f16 v182, v[vgprG2LScaleA+1]
-v_and_b32 v183, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
-v_lshlrev_b32 v183, 2, v183
-v_bfe_u32 v179, v[vgprG2LScaleZeroA+1], v183, 0x4
-v_cvt_f32_i32 v179, v179
-v_mul_f32 v183, v182, v179
-v_xor_b32 v183, 0x80000000, v183
+v_and_b32 v182, 0xffff, v[vgprG2LScaleA+1]
+v_lshl_or_b32 v182, v182, 16, v182
+v_and_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
+v_lshlrev_b32 v179, 2, v179
+v_bfe_u32 v179, v[vgprG2LScaleZeroA+1], v179, 0x4
+v_lshl_or_b32 v179, v179, 16, v179
+v_lshl_or_b32 v183, v179, 0, s[sgprScaleAPkMagic+2]
+v_lshl_or_b32 v184, v179, 4, s[sgprScaleAPkMagic+3]
 v_mov_b32 v181, v[vgprG2LA+6+0]
-v_bfe_u32 v179, v181, 0x0, 0x4
-v_bfe_u32 v180, v181, 0x4, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+4+0], v179, v180
-v_bfe_u32 v179, v181, 0x8, 0x4
-v_bfe_u32 v180, v181, 0xc, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+4+1], v179, v180
-v_bfe_u32 v179, v181, 0x10, 0x4
-v_bfe_u32 v180, v181, 0x14, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+4+2], v179, v180
-v_bfe_u32 v179, v181, 0x18, 0x4
-v_bfe_u32 v180, v181, 0x1c, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+4+3], v179, v180
+v_and_or_b32 v185, v181, 0xf000f, s[sgprScaleAPkMagic+0]
+v_and_or_b32 v186, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
+v_lshrrev_b32 v181, 0x8, v181
+v_and_or_b32 v187, v181, 0xf000f, s[sgprScaleAPkMagic+0]
+v_and_or_b32 v188, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
+v_pk_add_f16 v185, v185, v183
+v_pk_add_f16 v186, v186, v184
+v_pk_add_f16 v187, v187, v183
+v_pk_add_f16 v188, v188, v184
+v_pk_mul_f16 v185, v185, v182
+v_pk_mul_f16 v186, v186, v182
+v_pk_mul_f16 v187, v187, v182
+v_pk_mul_f16 v188, v188, v182
+v_perm_b32 v[vgprG2LA+4+0], v186, v185, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v188, v187, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v186, v185, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v188, v187, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:4608
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+0:vgprG2LB+0+3] offset:0
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+4:vgprG2LB+4+3] offset:4608
@@ -1702,17 +1674,17 @@ buffer_load_b128 v[vgprG2LB+28:vgprG2LB+28+3], v[vgprGlobalReadOffsetB+7], s[sgp
 s_waitcnt lgkmcnt(2)
 v_wmma_f32_16x16x16_f16 v[vgprValuC+16:vgprValuC+16+7], v[vgprValuB_X0_I0+8+0+0:vgprValuB_X0_I0+8+0+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuC+16:vgprValuC+16+7]
 s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]
-s_cselect_b32 s82, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0]
-s_cselect_b32 s83, s[sgprWrapUA+1], 0
+s_cselect_b32 s86, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0]
+s_cselect_b32 s87, s[sgprWrapUA+1], 0
 v_wmma_f32_16x16x16_f16 v[vgprValuC+24:vgprValuC+24+7], v[vgprValuB_X0_I0+8+0+0:vgprValuB_X0_I0+8+0+0+7], v[vgprValuA_X0_I0+8+0+0:vgprValuA_X0_I0+8+0+0+7], v[vgprValuC+24:vgprValuC+24+7]
 ds_load_b128 v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprLocalReadAddrB+0] offset:27680
 ds_load_b128 v[vgprValuB_X0_I0+28:vgprValuB_X0_I0+28+3], v[vgprLocalReadAddrB+0] offset:27696
-s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s82
-s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s83
-s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s82
+s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s86
+s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s87
+s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s86
 s_waitcnt lgkmcnt(2)
 v_wmma_f32_16x16x16_f16 v[vgprValuC+32:vgprValuC+32+7], v[vgprValuB_X0_I0+16+0+0:vgprValuB_X0_I0+16+0+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuC+32:vgprValuC+32+7]
-s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s83
+s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s87
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit
 v_wmma_f32_16x16x16_f16 v[vgprValuC+40:vgprValuC+40+7], v[vgprValuB_X0_I0+16+0+0:vgprValuB_X0_I0+16+0+0+7], v[vgprValuA_X0_I0+8+0+0:vgprValuA_X0_I0+8+0+0+7], v[vgprValuC+40:vgprValuC+40+7]
@@ -1734,18 +1706,18 @@ ds_load_b128 v[vgprValuA_X0_I0+12:vgprValuA_X0_I0+12+3], v[vgprLocalReadAddrA+0]
 ds_load_b128 v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprLocalReadAddrB+0] offset:9280
 ds_load_b128 v[vgprValuB_X0_I0+12:vgprValuB_X0_I0+12+3], v[vgprLocalReadAddrB+0] offset:9296
 s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]
-s_cselect_b32 s82, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0]
-s_cselect_b32 s83, s[sgprWrapUB+1], 0
+s_cselect_b32 s86, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0]
+s_cselect_b32 s87, s[sgprWrapUB+1], 0
 s_waitcnt lgkmcnt(4)
 v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7]
 ds_load_b128 v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprLocalReadAddrB+0] offset:18496
-s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s82
-s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s83
-s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s82
+s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s86
+s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s87
+s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s86
 s_waitcnt lgkmcnt(3)
 v_wmma_f32_16x16x16_f16 v[vgprValuC+8:vgprValuC+8+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuA_X0_I0+8+0+0:vgprValuA_X0_I0+8+0+0+7], v[vgprValuC+8:vgprValuC+8+7]
 ds_load_b128 v[vgprValuB_X0_I0+20:vgprValuB_X0_I0+20+3], v[vgprLocalReadAddrB+0] offset:18512
-s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s83
+s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s87
 s_cmp_eq_u32 s[sgprShadowLimitB+1], 0
 s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit
 s_waitcnt lgkmcnt(2)
@@ -1785,96 +1757,60 @@ s_waitcnt lgkmcnt(0)
 s_barrier
 v_wmma_f32_16x16x16_f16 v[vgprValuC+48:vgprValuC+48+7], v[vgprValuB_X0_I0+24+0+0:vgprValuB_X0_I0+24+0+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuC+48:vgprValuC+48+7]
 s_waitcnt vmcnt(9)
-v_cvt_f32_f16 v182, v[vgprG2LScaleA+0]
-v_and_b32 v183, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
-v_lshlrev_b32 v183, 2, v183
-v_bfe_u32 v179, v[vgprG2LScaleZeroA+0], v183, 0x4
-v_cvt_f32_i32 v179, v179
-v_mul_f32 v183, v182, v179
-v_xor_b32 v183, 0x80000000, v183
+v_and_b32 v182, 0xffff, v[vgprG2LScaleA+0]
+v_lshl_or_b32 v182, v182, 16, v182
+v_and_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
+v_lshlrev_b32 v179, 2, v179
+v_bfe_u32 v179, v[vgprG2LScaleZeroA+0], v179, 0x4
+v_lshl_or_b32 v179, v179, 16, v179
+v_lshl_or_b32 v183, v179, 0, s[sgprScaleAPkMagic+2]
+v_lshl_or_b32 v184, v179, 4, s[sgprScaleAPkMagic+3]
 v_mov_b32 v181, v[vgprG2LA+2+0]
-v_bfe_u32 v179, v181, 0x0, 0x4
-v_bfe_u32 v180, v181, 0x4, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+0+0], v179, v180
-v_bfe_u32 v179, v181, 0x8, 0x4
-v_bfe_u32 v180, v181, 0xc, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+0+1], v179, v180
-v_bfe_u32 v179, v181, 0x10, 0x4
-v_bfe_u32 v180, v181, 0x14, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+0+2], v179, v180
-v_bfe_u32 v179, v181, 0x18, 0x4
-v_bfe_u32 v180, v181, 0x1c, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+0+3], v179, v180
+v_and_or_b32 v185, v181, 0xf000f, s[sgprScaleAPkMagic+0]
+v_and_or_b32 v186, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
+v_lshrrev_b32 v181, 0x8, v181
+v_and_or_b32 v187, v181, 0xf000f, s[sgprScaleAPkMagic+0]
+v_and_or_b32 v188, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
+v_pk_add_f16 v185, v185, v183
+v_pk_add_f16 v186, v186, v184
+v_pk_add_f16 v187, v187, v183
+v_pk_add_f16 v188, v188, v184
+v_pk_mul_f16 v185, v185, v182
+v_pk_mul_f16 v186, v186, v182
+v_pk_mul_f16 v187, v187, v182
+v_pk_mul_f16 v188, v188, v182
+v_perm_b32 v[vgprG2LA+0+0], v186, v185, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v188, v187, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v186, v185, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v188, v187, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0
 s_waitcnt vmcnt(8)
-v_cvt_f32_f16 v182, v[vgprG2LScaleA+1]
-v_and_b32 v183, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
-v_lshlrev_b32 v183, 2, v183
-v_bfe_u32 v179, v[vgprG2LScaleZeroA+1], v183, 0x4
-v_cvt_f32_i32 v179, v179
-v_mul_f32 v183, v182, v179
-v_xor_b32 v183, 0x80000000, v183
+v_and_b32 v182, 0xffff, v[vgprG2LScaleA+1]
+v_lshl_or_b32 v182, v182, 16, v182
+v_and_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
+v_lshlrev_b32 v179, 2, v179
+v_bfe_u32 v179, v[vgprG2LScaleZeroA+1], v179, 0x4
+v_lshl_or_b32 v179, v179, 16, v179
+v_lshl_or_b32 v183, v179, 0, s[sgprScaleAPkMagic+2]
+v_lshl_or_b32 v184, v179, 4, s[sgprScaleAPkMagic+3]
 v_mov_b32 v181, v[vgprG2LA+6+0]
-v_bfe_u32 v179, v181, 0x0, 0x4
-v_bfe_u32 v180, v181, 0x4, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+4+0], v179, v180
-v_bfe_u32 v179, v181, 0x8, 0x4
-v_bfe_u32 v180, v181, 0xc, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+4+1], v179, v180
-v_bfe_u32 v179, v181, 0x10, 0x4
-v_bfe_u32 v180, v181, 0x14, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+4+2], v179, v180
-v_bfe_u32 v179, v181, 0x18, 0x4
-v_bfe_u32 v180, v181, 0x1c, 0x4
-v_cvt_f32_i32 v179, v179
-v_cvt_f32_i32 v180, v180
-v_fma_f32 v179, v179, v182, v183
-v_fma_f32 v180, v180, v182, v183
-v_cvt_f16_f32 v179, v179
-v_cvt_f16_f32 v180, v180
-v_pack_b32_f16 v[vgprG2LA+4+3], v179, v180
+v_and_or_b32 v185, v181, 0xf000f, s[sgprScaleAPkMagic+0]
+v_and_or_b32 v186, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
+v_lshrrev_b32 v181, 0x8, v181
+v_and_or_b32 v187, v181, 0xf000f, s[sgprScaleAPkMagic+0]
+v_and_or_b32 v188, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
+v_pk_add_f16 v185, v185, v183
+v_pk_add_f16 v186, v186, v184
+v_pk_add_f16 v187, v187, v183
+v_pk_add_f16 v188, v188, v184
+v_pk_mul_f16 v185, v185, v182
+v_pk_mul_f16 v186, v186, v182
+v_pk_mul_f16 v187, v187, v182
+v_pk_mul_f16 v188, v188, v182
+v_perm_b32 v[vgprG2LA+4+0], v186, v185, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v188, v187, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v186, v185, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v188, v187, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:4608
 s_waitcnt vmcnt(7)
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+0:vgprG2LB+0+3] offset:0
@@ -2019,6 +1955,7 @@ label_Summation_End_2:
 .set sgprAddressScaleA, UNDEF
 .set sgprAddressScaleB, UNDEF
 .set sgprSrdScaleA, UNDEF
+.set sgprScaleAPkMagic, UNDEF
 .set sgprAddressScaleZeroA, UNDEF
 .set sgprShadowLimitA, UNDEF
 .set sgprSrdScaleZeroA, UNDEF
