@@ -225,7 +225,9 @@ constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 ///
 /// The archive it names is not there, which is the point: the containment and link checks
 /// pass, the signature comparison runs, and only if it agrees does the loader get as far
-/// as reporting the absence. Nothing here depends on the archive's contents.
+/// as reporting the absence. Nothing here depends on the archive's contents. The metadata
+/// is the completed baseline tile prepare() reads before the comparison; the tile is not
+/// what these cases are about, and TestGfx950AttentionDenseDispatch.cpp owns its refusal.
 KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
 {
     KernelDefinition kernel;
@@ -243,6 +245,11 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
     kernel.source.signature = recorded;
     kernel.originDirectory = "/nonexistent";
     kernel.treeRoot = "/nonexistent";
+    kernel.metadata = {
+        {std::string("head_size"), HEAD_SIZE},
+        {std::string("block_m"), int64_t{256}},
+        {std::string("block_n"), int64_t{64}},
+    };
     return kernel;
 }
 

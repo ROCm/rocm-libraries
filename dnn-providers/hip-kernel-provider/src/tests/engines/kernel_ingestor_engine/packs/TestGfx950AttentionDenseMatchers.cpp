@@ -4,10 +4,13 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -16,7 +19,9 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -46,10 +51,10 @@
  *     compiled boundary-padding path; kernel_match's tile rule is conditional on `ragged`.
  *   - SLIDING WINDOW: declined. No variant in this catalog carries a non-zero
  *     sliding_window, so a windowed graph has nothing that could serve it.
- *   - NO block_m KMD field: the KMD declares only what varies, and the tile does not. The
- *     value the engine launches with is pinned to the shipped set, not baked into the
- *     binary -- see note 1 in Gfx950AttentionDenseGeometry.hpp for what must change if a
- *     variant ever moves it.
+ *   - TILE: every candidate carries its own completed (block_m, block_n). Applicability is
+ *     candidate-relative -- one graph admits some tiles of a cohort and not others -- and
+ *     a missing, mistyped or unbuildable tile declines before anything divides by it.
+ *     Cold ranking puts the 256/64 baseline first, then ascending (block_m, block_n).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -363,14 +368,14 @@ std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 }
 
 /// KernelSpec spells the fields the engine's KMD declares: dtype, head_size,
-/// num_query_heads, num_kv_heads, batch, seqlen_q, seqlen_kv, causal, sliding_window,
-/// ragged.
+/// num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q,
+/// seqlen_kv, block_m, block_n -- as a completed record carries them, so a spec that
+/// leaves the tile alone is a legacy record completed to 256/64.
 ///
-/// The KMD carries only what VARIES between candidates, so a knob the catalog holds at a
-/// single value -- block_m, block_n, waves_per_eu and the rest of the tuning surface --
-/// has no field here. A knob that starts varying must be added to the KMD first: without
-/// a field of its own, two candidates differing only in that knob complete to the same
-/// catalog key, and the loader keeps one of them and drops the other.
+/// The KMD carries only what VARIES between candidates. A knob that starts varying must
+/// be added to the KMD first: without a field of its own, two candidates differing only
+/// in that knob complete to the same catalog key, and the loader keeps one of them and
+/// drops the other.
 struct KernelSpec
 {
     std::string dtype = "BF16";
@@ -383,13 +388,27 @@ struct KernelSpec
     int64_t causal = 1;
     int64_t slidingWindow = 0;
     int64_t ragged = 0;
+    int64_t blockM = 256;
+    int64_t blockN = 64;
+    /// The descriptor id's final byte. Only the ranking cases vary it.
+    unsigned idByte = 0xa1;
 };
+
+/// A descriptor id ending in @p lastByte. Distinct bytes give distinct ids, ordered by
+/// the byte, so a case can choose which candidate the selector's id tie-break favours.
+hipdnn_plugin_sdk::ingestor::DescriptorId idEndingIn(unsigned lastByte)
+{
+    constexpr const char* HEX = "0123456789abcdef";
+    std::string text = "00000000-0000-4000-8000-0000000000";
+    text.push_back(HEX[(lastByte >> 4U) & 0xFU]);
+    text.push_back(HEX[lastByte & 0xFU]);
+    return hipdnn_flatbuffers_sdk::utilities::parseUuid(text);
+}
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
 {
     hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
-    kernel.kernelId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-00000000dea1");
+    kernel.kernelId = idEndingIn(spec.idByte);
     kernel.packId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-00000000dea2");
     kernel.dispatchId
@@ -405,11 +424,15 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("causal"), spec.causal},
         {std::string("sliding_window"), spec.slidingWindow},
         {std::string("ragged"), spec.ragged},
+        {std::string("block_m"), spec.blockM},
+        {std::string("block_n"), spec.blockN},
     };
     return kernel;
 }
 
-bool matchesKernel(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
+/// Runs graph_match then kernel_match for @p kernel, exactly as a catalog build does.
+bool matchesKernelDefinition(const GraphSpec& graphSpec,
+                             const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
 {
     registerNativeIngestorSymbols();
     const auto graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
@@ -429,7 +452,12 @@ bool matchesKernel(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
     {
         return false;
     }
-    return kernelMatcher(context, *bound, makeKernel(kernelSpec));
+    return kernelMatcher(context, *bound, kernel);
+}
+
+bool matchesKernel(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
+{
+    return matchesKernelDefinition(graphSpec, makeKernel(kernelSpec));
 }
 
 double scoreOf(const KernelSpec& kernelSpec)
@@ -449,6 +477,224 @@ double scoreOf(const KernelSpec& kernelSpec)
     const auto bound = graphMatcher(context);
     EXPECT_TRUE(bound.has_value());
     return scorer(context, bound.value_or(BoundTokens{}), makeKernel(kernelSpec));
+}
+
+/// A (block_m, block_n) pair.
+using Tile = std::pair<int64_t, int64_t>;
+using TileSet = std::set<Tile>;
+
+/// The tiles the catalog authors per aligned cohort at each head size.
+const std::vector<Tile>& d64Tiles()
+{
+    static const std::vector<Tile> s_tiles{
+        {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 64}, {256, 128}, {256, 256}};
+    return s_tiles;
+}
+
+const std::vector<Tile>& d128Tiles()
+{
+    static const std::vector<Tile> s_tiles{
+        {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 64}, {256, 128}};
+    return s_tiles;
+}
+
+TileSet tileSetOf(const std::vector<Tile>& tiles)
+{
+    return TileSet(tiles.begin(), tiles.end());
+}
+
+KernelSpec withTile(KernelSpec spec, int64_t blockM, int64_t blockN)
+{
+    spec.blockM = blockM;
+    spec.blockN = blockN;
+    return spec;
+}
+
+/// An aligned record's canonical build inputs: B1, Sq=Skv=512. Not runtime constraints.
+KernelSpec canonicalAligned()
+{
+    KernelSpec spec;
+    spec.batch = 1;
+    spec.seqLenQ = 512;
+    spec.seqLenKv = 512;
+    spec.ragged = 0;
+    return spec;
+}
+
+/// One candidate per tile, sharing @p semantic's other fields, with distinct ids.
+std::vector<KernelSpec> cohortOf(const KernelSpec& semantic, const std::vector<Tile>& tiles)
+{
+    std::vector<KernelSpec> cohort;
+    cohort.reserve(tiles.size());
+    unsigned idByte = 0x10;
+    for(const auto& [blockM, blockN] : tiles)
+    {
+        auto candidate = withTile(semantic, blockM, blockN);
+        candidate.idByte = idByte++;
+        cohort.push_back(candidate);
+    }
+    return cohort;
+}
+
+/// BF16/D128/H9/9 noncausal: the cross-attention cohort the long-KV witnesses use.
+KernelSpec canonicalD128H9()
+{
+    KernelSpec spec = canonicalAligned();
+    spec.headSize = 128;
+    spec.numQueryHeads = 9;
+    spec.numKvHeads = 9;
+    spec.causal = 0;
+    return spec;
+}
+
+std::vector<KernelSpec> d128H9Cohort()
+{
+    return cohortOf(canonicalD128H9(), d128Tiles());
+}
+
+GraphSpec d128H9Noncausal(int64_t batch, int64_t seqLenQ, int64_t seqLenKv)
+{
+    GraphSpec graph;
+    graph.batch = batch;
+    graph.numQueryHeads = 9;
+    graph.numKvHeads = 9;
+    graph.seqLenQ = seqLenQ;
+    graph.seqLenKv = seqLenKv;
+    graph.headSize = 128;
+    graph.headSizeV = 128;
+    graph.leftBound = std::nullopt;
+    graph.rightBound = std::nullopt;
+    return graph;
+}
+
+/// BF16/D64/H32/32 noncausal: the cohort that carries the D64-only 256/256 tile.
+std::vector<KernelSpec> d64H32Cohort()
+{
+    KernelSpec spec = canonicalAligned();
+    spec.headSize = 64;
+    spec.numQueryHeads = 32;
+    spec.numKvHeads = 32;
+    spec.causal = 0;
+    return cohortOf(spec, d64Tiles());
+}
+
+GraphSpec d64H32Noncausal(int64_t seqLenQ, int64_t seqLenKv)
+{
+    GraphSpec graph;
+    graph.batch = 1;
+    graph.numQueryHeads = 32;
+    graph.numKvHeads = 32;
+    graph.seqLenQ = seqLenQ;
+    graph.seqLenKv = seqLenKv;
+    graph.headSize = 64;
+    graph.headSizeV = 64;
+    graph.leftBound = std::nullopt;
+    graph.rightBound = std::nullopt;
+    return graph;
+}
+
+/// BF16/D64/H64/8 top-left causal -- the semantic cohort of the shipped B1/S2016 tail.
+GraphSpec tailGraph(int64_t batch, int64_t seqLenQ, int64_t seqLenKv)
+{
+    GraphSpec graph;
+    graph.batch = batch;
+    graph.numQueryHeads = 64;
+    graph.numKvHeads = 8;
+    graph.seqLenQ = seqLenQ;
+    graph.seqLenKv = seqLenKv;
+    graph.headSize = 64;
+    graph.headSizeV = 64;
+    return graph;
+}
+
+KernelSpec tail2016()
+{
+    KernelSpec spec;
+    spec.headSize = 64;
+    spec.numQueryHeads = 64;
+    spec.numKvHeads = 8;
+    spec.causal = 1;
+    spec.ragged = 1;
+    spec.batch = 1;
+    spec.seqLenQ = 2016;
+    spec.seqLenKv = 2016;
+    spec.idByte = 0xe0;
+    return spec;
+}
+
+/// The aligned candidates sharing the tail's semantic fields.
+std::vector<KernelSpec> tailCohort()
+{
+    KernelSpec spec = canonicalAligned();
+    spec.headSize = 64;
+    spec.numQueryHeads = 64;
+    spec.numKvHeads = 8;
+    spec.causal = 1;
+    return cohortOf(spec, d64Tiles());
+}
+
+/// Runs graph_match, then kernel_match over @p candidates, and returns the survivors'
+/// tiles -- ranked through the engine's score symbol and the SDK's NativeKernelHeuristic
+/// when @p rank, in authoring order otherwise.
+std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
+                                  const std::vector<KernelSpec>& candidates,
+                                  bool rank)
+{
+    registerNativeIngestorSymbols();
+    const auto graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
+        std::string(GRAPH_MATCHER_SYMBOL));
+    const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+        std::string(KERNEL_MATCHER_SYMBOL));
+
+    auto builder = buildSdpaGraph(graphSpec);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto bound = graphMatcher(context);
+    EXPECT_TRUE(bound.has_value()) << "graph_match declined the graph before kernel_match ran";
+    if(!bound.has_value())
+    {
+        return {};
+    }
+
+    hipdnn_plugin_sdk::ingestor::Catalog catalog;
+    catalog.bound = *bound;
+    for(const auto& spec : candidates)
+    {
+        auto kernel = makeKernel(spec);
+        if(kernelMatcher(context, *bound, kernel))
+        {
+            catalog.entries.push_back(std::move(kernel));
+        }
+    }
+
+    if(rank)
+    {
+        const hipdnn_plugin_sdk::ingestor::NativeKernelHeuristic heuristic{
+            std::string(SCORE_SYMBOL)};
+        catalog.entries = heuristic.rank(catalog, context);
+    }
+
+    std::vector<Tile> tiles;
+    tiles.reserve(catalog.entries.size());
+    for(const auto& entry : catalog.entries)
+    {
+        tiles.emplace_back(entry.getIntMetadata("block_m"), entry.getIntMetadata("block_n"));
+    }
+    return tiles;
+}
+
+TileSet admittedTiles(const GraphSpec& graph, const std::vector<KernelSpec>& candidates)
+{
+    return tileSetOf(matchCandidates(graph, candidates, /*rank=*/false));
+}
+
+/// The order a cold plan build tries the admitted candidates in.
+std::vector<Tile> coldOrder(const GraphSpec& graph, const std::vector<KernelSpec>& candidates)
+{
+    return matchCandidates(graph, candidates, /*rank=*/true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1056,8 +1302,8 @@ TEST(TestGfx950AttentionDenseKernelMatch, AcceptsARaggedCandidateForARaggedGraph
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateWhoseTileDoesNotDivideSeqLenKv)
 {
-    // Tile alignment is checked against GFX950_ATTENTION_DENSE_BLOCK_N, a constant in the
-    // pack rather than a KMD field, because the tile does not vary across the catalog.
+    // The candidate's own block_n must divide Skv. 288 is not a multiple of the baseline's
+    // 64, so the baseline declines; the BN32 neighbour that does serve it is pinned below.
     GraphSpec graph;
     graph.seqLenKv = 288; // not a multiple of 64
     KernelSpec kernel;
@@ -1174,38 +1420,329 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesWindowedCandidateForPlainGraph)
 }
 
 // ---------------------------------------------------------------------------
-// score
+// Candidate-relative tiles. Each cohort is authored as the catalog authors it --
+// canonical B1/Sq512/Skv512 build inputs, one candidate per tile -- and every graph
+// below differs from those inputs, so an admitted candidate is runtime-shape reuse.
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseScore, ScoresACandidateDeterministicallyAsAPositiveFiniteWeight)
+TEST(TestGfx950AttentionDenseTileMatch, D128CrossAttentionQ384AdmitsExactlyTheBm128Tiles)
 {
-    // The three properties the selector relies on, each true of a neutral placeholder and
-    // of a real tuning model alike:
+    // 384 is a multiple of 128 and not of 256; 512 is a multiple of every block_n.
+    EXPECT_EQ(admittedTiles(d128H9Noncausal(1, 384, 512), d128H9Cohort()),
+              (TileSet{{128, 32}, {128, 64}, {128, 128}}));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, D128CrossAttentionKv192AdmitsBothBlockMsAtBn32And64)
+{
+    // 192 is a multiple of 32 and 64 but not of 128.
+    EXPECT_EQ(admittedTiles(d128H9Noncausal(1, 1024, 192), d128H9Cohort()),
+              (TileSet{{128, 32}, {128, 64}, {256, 32}, {256, 64}}));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, D128CrossAttentionKv288And416AdmitOnlyBn32)
+{
+    // Both are odd multiples of 32: the baseline declines, and only the BN32 tiles serve.
+    for(const int64_t seqLenKv : {int64_t{288}, int64_t{416}})
+    {
+        EXPECT_EQ(admittedTiles(d128H9Noncausal(1, 1024, seqLenKv), d128H9Cohort()),
+                  (TileSet{{128, 32}, {256, 32}}))
+            << "seqlen_kv " << seqLenKv;
+    }
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, D128LongKvAdmitsEveryAuthoredTile)
+{
+    // 62208 = 486 * 128, so every block_n divides it.
+    EXPECT_EQ(admittedTiles(d128H9Noncausal(1, 1024, 62208), d128H9Cohort()),
+              tileSetOf(d128Tiles()));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, D128GqaCausalRuntimeBatchAdmitsAllSixTiles)
+{
+    // BF16/D128/H32/8 top-left causal at B3, Sq=Skv=1536: 1536 = 6 * 256 = 12 * 128.
+    GraphSpec graph;
+    graph.batch = 3;
+    graph.numQueryHeads = 32;
+    graph.numKvHeads = 8;
+    graph.seqLenQ = 1536;
+    graph.seqLenKv = 1536;
+
+    KernelSpec semantic = canonicalAligned();
+    semantic.numQueryHeads = 32;
+    semantic.numKvHeads = 8;
+    semantic.causal = 1;
+
+    EXPECT_EQ(admittedTiles(graph, cohortOf(semantic, d128Tiles())), tileSetOf(d128Tiles()));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, D64SelfAttentionAdmitsAllSevenTilesIncludingBn256)
+{
+    EXPECT_EQ(admittedTiles(d64H32Noncausal(1024, 1024), d64H32Cohort()), tileSetOf(d64Tiles()));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, D64Kv128ExcludesOnlyTheBn256Tile)
+{
+    EXPECT_EQ(admittedTiles(d64H32Noncausal(1024, 128), d64H32Cohort()),
+              (TileSet{{128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 64}, {256, 128}}));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, RefusesTilesGfx950DoesNotBuildEvenWhereTheyWouldDivide)
+{
+    // Every length below is a multiple of every block_n, so only the tile rules decide.
+    // 128/256 fails block_m % block_n at both head sizes; D128 256/256 passes the Python
+    // rules and fails the LDS budget. D64 256/256 is the positive neighbour.
+    const GraphSpec d64 = d64H32Noncausal(1024, 1024);
+    const GraphSpec d128 = d128H9Noncausal(1, 1024, 1024);
+
+    EXPECT_FALSE(matchesKernel(d64, withTile(d64H32Cohort().front(), 128, 256)));
+    EXPECT_FALSE(matchesKernel(d128, withTile(d128H9Cohort().front(), 128, 256)));
+    EXPECT_FALSE(matchesKernel(d128, withTile(d128H9Cohort().front(), 256, 256)));
+    EXPECT_TRUE(matchesKernel(d64, withTile(d64H32Cohort().front(), 256, 256)));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, BothLengthsAreCheckedAgainstTheCandidateTile)
+{
+    // One graph per failing length, each beside a tile that the same graph admits.
+    // Sq 128 x Skv 512: block_m 256 declines, 128 admits.
+    const auto q128 = d128H9Noncausal(1, 128, 512);
+    EXPECT_FALSE(matchesKernel(q128, withTile(canonicalD128H9(), 256, 64)));
+    EXPECT_TRUE(matchesKernel(q128, withTile(canonicalD128H9(), 128, 64)));
+    // Sq 512 x Skv 96: block_n 64 declines, 32 admits.
+    const auto kv96 = d128H9Noncausal(1, 512, 96);
+    EXPECT_FALSE(matchesKernel(kv96, withTile(canonicalD128H9(), 256, 64)));
+    EXPECT_TRUE(matchesKernel(kv96, withTile(canonicalD128H9(), 256, 32)));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, AlternativeTilesKeepTheMaskRules)
+{
+    // TOP_LEFT_CAUSAL at unequal lengths is served; BOTTOM_RIGHT_CAUSAL at unequal
+    // lengths is declined by graph_match for every tile alike, and served at equal ones.
+    GraphSpec topLeft;
+    topLeft.seqLenQ = 384;
+    topLeft.seqLenKv = 512;
+    EXPECT_TRUE(matchesKernel(topLeft, withTile(KernelSpec{}, 128, 32)));
+
+    GraphSpec bottomRightUnequal = topLeft;
+    bottomRightUnequal.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    EXPECT_FALSE(matchGraph(bottomRightUnequal).has_value());
+
+    GraphSpec bottomRightEqual = bottomRightUnequal;
+    bottomRightEqual.seqLenKv = 384;
+    EXPECT_TRUE(matchesKernel(bottomRightEqual, withTile(KernelSpec{}, 128, 128)));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, AlternativeTilesKeepTheSemanticFieldComparisons)
+{
+    // A BM128 candidate differing in one semantic field from a graph it would otherwise
+    // serve. The unperturbed candidate is the positive neighbour.
+    const GraphSpec graph = d128H9Noncausal(1, 384, 512);
+    const KernelSpec match = withTile(canonicalD128H9(), 128, 32);
+    EXPECT_TRUE(matchesKernel(graph, match));
+
+    KernelSpec otherDtype = match;
+    otherDtype.dtype = "FP16";
+    EXPECT_FALSE(matchesKernel(graph, otherDtype));
+
+    KernelSpec otherHeads = match;
+    otherHeads.numKvHeads = 3;
+    EXPECT_FALSE(matchesKernel(graph, otherHeads));
+
+    KernelSpec otherMask = match;
+    otherMask.causal = 1;
+    EXPECT_FALSE(matchesKernel(graph, otherMask));
+
+    // FP16 graph against the FP16 candidate, and D64 against D64: both dtypes and both
+    // head sizes are served at the alternative tile.
+    GraphSpec fp16Graph = graph;
+    fp16Graph.dataType = data_objects::DataType::HALF;
+    EXPECT_TRUE(matchesKernel(fp16Graph, otherDtype));
+
+    GraphSpec d64Graph = graph;
+    d64Graph.headSize = 64;
+    d64Graph.headSizeV = 64;
+    KernelSpec d64Candidate = match;
+    d64Candidate.headSize = 64;
+    EXPECT_TRUE(matchesKernel(d64Graph, d64Candidate));
+}
+
+// ---------------------------------------------------------------------------
+// Malformed tile metadata. Each is declined outright -- no default substituted, and no
+// division by the value: a zero block_n that reached `Skv % block_n` would fault the
+// process rather than fail the expectation.
+// ---------------------------------------------------------------------------
+
+TEST(TestGfx950AttentionDenseTileMatch, AcceptsARecordCompletedToTheBaselineTile)
+{
+    // A legacy record's raw form omits the tile; completion supplies 256/64 and the
+    // candidate is served. This is the positive neighbour of every case below.
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, DeclinesARecordWhoseTileWasNeverCompleted)
+{
+    for(const char* field : {"block_m", "block_n"})
+    {
+        auto kernel = makeKernel(KernelSpec{});
+        kernel.metadata.erase(field);
+        EXPECT_FALSE(matchesKernelDefinition(GraphSpec{}, kernel)) << "missing " << field;
+    }
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, DeclinesZeroNegativeAndUnbuiltTileValues)
+{
+    // Sq = Skv = 256 is a multiple of every legal tile, so only validation can decline.
+    const std::vector<std::pair<int64_t, int64_t>> malformed{
+        {0, 64}, {256, 0}, {0, 0}, {-256, 64}, {256, -64}, {64, 64}, {512, 64}, {256, 48}};
+    for(const auto& [blockM, blockN] : malformed)
+    {
+        EXPECT_FALSE(matchesKernel(GraphSpec{}, withTile(KernelSpec{}, blockM, blockN)))
+            << blockM << "/" << blockN;
+    }
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, DeclinesATileFieldOfTheWrongType)
+{
+    // Each value names 256 or 64 in some other type; none may be read as the integer.
+    using hipdnn_plugin_sdk::ingestor::MetadataValue;
+    const std::vector<MetadataValue> blockMSpellings{MetadataValue{std::string("256")},
+                                                     MetadataValue{256.0},
+                                                     MetadataValue{true},
+                                                     MetadataValue{std::vector<int64_t>{256}}};
+    for(const auto& value : blockMSpellings)
+    {
+        auto kernel = makeKernel(KernelSpec{});
+        kernel.metadata[std::string("block_m")] = value;
+        EXPECT_FALSE(matchesKernelDefinition(GraphSpec{}, kernel))
+            << "block_m held alternative " << value.index();
+    }
+
+    auto kernel = makeKernel(KernelSpec{});
+    kernel.metadata[std::string("block_n")] = MetadataValue{std::string("64")};
+    EXPECT_FALSE(matchesKernelDefinition(GraphSpec{}, kernel));
+}
+
+// ---------------------------------------------------------------------------
+// Exact tails beside aligned alternatives. A real shipped tail --
+// BF16/D64/H64/8 causal, B1, Sq=Skv=2016 -- with its aligned cohort alongside.
+// ---------------------------------------------------------------------------
+
+TEST(TestGfx950AttentionDenseTileMatch, TailServesOnlyItsExactAuthoredShape)
+{
+    // 2016 is a multiple of 32 but of no block_m, so no aligned candidate applies and
+    // the tail is the only one served.
+    EXPECT_TRUE(matchesKernel(tailGraph(1, 2016, 2016), tail2016()));
+    EXPECT_EQ(admittedTiles(tailGraph(1, 2016, 2016), tailCohort()), TileSet{});
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, TailRefusesEachIndependentShapeChange)
+{
+    // Batch, seqlen_q and seqlen_kv changed one at a time, then both lengths together.
+    // Each drops the tail; the aligned candidates each change admits are exactly those
+    // whose own tile divides the new lengths, so the tail's refusal is not global.
+    struct Case
+    {
+        const char* what;
+        GraphSpec graph;
+        TileSet aligned;
+    };
+    const std::vector<Case> cases{
+        {"batch 2", tailGraph(2, 2016, 2016), TileSet{}},
+        // TOP_LEFT_CAUSAL with Sq != Skv is served: 2048 is a multiple of both block_m,
+        // 2016 of block_n 32 only.
+        {"seqlen_q 2048", tailGraph(1, 2048, 2016), TileSet{{128, 32}, {256, 32}}},
+        {"seqlen_kv 2048", tailGraph(1, 2016, 2048), TileSet{}},
+        {"both 2048", tailGraph(1, 2048, 2048), tileSetOf(d64Tiles())},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.what);
+        EXPECT_FALSE(matchesKernel(c.graph, tail2016()));
+        EXPECT_EQ(admittedTiles(c.graph, tailCohort()), c.aligned);
+    }
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, TailRefusesAShapeItsOwnTileDivides)
+{
+    // A tail record at a length its own 256/64 tile divides is not a tail's shape: the
+    // aligned binary serves it, and the tail declines even at exact metadata equality.
+    KernelSpec tail = tail2016();
+    tail.seqLenQ = 2048;
+    tail.seqLenKv = 2048;
+    EXPECT_FALSE(matchesKernel(tailGraph(1, 2048, 2048), tail));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, TailWithAMalformedTileIsDeclined)
+{
+    // The tail's exact shape match does not excuse its tile: the geometry divides by it.
+    auto kernel = makeKernel(tail2016());
+    kernel.metadata.erase("block_m");
+    EXPECT_FALSE(matchesKernelDefinition(tailGraph(1, 2016, 2016), kernel));
+}
+
+// ---------------------------------------------------------------------------
+// Cold ranking, through the engine's own score symbol and the SDK heuristic that
+// consumes it: the order a cold (unbenchmarked) plan build tries candidates in.
+// ---------------------------------------------------------------------------
+
+TEST(TestGfx950AttentionDenseScore, BaselineFirstThenAscendingTilesWhateverTheIdOrder)
+{
+    // D64 S1024 admits all seven tiles. Ids are assigned twice -- ascending with the
+    // expected order, then descending -- so an order the id tie-break decided would
+    // differ between the two runs.
+    const std::vector<Tile> expected{
+        {256, 64}, {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 128}, {256, 256}};
+    const GraphSpec graph = d64H32Noncausal(1024, 1024);
+
+    for(const bool descendingIds : {false, true})
+    {
+        SCOPED_TRACE(descendingIds ? "descending ids" : "ascending ids");
+        auto cohort = d64H32Cohort();
+        for(std::size_t i = 0; i < cohort.size(); ++i)
+        {
+            const auto& tile = expected.at(i);
+            auto& candidate = cohort.at(i);
+            candidate.blockM = tile.first;
+            candidate.blockN = tile.second;
+            candidate.idByte = static_cast<unsigned>(descendingIds ? std::size_t{0x70} - i
+                                                                   : std::size_t{0x10} + i);
+        }
+        EXPECT_EQ(coldOrder(graph, cohort), expected);
+    }
+}
+
+TEST(TestGfx950AttentionDenseScore, BestApplicableAlternativeLeadsWhenTheBaselineCannotServe)
+{
+    // Sq 384 rules out every block_m 256 tile, the baseline included. Ids descend against
+    // the authoring order, so the selector's ascending-id tie-break alone would put
+    // 128/128 first.
+    auto cohort = d128H9Cohort();
+    for(std::size_t i = 0; i < cohort.size(); ++i)
+    {
+        cohort.at(i).idByte = static_cast<unsigned>(std::size_t{0x80} - i);
+    }
+    EXPECT_EQ(coldOrder(d128H9Noncausal(1, 384, 512), cohort),
+              (std::vector<Tile>{{128, 32}, {128, 64}, {128, 128}}));
+}
+
+TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveFiniteWeight)
+{
+    // The properties the selector relies on beyond the order itself:
     //
     //   DETERMINISM -- one candidate scored twice under the same context yields the same
-    //   number. A scorer that drifts between calls makes plan selection unreproducible,
-    //   and the same graph would pick different binaries on successive builds.
+    //   number. A scorer that drifts between calls makes plan selection unreproducible.
     //
     //   POSITIVITY -- the number is usable as a ranking weight rather than read as a
     //   refusal. Applicability is kernel_match's job; score ranks what already matched.
     //
     //   FINITENESS -- NaN compares false against everything, so a single NaN score turns
     //   the ranking into whatever order the sort happened to visit the candidates in.
-    //
-    // Deliberately NOT asserted: any ordering BETWEEN candidates. The scorer claims no
-    // ranking over them, so pinning one would pin an accident of the implementation.
-    const KernelSpec bf16;
-    KernelSpec fp16;
-    fp16.dtype = "FP16";
-
-    for(const auto& candidate : {bf16, fp16})
+    for(const auto& candidate : d64H32Cohort())
     {
+        SCOPED_TRACE(std::to_string(candidate.blockM) + "/" + std::to_string(candidate.blockN));
         const double score = scoreOf(candidate);
-        EXPECT_EQ(score, scoreOf(candidate))
-            << "candidate '" << candidate.dtype << "' scored differently on a repeat call";
-        EXPECT_GT(score, 0.0) << "candidate '" << candidate.dtype << "' scored non-positive";
-        EXPECT_TRUE(std::isfinite(score))
-            << "candidate '" << candidate.dtype << "' scored a non-finite value";
+        EXPECT_EQ(score, scoreOf(candidate));
+        EXPECT_GT(score, 0.0);
+        EXPECT_TRUE(std::isfinite(score));
     }
 }
 

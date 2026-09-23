@@ -3,12 +3,14 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <exception>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -58,9 +60,11 @@
  * PreparedDispatch subclass that lives in the pack's own anonymous namespace. The base
  * class hipdnn_plugin_sdk::ingestor::PreparedDispatch declares nothing but a destructor,
  * so a prepared dispatch is opaque to a test even where one can be produced. The call
- * site's ARGUMENT ORDER -- (seqLenQ, numQueryHeads, batch) -- is consequently not
+ * site's ARGUMENTS -- (block_m, seqLenQ, numQueryHeads, batch) -- are consequently not
  * observable without a real archive and a real gfx950 device. The geometry file pins what
- * the function computes; nothing pins what prepare() passes it.
+ * the function computes; nothing here pins what prepare() passes it. What IS reachable is
+ * the tile check prepare() makes before loading: a candidate with no supported tile is
+ * refused by name rather than launched with a substituted one.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -322,12 +326,13 @@ std::vector<KernelArgument> recordedSignature()
     return {buffer, buffer, buffer, buffer, scalar, scalar, scalar, scalar};
 }
 
-/// A KPACK descriptor for this engine naming an archive that is not there.
+/// A KPACK descriptor for this engine naming an archive that is not there, carrying the
+/// completed metadata prepare() reads: head_size and the (block_m, block_n) tile.
 ///
 /// That absence is the point: every check prepare() performs BEFORE the loader runs is
 /// reached, and when they all pass the loader reports the missing file. No device, no
 /// compile, no launch.
-KernelDefinition makeKernel()
+KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64)
 {
     KernelDefinition kernel;
     kernel.kernelId
@@ -344,12 +349,19 @@ KernelDefinition makeKernel()
     kernel.source.signature = recordedSignature();
     kernel.originDirectory = "/nonexistent";
     kernel.treeRoot = "/nonexistent";
+    kernel.metadata = {
+        {std::string("head_size"), HEAD_SIZE},
+        {std::string("block_m"), blockM},
+        {std::string("block_n"), blockN},
+    };
     return kernel;
 }
 
-/// The message prepare() throws for @p bound, or empty if it returned a prepared
-/// dispatch -- which it cannot, since the archive is absent.
-std::string prepareFailure(const AttentionGraph& graph, const BoundTokens& bound)
+/// The message prepare() throws for @p bound and @p kernel, or empty if it returned a
+/// prepared dispatch -- which it cannot, since the archive is absent.
+std::string prepareFailure(const AttentionGraph& graph,
+                           const BoundTokens& bound,
+                           const KernelDefinition& kernel = makeKernel())
 {
     const auto* handler = dispatchHandler();
     EXPECT_NE(handler, nullptr);
@@ -360,7 +372,7 @@ std::string prepareFailure(const AttentionGraph& graph, const BoundTokens& bound
 
     try
     {
-        handler->prepare(graph.context(), bound, makeKernel());
+        handler->prepare(graph.context(), bound, kernel);
     }
     catch(const std::exception& error)
     {
@@ -374,6 +386,9 @@ constexpr const char* MISSING_TOKEN_MARKER = "missing bound token";
 
 /// The fragment only the output-layout refusal carries.
 constexpr const char* OUTPUT_LAYOUT_MARKER = "not dense BSHD";
+
+/// The fragment only the tile refusal carries.
+constexpr const char* TILE_MARKER = "no supported block_m/block_n tile";
 
 } // namespace
 
@@ -569,6 +584,56 @@ TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesAN
     const std::string failure = prepareFailure(graph, tampered);
     ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
     EXPECT_NE(failure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << failure;
+}
+
+/// Every tile a catalog candidate can carry, at both block_m, reaches the loader: the tile
+/// check is not what stops a legal alternative.
+TEST(TestGfx950AttentionDenseDispatch, ReachesTheLoaderForEveryBuildableTile)
+{
+    const AttentionGraph graph;
+    const auto bound = bindingsFor(graph);
+    for(const auto& [blockM, blockN] : std::vector<std::pair<int64_t, int64_t>>{
+            {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 64}, {256, 128}})
+    {
+        SCOPED_TRACE(std::to_string(blockM) + "/" + std::to_string(blockN));
+        const std::string failure = prepareFailure(graph, bound, makeKernel(blockM, blockN));
+        ASSERT_FALSE(failure.empty()) << "prepare() cannot succeed without the archive";
+        EXPECT_EQ(failure.find(TILE_MARKER), std::string::npos) << failure;
+    }
+}
+
+/// A candidate whose tile is missing, zero, negative, unbuilt or unbuildable at its head
+/// size (D128 block_n 256 exceeds LDS). The grid and CTA come from block_m, so prepare()
+/// refuses by name before the loader -- a zero would otherwise be a division by zero, and
+/// any substitute tile launches this binary with another binary's geometry.
+TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareACandidateWithoutASupportedTile)
+{
+    const AttentionGraph graph;
+    const auto bound = bindingsFor(graph);
+
+    std::vector<KernelDefinition> malformed;
+    for(const auto& [blockM, blockN] : std::vector<std::pair<int64_t, int64_t>>{
+            {0, 64}, {256, 0}, {-256, 64}, {64, 64}, {512, 64}, {128, 256}, {256, 256}})
+    {
+        malformed.push_back(makeKernel(blockM, blockN));
+    }
+    for(const char* field : {"block_m", "block_n"})
+    {
+        auto kernel = makeKernel();
+        kernel.metadata.erase(field);
+        malformed.push_back(kernel);
+    }
+    auto mistyped = makeKernel();
+    mistyped.metadata[std::string("block_m")] = std::string("256");
+    malformed.push_back(mistyped);
+
+    for(std::size_t i = 0; i < malformed.size(); ++i)
+    {
+        SCOPED_TRACE("malformed candidate " + std::to_string(i));
+        const std::string failure = prepareFailure(graph, bound, malformed.at(i));
+        ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+        EXPECT_NE(failure.find(TILE_MARKER), std::string::npos) << failure;
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
