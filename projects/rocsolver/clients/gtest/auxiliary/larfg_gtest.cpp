@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,8 +40,8 @@ using larfg_tuple = std::tuple<I, I, int>;
 // (null handle, null pointers and invalid values)
 
 const vector<int> singular_range = {
-    0,  // alpha random, x random,
-    1,  // alpha random and real, x = 0
+    0, // alpha random, x random,
+    1, // alpha random and real, x = 0
 };
 
 const vector<int> incx_range = {
@@ -196,14 +196,24 @@ TEST_P(LARFG_64, __double_complex)
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          LARFG,
-                         Combine(ValuesIn(large_n_size_range), ValuesIn(incx_range), ValuesIn(singular_range)));
+                         Combine(ValuesIn(large_n_size_range),
+                                 ValuesIn(incx_range),
+                                 ValuesIn(singular_range)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, LARFG, Combine(ValuesIn(n_size_range), ValuesIn(incx_range), ValuesIn(singular_range)));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         LARFG,
+                         Combine(ValuesIn(n_size_range),
+                                 ValuesIn(incx_range),
+                                 ValuesIn(singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          LARFG_64,
-                         Combine(ValuesIn(large_n_size_range_64), ValuesIn(incx_range_64), ValuesIn(singular_range)));
+                         Combine(ValuesIn(large_n_size_range_64),
+                                 ValuesIn(incx_range_64),
+                                 ValuesIn(singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          LARFG_64,
-                         Combine(ValuesIn(n_size_range_64), ValuesIn(incx_range_64), ValuesIn(singular_range)));
+                         Combine(ValuesIn(n_size_range_64),
+                                 ValuesIn(incx_range_64),
+                                 ValuesIn(singular_range)));

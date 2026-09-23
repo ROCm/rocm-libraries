@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -100,8 +100,8 @@ void larfg_initData(const rocblas_handle handle,
         if(singular == 1)
         {
             ha[0][0] = std::real(ha[0][0]);
-            for (int i = 0; i < n-1; ++i)
-                hx[0][i*inc] = 0;
+            for(int i = 0; i < n - 1; ++i)
+                hx[0][i * inc] = 0;
         }
     }
 
@@ -320,12 +320,14 @@ void testing_larfg(Arguments& argus)
 
     // check computations
     if(argus.unit_check || argus.norm_check)
-        larfg_getError<T>(handle, singular, n, da, dx, inc, dtau, ha, ha_res, hx, hx_res, htau, htau_res, &max_error);
+        larfg_getError<T>(handle, singular, n, da, dx, inc, dtau, ha, ha_res, hx, hx_res, htau,
+                          htau_res, &max_error);
 
     // collect performance data
     if(argus.timing && hot_calls > 0)
-        larfg_getPerfData<T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau, &gpu_time_used, &cpu_time_used,
-                             hot_calls, argus.profile, argus.profile_kernels, argus.perf);
+        larfg_getPerfData<T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau, &gpu_time_used,
+                             &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,
+                             argus.perf);
 
     // validate results for rocsolver-test
     // using n * machine_precision as tolerance
