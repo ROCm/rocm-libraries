@@ -589,7 +589,7 @@ defaultBenchmarkCommonParameters = [
     {"NoReject": [False]},
     {"WaveTransposeStore": [0]},
     {"WaveTransposeStorePipe": [2]},
-    {"WaveTransposeStoreTDM": [0]},
+    {"WaveTransposeStoreTDM": [False]},
     {"TensorStore": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
