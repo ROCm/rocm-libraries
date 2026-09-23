@@ -34,13 +34,11 @@ SOFTWARE.
 #include <string>
 #include <vector>
 
-#include "framework/generic_tensor_setup.hpp"
 #include "framework/intensity.hpp"
 #include "framework/nd_config_param.hpp"
 #include "framework/tensor_setup.hpp"
 #include "framework/tolerance.hpp"
 #include "framework/voxel_config_param.hpp"
-#include "framework/voxel_tensor_setup.hpp"
 
 // Every comparison the suite makes goes through this header: the image ROI walk, the ND tensor
 // walk, the voxel box walk, and the flat reduction array. They differ only in how they enumerate

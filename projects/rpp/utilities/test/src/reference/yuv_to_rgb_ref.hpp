@@ -210,8 +210,7 @@ inline YuvFixedCoeffs yuv_fixed_coeffs(RpptColorStandard standard, RpptColorRang
 inline void yuv_to_rgb_pixel_fixed(int y, int u, int v, const YuvFixedCoeffs& k, double rgb[3]) {
     const int kr = y + ((v * k.crv) >> 16) - (k.crv >> 9);
     const int kb = y + ((u * k.cbu) >> 16) - (k.cbu >> 9);
-    const int kg =
-        y + ((u * k.cgu) >> 16) - (k.cgu >> 9) + ((v * k.cgv) >> 16) - (k.cgv >> 9);
+    const int kg = y + ((u * k.cgu) >> 16) - (k.cgu >> 9) + ((v * k.cgv) >> 16) - (k.cgv >> 9);
     rgb[0] = clampd(static_cast<double>((kr * k.cy + k.c) >> 16), 0.0, 255.0);
     rgb[1] = clampd(static_cast<double>((kg * k.cy + k.c) >> 16), 0.0, 255.0);
     rgb[2] = clampd(static_cast<double>((kb * k.cy + k.c) >> 16), 0.0, 255.0);
@@ -292,8 +291,8 @@ inline void yuv_to_rgb_reference(const Rpp8u* srcY, const Rpp8u* srcUV, Rpp8u* d
             const Rpp8u* chromaRow[4];
             for (int t = 0; t < 4; ++t) {
                 const int r = phase.base + t;
-                chromaRow[t] =
-                    srcUV + static_cast<std::size_t>(r < 0 ? 0 : (r > last ? last : r)) * srcUVPitch;
+                chromaRow[t] = srcUV + static_cast<std::size_t>(r < 0 ? 0 : (r > last ? last : r)) *
+                                           srcUVPitch;
             }
             for (Rpp32u x = 0; x < width; ++x) {
                 const Rpp32u cc = x / 2;

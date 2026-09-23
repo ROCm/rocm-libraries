@@ -42,7 +42,7 @@ namespace rpptest {
 
 // The generic-tensor ops are gridded over rank instead of layout/ROI. The label maps onto the same
 // structural slots as the image grammar: rank takes the Layout slot, the op param takes the Roi
-// slot. Descriptor construction and traversal for these live in generic_tensor_setup.hpp.
+// slot. Descriptor construction and traversal for these live in tensor_setup.hpp.
 
 // Extents including the leading batch axis, matching RpptGenericDesc::dims.
 using NdDims = std::vector<Rpp32u>;

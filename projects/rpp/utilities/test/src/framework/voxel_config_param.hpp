@@ -44,7 +44,7 @@ namespace rpptest {
 // image domain's RpptDesc + XYWH ROI. The layout slot carries the 3D layout together with its
 // channel count, and the ROI slot gains a second token for the ROI3D encoding, so the label keeps
 // the same structural slots: "<Backend>_<DTypeConv>_<Layout>_<Roi>_<Roi3DType>_<Shape>".
-// Descriptor construction, traversal and comparison live in framework/voxel_tensor_setup.hpp.
+// Descriptor construction, traversal and comparison live in framework/tensor_setup.hpp.
 
 enum class VoxelLayout { NCDHW1, NCDHW3, NDHWC3 };
 enum class Roi3D { XYZWHD, LTFRBB };

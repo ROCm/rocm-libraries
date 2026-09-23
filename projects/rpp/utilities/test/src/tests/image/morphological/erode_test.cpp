@@ -78,7 +78,7 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
                        op.kernelSize);
 
     // (2) Run RPP on the configured backend. erode exposes a separate HOST symbol (no backend
-    // arg); the HIP symbol lives under GPU_SUPPORT so it is only referenced when HIP is built.
+    // arg); the backend-arg symbol is only functional in a HIP build, so gate the HIP call on it.
     // RPP adds srcDesc.offsetInBytes to the src pointer internally, landing on the image base.
     DeviceTensor srcDev(cfg.backend, src.size() * dtype_size(cfg.dtype));
     DeviceTensor dst(cfg.backend, imageBytes);
@@ -88,7 +88,7 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
     RppHandle handle(cfg.backend, cfg.size.n);
     RppStatus status;
     if (cfg.backend == RPP_HIP_BACKEND) {
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
         status = rppt_erode(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.kernelSize, roi.data(),
                             XYWH, handle.get(), cfg.backend);
 #else

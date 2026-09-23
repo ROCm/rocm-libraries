@@ -30,8 +30,8 @@ SOFTWARE.
 #include <cstddef>
 
 #include "framework/intensity.hpp"
+#include "framework/tensor_setup.hpp"
 #include "framework/voxel_config_param.hpp"
-#include "framework/voxel_tensor_setup.hpp"
 
 namespace rpptest {
 

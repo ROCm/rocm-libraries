@@ -32,10 +32,9 @@ SOFTWARE.
 #include "framework/compare.hpp"
 #include "framework/config_param.hpp"
 #include "framework/dtype.hpp"
-#include "framework/generic_tensor_setup.hpp"
 #include "framework/skip_list.hpp"
+#include "framework/tensor_setup.hpp"
 #include "framework/voxel_config_param.hpp"
-#include "framework/voxel_tensor_setup.hpp"
 #include "reference/flip_voxel_ref.hpp"
 
 using namespace rpptest;

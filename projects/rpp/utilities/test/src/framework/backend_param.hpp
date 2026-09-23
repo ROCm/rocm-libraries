@@ -37,7 +37,7 @@ namespace rpptest {
 // installed rpp was built with the HIP backend.
 inline std::vector<RppBackend> available_backends() {
     std::vector<RppBackend> backends = {RPP_HOST_BACKEND};
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
     backends.push_back(RPP_HIP_BACKEND);
 #endif
     return backends;

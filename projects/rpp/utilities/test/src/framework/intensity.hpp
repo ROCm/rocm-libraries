@@ -58,6 +58,9 @@ inline Rpp16f from_double<Rpp16f>(double v) {
     return static_cast<Rpp16f>(static_cast<float>(v));
 }
 
+// M_PI is POSIX, not standard C++, so it is not guaranteed under a strict-conformance build.
+constexpr double kPi = 3.14159265358979323846;
+
 // Clamps v to [lo, hi]. Shared by the op reference models.
 inline double clampd(double v, double lo, double hi) {
     return v < lo ? lo : (v > hi ? hi : v);

@@ -27,7 +27,6 @@ SOFTWARE.
 
 #include <vector>
 
-#include "framework/generic_tensor_setup.hpp"
 #include "framework/intensity.hpp"
 #include "framework/nd_config_param.hpp"
 #include "framework/tensor_setup.hpp"
@@ -60,6 +59,11 @@ using namespace rpptest;
 // -- and requires the logical results to be bit-identical. No RPP op is called: this guards the
 // references themselves. For a reduction (normalize) it additionally pins that padding slack stays
 // out of the statistics.
+//
+// The image cases target the shared traversal helpers, not the ops: each op is just one
+// representative golden built on the helper named above its case (e.g. brightness for
+// for_each_roi_io, hue for for_each_roi_pixel), so every other golden on that helper is covered
+// too.
 
 namespace {
 

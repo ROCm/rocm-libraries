@@ -33,7 +33,7 @@ SOFTWARE.
 #include <stdexcept>
 #include <string>
 
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
 #include <hip/hip_runtime.h>
 #define RPP_TEST_CHECK_HIP(cmd)                                            \
     do {                                                                   \
@@ -68,7 +68,7 @@ class RppHandle {
     // op's own stream (not the whole device) after launching an op.
     void sync() const {
         if (backend_ == RPP_HIP_BACKEND) {
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
             rppAcceleratorQueue_t stream = nullptr;
             if (rppGetStream(handle_, &stream) != rppStatusSuccess)
                 throw std::runtime_error("rppGetStream failed");
@@ -89,7 +89,7 @@ class PinnedArray {
    public:
     PinnedArray(RppBackend backend, std::size_t count) : backend_(backend), count_(count) {
         if (backend_ == RPP_HIP_BACKEND) {
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
             RPP_TEST_CHECK_HIP(hipHostMalloc(reinterpret_cast<void**>(&data_), count_ * sizeof(T)));
 #endif
         } else {
@@ -98,7 +98,7 @@ class PinnedArray {
     }
     ~PinnedArray() {
         if (backend_ == RPP_HIP_BACKEND) {
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
             (void)hipHostFree(data_);
 #endif
         } else {
@@ -132,7 +132,7 @@ class DeviceTensor {
    public:
     DeviceTensor(RppBackend backend, std::size_t bytes) : backend_(backend), bytes_(bytes) {
         if (backend_ == RPP_HIP_BACKEND) {
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
             RPP_TEST_CHECK_HIP(hipMalloc(&data_, bytes_));
 #endif
         } else {
@@ -141,7 +141,7 @@ class DeviceTensor {
     }
     ~DeviceTensor() {
         if (backend_ == RPP_HIP_BACKEND) {
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
             (void)hipFree(data_);
 #endif
         } else {
@@ -157,7 +157,7 @@ class DeviceTensor {
 
     void write(const void* host, std::size_t bytes) {
         if (backend_ == RPP_HIP_BACKEND) {
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
             RPP_TEST_CHECK_HIP(hipMemcpy(data_, host, bytes, hipMemcpyHostToDevice));
 #endif
         } else {
@@ -167,7 +167,7 @@ class DeviceTensor {
 
     void read(void* host, std::size_t bytes) const {
         if (backend_ == RPP_HIP_BACKEND) {
-#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+#if RPP_BACKEND_HIP
             RPP_TEST_CHECK_HIP(hipMemcpy(host, data_, bytes, hipMemcpyDeviceToHost));
 #endif
         } else {

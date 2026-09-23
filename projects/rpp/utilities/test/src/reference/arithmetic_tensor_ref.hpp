@@ -32,9 +32,9 @@ SOFTWARE.
 #include <limits>
 #include <type_traits>
 
-#include "framework/generic_tensor_setup.hpp"
 #include "framework/intensity.hpp"
 #include "framework/nd_config_param.hpp"
+#include "framework/tensor_setup.hpp"
 
 namespace rpptest {
 
