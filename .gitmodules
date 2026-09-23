@@ -11,3 +11,7 @@
 [submodule "third_party/ffts"]
 	path = projects/rpp/third_party/ffts
 	url = https://github.com/anthonix/ffts.git
+[submodule "projects/hipccl/hipccl3/libhipcxx"]
+	path = projects/hipccl/hipccl3/libhipcxx
+	url = https://github.com/ROCm/libhipcxx.git
+	branch = amd-develop

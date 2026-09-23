@@ -62,28 +62,39 @@ set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
 set(VERSION_STRING "${HIPCCL_VERSION}" CACHE STRING "Unified hipCCL component version" FORCE)
 
 # --- Component selection ---
-option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" OFF)
-option(HIPCCL_BUILD_HIPCUB "Build hipCUB as part of the unified hipCCL build" OFF)
-option(HIPCCL_BUILD_ROCTHRUST "Build rocThrust as part of the unified hipCCL build" OFF)
+option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" ON)
+option(HIPCCL_BUILD_HIPCUB "Build hipCUB as part of the unified hipCCL build" ON)
+option(HIPCCL_BUILD_ROCTHRUST "Build rocThrust as part of the unified hipCCL build" ON)
 
-# NOTE(hipccl3): libhipcxx is present under projects/hipccl/hipccl3/libhipcxx
-# (pinned to ROCm/libhipcxx@5ac455d737937ba2dfd1a4e85ad13f19a775f692) but is
-# NOT wired into this superbuild yet. Its CMakeLists.txt is structured around
-# standalone lit-based testing rather than being a consumable add_subdirectory
-# target the way rocprim/hipcub/rocthrust are, and its install layout/version
-# scheme has not been reconciled with the unified layout above. Defaulting
-# this OFF and leaving the add_subdirectory() call commented out below is the
-# deliberate placeholder for this first pass.
-option(HIPCCL_BUILD_LIBHIPCXX "Build/test libhipcxx as part of the unified hipCCL build" OFF)
+# NOTE(hipccl3): libhipcxx is a git submodule (see ../.gitmodules), pinned to
+# the tip of ROCm/libhipcxx's amd-develop branch at the time it was added -
+# not a filter-repo'd copy like rocprim/hipcub/rocthrust, so it doesn't carry
+# preserved history the same way (it's tracked by its own upstream commit
+# instead). Its own CMakeLists.txt already supports being add_subdirectory()'d
+# cleanly: when nested (not the top-level project) it skips all of its own
+# testing/packaging/install logic and just defines a libhipcxx::libhipcxx
+# INTERFACE target (see libhipcxx/cmake/libhipcxxAddSubdir.cmake) - no naming
+# collisions or CMAKE_CXX_FLAGS meddling to guard against here, unlike
+# rocprim/hipcub/rocthrust.
+#
+# NOT YET DONE: libhipcxx isn't part of the unified CPack package or the
+# find_package(hipccl) config below - only the build (add_subdirectory) is
+# wired up so far.
+option(HIPCCL_BUILD_LIBHIPCXX "Build libhipcxx as part of the unified hipCCL build" OFF)
 
 # One switch to build everything, matching the "build the entire hipccl
 # project" requirement.
-option(HIPCCL_BUILD_ALL "Build every hipCCL component (rocprim, hipcub, rocthrust, libhipcxx)" OFF)
+#
+# NOTE(hipccl3): deliberately does NOT include HIPCCL_BUILD_LIBHIPCXX, even
+# though the option is now functional (see above) - how far libhipcxx should
+# be integrated into hipccl beyond "buildable as a submodule" is still an
+# open question, so it stays opt-in only rather than being swept in by
+# "build everything".
+option(HIPCCL_BUILD_ALL "Build every hipCCL component (rocprim, hipcub, rocthrust)" OFF)
 if(HIPCCL_BUILD_ALL)
     set(HIPCCL_BUILD_ROCPRIM ON CACHE BOOL "" FORCE)
     set(HIPCCL_BUILD_HIPCUB ON CACHE BOOL "" FORCE)
     set(HIPCCL_BUILD_ROCTHRUST ON CACHE BOOL "" FORCE)
-    #set(HIPCCL_BUILD_LIBHIPCXX ON CACHE BOOL "" FORCE) #TODO: Turn this back on once libhipcxx is properly integrated
 endif()
 
 if(HIPCCL_BUILD_ROCPRIM)
@@ -111,13 +122,11 @@ if(HIPCCL_BUILD_ROCTHRUST)
 endif()
 
 if(HIPCCL_BUILD_LIBHIPCXX)
-    message(FATAL_ERROR
-        "HIPCCL_BUILD_LIBHIPCXX is not yet implemented in the hipccl3 superbuild. "
-        "libhipcxx's CMakeLists.txt (projects/hipccl/hipccl3/libhipcxx/CMakeLists.txt) "
-        "needs to be reconciled with the unified version/install scheme before "
-        "it can be added here. See the NOTE(hipccl3) comment above HIPCCL_BUILD_LIBHIPCXX."
+    add_subdirectory_with_message(
+        COMPONENT libhipcxx
+        PREFIX_PATH .
+        EXPECT_TARGET libhipcxx::libhipcxx
     )
-    add_subdirectory(libhipcxx)
 endif()
 
 # --- Unified packaging ---

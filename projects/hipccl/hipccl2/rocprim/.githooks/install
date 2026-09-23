@@ -2,7 +2,9 @@
 
 project="rocprim"
 dotgit_dir="$(git rev-parse --git-dir)"
-project_dir="$(git rev-parse --show-toplevel)/projects/${project}"
+# NOTE(hipccl2): this copy of rocPRIM lives at
+# projects/hipccl/hipccl2/rocprim, not projects/rocprim like upstream.
+project_dir="$(git rev-parse --show-toplevel)/projects/hipccl/hipccl2/${project}"
 
 echo "Installing hooks..." 
 src_script="${project_dir}/.githooks/pre-commit"
