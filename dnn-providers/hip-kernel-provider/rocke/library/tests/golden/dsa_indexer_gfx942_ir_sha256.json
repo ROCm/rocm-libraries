@@ -10,6 +10,14 @@
           "bytes": 69290,
           "sha256": "d648aa314e033c8e6324fc366d9935fb86d3d51c4a707ee7525edf9828f45205"
         },
+        "dsa_indexer_gfx942/mfma_deepseek_hi64": {
+          "bytes": 11959,
+          "sha256": "c39f3f286736a41f3f934662c858e49d1168954368df31d0095b7ac179ab0654"
+        },
+        "dsa_indexer_gfx942/mfma_glm_hi32": {
+          "bytes": 11959,
+          "sha256": "4fb5a098bf5633907d6b008cbfa0a7a5f32f60fbd9d8f0f2418ff127d65b6387"
+        },
         "dsa_indexer_gfx942/small": {
           "bytes": 10798,
           "sha256": "e4d06529a31357a73883bb1f3b7269a05b67032391e21d030c1a441e0114a220"
@@ -25,6 +33,14 @@
         "dsa_indexer_gfx942/glm_hi32": {
           "bytes": 69297,
           "sha256": "e4173c1c9619bbb205630ecbf29dc6e5e08ce2c8cf9d1d9e697d2a7942f90304"
+        },
+        "dsa_indexer_gfx942/mfma_deepseek_hi64": {
+          "bytes": 11966,
+          "sha256": "904b22cc9e59f153f803886922a1fab3b06f7d0cfa92bec61e5c6cb99fdd30c2"
+        },
+        "dsa_indexer_gfx942/mfma_glm_hi32": {
+          "bytes": 11966,
+          "sha256": "43991c2cfd09d34bfaa44c20179352bfd828274e58a94c41aaebed36ed2f7a47"
         },
         "dsa_indexer_gfx942/small": {
           "bytes": 10805,
