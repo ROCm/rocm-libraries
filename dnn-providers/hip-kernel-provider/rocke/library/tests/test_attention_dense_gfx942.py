@@ -118,6 +118,30 @@ def test_supports_accepts_in_scope_cohort(dtype, d):
     ok, why = supports_attention_dense(_spec(dtype=dtype, head_size=d), arch="gfx942")
     assert ok, why
 
+def test_dispatch_bf16_d128_defaults_to_cfvst():
+    from dispatch.attention import AttentionRequest, dense_spec_for_request
+
+    req = AttentionRequest(
+        batch=1,
+        nhead_q=16,
+        nhead_k=4,
+        seqlen_q=2048,
+        seqlen_k=2048,
+        hdim_q=128,
+        hdim_v=128,
+        arch="gfx942",
+        mask_type=1,
+        dtype="bf16",
+        algorithm="attention_dense",
+        dense_persistent="auto",
+    )
+
+    spec = dense_spec_for_request(req)
+
+    assert spec.dtype == "bf16"
+    assert spec.head_size == 128
+    assert spec.resolved_use_cfvst()
+
 
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize("d", [64, 128])
