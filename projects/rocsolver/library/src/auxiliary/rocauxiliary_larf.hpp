@@ -226,6 +226,22 @@ void rocsolver_larf_getMemorySize(const rocblas_side side,
     else
         *size_Abyx = std::max(m, n);
     *size_Abyx *= sizeof(T) * batch_count;
+
+    // rocBLAS gates its fast transposed-gemv kernel (rocblas_gemvt_sn_kernel, which
+    // splits m across many workgroups) on receiving a scratch buffer; without one it
+    // falls back to the column-parallel rocblas_gemvt_kernel. The requirement is 0
+    // unless the shape is tall-skinny. It is appended to Abyx, past the order *
+    // batch_count elements holding W, so that the callers of this function do not have
+    // to thread an additional buffer through. rocsolver_larf_template does the split.
+    rocblas_operation trans = rocblas_operation_none;
+    if(side == rocblas_side_left)
+        trans = rocblas_is_complex<T> ? rocblas_operation_conjugate_transpose
+                                      : rocblas_operation_transpose;
+
+    size_t size_gemv_work;
+    rocblasCall_gemv_mem<BATCHED, T>(trans, rocblas_int(m), rocblas_int(n),
+                                     rocblas_int(batch_count), &size_gemv_work);
+    *size_Abyx += size_gemv_work;
 }
 
 template <typename T, typename I, typename U>
@@ -349,10 +365,15 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
     //      IT WILL WORK ON THE ENTIRE MATRIX/VECTOR REGARDLESS OF
     //      ZERO ENTRIES ****
 
+    // rocBLAS scratch for the fast transposed-gemv kernel occupies the tail of Abyx,
+    // past the order * batch_count elements that receive W below. Kept in step with
+    // rocsolver_larf_getMemorySize.
+    T* gemv_work = Abyx + size_t(order) * batch_count;
+
     // compute the matrix vector product  (W=-A'*X or W=-A*X)
     rocblasCall_gemv<T>(handle, trans, m, n, cast2constType<T>(scalars), 0, A, shiftA, lda, stridea,
                         x, shiftx, incx, stridex, cast2constType<T>(scalars + 1), 0, Abyx, 0, 1,
-                        order, batch_count, workArr);
+                        order, batch_count, workArr, gemv_work);
 
     // compute the rank-1 update  (A + tau*X*W'  or A + tau*W*X')
     if(leftside)
