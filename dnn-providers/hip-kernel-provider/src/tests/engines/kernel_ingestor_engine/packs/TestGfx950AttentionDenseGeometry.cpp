@@ -61,9 +61,10 @@ Gfx950AttentionDenseGeometry
 } // namespace
 
 // =============================================================================
-// gridX -- ceil(seqlen_q / block_m). Both sides of the divisibility boundary are
-// pinned for both tiles: truncation agrees with the ceiling on the aligned side and
-// disagrees on every ragged one, so only the ragged cases below distinguish the two.
+// gridX -- ceil(seqlen_q / block_m), as the Python writes it. kernel_match only serves
+// multiples of block_m, where the ceiling is the quotient; the non-multiple cases pin
+// that the function still matches the Python outside that contract rather than
+// truncating to a grid that skips rows.
 // =============================================================================
 
 TEST(TestGfx950AttentionDenseGeometry, AlignedSeqLenQIsOneBlockPerWholeTile)
@@ -80,15 +81,15 @@ TEST(TestGfx950AttentionDenseGeometry, AlignedSeqLenQIsOneBlockPerWholeTile)
     EXPECT_EQ(geometryFor(BM128, 384, 1, 1).gridX, 3U);
 }
 
-TEST(TestGfx950AttentionDenseGeometry, RaggedSeqLenQKeepsThePartialFinalBlock)
+TEST(TestGfx950AttentionDenseGeometry, NonMultipleSeqLenQKeepsThePartialFinalBlock)
 {
-    // ceil(257 / 256) = 2: one whole tile plus a single-row tail block. Truncating
-    // gives 1 and the tail rows are never written.
+    // ceil(257 / 256) = 2: one whole tile plus a single-row partial block. Truncating
+    // gives 1 and the last row is never written.
     EXPECT_EQ(geometryFor(BM256, 257, 1, 1).gridX, 2U);
-    // ceil(513 / 256) = 3 and ceil(769 / 256) = 4 -- same one-row tail, further out.
+    // ceil(513 / 256) = 3 and ceil(769 / 256) = 4 -- same one-row remainder, further out.
     EXPECT_EQ(geometryFor(BM256, 513, 1, 1).gridX, 3U);
     EXPECT_EQ(geometryFor(BM256, 769, 1, 1).gridX, 4U);
-    // ceil(384 / 256) = 2: a half-full tail block, not a one-row one.
+    // ceil(384 / 256) = 2: a half-full final block, not a one-row one.
     EXPECT_EQ(geometryFor(BM256, 384, 1, 1).gridX, 2U);
     // ceil(255 / 256) = 1 and ceil(1 / 256) = 1. Truncating gives 0 here, which is an
     // empty grid: the kernel returns having written nothing and reports success.
@@ -112,15 +113,6 @@ TEST(TestGfx950AttentionDenseGeometry, GridYIsQueryHeadsAndGridZIsBatch)
     EXPECT_EQ(geometry.gridX, 4U);
     EXPECT_EQ(geometry.gridY, 16U);
     EXPECT_EQ(geometry.gridZ, 3U);
-}
-
-TEST(TestGfx950AttentionDenseGeometry, RaggedShapeCarriesHeadsAndBatchAlongside)
-{
-    // ceil(1025 / 256) = 5, with heads 5 and batch 2. gridX equals gridY here only by
-    // arithmetic; the case exists so the ceiling and the passthrough are pinned together
-    // on one call, as prepare() reads them.
-    const Gfx950AttentionDenseGeometry expected{5U, 5U, 2U, PYTHON_BLOCK_X_BM256};
-    EXPECT_TRUE(geometryFor(BM256, 1025, 5, 2) == expected);
 }
 
 TEST(TestGfx950AttentionDenseGeometry, SingleHeadSingleBatchIsAOneDeepGrid)
@@ -160,8 +152,7 @@ TEST(TestGfx950AttentionDenseGeometry, WitnessLaunchesDependOnTheSelectedBlockM)
 TEST(TestGfx950AttentionDenseGeometry, BlockXIsNumWavesWave64Waves)
 {
     // (256 / 32) * 64 = 512 and (128 / 32) * 64 = 256 threads. Not seqlen-dependent:
-    // the same CTA serves an aligned shape, a ragged one, and a shape shorter than a
-    // single tile.
+    // the CTA is the same whatever the query length.
     for(const int64_t seqLenQ : {4096, 257, 1})
     {
         EXPECT_EQ(geometryFor(BM256, seqLenQ, 8, 4).blockX, PYTHON_BLOCK_X_BM256) << seqLenQ;

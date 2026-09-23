@@ -45,14 +45,12 @@
  * applicability rules live only in that Python; this file is where they become
  * enforceable.
  *
- * The catalog has two families, identified by the `ragged` flag:
- *
- *  - **Aligned**: ragged=0. Runtime batch/seqlen_q/seqlen_kv. Each candidate carries
- *    its own (block_m, block_n) tile and serves any valid B/Sq/Skv with Sq divisible by
- *    ITS block_m and Skv divisible by ITS block_n.
- *  - **Tail**: ragged=1. Exact B/Sq/Skv from metadata.
- *    Dense self-attention where Sq is not a multiple of the candidate's tile; boundary
- *    tiles handled on-chip.
+ * The catalog is aligned-only: every shipped candidate has ragged=0 and takes runtime
+ * batch/seqlen_q/seqlen_kv. Each candidate carries its own (block_m, block_n) tile and
+ * serves any valid B/Sq/Skv with Sq divisible by ITS block_m and Skv divisible by ITS
+ * block_n. A graph whose lengths no shipped tile divides is not served by this engine.
+ * A candidate whose `ragged` field is not 0 -- an exact-shape boundary-padding build --
+ * is declined, whatever its authored shape.
  *
  * Key invariants:
  *
@@ -60,8 +58,8 @@
  *     and takes no stride kernargs; a BHSD graph reads the wrong elements in bounds.
  *  b. **All variants are non-persistent.** Every variant takes (q,k,v,o,scale,
  *     batch,seqlen_q,seqlen_kv) -- eight kernel arguments. There is no persistent grid.
- *  c. **shape_generic = (ragged == 0).** Aligned binaries are shape-generic:
- *     skip metadata B/Sq/Skv equality for these. Tail rows must match exactly.
+ *  c. **Shape-generic.** The shape is a runtime argument, so the metadata's batch/
+ *     seqlen_q/seqlen_kv are canonical build inputs and are never compared to the graph.
  *  d. **hipDNN has no `causal` boolean.** Derive from left_bound/right_bound/deprecated
  *     booleans via maskTypeFor(). The deprecated booleans are wrong for shipped bundles.
  *  e. **The tile is per candidate.** block_m/block_n are completed KMD fields (legacy
@@ -88,14 +86,12 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.d
 // KMD fields (12-field schema). The KMD carries only what varies between candidates, so
 // waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every shipped variant
 // holds them at one value. A variant that moved any of them would have to add it here
-// first, or the candidates collide on the catalog key and the loader drops one.
+// first, or the candidates collide on the catalog key and the loader drops one. The
+// schema's batch/seqlen_q/seqlen_kv are canonical build inputs this file never reads.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
 constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
-constexpr std::string_view SEQLEN_Q_FIELD = "seqlen_q";
-constexpr std::string_view SEQLEN_KV_FIELD = "seqlen_kv";
-constexpr std::string_view BATCH_FIELD = "batch";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
@@ -600,6 +596,23 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound)
     return binding;
 }
 
+/// A candidate's integer metadata field, or nullopt when it is absent or holds another
+/// type. Total: never throws, so a malformed record declines instead of faulting a match.
+std::optional<int64_t> integerMetadata(const KernelDefinition& kernel, std::string_view field)
+{
+    const auto it = kernel.metadata.find(std::string(field));
+    if(it == kernel.metadata.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<int64_t>(&it->second);
+    if(value == nullptr)
+    {
+        return std::nullopt;
+    }
+    return *value;
+}
+
 /// A candidate's (block_m, block_n) tile, read from its completed metadata.
 struct AttentionDenseTile
 {
@@ -622,23 +635,9 @@ struct AttentionDenseTile
  */
 std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel)
 {
-    const auto integerField = [&kernel](std::string_view field) -> std::optional<int64_t> {
-        const auto it = kernel.metadata.find(std::string(field));
-        if(it == kernel.metadata.end())
-        {
-            return std::nullopt;
-        }
-        const auto* value = std::get_if<int64_t>(&it->second);
-        if(value == nullptr)
-        {
-            return std::nullopt;
-        }
-        return *value;
-    };
-
-    const auto headSize = integerField(HEAD_SIZE_FIELD);
-    const auto blockM = integerField(BLOCK_M_FIELD);
-    const auto blockN = integerField(BLOCK_N_FIELD);
+    const auto headSize = integerMetadata(kernel, HEAD_SIZE_FIELD);
+    const auto blockM = integerMetadata(kernel, BLOCK_M_FIELD);
+    const auto blockN = integerMetadata(kernel, BLOCK_N_FIELD);
     if(!headSize.has_value() || !blockM.has_value() || !blockN.has_value()
        || !isSupportedGfx950AttentionDenseTile(*headSize, *blockM, *blockN))
     {
@@ -656,17 +655,19 @@ bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& pr
 /**
  * @brief Kernel-scoped applicability: does THIS candidate's baked metadata fit?
  *
- * **shape_generic = (ragged == 0).** Aligned variants receive batch/seqlen_q/
- * seqlen_kv as runtime kernel arguments, so one binary serves any valid shape for the
- * same head/dtype configuration. Skip metadata shape equality for these. Tail rows
- * (ragged==1) bake the shape, so exact equality is required there.
+ * Only shape-generic candidates are served: `ragged` must be present, an integer, and 0.
+ * A ragged build bakes its exact shape and pads boundary tiles on-chip; this catalog
+ * ships none, and one arriving from elsewhere is declined even at its authored shape
+ * rather than matched on metadata equality.
+ *
+ * A served candidate receives batch/seqlen_q/seqlen_kv as runtime kernel arguments, so
+ * one binary serves any valid shape for the same head/dtype/mask configuration; the
+ * metadata's shape fields are canonical build inputs and are not compared.
  *
  * THE TILE IS THE CANDIDATE'S OWN. It is validated before anything divides by it; a
- * candidate without a supported tile declines. An aligned candidate requires
+ * candidate without a supported tile declines. The candidate then requires
  * `Sq % block_m == 0` and `Skv % block_n == 0` for ITS tile, so one graph can admit
- * some tiles of a cohort and not others. A tail is compiled with on-chip boundary
- * padding and a ceil'd grid; it serves only its exact authored self-attention shape,
- * and only where that shape is not a multiple of its own tile.
+ * some tiles of a cohort and not others, and a graph no tile divides admits none.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
@@ -694,6 +695,13 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    // Shape-generic builds only.
+    const auto ragged = integerMetadata(kernel, RAGGED_FIELD);
+    if(!ragged.has_value() || *ragged != 0)
+    {
+        return false;
+    }
+
     const auto dataTypeName = supportedDataTypeName(problem.dataType);
     if(!dataTypeName.has_value()
        || kernel.getStringMetadata(std::string(DTYPE_FIELD)) != *dataTypeName)
@@ -707,18 +715,6 @@ bool kernelMatches(const MatchContext& context,
     if(intField(HEAD_SIZE_FIELD) != problem.headSize
        || intField(NUM_QUERY_HEADS_FIELD) != problem.numQueryHeads
        || intField(NUM_KV_HEADS_FIELD) != problem.numKvHeads)
-    {
-        return false;
-    }
-
-    // shape_generic = (ragged == 0): aligned variants take runtime shape params,
-    // so a single binary covers any valid (batch, seqlen_q, seqlen_kv) for the same
-    // head/dtype configuration.  Tail rows (ragged==1) bake the exact shape.
-    const bool kernelIsRagged = intField(RAGGED_FIELD) != 0;
-    if(kernelIsRagged
-       && (intField(SEQLEN_Q_FIELD) != problem.seqLenQ
-           || intField(SEQLEN_KV_FIELD) != problem.seqLenKv
-           || intField(BATCH_FIELD) != problem.batch))
     {
         return false;
     }
@@ -739,15 +735,7 @@ bool kernelMatches(const MatchContext& context,
     }
 
     // Tile divisibility against THIS candidate's tile.
-    const bool aligned = tileDivides(*tile, problem);
-    if(!kernelIsRagged)
-    {
-        return aligned;
-    }
-    // A tail serves the graph the dispatcher would build a ragged spec for, derived
-    // exactly as dispatch/attention/gfx950.py::_dense_spec does against the tail's tile:
-    //     ragged = (sq == sk) and ((sq % block_m != 0) or (sk % block_n != 0))
-    return problem.seqLenQ == problem.seqLenKv && !aligned;
+    return tileDivides(*tile, problem);
 }
 
 /// Scores for the cold ranking. Every alternative scores `ALTERNATIVE_CEILING - key /
@@ -957,10 +945,8 @@ public:
         const auto problem = problemFor(*q, *k);
 
         // Grid from the SELECTED CANDIDATE'S block_m and the GRAPH PROBLEM, not from
-        // descriptor shape metadata. Aligned: metadata carries canonical build inputs
-        // (B=1, Sq=Skv=512), not runtime constraints.  Tail: metadata carries the exact
-        // baked shape, which matches the problem (enforced by kernelMatches), so problem
-        // values are equally correct. block_n does not enter the launch.
+        // descriptor shape metadata: that carries canonical build inputs (B=1,
+        // Sq=Skv=512), not runtime constraints. block_n does not enter the launch.
         const auto geometry = gfx950AttentionDenseGeometry(tile->blockM,
                                                            problem.seqLenQ,
                                                            problem.numQueryHeads,
@@ -994,7 +980,7 @@ public:
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
         const auto& p = preparedDense.problem();
-        // (q,k,v,o,scale,batch,seqlen_q,seqlen_kv) -- aligned and ragged share this ABI.
+        // (q,k,v,o,scale,batch,seqlen_q,seqlen_kv) -- every variant's ABI.
         preparedDense.kernelForStream(handle.getStream())
             .launch(handle.getStream(),
                     q.ptr,

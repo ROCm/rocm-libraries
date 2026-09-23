@@ -47,8 +47,9 @@
  *   - SHAPE: per-operand dimension overrides sit beside the layout fields, so a single
  *     operand can disagree with the problem shape on one axis while staying dense BSHD for
  *     its own extents. That is what makes the cross-operand agreement clauses reachable.
- *   - RAGGED: gfx950 serves non-tile-multiple self-attention lengths through a separately
- *     compiled boundary-padding path; kernel_match's tile rule is conditional on `ragged`.
+ *   - RAGGED: declined. The catalog is aligned-only: a candidate whose `ragged` field is
+ *     not 0 is declined at every shape, its own authored one included, and a graph whose
+ *     lengths no tile divides admits no candidate at all.
  *   - SLIDING WINDOW: declined. No variant in this catalog carries a non-zero
  *     sliding_window, so a windowed graph has nothing that could serve it.
  *   - TILE: every candidate carries its own completed (block_m, block_n). Applicability is
@@ -593,8 +594,9 @@ GraphSpec d64H32Noncausal(int64_t seqLenQ, int64_t seqLenKv)
     return graph;
 }
 
-/// BF16/D64/H64/8 top-left causal -- the semantic cohort of the shipped B1/S2016 tail.
-GraphSpec tailGraph(int64_t batch, int64_t seqLenQ, int64_t seqLenKv)
+/// BF16/D64/H64/8 top-left causal: the semantic cohort of the removed B1/S2016 ragged
+/// record, whose length 2016 is a multiple of 32 but of no block_m.
+GraphSpec d64H64Kv8Causal(int64_t batch, int64_t seqLenQ, int64_t seqLenKv)
 {
     GraphSpec graph;
     graph.batch = batch;
@@ -607,7 +609,8 @@ GraphSpec tailGraph(int64_t batch, int64_t seqLenQ, int64_t seqLenKv)
     return graph;
 }
 
-KernelSpec tail2016()
+/// A ragged record as the removed exact-shape builds were authored: B1, Sq=Skv=2016.
+KernelSpec raggedRecord2016()
 {
     KernelSpec spec;
     spec.headSize = 64;
@@ -622,8 +625,8 @@ KernelSpec tail2016()
     return spec;
 }
 
-/// The aligned candidates sharing the tail's semantic fields.
-std::vector<KernelSpec> tailCohort()
+/// The aligned cohort sharing d64H64Kv8Causal's semantic fields.
+std::vector<KernelSpec> d64H64Kv8Cohort()
 {
     KernelSpec spec = canonicalAligned();
     spec.headSize = 64;
@@ -631,6 +634,35 @@ std::vector<KernelSpec> tailCohort()
     spec.numKvHeads = 8;
     spec.causal = 1;
     return cohortOf(spec, d64Tiles());
+}
+
+/// FP16/D64/H12/12 noncausal at B16, Sq=Skv=197 -- a ViT-B/16 shape no tile divides.
+GraphSpec vitGraph197()
+{
+    GraphSpec graph;
+    graph.batch = 16;
+    graph.numQueryHeads = 12;
+    graph.numKvHeads = 12;
+    graph.seqLenQ = 197;
+    graph.seqLenKv = 197;
+    graph.headSize = 64;
+    graph.headSizeV = 64;
+    graph.dataType = data_objects::DataType::HALF;
+    graph.leftBound = std::nullopt;
+    graph.rightBound = std::nullopt;
+    return graph;
+}
+
+/// The semantic fields vitGraph197 asks for, as a canonical aligned record.
+KernelSpec vitSemantic()
+{
+    KernelSpec spec = canonicalAligned();
+    spec.dtype = "FP16";
+    spec.headSize = 64;
+    spec.numQueryHeads = 12;
+    spec.numKvHeads = 12;
+    spec.causal = 0;
+    return spec;
 }
 
 /// Runs graph_match, then kernel_match over @p candidates, and returns the survivors'
@@ -1269,15 +1301,17 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForTheOtherMask)
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesARaggedCandidateForAnAlignedGraph)
 {
-    // The ragged path pads boundary tiles on-chip; the binaries are different.
+    // A ragged build bakes its shape and pads boundary tiles on-chip. The catalog ships
+    // only shape-generic builds, so one is declined even where every length is aligned.
     KernelSpec kernel;
     kernel.ragged = 1;
     EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
 }
 
-TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateForARaggedGraph)
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateForANonMultipleGraph)
 {
-    // An aligned binary's grid does not cover the partial final query block.
+    // 4000 is a multiple of neither block_m: an aligned build has no boundary handling
+    // for the partial final query block.
     GraphSpec graph;
     graph.seqLenQ = 4000;
     graph.seqLenKv = 4000;
@@ -1285,19 +1319,6 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateForARaggedGra
     aligned.seqLenQ = 4000;
     aligned.seqLenKv = 4000;
     EXPECT_FALSE(matchesKernel(graph, aligned));
-}
-
-TEST(TestGfx950AttentionDenseKernelMatch, AcceptsARaggedCandidateForARaggedGraph)
-{
-    // Positive control for the ragged pair.
-    GraphSpec graph;
-    graph.seqLenQ = 4000;
-    graph.seqLenKv = 4000;
-    KernelSpec ragged;
-    ragged.ragged = 1;
-    ragged.seqLenQ = 4000;
-    ragged.seqLenKv = 4000;
-    EXPECT_TRUE(matchesKernel(graph, ragged));
 }
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateWhoseTileDoesNotDivideSeqLenKv)
@@ -1309,91 +1330,6 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateWhoseTileDoes
     KernelSpec kernel;
     kernel.seqLenKv = 288;
     EXPECT_FALSE(matchesKernel(graph, kernel));
-}
-
-TEST(TestGfx950AttentionDenseKernelMatch, RaggedKernelRefusesWrongBatch)
-{
-    // Tail (ragged=1) KDs bake the exact shape; a request with a different batch
-    // must not reuse the baked binary (silent wrong bounds). shape_generic=false
-    // for ragged==1, so batch equality is enforced. ViT-B/16 scenario: KD has
-    // B=16 but caller requests B=32.
-    GraphSpec graph;
-    graph.seqLenQ = 197;
-    graph.seqLenKv = 197;
-    graph.batch = 32;
-    graph.numQueryHeads = 12;
-    graph.numKvHeads = 12;
-    graph.headSize = 64;
-    graph.headSizeV = 64;
-    graph.leftBound = std::nullopt; // noncausal
-    graph.rightBound = std::nullopt;
-
-    KernelSpec kernel;
-    kernel.ragged = 1;
-    kernel.seqLenQ = 197;
-    kernel.seqLenKv = 197;
-    kernel.batch = 16;
-    kernel.numQueryHeads = 12;
-    kernel.numKvHeads = 12;
-    kernel.headSize = 64;
-    kernel.causal = 0;
-
-    EXPECT_FALSE(matchesKernel(graph, kernel));
-}
-
-TEST(TestGfx950AttentionDenseKernelMatch, RaggedKernelRefusesWrongSeqLen)
-{
-    // A ragged KD baked for S=197 must not serve S=394 (different tail length,
-    // different on-chip boundary-padding bounds).
-    GraphSpec graph;
-    graph.seqLenQ = 394;
-    graph.seqLenKv = 394;
-    graph.batch = 16;
-    graph.numQueryHeads = 12;
-    graph.numKvHeads = 12;
-    graph.headSize = 64;
-    graph.headSizeV = 64;
-    graph.leftBound = std::nullopt;
-    graph.rightBound = std::nullopt;
-
-    KernelSpec kernel;
-    kernel.ragged = 1;
-    kernel.seqLenQ = 197;
-    kernel.seqLenKv = 197;
-    kernel.batch = 16;
-    kernel.numQueryHeads = 12;
-    kernel.numKvHeads = 12;
-    kernel.headSize = 64;
-    kernel.causal = 0;
-
-    EXPECT_FALSE(matchesKernel(graph, kernel));
-}
-
-TEST(TestGfx950AttentionDenseKernelMatch, RaggedKernelAcceptsExactShape)
-{
-    // Positive control: the exact baked shape matches.
-    GraphSpec graph;
-    graph.seqLenQ = 197;
-    graph.seqLenKv = 197;
-    graph.batch = 16;
-    graph.numQueryHeads = 12;
-    graph.numKvHeads = 12;
-    graph.headSize = 64;
-    graph.headSizeV = 64;
-    graph.leftBound = std::nullopt;
-    graph.rightBound = std::nullopt;
-
-    KernelSpec kernel;
-    kernel.ragged = 1;
-    kernel.seqLenQ = 197;
-    kernel.seqLenKv = 197;
-    kernel.batch = 16;
-    kernel.numQueryHeads = 12;
-    kernel.numKvHeads = 12;
-    kernel.headSize = 64;
-    kernel.causal = 0;
-
-    EXPECT_TRUE(matchesKernel(graph, kernel));
 }
 
 TEST(TestGfx950AttentionDenseKernelMatch, AlignedKernelAcceptsDifferentBatch)
@@ -1622,61 +1558,80 @@ TEST(TestGfx950AttentionDenseTileMatch, DeclinesATileFieldOfTheWrongType)
 }
 
 // ---------------------------------------------------------------------------
-// Exact tails beside aligned alternatives. A real shipped tail --
-// BF16/D64/H64/8 causal, B1, Sq=Skv=2016 -- with its aligned cohort alongside.
+// Aligned-only. A ragged record is declined at every shape, and a graph whose lengths
+// no tile divides admits nothing; the aligned cohort beside it still serves whatever
+// its own tiles divide.
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseTileMatch, TailServesOnlyItsExactAuthoredShape)
+TEST(TestGfx950AttentionDenseTileMatch, DeclinesARaggedCandidateEvenAtItsExactAuthoredShape)
 {
-    // 2016 is a multiple of 32 but of no block_m, so no aligned candidate applies and
-    // the tail is the only one served.
-    EXPECT_TRUE(matchesKernel(tailGraph(1, 2016, 2016), tail2016()));
-    EXPECT_EQ(admittedTiles(tailGraph(1, 2016, 2016), tailCohort()), TileSet{});
+    // BF16/D64/H64/8 causal B1 S2016 and FP16/D64/H12/12 noncausal B16 S197: ragged
+    // records meeting a graph equal to their metadata on every field.
+    EXPECT_FALSE(matchesKernel(d64H64Kv8Causal(1, 2016, 2016), raggedRecord2016()));
+
+    KernelSpec vitRagged = vitSemantic();
+    vitRagged.ragged = 1;
+    vitRagged.batch = 16;
+    vitRagged.seqLenQ = 197;
+    vitRagged.seqLenKv = 197;
+    EXPECT_FALSE(matchesKernel(vitGraph197(), vitRagged));
+
+    // A ragged record at a length its tile divides is declined too; the same record with
+    // ragged=0 is the positive neighbour, so the flag alone is what declines it.
+    KernelSpec atMultiple = raggedRecord2016();
+    atMultiple.seqLenQ = 2048;
+    atMultiple.seqLenKv = 2048;
+    EXPECT_FALSE(matchesKernel(d64H64Kv8Causal(1, 2048, 2048), atMultiple));
+    atMultiple.ragged = 0;
+    EXPECT_TRUE(matchesKernel(d64H64Kv8Causal(1, 2048, 2048), atMultiple));
 }
 
-TEST(TestGfx950AttentionDenseTileMatch, TailRefusesEachIndependentShapeChange)
+TEST(TestGfx950AttentionDenseTileMatch, DeclinesARaggedFieldThatIsMissingOrMistyped)
 {
-    // Batch, seqlen_q and seqlen_kv changed one at a time, then both lengths together.
-    // Each drops the tail; the aligned candidates each change admits are exactly those
-    // whose own tile divides the new lengths, so the tail's refusal is not global.
+    // `ragged` is read without a throwing accessor: absent or non-integer declines the
+    // candidate rather than faulting the match. Integer 0 is the positive neighbour.
+    auto missing = makeKernel(KernelSpec{});
+    missing.metadata.erase("ragged");
+    EXPECT_FALSE(matchesKernelDefinition(GraphSpec{}, missing));
+
+    auto mistyped = makeKernel(KernelSpec{});
+    mistyped.metadata[std::string("ragged")]
+        = hipdnn_plugin_sdk::ingestor::MetadataValue{std::string("0")};
+    EXPECT_FALSE(matchesKernelDefinition(GraphSpec{}, mistyped));
+
+    EXPECT_TRUE(matchesKernelDefinition(GraphSpec{}, makeKernel(KernelSpec{})));
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, NonMultipleGraphsAdmitNoAlignedCandidate)
+{
+    // 2016 is a multiple of 32 but of no block_m; 197 is a multiple of nothing.
+    EXPECT_EQ(admittedTiles(d64H64Kv8Causal(1, 2016, 2016), d64H64Kv8Cohort()), TileSet{});
+    EXPECT_EQ(admittedTiles(vitGraph197(), cohortOf(vitSemantic(), d64Tiles())), TileSet{});
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, EachLengthIsJudgedAgainstEachCandidateTile)
+{
+    // The 2016 cohort under one length changed at a time, then both. Each admits exactly
+    // the tiles that divide its new lengths -- a batch change alone admits nothing.
     struct Case
     {
         const char* what;
         GraphSpec graph;
-        TileSet aligned;
+        TileSet admitted;
     };
     const std::vector<Case> cases{
-        {"batch 2", tailGraph(2, 2016, 2016), TileSet{}},
+        {"batch 2", d64H64Kv8Causal(2, 2016, 2016), TileSet{}},
         // TOP_LEFT_CAUSAL with Sq != Skv is served: 2048 is a multiple of both block_m,
         // 2016 of block_n 32 only.
-        {"seqlen_q 2048", tailGraph(1, 2048, 2016), TileSet{{128, 32}, {256, 32}}},
-        {"seqlen_kv 2048", tailGraph(1, 2016, 2048), TileSet{}},
-        {"both 2048", tailGraph(1, 2048, 2048), tileSetOf(d64Tiles())},
+        {"seqlen_q 2048", d64H64Kv8Causal(1, 2048, 2016), TileSet{{128, 32}, {256, 32}}},
+        {"seqlen_kv 2048", d64H64Kv8Causal(1, 2016, 2048), TileSet{}},
+        {"both 2048", d64H64Kv8Causal(1, 2048, 2048), tileSetOf(d64Tiles())},
     };
     for(const auto& c : cases)
     {
         SCOPED_TRACE(c.what);
-        EXPECT_FALSE(matchesKernel(c.graph, tail2016()));
-        EXPECT_EQ(admittedTiles(c.graph, tailCohort()), c.aligned);
+        EXPECT_EQ(admittedTiles(c.graph, d64H64Kv8Cohort()), c.admitted);
     }
-}
-
-TEST(TestGfx950AttentionDenseTileMatch, TailRefusesAShapeItsOwnTileDivides)
-{
-    // A tail record at a length its own 256/64 tile divides is not a tail's shape: the
-    // aligned binary serves it, and the tail declines even at exact metadata equality.
-    KernelSpec tail = tail2016();
-    tail.seqLenQ = 2048;
-    tail.seqLenKv = 2048;
-    EXPECT_FALSE(matchesKernel(tailGraph(1, 2048, 2048), tail));
-}
-
-TEST(TestGfx950AttentionDenseTileMatch, TailWithAMalformedTileIsDeclined)
-{
-    // The tail's exact shape match does not excuse its tile: the geometry divides by it.
-    auto kernel = makeKernel(tail2016());
-    kernel.metadata.erase("block_m");
-    EXPECT_FALSE(matchesKernelDefinition(tailGraph(1, 2016, 2016), kernel));
 }
 
 // ---------------------------------------------------------------------------
