@@ -93,9 +93,7 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
 
 .. list-table::
     :header-rows: 1
-.. list-table::
-:header-rows: 1
-:widths: 50,50
+    :widths: 70,30
 
     * - **Environment variable**
       - **Value**
@@ -115,12 +113,6 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | 4: The Stream-K algorithm behaves like data parallel (Launch WGs =  number of CUs)
         | 5: The Stream-K algorithm uses the Origami ``select_best_grid_size`` function
         | 6: Default (automatically pick the optimal workgroup count)
-
-    * - | ``TENSILE_STREAMK_DATA_PARALLEL``
-        | Runs Stream-K kernels in data-parallel mode.
-      - | Unset or 0: Stream-K kernels run normally.
-        | Non-zero: Enable data-parallel mode for every Stream-K solution.
-        | This is a debug override with no per-device default. To make a solution run data-parallel without setting this variable, declare ``StreamKForceDPOnly: 1`` on it in the library-logic file and rebuild the device library.
 
     * - | ``TENSILE_GRIDBASED_KDTREE``
         | Indexes grid-based solution-selection tables with a k-d tree instead of a linear scan.

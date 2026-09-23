@@ -5382,17 +5382,6 @@ namespace TensileLite
         return pass;
     }
 
-    namespace
-    {
-        /// StreamK data-parallel: debug override only (TENSILE_STREAMK_DATA_PARALLEL).
-        /// There is no in-code arch default -- a logic file that wants a pure
-        /// data-parallel launch declares StreamKForceDPOnly on the solution instead.
-        bool useStreamKDP()
-        {
-            return Debug::Instance().useStreamKDataParrallel();
-        }
-    } // namespace
-
     size_t ContractionSolution::requiredWorkspaceSize(Problem const&  problem,
                                                       Hardware const& hardware) const
     {
@@ -5437,7 +5426,7 @@ namespace TensileLite
                           << "setting GSU to 1." << std::endl;
                 gsu = 1;
             }
-            const bool streamKDP = useStreamKDP();
+            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
             size_t tiles = 0;
             if (useLegacyWorkspaceLogic)
@@ -5958,7 +5947,7 @@ namespace TensileLite
         // below so that fallback sees the reduction the launch will use.
         sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
 
-        const bool streamKDP   = useStreamKDP();
+        const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
@@ -6541,7 +6530,10 @@ namespace TensileLite
                 return sk5DynamicValue;
             };
 
-            size_t skGrid = tiles; // Fallback
+            size_t     skGrid    = tiles; // Fallback
+            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+            if(streamKDP)
+                skGrid = tiles;
 
             // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
             size_t z = 1;
@@ -7015,7 +7007,7 @@ namespace TensileLite
         // the grid lands on a splitting factor below 2 with parallel selected.
         reduction = streamKReconcileReduction(reduction, grid, tiles);
 
-        const bool streamKDP   = useStreamKDP();
+        const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
         d.streamKDP            = streamKDP;
         d.forceDPOnly          = forceDPOnly;
@@ -7152,16 +7144,16 @@ namespace TensileLite
             gridChangedBy = "fixedGrid";
 
         // Which mechanism (if any) makes this launch data-parallel-only. More than
-        // one can be set at once (e.g. DP mode on a force-DP-only kernel), so the
-        // ladder reports the most specific explanation first: the compile-time
-        // kernel param, then the process-wide DP mode, then the runtime workspace
-        // fallback -- from "this kernel is always DP" to "this particular launch
-        // had to give up on StreamK".
+        // one can be set at once (e.g. the debug override on a force-DP-only
+        // kernel), so the ladder reports the most specific explanation first:
+        // the compile-time kernel param, then the process-wide debug override,
+        // then the runtime workspace fallback -- from "this kernel is always DP"
+        // to "this particular launch had to give up on StreamK".
         const char* dpOnlySource = "none";
         if(d.forceDPOnly)
             dpOnlySource = "forceDPOnly(param)";
         else if(d.streamKDP)
-            dpOnlySource = "streamKDP(env)";
+            dpOnlySource = "streamKDP(debug)";
         else if(d.workspaceDPFallbackFired)
             dpOnlySource = "workspaceDP(runtime)";
 

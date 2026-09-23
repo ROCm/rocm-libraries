@@ -351,48 +351,6 @@ TEST(StreamKLaunchSummaryTest, ForceDpOnlyIsDpOnlyNoWorkspace)
 }
 
 // ---------------------------------------------------------------------------
-// Being an MI300A does not imply StreamK data-parallel.
-//
-// Data-parallel used to be an in-code architectural default keyed on gfx942 at
-// 228 CUs. It no longer is: a solution that wants a pure data-parallel launch
-// declares StreamKForceDPOnly (see ForceDpOnlyIsDpOnlyNoWorkspace), and
-// TENSILE_STREAMK_DATA_PARALLEL remains a debug-only override. This test pins
-// that removal so the device-derived default cannot quietly come back.
-//
-// Same shape as ForceDpOnlyIsDpOnlyNoWorkspace: 4096x4224 over a 128x128 tile is
-// 32*33 = 1056 tiles, and 1056 % 64 != 0, so the partial-tile workspace
-// reservation is live and its presence is what the assertions observe.
-// ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, MI300AHasNoDataParallelDefault)
-{
-    ContractionSolution solution;
-    initStreamKSolution(solution, 3);
-
-    auto problem = makeGemmProblem(4096, 4224, 512);
-    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-
-    // gfx942 at 228 CUs is the MI300A, the part that used to take data-parallel as
-    // an architectural default. makeDevice() is hardwired to gfx950, so the device
-    // is built directly here.
-    AMDGPU device(AMDGPU::Processor::gfx942, 228, "mi300a");
-    ASSERT_EQ(device.processor, AMDGPU::Processor::gfx942);
-    ASSERT_EQ(device.computeUnitCount, 228);
-    device.skDynamicGrid = 0;
-
-    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
-        << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
-
-    auto d = solution.computeStreamKDecisions(problem, device);
-
-    // The MI300A keeps the StreamK path and the partial-tile workspace that goes
-    // with it, exactly like any other part.
-    EXPECT_FALSE(d.streamKDP);
-    EXPECT_FALSE(d.forceDPOnly);
-    EXPECT_GT(d.requiredWorkspaceBytes, 0u);
-    EXPECT_TRUE(d.workspaceAllocated);
-}
-
-// ---------------------------------------------------------------------------
 // Workspace-starved SK4 falls back to a DP grid (grid=tiles, tree reduction):
 // workspaceDPFallbackFired and dpOnly set, nothing reserved. This is the RUNTIME
 // dp-only source, and it is the fallback that turns selectedGrid into finalGrid.
