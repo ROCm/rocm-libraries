@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 from . import graphs
-from .shapes import Candidate, Shape
+from .shapes import TOP_LEFT, Candidate, Shape
 
 #: The in-tree catalog, relative to the repository root.
 DEFAULT_CATALOG = Path("projects/hipdnn/tools/hipdnn_torch/MODEL_CATALOG.md")
@@ -84,6 +84,28 @@ def _load_mine_shapes():
 mine = _load_mine_shapes()
 
 
+def _alignment_of(record) -> str:
+    """The causal anchor the source declared, defaulting to top-left.
+
+    Taken from the record rather than left to `Shape`'s default: a mined bottom-right
+    graph that defaults to top-left is silently relabelled, and where Sq != Sk the two
+    compute different outputs.
+    """
+    mask = record.get("mask")
+    if isinstance(mask, dict) and mask.get("alignment"):
+        return mask["alignment"]
+    return record.get("alignment") or TOP_LEFT
+
+
+def _mask_type_of(record) -> int:
+    """`mine_shapes` publishes the mask as a normalised dict (`mask_type` plus
+    `sliding_window`); a record assembled here still carries the flat code."""
+    mask = record.get("mask")
+    if isinstance(mask, dict):
+        return mask.get("mask_type")
+    return record.get("mask_type")
+
+
 def _causal_from_mask(mask_type: int) -> bool | None:
     """A mask value as this corpus can express it, or None for one it cannot.
 
@@ -93,16 +115,16 @@ def _causal_from_mask(mask_type: int) -> bool | None:
     the full `left_bound=-1` history. So a windowed shape is dropped and counted, not
     flattened onto causal.
     """
-    if mask_type == mine.MASK_TYPE["causal"]:
+    if mask_type == mine._MASK_TYPE["causal"]:
         return True
-    if mask_type == mine.MASK_TYPE["full"]:
+    if mask_type == mine._MASK_TYPE["full"]:
         return False
     return None
 
 
 def _shape_from_mined(record: dict) -> Shape | None:
     """One `mine_shapes` record as a `Shape`, or None if this corpus cannot build it."""
-    causal = _causal_from_mask(record["mask_type"])
+    causal = _causal_from_mask(_mask_type_of(record))
     if causal is None:
         return None
     if record.get("hdim_v") not in (None, record["hdim_q"]):
@@ -118,7 +140,8 @@ def _shape_from_mined(record: dict) -> Shape | None:
         return Shape(dtype=record["dtype"], batch=int(record["batch"]),
                      heads_q=int(record["nhead_q"]), heads_kv=int(record["nhead_k"]),
                      seqlen_q=int(record["seqlen_q"]), seqlen_kv=int(record["seqlen_k"]),
-                     head_dim=int(record["hdim_q"]), causal=causal)
+                     head_dim=int(record["hdim_q"]), causal=causal,
+                     alignment=(_alignment_of(record) if causal else TOP_LEFT))
     except ValueError:
         # A head grouping no kernel implements, or a non-positive dimension. The row
         # is reported as unbuildable rather than repaired into a different shape.
@@ -319,22 +342,22 @@ def _normalise_row(row: dict, path: Path) -> dict | None:
     if any(field not in fields for field in required):
         return None
 
-    # A boolean `is_causal` column, or a named mask that `mine_shapes.MASK_TYPE`
+    # A boolean `is_causal` column, or a named mask that `mine_shapes._MASK_TYPE`
     # already knows. Every other spelling is refused there rather than mapped here:
     # `bottom_right`, for one, is a genuinely different mask from the top-left causal
     # `make_sdpa_bundles` writes, and accepting it would put a shape in the corpus
     # that is not the one the row named.
     raw_mask = str(fields.get("mask", "")).strip().lower()
     if raw_mask in ("true", "1", "yes"):
-        mask_type = mine.MASK_TYPE["causal"]
+        mask_type = mine._MASK_TYPE["causal"]
     elif raw_mask in ("", "false", "0", "no"):
-        mask_type = mine.MASK_TYPE["full"]
-    elif raw_mask in mine.MASK_TYPE:
-        mask_type = mine.MASK_TYPE[raw_mask]
+        mask_type = mine._MASK_TYPE["full"]
+    elif raw_mask in mine._MASK_TYPE:
+        mask_type = mine._MASK_TYPE[raw_mask]
     else:
         raise SystemExit(
             f"FAIL: unknown mask spelling {raw_mask!r} in {path}. Add it to "
-            f"mine_shapes.MASK_TYPE rather than defaulting -- guessing a mask puts a "
+            f"mine_shapes._MASK_TYPE rather than defaulting -- guessing a mask puts a "
             f"differently-masked problem in the corpus under the row's name.")
 
     heads_q = int(fields["heads_q"])
@@ -342,7 +365,7 @@ def _normalise_row(row: dict, path: Path) -> dict | None:
             "nhead_k": int(fields.get("heads_kv", heads_q)),
             "seqlen_q": int(fields["seqlen_q"]), "seqlen_k": int(fields["seqlen_kv"]),
             "hdim_q": int(fields["head_dim"]), "hdim_v": int(fields["head_dim"]),
-            "dtype": mine.normalise_dtype(fields.get("dtype"), path, "bf16"),
+            "dtype": mine._normalise_dtype(fields.get("dtype"), path, "bf16"),
             "mask_type": mask_type, "arch": fields.get("arch"),
             "model": str(fields.get("model", path.stem))}
 

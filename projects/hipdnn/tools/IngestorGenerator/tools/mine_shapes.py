@@ -1,71 +1,43 @@
-"""Build the shape corpus stage 4a resolves, from the sources that actually decide.
+"""Build the shape corpus the dispatcher resolves (RUNBOOK §2's corpus).
 
-Three sources answer three different questions, and no one of them is sufficient:
+Three sources answer three different questions, and none is sufficient alone:
 
-  * the kernel team's PUBLISHED RESULTS CSV -- what they measure, tune and will
-    escalate a regression on. It is the shape list ALREADY RESOLVED, with priority
-    and ticket group attached, and it carries shapes a benchmark's nested loops do
-    not enumerate. Ask for it before mining anything.
+  * the kernel team's published results CSV -- shapes already resolved, with
+    priority and ticket group attached. Ask for it before mining anything.
   * dnn-benchmarking's graph corpus -- what real callers ask for.
   * the kernel's own `supports_*` predicate -- what is legal to build.
 
-The first two are the ones an integration keeps skipping. Every source the mining
-guidance originally named was kernel-side, so it answered "what is LEGAL?" and
-nothing answered "what will anyone ASK for?". Following it exactly produced a legal,
-validated, well-tested engine that served zero real workloads -- three times, each
-caught only by counting against an external corpus rather than from inside the
-integration.
-
-PROVENANCE SURVIVES INTO THE NAME. Every emitted shape carries where it came from,
-because the moment a result can be split by source it stops being one number: the
-same measured win was large on one synthetic microbenchmark suite and close to
-parity on real model traces, and only the provenance split made that visible rather
-than suspected. It costs nothing here and cannot be recovered later.
-
-A `microbench/` path is a PROVENANCE LABEL, not a synthetic-data warning. One suite
-was discarded on the strength of its directory name and its own manifest said the
-opposite -- every shape rendered from a real source, none invented. That mistake cost
-72 shapes.
+Kernel-side sources answer what is legal; the first two answer what anyone
+asks for. Every emitted shape carries its provenance so a result can be split
+by source; a `microbench/` path is a provenance label, not a synthetic-data
+warning.
 
     mine_shapes.py --published <csv> --arch gfx942 --out shapes.json
 
-Emits the request-field mappings `dispatch_parity.py --shapes` consumes. It does NOT
-filter by what the kernel can serve: that is the dispatcher's job at stage 4a, which
-reports declines with reasons. Filtering here would hide the gap this corpus exists
-to measure.
+Emits the request-field mappings `dispatch_parity.py --shapes` consumes, and
+does not filter by what the kernel can serve: the dispatcher reports declines
+with reasons, and filtering here would hide the gap this corpus measures.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import sys
 from pathlib import Path
 
-#: CSV mask spellings -> the request's mask_type. `swin` is a sliding window, which
-#: is a different mask kind rather than a causal variant; folding it onto causal
-#: collapsed seven distinct shape keys in an earlier join. It is carried through with
-#: its own value so the dispatcher declines it explicitly instead of it silently
-#: becoming a causal duplicate.
-#: Public for the same reason BACKWARD_GRADIENT_TENSOR_NAMES is: `tools/corpus_build`
-#: reads shape files through this module and has to agree with it about what a mask
-#: value means, and a second literal there is one that can silently drift from this one.
-#: `no_mask` and `top_left` are aiter/CK's spellings of the two it already had (see
-#: `composablekernel/tile_engine/ops/fmha`, whose published model shapes use them).
-#: `bottom_right` is deliberately ABSENT: causal aligned to the bottom right is a
-#: different mask from causal aligned to the top left whenever seqlen_q != seqlen_k,
-#: so it is refused by name rather than mapped onto `causal`.
-MASK_TYPE = {"full": 0, "none": 0, "no_mask": 0, "causal": 1, "top_left": 1, "swin": 2}
+#: CSV mask spellings -> the request's mask_type. `swin` is a sliding window, a
+#: different mask kind rather than a causal variant, carried with its own value
+#: so the dispatcher declines it explicitly.
+_MASK_TYPE = {"full": 0, "none": 0, "no_mask": 0, "causal": 1, "top_left": 1,
+              "swin": 2}
 
-#: Tensor names that mark a graph as backward rather than forward, in BOTH
-#: gradient spellings a corpus uses. `d_query`-style names alone let
-#: `sample_sdpa_backward` (whose gradients are `dq`/`dk`/`dv`/`do`) through this
-#: filter, where it was then caught only incidentally by its `float` dtype -- a
-#: backward graph using a servable dtype would have been mined as a forward
-#: shape. Module-level so a consumer outside this file (e.g. a config's own
-#: EXCLUDE_TENSORS list) can be checked against the same set rather than a
-#: second literal that can silently drift from this one.
+#: Tensor names marking a graph as backward, in both gradient spellings a
+#: corpus uses: `d_query`-style names alone would let `dq`/`dk`/`dv`/`do`
+#: through. Module-level so a consumer outside this file (e.g. a config's
+#: EXCLUDE_TENSORS list) checks against the same set.
 BACKWARD_GRADIENT_TENSOR_NAMES = {
     "d_query",
     "d_key",
@@ -79,12 +51,9 @@ BACKWARD_GRADIENT_TENSOR_NAMES = {
 
 
 def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[dict]:
-    """Shapes from the kernel team's results CSV.
-
-    Why this beats reading the benchmark source: it is the shape list already
-    resolved, it names which kernel each published number refers to, and it carries
-    `priority`/`ticket_group` -- a shipping-priority signal available nowhere else.
-    """
+    """Shapes from the kernel team's results CSV: the shape list already
+    resolved, naming which kernel each published number refers to and carrying
+    `priority`/`ticket_group`, a signal available nowhere else."""
     shapes = []
     with path.open() as handle:
         for row in csv.DictReader(handle):
@@ -93,14 +62,22 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
             mask = (row.get("mask") or "").strip().lower()
             if mask == "swin" and not include_windowed:
                 continue
-            mask_type = MASK_TYPE.get(mask)
+            mask_type = _MASK_TYPE.get(mask)
             if mask_type is None:
                 raise SystemExit(
                     f"FAIL: unknown mask spelling {mask!r} in {path}. Add it to "
-                    f"MASK_TYPE rather than defaulting -- guessing a mask is how a "
+                    f"_MASK_TYPE rather than defaulting -- guessing a mask is how a "
                     f"windowed graph gets served as plain causal."
                 )
             head_dim = int(row["head_dim"])
+            window = 0
+            if mask_type == _MASK_TYPE["swin"]:
+                raw_window = (row.get("window_size") or "").strip()
+                if not raw_window.isdigit() or int(raw_window) <= 0:
+                    raise SystemExit(
+                        f"FAIL: {path}: windowed CSV row requires a positive window_size width"
+                    )
+                window = int(raw_window)
             shapes.append(
                 {
                     "batch": int(row["batch"]),
@@ -110,8 +87,10 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
                     "seqlen_k": int(row["seq_kv"]),
                     "hdim_q": head_dim,
                     "hdim_v": head_dim,
-                    "dtype": normalise_dtype(row.get("dtype"), path, "bf16"),
+                    "dtype": _normalise_dtype(row.get("dtype"), path, "bf16"),
                     "mask_type": mask_type,
+                    "sliding_window": window,
+                    "use_sinks": False,
                     # Provenance, carried not computed. `_provenance` is stripped
                     # before the request is constructed and kept for reporting.
                     "_provenance": {
@@ -127,72 +106,61 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
     return shapes
 
 
-def _mask_type_from_graph(graph: dict, path: Path) -> int:
-    """Causality from the graph's OWN attributes, never from its filename.
+def _mask_from_attributes(
+    attrs: dict, path: Path, seqlen_q: int, seqlen_k: int
+) -> dict:
+    """Normalize the graph dialect to a mask kind, a window, and an anchor.
 
-    The first version read `"causal" in path.stem.lower()`. Against this repo's real
-    bundle tree that is wrong for every causal graph there is: 25 of them carry
-    `causal` in a PARENT DIRECTORY (`.../hd128_causal_batch/Small/Small.json`) and
-    none carry it in the leaf name, so the miner reported a corpus with zero causal
-    graphs. `causal` is not cosmetic -- the dispatcher does `causal=(mask_type != 0)`,
-    so it selects which branch resolves and which kernels get built. A corpus that
-    reports no causal graphs sizes a variant set that cannot serve them.
+    The anchor is REPORTED rather than normalized away. Folding bottom-right onto
+    top-left is safe only where Sq == Sk, and a UHD corpus deliberately contains the
+    case where it is not: `corpus_build.both_anchors` twins every causal shape so an
+    engine whose table is bottom-right-only is exercised (AITER's gfx942 forward table
+    has no top-left causal kernel, and a single-anchor corpus had it serving none of
+    its 15 causal graphs). Refusing those made this reader unable to read the corpus
+    the UHD trains on.
 
-    Reading the attributes is also the only correct derivation, independent of naming.
-    hipDNN has NO `causal` boolean: the deprecated `causal_mask` /
-    `causal_mask_bottom_right` pair takes precedence WHEN SET, and otherwise causality
-    comes from (`left_bound`, `right_bound`, `diagonal_alignment`). Every shipped
-    causal bundle in this tree leaves both booleans false and expresses causality as
-    `left_bound=-1, right_bound=0` -- so a reader that trusts only the booleans
-    computes "not causal" for all of them. That derivation is the single
-    highest-value paragraph in this skill's own graph contract, and the filename
-    heuristic bypassed it entirely.
-
-    A windowed graph is NOT causal-with-a-tweak: a finite `left_bound` is a sliding
-    window, a different mask kind, and folding it onto causal is how one gets served
-    as plain causal -- a wrong answer rather than a decline.
+    Consumers that only ever see Sq == Sk keep reading `mask_type` and `sliding_window`
+    and are unaffected; `alignment` is additive.
     """
-    for node in graph.get("nodes") or []:
-        attrs = node.get("attributes") or {}
-        if not any(
-            k in attrs
-            for k in ("causal_mask", "causal_mask_bottom_right", "left_bound")
-        ):
-            continue
-        if attrs.get("causal_mask") or attrs.get("causal_mask_bottom_right"):
-            return MASK_TYPE["causal"]
-        left = attrs.get("left_bound")
-        right = attrs.get("right_bound")
-        if left is None and right is None:
-            return MASK_TYPE["full"]
-        if left is not None and not isinstance(left, (int, float)):
+    alignment = attrs.get("diagonal_alignment", "TOP_LEFT")
+    if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
+        raise SystemExit(f"FAIL: {path}: unsupported diagonal_alignment {alignment!r}")
+    for flag in ("causal_mask", "causal_mask_bottom_right"):
+        if flag in attrs and type(attrs[flag]) is not bool:
+            raise SystemExit(f"FAIL: {path}: {flag} must be boolean")
+    left, right = attrs.get("left_bound"), attrs.get("right_bound")
+    for name, value in (("left_bound", left), ("right_bound", right)):
+        if value is not None and (type(value) is not int or value < -1):
             raise SystemExit(
-                f"FAIL: non-numeric left_bound {left!r} in {path}. Refusing rather "
-                f"than defaulting -- an unresolvable bound falling through to "
-                f"'causal' is exactly the wrong-answer-not-a-decline failure this "
-                f"reader exists to refuse."
+                f"FAIL: {path}: invalid {name} {value!r}; expected null or integer >= -1"
             )
-        # left_bound < 0 means "all history": causal. A finite left_bound is a
-        # sliding window, which is its own mask kind.
-        if isinstance(left, (int, float)) and left >= 0:
-            return MASK_TYPE["swin"]
-        return MASK_TYPE["causal"]
-    # No mask attributes at all: the graph does not describe one. Say so by falling
-    # back to the path, and only then -- a directory name is a hint, not a contract.
-    return MASK_TYPE["causal"] if "causal" in str(path).lower() else MASK_TYPE["full"]
+    if attrs.get("causal_mask"):
+        left, right, alignment = -1, 0, "TOP_LEFT"
+    elif attrs.get("causal_mask_bottom_right"):
+        left, right, alignment = -1, 0, "BOTTOM_RIGHT"
+    left = -1 if left is None else left
+    right = -1 if right is None else right
+    if left == -1 and right == -1:
+        return {"mask_type": 0, "sliding_window": 0, "alignment": "top_left"}
+    if right != 0:
+        # A right bound other than 0 is not a causal mask at all, and there is no
+        # anchor that makes it one. Still refused.
+        raise SystemExit(
+            f"FAIL: {path}: unsupported translation of bounds ({left}, {right}), "
+            f"alignment {alignment}, Sq={seqlen_q}, Sk={seqlen_k} to AttentionRequest"
+        )
+    return {
+        "mask_type": 1 if left == -1 else 2,
+        "sliding_window": 0 if left == -1 else left + 1,
+        "alignment": "bottom_right" if alignment == "BOTTOM_RIGHT" else "top_left",
+    }
 
 
-#: Every spelling a source uses for a dtype -> the spelling the rocKE spec takes.
-#: Three vocabularies meet here and none of them agree: hipDNN graphs say
-#: `bfloat16`, torch traces say `torch.bfloat16`, the spec says `bf16`. A source
-#: dtype that reaches the dispatcher unmapped is REJECTED at spec construction
-#: ("dtype must be one of ['bf16', 'fp16']"), which reads like the kernel declining
-#: a shape when it is really the miner mis-spelling one -- and the whole graph
-#: corpus disappears from the servable count that way.
-#: Public, with `normalise_dtype`, because `tools/corpus_build` normalises the same
-#: three vocabularies when it reads the cluster's shape files; a fourth table there
-#: would be a fourth opinion about what `half` means.
-DTYPE_SPELLINGS = {
+#: Every spelling a source uses for a dtype -> the spelling the rocKE spec
+#: takes. hipDNN graphs say `bfloat16`, torch traces `torch.bfloat16`, the spec
+#: `bf16`. An unmapped dtype is rejected at spec construction, which reads like
+#: the kernel declining a shape when the miner mis-spelled one.
+_DTYPE_SPELLINGS = {
     "bf16": "bf16",
     "bfloat16": "bf16",
     "torch.bfloat16": "bf16",
@@ -203,45 +171,41 @@ DTYPE_SPELLINGS = {
 }
 
 
-def normalise_dtype(raw, path: Path, fallback: str) -> str:
+def _normalise_dtype(raw, path: Path, fallback: str) -> str:
     """One spelling for a dtype, or a refusal naming the source.
 
-    Refuses rather than defaults, for the same reason the mask derivation does: a
-    guessed dtype builds a different binary and still validates, so the failure is
-    silent and numeric. An ABSENT dtype falls back (the source simply did not say);
-    an UNRECOGNISED one is a mapping this table owes, not a value to paper over.
+    An absent dtype falls back; an unrecognised one is a mapping this table
+    owes, since a guessed dtype builds a different binary and still validates.
     """
     if raw is None or str(raw).strip() == "":
         return fallback
     spelling = str(raw).strip().lower()
-    resolved = DTYPE_SPELLINGS.get(spelling)
+    resolved = _DTYPE_SPELLINGS.get(spelling)
     if resolved is None:
         raise SystemExit(
             f"FAIL: unknown dtype spelling {raw!r} in {path}. Add it to "
-            f"DTYPE_SPELLINGS rather than defaulting -- a guessed dtype builds the "
+            f"_DTYPE_SPELLINGS rather than defaulting -- a guessed dtype builds the "
             f"wrong binary and still validates."
         )
     return resolved
 
 
 def from_graph_corpus(root: Path) -> list[dict]:
-    """Shapes from a dnn-benchmarking graph tree, one JSON per graph.
-
-    The suite name is kept because it is the axis a result must be split along. Real
-    model traces and parameter sweeps do not behave alike, and a single geomean over
-    both reports the synthetic population's win as though it were everyone's.
-    """
+    """Shapes from a dnn-benchmarking graph tree, one JSON per graph. The suite
+    name is kept because it is the axis a result must be split along: a single
+    geomean over model traces and parameter sweeps reports the synthetic
+    population's win as everyone's."""
     shapes = []
     for path in sorted(root.rglob("*.json")):
         try:
             graph = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        # A shape directory holds more than graphs -- a published `model_shapes.json`
-        # is a LIST of records, and `.get` on it raises rather than mining nothing.
-        # A tree that mixes the two is the ordinary case for `~/model-shapes`, so a
-        # document that is not a graph object is skipped exactly like an unparseable
-        # one: this reader mines graphs, and says nothing about anything else.
+        # A document that is not a graph object is skipped exactly like an unparseable
+        # one: this reader mines graphs and says nothing about anything else. Load-bearing
+        # for corpus_build, which points it at a published shape directory holding CSV,
+        # record-style JSON arrays and key=value files beside the graphs -- all of which
+        # parse as JSON and none of which carry tensors.
         if not isinstance(graph, dict):
             continue
         tensors = {
@@ -249,31 +213,78 @@ def from_graph_corpus(root: Path) -> list[dict]:
             for t in graph.get("tensors", []) or []
             if isinstance(t, dict)
         }
-        # A backward graph cannot be served by a prefill kernel, and one of them takes
-        # the device down through a third-party backward FMHA. The filename is not
-        # authoritative, so the marker is structural -- but it has to cover BOTH
-        # gradient spellings (see BACKWARD_GRADIENT_TENSOR_NAMES). `d_query`-style
-        # names alone let `sample_sdpa_backward` (whose gradients are
-        # `dq`/`dk`/`dv`/`do`) through the filter, where it was then caught only
-        # incidentally by its `float` dtype. A backward graph that happened to use a
-        # servable dtype would have been mined as a forward shape.
-        #
-        # The node's own op type is the primary marker, since that is what the graph
-        # DECLARES it is; the tensor-name sets are the belt-and-braces fallback for a
-        # graph whose node type is absent or spelled differently.
+        # A backward graph cannot be served by a prefill kernel. The filename
+        # is not authoritative, so the marker is structural: the node's own op
+        # type is primary, with BACKWARD_GRADIENT_TENSOR_NAMES as the fallback
+        # for a graph whose node type is absent or spelled differently.
         node_types = {str(n.get("type", "")).lower() for n in graph.get("nodes") or []}
         if any("backward" in t or "bwd" in t for t in node_types):
             continue
         if BACKWARD_GRADIENT_TENSOR_NAMES & set(tensors):
             continue
-        query = tensors.get("query") or tensors.get("q")
-        key = tensors.get("key") or tensors.get("k")
-        if not query or not key:
+        sdpa = [
+            n
+            for n in graph.get("nodes", [])
+            if n.get("type") == "SdpaAttributes"
+            or "q_tensor_uid" in (n.get("attributes") or {})
+        ]
+        if len(sdpa) > 1:
+            raise SystemExit(
+                f"FAIL: {path}: multiple SDPA nodes cannot form one request"
+            )
+        attrs = (
+            (sdpa[0].get("attributes") or {})
+            if sdpa
+            else next(
+                (
+                    n["attributes"]
+                    for n in graph.get("nodes", [])
+                    if n.get("attributes")
+                ),
+                {},
+            )
+        )
+        by_uid = {t["uid"]: t for t in graph.get("tensors", []) if "uid" in t}
+        selected = []
+        for short, long in (("q", "query"), ("k", "key"), ("v", "value")):
+            uid_key = f"{short}_tensor_uid"
+            tensor = (
+                by_uid.get(attrs[uid_key])
+                if uid_key in attrs
+                else (tensors.get(long) or tensors.get(short))
+            )
+            selected.append(tensor)
+        query, key, value = selected
+        if not query and not key and not sdpa:
             continue
-        qdims = query.get("dims") or []
-        kdims = key.get("dims") or []
-        if len(qdims) != 4 or len(kdims) != 4:
-            continue
+        if any(t is None for t in selected):
+            raise SystemExit(
+                f"FAIL: {path}: SDPA requires independent Q, K and V tensors"
+            )
+        dimensions = [t.get("dims") or [] for t in selected]
+        if any(
+            len(d) != 4 or any(type(x) is not int or x <= 0 for x in d)
+            for d in dimensions
+        ):
+            raise SystemExit(
+                f"FAIL: {path}: SDPA requires positive logical BHSD dimensions"
+            )
+        qdims, kdims, vdims = dimensions
+        if qdims[0] != kdims[0] or kdims[:3] != vdims[:3] or qdims[3] != kdims[3]:
+            raise SystemExit(
+                f"FAIL: {path}: incompatible independent Q/K/V dimensions {dimensions}"
+            )
+        dtypes = [_normalise_dtype(t.get("data_type"), path, "bf16") for t in selected]
+        if len(set(dtypes)) != 1:
+            raise SystemExit(
+                f"FAIL: {path}: mixed Q/K/V dtypes cannot form one request"
+            )
+        mask = _mask_from_attributes(attrs, path, qdims[2], kdims[2])
+        sink_uid = attrs.get("sink_token_tensor_uid")
+        if sink_uid is not None and sink_uid not in by_uid:
+            raise SystemExit(
+                f"FAIL: {path}: sink_token_tensor_uid names a missing tensor"
+            )
         shapes.append(
             {
                 "batch": int(qdims[0]),
@@ -282,86 +293,51 @@ def from_graph_corpus(root: Path) -> list[dict]:
                 "seqlen_q": int(qdims[2]),
                 "seqlen_k": int(kdims[2]),
                 "hdim_q": int(qdims[3]),
-                "hdim_v": int(qdims[3]),
-                "dtype": normalise_dtype(query.get("data_type"), path, "bf16"),
-                "mask_type": _mask_type_from_graph(graph, path),
+                "hdim_v": int(vdims[3]),
+                "dtype": dtypes[0],
+                **mask,
+                "use_sinks": sink_uid is not None,
                 "_provenance": {
                     "source": "graphs",
                     "suite": str(path.parent.name),
-                    "graph": path.stem,
+                    "graph": graph.get("name", path.stem),
+                    "path": str(path),
+                    "mask": {
+                        k: attrs.get(k)
+                        for k in (
+                            "left_bound",
+                            "right_bound",
+                            "diagonal_alignment",
+                            "causal_mask",
+                            "causal_mask_bottom_right",
+                        )
+                    },
                 },
             }
         )
     return shapes
 
 
-def _bench_graph_name(path: Path, record: dict) -> str:
-    """A stable, human-readable name for one rocKE benchmark trace record.
-
-    Exists because `graph` is the key a `--declines` file is written against, and the
-    only alternative the reconciler accepts is the corpus INDEX. An index is a
-    position, not an identity: re-mine with a different flag, or land a new trace
-    upstream, and every key after the insertion point now marks a DIFFERENT shape.
-    The reconciler hard-fails a key matching nothing -- which is right, and does not
-    help here, because a shifted index still matches something.
-
-    So the name is built from what the record says about itself rather than where it
-    sits: the trace file it came from, its own `variant` label when the suite records
-    one, and `call_idx` as the tiebreak for suites that do not. Prefixed with the
-    source so it can never collide with a dnn-benchmarking graph stem, which shares
-    this field.
-    """
-    parts = [path.stem]
-    variant = str(record.get("variant") or "").strip()
-    if variant:
-        parts.append(variant)
-    # ALWAYS append the shape, even when a variant label exists. A name that does not
-    # identify exactly one shape is not usable as a declines key: the `aiter` suite
-    # records no `variant` at all, so a name built from the trace stem alone collapsed
-    # 82 records onto one key. `call_idx` is deliberately NOT used -- it is a position
-    # in a capture, which is the very instability this function exists to avoid.
-    # Two records that agree on every one of these fields ARE the same shape and are
-    # merged by deduplicate() anyway, so collisions here are correct rather than lossy.
-    parts.append(
-        f"b{record.get('num_seqs')}_hq{record.get('num_query_heads')}"
-        f"_kv{record.get('num_kv_heads')}_d{record.get('head_size')}"
-        f"_sq{record.get('max_seqlen_q')}_sk{record.get('max_seqlen_k')}"
-    )
-    return "rocke_bench__" + "__".join(parts)
+def _bench_graph_name(shape: dict) -> str:
+    """A stable runtime identity from the complete request, never capture position."""
+    return "rocke_bench__" + hashlib.sha256(_shape_key(shape).encode()).hexdigest()
 
 
 def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
-    """Shapes from rocKE's OWN benchmark tree -- the third source, and for an arch
-    with no published CSV it is the only one that says what the kernel team measures.
+    """Shapes from rocKE's own benchmark tree; for an arch with no published
+    CSV it is the only source saying what the kernel team measures.
 
-    Two formats live side by side under `benchmarks/<arch>/attention/`, and they are
-    not interchangeable:
+    `*_shapes.json` / `*_bench.json` under `benchmarks/<arch>/attention/` are
+    JSONL, one record per line (`json.load` raises "Extra data"): captured
+    launch traces carrying `window_size` and `has_sinks`. The paired
+    `benchmark_*_live.py` generates shapes instead.
 
-      * `*_shapes.json` / `*_bench.json` -- JSONL, ONE RECORD PER LINE (not a JSON
-        document; `json.load` raises "Extra data" on all three of them). These are
-        captured launch traces: real shapes, with `window_size` and `has_sinks` as
-        genuine recorded attributes.
-      * `benchmark_*_live.py` -- the sweep that GENERATES shapes, whose `_configs()`
-        enumerates (seqlens, Hq, Hkv, W, persistent) per mode.
-
-    CAUSALITY IS NOT IN THE TRACES. No record in any of the three JSONL files carries
-    a causal/mask key -- verified by set-union over every key present. The dispatcher
-    does `causal = (mask_type != 0)`, so guessing it picks which branch resolves and
-    which kernels get built, and a prefill trace defaulted to non-causal sizes a
-    variant set that cannot serve the causal traffic it was mined from. So this
-    refuses rather than defaults, exactly as the op-shaped-miner contract requires of
-    an unrecognised categorical: a trace states causality through `window_size`, or
-    it is skipped and counted.
-
-    `window_size` is `[left, right]` in the kernel's own convention, matching the
-    graph side's (`left_bound`, `right_bound`) pair:
-      * `[-1, -1]` -- unbounded both ways. Prefill attention with no window is
-        CAUSAL by construction here (these are prefill suites; `ALL_DECODE` is false
-        on every record), and the paired `benchmark_dense_prefill_live.py` labels the
-        W=0 arm "full-causal" rather than "no mask".
-      * `[W, 0]` with W >= 0 -- a banded causal window: right bound 0 is the causal
-        clamp, finite left bound is the window. A DIFFERENT mask kind, never folded
-        onto plain causal.
+    Causality is not recorded and the dispatcher does
+    `causal = (mask_type != 0)`, so a trace states causality through
+    `window_size` or it is skipped and counted. `window_size` is
+    `[left, right]`: `[-1, -1]` is unbounded both ways, causal for these
+    prefill suites, and `[W, 0]` with W >= 0 is a banded causal window, never
+    folded onto plain causal.
     """
     shapes: list[dict] = []
     skipped_unknown_mask = 0
@@ -393,23 +369,23 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             if left is None or right is None:
                 skipped_unknown_mask += 1
                 continue
-            # The WIDTH is carried, not just the kind. A windowed shape whose width
-            # is dropped reaches the dispatcher as sliding_window=0, which resolves
-            # to plain causal -- the kernel then computes a full causal triangle for
-            # a banded request and returns a WRONG ANSWER rather than declining. The
-            # mask kind alone does not encode the window; both must travel.
+            # The width is carried, not just the kind: a windowed shape whose
+            # width is dropped reaches the dispatcher as sliding_window=0,
+            # resolves to plain causal, and the kernel computes a full causal
+            # triangle for a banded request -- a wrong answer, not a decline.
             sliding_window = 0
             if int(left) < 0 and int(right) < 0:
-                mask_type = MASK_TYPE["causal"]
-            elif int(left) >= 0:
-                mask_type = MASK_TYPE["swin"]
-                # `[W, 0]` is a banded causal window of left-context W. The spec
-                # counts the window in TOKENS including the current one, matching
-                # the kernel's `q-W+1 <= k <= q` band, so a recorded left bound of
-                # 127 is a 128-token window.
+                mask_type = _MASK_TYPE["causal"]
+            elif int(left) >= 0 and int(right) == 0:
+                mask_type = _MASK_TYPE["swin"]
+                # The spec counts the window in TOKENS including the current one,
+                # matching the kernel's `q-W+1 <= k <= q` band, so a recorded left
+                # bound of 127 is a 128-token window.
                 sliding_window = int(left) + 1
+            elif int(left) == -1 and int(right) == 0:
+                mask_type = _MASK_TYPE["causal"]
             else:
-                mask_type = MASK_TYPE["causal"]
+                raise SystemExit(f"FAIL: {path}: unsupported trace window {window!r}")
             head_size = record.get("head_size")
             seqlen_q = record.get("max_seqlen_q")
             seqlen_k = record.get("max_seqlen_k")
@@ -417,10 +393,9 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             heads_kv = record.get("num_kv_heads")
             if None in (head_size, seqlen_q, seqlen_k, heads_q, heads_kv):
                 continue
-            # `q_dtype` is a torch spelling ("torch.bfloat16"), normalised through
-            # the same table the graph corpus uses -- one vocabulary, one place to
-            # add a spelling, rather than two that can disagree.
-            dtype = normalise_dtype(record.get("q_dtype"), path, dtype_default)
+            # `q_dtype` is a torch spelling ("torch.bfloat16"), normalised
+            # through the same table the graph corpus uses.
+            dtype = _normalise_dtype(record.get("q_dtype"), path, dtype_default)
             shapes.append(
                 {
                     "batch": int(record.get("num_seqs") or 1),
@@ -433,37 +408,26 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
                     "dtype": dtype,
                     "mask_type": mask_type,
                     "sliding_window": sliding_window,
-                    # A recorded request attribute, not a tuning choice. Carried so
-                    # the dispatcher resolves the shape the trace actually asked for;
-                    # whether THIS integration ships a sink variant is a scope
-                    # decision made downstream, and filtering here would hide the
-                    # shape from the step-9 reconciler entirely.
+                    # A recorded request attribute, not a tuning choice: the
+                    # dispatcher resolves the shape the trace asked for.
+                    # Whether this integration ships a sink variant is decided
+                    # downstream, and filtering here would hide the shape from
+                    # runtime reconciliation.
                     "use_sinks": bool(record.get("has_sinks")),
                     "_provenance": {
                         "source": "rocke_bench",
                         "suite": str(path.parent.name),
                         "trace": path.stem,
-                        # A STABLE NAME for this shape, because `graph` is the key a
-                        # --declines file is written against and the alternative is a
-                        # corpus INDEX. An index shifts the moment the corpus is
-                        # re-mined with different flags or a new trace lands, and the
-                        # same declines file then marks a DIFFERENT shape -- silently,
-                        # since a key that matches nothing is only a hard error, not a
-                        # correction. Derived from the trace and the record's own
-                        # variant/call_idx so it survives re-mining, and prefixed with
-                        # the source so it cannot collide with a dnn-benchmarking
-                        # graph stem.
-                        "graph": _bench_graph_name(path, record),
+                        # The runtime key binds all request semantics, independently
+                        # of trace labels and capture position.
+                        "graph": "",
                         "model": str(record.get("model") or ""),
                         "variant": str(record.get("variant") or ""),
-                        # Recorded, and load-bearing for scope: a sink trace is a
-                        # shape this integration declines on purpose, and the step-9
-                        # reconciler needs to see it rather than have it filtered out
-                        # here.
                         "has_sinks": bool(record.get("has_sinks")),
                     },
                 }
             )
+            shapes[-1]["_provenance"]["graph"] = _bench_graph_name(shapes[-1])
     if skipped_unknown_mask:
         print(
             f"  NOTE: {skipped_unknown_mask} rocKE trace record(s) skipped -- no "
@@ -473,43 +437,35 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
     return shapes
 
 
-def _shape_key(shape: dict) -> tuple:
-    return tuple(
-        shape[k]
-        for k in (
-            "batch",
-            "nhead_q",
-            "nhead_k",
-            "seqlen_q",
-            "seqlen_k",
-            "hdim_q",
-            "hdim_v",
-            "dtype",
-            "mask_type",
-        )
+def _shape_key(shape: dict) -> str:
+    """All request semantics participate; provenance never does."""
+    fields = {"sliding_window": 0, "use_sinks": False}
+    fields.update(
+        {key: value for key, value in shape.items() if not key.startswith("_")}
     )
+    return json.dumps(fields, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def deduplicate(shapes: list[dict]) -> tuple[list[dict], int]:
-    """One entry per distinct shape, keeping the first provenance and counting the rest.
-
-    A corpus is a set of shapes, not a set of rows. Two suites asking for the same
-    shape is one variant to compile -- but it is two votes for that shape mattering,
-    so the duplicate count is reported rather than discarded.
-    """
+    """One entry per distinct shape, keeping the first provenance and counting
+    the rest: two suites asking for the same shape is one variant to compile
+    but two votes for it mattering."""
     seen: dict = {}
     duplicates = 0
     for shape in shapes:
         key = _shape_key(shape)
         if key in seen:
             duplicates += 1
-            seen[key]["_provenance"].setdefault("also", []).append(
-                shape["_provenance"].get("suite")
-                or shape["_provenance"].get("model")
-                or shape["_provenance"].get("source")
+            seen[key]["_provenance_occurrences"].extend(
+                shape.get("_provenance_occurrences", [shape.get("_provenance", {})])
             )
             continue
-        seen[key] = shape
+        seen[key] = {
+            **shape,
+            "_provenance_occurrences": list(
+                shape.get("_provenance_occurrences", [shape.get("_provenance", {})])
+            ),
+        }
     return list(seen.values()), duplicates
 
 
