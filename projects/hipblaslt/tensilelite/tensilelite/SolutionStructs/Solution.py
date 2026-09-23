@@ -6700,6 +6700,14 @@ class Solution(collections.abc.Mapping):
         elif state["VectorWidthA"] > 1:
           reject(state, printRejectionReason, "reject to reduce number of kernels")
 
+    # StoreRemapTensorStore only selects how a StoreRemap round is flushed, so it is
+    # meaningless once StoreRemapVectorWidth has settled at 0. Pin it to 0 there: the codegen
+    # gate already ignores it, but leaving it at -1 would put a live-looking SRTSn1 in the
+    # kernel name and make a yaml that forks over [-1, 0, 1] emit three identical kernels.
+    # Placed after the -1 resolution above so it sees the final StoreRemapVectorWidth.
+    if not state["StoreRemapVectorWidth"]:
+      state["StoreRemapTensorStore"] = 0
+
     # GuaranteeNoPartial
     # UseSubtileImpl does its own edge masking (see Components/Subtile), so mark
     # loads non-partial to skip the classic graShift path.
@@ -6847,6 +6855,29 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "storeRemap: number elements of lds less than per wave per local read elements." + \
                " Please use smaller StoreRemapVectorWidth.")
         return
+      if state.get("StoreRemapTensorStore", -1) == 1:
+        # Explicitly forced on: say so now rather than silently falling back to
+        # ds_read + buffer_store. -1 (auto) checks the same conditions at codegen time and
+        # just uses the other path. Edge batches and the GSU branch still fall back even at 1.
+        if not isaInfoMap[isa].asmCaps.get("HasTDM", False):
+          reject(state, printRejectionReason,
+                 "StoreRemapTensorStore=1 requires tensor_store_from_lds (HasTDM)")
+          return
+        if not state["BufferStore"]:
+          reject(state, printRejectionReason, "StoreRemapTensorStore=1 requires BufferStore")
+          return
+        if state["WavefrontSize"] != 32:
+          reject(state, printRejectionReason,
+                 "StoreRemapTensorStore=1 is only implemented for WavefrontSize 32 (got %u)"
+                 % state["WavefrontSize"])
+          return
+        if state["MatrixInstN"] % state["MIWaveGroup"][0] != 0:
+          # Each wave DMAs MatrixInstN//MIWaveGroup[0] rows of the round; an uneven split
+          # would leave rows unwritten or double-written.
+          reject(state, printRejectionReason,
+                 "StoreRemapTensorStore=1 requires MatrixInstN(%u) %% MIWaveGroup[0](%u) == 0"
+                 % (state["MatrixInstN"], state["MIWaveGroup"][0]))
+          return
       if state["SourceSwap"]:
         # SourceSwap needs three things, all in place: the LDS-write coord0/coord1 derivation
         # (storeRemapComputeStoreVgprs), the vc1 row walk (storeRemapAddLocalWrite), and the
