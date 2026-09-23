@@ -13,7 +13,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path):
