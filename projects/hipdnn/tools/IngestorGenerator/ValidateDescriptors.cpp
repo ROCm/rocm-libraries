@@ -201,7 +201,7 @@ const char* severityName(hipdnnSeverity_t severity)
 /// Every native symbol name one DescriptorSet references, across all five hook kinds:
 /// `engine.graphMatchNativeSymbol`, every `matchers[].matchSymbol` (dispatched by
 /// `matcher.scope` onto the graph- or kernel-scoped registry), every
-/// `dispatches[].dispatchSymbol`, and `heuristic->payload` for a native heuristic.
+/// `dispatches[].dispatchSymbol`, and `heuristic->nativeSymbol` for a native heuristic.
 /// Harvested from pass 1's unresolved-symbol sets, before any stub is registered.
 struct HarvestedSymbols
 {
@@ -236,9 +236,9 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
         {
             harvested.dispatch.insert(dispatch.dispatchSymbol);
         }
-        if(set.heuristic.has_value() && set.heuristic->kind == HeuristicKind::NATIVE)
+        if(set.heuristic.has_value() && set.heuristic->adapter == UhdAdapter::NATIVE)
         {
-            harvested.score.insert(set.heuristic->payload);
+            harvested.score.insert(set.heuristic->nativeSymbol);
         }
     }
     return harvested;
