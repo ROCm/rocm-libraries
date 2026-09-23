@@ -39,7 +39,7 @@ they are not available behavior in the current API.
 | Searchable `JustInTime` solution library and equality-first priority | A problem description selects existing tuned equality results before JIT is considered | The library would prefer a matching tuned result, then search compatible JIT entries before requesting another compilation |
 | Separate planning and prediction-input protocol | Operation, target and specialization facts produce a structured compilation plan | The library could inspect the plan and check for existing code before invoking a backend compiler; the initial provider design combines these steps |
 | Persistent code cache | A plan identity and compatibility information locate a stored bundle | A cache hit would supply the bundle to the loader; a miss would compile and then store it |
-| Exact epilogue specialization | Concrete output operations, such as bias and activation, become specialization inputs | Planning would include these operations when selecting or compiling code; the initial prediction model does not account for their cost |
+| Exact epilogue specialization | The requested bias, activation and output operations identify a compiled specialization | Compile only that epilogue, removing generic runtime activation dispatch; modeling its cost is separate prediction work |
 | Tuning blueprints | Stored knowledge supplies choices that the performance model does not predict | A provider would combine those choices with predicted parameters before validation |
 | Additional operation adapters and providers | An operation-specific description becomes a generic request and an executable result | Attention is a possible later operation; no Attention request factory or provider is implemented |
 

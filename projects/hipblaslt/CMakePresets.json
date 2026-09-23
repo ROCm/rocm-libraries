@@ -34,7 +34,7 @@
     {
       "name": "jit",
       "displayName": "hipBLASLt JIT development",
-      "description": "Build the opt-in JIT API and GEMM sample without prebuilt device libraries.",
+      "description": "Build the opt-in JIT API without prebuilt device libraries.",
       "inherits": "default:release",
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
