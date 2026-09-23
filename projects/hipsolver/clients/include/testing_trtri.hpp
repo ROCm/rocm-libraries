@@ -423,12 +423,12 @@ void testing_trtri(Arguments& argus)
     }
 
     // memory allocations
-    host_strided_batch_vector<T>     hA(size_A, 1, size_A, 1);
-    host_strided_batch_vector<T>     hARes(size_ARes, 1, size_ARes, 1);
-    host_strided_batch_vector<int>   hInfo(1, 1, 1, 1);
-    host_strided_batch_vector<int>   hInfoRes(1, 1, 1, 1);
-    device_strided_batch_vector<T>   dA(size_A, 1, size_A, 1);
-    device_strided_batch_vector<int> dInfo(1, 1, 1, 1);
+    host_strided_batch_vector<T>     hA(size_A, 1, size_A, bc);
+    host_strided_batch_vector<T>     hARes(size_ARes, 1, size_ARes, bc);
+    host_strided_batch_vector<int>   hInfo(1, 1, 1, bc);
+    host_strided_batch_vector<int>   hInfoRes(1, 1, 1, bc);
+    device_strided_batch_vector<T>   dA(size_A, 1, size_A, bc);
+    device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
     if(size_A)
         CHECK_HIP_ERROR(dA.memcheck());
     CHECK_HIP_ERROR(dInfo.memcheck());
