@@ -68,12 +68,6 @@ target_compile_options(rpp_tests PRIVATE -Wall -Wextra -Werror)
 # src/main.cpp provides main() (it installs the suite's own reporter), so gtest_main is not used.
 target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest)
 
-if(rpp_BACKEND_TYPE STREQUAL "HIP" OR BACKEND STREQUAL "HIP")
-    # GPU_SUPPORT exposes the HIP-only API symbols guarded behind it in the installed
-    # headers (e.g. rppt_erode/rppt_dilate); the legacy HIP suite defines it the same way.
-    target_compile_definitions(rpp_tests PRIVATE RPP_TEST_HAVE_HIP=1 GPU_SUPPORT=1)
-endif()
-
 # One CTest test per GTest suite (per operator) by default -- see cmake/grouped_tests.cmake for
 # why. Per-case registration stays available: it isolates every case in its own process, so a
 # segfault or GPU fault takes down one case rather than its whole operator suite, at the cost of
