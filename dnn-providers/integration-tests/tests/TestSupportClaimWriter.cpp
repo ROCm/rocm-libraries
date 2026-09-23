@@ -157,7 +157,9 @@ TEST(TestSupportClaimWriter, DeclineLeavesCheckedInClaimIntact)
     nlohmann::json existingJson;
     existingJson["version"] = 1;
     existingJson["claims"]["MIOPEN_ENGINE"]["gfx942"] = nlohmann::json::array({"linux"});
-    std::ofstream(sidecarPath) << dumpCanonical(existingJson);
+    // Binary, because the writer compares bytes: a text-mode seed carries CRLF on
+    // Windows and never matches.
+    std::ofstream(sidecarPath, std::ios::binary) << dumpCanonical(existingJson);
 
     const auto bundlePath = dir.path() / "Small.json";
     const std::vector<ObservedGraphSupport> observations = {
