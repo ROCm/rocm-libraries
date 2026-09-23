@@ -80,7 +80,9 @@ if(GPU_TARGETS MATCHES "gfx125")
    # The example runner defaults to FP16; register an explicit BF16-only smoke.
    set_source_files_properties(tdm_fmha_v128_fwd.cpp
       ${TDM_FMHA_EXAMPLE_DIR}/example_fmha_fwd.cpp PROPERTIES LANGUAGE HIP)
+   set(TDM_FMHA_V128_RUNNER_SUPPORT tdm_fmha_v128_runner_support.cpp)
    add_executable(test_tdm_fmha_v128_fwd tdm_fmha_v128_fwd.cpp
+      ${TDM_FMHA_V128_RUNNER_SUPPORT}
       ${TDM_FMHA_EXAMPLE_DIR}/example_fmha_fwd.cpp)
    target_link_libraries(test_tdm_fmha_v128_fwd PRIVATE utility getopt::getopt)
    add_test(NAME test_tdm_fmha_v128_fwd COMMAND $<TARGET_FILE:test_tdm_fmha_v128_fwd>
@@ -103,6 +105,7 @@ if(GPU_TARGETS MATCHES "gfx125")
 
    set_source_files_properties(tdm_fmha_v128_oracle.cpp PROPERTIES LANGUAGE HIP)
    add_executable(test_tdm_fmha_v128_oracle tdm_fmha_v128_oracle.cpp
+      ${TDM_FMHA_V128_RUNNER_SUPPORT}
       ${TDM_FMHA_EXAMPLE_DIR}/example_fmha_fwd.cpp)
    target_link_libraries(test_tdm_fmha_v128_oracle PRIVATE utility getopt::getopt)
    target_include_directories(test_tdm_fmha_v128_oracle PRIVATE ${TDM_FMHA_EXAMPLE_DIR})
