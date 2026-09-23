@@ -232,7 +232,7 @@ struct FmhaD192SplitSoftmax
     {
         const float row_max = max(lhs_local_max, rhs_local_max);
         const float exponent_max =
-            ValidateMax && row_max == -numeric<float>::infinity() ? 0.0f : row_max;
+            ValidateMax && __builtin_isinf_sign(row_max) < 0 ? 0.0f : row_max;
         return Part1State{row_max, __builtin_fmaf(-exponent_max, log2e_scale, old_max_log2e)};
     }
 

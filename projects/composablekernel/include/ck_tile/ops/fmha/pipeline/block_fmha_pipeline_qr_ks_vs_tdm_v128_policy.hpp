@@ -710,7 +710,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
         const auto validated_max = [](float value) {
             if constexpr(kValidateMax)
             {
-                return value == -numeric<float>::infinity() ? 0.0f : value;
+                return __builtin_isinf_sign(value) < 0 ? 0.0f : value;
             }
             else
             {
