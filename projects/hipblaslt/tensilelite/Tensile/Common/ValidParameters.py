@@ -576,6 +576,7 @@ validParameters = { # we need to make sure this matches develop
     #      pipeline rather than one of the features layered on top.
     #   2  + InsertCoexecHazard and Gfx1250HazardModule: s_wait_xcnt coverage,
     #      which Components/Subtile emits none of.
+    #   3  + AsmMovePropagation, which folds away redundant v_mov_b32 copies.
     #
     # Higher levels each add one more pass and are enabled in their own change,
     # once that pass has been measured on hardware on its own.
@@ -588,7 +589,7 @@ validParameters = { # we need to make sure this matches develop
     # s_waitcnt / s_wait_alu it emits.
     #
     # gfx1250 + UseSubtileImpl only; forced to 0 elsewhere.
-    "StinkySubtile": [0, 1, 2],
+    "StinkySubtile": [0, 1, 2, 3],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

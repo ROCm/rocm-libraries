@@ -2578,7 +2578,7 @@
         1,
         2,
       ]),
-      'len': 3,
+      'len': 4,
       'type': 'list',
     }),
     'StorePriorityOpt': dict({
