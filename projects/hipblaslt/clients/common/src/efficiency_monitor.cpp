@@ -30,6 +30,7 @@
 
 #include "efficiency_monitor.hpp"
 #include "hipblaslt/hipblaslt-ext-op.h"
+#include "hipblaslt_ostream.hpp"
 
 #ifndef _WIN32
 
@@ -491,15 +492,38 @@ private:
                 m_socketHandles[device], &deviceCount, &m_processorHandles[0]));
             for(uint32_t smiIndex = 0; smiIndex < deviceCount; smiIndex++)
             {
-                uint64_t amdSMIPCIID{};
-                AMDSMI_CHECK_EXC(amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID));
+                uint64_t        amdSMIPCIID{};
+                amdsmi_status_t bdfStatus
+                    = amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID);
+
+                BdfMatchDecision decision = decideBdfMatch(
+                    bdfStatus, smiIndex, amdSMIPCIID, hipPCIID, hipDeviceIndex, deviceCount);
+
+                if(decision.action == BdfMatchAction::Throw)
+                    AMDSMI_CHECK_EXC(bdfStatus);
+
+                if(decision.action == BdfMatchAction::ReturnIndex)
+                {
+                    if(isAmdsmiTelemetryUnavailable(bdfStatus))
+                    {
+                        // No PCI BDF to match against on this platform; warn once
+                        // and use a best-effort processor index instead of aborting.
+                        static bool warned = false;
+                        if(!warned)
+                        {
+                            hipblaslt_cerr
+                                << "Warning: AMD-SMI does not support PCI BDF queries "
+                                   "on this platform (e.g. WSL/DXG); disabling "
+                                   "BDF-based device matching for efficiency "
+                                   "monitoring and using processor "
+                                << decision.index << "." << std::endl;
+                            warned = true;
+                        }
+                    }
+                    return decision.index;
+                }
 
                 msg << smiIndex << ": " << amdSMIPCIID << std::endl;
-
-                if(hipPCIID == amdSMIPCIID)
-                {
-                    return smiIndex;
-                }
             }
         }
 

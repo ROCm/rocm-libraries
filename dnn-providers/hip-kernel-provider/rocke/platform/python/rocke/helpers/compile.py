@@ -20,7 +20,7 @@ takes a `KernelDef` produced by an instance builder and returns a
 Use `compile_kernel(...)` from a kernel-author script when:
 
   - You want to *run* the kernel: feed `artifact.hsaco` into
-    `rocke._hip_module.Runtime.load_module()`.
+    `rocke.runtime.Runtime.load_module()`.
 
   - You want to *inspect* the lowered IR: write `artifact.llvm_text`
     next to a `.ll` file and run `llc -mtriple=amdgcn-amd-amdhsa
@@ -30,10 +30,25 @@ Use `compile_kernel(...)` from a kernel-author script when:
     of re-importing the comgr ctypes wrapper: the helper memoises the
     comgr load.
 
-Typical use:
+Existing callers choose targets before calling this module:
+
+  - ``examples/common/bake_off_direct_conv_4c.py`` forwards ``--isa`` as
+    ``isa=`` when present; otherwise it forwards ``--arch`` (default ``gfx950``).
+  - ``benchmark/gemm/fp16_rcr_sweep.py`` starts with ``--arch`` or
+    ``GemmSweepConfig.arch``, carries it through dispatch records, then passes
+    it as ``arch=`` in ``compile_variant``.
+  - ``instances/common/moe_sorting.py`` resolves ``MoeSortingLauncher.arch``
+    before compilation: an explicit value wins; otherwise ``get_device_arch()``
+    queries HIP, with ``gfx950`` as the fallback if discovery fails.
+
+With ``arch=``, ``compile_kernel`` builds the COMGR ISA name from
+``ArchTarget.isa_triple`` and the derived compiler target. With neither argument,
+it uses its own ``isa="amdgcn-amd-amdhsa--gfx950"`` default without querying HIP.
+
+Example with a fixed target:
 
     from rocke.helpers import compile_kernel
-    artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950")
+    artifact = compile_kernel(kernel, arch="gfx950")
     print(f"codegen total {artifact.timings['total']:.2f} ms")
     Path("out.hsaco").write_bytes(artifact.hsaco)
 """
@@ -47,6 +62,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ..core.arch import (
+    ArchTarget,
+    arch_from_isa,
+    base_arch_from_target_id,
+    compiler_target_from_target_id,
+    known_arches,
+    target_id_from_isa,
+)
 from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
@@ -58,7 +81,11 @@ from ..runtime.comgr import build_hsaco_from_llvm_ir
 
 @dataclass
 class KernelArtifact:
-    """The compiled output of one `compile_kernel(...)` call."""
+    """Output from ``compile_kernel`` or ``compile_kernel_via_hipcc``.
+
+    ``isa`` records the COMGR ISA name for the compiler target used to build
+    ``hsaco``, including any target features. It is not a device query result.
+    """
 
     kernel: KernelDef
     ir_text: str
@@ -89,13 +116,18 @@ def compile_kernel(
 ) -> KernelArtifact:
     """Lower `kernel` to a `KernelArtifact` ready for HIP module load.
 
-    `arch` is the preferred way to select the target (e.g. ``"gfx942"``,
-    ``"gfx950"``): when given, the comgr ISA triple is derived from
-    :class:`rocke.core.arch.ArchTarget`, so callers don't hand-spell the
-    triple. `arch` takes precedence over `isa`.
+    Pass a target ID through `arch`, such as ``"gfx942"`` or ``"gfx1250-strict"``.
+    Alternatively, pass a COMGR ISA name through `isa`, such as
+    ``"amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"``. `arch` takes precedence;
+    if neither is supplied, the target is ``gfx950``. This function does not
+    query a GPU; callers may resolve `arch` from HIP before calling it. See the
+    module docstring for examples of CLI, configuration, and launcher inputs.
 
-    `isa` is the raw comgr target triple and stays accepted for backward
-    compatibility; `gfx950` is the historical default every example uses.
+    The target helpers remove profile suffixes such as ``-strict`` from the
+    compiler target and retain features such as ``:sramecc+:xnack-``. The base
+    architecture selects rocKE lowering. The resulting COMGR ISA name is
+    passed to `build_hsaco_from_llvm_ir` and recorded in `KernelArtifact.isa`.
+    COMGR checks compiler support when compilation runs.
 
     `capture_ir_text` controls whether the MLIR-style textual dump is
     populated. Disable for tight sweep loops where the dump is
@@ -113,16 +145,16 @@ def compile_kernel(
     for backward compatibility but is no longer consulted).
     """
     if arch is not None:
-        from ..core.arch import ArchTarget
-
-        isa = ArchTarget.from_gfx(arch).isa_triple
-        _lower_arch = arch
+        _lower_arch = base_arch_from_target_id(arch)
+        compiler_target = compiler_target_from_target_id(arch)
+        base_isa = ArchTarget.from_gfx(_lower_arch).isa_triple
+        isa = f"{base_isa[: -len(_lower_arch)]}{compiler_target}"
     else:
-        # Derive the lowering arch from the isa triple so the ISA backend
-        # (datalayout/triple/waitcnt) matches the comgr target even when a
-        # caller passes isa= directly.
-        from ..core.arch import arch_from_isa, known_arches
-
+        # Derive both names from the caller's ISA name. Use the base architecture
+        # for lowering and preserve compiler features in the COMGR ISA name.
+        target_id = target_id_from_isa(isa)
+        compiler_target = compiler_target_from_target_id(target_id)
+        isa = f"{isa[: -len(target_id)]}{compiler_target}"
         _gfx = arch_from_isa(isa)
         _lower_arch = _gfx if _gfx in known_arches() else None
 
@@ -249,31 +281,18 @@ def compile_kernel_via_hipcc(
     extra_flags: Optional[List[str]] = None,
     timeout_s: int = 240,
 ) -> KernelArtifact:
-    """Lower ``kernel`` to HIP C++, compile through ``hipcc --genco``, and
-    return a :class:`KernelArtifact` whose ``hsaco`` is the hipcc output.
+    """Lower ``kernel`` to HIP C++ and compile it with ``hipcc --genco``.
 
-    Use this **only** when the LLVM-direct pipeline (``compile_kernel``)
-    is leaving performance on the table for a specific workload. The HIP
-    path goes through the full clang frontend + AMDGPU backend, which
-    sometimes generates better-scheduled code for long-running attention
-    kernels (we measured a ~5% win on prefill_b4_q1000 with the kernel
-    in ``instances/attention_tiled_2d.py``). The trade-offs:
+    ``arch`` accepts the same target IDs as :func:`compile_kernel`. The base
+    architecture is passed to ``lower_kernel_to_hip``; the compiler target
+    is passed to hipcc as ``--offload-arch``. Neither is discovered from a GPU.
 
-      - Compile is ~5× slower (~450ms vs ~90ms via libamd_comgr) due
-        to the heavier clang frontend.
-      - Requires ``hipcc`` in ``$PATH`` (build-time only, since the HSACO
-        bytes are cacheable and identical to the LLVM-direct path's
-        runtime ABI).
-      - The HIP debug backend has narrower op coverage than the LLVM
-        backend; verify the kernel actually lowers via ``lower_kernel_to_hip``
-        before relying on this path.
-      - An explicit scheduler policy is rejected because this path does not
-        carry the LLVM function attribute used by the COMGR path.
+    Requires hipcc on ``PATH`` and a kernel supported by the HIP lowerer.
+    An explicit scheduler policy is rejected because this path does not emit
+    the LLVM function attribute used by the COMGR path.
 
-    Returns the same ``KernelArtifact`` shape as :func:`compile_kernel`;
-    ``ir_text`` is the textual MLIR-style IR, ``llvm_text`` is empty
-    (this path doesn't go through the LLVM-direct lowering), ``hsaco``
-    is the hipcc output, and ``timings`` records the lower + hipcc steps.
+    Returns a :class:`KernelArtifact` with hipcc's output in ``hsaco``, an
+    empty ``llvm_text``, and timings for HIP lowering and compilation.
     """
     policy = codegen_policy_for_kernel(kernel)
     if policy.scheduler_strategy is not None:
@@ -286,7 +305,9 @@ def compile_kernel_via_hipcc(
     t0 = time.perf_counter()
     ir_text = print_ir(kernel)
     t1 = time.perf_counter()
-    hip_src = lower_kernel_to_hip(kernel, arch=arch)
+    lower_arch = base_arch_from_target_id(arch)
+    compiler_target = compiler_target_from_target_id(arch)
+    hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     t2 = time.perf_counter()
     flags = ["-O3"]
     if extra_flags:
@@ -299,7 +320,7 @@ def compile_kernel_via_hipcc(
         proc = subprocess.run(
             [
                 "hipcc",
-                f"--offload-arch={arch}",
+                f"--offload-arch={compiler_target}",
                 "--genco",
                 *flags,
                 str(src_path),
@@ -322,7 +343,7 @@ def compile_kernel_via_hipcc(
     timings["ir_lower_hip"] = (t2 - t1) * 1000.0
     timings["hipcc"] = (t3 - t2) * 1000.0
     timings["total"] = (t3 - t0) * 1000.0
-    isa = f"amdgcn-amd-amdhsa--{arch}"
+    isa = f"amdgcn-amd-amdhsa--{compiler_target}"
     return KernelArtifact(
         kernel=kernel,
         ir_text=ir_text,
@@ -341,34 +362,32 @@ def emit_device_llvm_ir_via_hipcc(
     extra_flags: Optional[List[str]] = None,
     timeout_s: int = 120,
 ) -> str:
-    """Lower ``kernel`` to HIP C++, then emit device LLVM IR via hipcc.
+    """Lower ``kernel`` to HIP C++ and ask hipcc to emit device LLVM IR.
 
-    This is the **ground-truth datalayout oracle**: it asks the project's
-    own ``hipcc --offload-arch=<arch>`` to emit textual LLVM IR
-    (``-S -emit-llvm --cuda-device-only``) instead of HSACO. The returned
-    IR carries the authoritative ``target datalayout`` and intrinsic
-    signatures for whatever ROCm/clang version is installed — exactly what
-    ``compile_kernel_via_hipcc`` feeds to the backend when compiling real
-    kernels. Use this in drift-guard tests to assert rocke's hardcoded
-    constants (``_DATALAYOUT_LLVM20`` / ``_DATALAYOUT_LLVM22``) match the
-    toolchain byte-for-byte.
+    Target selection matches :func:`compile_kernel_via_hipcc`: the base
+    architecture selects HIP lowering and the compiler target becomes
+    hipcc's ``--offload-arch`` argument.
+
+    Uses ``-S -emit-llvm --cuda-device-only``. Tests can compare the returned
+    ``target datalayout`` with rocKE's LLVM lowering for the same target.
 
     Args:
         kernel: The kernel to lower.
-        arch: Target architecture (e.g., ``"gfx950"``).
-        extra_flags: Optional hipcc flags appended to the default ``["-O3"]``.
-        timeout_s: Timeout in seconds (default 120).
+        arch: Target ID, such as ``gfx950`` or ``gfx1250-strict``.
+        extra_flags: hipcc flags appended after ``-O3``.
+        timeout_s: Subprocess timeout in seconds.
 
     Returns:
-        The device LLVM IR text emitted by hipcc. If hipcc produces
-        multiple ``.ll`` files (rare), this concatenates them with a
-        separator comment.
+        The generated ``.ll`` files joined with filename comments.
 
     Raises:
-        RuntimeError: If hipcc is not in PATH or the compile fails.
+        RuntimeError: If hipcc fails or produces no ``.ll`` files.
         FileNotFoundError: If hipcc cannot be located.
+        subprocess.TimeoutExpired: If hipcc exceeds ``timeout_s``.
     """
-    hip_src = lower_kernel_to_hip(kernel, arch=arch)
+    lower_arch = base_arch_from_target_id(arch)
+    compiler_target = compiler_target_from_target_id(arch)
+    hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     flags = ["-O3"]
     if extra_flags:
         flags.extend(extra_flags)
@@ -380,7 +399,7 @@ def emit_device_llvm_ir_via_hipcc(
         proc = subprocess.run(
             [
                 "hipcc",
-                f"--offload-arch={arch}",
+                f"--offload-arch={compiler_target}",
                 "-S",
                 "-emit-llvm",
                 "--cuda-device-only",

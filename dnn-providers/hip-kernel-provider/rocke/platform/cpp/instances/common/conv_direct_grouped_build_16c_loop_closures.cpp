@@ -154,8 +154,17 @@ rocke_value_t* rocke_dconv16c_lds_read_input(rocke_dconv_16c_ctx_t* ctx,
     rocke_value_t* lds_idx;
     rocke_value_t* indices[2];
 
-    /* W_lds_idx = b.add(q_in_lane, b.const_i32(q_subtile * 16 + s_const)) */
-    W_lds_idx = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16 + s_const));
+    /* W_lds_idx = b.add(
+     *     b.mul(b.add(q_in_lane, b.const_i32(q_subtile*16)), b.const_i32(c_stride)),
+     *     b.const_i32(s_const))
+     * Force Python left-to-right SSA order: inner add first, then mul, then outer add. */
+    {
+        rocke_value_t* base = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16));
+        rocke_value_t* c_s = rocke_b_const_i32(b, ctx->p.stride);
+        rocke_value_t* mul_v = rocke_b_mul(b, base, c_s);
+        rocke_value_t* c_sc = rocke_b_const_i32(b, s_const);
+        W_lds_idx = rocke_b_add(b, mul_v, c_sc);
+    }
     /* lds_idx = b.add(b.add(b.mul(W_lds_idx, c_BG_cpg), b.mul(wave_id, c_cpg)),
      *                 b.mul(c4, b.const_i32(4)))
      * Force Python left-to-right SSA emission (C arg eval order unspecified):
@@ -187,10 +196,15 @@ rocke_value_t*
     rocke_value_t* lds_idx;
     rocke_value_t* indices[2];
 
-    /* W_lds_idx = b.add(b.add(q_in_lane, b.const_i32(q_subtile * 16)),
-     *                   s_lane_k32) */
-    W_lds_idx = rocke_b_add(
-        b, rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16)), ctx->s_lane_k32);
+    /* W_lds_idx = b.add(
+     *     b.mul(b.add(q_in_lane, b.const_i32(q_subtile*16)), b.const_i32(c_stride)),
+     *     s_lane_k32)
+     * Force Python left-to-right SSA order: inner add first, then mul, then outer add. */
+    {
+        rocke_value_t* base = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16));
+        W_lds_idx = rocke_b_add(
+            b, rocke_b_mul(b, base, rocke_b_const_i32(b, ctx->p.stride)), ctx->s_lane_k32);
+    }
     /* lds_idx = b.add(b.add(b.mul(W_lds_idx, c_BG_cpg), b.mul(wave_id, c_cpg)),
      *                 ch_lane_k32)
      * Force Python left-to-right SSA emission (C arg eval order unspecified). */
@@ -224,8 +238,17 @@ rocke_value_t* rocke_dconv16c_lds_read_input_s2_k32(rocke_dconv_16c_ctx_t* ctx,
     rocke_value_t* vec;
     rocke_value_t* indices[2];
 
-    /* W_lds_idx = b.add(q_in_lane, b.const_i32(q_subtile*16 + 2)) */
-    W_lds_idx = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16 + 2));
+    /* W_lds_idx = b.add(
+     *     b.mul(b.add(q_in_lane, b.const_i32(q_subtile*16)), b.const_i32(c_stride)),
+     *     b.const_i32(2))
+     * Force Python left-to-right SSA order: inner add first, then mul, then outer add. */
+    {
+        rocke_value_t* base = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16));
+        rocke_value_t* c_s = rocke_b_const_i32(b, ctx->p.stride);
+        rocke_value_t* mul_v = rocke_b_mul(b, base, c_s);
+        rocke_value_t* c_2 = rocke_b_const_i32(b, 2);
+        W_lds_idx = rocke_b_add(b, mul_v, c_2);
+    }
     /* lds_idx = b.add(b.add(b.mul(W_lds_idx, c_BG_cpg), b.mul(wave_id, c_cpg)),
      *                 ch_lane_k32) -- force Python left-to-right SSA order. */
     {
@@ -446,9 +469,12 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
         p_flush_val = y - (KH - 1);
         P_FLUSH = ((p_flush_val % KH) + KH) % KH;
 
-        /* if 0 <= p_flush_val < p.H: flush each qt to D */
-        if(0 <= p_flush_val && p_flush_val < p->H)
+        /* if 0 <= p_flush_val < p.H and p_flush_val % c_stride == 0:
+         *     ho_row = p_flush_val // c_stride
+         *     flush each qt to D */
+        if(0 <= p_flush_val && p_flush_val < p->H && p_flush_val % p->stride == 0)
         {
+            int ho_row = p_flush_val / p->stride;
             for(qt = 0; qt < q_subtiles; ++qt)
             {
                 rocke_value_t* acc_to_flush = ctx->acc_tiles[qt][P_FLUSH];
@@ -479,12 +505,12 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
                     k_val = rocke_b_add(b, mul_g, mul_c4);
                 }
 
-                /* d_base, _ = d_desc.offset(b, n=n, h=const_i32(p_flush_val),
+                /* d_base, _ = d_desc.offset(b, n=n, h=const_i32(ho_row),
                  *                           w=out_q, k=k_val) */
                 off_names[0] = "n";
                 off_vals[0] = ctx->n;
                 off_names[1] = "h";
-                off_vals[1] = rocke_b_const_i32(b, p_flush_val);
+                off_vals[1] = rocke_b_const_i32(b, ho_row);
                 off_names[2] = "w";
                 off_vals[2] = out_q;
                 off_names[3] = "k";

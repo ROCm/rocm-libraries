@@ -120,10 +120,9 @@ public:
             variantPack.at(_params.outputTensor.uid),
             _params.outputTensor.dims,
             _params.outputTensor.strides);
-        const auto epsilonValue = static_cast<double>(
-            hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<ComputeDataType>(
-                _params.epsilonTensor, variantPack, "Epsilon"));
-
+        const auto epsilonValue
+            = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
+                _params.epsilonTensor, variantPack, "Epsilon");
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<ComputeDataType>> invRmsTensor;
         if(_params.invRmsTensor.has_value())
         {
@@ -242,6 +241,11 @@ public:
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
         const auto* nodeAttributes = node.attributes_as_RMSNormAttributes();
         if(nodeAttributes == nullptr)
         {
@@ -256,7 +260,6 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->epsilon_tensor_uid(), ComputeDataTypeEnum);
 
         std::vector<int64_t> operandUids = {nodeAttributes->x_tensor_uid(),
                                             nodeAttributes->scale_tensor_uid(),

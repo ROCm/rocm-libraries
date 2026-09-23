@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,9 @@ rocsparse_status rocsparse::gthrz_template(rocsparse_handle     handle,
     hipStream_t stream = handle->stream;
 
 #define GTHRZ_DIM 512
-    dim3 gthrz_blocks((nnz - 1) / GTHRZ_DIM + 1);
+    // Clamp grid.x to the device limit; the kernel's grid-stride loop covers the rest.
+    dim3 gthrz_blocks(rocsparse::min(static_cast<int64_t>(nnz - 1) / GTHRZ_DIM + 1,
+                                     static_cast<int64_t>(handle->properties.maxGridSize[0])));
     dim3 gthrz_threads(GTHRZ_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gthrz_kernel<GTHRZ_DIM>),
