@@ -490,6 +490,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT";
     case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC:
         return "HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC";
+    case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER:
+        return "HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER";
 
     // Convolution forward operation attributes
     case HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W:

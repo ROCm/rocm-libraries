@@ -189,6 +189,33 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         # that carries the source, and only this one does.
         PACK_NAMES unit unit_shared ${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}
     )
+
+    # One census entry per architecture the `unit` pack was wired for, each running this
+    # binary against that pack's own shard. A census entry names one shard and the listener
+    # requires every case in the suite to pass without skipping, so only a single-pack suite
+    # qualifies: every TestPointwisePacks case reads loadedSet("hipkernel:Pointwise"), which
+    # the `unit` root holds, while TestConvFwdPack reaches across unit and unit_shared and
+    # is censused nowhere.
+    #
+    # EXPECTED_CASES pins the suite's case-name set: the listener builds its obligations
+    # from the suite itself, so a dropped case takes its obligation with it and the pin is
+    # what notices. Each entry is registered with three controls -- the suite with every
+    # case filtered out, a root that does not exist, and a pin naming an unregistered case
+    # -- each matched against the diagnostic it must provoke.
+    hkp_register_census_tests(
+        TARGET hip_kernel_provider_tests
+        PACK_NAME unit
+        SUITES TestPointwisePacks
+        EXPECTED_CASES
+            EachPackShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes
+            EveryKernelNamesItsPacksEmbeddedSource
+            EveryEmbeddedSourceKeyResolvesInTheCompiledInTable
+            EveryPackNamesTheArchitectureItWasPackedFor
+            EveryPackSharesTheEngineDispatchAndAllButOneMatcher
+            ExposesBlockSizeAsAKnobAndDtypeAsInternal
+            MatchersCoverBothScopes
+            SubtractsInTheRightDirection
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

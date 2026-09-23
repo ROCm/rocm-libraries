@@ -444,9 +444,14 @@ std::vector<int64_t>
     const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
     const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
     const bool hasNonDefaultTensorAlignment = graphDesc->hasNonDefaultTensorAlignment();
+    const bool isRaggedOffsetMultiplier = graphDesc->hasRaggedOffsetMultiplier();
 
-    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
-        isOverrideShapeEnabled, isRuntimePBV, isRaggedTensorEnabled, hasNonDefaultTensorAlignment);
+    const auto& requiredVersion
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(isOverrideShapeEnabled,
+                                                                  isRuntimePBV,
+                                                                  isRaggedTensorEnabled,
+                                                                  hasNonDefaultTensorAlignment,
+                                                                  isRaggedOffsetMultiplier);
 
     std::vector<int64_t> engineIds;
 
@@ -1041,7 +1046,8 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                                       true,
                                       /*isRuntimePassByValue=*/false,
                                       /*isRaggedTensorEnabled=*/false,
-                                      /*hasNonDefaultTensorAlignment=*/false),
+                                      /*hasNonDefaultTensorAlignment=*/false,
+                                      /*isRaggedOffsetMultiplier=*/false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

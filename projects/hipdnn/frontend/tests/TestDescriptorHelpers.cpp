@@ -128,7 +128,9 @@ protected:
                                    const std::vector<int64_t>& dims,
                                    const std::vector<int64_t>& strides,
                                    bool isRuntime = false,
-                                   int64_t alignment = DEFAULT_TENSOR_ALIGNMENT)
+                                   int64_t alignment = DEFAULT_TENSOR_ALIGNMENT,
+                                   int64_t raggedOffsetMultiplier
+                                   = DEFAULT_RAGGED_OFFSET_MULTIPLIER)
     {
         EXPECT_CALL(*_mockBackend,
                     backendSetAttribute(_,
@@ -180,6 +182,18 @@ protected:
                                             HIPDNN_TYPE_INT64,
                                             1,
                                             pointsToScalar<int64_t>(alignment)))
+                .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        }
+        // Lowering only sends the ragged-offset-multiplier attribute for a non-default
+        // multiplier, keeping graphs compatible with a pre-1.4.0 backend.
+        if(raggedOffsetMultiplier != DEFAULT_RAGGED_OFFSET_MULTIPLIER)
+        {
+            EXPECT_CALL(*_mockBackend,
+                        backendSetAttribute(_,
+                                            HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER,
+                                            HIPDNN_TYPE_INT64,
+                                            1,
+                                            pointsToScalar<int64_t>(raggedOffsetMultiplier)))
                 .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
         }
         // Lowering only sends the runtime pass-by-value extension attribute when
@@ -244,6 +258,51 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescPropagatesCustomAlignment)
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_alignment(K_ALIGNMENT);
+
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    EXPECT_TRUE(err.is_good());
+}
+
+TEST_F(TestDescriptorHelpers, EnsureTensorDescPropagatesCustomRaggedOffsetMultiplier)
+{
+    constexpr int64_t K_MULTIPLIER = 512;
+
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES),
+                              false,
+                              DEFAULT_TENSOR_ALIGNMENT,
+                              K_MULTIPLIER);
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    tensor->set_ragged_offset_multiplier(K_MULTIPLIER);
+
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    EXPECT_TRUE(err.is_good());
+}
+
+// A tensor at the default multiplier must never send
+// HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER during lowering, so an ordinary graph
+// imposes no pre-1.4.0 backend version floor.
+TEST_F(TestDescriptorHelpers, EnsureTensorDescOmitsRaggedOffsetMultiplierForDefault)
+{
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER, _, _, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    ASSERT_EQ(tensor->get_ragged_offset_multiplier(), DEFAULT_RAGGED_OFFSET_MULTIPLIER);
 
     auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good());

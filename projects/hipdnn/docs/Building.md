@@ -413,9 +413,7 @@ Disabling the cache is a diagnostic, not a fix: it makes every build pay full co
 cost. Relocating it is what you want. Note that a cache on local disk is also per-machine and
 per-container, so a fresh CI runner or a rebuilt container always starts cold.
 
-Kernel compilation normally dominates, which is why the cache matters so much and why
-`HKP_PACK_JOBS` (worker count, defaulting to `min(32, ncpu)`) is the other lever worth
-touching.
+The other lever is the packer's worker count. A CMake-driven build fixes it per packaging root through the `PACK_JOBS` argument at each `hkp_wire_pack_target()` call site, not through the `HKP_PACK_JOBS` environment variable, which reaches only a direct `hkp_pack` run. The [descriptor-packaging README](../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md) gives the per-root values.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
