@@ -284,21 +284,26 @@ jobs:
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
-      - name: Verify HIP compilation and execution
+      - name: Verify hipBLASLt GPU execution
         timeout-minutes: 5
+        env:
+          OMP_NUM_THREADS: 1
         run: |
           set -euo pipefail
-          OUT="${GITHUB_WORKSPACE}/build"
-          OFFLOAD_ARCH=$("${OUT}/lib/llvm/bin/offload-arch" | grep -m1 '^gfx')
-          test -n "${OFFLOAD_ARCH}"
-          "${OUT}/bin/amdclang++" \
-            --hip-path="${OUT}" \
-            --hip-device-lib-path="${OUT}/lib/llvm/amdgcn/bitcode" \
-            --offload-arch="${OFFLOAD_ARCH}" \
-            -x hip tests/hip_check.cpp \
-            -Xlinker "-rpath=${OUT}/lib" \
-            -o "${RUNNER_TEMP}/hip-check"
-          timeout -k 10 120 "${RUNNER_TEMP}/hip-check"
+          # Exercise the packaged library itself instead of relying on
+          # compiler-tool wrapper paths supplied by a full SDK installation.
+          # Checking its explicit RUN and OK lines prevents a renamed or skipped
+          # test from turning a no-op filter into a successful health probe.
+          mkdir -p test_logs
+          probe='_/matmul_test.matmul/smoke_matmul_smoke_f16_rf16_rf16_rf16_rf32_r_NN_8_8_8_5_8_8_0_8_8_1'
+          probe_log="test_logs/hipblaslt-gpu-probe.log"
+          timeout -k 10 120 "${THEROCK_BIN_DIR}/hipblaslt-test" \
+            --gtest_color=no \
+            --gtest_filter="${probe}" \
+            2>&1 | tee "${probe_log}"
+          grep -Fq "[ RUN      ] ${probe}" "${probe_log}"
+          grep -Fq "[       OK ] ${probe} (" "${probe_log}"
+          grep -Fq '[  PASSED  ] 1 test.' "${probe_log}"
 
       - name: Test hipBLASLt (quick)
         timeout-minutes: 180
