@@ -412,11 +412,10 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
 }
 
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
-// generic General sweep does not cover -- (160,160) and (80,96). The generic
+// generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts
-// the pipeline, and never requests 160 or the true 80/96 tile. Non-multiple
-// seqlens select the seqlen-padded instances; (80,96) only matches the
-// dpad="t" variant since 80 % 128 != 0.
+// the pipeline, and never requests 160 or the true 96/96 tile. Non-multiple
+// seqlens select the seqlen-padded instances.
 class QrTdmNewHeadDim
     : public TestWithParam<std::tuple<mode_enum, std::tuple<int, int, int, int, const char*>>>
 {
@@ -428,8 +427,8 @@ INSTANTIATE_TEST_SUITE_P(
     Combine(Values(mode_enum::batch, mode_enum::group),
             Values(std::tuple{160, 160, 127, 509, "0"}, // 160 dense, seqlen-padded
                    std::tuple{160, 160, 99, 256, "1"},  // 160 causal
-                   std::tuple{80, 96, 127, 509, "0"},   // 80/96 dense, dpad only
-                   std::tuple{80, 96, 99, 256, "1"}))); // 80/96 causal
+                   std::tuple{96, 96, 127, 509, "0"},   // 96/96 dense
+                   std::tuple{96, 96, 99, 256, "1"}))); // 96/96 causal
 
 TEST_P(QrTdmNewHeadDim, DataTypeConfig)
 {
