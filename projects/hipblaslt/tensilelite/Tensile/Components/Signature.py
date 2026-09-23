@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+from Tensile.ExecutionPolicy import isDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa.code import SignatureBase
 from rocisa.enum import SignatureValueKind as SVK
 from ..Component import Signature
@@ -284,12 +285,12 @@ class SignatureDefault(Signature):
         # host (ContractionSolution.cpp singleCallArgs) matches by not appending
         # ws/Flags under streamKForceDPOnly, so the positional kernarg layout stays
         # consistent host<->device.
-        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
+        if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isDataParallel(kernel):
             if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
                 signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
 
-        if kernel["StreamK"] == 4:
+        if hasDynamicAssignment(kernel):
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
             signature.addArg("TotalItems",                         SVK.SIG_VALUE, "u32")
             signature.addArg("SKTiles",                            SVK.SIG_VALUE, "u32")
@@ -297,7 +298,7 @@ class SignatureDefault(Signature):
             signature.addArg("SKItersPerWI",                       SVK.SIG_VALUE, "u32")
             signature.addArg("SKGrid",                             SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 24
-        elif kernel["StreamK"] == 5:
+        elif hasHybridAssignment(kernel):
             # Hybrid SK3+SK4. The host pushes only the 6 args matching the
             # mode it selected for this launch; the SK4 reader names
             # (TotalItems, SKTiles, SKSplit, SKItersPerWI, SKGrid) are emitted
@@ -317,7 +318,7 @@ class SignatureDefault(Signature):
             signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
             signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 24
-        elif kernel["StreamK"] == 3:  # SK3 two-tile ABI
+        elif hasStaticAssignment(kernel):  # SK3 two-tile ABI
             # StreamK args
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
             signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
@@ -336,7 +337,7 @@ class SignatureDefault(Signature):
                                         SVK.SIG_VALUE, pack_cptValueType)
 
         # ver3 places AddressWS after alpha/beta, see the StreamK block above.
-        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"] \
+        if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isDataParallel(kernel) \
            and kernel["InternalSupportParams"]["KernArgsVersion"] >= 3:
             signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
 

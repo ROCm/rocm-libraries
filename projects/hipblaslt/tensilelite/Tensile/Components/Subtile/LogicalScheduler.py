@@ -22,6 +22,7 @@ The schedule is built in these passes:
 """
 
 from __future__ import annotations
+from Tensile.ExecutionPolicy import hasStaticAssignment
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, ClassVar, Dict, List, Optional, Tuple, Union
@@ -3439,7 +3440,7 @@ class LogicalScheduler:
             label == "PRELOOP"
             and kernel.get("UseSubtileImpl")
             and kernel.get("PrefetchAcrossPersistent")
-            and kernel.get("StreamK") == 3
+            and hasStaticAssignment(kernel)
         )
         pap_merge_label = Label("SubtilePAPPreloopFirstGRMerge", "") if use_pap_preloop_skip else None
         skipping_first_gr_group = False
@@ -3460,21 +3461,21 @@ class LogicalScheduler:
                         if use_pap_preloop_skip and not first_gr_group_done:
                             if em.opType == 'gr':
                                 if not skipping_first_gr_group:
-                                    module.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+                                    module.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0,
                                                          comment="Subtile PAP: first PRELOOP GR already issued?"))
                                     module.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
                                                             comment="skip first PRELOOP GR group if primed"))
                                     skipping_first_gr_group = True
                             elif skipping_first_gr_group:
                                 module.add(pap_merge_label)
-                                module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+                                module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
                                                    comment="Subtile PAP: clear after first PRELOOP GR merge"))
                                 first_gr_group_done = True
                         for inst in em.instructions:
                             module.add(inst)
         if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
             module.add(pap_merge_label)
-            module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+            module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
@@ -3561,7 +3562,7 @@ class LogicalScheduler:
         def make_subtile_pap_module(skip_barrier=False):
             if (kernel.get("UseSubtileImpl")
                 and kernel.get("PrefetchAcrossPersistent")
-                and kernel.get("StreamK") == 3
+                and hasStaticAssignment(kernel)
                 and hasattr(writer, "prefetchAcrossPersistentSubtile")):
                 preloop_gr = Module("Subtile PAP first PRELOOP GR")
                 for em in self._preloop_emitted[0][0]:

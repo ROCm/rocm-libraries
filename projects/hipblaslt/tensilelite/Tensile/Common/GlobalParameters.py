@@ -442,6 +442,7 @@ internalParameters = {
 
 # These parameters are used in ContractionSolutions for user arguments support.
 defaultInternalSupportParams = {
+    "PersistentLoopArgsVersion": 0,
     "KernArgsVersion": 3,
     # Information about user input internal kernel argument support
     # Change this to False if the CustomKernel does not support.
@@ -594,11 +595,11 @@ defaultBenchmarkCommonParameters = [
     {"StoreSyncOpt": [0]},
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
-    {"StreamK": [0]},
-    {"StreamKForceDPOnly": [0]},
+    {"TileProcessingStrategy": ["None"]},
+    {"WorkAssignment": ["StaticGrid"]},
     {"StreamKAtomic": [0]},
-    {"StreamKWorkStealing": [0]},
-    {"StreamKXCCMapping": [0]},
+    {"WorkQueueStealing": [0]},
+    {"PersistentXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
     {"DebugPersistentKernelLoopForever": [False]},

@@ -21,6 +21,7 @@
 ################################################################################
 
 
+from Tensile.ExecutionPolicy import isPersistent
 from rocisa.code import Module, Label, ValueSet
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
@@ -113,7 +114,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
 
     if clusterEnabled(kernel["ClusterDim"]):
         module.add(SBranch(label_skipWGMXCC.getLabelName()))
-    if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
+    if(isPersistent(kernel) and kernel["WorkGroupMappingXCC"] == -1):
         SgprWGMXCC    = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprWGMXCC")
         SgprChunkSize = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprChunkSize", preventOverflow=False)
         SgprK         = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprK", preventOverflow=False)
@@ -519,16 +520,16 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
         writer.sgprPool.checkIn(ts)
 
     # For non-streamK kernels we need to recompute the 1D global tile index
-    # For StreamK we store the global tile index when its computed in skIndexToWG(...) in StreamK.py
+    # For StreamK we store the global tile index when its computed in tileIndexToWorkGroup(...) in StreamK.py
     sgprIndex = "WorkGroup0"
-    if not kernel["StreamK"]:
+    if not isPersistent(kernel):
         sgprTmp = writer.sgprPool.checkOut(1, tag="SpaceFillingCurveWalk_sgprTmp")
         # Recompute the 1D ID from 2D IDs
         module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0"), comment=""))
         module.add(SAddU32(dst=sgpr(sgprIndex), src0=sgpr("WorkGroup0"), src1=sgpr(sgprTmp), comment=""))
         writer.sgprPool.checkIn(sgprTmp)
     else:
-        module.add(SMovB32(dst=sgpr(sgprIndex), src=sgpr("StreamKTileID"), comment=""))
+        module.add(SMovB32(dst=sgpr(sgprIndex), src=sgpr("PersistentTileID"), comment=""))
 
     # Global number of WGs in M, N directions.
     # sgprNumTiles{M,N} may be overwritten so we store NumWorkGroups{0,1} values in them.
@@ -541,7 +542,7 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
     # reused as tmps sgprs. The values are restored at the end of this subroutine (SpaceFillingCurveWalk)
     # If sgprsToStore is set to empty array, no sgprs are stored in a vgpr.
     sgprsToStore = ["NumWorkGroups0", "NumWorkGroups1", "Alpha", "Beta",\
-                    "WorkGroup2", "StreamKLocalStart", "StreamKIterEnd", \
+                    "WorkGroup2", "StreamKLocalStart", "PersistentIterationEnd", \
                     "LoopCounterL", "OrigLoopCounterL", "SizesSum"]
     if len(sgprsToStore):
         vgprSgprPool = writer.vgprPool.checkOut(1, tag="SpaceFillingCurveWalk_vgprSgprPool")

@@ -3440,7 +3440,7 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
     // Amax uses Synchronizer for its counter, so retain its GSU region.
-    return solution.sizeMapping.streamK > 0 && solution.sizeMapping.streamKAtomic == 0
+    return solution.sizeMapping.isStreamK() && solution.sizeMapping.streamKAtomic == 0
            && !solution.problemType.outputAmaxD;
 }
 
