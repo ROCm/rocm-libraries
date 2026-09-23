@@ -13,9 +13,13 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -312,9 +316,34 @@ TEST(TestOutputComparison, OnlyTheRequestedUidsAreCompared)
 // Validator kind. ALLCLOSE grades each element against its own magnitude; RMS grades
 // the tensor against its largest. The two disagree exactly where reduction outputs
 // live: an element near zero, on a tensor whose scale is large.
+//
+// These run at both sites. A GPU reference's output is compared on the device by
+// default and golden data on the host, and the two must reach the same verdict on the
+// same data. The tensors are filled on the host; the device validators read them after
+// migration, as they read a golden tensor under --validator gpu.
 // ---------------------------------------------------------------------------
 
-TEST(TestOutputComparison, RmsAcceptsANearZeroElementThatAllcloseRejects)
+class TestOutputComparisonSite : public ::testing::TestWithParam<ValidationSite>
+{
+protected:
+    void SetUp() override
+    {
+        if(GetParam() == ValidationSite::DEVICE)
+        {
+            SKIP_IF_NO_DEVICES();
+        }
+    }
+};
+
+INSTANTIATE_TEST_SUITE_P(BothSites,
+                         TestOutputComparisonSite,
+                         ::testing::Values(ValidationSite::HOST, ValidationSite::DEVICE),
+                         [](const ::testing::TestParamInfo<ValidationSite>& info) {
+                             return std::string(info.param == ValidationSite::HOST ? "Host"
+                                                                                   : "Device");
+                         });
+
+TEST_P(TestOutputComparisonSite, RmsAcceptsANearZeroElementThatAllcloseRejects)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -331,7 +360,7 @@ TEST(TestOutputComparison, RmsAcceptsANearZeroElementThatAllcloseRejects)
                               *expected,
                               *actual,
                               ComparisonTolerance::allClose(0.0f, 1e-4f),
-                              ValidationSite::HOST,
+                              GetParam(),
                               "b")
                     .has_value())
         << "allclose should reject: rtol*|ref| is 1e-7 against a 1e-4 drift";
@@ -341,13 +370,13 @@ TEST(TestOutputComparison, RmsAcceptsANearZeroElementThatAllcloseRejects)
                                *expected,
                                *actual,
                                ComparisonTolerance::rms(K_RMS_THRESHOLD),
-                               ValidationSite::HOST,
+                               GetParam(),
                                "b")
                      .has_value())
         << "relative RMS is ~6e-8 against a 1e-4 threshold";
 }
 
-TEST(TestOutputComparison, RmsStillRejectsDriftLargeAgainstTheTensorScale)
+TEST_P(TestOutputComparisonSite, RmsStillRejectsDriftLargeAgainstTheTensorScale)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -362,13 +391,13 @@ TEST(TestOutputComparison, RmsStillRejectsDriftLargeAgainstTheTensorScale)
                               *expected,
                               *actual,
                               ComparisonTolerance::rms(K_RMS_THRESHOLD),
-                              ValidationSite::HOST,
+                              GetParam(),
                               "b")
                     .has_value())
         << "RMS is a real check, not a pass-through";
 }
 
-TEST(TestOutputComparison, RmsFailureReportsItsThresholdNotAtolRtol)
+TEST_P(TestOutputComparisonSite, RmsFailureReportsItsThresholdNotAtolRtol)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -383,13 +412,47 @@ TEST(TestOutputComparison, RmsFailureReportsItsThresholdNotAtolRtol)
                                         *expected,
                                         *actual,
                                         ComparisonTolerance::rms(K_RMS_THRESHOLD),
-                                        ValidationSite::HOST,
+                                        GetParam(),
                                         "b");
 
     ASSERT_TRUE(mismatch.has_value());
     EXPECT_NE(mismatch->report.find("relative RMS"), std::string::npos);
     EXPECT_EQ(mismatch->report.find("atol="), std::string::npos)
         << "atol/rtol did not decide this failure and must not be printed as if they had";
+}
+
+// Equal verdicts at both sites are the point, which is also why the verdict tests above
+// cannot tell which validator ran. The site has to build its own site's validator: a
+// DEVICE comparison that quietly built a host validator would pass every one of them.
+TEST(TestOutputComparison, EachSiteBuildsItsOwnValidator)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto built = [](const ComparisonTolerance& tolerance, ValidationSite site) {
+        auto selection = makeValidator(DataType::FLOAT, "y_out", tolerance, site);
+        EXPECT_TRUE(selection.error.empty()) << selection.error;
+        return std::move(selection.validator);
+    };
+    const auto allClose = ComparisonTolerance::allClose(0.0f, 0.0f);
+    const auto rms = ComparisonTolerance::rms(K_RMS_THRESHOLD);
+
+    const auto hostAllClose = built(allClose, ValidationSite::HOST);
+    const auto deviceAllClose = built(allClose, ValidationSite::DEVICE);
+    const auto hostRms = built(rms, ValidationSite::HOST);
+    const auto deviceRms = built(rms, ValidationSite::DEVICE);
+
+    EXPECT_NE(dynamic_cast<const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float>*>(
+                  hostAllClose.get()),
+              nullptr);
+    EXPECT_NE(
+        dynamic_cast<const hipdnn_gpu_ref::GpuFpReferenceValidation<float>*>(deviceAllClose.get()),
+        nullptr);
+    EXPECT_NE(
+        dynamic_cast<const hipdnn_test_sdk::utilities::CpuFpReferenceMiopenRmsValidation<float>*>(
+            hostRms.get()),
+        nullptr);
+    EXPECT_NE(
+        dynamic_cast<const hipdnn_gpu_ref::GpuFpReferenceRmsValidation<float>*>(deviceRms.get()),
+        nullptr);
 }
 
 // The point of the lookup taking a uid and a label: one graph, two outputs, two
@@ -454,7 +517,7 @@ TEST(TestOutputComparison, LabelFromAnEmptyNameFallsBackToTheUid)
 // test body.
 // ---------------------------------------------------------------------------
 
-TEST(TestOutputComparison, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
+TEST_P(TestOutputComparisonSite, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -470,7 +533,7 @@ TEST(TestOutputComparison, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
                                              *expected,
                                              *actual,
                                              ComparisonTolerance::rms(K_RMS_THRESHOLD),
-                                             ValidationSite::HOST,
+                                             GetParam(),
                                              "Bundle: b"));
 
     // Equal tensors, so this is not a numerical verdict: it reports that the override
@@ -484,7 +547,7 @@ TEST(TestOutputComparison, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
 }
 
 // The guard is scoped to RMS: integer outputs still compare normally under the default.
-TEST(TestOutputComparison, AllcloseStillGradesIntegerOutputs)
+TEST_P(TestOutputComparisonSite, AllcloseStillGradesIntegerOutputs)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -495,12 +558,29 @@ TEST(TestOutputComparison, AllcloseStillGradesIntegerOutputs)
     auto matching = intTensor(attrs, 7);
     auto drifted = intTensor(attrs, 9);
 
-    EXPECT_FALSE(
-        compareTensor(K_UID_INT, attrs, *expected, *matching, exact(), ValidationSite::HOST, "b")
-            .has_value());
+    EXPECT_FALSE(compareTensor(K_UID_INT, attrs, *expected, *matching, exact(), GetParam(), "b")
+                     .has_value());
     EXPECT_TRUE(
-        compareTensor(K_UID_INT, attrs, *expected, *drifted, exact(), ValidationSite::HOST, "b")
-            .has_value());
+        compareTensor(K_UID_INT, attrs, *expected, *drifted, exact(), GetParam(), "b").has_value());
+}
+
+// An integer output nobody wrote still holds its sentinel fill (the type's maximum). If
+// neither the engine nor the reference wrote it, both sides hold the same value, and the
+// comparison must fail anyway, at either site.
+TEST_P(TestOutputComparisonSite, UnwrittenIntegerOutputFailsEvenWhenBothSidesMatch)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
+
+    auto expected = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    auto actual = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    expected->fillWithSentinelValue();
+    actual->fillWithSentinelValue();
+
+    EXPECT_TRUE(
+        compareTensor(K_UID_INT, attrs, *expected, *actual, exact(), GetParam(), "b").has_value());
 }
 
 // A ValidatorKind with no case in makeValidator must not be graded by whichever branch

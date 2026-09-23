@@ -15,6 +15,32 @@
 
 using namespace gpu_ref;
 
+// True when x is the value Tensor::fillWithSentinelValue() leaves in an unwritten integer
+// output: the type's maximum. CpuIntReferenceValidation rejects it on either side, and so
+// must validateExact or the two sites grade the same data differently. Floating-point
+// types return false: their sentinel is NaN, which validateAllClose already rejects.
+// Every kernel here is compiled for every DATA_TYPE, so this must compile for all of them.
+template <typename T>
+__device__ inline bool isIntegerSentinel(T x)
+{
+    if constexpr(__is_same(T, signed char))
+    {
+        return x == __INT8_MAX__;
+    }
+    else if constexpr(__is_same(T, unsigned char))
+    {
+        return x == __UINT8_MAX__;
+    }
+    else if constexpr(__is_same(T, int))
+    {
+        return x == __INT32_MAX__;
+    }
+    else
+    {
+        return false;
+    }
+}
+
 // Decompose a linear element index into strided offsets for two tensors.
 // Computes multi-dimensional coordinates from linearIdx using dims (innermost-last),
 // then dot-products with each tensor's strides to get physical offsets.
@@ -85,7 +111,8 @@ extern "C" __global__ void validateAllClose(ValidatorArgs args)
 }
 
 // Integer exact-equality validation kernel.
-// Sets failureFlag to 1 atomically if any element differs.
+// Sets failureFlag to 1 atomically if any element differs, or if either side holds the
+// unwritten-output sentinel (see isIntegerSentinel).
 extern "C" __global__ void validateExact(ValidatorArgs args)
 {
     auto idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -110,11 +137,18 @@ extern "C" __global__ void validateExact(ValidatorArgs args)
             idx, args.dims, args.refStrides, args.implStrides, args.ndim, refIdx, implIdx);
     }
 
-    if(ref[refIdx] != impl[implIdx])
+    const auto refVal = ref[refIdx];
+    const auto implVal = impl[implIdx];
+    if(isIntegerSentinel(refVal) || isIntegerSentinel(implVal) || refVal != implVal)
     {
         atomicMax(args.failureFlag, 1);
     }
 }
+
+// validateRms's tree reduction halves its stride from LOCAL_SIZE / 2, so it needs
+// LOCAL_SIZE to be a power of two and to equal blockDim.x (the host launches with the
+// same constant it passes as LOCAL_SIZE).
+static_assert((LOCAL_SIZE & (LOCAL_SIZE - 1)) == 0, "LOCAL_SIZE must be a power of two");
 
 // Relative-RMS accumulation kernel: MIOpen's aggregate check, the device half of
 // CpuFpReferenceMiopenRmsValidation. The host forms

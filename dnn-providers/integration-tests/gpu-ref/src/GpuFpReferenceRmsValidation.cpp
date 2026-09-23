@@ -6,6 +6,7 @@
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefValidatorHelpers.hpp>
 #include <hipdnn-gpu-ref/detail/HipRtcTypeName.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 
 #include <algorithm>
@@ -81,6 +82,9 @@ bool GpuFpReferenceRmsValidation<T>::allClose(
 
     if(totals.nanOrInf != 0)
     {
+        // The kernel keeps no indices, so unlike the host validator this cannot say where.
+        HIPDNN_SDK_LOG_ERROR("NaN or Inf detected in the reference or implementation. This may "
+                             "indicate an output element was not written by the operation.");
         return false;
     }
 
@@ -91,6 +95,15 @@ bool GpuFpReferenceRmsValidation<T>::allClose(
     const double relativeRmsError
         = std::sqrt(totals.squareDifference)
           / (std::sqrt(static_cast<double>(totalElements)) * maxMagnitude);
+
+    // Logged in the host validator's words: the mismatch report shows the threshold and
+    // the element drift, but this ratio is what decided the verdict.
+    if(relativeRmsError > _relativeTolerance)
+    {
+        HIPDNN_SDK_LOG_ERROR("Validation failed: relative rms error = " << relativeRmsError
+                                                                        << ", relative tolerance = "
+                                                                        << _relativeTolerance);
+    }
 
     return relativeRmsError <= _relativeTolerance;
 }
