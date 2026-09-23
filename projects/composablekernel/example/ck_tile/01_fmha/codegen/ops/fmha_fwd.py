@@ -50,10 +50,17 @@ K0_MAX_SUBMAX_MAP = {
     80: 96,
     96: 128,
     128: 128,
-    160: 160,
+    160: 256,
     192: 192,
     256: 256,
 }
+
+# TDM stores the head dim at its true length (see tdm_ceil_to_qualified_tile_length
+# in tile_fmha_shape.hpp), so 96 and 160 map to themselves (not the shared rounded
+# 128 / 256) -- the dpad=f dcheck then reads hdim_q % 96 or % 160, letting those
+# head dims take the un-padded naive-load path. Only the qr_tdm dcheck/dvcheck use
+# this; the generic qr fallback keeps the shared rounded map above (160 -> 256).
+TDM_K0_MAX_SUBMAX_MAP = {**K0_MAX_SUBMAX_MAP, 96: 96, 160: 160}
 
 FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 // Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.\n
@@ -92,7 +99,8 @@ using fmha_shape = ck_tile::TileFmhaShape<fmha_block_tile,
                                           ck_tile::sequence<{F_wm0}, {F_wn0}, {F_wk0}>,
                                           ck_tile::sequence<{F_rm1}, {F_rn1}, {F_rk1}>,
                                           ck_tile::sequence<{F_wm1}, {F_wn1}, {F_wk1}>,
-                                          {F_vlayout}>;
+                                          {F_vlayout},
+                                          {F_use_tdm_ceil}>;
 
 using fmha_traits = ck_tile::TileFmhaTraits<{F_spad},
                                             {F_skpad},
@@ -416,7 +424,7 @@ class FmhaFwdApiTrait:
         elif self.pipeline_tag == "qr_tdm":
             if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
-            return f"a.hdim_q % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+            return f"a.hdim_q % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
@@ -436,7 +444,7 @@ class FmhaFwdApiTrait:
         elif self.pipeline_tag == "qr_tdm":
             if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
-            return f"a.hdim_v % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+            return f"a.hdim_v % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
@@ -812,6 +820,7 @@ class FmhaFwdKernel:
             F_wn1=self.F_tile.F_wn1,
             F_wk1=self.F_tile.F_wk1,
             F_vlayout=LAYOUT_MAP[self.F_pipeline.F_vlayout],
+            F_use_tdm_ceil=("true" if self.F_pipeline.tag == "qr_tdm" else "false"),
             F_spad=BOOL_MAP[self.F_pipeline.F_spad],
             F_skpad=BOOL_MAP[self.F_pipeline.F_skpad],
             F_dpad=BOOL_MAP[self.F_pipeline.F_dpad],
@@ -1466,7 +1475,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 384")),
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                ( 80,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 2048")),
+                ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 768")),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
@@ -1522,7 +1531,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # NOTE: dropout is not yet implemented in qr_tdm - only emit
             # dropout="f" so dropout workloads fall through to qr.
             # Logits soft cap is not implemented either, so pin logits="f".
-            if (hdim, hdim_v) in {(32, 32), (64, 64), (80, 96), (128, 128), (160, 160), (192, 128), (256, 256)}:
+            if (hdim, hdim_v) in {(32, 32), (64, 64), (96, 96), (128, 128), (160, 160), (192, 128), (256, 256)}:
                 for logits, mask, bias, lse, sink in itertools.product(
                     ["f"],
                     get_mask_map(mask_impl).keys(),

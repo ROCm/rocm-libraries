@@ -321,26 +321,29 @@ struct SelVTag
     static constexpr bool kTranspose     = true;
 };
 
-// Full self-consistent shape for an aligned head dim: QK head dim QK (== bk0max
-// so kSubQKHeaddim == kQKHeaddim == QK, no ceil rounding) with V head dim VN1.
-// Matches the real gfx125 qr_tdm tiles, including the asymmetric 192/128 (QK=192,
-// VN1=128). M0=128 prefill path.
+// Full self-consistent shape for an aligned head dim: QK head dim QK with V head
+// dim VN1. Uses the TDM ceil (last template arg true), matching the real gfx125
+// qr_tdm shapes, so kSubQKHeaddim keeps QK's true length (96 -> 96, 160 -> 160,
+// 128/192 unchanged) instead of the shared rounded value. Includes the asymmetric
+// 192/128 (QK=192, VN1=128). M0=128 prefill path.
 template <ck_tile::index_t QK, ck_tile::index_t VN1>
 using AlignedHeadDimShape = ck_tile::TileFmhaShape<ck_tile::sequence<128, 64, 32, VN1, 32, QK>,
                                                    ck_tile::sequence<4, 1, 1>,
                                                    ck_tile::sequence<16, 16, 32>,
                                                    ck_tile::sequence<4, 1, 1>,
                                                    ck_tile::sequence<16, 16, 32>,
-                                                   true>;
+                                                   true,
+                                                   /*UseTdmCeil=*/true>;
 
 template <typename DataType, ck_tile::index_t QK, ck_tile::index_t VN1>
 using AlignedHeadDimProblem =
     TestProblemWithShape<TestFmhaProblem<DataType, 128>, AlignedHeadDimShape<QK, VN1>>;
 
 // Validate issue geometry + reader segments for an aligned head dim, using the
-// head-dim-correct padding config. Only meaningful for dims where padding is
-// enabled (kQKHeaddim == kSubQKHeaddim); ceil-rounded dims (80->96, 96->128)
-// are gated off and covered by is_disabled_selection asserts elsewhere.
+// head-dim-correct padding config. Only meaningful for dims TDM stores un-rounded
+// (tdm_ceil_to_qualified_tile_length<kQKHeaddim>() == kQKHeaddim), which is where
+// padding is enabled; any dim TDM still rounds up is gated off and covered by
+// is_disabled_selection asserts elsewhere.
 template <typename DataType, ck_tile::index_t QK, ck_tile::index_t VN1>
 constexpr bool validate_aligned_head_dim()
 {
@@ -358,9 +361,12 @@ static_assert(validate_production_geometries<ck_tile::bf16_t>());
 static_assert(validate_production_geometries<ck_tile::half_t>());
 
 // Lock in the geometry invariants for newly supported aligned head dims:
-// symmetric 160/160 and asymmetric 192/128 (QK=192, V=128).
+// symmetric 96/96 and 160/160, and asymmetric 192/128 (QK=192, V=128). 96 and
+// 160 keep their true length via the TDM ceil (UseTdmCeil in AlignedHeadDimShape).
+static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 96, 96>());
 static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 160, 160>());
 static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 192, 128>());
+static_assert(validate_aligned_head_dim<ck_tile::half_t, 96, 96>());
 static_assert(validate_aligned_head_dim<ck_tile::half_t, 160, 160>());
 static_assert(validate_aligned_head_dim<ck_tile::half_t, 192, 128>());
 #endif
