@@ -982,7 +982,11 @@ namespace TensileLite
 
                 Key key = key_orig;
 
-                if(this->useKdTree)
+                // The index is 2-D (M, N) and models no batch dimension, so batched
+                // problems take the binary path below, which searches B directly. A table
+                // may still declare UseKdTree unconditionally: it applies at B == 1 and is
+                // bypassed otherwise. Batch is key[2] here, matching the b computed below.
+                if(this->useKdTree && (key.size() <= 3 || key[2] == 1))
                 {
                     // roctxRangePush("KDTree");
                     auto compK = [](KBEntry<Value> const& e, int const N) { return e.k < N; };
