@@ -25,13 +25,13 @@ The components interact in this order:
 
 The benchmark does not own prediction policy or launch generated code directly.
 The request, backend, solution, and operation adapter are described in the
-[JIT API sample guide](../samples/29_hipblaslt_jit_gemm/README.md).
+[JIT API guide](../../docs/jit.md).
 
 ## Build and run
 
 JIT GEMM is a build-time opt-in feature enabled by
 `HIPBLASLT_ENABLE_JIT=ON`. Building `hipblaslt-bench` also requires
-`HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT sample build instructions](../samples/29_hipblaslt_jit_gemm/README.md#build)
+`HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT API build instructions](../../docs/jit.md#build)
 describe the required host library, Python dependencies, and compiler setup.
 The JIT path does not require a prebuilt hipBLASLt device library.
 
