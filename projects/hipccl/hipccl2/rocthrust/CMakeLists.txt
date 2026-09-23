@@ -134,7 +134,12 @@ if(BUILD_OFFLOAD_COMPRESS)
   check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
     # Some test will raise an unused-command-line-argument warning while building when they have no kernel code.
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress -Wno-unused-command-line-argument")
+    # NOTE(hipccl2): switched from `set(CMAKE_CXX_FLAGS ...)` to
+    # add_compile_options() - same effective scope (this directory and
+    # everything add_subdirectory()'d after this point), but silences
+    # ROCMChecks' "set on a target where possible" warning. Matches hipCUB's
+    # own (pre-existing) pattern for the same flag.
+    add_compile_options("--offload-compress" "-Wno-unused-command-line-argument")
   else()
     message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
   endif()
@@ -292,7 +297,12 @@ if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 if(CODE_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
+  # NOTE(hipccl2): switched from `set(CMAKE_CXX_FLAGS ...)` to
+  # add_compile_options() for the same reason as the offload-compress flag
+  # above - silences ROCMChecks' "set on a target where possible" warning
+  # without changing scope (still applies to this directory and everything
+  # add_subdirectory()'d after this point, i.e. test/benchmark).
+  add_compile_options("-O0" "-fprofile-instr-generate" "-fcoverage-mapping")
 endif()
 
 # Tests

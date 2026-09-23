@@ -114,7 +114,13 @@ include(CheckCXXCompilerFlag)
 if(BUILD_OFFLOAD_COMPRESS)
   check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+    # NOTE(hipccl2): switched from `set(CMAKE_CXX_FLAGS ...)` to
+    # add_compile_options() - same effective scope (this directory and
+    # everything add_subdirectory()'d after this point; it never leaked into
+    # hipcub/rocthrust's sibling scope either way), but silences ROCMChecks'
+    # "set on a target where possible" warning. Matches hipCUB's own
+    # (pre-existing) pattern for the same flag.
+    add_compile_options("--offload-compress")
   else()
     message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
   endif()
