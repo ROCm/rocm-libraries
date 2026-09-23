@@ -195,10 +195,10 @@ sweep:
       Moves with block_m; same tile constraints as block_m. BN256 is legal
       only with block_m=256 at D=64.
 
-# Fields the aligned kernel reads only from kernel arguments: aligned entries
-# are built at the canonical B1/Sq512/Skv512 and reused for any runtime shape
-# their tile divides, while exact tails (ragged==1) match their authored
-# batch/seqlen_q/seqlen_kv exactly. Documentation only: no generator tool reads
+# Fields the aligned kernel reads only from kernel arguments: every entry is
+# built at the canonical B1/Sq512/Skv512 and reused for any runtime shape its
+# tile divides. The catalog is aligned-only (840 entries, ragged 0), and
+# ragged candidates are declined. Documentation only: no generator tool reads
 # this block, and the rocKE spec's own runtime_param_fields decides per mode.
 runtime_param_fields:
   - batch
@@ -244,11 +244,11 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
     kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, seqlen_q, seqlen_kv, batch, block_m, block_n]
     guard: >
-      kernelMatches() returns false (no panic) if any field disagrees or the
-      candidate's tile is illegal. Aligned (ragged==0) entries require
-      seqlen_q % block_m == 0 and seqlen_kv % block_n == 0 per candidate;
-      exact tails (ragged==1) require equal B/Sq/Skv. score() ranks an
-      applicable 256/64 baseline first, then ascending (block_m, block_n).
+      kernelMatches() returns false (no panic) if any field disagrees, the
+      candidate's tile is illegal, or the candidate is ragged (ragged != 0).
+      Entries require seqlen_q % block_m == 0 and seqlen_kv % block_n == 0
+      per candidate. score() ranks an applicable 256/64 baseline first, then
+      ascending (block_m, block_n).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
 
   - name: kernargs

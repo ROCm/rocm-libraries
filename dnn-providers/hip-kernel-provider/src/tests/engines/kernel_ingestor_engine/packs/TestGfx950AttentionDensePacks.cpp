@@ -77,9 +77,9 @@ struct ExpectedInventory
 /// all ship for every device, so they cannot be filed under a concrete id.
 constexpr const char* ARCH_WILDCARD = "*";
 
-/// The emitted inventory, keyed by architecture. gfx950 ships 857 kernels: the 132
-/// aligned baseline-tile (`_ca`/`_nm`) and 17 exact-tail (`_ragged`) entries, plus 708
-/// tile alternatives (`_c<causal>_bm<block_m>_bn<block_n>`) of the aligned entries.
+/// The emitted inventory, keyed by architecture. gfx950 ships 840 aligned kernels: the
+/// 132 baseline-tile (`_ca`/`_nm`) entries plus their 708 tile alternatives
+/// (`_c<causal>_bm<block_m>_bn<block_n>`).
 const std::map<std::string, ExpectedInventory>& expectedByArch()
 {
     static const std::map<std::string, ExpectedInventory> s_expected = {
@@ -149,9 +149,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.bf16_d128_hq28_kv4_c1_bm256_bn32.gfx950",
                  "attention_dense.bf16_d128_hq28_kv4_ca.gfx950",
                  "attention_dense.bf16_d128_hq28_kv4_nm.gfx950",
-                 "attention_dense.bf16_d128_hq32_kv32_b1_s13376_nm_ragged.gfx950",
-                 "attention_dense.bf16_d128_hq32_kv32_b1_s17556_nm_ragged.gfx950",
-                 "attention_dense.bf16_d128_hq32_kv32_b1_s30240_nm_ragged.gfx950",
                  "attention_dense.bf16_d128_hq32_kv32_c0_bm128_bn128.gfx950",
                  "attention_dense.bf16_d128_hq32_kv32_c0_bm128_bn32.gfx950",
                  "attention_dense.bf16_d128_hq32_kv32_c0_bm128_bn64.gfx950",
@@ -200,11 +197,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.bf16_d128_hq40_kv10_c1_bm256_bn32.gfx950",
                  "attention_dense.bf16_d128_hq40_kv10_ca.gfx950",
                  "attention_dense.bf16_d128_hq40_kv10_nm.gfx950",
-                 "attention_dense.bf16_d128_hq40_kv40_b1_s17160_nm_ragged.gfx950",
-                 "attention_dense.bf16_d128_hq40_kv40_b1_s32760_nm_ragged.gfx950",
-                 "attention_dense.bf16_d128_hq40_kv40_b1_s48360_nm_ragged.gfx950",
-                 "attention_dense.bf16_d128_hq40_kv40_b1_s75600_nm_ragged.gfx950",
-                 "attention_dense.bf16_d128_hq40_kv40_b1_s7800_nm_ragged.gfx950",
                  "attention_dense.bf16_d128_hq40_kv40_c0_bm128_bn128.gfx950",
                  "attention_dense.bf16_d128_hq40_kv40_c0_bm128_bn32.gfx950",
                  "attention_dense.bf16_d128_hq40_kv40_c0_bm128_bn64.gfx950",
@@ -301,7 +293,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.bf16_d128_hq8_kv1_c1_bm256_bn32.gfx950",
                  "attention_dense.bf16_d128_hq8_kv1_ca.gfx950",
                  "attention_dense.bf16_d128_hq8_kv1_nm.gfx950",
-                 "attention_dense.bf16_d128_hq8_kv2_b2_s64_ca_ragged.gfx950",
                  "attention_dense.bf16_d128_hq8_kv2_c0_bm128_bn128.gfx950",
                  "attention_dense.bf16_d128_hq8_kv2_c0_bm128_bn32.gfx950",
                  "attention_dense.bf16_d128_hq8_kv2_c0_bm128_bn64.gfx950",
@@ -314,7 +305,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.bf16_d128_hq8_kv2_c1_bm256_bn32.gfx950",
                  "attention_dense.bf16_d128_hq8_kv2_ca.gfx950",
                  "attention_dense.bf16_d128_hq8_kv2_nm.gfx950",
-                 "attention_dense.bf16_d128_hq8_kv8_b2_s64_ca_ragged.gfx950",
                  "attention_dense.bf16_d128_hq8_kv8_c0_bm128_bn128.gfx950",
                  "attention_dense.bf16_d128_hq8_kv8_c0_bm128_bn32.gfx950",
                  "attention_dense.bf16_d128_hq8_kv8_c0_bm128_bn64.gfx950",
@@ -477,7 +467,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.bf16_d64_hq32_kv8_c1_bm256_bn32.gfx950",
                  "attention_dense.bf16_d64_hq32_kv8_ca.gfx950",
                  "attention_dense.bf16_d64_hq32_kv8_nm.gfx950",
-                 "attention_dense.bf16_d64_hq64_kv8_b1_s2016_ca_ragged.gfx950",
                  "attention_dense.bf16_d64_hq64_kv8_c0_bm128_bn128.gfx950",
                  "attention_dense.bf16_d64_hq64_kv8_c0_bm128_bn32.gfx950",
                  "attention_dense.bf16_d64_hq64_kv8_c0_bm128_bn64.gfx950",
@@ -506,7 +495,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.bf16_d64_hq8_kv1_c1_bm256_bn32.gfx950",
                  "attention_dense.bf16_d64_hq8_kv1_ca.gfx950",
                  "attention_dense.bf16_d64_hq8_kv1_nm.gfx950",
-                 "attention_dense.bf16_d64_hq8_kv8_b2_s64_ca_ragged.gfx950",
                  "attention_dense.bf16_d64_hq8_kv8_c0_bm128_bn128.gfx950",
                  "attention_dense.bf16_d64_hq8_kv8_c0_bm128_bn32.gfx950",
                  "attention_dense.bf16_d64_hq8_kv8_c0_bm128_bn64.gfx950",
@@ -725,7 +713,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.fp16_d128_hq8_kv1_c1_bm256_bn32.gfx950",
                  "attention_dense.fp16_d128_hq8_kv1_ca.gfx950",
                  "attention_dense.fp16_d128_hq8_kv1_nm.gfx950",
-                 "attention_dense.fp16_d128_hq8_kv2_b2_s64_ca_ragged.gfx950",
                  "attention_dense.fp16_d128_hq8_kv2_c0_bm128_bn128.gfx950",
                  "attention_dense.fp16_d128_hq8_kv2_c0_bm128_bn32.gfx950",
                  "attention_dense.fp16_d128_hq8_kv2_c0_bm128_bn64.gfx950",
@@ -738,7 +725,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.fp16_d128_hq8_kv2_c1_bm256_bn32.gfx950",
                  "attention_dense.fp16_d128_hq8_kv2_ca.gfx950",
                  "attention_dense.fp16_d128_hq8_kv2_nm.gfx950",
-                 "attention_dense.fp16_d128_hq8_kv8_b2_s64_ca_ragged.gfx950",
                  "attention_dense.fp16_d128_hq8_kv8_c0_bm128_bn128.gfx950",
                  "attention_dense.fp16_d128_hq8_kv8_c0_bm128_bn32.gfx950",
                  "attention_dense.fp16_d128_hq8_kv8_c0_bm128_bn64.gfx950",
@@ -803,7 +789,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.fp16_d64_hq128_kv128_c1_bm256_bn32.gfx950",
                  "attention_dense.fp16_d64_hq128_kv128_ca.gfx950",
                  "attention_dense.fp16_d64_hq128_kv128_nm.gfx950",
-                 "attention_dense.fp16_d64_hq12_kv12_b16_s197_nm_ragged.gfx950",
                  "attention_dense.fp16_d64_hq12_kv12_c0_bm128_bn128.gfx950",
                  "attention_dense.fp16_d64_hq12_kv12_c0_bm128_bn32.gfx950",
                  "attention_dense.fp16_d64_hq12_kv12_c0_bm128_bn64.gfx950",
@@ -818,7 +803,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.fp16_d64_hq12_kv12_c1_bm256_bn32.gfx950",
                  "attention_dense.fp16_d64_hq12_kv12_ca.gfx950",
                  "attention_dense.fp16_d64_hq12_kv12_nm.gfx950",
-                 "attention_dense.fp16_d64_hq16_kv16_b8_s257_nm_ragged.gfx950",
                  "attention_dense.fp16_d64_hq16_kv16_c0_bm128_bn128.gfx950",
                  "attention_dense.fp16_d64_hq16_kv16_c0_bm128_bn32.gfx950",
                  "attention_dense.fp16_d64_hq16_kv16_c0_bm128_bn64.gfx950",
@@ -931,7 +915,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.fp16_d64_hq8_kv1_c1_bm256_bn32.gfx950",
                  "attention_dense.fp16_d64_hq8_kv1_ca.gfx950",
                  "attention_dense.fp16_d64_hq8_kv1_nm.gfx950",
-                 "attention_dense.fp16_d64_hq8_kv8_b2_s64_ca_ragged.gfx950",
                  "attention_dense.fp16_d64_hq8_kv8_c0_bm128_bn128.gfx950",
                  "attention_dense.fp16_d64_hq8_kv8_c0_bm128_bn32.gfx950",
                  "attention_dense.fp16_d64_hq8_kv8_c0_bm128_bn64.gfx950",
