@@ -25,9 +25,6 @@ The RPP project is located in `ROCm/rocm-libraries <https://github.com/ROCm/rocm
     * :doc:`Install RPP <install/rpp-install>`
     * :doc:`Build from source <install/rpp-build>`
 
-.. grid:: 2
-  :gutter: 3
-
   .. grid-item-card:: How to
 
     * :doc:`Run a tensor augmentation <./how-to/rpp-run-tensor-augmentation>`
