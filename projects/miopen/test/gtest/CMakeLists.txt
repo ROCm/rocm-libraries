@@ -74,6 +74,15 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     )
 endif()
 
+# Tests added for the hipDNN wrapper work build only with the flag on, so a flag-off build
+# registers exactly the tests it did before that work.
+if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    list(APPEND SKIP_TESTS
+        hipdnn_shim_conv.cpp
+        version_api.cpp
+    )
+endif()
+
 # Append a pattern to the accumulated gtest negative (exclusion) filter.
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
     set (TMP_FILTER ${MIOPEN_GTEST_FILTER_NEGATIVE})
@@ -574,9 +583,8 @@ endif()
 # mirror above: the installed CTestTestfile.cmake only comes from test_categories.yaml, so
 # this add_test() call is invisible to it too.
 #
-# Gated on the flag alone, matching the build-tree entry: the check never loads or runs
-# either library, so it carries none of the GPU or MIOPEN_TEST_DISCRETE restrictions the
-# parity mirror above needs.
+# No GPU condition: the check only reads the two libraries. No MIOPEN_TEST_DISCRETE
+# condition either, because a discrete build installs nothing from this directory.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(wrapper_abi_check \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\")

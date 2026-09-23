@@ -50,6 +50,11 @@ import pathlib, sys
 pathlib.Path(__file__).with_suffix(".argv").write_text("\\n".join(sys.argv[1:]))
 """
 
+FAILS = """#!/usr/bin/env python3
+import sys
+sys.exit(1)
+"""
+
 
 # Checked before anything here touches os.geteuid(), which off POSIX would fail at
 # import rather than skip.
@@ -68,10 +73,16 @@ class ParityRunnerTest(unittest.TestCase):
         for name, body in (
             ("fake_gtest.py", FAKE_GTEST),
             ("fake_compare.py", RECORDS_ARGV),
+            ("failing_compare.py", FAILS),
         ):
             path = self.tree / name
             path.write_text(body)
             path.chmod(0o755)
+
+        # Where the harness's default report directory lands, so a test can see
+        # whether it was cleaned up.
+        self.tmp = self.tree / "tmp"
+        self.tmp.mkdir()
 
     def run_harness(self, cwd, *extra):
         return subprocess.run(
@@ -89,6 +100,7 @@ class ParityRunnerTest(unittest.TestCase):
                 *extra,
             ],
             cwd=str(cwd),
+            env=dict(os.environ, TMPDIR=str(self.tmp)),
             capture_output=True,
             text=True,
         )
@@ -133,6 +145,26 @@ class ParityRunnerTest(unittest.TestCase):
         result = self.run_harness(self.tree)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("replay reports:", result.stdout)
+
+    def test_the_temporary_report_directory_is_removed_after_a_pass(self):
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(list(self.tmp.iterdir()), [])
+
+    def test_the_temporary_report_directory_is_kept_after_a_failure(self):
+        result = self.run_harness(
+            self.tree, "--compare", str(self.tree / "failing_compare.py")
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        [kept] = self.tmp.iterdir()
+        self.assertIn(f"replay reports: {kept}", result.stdout)
+        self.assertEqual(
+            sorted(p.name for p in kept.iterdir()),
+            [
+                "fake_gtest.py_forwarding_disabled.xml",
+                "fake_gtest.py_forwarding_enabled.xml",
+            ],
+        )
 
     def test_the_comparison_is_held_to_this_run_s_binary(self):
         """--newer-than is what stops a leftover pair of reports comparing cleanly."""

@@ -29,6 +29,7 @@ below suit the installed layout, where everything lands in one directory.
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -66,16 +67,6 @@ def main():
     args = parser.parse_args()
 
     gtest = Path(args.gtest).resolve()
-    # A temporary directory rather than the working directory, because ctest runs the installed
-    # entry from inside the install tree, which on a shipping prefix is root-owned and read-only
-    # to whoever runs the tests. The XMLs feed the comparison below and nothing else, so they do
-    # not need to outlive the run; the location is printed to keep a failure diagnosable.
-    if args.output_dir:
-        output_dir = Path(args.output_dir).resolve()
-        output_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        output_dir = Path(tempfile.mkdtemp(prefix="miopen_forwarding_parity_"))
-    print(f"replay reports: {output_dir}", flush=True)
 
     lib_dirs = (
         [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
@@ -99,6 +90,18 @@ def main():
     ld_path = os.pathsep.join(
         p for p in (str(private_lib.parent), os.environ.get("LD_LIBRARY_PATH")) if p
     )
+
+    # A temporary directory rather than the working directory, because ctest runs the installed
+    # entry from inside the install tree, which on a shipping prefix is root-owned and read-only
+    # to whoever runs the tests. The XMLs only feed the comparison below, so the directory is
+    # removed after a pass. After a failure it is kept, and its printed path is how to find it.
+    temporary = not args.output_dir
+    if temporary:
+        output_dir = Path(tempfile.mkdtemp(prefix="miopen_forwarding_parity_"))
+    else:
+        output_dir = Path(args.output_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"replay reports: {output_dir}", flush=True)
 
     reports = []
     for mode in ("disabled", "enabled"):
@@ -132,6 +135,8 @@ def main():
         "forwarding parity comparison",
     )
 
+    if ok and temporary:
+        shutil.rmtree(output_dir)
     return 0 if ok else 1
 
 

@@ -7,13 +7,11 @@
 // buffer staging around them come from the shared test infrastructure, which the wrapper
 // does not sit in front of. Results are checked against an independent CPU reference rather
 // than a second MIOpen run. The "HipdnnShim" token in each suite name is what selects them
-// into the parity surface; see README.md. Built only under MIOPEN_ENABLE_HIPDNN_WRAPPER,
-// which keeps ctest -N identical to the flag-off baseline.
+// into the parity surface; see README.md. CMakeLists.txt builds this file only under
+// MIOPEN_ENABLE_HIPDNN_WRAPPER.
 //
 // Convolution is covered through both public entry points into it, because they are separate
 // code paths that will be swapped over to hipDNN independently.
-
-#ifdef MIOPEN_ENABLE_HIPDNN_WRAPPER
 
 #include <gtest/gtest.h>
 #include "get_handle.hpp"
@@ -271,5 +269,3 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
 
     ExpectMatchesCpuReference(x, w, y);
 }
-
-#endif // MIOPEN_ENABLE_HIPDNN_WRAPPER
