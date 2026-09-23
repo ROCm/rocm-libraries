@@ -368,6 +368,10 @@ class SignatureDefault(Signature):
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressScaleB", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
+            # w4a16 asymmetric: packed int4 zero-points, appended right after
+            # scaleB to match ContractionSolution's argument order.
+            if kernel["ProblemType"]["ScaleZeroPointA"]:
+                signature.addArg("AddressScaleZeroA", SVK.SIG_GLOBALBUFFER, "void", "generic")
         userArgumentsInfo.scaleASize += 8
         userArgumentsInfo.scaleBSize += 8
         if kernel["ProblemType"]["UseScaleCD"]:
