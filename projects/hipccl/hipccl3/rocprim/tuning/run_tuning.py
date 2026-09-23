@@ -76,6 +76,8 @@ def get_available_algorithms() -> List[str]:
         "device_select_flag",
         "device_select_predicate",
         "device_select_unique",
+        "device_scan",
+        "device_scan_by_key"
         "device_reduce",
         "device_segmented_reduce",
         "device_reduce_by_key"
