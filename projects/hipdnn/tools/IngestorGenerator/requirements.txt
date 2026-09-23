@@ -1,0 +1,12 @@
+PyYAML>=6.0
+Jinja2>=3.1
+# This generator's own gates are pytest suites (`$GEN/.venv/bin/python -m pytest
+# tests/test_fragment_contracts.py` and its siblings), so a venv built as the
+# runbook's "Paths and interpreters" section prescribes needs pytest to run them.
+pytest>=7.0
+
+# rocm_kpack is a real dependency of ONE test class and is deliberately absent above:
+# it ships in the rocm-kpack checkout, not on PyPI. Supply it by pointing
+# HIPKERNELPROVIDER_ROCM_KPACK_DIR at that checkout's `python` directory -- see
+# "Setup" in README.md. Unset, tests/test_verify_variant_sets.py's
+# TestRealArchiveSelectedConsumer skips; it never fails for want of this.

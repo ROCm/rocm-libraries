@@ -1,0 +1,67 @@
+# Worked example: a small single-pack engine ("ScaleAdd": y = a*x + b, elementwise),
+# modeled on the shipped conv_fwd/pointwise engines. Round-trips through
+# generate.py --dry-run, and through hipdnn_validate_descriptors once a real kernel source
+# and matcher/dispatch bodies are filled in. See README.md.
+
+engine:
+  name: hipkernel:ScaleAdd
+  sdk_version: "1.0.0"
+  behavior_notes: [runtime_compilation]
+  knobs: [block_size]
+  heuristic: native
+
+kmd_fields:
+  - name: block_size
+    type: int
+    default_value: 64
+  - name: dtype
+    type: string
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: embedded_source
+workspace_policy: none
+
+# The authored set under test_descriptors/ this bundle is written into. Each set is its
+# own pack target, so this picks the shard the unit-test binary reads.
+authored_subpath: unit
+
+packs:
+  - name: scale_add
+    arch: [gfx942]
+    kernels:
+      - name: scale_add.f32_block64
+        kernel_source:
+          kind: embedded_source
+          source_file: ScaleAdd.cpp
+          entry_point: ScaleAdd
+        metadata:
+          block_size: 64
+          dtype: FLOAT
+        priority: 0
+      - name: scale_add.f32_block256
+        kernel_source:
+          kind: embedded_source
+          source_file: ScaleAdd.cpp
+          entry_point: ScaleAdd
+        metadata:
+          block_size: 256
+          dtype: FLOAT
+        priority: 0
+
+# What the COMPILER specialized on. Rides once on each emitted KDP as
+# provenance.specialization_contract, inherited by the kernels under it, and is all a
+# machine checking a shipped bundle has: the producer is not installed where the archive
+# lands.
+#
+# The direct-load dialect compiles from `source_file`/`entry_point` at plan-build time and
+# hydrates no builder object, so no binding has anything to read back and every field is
+# matcher-only. Stated rather than left blank: a bundle carrying no claim is
+# indistinguishable from one whose author never considered the question.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [block_size, dtype]
+  bindings: {}
+  vocabulary: {}
