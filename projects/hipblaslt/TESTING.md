@@ -1193,3 +1193,10 @@ Numbers that are safe to hard-code, because they are read from a config file rat
 hand, or because they describe a specific dated incident rather than a suite's current size (a
 coverage floor in `pyproject.toml`, a line count in a specific historical PR), are fine as written.
 A new count of "how many tests exist today" is not; phrase it qualitatively instead.
+
+## Experimental JIT validation
+
+The [JIT validation guide](clients/tests/jit/README.md) explains the generic
+backend, public C/C++ GEMM, sample, prediction, corruption and feature-off tests.
+It describes the shared native GPU workflow, source-build checks, and coverage
+that remains unverified.

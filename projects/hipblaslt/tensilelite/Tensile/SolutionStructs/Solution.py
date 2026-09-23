@@ -162,6 +162,11 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   # Format-vs-transport. These compatibility rules apply only when MX scales
   # are present; without MX scales MXScaleFormat is a don't-care.
   if hasMXBlock:
+    if isGfx950 and state["MXLoadInst"] == "BufferLoad" and state["MXScaleFormat"] == "NoSwizzle":
+      reject(state, printRejectionReason,
+             "gfx950 MX BufferLoad requires MXScaleFormat=HostPreSwizzle; "
+             "natural scale loads are not implemented")
+      return False
     if state["MXScaleFormat"] == "InMemorySwizzle" and state["MXLoadInst"] != "TDM":
       reject(state, printRejectionReason,
              "MXScaleFormat=InMemorySwizzle requires MXLoadInst=TDM "

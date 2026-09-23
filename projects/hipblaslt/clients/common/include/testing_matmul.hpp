@@ -3626,7 +3626,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                 //// copy data from CPU to device end
                 if(size_D_copy[i])
                 {
-                    copy_buf(hC[batchCount], hD_gold[batchCount], To);
+                    // Each pointer-array entry contains one matrix. Seed the
+                    // in-place BLAS reference using D's leading dimension.
+                    const size_t elementBytes = realDataTypeSize(To);
+                    std::memset(hD_gold[batchCount].buf(), 0, hD_gold[batchCount].getNumBytes());
+                    hipblaslt_copy_matrix(hC[batchCount].as<char>(),
+                                          hD_gold[batchCount].as<char>(),
+                                          M[i] * elementBytes,
+                                          N[i],
+                                          ldc[i] * elementBytes,
+                                          ldd[i] * elementBytes);
                 }
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
@@ -4126,53 +4135,72 @@ void testing_matmul_with_bias(const Arguments& arg,
         tuningVec.push_back(hipblaslt_ext::GemmTuning());
     }
 
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
-    auto select_jit_algo = [&](const hipblaslt_ext::experimental::GenerateOptions& options,
-                               hipblasLtMatmulHeuristicResult_t&                   result,
-                               hipblaslt_ext::experimental::JitGemmInfo&           info) {
-        return hipblaslt_ext::experimental::getJitGemmAlgo(handle,
-                                                           matmul[0][0],
-                                                           alpha_in[0],
-                                                           dA[0].buf(),
-                                                           matA[0],
-                                                           dB[0].buf(),
-                                                           matB[0],
-                                                           &h_beta[0],
-                                                           dC[0].buf(),
-                                                           matC[0],
-                                                           (*dDp)[0].buf(),
-                                                           matD[0],
-                                                           options,
-                                                           max_workspace_size,
-                                                           result,
-                                                           info);
+#ifdef HIPBLASLT_ENABLE_JIT
+    namespace jit        = hipblaslt_ext::experimental::jit;
+    auto select_jit_algo = [&](const jit::tensilelite::Options&  options,
+                               hipblasLtMatmulHeuristicResult_t& result,
+                               jit::Diagnostics&                 info) {
+        jit::Request request;
+        auto         status = jit::makeGemmRequest(handle,
+                                           matmul[0][0],
+                                           alpha_in[0],
+                                           dA[0].buf(),
+                                           matA[0],
+                                           dB[0].buf(),
+                                           matB[0],
+                                           &h_beta[0],
+                                           dC[0].buf(),
+                                           matC[0],
+                                           (*dDp)[0].buf(),
+                                           matD[0],
+                                           request,
+                                           info);
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            return status;
+        jit::Backend backend;
+        status = jit::tensilelite::createBackend(options, backend, info);
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            return status;
+        int device;
+        if(hipGetDevice(&device) != hipSuccess)
+            return HIPBLAS_STATUS_INTERNAL_ERROR;
+        jit::Solution solution;
+        status = jit::getJitAlgo(device, request, backend, max_workspace_size, solution, info);
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            return status;
+        const auto summary = info.message;
+        status             = jit::getGemmAlgo(solution, result, info);
+        if(status == HIPBLAS_STATUS_SUCCESS)
+            info.message = summary;
+        return status;
     };
     if(hipblaslt_bench_options::jit_gemm() && (!M[0] || !N[0]))
     {
         // Validate the descriptors through the same API. Empty outputs need no
         // generated algorithm, reference calculation, warmup, or timed launch.
-        hipblasLtMatmulHeuristicResult_t         result{};
-        hipblaslt_ext::experimental::JitGemmInfo info;
-        auto                                     status = select_jit_algo({}, result, info);
+        hipblasLtMatmulHeuristicResult_t result{};
+        jit::Diagnostics                 info;
+        auto                             status = select_jit_algo({}, result, info);
         if(status != HIPBLAS_STATUS_NOT_SUPPORTED
-           || info.error != "Empty output does not require a GEMM algorithm")
-            throw std::invalid_argument("JIT empty-output validation failed: " + info.error);
+           || info.message != "Empty output needs no GEMM algorithm")
+            throw std::invalid_argument("JIT empty-output validation failed: " + info.message);
         hipblaslt_cerr << "JIT GEMM: empty output; no kernel generation or launch" << std::endl;
         return;
     }
 
     // Preparation runs once during selection, before reference, warmup, or timing.
     auto generate_jit_algo = [&]() {
-        hipblasLtMatmulHeuristicResult_t         result{};
-        hipblaslt_ext::experimental::JitGemmInfo info;
-        const auto options = hipblaslt_bench_options::jit_generate_options();
-        const auto status  = select_jit_algo(options, result, info);
+        hipblasLtMatmulHeuristicResult_t result{};
+        jit::Diagnostics                 info;
+        const auto                       options = hipblaslt_bench_options::jit_generate_options();
+        const auto                       status  = select_jit_algo(options, result, info);
         if(status != HIPBLAS_STATUS_SUCCESS)
-            throw std::invalid_argument("JIT preparation failed: " + info.error
+            throw std::invalid_argument("JIT preparation failed: " + info.message
                                         + " (artifacts: " + options.outputPath + ")");
-        hipblaslt_cerr << "JIT recipe: " << info.configPath << std::endl;
-        hipblaslt_cerr << "JIT manifest: " << info.manifestPath << std::endl;
-        hipblaslt_cerr << "JIT prediction: " << info.prediction << std::endl;
+        hipblaslt_cerr << "JIT recipe: " << (options.outputPath + ".yaml") << std::endl;
+        hipblaslt_cerr << "JIT manifest: " << (options.outputPath + "/bundle/manifest.json")
+                       << std::endl;
+        hipblaslt_cerr << "JIT prediction: " << info.message << std::endl;
         return result;
     };
 #endif
@@ -4789,7 +4817,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             ((*dDp)[0].as<char>()) + b * size_D[0] * realDataTypeSize(To),
                             matD[0]));
                 }
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+#ifdef HIPBLASLT_ENABLE_JIT
                 if(hipblaslt_bench_options::jit_gemm())
                     tmpAlgo.push_back(generate_jit_algo());
                 else
@@ -4825,7 +4853,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
 
                 std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo(requestAlgoCount);
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+#ifdef HIPBLASLT_ENABLE_JIT
                 if(hipblaslt_bench_options::jit_gemm())
                 {
                     tmpAlgo[0] = generate_jit_algo();

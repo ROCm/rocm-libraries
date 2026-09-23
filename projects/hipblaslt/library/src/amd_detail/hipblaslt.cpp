@@ -91,6 +91,14 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
 {
     switch(status)
     {
+    case rocblaslt_status_not_supported:
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
+    case rocblaslt_status_execution_failed:
+        return HIPBLAS_STATUS_EXECUTION_FAILED;
+    case rocblaslt_status_not_initialized:
+        return HIPBLAS_STATUS_NOT_INITIALIZED;
+    case rocblaslt_status_type_mismatch:
+        return HIPBLAS_STATUS_INVALID_VALUE;
     case rocblaslt_status_success:
         return HIPBLAS_STATUS_SUCCESS;
     case rocblaslt_status_invalid_handle:

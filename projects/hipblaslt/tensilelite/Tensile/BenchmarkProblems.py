@@ -243,7 +243,15 @@ def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, s
         elif len(mi) == 0:
             solution["EnableMatrixInstruction"] = False
 
-        if validateMIParameters(solution, isaInfoMap):
+        try:
+            validMI = validateMIParameters(solution, isaInfoMap)
+        except AssertionError as error:
+            # This validator reports unsupported instructions/geometry with
+            # AssertionError. A rejected recipe is not a toolchain failure.
+            if not silent:
+                print(f"reject: {error}")
+            return None
+        if validMI:
             solutionObject = Solution(
                 solution,
                 debugConfig.splitGSU,
