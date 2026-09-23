@@ -448,7 +448,7 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
                 snprintf(reason,
                          reason_cap,
                          "DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
-                         "is fp16-only on CDNA; use 8c/16c/32c for bf16");
+                         "is fp16-only; use fp16 dtype or a different cpg variant");
             }
             return ROCKE_ERR_VALUE;
         }
@@ -542,8 +542,8 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
         const char* dt = p->dtype ? p->dtype : "fp16";
         if(strcmp(dt, "fp16") != 0)
         {
-            CK_DCONV4C_REJECT("DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
-                              "is fp16-only on CDNA; use 8c/16c/32c for bf16");
+            CK_DCONV4C_REJECT("DirectConv4cSpec: bf16 not supported - "
+                              "no mfma_f32_4x4x4_bf16 atom");
         }
     }
     /* if p.cpg != 4 or p.kpg != 4: return False, ... */
@@ -1613,6 +1613,19 @@ rocke_status_t rocke_direct_depthwise_dgrad_validate(
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype != "fp16": raise ValueError(...) — depthwise kernels are fp16-only */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "DirectDepthwiseDgradSpec: bf16 not supported; "
+                         "depthwise kernels are fp16-only");
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
