@@ -158,6 +158,74 @@ struct DeviceTransform
 
     template<typename... RandomAccessIteratorsIn,
              typename RandomAccessIteratorOut,
+             typename Predicate,
+             typename NumItemsT,
+             typename TransformOp>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformIf(hipcub::tuple<RandomAccessIteratorsIn...> inputs,
+                                  RandomAccessIteratorOut                   output,
+                                  NumItemsT                                 num_items,
+                                  Predicate                                 predicate,
+                                  TransformOp                               transform_op,
+                                  hipStream_t                               stream = nullptr)
+    {
+        return ::rocprim::transform(inputs, output, num_items, predicate, transform_op, stream);
+    }
+
+    template<typename... RandomAccessIteratorsIn,
+             typename RandomAccessIteratorOut,
+             typename NumItemsT,
+             typename Predicate,
+             typename TransformOp>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformIf([[maybe_unused]] void*                    d_temp_storage,
+                                  [[maybe_unused]] size_t&                  temp_storage_bytes,
+                                  hipcub::tuple<RandomAccessIteratorsIn...> inputs,
+                                  RandomAccessIteratorOut                   output,
+                                  NumItemsT                                 num_items,
+                                  Predicate                                 predicate,
+                                  TransformOp                               transform_op,
+                                  hipStream_t                               stream = nullptr)
+    {
+        return ::rocprim::transform(inputs, output, num_items, predicate, transform_op, stream);
+    }
+
+    template<typename RandomAccessIteratorsIn,
+             typename RandomAccessIteratorOut,
+             typename Predicate,
+             typename NumItemsT,
+             typename TransformOp>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformIf(RandomAccessIteratorsIn input,
+                                  RandomAccessIteratorOut output,
+                                  NumItemsT               num_items,
+                                  Predicate               predicate,
+                                  TransformOp             transform_op,
+                                  hipStream_t             stream = nullptr)
+    {
+        return ::rocprim::transform(input, output, num_items, predicate, transform_op, stream);
+    }
+
+    template<typename RandomAccessIteratorsIn,
+             typename RandomAccessIteratorOut,
+             typename NumItemsT,
+             typename Predicate,
+             typename TransformOp>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformIf([[maybe_unused]] void*   d_temp_storage,
+                                  [[maybe_unused]] size_t& temp_storage_bytes,
+                                  RandomAccessIteratorsIn  input,
+                                  RandomAccessIteratorOut  output,
+                                  NumItemsT                num_items,
+                                  Predicate                predicate,
+                                  TransformOp              transform_op,
+                                  hipStream_t              stream = nullptr)
+    {
+        return ::rocprim::transform(input, output, num_items, predicate, transform_op, stream);
+    }
+
+    template<typename... RandomAccessIteratorsIn,
+             typename RandomAccessIteratorOut,
              typename NumItemsT,
              typename TransformOp>
     HIPCUB_RUNTIME_FUNCTION
