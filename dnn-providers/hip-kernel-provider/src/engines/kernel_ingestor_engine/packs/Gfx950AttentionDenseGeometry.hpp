@@ -24,31 +24,43 @@
  * TWO DIFFERENCES FROM THE gfx942 TWIN, each verified against the source rather
  * than assumed from the sibling:
  *
- *  1. **block_m is not a parameter.** gfx950 bakes `_BLOCK_M = 256` as a module
- *     constant (attention_dense.py:88) and `attention_dense_block` derives the CTA
- *     from the `num_waves` property, which is `_BLOCK_M // 32` -- not from a spec
- *     field. There is no block_m knob to pass, so the block is the CONSTANT 512
- *     lanes for every variant this engine ships. Taking a block_m argument here
- *     would invite a caller to vary something the binary cannot.
+ *  1. **block_m is a spec field that this engine pins, not one the kernel bakes.**
+ *     Unlike the gfx942 twin -- which really does carry a module-level `_BLOCK_M`
+ *     (kernels/gfx942/attention_dense.py:211-213) and varies it across its shipped
+ *     set -- gfx950 reads the value off the spec: `attention_dense_grid` divides by
+ *     `spec.block_m` and `attention_dense_block` is `(spec.num_waves * 64, 1, 1)`
+ *     with `num_waves = block_m // 32` (kernels/gfx950/attention_dense.py:2046-2059).
+ *     The preflight accepts every geometry in DENSE_TILE_GEOMETRIES, which includes
+ *     `bm128` (kernels/common/attention_dense_spec.py:23-26).
+ *
+ *     Every variant this engine ships is block_m 256, so the constant below is a
+ *     pin on the SHIPPED SET, not a property of the binary. It is deliberately not
+ *     a KMD field because it does not vary -- the KMD carries only what varies.
+ *     If a bm128 variant is ever added, this constant stops being true: block_m
+ *     must become a KMD field, be threaded through gfx950AttentionDenseGeometry(),
+ *     and be compared in kernelMatches(). Until then, varying it here would launch
+ *     512 lanes against a 256-lane binary and halve the query grid.
  *
  *  2. **The ceiling is LIVE, not defensive.** On gfx942 `Sq % block_m == 0` is
  *     enforced by the predicate, so the ceil is exact and written only for
  *     term-by-term comparison with the Python. gfx950 serves RAGGED shapes, where
- *     `seqlen_q % 256 != 0` is legal and the last query block is partial
- *     (attention_dense.py:1878 keeps the ceil for exactly that reason). Truncating
- *     here would drop the final block: the tail rows are never written, and nothing
- *     reports it.
+ *     `seqlen_q % block_m != 0` is legal and the last query block is partial. The
+ *     Python carries the same ceil wherever it counts query blocks -- the spec's own
+ *     block accounting (attention_dense.py:153, :170, :191) and `attention_dense_grid`
+ *     (:2046-2055). Truncating here would drop the final block: the tail rows are
+ *     never written, and nothing reports it.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-/// The query-block tile, baked into the gfx950 kernel as `_BLOCK_M`
-/// (kernels/gfx950/attention_dense.py:88). Not a spec field and not a knob: the
-/// causal mask and the P relayout both assume it.
+/// The query-block tile every shipped gfx950 attention_dense variant is built with.
+/// `block_m` IS a spec field (kernels/common/attention_dense_spec.py), so this is a
+/// pin on the shipped set rather than a constant of the binary -- see note 1 above
+/// for what must change if a variant with another block_m is ever shipped.
 inline constexpr int64_t GFX950_ATTENTION_DENSE_BLOCK_M = 256;
 
 /// Lanes per wave64 wave, and the divisor `num_waves` uses. `attention_dense_block`
-/// is `(num_waves * 64, 1, 1)` with `num_waves = _BLOCK_M // 32`.
+/// is `(num_waves * 64, 1, 1)` with `num_waves = block_m // 32`.
 inline constexpr int64_t GFX950_WAVE_LANES = 64;
 inline constexpr int64_t GFX950_ROWS_PER_WAVE = 32;
 
@@ -71,15 +83,17 @@ struct Gfx950AttentionDenseGeometry
 /**
  * @brief The launch geometry for one variant, from its KMD metadata alone.
  *
- * Mirrors `attention_dense_grid` (kernels/gfx950/attention_dense.py:1874-1881):
+ * Mirrors `attention_dense_grid` (kernels/gfx950/attention_dense.py:2046-2055):
  *
- *     nqb = (spec.seqlen_q + _BLOCK_M - 1) // _BLOCK_M   # ceil: ragged partial block
+ *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m  # ceil: ragged tail
  *     return (nqb, spec.num_query_heads, spec.batch)
  *
- * and `attention_dense_block` (:1883-1885), `(num_waves * 64, 1, 1)`.
+ * and `attention_dense_block` (:2057-2059), `(spec.num_waves * 64, 1, 1)`.
  *
- * All 150 shipped variants are non-persistent; the persistent grid-stride arm is
- * not present in this catalog.
+ * Every shipped variant is non-persistent, so only the `else` arm above is mirrored
+ * here; the Python's persistent arm -- `(spec.num_persistent, 1, 1)` -- has no
+ * counterpart in this catalog. A count is deliberately not quoted: the census test
+ * owns the inventory, and a number here would drift.
  *
  * Throws instead of returning a degenerate grid. An empty or negative launch returns
  * cleanly having written nothing, which is the silent-wrong-answer case this file
@@ -103,9 +117,9 @@ inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t seqLenQ
     }
 
     Gfx950AttentionDenseGeometry geometry;
-    // Constant across every shipped variant: block_m is baked, not a knob. Written as
-    // the same expression the Python evaluates rather than the literal 512, so the two
-    // halves can be diffed term for term.
+    // Written as the same expression the Python evaluates rather than the literal 512,
+    // so the two halves can be diffed term for term. The tile is pinned to the shipped
+    // set, not baked into the binary -- see note 1 in the file header.
     geometry.blockX = static_cast<unsigned>(GFX950_ATTENTION_DENSE_BLOCK_M / GFX950_ROWS_PER_WAVE
                                             * GFX950_WAVE_LANES);
     // CEIL, and it is load-bearing here: a ragged shape has a partial final query

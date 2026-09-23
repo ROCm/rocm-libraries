@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -34,10 +35,21 @@
  * These are matcher-only: no device, no compile, no launch.
  *
  * gfx950-specific behaviors covered:
+ *   - LAYOUT: every operand's stride spelling is set independently, so each tensor's clause
+ *     of the layout gate is pinned by a case that flips that tensor and nothing else. All
+ *     four operands are gated in graph_match; prepare() re-checks the output as defence in
+ *     depth for a caller that reaches the handler without having matched.
+ *   - SHAPE: per-operand dimension overrides sit beside the layout fields, so a single
+ *     operand can disagree with the problem shape on one axis while staying dense BSHD for
+ *     its own extents. That is what makes the cross-operand agreement clauses reachable.
  *   - RAGGED: gfx950 serves non-tile-multiple self-attention lengths through a separately
  *     compiled boundary-padding path; kernel_match's tile rule is conditional on `ragged`.
- *   - SLIDING WINDOW: accepted for self-attention shapes (rocke_bench SWA corpus).
- *   - NO block_m KMD field: baked module constant (256).
+ *   - SLIDING WINDOW: declined. No variant in this catalog carries a non-zero
+ *     sliding_window, so a windowed graph has nothing that could serve it.
+ *   - NO block_m KMD field: the KMD declares only what varies, and the tile does not. The
+ *     value the engine launches with is pinned to the shipped set, not baked into the
+ *     binary -- see note 1 in Gfx950AttentionDenseGeometry.hpp for what must change if a
+ *     variant ever moves it.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -86,6 +98,43 @@ std::vector<int64_t> bhsdStrides(int64_t heads, int64_t sequence, int64_t headSi
     return {heads * sequence * headSize, sequence * headSize, headSize, 1};
 }
 
+/// Elements of slack a real allocator leaves between token rows.
+constexpr int64_t ROW_PAD = 8;
+
+/// BSHD axis order with the per-token row stride padded past `heads * headSize`. The
+/// tensor is still token-major and still dense in the frontend's sense, but the matcher
+/// compares strides by exact equality, so the padding alone is disqualifying.
+std::vector<int64_t> paddedBshdStrides(int64_t heads, int64_t sequence, int64_t headSize)
+{
+    const int64_t rowStride = heads * headSize + ROW_PAD;
+    return {sequence * rowStride, headSize, rowStride, 1};
+}
+
+/// The stride spelling one operand carries. Chosen per tensor so a fixture can hand Q
+/// one layout and K, V or O another -- the mixed-layout graph is the hazard the
+/// per-operand clauses of the matcher exist to catch.
+enum class StrideLayout
+{
+    BSHD,
+    BHSD,
+    PADDED_BSHD
+};
+
+std::vector<int64_t>
+    stridesFor(StrideLayout layout, int64_t heads, int64_t sequence, int64_t headSize)
+{
+    switch(layout)
+    {
+    case StrideLayout::BHSD:
+        return bhsdStrides(heads, sequence, headSize);
+    case StrideLayout::PADDED_BSHD:
+        return paddedBshdStrides(heads, sequence, headSize);
+    case StrideLayout::BSHD:
+    default:
+        return bshdStrides(heads, sequence, headSize);
+    }
+}
+
 struct GraphSpec
 {
     int64_t batch = BATCH;
@@ -97,8 +146,27 @@ struct GraphSpec
     int64_t headSizeV = HEAD_SIZE;
     data_objects::DataType dataType = data_objects::DataType::BFLOAT16;
     std::optional<data_objects::DataType> vDataType;
-    bool bhsd = false;
+    StrideLayout qLayout = StrideLayout::BSHD;
+    StrideLayout kLayout = StrideLayout::BSHD;
+    StrideLayout vLayout = StrideLayout::BSHD;
+    StrideLayout oLayout = StrideLayout::BSHD;
     bool omitStrides = false;
+
+    // Per-operand dimension overrides, the dimension counterpart of the per-operand
+    // layout fields above. Each falls back to the shared value, so a spec that leaves
+    // them unset builds four operands that agree on every axis.
+    //
+    // They spell the one family of graphs the shared fields cannot: an operand whose
+    // extents disagree with the problem shape the kernel derives from Q and K. Strides
+    // follow the override, so a perturbed operand is still dense BSHD for its own
+    // extents and the layout gate is not what rejects the graph.
+    std::optional<int64_t> qBatch;
+    std::optional<int64_t> kBatch;
+    std::optional<int64_t> vBatch;
+    std::optional<int64_t> oBatch;
+    std::optional<int64_t> oNumHeads;
+    std::optional<int64_t> oSeqLen;
+    std::optional<int64_t> oHeadSize;
 
     // Mask. Defaults to top-left causal.
     std::optional<int64_t> leftBound = -1;
@@ -127,26 +195,40 @@ struct GraphSpec
         = data_objects::AttentionImplementation::AUTO;
 
     bool twoNodes = false;
+
+    /// Gives Q, K, V and O the same stride spelling.
+    void setEveryLayout(StrideLayout layout)
+    {
+        qLayout = layout;
+        kLayout = layout;
+        vLayout = layout;
+        oLayout = layout;
+    }
 };
 
 flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    const auto strides = [&](int64_t heads, int64_t sequence, int64_t headSize) {
-        return spec.bhsd ? bhsdStrides(heads, sequence, headSize)
-                         : bshdStrides(heads, sequence, headSize);
-    };
+    // The output's extents: heads and sequence follow Q, head size follows V, which is
+    // what an SDPA output carries. An override replaces the inherited value.
+    const int64_t outputHeads = spec.oNumHeads.value_or(spec.numQueryHeads);
+    const int64_t outputSeqLen = spec.oSeqLen.value_or(spec.seqLenQ);
+    const int64_t outputHeadSize = spec.oHeadSize.value_or(spec.headSizeV);
 
-    const std::vector<int64_t> qDims{spec.batch, spec.numQueryHeads, spec.seqLenQ, spec.headSize};
-    const std::vector<int64_t> kDims{spec.batch, spec.numKvHeads, spec.seqLenKv, spec.headSize};
-    const std::vector<int64_t> vDims{spec.batch, spec.numKvHeads, spec.seqLenKv, spec.headSizeV};
-    const std::vector<int64_t> oDims{spec.batch, spec.numQueryHeads, spec.seqLenQ, spec.headSizeV};
+    const std::vector<int64_t> qDims{
+        spec.qBatch.value_or(spec.batch), spec.numQueryHeads, spec.seqLenQ, spec.headSize};
+    const std::vector<int64_t> kDims{
+        spec.kBatch.value_or(spec.batch), spec.numKvHeads, spec.seqLenKv, spec.headSize};
+    const std::vector<int64_t> vDims{
+        spec.vBatch.value_or(spec.batch), spec.numKvHeads, spec.seqLenKv, spec.headSizeV};
+    const std::vector<int64_t> oDims{
+        spec.oBatch.value_or(spec.batch), outputHeads, outputSeqLen, outputHeadSize};
 
-    const auto qStrides = strides(spec.numQueryHeads, spec.seqLenQ, spec.headSize);
-    const auto kStrides = strides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
-    const auto vStrides = strides(spec.numKvHeads, spec.seqLenKv, spec.headSizeV);
-    const auto oStrides = strides(spec.numQueryHeads, spec.seqLenQ, spec.headSizeV);
+    const auto qStrides = stridesFor(spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
+    const auto kStrides = stridesFor(spec.kLayout, spec.numKvHeads, spec.seqLenKv, spec.headSize);
+    const auto vStrides = stridesFor(spec.vLayout, spec.numKvHeads, spec.seqLenKv, spec.headSizeV);
+    const auto oStrides = stridesFor(spec.oLayout, outputHeads, outputSeqLen, outputHeadSize);
 
     const std::vector<int64_t>* const qStridesPtr = spec.omitStrides ? nullptr : &qStrides;
     const std::vector<int64_t>* const kStridesPtr = spec.omitStrides ? nullptr : &kStrides;
@@ -280,9 +362,15 @@ std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
     return matcher(context);
 }
 
-/// KernelSpec matches our 10-field KMD schema: dtype, head_size, num_query_heads,
-/// num_kv_heads, batch, seqlen_q, seqlen_kv, causal, sliding_window, ragged.
-/// block_n is no longer a KMD field (fixed at 64 for all 150 variants).
+/// KernelSpec spells the fields the engine's KMD declares: dtype, head_size,
+/// num_query_heads, num_kv_heads, batch, seqlen_q, seqlen_kv, causal, sliding_window,
+/// ragged.
+///
+/// The KMD carries only what VARIES between candidates, so a knob the catalog holds at a
+/// single value -- block_m, block_n, waves_per_eu and the rest of the tuning surface --
+/// has no field here. A knob that starts varying must be added to the KMD first: without
+/// a field of its own, two candidates differing only in that knob complete to the same
+/// catalog key, and the loader keeps one of them and drops the other.
 struct KernelSpec
 {
     std::string dtype = "BF16";
@@ -404,7 +492,34 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdLayout)
 {
     // The kernel bakes BSHD strides and takes no stride kernargs; BHSD is wrong elements.
     GraphSpec spec;
-    spec.bhsd = true;
+    spec.setEveryLayout(StrideLayout::BHSD);
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdQueryAlone)
+{
+    // Q is the only operand flipped, so only the Q clause of the layout gate can stop it.
+    GraphSpec spec;
+    spec.qLayout = StrideLayout::BHSD;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdKeyAlone)
+{
+    // The mixed-layout graph: a BSHD query beside a BHSD key. Q sails through the layout
+    // gate, so the K clause is the only thing between this graph and a launch that reads
+    // K as if it were packed -- wrong elements in bounds, no fault and no status code.
+    GraphSpec spec;
+    spec.kLayout = StrideLayout::BHSD;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdValueAlone)
+{
+    // Same hazard on the value operand. V shares K's base and stride in the kernel builder,
+    // so a BHSD V is addressed with the packed stride the builder computed for K.
+    GraphSpec spec;
+    spec.vLayout = StrideLayout::BHSD;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
@@ -418,8 +533,51 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsSingleHeadUnderEitherStrideSpell
     EXPECT_TRUE(matchGraph(bshd).has_value());
 
     GraphSpec bhsd = bshd;
-    bhsd.bhsd = true;
+    bhsd.setEveryLayout(StrideLayout::BHSD);
     EXPECT_TRUE(matchGraph(bhsd).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedSequenceStride)
+{
+    // Far likelier in a real graph than a full transpose: BSHD axis ORDER, but token rows
+    // padded past heads * headSize. The kernel bakes heads * headSize as the row stride,
+    // so every row after the first is read off by the accumulated padding.
+    //
+    // batch = 1 makes the batch axis unit-extent and therefore exempt from the stride
+    // compare, which leaves the sequence-stride clause as the only thing that can catch
+    // this. Heads and sequence both stay above 1 so neither of those is exempted away.
+    GraphSpec packed;
+    packed.batch = 1;
+    EXPECT_TRUE(matchGraph(packed).has_value());
+
+    GraphSpec padded = packed;
+    padded.qLayout = StrideLayout::PADDED_BSHD;
+    EXPECT_FALSE(matchGraph(padded).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdOutput)
+{
+    // The layout gate covers all four operands. The kernel bakes BSHD for the epilogue
+    // exactly as it does for the inputs, so a differently-strided output is outside the
+    // capability set and declines here -- leaving the graph free for another engine
+    // rather than being claimed and then faulted on in prepare().
+    GraphSpec spec;
+    spec.oLayout = StrideLayout::BHSD;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)
+{
+    // Exact-equality rule, same as the inputs: a dense-but-padded row stride is not the
+    // layout the epilogue bakes. Batch is 1 so the batch axis is unit-extent and exempt,
+    // leaving the sequence stride as the only clause that can reject this graph.
+    GraphSpec spec;
+    spec.batch = 1;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec padded = spec;
+    padded.oLayout = StrideLayout::PADDED_BSHD;
+    EXPECT_FALSE(matchGraph(padded).has_value());
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBottomRightCausalWhenSeqLensDiffer)
@@ -472,6 +630,109 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
     GraphSpec spec;
     spec.headSizeV = 64;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Cross-operand shape agreement.
+//
+// The kernel derives ONE problem shape from Q and K and addresses every operand from
+// it -- there are no per-tensor extent kernargs. An operand whose dims disagree is
+// therefore walked with the wrong bounds: in-bounds wrong elements where the operand
+// is larger, an out-of-bounds write where the output is smaller.
+//
+// Each case perturbs exactly one axis of one operand and leaves that operand's strides
+// dense BSHD for its own extents, so the layout gate passes and the cross-tensor clause
+// named in the comment is the only thing that can decline the graph. Each is paired
+// with the unperturbed spec as its positive control.
+// ---------------------------------------------------------------------------
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputBatchMismatch)
+{
+    // Kills the O-vs-batch clause. The epilogue reuses the query base and stride, so an
+    // output allocated for a different batch count is written past its own end.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.oBatch = BATCH + 1;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputHeadCountMismatch)
+{
+    // Kills the O-vs-numQueryHeads clause. The grid is sized from Q's head count, so a
+    // narrower or wider output is indexed by head ids it has no storage for. Q, K and V
+    // are untouched, so the GQA divisibility check still sees Hq == Hkv.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.oNumHeads = HEADS * 2;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputSequenceLengthMismatch)
+{
+    // Kills the O-vs-seqLenQ clause. seqlen_q is a launch argument taken from Q, and the
+    // query block id indexes the output with it; an output of a different length is the
+    // same walk over the wrong extent.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.oSeqLen = SEQ * 2;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputHeadSizeMismatch)
+{
+    // Kills the O-vs-headSize clause, which compares O against Q's head size. headSizeV
+    // is left at the default so V still agrees with Q and the V clause -- the one
+    // DeclinesMismatchedHeadSizes pins -- cannot be what stops this graph.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.oHeadSize = 64;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyBatchMismatch)
+{
+    // Kills the K-vs-batch clause. batch comes from Q; V and O are left agreeing with it
+    // so their own batch clauses pass and K's is the only one left to fire.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.kBatch = BATCH + 1;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesValueBatchMismatch)
+{
+    // Kills the V-vs-batch clause. V shares K's base and stride in the kernel builder,
+    // so a V holding a different number of batches is read as if it held K's.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.vBatch = BATCH + 1;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesQueryBatchDisagreement)
+{
+    // The complementary direction: Q is the operand that disagrees, so the problem's
+    // batch moves and K, V and O are all left behind. V is compared first, so the V
+    // clause is what declines this one -- the case exists to show that the batch
+    // agreement is judged against Q, not against a majority of the operands.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.qBatch = BATCH + 1;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesNonDivisibleGqaGrouping)
@@ -639,22 +900,25 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedMmaCoreMode)
 }
 
 // ---------------------------------------------------------------------------
-// Sliding-window: accepted for self-attention, declined for cross-attention.
+// Sliding-window: declined outright. No variant in this catalog carries a
+// non-zero sliding_window, so a windowed graph has nothing that could serve it.
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseGraphMatch, AcceptsSlidingWindowForSelfAttention)
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesSlidingWindowForSelfAttention)
 {
-    // rocke_bench SWA shapes: self-attention only. The kernel bakes the windowed
-    // KV-loop bound at compile time as spec.sliding_window.
+    // Every shipped variant is sliding_window = 0. Serving a windowed graph on a
+    // full-length causal binary would attend the whole lower triangle instead of the
+    // requested band: wrong numerics, no error.
     GraphSpec spec;
-    spec.leftBound = 127; // sliding_window = left_bound + 1 = 128
+    spec.leftBound = 127;
     spec.rightBound = 0;
-    EXPECT_TRUE(matchGraph(spec).has_value());
+    EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesSlidingWindowForCrossAttention)
 {
-    // Cross-attention SWA cannot be verified by available reference executors.
+    // Declined for the same reason as the self-attention case above; the unequal
+    // sequence lengths are incidental, not the cause.
     GraphSpec spec;
     spec.seqLenKv = SEQ * 2;
     spec.leftBound = 127;
@@ -662,20 +926,18 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesSlidingWindowForCrossAttention)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, ServesAsSlidingWindowWhenDeprecatedBoolIsSetAlongBound)
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesWhenDeprecatedBoolIsSetAlongsideBound)
 {
-    // A REAL BOUND WINS OVER THE DEPRECATED BOOLEAN. When left_bound is set alongside
-    // causal_mask=true, the bound wins and this is treated as sliding-window, not plain
-    // causal. For self-attention (Sq==Skv), SWA is served. The ordering matters: without
-    // it, a windowed graph would be served as plain causal (attending the full triangle).
-    // This verifies that the bound-wins ordering fires by checking the graph IS accepted
-    // as SWA rather than rejected (since cross-attention SWA is declined, not self-att.).
+    // A REAL BOUND WINS OVER THE DEPRECATED BOOLEAN, and this case is the reason the
+    // ordering is load-bearing. causal_mask=true alone is served as plain causal; add
+    // left_bound and the graph is asking for a band the catalog cannot supply, so it
+    // must decline. If the boolean won instead, the window would be silently widened
+    // to the full triangle -- accepted, dispatched, and wrong.
     GraphSpec spec;
     spec.causalMaskDeprecated = true;
     spec.leftBound = 127;
     spec.rightBound = 0;
-    // seqLenQ == seqLenKv by default: this is self-attention SWA, which we serve.
-    EXPECT_TRUE(matchGraph(spec).has_value());
+    EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoBound)
@@ -794,8 +1056,8 @@ TEST(TestGfx950AttentionDenseKernelMatch, AcceptsARaggedCandidateForARaggedGraph
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateWhoseTileDoesNotDivideSeqLenKv)
 {
-    // block_n is fixed at 64 for all variants; tile alignment is checked against
-    // GFX950_ATTENTION_DENSE_BLOCK_N, not a KMD field.
+    // Tile alignment is checked against GFX950_ATTENTION_DENSE_BLOCK_N, a constant in the
+    // pack rather than a KMD field, because the tile does not vary across the catalog.
     GraphSpec graph;
     graph.seqLenKv = 288; // not a multiple of 64
     KernelSpec kernel;
@@ -915,15 +1177,36 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesWindowedCandidateForPlainGraph)
 // score
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseScore, ReturnsNeutralConstant)
+TEST(TestGfx950AttentionDenseScore, ScoresACandidateDeterministicallyAsAPositiveFiniteWeight)
 {
-    // All 150 variants share fixed BN64 tuning; no competing tuning variants exist.
-    // score() returns a neutral constant so no arbitrary ordering bias is introduced.
+    // The three properties the selector relies on, each true of a neutral placeholder and
+    // of a real tuning model alike:
+    //
+    //   DETERMINISM -- one candidate scored twice under the same context yields the same
+    //   number. A scorer that drifts between calls makes plan selection unreproducible,
+    //   and the same graph would pick different binaries on successive builds.
+    //
+    //   POSITIVITY -- the number is usable as a ranking weight rather than read as a
+    //   refusal. Applicability is kernel_match's job; score ranks what already matched.
+    //
+    //   FINITENESS -- NaN compares false against everything, so a single NaN score turns
+    //   the ranking into whatever order the sort happened to visit the candidates in.
+    //
+    // Deliberately NOT asserted: any ordering BETWEEN candidates. The scorer claims no
+    // ranking over them, so pinning one would pin an accident of the implementation.
     const KernelSpec bf16;
     KernelSpec fp16;
     fp16.dtype = "FP16";
-    EXPECT_EQ(scoreOf(bf16), scoreOf(fp16));
-    EXPECT_GT(scoreOf(bf16), 0.0);
+
+    for(const auto& candidate : {bf16, fp16})
+    {
+        const double score = scoreOf(candidate);
+        EXPECT_EQ(score, scoreOf(candidate))
+            << "candidate '" << candidate.dtype << "' scored differently on a repeat call";
+        EXPECT_GT(score, 0.0) << "candidate '" << candidate.dtype << "' scored non-positive";
+        EXPECT_TRUE(std::isfinite(score))
+            << "candidate '" << candidate.dtype << "' scored a non-finite value";
+    }
 }
 
 } // namespace

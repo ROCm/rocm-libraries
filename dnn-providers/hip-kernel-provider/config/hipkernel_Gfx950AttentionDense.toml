@@ -7,10 +7,10 @@ version = 1
 # All bundles for this engine are forward-only dense SDPA on gfx950.
 # No tolerance overrides needed: the forward pass uses the common SdpaAttributes
 # tolerance (tol::sdpa::getToleranceFwd<T>()).
-
-# Skip on non-gfx950 arches: the engine's packs arch-prune before the matcher,
-# so every case would skip anyway, but an explicit skip gives a clearer reason.
-[[skips]]
-archs = []
-filters = ["*"]
-reason = "hipkernel:Gfx950AttentionDense is gfx950-only; packs arch-prune on all other arches"
+#
+# No [[test_skips]] entry: the engine's packs arch-prune before the matcher, so a
+# non-gfx950 device declines through the ordinary path. An entry cannot express
+# "skip everywhere except gfx950" -- the schema has no negation, and an empty
+# `archs` list means EVERY arch (TestSettings.hpp: `entry.archs.empty() || ...`),
+# so a skip written that way would silence gfx950 too. ASM_SDPA_ENGINE.toml ships
+# no skips for the same reason.

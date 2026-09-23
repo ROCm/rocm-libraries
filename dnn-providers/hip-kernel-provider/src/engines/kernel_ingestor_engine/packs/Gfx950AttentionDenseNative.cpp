@@ -80,8 +80,10 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
 
-// KMD fields (10-field schema). block_n/waves_per_eu/persistent/num_persistent/wide_lds_dma
-// no longer vary across variants and are not in the KMD.
+// KMD fields (10-field schema). The KMD carries only what varies between candidates, so
+// block_m/block_n/waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every
+// shipped variant holds them at one value. A variant that moved any of them would have to
+// add it here first, or the candidates collide on the catalog key and the loader drops one.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
@@ -197,13 +199,15 @@ bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
            && axisOk(SEQ_AXIS, heads * headSize) && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
-/// Mask classification, mirroring asm_sdpa_engine/plans/SdpaPlanUtils.hpp::getMaskType.
+/// The mask kinds this engine serves. Narrower than
+/// asm_sdpa_engine/plans/SdpaPlanUtils.hpp::getMaskType, which also classifies windowed
+/// masks: no variant in this catalog carries a non-zero sliding_window, so a windowed
+/// graph has no spelling here and is declined outright.
 enum class MaskType : int
 {
     NO_MASK = 0,
     TOP_LEFT_CAUSAL = 1,
-    BOTTOM_RIGHT_CAUSAL = 2,
-    SLIDING_WINDOW = 3
+    BOTTOM_RIGHT_CAUSAL = 2
 };
 
 /**
@@ -235,10 +239,13 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
         return std::nullopt;
     }
 
-    // A bounded left edge is a window whatever the booleans say.
+    // A bounded left edge is a window whatever the booleans say, and no shipped variant
+    // carries a non-zero sliding_window. Serving one on a causal binary would apply the
+    // wrong mask with no error, so a windowed graph is declined here rather than left to
+    // fall through to a kernel comparison it could only fail.
     if(left != UNBOUNDED)
     {
-        return MaskType::SLIDING_WINDOW;
+        return std::nullopt;
     }
 
     if(topLeftDeprecated)
@@ -250,17 +257,15 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
         return MaskType::BOTTOM_RIGHT_CAUSAL;
     }
 
+    // Both bounds are now either unset or zero: unset on the right is an unmasked graph,
+    // zero is a diagonal with no band, whose alignment picks the causal corner.
     if(right == UNBOUNDED)
     {
         return MaskType::NO_MASK;
     }
-    if(right == 0)
-    {
-        return attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT
-                   ? MaskType::BOTTOM_RIGHT_CAUSAL
-                   : MaskType::TOP_LEFT_CAUSAL;
-    }
-    return MaskType::SLIDING_WINDOW;
+    return attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT
+               ? MaskType::BOTTOM_RIGHT_CAUSAL
+               : MaskType::TOP_LEFT_CAUSAL;
 }
 
 /// The kernel's dtype spelling for a graph dtype, or nullopt for one it cannot be built for.
@@ -342,8 +347,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         return std::nullopt;
     }
 
-    // --- 3. Total predicates, before anything indexes an axis. O is included for
-    // well-formedness only; its LAYOUT is checked in prepare().
+    // --- 3. Total predicates, before anything indexes an axis.
     if(!isWellFormedOperand(*q) || !isWellFormedOperand(*k) || !isWellFormedOperand(*v)
        || !isWellFormedOperand(*o))
     {
@@ -351,7 +355,13 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     }
 
     // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
-    if(!hasBshdStrides(*q) || !hasBshdStrides(*k) || !hasBshdStrides(*v))
+    //
+    // All four operands are held to the same rule here, O included. The kernel bakes
+    // BSHD for the epilogue exactly as it does for the inputs, so a differently-strided
+    // output is outside the capability set and a DECLINE is the honest answer: another
+    // engine may serve the graph. Accepting it and faulting later would claim a graph
+    // this engine cannot execute.
+    if(!hasBshdStrides(*q) || !hasBshdStrides(*k) || !hasBshdStrides(*v) || !hasBshdStrides(*o))
     {
         return std::nullopt;
     }
@@ -427,17 +437,20 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     }
 
     int64_t causal = 0;
-    int64_t slidingWindow = 0;
+
+    // Windowed graphs are declined in maskTypeFor, so every mask that reaches here is a
+    // full-length one. The zero is still bound and compared against the kernel's
+    // sliding_window field below, so a variant built with a window cannot be matched by a
+    // graph that does not ask for one.
+    const int64_t slidingWindow = 0;
 
     switch(*mask)
     {
     case MaskType::NO_MASK:
         causal = 0;
-        slidingWindow = 0;
         break;
     case MaskType::TOP_LEFT_CAUSAL:
         causal = 1;
-        slidingWindow = 0;
         break;
     case MaskType::BOTTOM_RIGHT_CAUSAL:
         // The kernel's causal clamp is TOP-LEFT. Bottom-right coincides EXACTLY when
@@ -447,26 +460,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
             return std::nullopt;
         }
         causal = 1;
-        slidingWindow = 0;
         break;
-    case MaskType::SLIDING_WINDOW:
-    {
-        // SWA is served for self-attention shapes only (Sq == Skv).
-        // sliding_window = left_bound + 1 (mining.md derivation).
-        const int64_t left
-            = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
-        if(left < 0)
-        {
-            return std::nullopt;
-        }
-        if(problem.seqLenQ != problem.seqLenKv)
-        {
-            return std::nullopt;
-        }
-        causal = 1;
-        slidingWindow = left + 1;
-        break;
-    }
     default:
         // Unrecognised mask kinds are declined, never served as if dense.
         return std::nullopt;
@@ -711,15 +705,34 @@ double scoreKernel(const MatchContext& /*context*/,
 ///
 /// All variants are non-persistent. use_sinks=False so no sink_ptr slot.
 /// ABI: (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv) -- 8 args.
+///
+/// NAMES ARE LOAD-BEARING, not decoration. requireSignatureMatch compares kind and size
+/// always, but names only when BOTH sides carry one. Kind and size alone cannot tell the
+/// four pointers apart, nor `scale` (f32) from `batch` (i32) -- both are by_value/4 -- so
+/// without names an operand permutation passes the check and the kernel reads the wrong
+/// buffers with no error and no status code. hkp_pack lowers these names into the kpack
+/// descriptor from the rocKE builder's own parameter list, so the recorded side carries
+/// them and the comparison is live. Keep these spellings identical to the Python
+/// (kernels/gfx950/attention_dense.py, the attention_dense_signature parameter list); a
+/// divergence here fails every dispatch rather than silently weakening the check.
+///
+/// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
+/// mismatch diagnostic prints the real layout beside the recorded one instead of eight
+/// zeroes that read as data.
 std::vector<KernelArgument> attentionDenseKernelSignature()
 {
-    static const KernelArgument s_buffer{
-        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
-    static const KernelArgument s_f32{"by_value", static_cast<uint32_t>(sizeof(float)), 0, ""};
-    static const KernelArgument s_i32{"by_value", static_cast<uint32_t>(sizeof(int32_t)), 0, ""};
+    constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
+    constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
+    constexpr auto F32 = static_cast<uint32_t>(sizeof(float));
 
-    // (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv)
-    return {s_buffer, s_buffer, s_buffer, s_buffer, s_f32, s_i32, s_i32, s_i32};
+    return {KernelArgument{"global_buffer", PTR, 0, "q_ptr"},
+            KernelArgument{"global_buffer", PTR, 8, "k_ptr"},
+            KernelArgument{"global_buffer", PTR, 16, "v_ptr"},
+            KernelArgument{"global_buffer", PTR, 24, "o_ptr"},
+            KernelArgument{"by_value", F32, 32, "scale"},
+            KernelArgument{"by_value", I32, 36, "batch"},
+            KernelArgument{"by_value", I32, 40, "seqlen_q"},
+            KernelArgument{"by_value", I32, 44, "seqlen_kv"}};
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
@@ -785,8 +798,10 @@ public:
     {
         const auto binding = attentionDenseBinding(bound);
 
-        // Deferred from graph_match: the output tensor's shape is inferred by the
-        // frontend and is not reliably populated during matching.
+        // graph_match is the gate for this: a non-BSHD output declines there and never
+        // reaches prepare(). This re-check is defence in depth for a caller that reaches
+        // the handler without having matched, which is why it faults rather than declines
+        // -- by this point the engine has been chosen and there is no one left to defer to.
         const auto* o = findTensor(context, binding.o);
         if(o == nullptr || !isWellFormedOperand(*o) || !hasBshdStrides(*o))
         {

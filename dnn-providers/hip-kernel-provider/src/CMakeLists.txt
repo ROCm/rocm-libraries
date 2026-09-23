@@ -320,7 +320,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-       AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+       AND HIPKERNELPROVIDER_ENABLE_ROCKE
        AND TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check

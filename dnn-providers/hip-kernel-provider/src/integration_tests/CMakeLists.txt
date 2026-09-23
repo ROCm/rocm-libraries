@@ -169,7 +169,7 @@ endif()
 
 # Register the gfx950 dense attention kpack engine integration test target.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-   AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+   AND HIPKERNELPROVIDER_ENABLE_ROCKE
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     add_external_integration_test_target(
         TARGET_NAME hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests
