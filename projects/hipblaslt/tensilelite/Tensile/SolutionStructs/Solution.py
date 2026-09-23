@@ -1204,9 +1204,15 @@ class Solution(collections.abc.Mapping):
       else:
         # SourceSwap stays on. Disable fold-only features (newer-upstream defaults that
         # never existed on the ss1 base) that are incompatible with the SourceSwap
-        # interleaved local-read map and its store path. Leaving them at their fold
-        # defaults -- notably PreloopGRClusterSize=6 -- reorders the preloop global reads
-        # / store and corrupts the SourceSwap store addressing (illegal memory access).
+        # interleaved local-read map and its own SubtileStoreInNLL store path. Left at
+        # their fold defaults they alter the preloop global-read schedule / store and
+        # produce numerically wrong output (verified: removing these gates makes the SS1
+        # equality solutions return nan / ~1e32 instead of norm_error=0). Both the
+        # store-path pair (PostLoopStoreInNll/DPPStoreFold) and the preloop/WG pair
+        # (PreloopGRClusterSize/WGMBitSwizzle, plus PreloopGRReorder gated in
+        # LogicalScheduler) are independently load-bearing -- gating only one pair still
+        # yields garbage. DPPStoreFold in particular is not merely a PLSIN rider; it must
+        # be off for SourceSwap on its own.
         state["PreloopGRClusterSize"] = -1   # off (fold default 6)
         state["PostLoopStoreInNll"] = False
         state["DPPStoreFold"] = False
