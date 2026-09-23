@@ -31,6 +31,10 @@ The RPP project is located in `ROCm/rocm-libraries <https://github.com/ROCm/rocm
   .. grid-item-card:: How to
 
     * :doc:`Run a tensor augmentation <./how-to/rpp-run-tensor-augmentation>`
+    
+  .. grid-item-card:: Examples
+
+    * `RPP examples <https://github.com/ROCm/rocm-examples/tree/amd-staging/Libraries/RPP>`_
 
   .. grid-item-card:: Reference
 
