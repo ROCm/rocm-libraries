@@ -221,7 +221,10 @@ def build_pcfg(kernels_dir):
         has_gfx = n_prob == NUM_BASE_PROB_FEATURES + 1 and prob_cols[-1] == "gfx_code"
         base_ok = n_prob == NUM_BASE_PROB_FEATURES
         if not (base_ok or has_gfx) or n_feat != n_prob + n_arg:
-            print("skip %s (schema mismatch prob=%d arg=%d feat=%d)" % (name, n_prob, n_arg, n_feat))
+            print(
+                "skip %s (schema mismatch prob=%d arg=%d feat=%d)"
+                % (name, n_prob, n_arg, n_feat)
+            )
             continue
         model_file = kernels_dir / ("lgbm_pcfg_%s_model.txt" % name)
         if not model_file.exists():
@@ -254,9 +257,7 @@ def build_pcfg(kernels_dir):
             sec += _u32(len(valid))
             for c in valid:
                 sec += _str(c["desc"])
-                vals = [
-                    (math.nan if a is None else float(a)) for a in c["args"]
-                ]
+                vals = [(math.nan if a is None else float(a)) for a in c["args"]]
                 sec += _arr("d", vals)
         sections.append((name, bytes(sec)))
 

@@ -54,7 +54,7 @@ std::vector<char> ReadRange(const fs::path& path, std::uint64_t offset, std::uin
 
 } // namespace
 
-LgbmPcfgMetadata::LgbmPcfgMetadata()
+LgbmPcfgMetadata::LgbmPcfgMetadata() : bin_path(GetSystemDbPath() / "lgbm_pcfg.bin")
 {
     // Single self-describing binary bundle (see lgbm_binary.hpp and
     // script/convert_lgbm_binary.py): "MIOPCFG1" + u32 version + u32 num_solvers,
@@ -62,8 +62,6 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
     // feature counts, a FOREST block, and the candidate buckets. Only the
     // header+directory is read here (a small prefix); each section is read from
     // disk and parsed lazily in Find().
-    bin_path = GetSystemDbPath() / "lgbm_pcfg.bin";
-
     std::uint64_t file_size = 0;
     {
         std::ifstream in(bin_path, std::ios::binary | std::ios::ate);

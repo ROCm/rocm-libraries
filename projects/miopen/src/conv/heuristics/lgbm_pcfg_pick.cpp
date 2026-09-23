@@ -273,8 +273,8 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
 
     std::vector<std::string> ranked;
     {
-        ScopedTimeLogger t("lgbm_pcfg.PickConfig.RankBucket(" +
-                           std::to_string(bit->second.size()) + " cands)");
+        ScopedTimeLogger t("lgbm_pcfg.PickConfig.RankBucket(" + std::to_string(bit->second.size()) +
+                           " cands)");
         ranked = RankBucket(*model->forest, *model, prefix, bit->second);
     }
     if(!ranked.empty())

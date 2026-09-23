@@ -164,7 +164,7 @@ const LgbmForest& LgbmForest::GetRank()
         catch(const std::exception& e)
         {
             MIOPEN_LOG_W("LGBM forest: cannot load lgbm_rank.bin (" << e.what()
-                                                                   << "); picker will abstain");
+                                                                    << "); picker will abstain");
             return std::vector<char>{};
         }
     }();

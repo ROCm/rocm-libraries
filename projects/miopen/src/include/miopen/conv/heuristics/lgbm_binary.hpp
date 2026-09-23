@@ -80,7 +80,7 @@ public:
         const std::uint16_t len = ReadU16();
         if(!Take(len))
             return {};
-        return std::string(data_ + pos_ - len, len);
+        return {data_ + pos_ - len, len};
     }
 
     // Compare the next `n` bytes against a magic literal without advancing on a
