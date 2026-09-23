@@ -14,7 +14,7 @@ not imply that rocKE exposes every instruction.
 - [RDNA3](#rdna3)
 - [RDNA3.5](#rdna35)
 - [RDNA4](#rdna4)
-- [gfx1250](#gfx1250)
+- [CDNA5](#cdna5)
 - [Cross-architecture capability summary](#cross-architecture-capability-summary)
 
 ## Sources and reproduction
@@ -37,7 +37,7 @@ including official aliases. This check does not establish table completeness.
 | RDNA3 | WMMA | `amdgpu_isa_rdna3.xml` |
 | RDNA3.5 / gfx1151 | WMMA | `amdgpu_isa_rdna3_5.xml` |
 | RDNA4 / gfx1201 | WMMA, SWMMAC | `amdgpu_isa_rdna4.xml` |
-| gfx1250 | WMMA, SWMMAC | `amdgpu_isa_cdna5.xml` |
+| CDNA5 / gfx1250 | WMMA, SWMMAC | `amdgpu_isa_cdna5.xml` |
 
 The last XML identifies itself as **AMD CDNA 5** in
 `ISA/Architecture/ArchitectureName`. rocKE's gfx1250 catalog entry uses
@@ -364,9 +364,9 @@ No XF32.
 
 ---
 
-## gfx1250
+## CDNA5
 
-This part uses the **WMMA / SWMMAC** naming (not MFMA), consistent with rocKE's
+The gfx1250 target uses the **WMMA / SWMMAC** naming (not MFMA), consistent with rocKE's
 `arch_specs.json` entry for `gfx1250` (`family: "cdna"`, `target_family:
 "gfx12_cdna"`, `has_mfma: false`, `has_wmma: true`). It expands supported shapes and
 formats, and adds **F8F6F4/FP4** with per-block scaling (`V_WMMA_SCALE*` /
@@ -447,7 +447,7 @@ per-block **scale** operands. **No native XF32/TF32 or F64 matrix instruction.**
 
 ## Cross-architecture capability summary
 
-| Feature | CDNA1 | CDNA2 | CDNA3 | CDNA4 | RDNA3 | RDNA3.5 | RDNA4 | gfx1250 |
+| Feature | CDNA1 | CDNA2 | CDNA3 | CDNA4 | RDNA3 | RDNA3.5 | RDNA4 | CDNA5 |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | Engine | MFMA | MFMA | MFMA | MFMA | WMMA | WMMA | WMMA | WMMA |
 | F32 accum | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
