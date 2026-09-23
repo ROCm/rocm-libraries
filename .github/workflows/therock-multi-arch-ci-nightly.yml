@@ -96,6 +96,9 @@ jobs:
   linux_code_coverage_build_and_test:
     name: Linux::CodeCoverage::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
     needs: [linux_build_and_test]
+    # Run once linux_build_and_test finishes regardless of pass/fail (tests can
+    # fail), but skip if that job was skipped or the run was cancelled.
+    if: ${{ !cancelled() && needs.linux_build_and_test.result != 'skipped' }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_coverage_linux.yml@users/jainprad/codecoverage-workflows-therock
     secrets: inherit
     with:
