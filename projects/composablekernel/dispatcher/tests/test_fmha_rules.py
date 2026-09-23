@@ -63,7 +63,10 @@ def _base_config(
 
 
 def _gfx11_batch_prefill_config(pipeline="batch_prefill_gfx11", **sig_overrides):
-    """Config on the gfx1100 Independent-V predicate; overrides break one clause."""
+    """Config on the gfx1100 emission envelope; overrides break one clause.
+
+    hdim 128 uses M128/block256; hdim 96 and 64 use M64/block128.
+    """
     sig_overrides.setdefault("paged_kv", True)
     sig_overrides.setdefault("page_size", 16)
     sig_overrides.setdefault("kv_memory_layout", "linear")
@@ -73,9 +76,12 @@ def _gfx11_batch_prefill_config(pipeline="batch_prefill_gfx11", **sig_overrides)
         pipeline=pipeline,
         **sig_overrides,
     )
+    hdim = cfg["signature"]["hdim_q"]
+    m0 = 128 if hdim == 128 else 64
+    waves = m0 * 2 // 32
     cfg["signature"]["mode"] = "group"
-    cfg["algorithm"]["tile"] = [128, 32, 32, 128, 32, 128]
-    cfg["algorithm"]["wave"] = [8, 1, 1, 8, 1, 1, 1, 1, 1]
+    cfg["algorithm"]["tile"] = [m0, 32, 32, cfg["signature"]["hdim_v"], 32, hdim]
+    cfg["algorithm"]["wave"] = [waves, 1, 1, waves, 1, 1, 1, 1, 1]
     cfg["algorithm"]["warp"] = [16, 16, 16, 16, 16, 16, 16, 16, 16]
     return cfg
 
@@ -207,11 +213,54 @@ class TestValidateConfig(unittest.TestCase):
         self.assertFalse(r.valid)
         self.assertTrue(any("linear" in e for e in r.errors), r.errors)
 
-    def test_gfx1100_batch_prefill_gfx11_rejects_non_128_hdim(self):
+    def test_gfx1100_batch_prefill_gfx11_accepts_native_hdims(self):
+        """128 rides Independent-V; 96 and 64 ride the fallback gemm1 on M64."""
+        for hdim in (128, 96, 64):
+            with self.subTest(hdim=hdim):
+                cfg = _gfx11_batch_prefill_config(hdim_q=hdim, hdim_v=hdim)
+                r = validate_config(cfg, SPECS)
+                self.assertTrue(r.valid, r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_padded_hdim_pair(self):
+        """(96, 128) is the padded pair these native instances replace."""
         cfg = _gfx11_batch_prefill_config(hdim_q=96, hdim_v=128)
         r = validate_config(cfg, SPECS)
         self.assertFalse(r.valid)
-        self.assertTrue(any("hdim 128" in e for e in r.errors), r.errors)
+        self.assertTrue(any("hdim pairs" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_padded_qk_tile(self):
+        """hdim 96 must carry QKHeaddim 96, not ceil_to_qualified_tile_length 128."""
+        cfg = _gfx11_batch_prefill_config(hdim_q=96, hdim_v=96)
+        tile = list(cfg["algorithm"]["tile"])
+        tile[5] = 128
+        cfg["algorithm"]["tile"] = tile
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("QKHeaddim=96" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_soft_cap(self):
+        """gfx1100 builds with FAST_EXP2=0, which the pipeline asserts against."""
+        cfg = _gfx11_batch_prefill_config(logits=True)
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("soft cap" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_unbalanced_gemm1_warps(self):
+        """Mirror of TileFmhaShape's NumGemm1Warps % NumGemm0Warps == 0."""
+        cfg = _gfx11_batch_prefill_config(hdim_q=96, hdim_v=96)
+        cfg["algorithm"]["wave"] = [4, 1, 1, 2, 1, 1, 1, 1, 1]
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("gemm1 warp count" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_m128_for_hdim96(self):
+        """Each head dim is pinned to the one M0 that has device evidence."""
+        cfg = _gfx11_batch_prefill_config(hdim_q=96, hdim_v=96)
+        cfg["algorithm"]["tile"] = [128, 32, 32, 96, 32, 96]
+        cfg["algorithm"]["wave"] = [8, 1, 1, 8, 1, 1, 1, 1, 1]
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("block size 128" in e for e in r.errors), r.errors)
 
     def test_gfx1100_batch_prefill_gfx11_rejects_dropout(self):
         cfg = _gfx11_batch_prefill_config(dropout=True)

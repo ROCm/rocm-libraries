@@ -255,10 +255,17 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
     static_assert(kQLoadOnce == Policy::QLoadOnce);
 #if defined(__gfx11__)
     // Device-only: kBlockSize uses get_warp_size(), which is 64 on the host pass.
-    // The gfx11 policy has no fallback gemm1 - ARegBSmem cannot consume a gfx11 WMMA P tile.
-    static_assert(!Policy::kUseSyncKLoad || Policy::template UseIndependentVBuffer<Problem>(),
-                  "batch_prefill_gfx11 requires block size 256, N0=32, K1=32, N1=128, "
-                  "linear KV layout and no dropout");
+    // Keyed on kUseSyncKLoad, not on the architecture: no CDNA instance sets it.
+    // These are the K-staging requirements; the gemm1 shape is not among them,
+    // because outside UseIndependentVBuffer the pipeline permutes P into the
+    // fallback gemm1's A distribution instead.
+    static_assert(!Policy::kUseSyncKLoad ||
+                      (Problem::kKVMemoryLayout ==
+                           BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT &&
+                       Problem::BlockFmhaShape::kN0 == 32 && Problem::BlockFmhaShape::kK0 == 32 &&
+                       Problem::BlockFmhaShape::kK1 == 32 && !Problem::kHasDropout),
+                  "batch_prefill_gfx11 requires N0=32, K0=K1=32, linear KV layout "
+                  "and no dropout");
 #endif
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
