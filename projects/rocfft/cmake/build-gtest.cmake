@@ -35,7 +35,13 @@ set( _gtest_main_lib
   ${_gtest_prefix}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX} )
 
 if( NOT TARGET googletest )
- 
+
+  if(NOT ALLOW_FETCH_DEPS AND NOT DEFINED GTEST_SRC_URL)
+    # If fetching external dependencies isn't allowed, the user must specify a (presumably internal)
+    # URL.  Otherwise, fail configuration.
+    message(FATAL_ERROR "ALLOW_FETCH_DEPS is set, but GTEST_SRC_URL was not provided")
+  endif()
+  
   set(GTEST_SRC_URL
     https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
     CACHE STRING
