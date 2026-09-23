@@ -47,7 +47,8 @@ BenchmarkProblems:
     - SourceSwap: [true]
     - StaggerU: [0]
     - GlobalSplitU: [0]
-    - StreamK: [3]
+    - TileProcessingStrategy: [StreamK]
+    - WorkAssignment: [StaticGrid]
     - Groups:
       - 
         - NonTemporalC: 0

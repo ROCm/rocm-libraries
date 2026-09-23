@@ -366,7 +366,7 @@ namespace TensileLite
         }
 
         // One-shot notice when uniform-summation-order grid steering displaces a developer
-        // override (skFixedGrid) or production CU knobs (skMaxCUs / skGridMultiplier).
+        // override (persistentFixedGrid) or production CU knobs (persistentMaxCUs / persistentGridMultiplier).
         void warnStreamKUniformityGridSnapOnce(size_t g0, size_t gStar)
         {
             static std::once_flag warnedFlag;
@@ -375,7 +375,7 @@ namespace TensileLite
                              "from "
                           << g0 << " to " << gStar
                           << " (never upward) so the launch stays row-uniform; "
-                             "skFixedGrid / skMaxCUs / skGridMultiplier act as hints under "
+                             "persistentFixedGrid / persistentMaxCUs / persistentGridMultiplier act as hints under "
                              "uniform summation order.\n";
             });
         }
@@ -4871,7 +4871,7 @@ namespace TensileLite
         //     tiles, or ItersPerTile / F below MinItersPerCU) and falls back to
         //     the all-full grid == tiles;
         //   * the same snap sees g0 < tiles and snaps up to tiles;
-        //   * skFixedGrid / skMaxCUs / skGridMultiplier / the analytical grid
+        //   * persistentFixedGrid / persistentMaxCUs / persistentGridMultiplier / the analytical grid
         //     land anywhere in [1, 2 * tiles).
         //
         // Tree reduction is always expressible at those grids, so fall back to
@@ -5089,7 +5089,7 @@ namespace TensileLite
             if(gsu > 1)
                 throw std::runtime_error("DataParallel persistent execution does not support GlobalSplitU > 1");
             launch = resolvePersistentSettings(problem, hardware);
-            if(Debug::Instance().printStreamKLaunchSummary())
+            if(Debug::Instance().printPersistentLaunchSummary())
                 printPersistentLaunchSummary(std::cerr, problem, launch);
         }
         else if(sizeMapping.isStreamK() || customStreamK)
@@ -5182,7 +5182,7 @@ namespace TensileLite
             // the guard already rejected. Grid and reduction are overwritten from
             // the values solve() launches with (post all fallbacks, post
             // reconciliation), so the summary cannot drift from the real launch.
-            if(Debug::Instance().printStreamKLaunchSummary())
+            if(Debug::Instance().printPersistentLaunchSummary())
             {
                 StreamKDecisions skDecisions = computeStreamKDecisions(problem, hardware);
                 skDecisions.finalGrid = launch.grid;
@@ -5681,11 +5681,11 @@ namespace TensileLite
                 // the caller's buffer: the launch reserves partial tiles only
                 // when they fit the workspace it is given and otherwise falls
                 // back to DP, so an under-report costs the partial-tile path,
-                // not memory safety. Absent a fixed grid (skFixedGrid == 0) the
+                // not memory safety. Absent a fixed grid (persistentFixedGrid == 0) the
                 // reconcile below erases the divergence for these modes anyway --
                 // they take the work-item branch of getPersistentGridImpl(), which
                 // ignores the strategy and yields skGrid <= tiles, so splitk < 2
-                // demotes the query to tree too. Under skFixedGrid the grid is
+                // demotes the query to tree too. Under persistentFixedGrid the grid is
                 // the user's and the divergence can persist.
                 auto   reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getPersistentGridImpl(*this,
@@ -5891,7 +5891,7 @@ namespace TensileLite
         }
         else
         {
-            if(static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid)
+            if(static_cast<origami::grid_selection_t>(pAMDGPU->persistentDynamicGrid)
                != origami::grid_selection_t::k_split_aware)
             {
                 return reductionStrat;
@@ -5937,7 +5937,7 @@ namespace TensileLite
                 origami_problem,
                 *(hipAMDGPU->analyticalHardware),
                 origami_config,
-                static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
+                static_cast<origami::grid_selection_t>(pAMDGPU->persistentDynamicGrid));
         }
 
         // Under USO + static two-tile packing, admit origami's parallel
@@ -6792,13 +6792,13 @@ namespace TensileLite
             size_t cuCount = pAMDGPU->computeUnitCount;
 
             // User-specified grid size for persistent execution.
-            if(pAMDGPU->skFixedGrid > 0)
+            if(pAMDGPU->persistentFixedGrid > 0)
             {
-                grid = pAMDGPU->skFixedGrid;
+                grid = pAMDGPU->persistentFixedGrid;
                 if(outFixedGridUsed)
                     *outFixedGridUsed = true;
             }
-            else if(pAMDGPU->skDynamicGrid > 0)
+            else if(pAMDGPU->persistentDynamicGrid > 0)
             {
                 if(self.sizeMapping.hasDynamicAssignment() || sk5DynamicSubMode())
                 {
@@ -6808,9 +6808,9 @@ namespace TensileLite
                         = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1));
                     auto kernelOccupancy = std::min(occupancy, size_t{3});
                     auto maxGrid         = cuCount * kernelOccupancy;
-                    if(pAMDGPU->skMaxCUs > 0)
+                    if(pAMDGPU->persistentMaxCUs > 0)
                     {
-                        maxGrid = std::min(maxGrid, static_cast<size_t>(pAMDGPU->skMaxCUs));
+                        maxGrid = std::min(maxGrid, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
                     }
                     // TODO Calculate total work items when dynamic queue works with stream-k
                     // For now, all work items are full tiles
@@ -6840,10 +6840,10 @@ namespace TensileLite
 
                     // Fold both CU budgets into origami_problem.num_cus (the single
                     // source of truth select_grid_size derives its budget from).
-                    // smCountTarget and skMaxCUs each use 0 to mean "no cap"; take the
+                    // smCountTarget and persistentMaxCUs each use 0 to mean "no cap"; take the
                     // tighter (minimum) positive cap so the analytical path honors both.
                     auto   smt       = problem.getParams().smCountTarget(); // int, 0 = no cap
-                    auto   maxCUs       = pAMDGPU->skMaxCUs;                   // int, 0 = no cap
+                    auto   maxCUs       = pAMDGPU->persistentMaxCUs;                   // int, 0 = no cap
                     size_t budget    = 0;                                  // 0 = use all CUs
                     if(smt > 0)
                         budget = static_cast<size_t>(smt);
@@ -6897,21 +6897,21 @@ namespace TensileLite
                         origami_problem,
                         *(hipAMDGPU->analyticalHardware),
                         origami_config,
-                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
+                        static_cast<origami::grid_selection_t>(pAMDGPU->persistentDynamicGrid));
                 }
             }
             // Limit the CUs persistent execution uses to the hardware or specified maximum,
             // whichever is minimum.
-            else if(pAMDGPU->skMaxCUs > 0)
+            else if(pAMDGPU->persistentMaxCUs > 0)
             {
-                grid = std::min(cuCount, static_cast<size_t>(pAMDGPU->skMaxCUs));
+                grid = std::min(cuCount, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
             }
 
             // Multiply the cuCount with a constant factor (c), and launch
             // c * cuCount number of persistent workgroups.
-            else if(pAMDGPU->skGridMultiplier > 1)
+            else if(pAMDGPU->persistentGridMultiplier > 1)
             {
-                grid = cuCount * pAMDGPU->skGridMultiplier;
+                grid = cuCount * pAMDGPU->persistentGridMultiplier;
             }
 
             // If no option is specified, launch exactly cuCount worth of workgroups.
@@ -7040,8 +7040,8 @@ namespace TensileLite
                     }
 
                     if(grid != g0
-                       && (pAMDGPU->skFixedGrid > 0 || pAMDGPU->skMaxCUs > 0
-                           || pAMDGPU->skGridMultiplier > 1))
+                       && (pAMDGPU->persistentFixedGrid > 0 || pAMDGPU->persistentMaxCUs > 0
+                           || pAMDGPU->persistentGridMultiplier > 1))
                     {
                         warnStreamKUniformityGridSnapOnce(g0, grid);
                     }
@@ -7393,7 +7393,7 @@ namespace TensileLite
         // the workspace-DP fallback runs last (in computeStreamKDecisions, after
         // getPersistentGridImpl returns); inside getPersistentGridImpl the ForceDPOnly cluster
         // multicast clamp runs after the tree-bounds fallback, which in turn runs
-        // after the skFixedGrid override. So the first matching branch below names
+        // after the persistentFixedGrid override. So the first matching branch below names
         // the clamp that actually produced finalGrid.
         const char* gridChangedBy = "none";
         if(d.workspaceDPFallbackFired)

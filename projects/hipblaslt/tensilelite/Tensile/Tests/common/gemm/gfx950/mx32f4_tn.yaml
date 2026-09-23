@@ -101,7 +101,8 @@ BenchmarkProblems:
 #        - NumElementsPerBatchStore: [0]
 #        - StorePriorityOpt: [0]
 #        - StaggerU: [0]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -164,7 +165,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToLds: [0,1,2,3]
         - Use64bShadowLimitMX: [false, true]
-        - StreamK: [0,3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

@@ -1220,7 +1220,7 @@ namespace
 
     // A mock device rather than the real one: nothing below depends on the
     // hardware, and this keeps the cases running where there is no GPU.
-    // skDynamicGrid is forced off so StreamK resolution stays on the
+    // persistentDynamicGrid is forced off so StreamK resolution stays on the
     // non-analytical path (plain AMDGPU has no origami hardware). The
     // AMDGPU constructor reads TENSILE_STREAMK_DYNAMIC_GRID (default 6 =
     // k_split_aware), so leaving the field at its post-construction value
@@ -1229,7 +1229,7 @@ namespace
     {
         auto hardware = TensileLite::AMDGPU(
             TensileLite::AMDGPU::Processor::gfx950, 256, "row_uniformity_probe");
-        hardware.skDynamicGrid = 0;
+        hardware.persistentDynamicGrid = 0;
         return hardware;
     }
 
@@ -1289,7 +1289,7 @@ namespace
         auto       solution = probeSolution();
         auto       problem  = probeProblem();
 
-        ASSERT_EQ(hardware.skDynamicGrid, 0)
+        ASSERT_EQ(hardware.persistentDynamicGrid, 0)
             << "probe AMDGPU must keep StreamK on the non-analytical path; "
                "plain AMDGPU has no origami hardware";
         ASSERT_NE(solution->sizeMapping.workGroupMapping, 0)
@@ -1398,7 +1398,6 @@ namespace
         const auto hardware                  = probeHardware();
         auto       solution                  = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->sizeMapping.workGroupSize = TensileLite::dim3(256, 1, 16);
         solution->sizeMapping.LocalSplitU   = 1;
 
@@ -1431,7 +1430,6 @@ namespace
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->internalArgsSupport.staggerU = false;
         solution->sizeMapping.staggerU         = 16;
         auto problem                           = probeProblem();
@@ -1466,7 +1464,6 @@ namespace
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->internalArgsSupport.staggerU = false;
         solution->sizeMapping.staggerU         = 16;
         solution->customKernel.name            = "DummyCustomKernel";
@@ -1486,7 +1483,6 @@ namespace
         const auto hardware                      = probeHardware();
         auto       solution                      = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         solution->sizeMapping.adaptiveGemmGSUA   = 1;
         solution->sizeMapping.globalAccumulation = 0;
         solution->sizeMapping.globalSplitU       = 4;
@@ -1518,7 +1514,7 @@ namespace
         solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
         auto problem                  = probeProblem();
 
-        ASSERT_EQ(hardware.skDynamicGrid, 0);
+        ASSERT_EQ(hardware.persistentDynamicGrid, 0);
         const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
         ASSERT_EQ(tiles, 64u) << "1024x1024 with MT 128x128";
         const size_t grid
@@ -1543,7 +1539,7 @@ namespace
     TEST(RowUniformityStreamKRejection_pre_checkin, FlagClampedDynamicGridFailsClosed)
     {
         auto hardware                 = probeHardware();
-        hardware.skFixedGrid          = 4096;
+        hardware.persistentFixedGrid          = 4096;
         auto solution                 = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
         solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
@@ -1556,7 +1552,7 @@ namespace
 
         const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
         ASSERT_EQ(tiles, 100u) << "1280x1280 with MT 128x128";
-        ASSERT_GT(static_cast<size_t>(hardware.skFixedGrid),
+        ASSERT_GT(static_cast<size_t>(hardware.persistentFixedGrid),
                   static_cast<size_t>(TensileLite::StreamKFlagElements))
             << "the requested grid must be above the bound so the clamp is what fires";
 
@@ -1611,7 +1607,6 @@ namespace
         const auto hardware           = probeHardware();
         auto       solution           = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
         auto problem                  = probeProblem();
         problem.setGroupedGemm(true);
 
@@ -2107,11 +2102,11 @@ namespace
         device.computeUnitCount   = 256;
         device.deviceName         = "row_uniformity_grid_steering";
         device.analyticalHardware = hw;
-        device.skDynamicGrid
+        device.persistentDynamicGrid
             = static_cast<int>(origami::grid_selection_t::k_split_aware);
-        device.skFixedGrid      = 0;
-        device.skMaxCUs         = 0;
-        device.skGridMultiplier = 1;
+        device.persistentFixedGrid      = 0;
+        device.persistentMaxCUs         = 0;
+        device.persistentGridMultiplier = 1;
         return device;
     }
 
@@ -2195,8 +2190,8 @@ namespace
     {
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        device.skDynamicGrid = 0;
-        device.skFixedGrid   = 10;
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid   = 10;
 
         auto         problem = uniformityGemm(512, 512, 1024);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
@@ -2212,8 +2207,8 @@ namespace
     {
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        device.skDynamicGrid = 0;
-        device.skFixedGrid   = 8;
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid   = 8;
 
         auto         problem = uniformityGemm(512, 512, 1024);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
@@ -2230,8 +2225,8 @@ namespace
         // Without perTileExtraIters: snap to T. With capability: keep T*F.
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        device.skDynamicGrid = 0;
-        device.skFixedGrid   = 8;
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid   = 8;
 
         auto         problem = uniformityGemm(256, 256, 1088);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
@@ -2260,8 +2255,8 @@ namespace
     {
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        device.skDynamicGrid = 0;
-        device.skFixedGrid   = 8;
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid   = 8;
 
         auto         problem = uniformityGemm(256, 256, 1088);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
@@ -2284,9 +2279,9 @@ namespace
     {
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        device.skFixedGrid      = 0;
-        device.skMaxCUs         = 0;
-        device.skGridMultiplier = 1;
+        device.persistentFixedGrid      = 0;
+        device.persistentMaxCUs         = 0;
+        device.persistentGridMultiplier = 1;
 
         auto         problem = uniformityGemm(512, 512, 8192);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
@@ -2343,9 +2338,9 @@ namespace
         auto device = uniformitySteeringDevice();
         // No override knobs: the grid must come from the CU-bounded analytical
         // selection, which is what "baseline" means here.
-        device.skFixedGrid      = 0;
-        device.skMaxCUs         = 0;
-        device.skGridMultiplier = 1;
+        device.persistentFixedGrid      = 0;
+        device.persistentMaxCUs         = 0;
+        device.persistentGridMultiplier = 1;
 
         auto problem = uniformityGemm(9984, 2048, 128);
         // Tile scheduling ON -- the attribute independent of uniform summation order.
@@ -2443,8 +2438,8 @@ namespace
     TEST(RowUniformityGridSteering_pre_checkin, MinItersPerCUBoundaryIsEight)
     {
         auto device          = uniformitySteeringDevice();
-        device.skDynamicGrid = 0;
-        device.skFixedGrid   = 8; // g0 = 8 = T * 2 with T = 4
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid   = 8; // g0 = 8 = T * 2 with T = 4
 
         // K=1024, DepthU=64 -> I = 16, so I / F = 8 sits exactly on the floor.
         {
@@ -2504,8 +2499,8 @@ namespace
         // MinItersPerCU, so the flag bound is the only thing separating them.
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        device.skDynamicGrid = 0;
-        device.skFixedGrid   = 3200;
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid   = 3200;
 
         auto problem = uniformityGemm(1280, 1280, 16384);
         // Large enough that partialTileSize() never rejects a candidate here;
@@ -2577,8 +2572,8 @@ namespace
         // T=4096 (8192x8192, MT 128x128) is already twice the bound.
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        device.skDynamicGrid = 0;
-        device.skFixedGrid   = 8192; // g0 = T*2
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid   = 8192; // g0 = T*2
 
         auto problem = uniformityGemm(8192, 8192, 1024);
         problem.setWorkspaceSize(1ull << 30);
@@ -2624,8 +2619,8 @@ namespace
     {
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        device.skDynamicGrid = 0;
-        device.skFixedGrid   = 3200;
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid   = 3200;
 
         auto problem = uniformityGemm(1280, 1280, 16384);
         problem.setWorkspaceSize(1ull << 30);

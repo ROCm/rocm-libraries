@@ -29,7 +29,7 @@ _TESTS_ROOT = os.path.dirname(_COMMON_DIR)
 # A config tagged ``ffm_fail`` and a gfx1250 config that is not.
 _FFM_FAIL_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "tdm_multicast_gfx1250.yaml")
 _PLAIN_GFX1250_CONFIG = os.path.join(
-    _COMMON_DIR, "streamk", "gfx1250", "core", "sk_mxf4_force_dp_only.yaml"
+    _COMMON_DIR, "streamk", "gfx1250", "core", "data_parallel_static_mxf4.yaml"
 )
 # A config tagged ``skip-gfx1250v0``.
 _SKIP_GFX1250V0_CONFIG = os.path.join(

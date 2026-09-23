@@ -45,7 +45,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - 1LDSBuffer: [0]
         - UseCustomMainLoopSchedule: [1]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - AdaptiveGemmNTAB: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

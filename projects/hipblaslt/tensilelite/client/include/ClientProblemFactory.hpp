@@ -40,6 +40,8 @@ namespace TensileLite
     namespace Client
     {
 
+        std::vector<int> resolveHybridAssignmentPolicies(po::variables_map const& args);
+
         class ClientProblemFactory
         {
         public:

@@ -10,6 +10,7 @@ import pytest
 
 from Tensile.ExecutionPolicy import (
     normalize_execution_policy,
+    normalize_hybrid_assignment_policy,
     resolve_policy,
     hasStaticAssignment,
     hasDynamicAssignment,
@@ -237,6 +238,31 @@ def test_prebuilt_dp_defaults_to_legacy_layout_and_preserves_explicit_native_lay
     assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 0
     native = normalize_execution_policy({"TileProcessingStrategy": "DataParallel", "InternalSupportParams": {"PersistentLoopArgsVersion": 1}}, regenerate=False)
     assert native["InternalSupportParams"]["PersistentLoopArgsVersion"] == 1
+
+
+@pytest.mark.parametrize("name,value", (("Default", 0), ("DynamicWorkQueue", 1), ("Auto", 2)))
+def test_hybrid_runtime_alias_preserves_existing_encoding(name, value):
+    canonical = normalize_hybrid_assignment_policy({"HybridAssignmentPolicy": [name]})
+    legacy = normalize_hybrid_assignment_policy({"StreamKHybridMode": [value]})
+    assert canonical == legacy
+    assert canonical["StreamKHybridMode"] == [value]
+    assert canonical["HybridAssignmentPolicy"] == [name]
+    assert normalize_hybrid_assignment_policy(canonical) == canonical
+
+
+def test_hybrid_policy_sweep_preserves_order_and_compiled_assignment():
+    state = normalize_hybrid_assignment_policy({
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": "Hybrid",
+        "HybridAssignmentPolicy": ["Default", "DynamicWorkQueue", "Auto"],
+    })
+    assert state["StreamKHybridMode"] == [0, 1, 2]
+    assert state["WorkAssignment"] == "Hybrid"
+
+
+@pytest.mark.parametrize("canonical,legacy", ((["Default"], [1]), (["Auto"], [0]), (["Default", "DynamicWorkQueue"], [1, 0])))
+def test_conflicting_explicit_hybrid_aliases_are_rejected(canonical, legacy):
+    with pytest.raises(ValueError, match="Conflicting StreamKHybridMode and HybridAssignmentPolicy"):
+        normalize_hybrid_assignment_policy({"HybridAssignmentPolicy": canonical, "StreamKHybridMode": legacy})
 
 
 @pytest.mark.parametrize("outer", (0, 1, 2, 3))

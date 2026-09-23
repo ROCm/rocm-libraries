@@ -891,6 +891,11 @@ validParameters = { # we need to make sure this matches develop
     # Persistent tile processing and work assignment are independent selectors.
     # None disables persistence and ignores assignment. DataParallel supports StaticGrid;
     # StreamK supports StaticGrid, DynamicWorkQueue and Hybrid.
+    # Shared host grid controls retain their numeric behavior. New environment
+    # spellings win when both old and new names are explicitly set:
+    # TENSILE_PERSISTENT_FIXED_GRID, TENSILE_PERSISTENT_DYNAMIC_GRID,
+    # TENSILE_PERSISTENT_MAX_CUS, TENSILE_PERSISTENT_GRID_MULTIPLIER,
+    # TENSILE_PERSISTENT_DYNAMIC_WGM (legacy TENSILE_STREAMK_* aliases).
     # Grid-policy selection is independent of device work-queue assignment.
     "TileProcessingStrategy": ["None", "DataParallel", "StreamK"],
     "WorkAssignment": ["StaticGrid", "DynamicWorkQueue", "Hybrid"],

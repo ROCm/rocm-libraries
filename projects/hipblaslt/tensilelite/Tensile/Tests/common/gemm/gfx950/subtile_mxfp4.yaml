@@ -81,7 +81,8 @@ BenchmarkProblems:
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -159,7 +160,8 @@ BenchmarkProblems:
         - DepthU: [512]                 # 4*MI_K; K must be mult of 512
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -223,7 +225,8 @@ BenchmarkProblems:
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -290,7 +293,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -339,7 +343,8 @@ BenchmarkProblems:
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -411,7 +416,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -464,7 +470,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -516,7 +523,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -581,7 +589,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -652,7 +661,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -695,7 +705,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
@@ -744,7 +755,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - TransposeLDS: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]

@@ -70,7 +70,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - SourceSwap: [True]
         - StoreVectorWidth: [-1]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
       BenchmarkFinalParameters:

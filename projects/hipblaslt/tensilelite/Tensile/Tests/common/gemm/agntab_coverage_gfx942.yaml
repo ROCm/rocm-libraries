@@ -44,9 +44,10 @@ GlobalParameters:
     # - UseSubtileImpl: [0, 1]
     - Groups:
       - - GlobalSplitU: 0
-          StreamK:      3
+          TileProcessingStrategy: StreamK
+          WorkAssignment: StaticGrid
         - GlobalSplitU: -1
-          StreamK:      0
+          TileProcessingStrategy: "None"
   BenchmarkJoinParameters:
   BenchmarkFinalParameters:
     - ProblemSizes:

@@ -61,9 +61,10 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4, 4, 2, 2]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StreamKAtomic: [0, 1]
-        - StreamKXCCMapping: [0]
+        - PersistentXCCMapping: [0]
         - SpaceFillingAlgo: [[1]]
         - SFCWGM: [[[4, 4]]]
         - PrefetchGlobalRead: [2]

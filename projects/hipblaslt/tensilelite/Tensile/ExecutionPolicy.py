@@ -169,6 +169,30 @@ def normalize_execution_policy_with_defaults(config, library_defaults):
 
 
 
+def normalize_hybrid_assignment_policy(config):
+    """Resolve explicit global runtime aliases while preserving 0/1/2 meanings."""
+    result = dict(config)
+    names = ("Default", "DynamicWorkQueue", "Auto")
+    canonical = result.get("HybridAssignmentPolicy")
+    legacy = result.get("StreamKHybridMode")
+    if canonical is not None:
+        canonical = list(canonical) if isinstance(canonical, (list, tuple)) else [canonical]
+        if not canonical or any(value not in names for value in canonical):
+            raise ValueError("HybridAssignmentPolicy must contain Default, DynamicWorkQueue, or Auto")
+    if legacy is not None:
+        legacy = list(legacy) if isinstance(legacy, (list, tuple)) else [legacy]
+        if not legacy or any(type(value) is not int or value not in (0, 1, 2) for value in legacy):
+            raise ValueError("StreamKHybridMode must contain 0, 1, or 2")
+        translated = [names[value] for value in legacy]
+        if canonical is not None and canonical != translated:
+            raise ValueError("Conflicting StreamKHybridMode and HybridAssignmentPolicy")
+        canonical = translated
+    if canonical is not None:
+        result["HybridAssignmentPolicy"] = canonical
+        result["StreamKHybridMode"] = [names.index(value) for value in canonical]
+    return result
+
+
 def _translate_legacy_streamk_selectors(config, explicit, result):
     """Validate legacy selectors and write their canonical equivalents to result."""
     mode = config.get("StreamK", 0)

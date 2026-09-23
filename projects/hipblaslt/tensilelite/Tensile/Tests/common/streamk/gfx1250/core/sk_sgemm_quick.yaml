@@ -35,7 +35,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [1]
       ForkParameters:
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
         - DepthU: [ 64 ]
@@ -75,7 +76,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [1]
       ForkParameters:
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
         - DepthU: [ 16 ]

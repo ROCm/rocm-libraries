@@ -21,7 +21,7 @@ GlobalParameters:
   EnqueuesPerSync: 1
   # NumBenchmarks: 10
   SleepPercent: 50
-  StreamKHybridMode: [1]
+  HybridAssignmentPolicy: [DynamicWorkQueue]
 
 BenchmarkProblems:
 
@@ -63,7 +63,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [True]
         - StaggerU: [0]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - WorkGroupMappingXCC: [8]
         - TransposeLDS: [-1]
         - UseSgprForGRO: [0]
@@ -118,7 +119,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [True]
         - StaggerU: [0]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - WorkGroupMappingXCC: [8]
         - TransposeLDS: [-1]
         - UseSgprForGRO: [0]
@@ -159,7 +161,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [True]
         - StaggerU: [0]
-        - StreamK: [4, 5]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [DynamicWorkQueue, Hybrid]
         - TransposeLDS: [-1]
         - UseSgprForGRO: [0]
         - WorkGroupMapping: [1]

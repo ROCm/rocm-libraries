@@ -49,6 +49,7 @@ from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters, validateRuntimeLanguage
 from Tensile.Common.TimingInstrumentation import timing_context, flush_timing_buffer
+from Tensile.ExecutionPolicy import normalize_hybrid_assignment_policy
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -299,7 +300,9 @@ def argUpdatedGlobalParameters(args):
     if PyTestBuildArchNames != None and len(PyTestBuildArchNames) > 0:
         rv["Architecture"] = PyTestBuildArchNames
 
-    return rv
+    # Resolve aliases within the explicit CLI tier before it overrides YAML
+    # values, so inherited spellings cannot mask an override or conflict with it.
+    return normalize_hybrid_assignment_policy(rv)
 
 def get_gpu_max_frequency_smi(device_id):
     '''

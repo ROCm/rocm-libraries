@@ -13,7 +13,7 @@
 # storeBranchesCommon (reached by StreamK=3 and StreamK=5). When set, a loop
 # of tree-structured partial-tile accumulation is emitted instead of the linear scan.
 # StreamK=3 (TwoTileDPFirst) calls storeBranchesCommon directly.
-# StreamK=5 (Hybrid) calls storeBranchesCommon for its static SK3 path.
+# StreamK=5 (Hybrid) calls storeBranchesCommon for its static StreamK/StaticGrid path.
 # StreamK=4 (Dynamic) has its own storeBranches and does NOT call storeBranchesCommon.
 # Using modes 3 and 5 here gives the tree-reduction code two entry points.
 #
@@ -52,9 +52,10 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4, 4, 2, 2]
-        - StreamK: [3, 5]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid, Hybrid]
         - StreamKAtomic: [0]
-        - StreamKXCCMapping: [0]
+        - PersistentXCCMapping: [0]
         - StreamKFixupTreeReduction: [1]
         - DebugStreamK: [0]
         - PrefetchGlobalRead: [2]

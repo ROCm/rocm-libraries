@@ -786,7 +786,7 @@ namespace TensileLite
         // clamp (SK3 + streamKForceDPOnly + clusterDim.x*clusterDim.y > 1 -> grid=tiles,
         // one workgroup per output tile). Applied after the tree-bounds fallback.
         bool clusterDPGridClamped     = false;
-        // available: getSKGridImpl out-param (AMDGPU skFixedGrid override applied).
+        // available: getSKGridImpl out-param (AMDGPU persistentFixedGrid override applied).
         bool fixedGridUsed            = false;
     };
 

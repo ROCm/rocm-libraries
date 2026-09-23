@@ -250,7 +250,7 @@ TEST(PersistentDataParallelTest, UsesHardwareCuCount)
 
     auto problem         = dummyProblem();
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
     auto launch = solution.resolvePersistentSettings(problem, device);
     EXPECT_EQ(launch.reduction, origami::reduction_t::none);
     EXPECT_EQ(launch.grid, _CPX_CU);
@@ -269,10 +269,10 @@ TEST(PersistentDataParallelTest, FixedGridOverridesHardwareCuCount)
 
     auto problem         = dummyProblem();
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
-    device.skFixedGrid   = 17;
+    device.persistentDynamicGrid = 0;
+    device.persistentFixedGrid   = 17;
     auto launch = solution.resolvePersistentSettings(problem, device);
-    EXPECT_EQ(launch.grid, device.skFixedGrid);
+    EXPECT_EQ(launch.grid, device.persistentFixedGrid);
 }
 
 TEST(PersistentDataParallelTest, DoesNotRequestPartialWorkspace)
@@ -290,7 +290,7 @@ TEST(PersistentDataParallelTest, DoesNotRequestPartialWorkspace)
 
     auto problem         = dummyProblem();
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
     auto tiles           = problem.getNumTiles(solution.sizeMapping, 1);
 
     ASSERT_NE(tiles % _CPX_CU, 0);
@@ -620,12 +620,12 @@ TEST(StreamKSmCountTargetTest, SmCountTargetChangesReductionAndGrid)
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
     env.solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
-    env.device.skDynamicGrid         = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    env.device.persistentDynamicGrid         = static_cast<int>(origami::grid_selection_t::k_split_aware);
 
     // Make smCountTarget the sole grid budget source (AMDGPU defaults, explicit).
-    env.device.skFixedGrid      = 0;
-    env.device.skMaxCUs         = 0;
-    env.device.skGridMultiplier = 1;
+    env.device.persistentFixedGrid      = 0;
+    env.device.persistentMaxCUs         = 0;
+    env.device.persistentGridMultiplier = 1;
 
     // Scenario 1 - reduction: select_reduction picks parallel when tiles <=
     // cu_count/4. 512x512 => 16 tiles fits at 256 CUs (16<=64) but not at 32
@@ -1090,7 +1090,7 @@ TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamic
 // ship, but TENSILE_STREAMK_GRID_MULTIPLIER scales it uncapped. Both that and
 // TENSILE_STREAMK_FIXED_GRID latch into a function-local static on first read,
 // so they cannot be set from inside a running test; these drive
-// AMDGPU::skFixedGrid, the field the latter feeds, directly.
+// AMDGPU::persistentFixedGrid, the field the latter feeds, directly.
 // ===========================================================================
 
 namespace
@@ -1099,14 +1099,14 @@ namespace
     // 8 * 128 = 1024 bytes = 256 ints before the first flag.
     constexpr size_t kQueuePrefixElements = 256;
 
-    // Pin the grid the clamp has to cut back. skFixedGrid is the first arm of
-    // getSKGrid's if-chain, so it wins over skMaxCUs and skGridMultiplier,
+    // Pin the grid the clamp has to cut back. persistentFixedGrid is the first arm of
+    // getSKGrid's if-chain, so it wins over persistentMaxCUs and persistentGridMultiplier,
     // which keep whatever values the environment left on the device; clearing
-    // skDynamicGrid additionally keeps origami out of the decision.
+    // persistentDynamicGrid additionally keeps origami out of the decision.
     void pinGridToWholeFlagRegion(StreamK5AnalyticalEnv& env)
     {
-        env.device.skDynamicGrid = 0;
-        env.device.skFixedGrid   = static_cast<int>(StreamKFlagElements);
+        env.device.persistentDynamicGrid = 0;
+        env.device.persistentFixedGrid   = static_cast<int>(StreamKFlagElements);
     }
 
     // 8192 x 8064 over the env's 128x128 macro tile is 64 x 63 = 4032 tiles:
@@ -1199,7 +1199,7 @@ TEST(SKLaunchGridLimitsTest, CapsGridWhenTilesReach2Pow24)
 
     auto   problem       = makeGemmProblem(524288, 98304, 128);
     AMDGPU device        = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
 
     auto tiles = problem.getNumTiles(solution.sizeMapping, 1);
     ASSERT_EQ(tiles, maxTilesBeforeCap);
@@ -1241,7 +1241,7 @@ TEST(SKLaunchGridLimitsTest, StillUsesDpFallbackBelowTileThreshold)
 
     auto   problem       = makeGemmProblem(65536, 65552, 128);
     AMDGPU device        = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
 
     auto tiles = problem.getNumTiles(solution.sizeMapping, 1);
     ASSERT_EQ(tiles, 16781312u);
@@ -1338,7 +1338,7 @@ TEST_P(DataParallelLaunchLimitsTest, PackedGridFitsHipWorkItemLimit)
     const size_t threads = threadsPerWorkGroup(solution);
     const size_t maxGrid = std::numeric_limits<uint32_t>::max() / threads;
     if(!param.analytical)
-        device.skFixedGrid = static_cast<int>(maxGrid) + param.gridDelta;
+        device.persistentFixedGrid = static_cast<int>(maxGrid) + param.gridDelta;
 
     // 4097*4097 tiles are not divisible by the analytical CU grid. With no
     // workspace, origami selects all tiles, exceeding UINT32_MAX work items.
@@ -1358,7 +1358,7 @@ TEST_P(DataParallelLaunchLimitsTest, PackedGridFitsHipWorkItemLimit)
     if(param.analytical || param.gridDelta > 0)
         EXPECT_EQ(launch.grid, kGfx950AnalyticalCuCount);
     else
-        EXPECT_EQ(launch.grid, static_cast<size_t>(device.skFixedGrid))
+        EXPECT_EQ(launch.grid, static_cast<size_t>(device.persistentFixedGrid))
             << "A representable explicit grid must remain unchanged";
 
     ContractionInputs inputs;
