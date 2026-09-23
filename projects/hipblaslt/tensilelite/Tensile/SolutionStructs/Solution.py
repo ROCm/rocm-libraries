@@ -1201,6 +1201,16 @@ class Solution(collections.abc.Mapping):
         state["VectorWidthA"] = 1
         state["VectorWidthB"] = 1
         state["SourceSwap"] = False
+      else:
+        # SourceSwap stays on. Disable fold-only features (newer-upstream defaults that
+        # never existed on the ss1 base) that are incompatible with the SourceSwap
+        # interleaved local-read map and its store path. Leaving them at their fold
+        # defaults -- notably PreloopGRClusterSize=6 -- reorders the preloop global reads
+        # / store and corrupts the SourceSwap store addressing (illegal memory access).
+        state["PreloopGRClusterSize"] = -1   # off (fold default 6)
+        state["PostLoopStoreInNll"] = False
+        state["DPPStoreFold"] = False
+        state["WGMBitSwizzle"] = False
       # Force BufferStore=True: UseSubtileImpl optimized storeD path is only implemented
       # for buffer stores for now.
       state["BufferStore"] = True
@@ -1877,6 +1887,11 @@ class Solution(collections.abc.Mapping):
       state["PLSINStoreMode"] = "Weave"
 
     isa = tuple(state["ISA"])
+
+    # PostLoopStoreInNll is a non-SourceSwap (fold) feature; SourceSwap uses its own
+    # SubtileStoreInNLL store path, so PLSIN must never be enabled for a SourceSwap kernel.
+    if state.get("SourceSwap", False):
+      state["PostLoopStoreInNll"] = False
 
     if state["PostLoopStoreInNll"]:
       isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \

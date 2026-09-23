@@ -208,7 +208,14 @@ def emitScaleGRPtrUpdate(ti, writer, kernel, holdOnLastIter=False):
 
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
-  emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter)
+  if kernel.get("SourceSwap", False):
+    # Interleaved (SS1) scale layout: unconditional base advance. Fold's
+    # emitSrdAdvance hold threshold is derived for the blocked map and would
+    # corrupt the interleaved scale-SRD base (global OOB).
+    module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))
+    module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0))
+  else:
+    emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter)
   return module
 
 

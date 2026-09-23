@@ -659,6 +659,16 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, holdOnLastIter=False):
     return module
 
   module = Module(f"GR Ptr Update ({tc})")
+  if kernel.get("SourceSwap", False):
+    # Interleaved (SS1) map: plain one-DepthU advance, no preshuffle row
+    # multiplier and no fold hold threshold (both derived for the blocked map
+    # and would advance the SRD past the tensor -> global OOB).
+    inc = int(ti.depthUBytes)
+    module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
+               comment=f"{tc}: advance SRD by {inc} bytes"))
+    module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+               comment=f"{tc}: carry"))
+    return module
   # Host-pre-shuffled data interleaves one K tile across all rows of an MFMA
   # tile, so advancing one DepthU consumes 16 contiguous row fragments.
   rowMultiplier = ti.mmaTileShape[0] if ti.isPreShuffled else 1

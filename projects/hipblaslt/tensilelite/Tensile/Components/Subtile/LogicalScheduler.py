@@ -3722,7 +3722,11 @@ class LogicalScheduler:
             # (vmcnt(0)) at the barrier; the [MT0 GRs][gr_inc][initC] region is
             # unchanged so _interleave_preloop_filler still clusters MT0. Default
             # on (matches GlobalParameters PreloopGRReorder=[1]).
-            do_reorder = bool(self._kernel.get("PreloopGRReorder", 1)) if self._kernel else True
+            # The Exp-3 GR reorder is a non-SourceSwap (fold) preloop optimization; the
+            # SourceSwap interleaved global-read map is not built for the hoisted-MT1
+            # ordering, so force the original (non-reordered) preloop under SourceSwap.
+            do_reorder = (bool(self._kernel.get("PreloopGRReorder", 1))
+                          and not self._kernel.get("SourceSwap", False)) if self._kernel else True
             if maxUnroll > 1:
                 preloop_ops = []
                 for uid in range(maxUnroll):
@@ -4897,7 +4901,9 @@ class LogicalScheduler:
         # seed + windowed SRD). The pass consumes writer._deferredPreloopLraModules
         # and stashes the full initC on self._canonicalInitCInstrs for the slow path,
         # so the legacy LRA re-injection below is skipped when it runs.
-        _plgrcs = kernel.get("PreloopGRClusterSize", -1)
+        # Clustered preloop is a non-SourceSwap (fold) feature; keep it off the SourceSwap
+        # path entirely (SourceSwap already forces PreloopGRClusterSize=-1 in Solution.py).
+        _plgrcs = -1 if kernel.get("SourceSwap", False) else kernel.get("PreloopGRClusterSize", -1)
         _single_du = (max(self.config.numUnroll.values())
                       if self.config.numUnroll else 1) == 1
         filler_pass_ran = False
