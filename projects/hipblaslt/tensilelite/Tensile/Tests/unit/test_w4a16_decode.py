@@ -97,5 +97,12 @@ def test_q27b_equality_dispatch_keys():
                 assert solution["WorkGroup"] == [32, 8, 1]
                 assert solution["MacroTile0"] == 64
                 assert solution["MacroTile1"] == 256
+            else:
+                assert solution["CustomKernelName"].endswith(
+                    "_MT128x256x64_MI16x16x1_gfx1151")
+                assert solution["WorkGroup"] == [64, 8, 1]
+                assert solution["MacroTile0"] == 128
+                assert solution["MacroTile1"] == 256
+                assert solution["WorkGroupMapping"] == 1
     assert logic["ProblemType"]["ScaleBlockSizeA"] == 32
     assert logic["ProblemType"]["Int4EncodingA"] == "UnsignedBias8ExLlama"
