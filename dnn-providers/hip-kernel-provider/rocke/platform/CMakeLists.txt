@@ -91,12 +91,6 @@ endif()
 option(ROCKE_BUILD_PYBIND "Build the rocke_engine Python extension module" OFF)
 option(ROCKE_INSTALL_PYTHON_PACKAGE "Install the rocke Python frontend" ON)
 option(ROCKE_INSTALL_TESTS "Install rocKE smoke test artifacts and CTest metadata" ON)
-# The Python rocKE CI tests (import smoke + golden byte-stability) are gated
-# separately from the C++ smoke tests. Provider mode turns them OFF until their
-# test-artifact packaging is wired up (the rocke package, the smoke/golden
-# scripts, and the golden JSON are not yet in TheRock's hipkernelprovider
-# artifact includes, so staging them there fails at test time). Standalone
-# runs, which package everything locally, keep them ON.
 option(ROCKE_INSTALL_PYTHON_TESTS "Install rocKE Python smoke/golden CI tests" ON)
 option(ROCKE_INSTALL_STANDALONE_CTEST "Install standalone rocKE CTest metadata" ON)
 if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
