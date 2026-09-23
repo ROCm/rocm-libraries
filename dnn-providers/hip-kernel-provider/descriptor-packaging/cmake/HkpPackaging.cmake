@@ -247,16 +247,19 @@ function(hkp_wire_pack_target)
     #
     # This manifest puts the input SET into the edge. Its content changes when a
     # path leaves either glob, which makes it newer than the stamp and forces the
-    # pack. COPYONLY rewrites only when the content differs, so an unchanged tree
-    # does not repack on every configure. It lives in the binary dir rather than
-    # under ARG_OUT_ROOT because the pack command wipes that tree -- a dependency
-    # deleted by the command it guards would make every build repack.
+    # pack. file(CONFIGURE) rewrites only when the content differs, so an
+    # unchanged tree does not repack on every configure. It lives in the binary
+    # dir rather than under ARG_OUT_ROOT because the pack command wipes that tree
+    # -- a dependency deleted by the command it guards would make every build
+    # repack. @ONLY because the body is paths, not a template.
     set(_input_manifest "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-inputs.txt")
     set(_manifest_paths ${_source_inputs} ${_tool_sources})
     list(SORT _manifest_paths)
     string(REPLACE ";" "\n" _manifest_body "${_manifest_paths}")
-    file(WRITE "${_input_manifest}.in" "${_manifest_body}\n")
-    configure_file("${_input_manifest}.in" "${_input_manifest}" COPYONLY)
+    # cmake-lint: disable=E1126
+    #   cmake-lint carries no form spec for file(CONFIGURE) and reports it as an
+    #   invalid discriminator. It is valid CMake from 3.18; the floor here is 3.25.
+    file(CONFIGURE OUTPUT "${_input_manifest}" CONTENT "${_manifest_body}\n" @ONLY)
 
     hkp_require_kpack_runtime("${_interp}" "the ${_interp_what}")
 
