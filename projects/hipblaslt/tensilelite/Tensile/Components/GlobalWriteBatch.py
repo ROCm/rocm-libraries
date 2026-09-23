@@ -1886,6 +1886,9 @@ class GlobalWriteBatchWriter:
     if waveContigTDMStore:
       module.add(self._emitWaveTDMStoreSetup())
     # TensorStore: hoist the lane-invariant full-MT LDS base once per batch (same idea as the TDM store).
+    # Staging ds_stores are DEFERRED to one post-loop block (converts pipeline, stores batch); collect
+    # their (srcVgpr, offset, numRegs, bytes, comment) here per element and emit them after the loop.
+    self._tsDeferredStores = []
     if tensorStore:
       module.add(self._emitTensorStoreSetup())
     for elementIdx in range(0, len(self.batchElements)):
@@ -2347,7 +2350,9 @@ class GlobalWriteBatchWriter:
             packModule.add(VPackF16toB32(dst=vgpr(dVgpr), src0=vgpr(formatting(sumIdxV-1, "ValuC+", self.parentWriter.states.c.startVgprValu)), src1=vgpr(formatVgpr), \
                           comment="Pack with neighbor"))
 
-      if self.kernel["ExpertSchedulingMode"] > 0:
+      if self.kernel["ExpertSchedulingMode"] > 0 and not tensorStore:
+        # TensorStore defers the staging ds_store to a post-loop block and emits ONE va_vdst wait there,
+        # so skip the per-element wait here to let the converts pipeline.
         packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
 
       biasReductionModule = Module("biasReductionModule")
@@ -2528,16 +2533,11 @@ class GlobalWriteBatchWriter:
             storeCodeModule.add(tdmModule)
             self.storesIssued += tdmStores
           elif tensorStore:
-            # TensorStore form: stage every store-element into the SHARED full-MT LDS image at its true
-            # (M,N) (from the store-state coords). On the globally-LAST element (last element of the last
-            # store batch) barrier all waves and flush the whole MT with ONE per-wave tensor_store_from_lds
-            # (disjoint N-slice). isLast must be the true last element, not (tt0,tt1)==max: with >1 element
-            # per tile (MIOutputVectorWidth split) that tuple repeats and would flush prematurely.
-            isLast = (elementIdx == len(self.batchElements) - 1) \
-                     and getattr(self.parentWriter, "TensorStoreLastBatch", 1) == 1
-            tsModule, tsStores = self._emitTensorStore(elementIdx, element[1], element[0], isLast)
-            storeCodeModule.add(tsModule)
-            self.storesIssued += tsStores
+            # TensorStore form: DEFER the staging ds_store for this store-element — collect its
+            # (srcVgpr, LDS offset, numRegs, ...) and emit all of them in one post-loop block so the
+            # per-element f32->Dest converts pipeline and the stores batch. The barrier + per-wave flush
+            # also move to the post-loop block (of the last store batch).
+            self._tsDeferredStores.append(self._tensorStoreStageInfo(elementIdx, element[1], element[0]))
           elif waveContigF8Merge:
             storeCodeModule.add(self._emitF8PartnerMergeStore(addrCalc, sumIdx))
             self.storesIssued += 1
@@ -2585,6 +2585,23 @@ class GlobalWriteBatchWriter:
       self.parentWriter.vgprPool.checkIn(vgprRND)
 
     module.add(storeCode)
+
+    # TensorStore: emit all deferred staging ds_stores together now (after the per-element convert loop),
+    # so the converts pipelined and a SINGLE va_vdst wait covers them all (vs one per element). Then, on
+    # the LAST store batch, the per-wave flush (barrier + tensor_store_from_lds) — after every batch's
+    # staging (LDS accumulates across batches). elementSumIdx[i] is a distinct per-element VGPR still live
+    # here (freed only in _epilog), so re-reading it is data-safe.
+    if tensorStore and self._tsDeferredStores:
+      vLdsBase = self.cvtVgprStruct.vgprXposeBase + 0
+      if self.kernel["ExpertSchedulingMode"] > 0:
+        module.add(SWaitAlu(va_vdst=0, comment="TensorStore: one wait for all element converts"))
+      for (tileBase, off, nregs, bps, cmt) in self._tsDeferredStores:
+        module.add(dsStore(bps, dstAddr=vgpr(vLdsBase), src=vgpr(tileBase, nregs),
+                           ds=DSModifiers(offset=off), comment=cmt,
+                           memToken=MemTokenData([self.parentWriter.states.memTokenLdsBuffer0])))
+      if getattr(self.parentWriter, "TensorStoreLastBatch", 1) == 1:
+        module.add(self._emitTensorStoreFlush())
+        self.storesIssued += 1
 
     if self.parentWriter.db["CheckStoreC"]>=0:
       useBuffer = self.kernel["BufferStore"]
@@ -4356,22 +4373,37 @@ class GlobalWriteBatchWriter:
     module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=self.kernel["TensorStoreLdsByteOffset"], comment="+ TensorStoreLdsByteOffset (staging after main-loop LDS)"))
     return module
 
-  def _emitTensorStore(self, elementIdx: int, tt0: int, tt1: int, isLast: bool):
-    """TensorStore: stage a (tt0,tt1) 8-M block into the SHARED full-MT LDS image, then on the LAST tile
-    barrier all waves and flush the whole MT with ONE per-wave tensor_store_from_lds (disjoint N-slice).
+  def _tensorStoreStageInfo(self, elementIdx: int, tt0: int, tt1: int):
+    """Compute one DEFERRED TensorStore staging write and return (srcVgpr, LDS byte offset, numRegs, bytes,
+    comment). The ds_store itself is emitted later in a single post-loop block (see _emitAdd) so all
+    elements' f32->Dest converts pipeline and the stores batch (one VALU wait instead of one per element).
 
-    Each lane's packed 8-M block (elementSumIdx, already converted to Dest by packdata) is ds_stored to
-    LDS[N_global*MT0 + M_global] via the hoisted base (_emitTensorStoreSetup -> vLdsBase) plus a
-    compile-time OFFSET immediate ((tt1*miwg1*matN)*MT0 + tt0*miwg0*matM)*bpe. On the last element every
-    wave DMAs columns [waveId*colsPerWave, (waveId+1)*colsPerWave) of the column-major LDS image to D
-    (colsPerWave = MT1//numWaves): tile_dim0 = MT0, tile_dim1 = colsPerWave, tensor_dim0_stride = StrideD.
-    A cross-wave s_barrier is REQUIRED here (the N-slice was written by MANY waves), unlike the per-wave
-    TDM store which reads only its own LDS. Returns (module, numStoresIssued)."""
-    module = Module("TensorStore")
+    Each lane's packed block lives at elementSumIdx[elementIdx] (already converted to Dest by packdata) and
+    lands in the SHARED full-MT LDS image at the hoisted base (_emitTensorStoreSetup -> vLdsBase) plus a
+    compile-time OFFSET from the store-state's TRUE per-element (M,N) coordinate (encodes eIdx/vc sub-offsets
+    a coarse (tt0,tt1) formula would collapse); numRegs = gwvw register span."""
+    bpe     = self.parentWriter.states.bpeCexternal
+    mt0     = self.kernel["MacroTile0"]
+    tileBase = self.ss.elementSumIdx[elementIdx]
+    gwvw    = self.ss.cfg.gwvw
+    bps     = bpe * gwvw
+    numRegs = int(max(1, bps / self.parentWriter.states.bpr))
+    coord0  = self.ss.elementCoord0[elementIdx]
+    coord1  = self.ss.elementCoord1[elementIdx]
+    elemOffsetBytes = (coord1 * mt0 + coord0) * bpe
+    comment = "stage element #%d coord0=%d coord1=%d (tt0=%d,tt1=%d) to full-MT LDS, %d regs" % (
+      elementIdx, coord0, coord1, tt0, tt1, numRegs)
+    return (tileBase, elemOffsetBytes, numRegs, bps, comment)
+
+  def _emitTensorStoreFlush(self):
+    """Flush the whole full-MT LDS image with ONE per-wave tensor_store_from_lds (disjoint N-slice).
+    Emitted once, in the post-loop block of the LAST store batch, AFTER all deferred staging ds_stores.
+    Each wave DMAs columns [waveId*colsPerWave, (waveId+1)*colsPerWave) (colsPerWave = MT1//numWaves):
+    tile_dim0 = MT0, tile_dim1 = colsPerWave, tensor_dim0_stride = StrideD. A cross-wave s_barrier is
+    REQUIRED (the N-slice was written by MANY waves), unlike the per-wave TDM store."""
+    module = Module("TensorStoreFlush")
     bpe   = self.parentWriter.states.bpeCexternal
     ws    = self.kernel["WavefrontSize"]
-    matM  = self.kernel["MatrixInstM"]
-    matN  = self.kernel["MatrixInstN"]
     miwg0 = self.kernel["MIWaveGroup"][0]
     miwg1 = self.kernel["MIWaveGroup"][1]
     numWaves = miwg0 * miwg1
@@ -4379,28 +4411,6 @@ class GlobalWriteBatchWriter:
     mt1   = self.kernel["MacroTile1"]
     colsPerWave = mt1 // numWaves
     strideD1J = "StrideD%s" % self.parentWriter.states.indexChars[self.kernel["PackedC1IndicesX"][0]]
-    vLdsBase = self.cvtVgprStruct.vgprXposeBase + 0
-    tileBase = self.ss.elementSumIdx[elementIdx]
-
-    # Use the store-state's TRUE per-element coordinate (encodes eIdx / vc sub-offsets that a coarse
-    # (tt0,tt1) formula would collapse -> collisions), and the element's real register span (gwvw), so
-    # the LDS image matches the normal store's global (M,N) placement. The hoisted lane base already
-    # supplies (waveId0*matM + Mhalf*8, waveId1*matN + N_local); coordOffset adds eIdx/tt within that.
-    gwvw    = self.ss.cfg.gwvw
-    bps     = bpe * gwvw
-    numRegs = int(max(1, bps / self.parentWriter.states.bpr))
-    coord0  = self.ss.elementCoord0[elementIdx]
-    coord1  = self.ss.elementCoord1[elementIdx]
-    elemOffsetBytes = (coord1 * mt0 + coord0) * bpe
-    module.addComment1("TensorStore #%d: stage coord0=%d coord1=%d (tt0=%d,tt1=%d) at LDS offset %d, %d regs" % (
-      elementIdx, coord0, coord1, tt0, tt1, elemOffsetBytes, numRegs))
-    module.add(dsStore(bps, dstAddr=vgpr(vLdsBase), src=vgpr(tileBase, numRegs),
-                       ds=DSModifiers(offset=elemOffsetBytes), comment="stage element to full-MT LDS",
-                       memToken=MemTokenData([self.parentWriter.states.memTokenLdsBuffer0])))
-
-    if not isLast:
-      return module, 0
-
     module.addComment1("TensorStore: flush full MT via ONE per-wave tensor_store_from_lds (disjoint N-slice, colsPerWave=%d)" % colsPerWave)
     # The descriptor build below (waveId, lds/global addr, dims) is independent of the LDS staging, so
     # emit it FIRST — it overlaps with the ds_store drain. Only the tensor_store READ must wait, so the
@@ -4459,7 +4469,7 @@ class GlobalWriteBatchWriter:
       module.add(SWaitCnt(dscnt=0, comment="wait all LDS staging writes (before barrier) [stinky-keep]"))
       module.add(self.parentWriter._syncThreads(self.kernel, "TensorStore: all waves finished MT staging"))
       module.add(tdm.issueStore(g0, g1))
-    return module, 1
+    return module
 
   def _emitWaveTransposeSetup(self):
     """Emit the LANE-INVARIANT wave-transpose store setup ONCE per batch (before the element loop).
