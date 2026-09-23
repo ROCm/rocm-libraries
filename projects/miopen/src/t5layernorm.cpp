@@ -50,15 +50,17 @@ miopenStatus_t T5LayerNormForward(const Handle& handle,
         layernorm::ProblemDescription{mode, xDesc, weightDesc, yDesc, rstdDesc, epsilon};
 
     const auto invoke_params = [&]() {
-        auto tmp    = layernorm::T5InvokeParams{};
-        tmp.type    = InvokeType::Run;
-        tmp.xDesc   = &xDesc;
-        tmp.x       = x;
-        tmp.weight  = weight;
-        tmp.y       = y;
-        tmp.rstd    = rstd;
-        tmp.epsilon = epsilon;
-        tmp.mode    = mode;
+        auto tmp       = layernorm::T5InvokeParams{};
+        tmp.type       = InvokeType::Run;
+        tmp.xDesc      = &xDesc;
+        tmp.x          = x;
+        tmp.weight     = weight;
+        tmp.y          = y;
+        tmp.rstd       = rstd;
+        tmp.epsilon    = epsilon;
+        tmp.mode       = mode;
+        tmp.outer_size = problem.outer_size;
+        tmp.inner_size = problem.inner_size;
         return tmp;
     }();
 
@@ -123,6 +125,8 @@ miopenStatus_t T5LayerNormBackward(const Handle& handle,
         tmp.rstd           = rstd;
         tmp.dx             = dx;
         tmp.dw             = dw;
+        tmp.outer_size     = problem.outer_size;
+        tmp.inner_size     = problem.inner_size;
         tmp.mode           = mode;
         return tmp;
     }();

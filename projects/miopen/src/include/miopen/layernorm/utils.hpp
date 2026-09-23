@@ -32,38 +32,30 @@ namespace miopen {
 namespace solver {
 namespace layernorm {
 
-#define LOCAL_SIZE 256
-
 inline std::size_t sizeof_kernel_FLOAT(const miopen::layernorm::ProblemDescription& problem)
 {
     const auto datatype = problem.GetXDesc().GetType();
     return get_data_size(datatype);
 }
 
-inline std::size_t sizeof_local_memory(const miopen::layernorm::ProblemDescription& problem)
+inline std::size_t sizeof_local_memory(const miopen::layernorm::ProblemDescription& problem,
+                                       const int local_size)
 {
     std::size_t rv = 0;
-    rv += LOCAL_SIZE * sizeof_kernel_FLOAT(problem) * 2;
+    rv += local_size * sizeof_kernel_FLOAT(problem) * 2;
     return rv;
 }
 
-inline std::size_t sizeof_local_memory_t5(const miopen::layernorm::ProblemDescription& problem)
-{
-    std::size_t rv = 0;
-    rv += LOCAL_SIZE * sizeof_kernel_FLOAT(problem);
-    return rv;
-}
-
-inline size_t get_reqd_work_item_cnt(const ExecutionContext& context)
+inline size_t get_reqd_work_item_cnt(const ExecutionContext& context, const int local_size)
 {
     // At least 4 WGs per one CU
-    return static_cast<size_t>(LOCAL_SIZE * context.GetStream().GetMaxComputeUnits() * 4);
+    return static_cast<size_t>(local_size * context.GetStream().GetMaxComputeUnits() * 4);
 }
 
-inline size_t get_reqd_work_item_cnt(const Handle& handle)
+inline size_t get_reqd_work_item_cnt(const Handle& handle, const int local_size)
 {
     // At least 4 WGs per one CU
-    return static_cast<size_t>(LOCAL_SIZE * handle.GetMaxComputeUnits() * 4);
+    return static_cast<size_t>(local_size * handle.GetMaxComputeUnits() * 4);
 }
 
 inline size_t get_parallelism_size(size_t reqd_work_item_cnt, size_t inner_size, size_t outer_size)

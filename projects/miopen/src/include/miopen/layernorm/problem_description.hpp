@@ -25,11 +25,11 @@
  *******************************************************************************/
 #pragma once
 
-#include <miopen/activ.hpp>
 #include <miopen/problem_description_base.hpp>
+#include <miopen/activ.hpp>
 #include <miopen/tensor.hpp>
+#include <miopen/mlo_internal.hpp>
 #include <cassert>
-#include <string>
 
 namespace miopen {
 
@@ -43,8 +43,59 @@ enum class Direction
     Backward,
 };
 
-struct ProblemDescription : ProblemDescriptionBase
+struct ProblemDescriptionTag
 {
+};
+
+size_t GetStride(const TensorDescriptor& xDesc, int32_t normalized_dim);
+
+size_t GetOuterSize(const TensorDescriptor& xDesc, int32_t normalized_dim, size_t stride);
+
+size_t GetInnerSize(const TensorDescriptor& xDesc, int32_t normalized_dim);
+
+struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
+                                                    ProblemDescriptionTag
+#if MIOPEN_ENABLE_SQLITE
+    ,
+                                                    SQLiteSerializable<ProblemDescription>
+#endif
+{
+    ProblemDescription(Direction direction_,
+                       miopenNormMode_t mode_,
+                       const TensorDescriptor& xDesc_,
+                       const TensorDescriptor& x2Desc_,
+                       const TensorDescriptor& weightDesc_,
+                       const TensorDescriptor& biasDesc_,
+                       const TensorDescriptor& yDesc_,
+                       const TensorDescriptor& meanDesc_,
+                       const TensorDescriptor& rstdDesc_,
+                       const TensorDescriptor& dyDesc_,
+                       const TensorDescriptor& dxDesc_,
+                       const TensorDescriptor& dwDesc_,
+                       const TensorDescriptor& dbDesc_,
+                       float epsilon_,
+                       int32_t normalized_dim_)
+        : stride(GetStride(xDesc_, normalized_dim_)),
+          outer_size(GetOuterSize(xDesc_, normalized_dim_, stride)),
+          inner_size(GetInnerSize(xDesc_, normalized_dim_)),
+          direction(direction_),
+          mode(mode_),
+          xDesc(xDesc_),
+          x2Desc(x2Desc_),
+          weightDesc(weightDesc_),
+          biasDesc(biasDesc_),
+          yDesc(yDesc_),
+          meanDesc(meanDesc_),
+          rstdDesc(rstdDesc_),
+          dyDesc(dyDesc_),
+          dxDesc(dxDesc_),
+          dwDesc(dwDesc_),
+          dbDesc(dbDesc_),
+          epsilon(epsilon_),
+          normalized_dim(normalized_dim_)
+    {
+    }
+
     ProblemDescription(miopenNormMode_t mode_,
                        const TensorDescriptor& xDesc_,
                        const TensorDescriptor& weightDesc_,
@@ -54,15 +105,49 @@ struct ProblemDescription : ProblemDescriptionBase
                        const TensorDescriptor& rstdDesc_,
                        float epsilon_,
                        int32_t normalized_dim_)
-        : mode(mode_),
-          xDesc(xDesc_),
-          weightDesc(weightDesc_),
-          biasDesc(biasDesc_),
-          yDesc(yDesc_),
-          meanDesc(meanDesc_),
-          rstdDesc(rstdDesc_),
-          epsilon(epsilon_),
-          normalized_dim(normalized_dim_)
+        : ProblemDescription(Direction::Forward,
+                             mode_,
+                             xDesc_,
+                             {},
+                             weightDesc_,
+                             biasDesc_,
+                             yDesc_,
+                             meanDesc_,
+                             rstdDesc_,
+                             {},
+                             {},
+                             {},
+                             {},
+                             epsilon_,
+                             normalized_dim_)
+    {
+    }
+
+    ProblemDescription(miopenNormMode_t mode_,
+                       const TensorDescriptor& dyDesc_,
+                       const TensorDescriptor& xDesc_,
+                       const TensorDescriptor& weightDesc_,
+                       const TensorDescriptor& meanDesc_,
+                       const TensorDescriptor& rstdDesc_,
+                       const TensorDescriptor& dxDesc_,
+                       const TensorDescriptor& dwDesc_,
+                       const TensorDescriptor& dbDesc_,
+                       int32_t normalized_dim_)
+        : ProblemDescription(Direction::Backward,
+                             mode_,
+                             xDesc_,
+                             {},
+                             weightDesc_,
+                             {},
+                             {},
+                             meanDesc_,
+                             rstdDesc_,
+                             dyDesc_,
+                             dxDesc_,
+                             dwDesc_,
+                             dbDesc_,
+                             {},
+                             normalized_dim_)
     {
     }
 
@@ -76,16 +161,21 @@ struct ProblemDescription : ProblemDescriptionBase
                        const TensorDescriptor& rstdDesc_,
                        float epsilon_,
                        int32_t normalized_dim_)
-        : mode(mode_),
-          xDesc(xDesc_),
-          x2Desc(x2Desc_),
-          weightDesc(weightDesc_),
-          biasDesc(biasDesc_),
-          yDesc(yDesc_),
-          meanDesc(meanDesc_),
-          rstdDesc(rstdDesc_),
-          epsilon(epsilon_),
-          normalized_dim(normalized_dim_)
+        : ProblemDescription(Direction::Forward,
+                             mode_,
+                             xDesc_,
+                             x2Desc_,
+                             weightDesc_,
+                             biasDesc_,
+                             yDesc_,
+                             meanDesc_,
+                             rstdDesc_,
+                             {},
+                             {},
+                             {},
+                             {},
+                             epsilon_,
+                             normalized_dim_)
     {
     }
 
@@ -95,13 +185,21 @@ struct ProblemDescription : ProblemDescriptionBase
                        const TensorDescriptor& yDesc_,
                        const TensorDescriptor& rstdDesc_,
                        float epsilon_)
-        : direction(Direction::Forward),
-          mode(mode_),
-          xDesc(xDesc_),
-          weightDesc(weightDesc_),
-          yDesc(yDesc_),
-          rstdDesc(rstdDesc_),
-          epsilon(epsilon_)
+        : ProblemDescription(Direction::Forward,
+                             mode_,
+                             xDesc_,
+                             {},
+                             weightDesc_,
+                             {},
+                             yDesc_,
+                             {},
+                             rstdDesc_,
+                             {},
+                             {},
+                             {},
+                             {},
+                             epsilon_,
+                             xDesc_.GetLengths().size() - 1)
     {
     }
 
@@ -112,14 +210,21 @@ struct ProblemDescription : ProblemDescriptionBase
                        const TensorDescriptor& rstdDesc_,
                        const TensorDescriptor& dxDesc_,
                        const TensorDescriptor& dwDesc_)
-        : direction(Direction::Backward),
-          mode(mode_),
-          xDesc(xDesc_),
-          weightDesc(weightDesc_),
-          rstdDesc(rstdDesc_),
-          dyDesc(dyDesc_),
-          dxDesc(dxDesc_),
-          dwDesc(dwDesc_)
+        : ProblemDescription(Direction::Backward,
+                             mode_,
+                             xDesc_,
+                             {},
+                             weightDesc_,
+                             {},
+                             {},
+                             {},
+                             rstdDesc_,
+                             dyDesc_,
+                             dxDesc_,
+                             dwDesc_,
+                             {},
+                             {},
+                             xDesc_.GetLengths().size() - 1)
     {
     }
 
@@ -135,6 +240,7 @@ struct ProblemDescription : ProblemDescriptionBase
     const TensorDescriptor& GetDYDesc() const { return dyDesc; }
     const TensorDescriptor& GetDXDesc() const { return dxDesc; }
     const TensorDescriptor& GetDWDesc() const { return dwDesc; }
+    const TensorDescriptor& GetDBDesc() const { return dbDesc; }
     float GetEpsilon() const { return epsilon; }
     int32_t GetNormalizedDim() const { return normalized_dim; }
 
@@ -229,7 +335,8 @@ struct ProblemDescription : ProblemDescriptionBase
         else
         {
             if(!(dyDesc.IsPacked() && xDesc.IsPacked() && weightDesc.IsPacked() &&
-                 rstdDesc.IsPacked() && dxDesc.IsPacked() && dwDesc.IsPacked()))
+                 rstdDesc.IsPacked() && dxDesc.IsPacked() && dwDesc.IsPacked() &&
+                 dbDesc.IsPacked()))
             {
 #if MIOPEN_BUILD_DEV || !MIOPEN_NDEBUG
                 MIOPEN_THROW(miopenStatusBadParm,
@@ -242,20 +349,46 @@ struct ProblemDescription : ProblemDescriptionBase
         return true;
     }
 
-    bool IsLargeSize() const
-    {
-        auto dims = xDesc.GetLengths();
+    bool IsLargeSize() const { return outer_size * stride > 32; }
 
-        size_t outer_size = 1;
-        for(size_t i = 0; i < normalized_dim; i++)
-        {
-            outer_size *= dims[i];
-        }
-
-        return (outer_size > 32);
-    }
+    void Serialize(std::ostream& stream) const { stream << MakeNetworkConfig().ToString(); }
 
     NetworkConfig MakeNetworkConfig() const override;
+
+    template <class Self>
+    static void Visit(Self&& self, std::function<void(int64_t, std::string)> f)
+    {
+        f(static_cast<uint64_t>(self.direction), "direction");
+        f(self.outer_size, "outer_size");
+        f(self.inner_size, "inner_size");
+        f(self.stride, "stride");
+        f(static_cast<uint64_t>(self.mode), "mode");
+    }
+
+    template <class Self>
+    static void Visit(Self&& self, std::function<void(std::string, std::string)> f)
+    {
+        f(GetDataTypeName(self.xDesc.GetType()), "data_type");
+    }
+
+    template <class Self, class Visitor>
+    static void VisitAll(Self&& self, const Visitor& f)
+    {
+        Visit(std::forward<Self>(self), [&](int64_t value, std::string name) { f(value, name); });
+        Visit(std::forward<Self>(self),
+              [&](std::string value, std::string name) { f(value, name); });
+    }
+
+    // This declaration marks layernorm as a primitive with tuning enabled.
+    // Any tunable solver would be able pick it and fetch a db instance in ExecutePrimitive.
+    // It has to be discoverable via ADL from problem description.
+    friend auto GetDb(const ExecutionContext& context,
+                      const ProblemDescriptionTag&) -> PerformanceDb;
+
+public:
+    const size_t stride;
+    const size_t outer_size;
+    const size_t inner_size;
 
 private:
     Direction direction;
@@ -270,11 +403,21 @@ private:
     TensorDescriptor dyDesc;
     TensorDescriptor dxDesc;
     TensorDescriptor dwDesc;
+    TensorDescriptor dbDesc;
 
     float epsilon;
     int32_t normalized_dim;
 
     NetworkConfig MakeForwardNetworkConfig() const;
+
+    std::size_t GetBatchSize() const { return xDesc.GetLengths()[0]; }
+    std::size_t GetChannel() const { return xDesc.GetNumDims() > 2 ? xDesc.GetLengths()[1] : 0; }
+    std::size_t GetDepth() const { return xDesc.GetNumDims() > 4 ? xDesc.GetLengths()[2] : 0; }
+    std::size_t GetHeight() const
+    {
+        return xDesc.GetNumDims() > 2 ? xDesc.GetLengths()[xDesc.GetNumDims() - 2] : 0;
+    }
+    std::size_t GetWidth() const { return xDesc.GetLengths()[xDesc.GetNumDims() - 1]; }
 };
 
 } // namespace layernorm

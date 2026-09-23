@@ -54,6 +54,7 @@ void Run2dDriver(miopenDataType_t prec)
     switch(prec)
     {
     case miopenBFloat16: params = GPU_Conv2d_BFP16::GetParam(); break;
+
     case miopenFloat:
     case miopenHalf:
     case miopenInt8:
@@ -65,8 +66,6 @@ void Run2dDriver(miopenDataType_t prec)
         FAIL() << "miopenFloat, miopenHalf, miopenInt8, miopenInt32, "
                   "miopenDouble, miopenFloat8_fnuz, miopenBFloat8_fnuz "
                   "data type not supported by conv_igemm_dynamic_xdlops_nhwc_bf16 test";
-
-    default: params = GPU_Conv2d_BFP16::GetParam();
     }
 
     ScopedEnvironment<std::string> find_mode_env1(MIOPEN_FIND_MODE, "normal");
@@ -97,7 +96,7 @@ bool IsTestSupportedForDevice(const miopen::Handle& handle)
 {
     const auto& target  = handle.GetTargetProperties();
     std::string devName = handle.GetDeviceName();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
 
     if(devName == "gfx90a" || devName == "gfx942")
@@ -120,7 +119,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     const std::string args_nhwc_bwd = dis_fwd + dis_bk_wei + in_nhwc + fil_nhwc + out_nhwc;
     const std::string args_nhwc_wrw = dis_fwd + dis_bk_data + in_nhwc + fil_nhwc + out_nhwc;
 
-    const std::vector<std::string> test_cases = {
+    return {
         // clang-format off
     //fwd
     {flags + " --input  64 256  7  7 --weights 128 256 1 1 --pads_strides_dilations 0 0 1 1 1 1" + args_nhwc_fwd},
@@ -182,7 +181,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {flags + " --input  1 128 56 56 --weights 1 128 5 5 --pads_strides_dilations 0 0 2 2 1 1 " + args_nhwc_wrw}
         // clang-format on
     };
-    return test_cases;
 }
 
 } // namespace conv_igemm_dynamic_xdlops_nhwc_bf16

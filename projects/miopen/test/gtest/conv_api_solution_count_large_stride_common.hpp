@@ -14,8 +14,6 @@
 #include <miopen/solver_id.hpp>
 #include <gtest/gtest.h>
 #include <cstdint>
-#include <limits>
-#include <vector>
 
 #include "gtest_common.hpp"
 
@@ -45,49 +43,6 @@ struct Descriptors
 };
 
 inline uint64_t SolverIdFromName(const char* name) { return miopen::solver::Id(name).Value(); }
-
-// DescriptorNeedsLargeTensorPath -- true if this tensor descriptor has any
-// length or packed stride exceeding INT_MAX, i.e. it needs a CK "large-tensor"
-// (int64-indexed) instance. Mirrors TensorDescriptor::AllDimsFitIntoInt
-// (src/tensor.cpp::CheckDimsFitIntoInt). The C API returns strides as int,
-// which would truncate the very >INT_MAX values we are looking for, so we
-// recompute the packed row-major strides in 64-bit from the faithfully-returned
-// lengths (matching CalculateStrides for the default NCHW/NCDHW layout these
-// descriptors use: stride[i] = product(lengths[i+1 .. rank-1])).
-inline bool DescriptorNeedsLargeTensorPath(miopenTensorDescriptor_t desc)
-{
-    int rank = 0;
-    if(miopenGetTensorDescriptorSize(desc, &rank) != miopenStatusSuccess || rank <= 0)
-        return false; // Can't determine; do not skip.
-
-    std::vector<int> lens(rank);
-    std::vector<int> strides_unused(rank);
-    miopenDataType_t dtype;
-    if(miopenGetTensorDescriptor(desc, &dtype, lens.data(), strides_unused.data()) !=
-       miopenStatusSuccess)
-        return false;
-
-    constexpr std::int64_t int_max = std::numeric_limits<int>::max();
-
-    // Walk from the innermost dim outward; `stride` holds stride[i] on entry.
-    std::int64_t stride = 1;
-    for(int i = rank - 1; i >= 0; --i)
-    {
-        if(static_cast<std::int64_t>(lens[i]) > int_max || stride > int_max)
-            return true;
-        stride *= static_cast<std::int64_t>(lens[i]);
-    }
-    return false;
-}
-
-// True if the problem exceeds int32 indexing on any of its x/w/y tensors --
-// matches the solver's RequiresLargeTensorCKInstance gate, which requires all
-// three to fit (conv::ProblemDescription::AllTensorsDimsFitIntoInt).
-inline bool ProblemNeedsLargeTensorPath(const Descriptors& d)
-{
-    return DescriptorNeedsLargeTensorPath(d.xDesc) ||
-           DescriptorNeedsLargeTensorPath(d.wDesc) || DescriptorNeedsLargeTensorPath(d.yDesc);
-}
 
 // SetupDescriptorsImpl -- shared rank-templated descriptor builder. The
 // reproducer-family tests use uniform pad=1, stride=1, dilation=1 in all

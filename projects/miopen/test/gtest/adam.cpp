@@ -23,9 +23,15 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <sstream>
+#include <string_view>
+
 #include "adam.hpp"
+#include "test_parameter_name_generator.hpp"
 
 namespace adam {
+
+/////////////////////////////////////////////////////////
 
 struct GPU_Adam_FP32 : AdamTest<float, float>
 {
@@ -39,27 +45,68 @@ struct GPU_AmpAdam_FP32 : AdamTest<float, half_float::half>
 {
 };
 
+/////////////////////////////////////////////////////////
+
 } // namespace adam
 using namespace adam;
 
+/////////////////////////////////////////////////////////
+
 TEST_P(GPU_Adam_FP32, AdamFloatTestFw)
 {
-    RunTest();
+    RunTest(true);
     Verify();
 };
 
 TEST_P(GPU_Adam_FP16, AdamFloat16TestFw)
 {
-    RunTest();
+    RunTest(true);
     Verify();
 };
 
 TEST_P(GPU_AmpAdam_FP32, AmpAdamTestFw)
 {
-    RunTest();
+    RunTest(true);
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_FP32, testing::ValuesIn(AdamTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_FP16, testing::ValuesIn(AdamTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AmpAdam_FP32, testing::ValuesIn(AdamTestConfigs()));
+/////////////////////////////////////////////////////////
+
+struct TestNameGenerator
+{
+    std::string operator()(const auto& info)
+    {
+        const auto& tc = info.param;
+        std::stringstream ss;
+
+        ss << "input_" << GetRangeAsString(tc.input, "x") << "_lr_" << tc.lr << "_beta1_"
+           << tc.beta1 << "_beta2_" << tc.beta2 << "_weight_decay_" << tc.weight_decay << "_eps_"
+           << tc.eps << "_lr_" << tc.lr << "_lr_" << tc.lr << std::boolalpha << "_amsgrad_"
+           << tc.amsgrad << "_maximize_" << tc.maximize << "_adamw_" << tc.adamw
+           << "_use_step_tensor_" << tc.use_step_tensor << "_test_id_" << info.index;
+
+        std::string str(ss.str());
+
+        // Name format only supports letters, numbers and underscores.
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
+            return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+        });
+
+        return str;
+    }
+};
+
+/////////////////////////////////////////////////////////
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Adam_FP32,
+                         testing::ValuesIn(AdamTestConfigs()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Adam_FP16,
+                         testing::ValuesIn(AdamTestConfigs()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_AmpAdam_FP32,
+                         testing::ValuesIn(AdamTestConfigs()),
+                         TestNameGenerator{});

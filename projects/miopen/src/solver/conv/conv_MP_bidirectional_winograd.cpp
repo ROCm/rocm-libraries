@@ -39,7 +39,6 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/invokers/impl_gemm.hpp>
 
-#include <boost/any.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 
 #if MIOPEN_BACKEND_HIP
@@ -193,7 +192,7 @@ static bool IsApplicableTransform(const ExecutionContext& ctx, const ProblemDesc
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
 
     const std::string name = ctx.GetStream().GetDeviceName();
@@ -228,7 +227,12 @@ static bool IsApplicableTransform(const ExecutionContext& ctx, const ProblemDesc
         }
     }
 
-    if(!problem.IsLayoutDefault())
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+    if(!(problem.GetIn().IsPossibleLayout4D5D("NCHW", strict) &&
+         problem.GetWeights().IsPossibleLayout4D5D("NCHW", strict) &&
+         problem.GetOut().IsPossibleLayout4D5D("NCHW", strict)))
         return false;
 
     {
@@ -327,8 +331,15 @@ bool ConvMPBidirectWinograd<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>::IsA
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    if(!problem.IsLayoutDefault())
-        return false;
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    {
+        static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+        if(!(problem.GetIn().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetWeights().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetOut().IsPossibleLayout4D5D("NCHW", strict)))
+            return false;
+    }
 
     if(problem.IsTensorsCasted())
         return false;
@@ -736,6 +747,12 @@ template struct MIOPEN_INTERNALS_EXPORT ConvMPBidirectWinograd<4, 3>;
 template struct MIOPEN_INTERNALS_EXPORT ConvMPBidirectWinograd<5, 3>;
 template struct MIOPEN_INTERNALS_EXPORT ConvMPBidirectWinograd<6, 3>;
 
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvMPBidirectWinograd<2, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvMPBidirectWinograd<3, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvMPBidirectWinograd<4, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvMPBidirectWinograd<5, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvMPBidirectWinograd<6, 3>;
+
 // ExecutionContext and ProblemDescription transformation
 // for winograd buffers calculation using xdlops_convolution
 template <int WinoDataH, int WinoFilterH, int WinoDataW, int WinoFilterW>
@@ -745,6 +762,7 @@ ExecutionContext ConvMPBidirectWinograd_xdlops<WinoDataH, WinoFilterH, WinoDataW
 {
     auto transformed_ctx = ctx;
     transformed_problem.SetupFloats(transformed_ctx);
+    transformed_problem.SetupComputeType(transformed_ctx);
 
     return transformed_ctx;
 }
@@ -930,9 +948,11 @@ ConvMPBidirectWinograd_xdlops<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>::G
     result.construction_params.push_back(wino_transform.construction_params[2]);
     result.construction_params.push_back(xdlops_conv.construction_params[0]);
 
+    // NOLINTBEGIN (bugprone-unchecked-optional-access)
     result.invoker_factory =
         MakeWinogradInvokerFactory<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>(
             ctx, problem, xdlops_conv.invoker_factory.value(), true);
+    // NOLINTEND (bugprone-unchecked-optional-access)
 
     return result;
 }
@@ -959,6 +979,12 @@ template struct ConvMPBidirectWinograd_xdlops<3, 3>;
 template struct ConvMPBidirectWinograd_xdlops<4, 3>;
 template struct ConvMPBidirectWinograd_xdlops<5, 3>;
 template struct ConvMPBidirectWinograd_xdlops<6, 3>;
+
+template struct TransposedConvMPBidirectWinograd_xdlops<2, 3>;
+template struct TransposedConvMPBidirectWinograd_xdlops<3, 3>;
+template struct TransposedConvMPBidirectWinograd_xdlops<4, 3>;
+template struct TransposedConvMPBidirectWinograd_xdlops<5, 3>;
+template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 
 } // namespace conv
 } // namespace solver

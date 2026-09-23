@@ -66,8 +66,9 @@ size_t RNNLayoutTransformTotalTmpSpace(miopenRNNMode_t rnnMode,
     case miopenLSTM:
         return std::max((h_tmp_size + c_tmp_size), transform_workspace) + xin_tmp_size +
                yout_tmp_size;
-    default: MIOPEN_THROW(miopenStatusInternalError, "unknown rnnDesc.rnnMode");
     }
+
+    MIOPEN_THROW(miopenStatusInternalError, "unknown rnnDesc.rnnMode");
 }
 
 size_t RNNLayoutTransformTotalTmpSpace(miopenRNNMode_t rnnMode,

@@ -32,6 +32,8 @@ static Driver* makeDriver(const std::string& base_arg)
         return new PoolDriver<float, double>();
     if(base_arg == "poolfp16")
         return new PoolDriver<float16, double>();
+    if(base_arg == "poolbfp16")
+        return new PoolDriver<bfloat16, double>();
     return nullptr;
 }
 

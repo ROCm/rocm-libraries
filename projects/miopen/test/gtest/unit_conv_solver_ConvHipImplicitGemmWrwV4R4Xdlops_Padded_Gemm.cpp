@@ -30,14 +30,7 @@
 #error "HIP_PACKAGE_VERSION_FLAT undefined"
 #endif
 
-// LLVM buffer intrinsics llvm.amdgcn.buffer.* have been removed in HIP 6.4
-#define WORKAROUND_SWDEV_498660 (HIP_PACKAGE_VERSION_FLAT >= 6004000000)
-
-#if WORKAROUND_SWDEV_498660
-#define SOLVER_NAME DISABLED_ConvHipImplicitGemmWrwV4R4XdlopsPaddedGemm
-#else
 #define SOLVER_NAME ConvHipImplicitGemmWrwV4R4XdlopsPaddedGemm
-#endif
 
 namespace {
 
@@ -53,27 +46,28 @@ auto GetConvTestCases(miopenDataType_t datatype)
 }
 
 template <miopenDataType_t datatype>
-const auto& GetTestParams()
+miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-    static const auto params = [] {
-        Gpu supported_gpus = Gpu::gfx908 | Gpu::gfx90A;
-        if constexpr(datatype != miopenBFloat16)
-        {
-            supported_gpus = supported_gpus | Gpu::gfx94X;
-        }
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.EnableDeprecatedSolvers();
-        p.Tunable(5);
-        p.SetConvAttrFp16Alt(0);
-        p.SetTolerance(Gpu::gfx90A, miopenFloat, 2.0f);
-        return p;
-    }();
-    return params;
+    Gpu supported_gpus = Gpu::gfx908 | Gpu::gfx90A;
+    auto p             = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+    p.Tunable(5);
+    p.SetConvAttrFp16Alt(0);
+    p.SetTolerance(Gpu::gfx90A, miopenFloat, 2.0f);
+    return p;
 }
 
-const auto& GetTestParamsFP16() { return GetTestParams<miopenHalf>(); }
-const auto& GetTestParamsBFP16() { return GetTestParams<miopenBFloat16>(); }
-const auto& GetTestParamsFP32() { return GetTestParams<miopenFloat>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsFP16()
+{
+    return GetTestParams<miopenHalf>();
+}
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsBFP16()
+{
+    return GetTestParams<miopenBFloat16>();
+}
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsFP32()
+{
+    return GetTestParams<miopenFloat>();
+}
 
 } // namespace
 

@@ -128,10 +128,10 @@ SingleWeightBackward::GetSolution(const ExecutionContext& /*context*/,
             if(profiling)
             {
                 handle_.EnableProfiling(false);
-                hipStreamSynchronize(handle_.GetStream());
+                (void)hipStreamSynchronize(handle_.GetStream());
                 start = miopen::make_hip_event();
                 stop  = miopen::make_hip_event();
-                hipEventRecord(start.get(), handle_.GetStream());
+                (void)hipEventRecord(start.get(), handle_.GetStream());
             }
 
             auto work_a = getBuffPart(params.GetWorkspace(), 0);
@@ -175,13 +175,13 @@ SingleWeightBackward::GetSolution(const ExecutionContext& /*context*/,
             if(profiling)
             {
                 float elapsed = 0.0f;
-                hipEventRecord(stop.get(), handle_.GetStream());
+                (void)hipEventRecord(stop.get(), handle_.GetStream());
                 handle_.EnableProfiling(true);
-                hipEventSynchronize(stop.get());
-                hipEventElapsedTime(&elapsed, start.get(), stop.get());
+                (void)hipEventSynchronize(stop.get());
+                (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
                 // Clean up
-                hipEventDestroy(start.get());
-                hipEventDestroy(stop.get());
+                (void)hipEventDestroy(start.get());
+                (void)hipEventDestroy(stop.get());
                 handle_.ResetKernelTime();
                 handle_.AccumKernelTime(elapsed);
             };

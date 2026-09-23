@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -11,6 +11,10 @@
 #include "ck/library/utility/host_tensor.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_gemm.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace host {
@@ -19,21 +23,22 @@ template <typename ADataType,
           typename BDataType,
           typename CDataType,
           typename AccDataType,
-          typename ScaleDataType,
+          typename AScaleDataType,
           typename AElementwiseOperation,
           typename BElementwiseOperation,
           typename CElementwiseOperation,
-          typename ComputeTypeA = CDataType,
-          typename ComputeTypeB = ComputeTypeA>
+          typename ComputeTypeA   = CDataType,
+          typename ComputeTypeB   = ComputeTypeA,
+          typename BScaleDataType = AScaleDataType>
 struct ReferenceMXGemm : public device::BaseOperator
 {
     // Argument
     struct Argument : public device::BaseArgument
     {
         Argument(const Tensor<ADataType>& a_m_k,
-                 const Tensor<ScaleDataType>& a_m_kblock_scales,
+                 const Tensor<AScaleDataType>& a_m_kblock_scales,
                  const Tensor<BDataType>& b_k_n,
-                 const Tensor<ScaleDataType>& b_kblock_n_scales,
+                 const Tensor<BScaleDataType>& b_kblock_n_scales,
                  Tensor<CDataType>& c_m_n,
                  AElementwiseOperation a_element_op,
                  BElementwiseOperation b_element_op,
@@ -50,9 +55,9 @@ struct ReferenceMXGemm : public device::BaseOperator
         }
 
         const Tensor<ADataType>& a_m_k_;
-        const Tensor<ScaleDataType>& a_m_kblock_scales_;
+        const Tensor<AScaleDataType>& a_m_kblock_scales_;
         const Tensor<BDataType>& b_k_n_;
-        const Tensor<ScaleDataType>& b_kblock_n_scales_;
+        const Tensor<BScaleDataType>& b_kblock_n_scales_;
         Tensor<CDataType>& c_m_n_;
 
         AElementwiseOperation a_element_op_;
@@ -77,33 +82,34 @@ struct ReferenceMXGemm : public device::BaseOperator
                                                                            ComputeTypeA,
                                                                            ComputeTypeB>;
 
-            Tensor<ComputeTypeA> a_m_k_scaled(arg.a_m_k_.mDesc);
-            Tensor<ComputeTypeB> b_k_n_scaled(arg.b_k_n_.mDesc);
+            const ck::index_t M = arg.a_m_k_.mDesc.GetLengths()[0];
+            const ck::index_t N = arg.b_k_n_.mDesc.GetLengths()[1];
+            assert(arg.a_m_k_.mDesc.GetLengths()[1] == arg.b_k_n_.mDesc.GetLengths()[0]);
+            const ck::index_t K           = arg.a_m_k_.mDesc.GetLengths()[1];
+            const ck::index_t SCALE_BLOCK = K / arg.a_m_kblock_scales_.mDesc.GetLengths()[1];
+            Tensor<ComputeTypeA> a_m_k_scaled(HostTensorDescriptor({M, K}, {K, 1}));
+            Tensor<ComputeTypeB> b_k_n_scaled(HostTensorDescriptor({K, N}, {1, K}));
+            // printf("K: %d\n", K);
 
-            const auto M           = arg.a_m_k_.mDesc.GetLengths()[0];
-            const auto N           = arg.b_k_n_.mDesc.GetLengths()[1];
-            const auto K           = arg.a_m_k_.mDesc.GetLengths()[1];
-            const auto SCALE_BLOCK = K / arg.a_m_kblock_scales_.mDesc.GetLengths()[1];
-
-            for(size_t m = 0; m < M; m++)
+            for(int m = 0; m < M; m++)
             {
-                for(size_t k = 0; k < K; k++)
+                for(int k = 0; k < K; k++)
                 {
                     if constexpr(is_same_v<ADataType, f4x2_pk_t>)
                     {
-                        // TODO: add support for ColMajor layout as well
                         if(k % 2 == 1)
-                            a_m_k_scaled(m, k) =
-                                type_convert<ComputeTypeA>(
-                                    f4_t(arg.a_m_k_(m, k).template unpack<>(Number<1>{}))) *
-                                type_convert<ComputeTypeA>(
-                                    arg.a_m_kblock_scales_(m, k / SCALE_BLOCK));
-                        else
-                            a_m_k_scaled(m, k) =
-                                type_convert<ComputeTypeA>(
-                                    f4_t(arg.a_m_k_(m, k).template unpack<>(Number<0>{}))) *
-                                type_convert<ComputeTypeA>(
-                                    arg.a_m_kblock_scales_(m, k / SCALE_BLOCK));
+                        {
+                            continue;
+                        }
+                        // TODO: add support for ColMajor layout as well
+                        auto a_pack = arg.a_m_k_(m, k);
+                        auto a_scale =
+                            type_convert<ComputeTypeA>(arg.a_m_kblock_scales_(m, k / SCALE_BLOCK));
+                        auto a_f4_lo = f4_t(a_pack.template unpack<>(Number<0>{}));
+                        auto a_f4_hi = f4_t(a_pack.template unpack<>(Number<1>{}));
+
+                        a_m_k_scaled(m, k)     = type_convert<ComputeTypeA>(a_f4_lo) * a_scale;
+                        a_m_k_scaled(m, k + 1) = type_convert<ComputeTypeA>(a_f4_hi) * a_scale;
                     }
                     else if constexpr(is_same_v<ADataType, f6x16_pk_t> ||
                                       is_same_v<ADataType, bf6x16_pk_t> ||
@@ -124,25 +130,24 @@ struct ReferenceMXGemm : public device::BaseOperator
                 }
             }
 
-            for(size_t n = 0; n < N; n++)
+            for(int n = 0; n < N; n++)
             {
-                for(size_t k = 0; k < K; k++)
+                for(int k = 0; k < K; k++)
                 {
                     if constexpr(is_same_v<BDataType, f4x2_pk_t>)
                     {
                         // TODO: add support for RowMajor layout as well
                         if(k % 2 == 1)
-                            b_k_n_scaled(k, n) =
-                                type_convert<ComputeTypeB>(
-                                    f4_t(arg.b_k_n_(k, n).template unpack<>(Number<1>{}))) *
-                                type_convert<ComputeTypeB>(
-                                    arg.b_kblock_n_scales_(k / SCALE_BLOCK, n));
-                        else
-                            b_k_n_scaled(k, n) =
-                                type_convert<ComputeTypeB>(
-                                    f4_t(arg.b_k_n_(k, n).template unpack<>(Number<0>{}))) *
-                                type_convert<ComputeTypeB>(
-                                    arg.b_kblock_n_scales_(k / SCALE_BLOCK, n));
+                        {
+                            continue;
+                        }
+                        auto b_pack = arg.b_k_n_(k, n);
+                        auto b_scale =
+                            type_convert<ComputeTypeB>(arg.b_kblock_n_scales_(k / SCALE_BLOCK, n));
+                        auto b_f4_lo           = f4_t(b_pack.template unpack<>(Number<0>{}));
+                        auto b_f4_hi           = f4_t(b_pack.template unpack<>(Number<1>{}));
+                        b_k_n_scaled(k, n)     = type_convert<ComputeTypeB>(b_f4_lo) * b_scale;
+                        b_k_n_scaled(k + 1, n) = type_convert<ComputeTypeB>(b_f4_hi) * b_scale;
                     }
                     else if constexpr(is_same_v<BDataType, f6x16_pk_t> ||
                                       is_same_v<BDataType, bf6x16_pk_t> ||
@@ -193,9 +198,9 @@ struct ReferenceMXGemm : public device::BaseOperator
     bool IsSupportedArgument(const device::BaseArgument*) override { return true; }
 
     static auto MakeArgument(const Tensor<ADataType>& a_m_k,
-                             const Tensor<ScaleDataType>& a_m_kblock_scales,
+                             const Tensor<AScaleDataType>& a_m_kblock_scales,
                              const Tensor<BDataType>& b_k_n,
-                             const Tensor<ScaleDataType>& b_kblock_n_scales,
+                             const Tensor<BScaleDataType>& b_kblock_n_scales,
                              Tensor<CDataType>& c_m_n,
                              AElementwiseOperation a_element_op,
                              BElementwiseOperation b_element_op,
@@ -234,3 +239,6 @@ struct ReferenceMXGemm : public device::BaseOperator
 } // namespace host
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

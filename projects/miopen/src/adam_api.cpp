@@ -67,7 +67,7 @@ static void LogCmdAdam(const miopenTensorDescriptor_t paramDesc,
         for(auto dim : dims)
         {
             batch_sz += std::to_string(dim);
-            batch_sz += "x";
+            batch_sz += 'x';
         }
         batch_sz.pop_back();
         ss << " -d " << batch_sz << " -l " << lr << " -1 " << beta1 << " -2 " << beta2 << " -e "

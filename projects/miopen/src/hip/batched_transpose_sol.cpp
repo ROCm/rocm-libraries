@@ -35,6 +35,7 @@
 #include <limits>
 #include <iostream>
 #include <sstream>
+#include <ranges>
 
 #define BATCHED_TRANSPOSE_BLOCK_SIZE 256
 #define BATCHED_TRANSPOSE_PERSISTENT 0
@@ -242,32 +243,33 @@ static inline BatchedTransposeParam HeuristicGet(const ExecutionContext& ctx,
         // Early heuristic for cases that has very large width, very small height (or vice versa)
         if(hw_radio <= 48)
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 64, 1, 1, 1, 1}
-                                : BatchedTransposeParam{64, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 64, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{64, 4, 1, 1, 1, 1};
         }
         else if(hw_radio <= 128)
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 128, 1, 1, 1, 1}
-                                : BatchedTransposeParam{128, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 128, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{128, 4, 1, 1, 1, 1};
         }
         else
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 256, 1, 1, 1, 1}
-                                : BatchedTransposeParam{256, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 256, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{256, 4, 1, 1, 1, 1};
         }
+        return best_kernel;
     }
 
-    for(auto it = kernel_list.rbegin(); it != kernel_list.rend(); it++)
+    for(const auto& it : std::ranges::reverse_view(kernel_list))
     {
-        if(it->tile_x == 4 || it->tile_y == 4)
+        if(it.tile_x == 4 || it.tile_y == 4)
         {
             // We don't want such kernel to be selected here,
             // they should be used in above cases
             continue;
         }
-        if(!IsApplicable(batch, height, width, &(*it)))
+        if(!IsApplicable(batch, height, width, &it))
             continue;
-        std::size_t current_padding_size = GetExtraPaddingSize(batch, height, width, &(*it));
+        std::size_t current_padding_size = GetExtraPaddingSize(batch, height, width, &it);
         bool replace_current             = false;
         if(best_kernel.tile_x == 0 && best_kernel.tile_y == 0)
         {
@@ -277,12 +279,12 @@ static inline BatchedTransposeParam HeuristicGet(const ExecutionContext& ctx,
         if(hw_radio > 128)
         {
             // This is for cases that h, w have a great difference
-            if(!IsSameSide(height, width, &(*it)))
+            if(!IsSameSide(height, width, &it))
                 continue;
             float prev_radio = GetNormalizedRadio(
                 GetNormalizedRadio(best_kernel.tile_y, best_kernel.tile_x), hw_radio);
             float curr_radio =
-                GetNormalizedRadio(GetNormalizedRadio(it->tile_y, it->tile_x), hw_radio);
+                GetNormalizedRadio(GetNormalizedRadio(it.tile_y, it.tile_x), hw_radio);
 
             if(curr_radio * current_padding_size < prev_radio * extra_padding_size)
             {
@@ -295,9 +297,9 @@ static inline BatchedTransposeParam HeuristicGet(const ExecutionContext& ctx,
             {
                 // If width == height, a greate chance is that the kernel performance would be
                 // almost the same, so ignore this case
-                if((width > height && it->tile_x > it->tile_y &&
+                if((width > height && it.tile_x > it.tile_y &&
                     best_kernel.tile_x < best_kernel.tile_y) ||
-                   (width < height && it->tile_x < it->tile_y &&
+                   (width < height && it.tile_x < it.tile_y &&
                     best_kernel.tile_x > best_kernel.tile_y))
                 {
                     replace_current = true;
@@ -315,7 +317,7 @@ static inline BatchedTransposeParam HeuristicGet(const ExecutionContext& ctx,
         if(replace_current)
         {
             extra_padding_size = current_padding_size;
-            best_kernel        = *it;
+            best_kernel        = it;
         }
     }
 
@@ -332,12 +334,8 @@ BatchedTransposeSolution::BatchedTransposeSolution(const ExecutionContext& ctx,
                                                    uint32_t width_)
     : data_type(data_type_), batch(batch_), height(height_), width(width_)
 {
-    if(!(data_type == miopenHalf     //
-         || data_type == miopenFloat //
-         || data_type == miopenInt32 //
-         || data_type == miopenInt8  //
-         || data_type == miopenBFloat16))
-        MIOPEN_THROW("These data type are not supported");
+    if(!IsApplicable(data_type))
+        MIOPEN_THROW("This data type is not supported");
     num_cu                 = ctx.GetStream().GetMaxComputeUnits();
     std::size_t data_size  = miopen::GetTypeSize(data_type);
     kernel_param_heuristic = batched_transpose::HeuristicGet(ctx, data_size, batch, height, width);

@@ -547,6 +547,10 @@ protected:
             wrong_configs.push_back(config);
         }
 
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+        // Skip wrong dimension tests when AddressSanitizer is enabled as they trigger buffer
+        // overflows before reaching actual API validation, rendering the edge case tests useless.
+#else
         // wrong number of dimensions
         for(auto ndims : wrong_ndims)
         {
@@ -555,6 +559,7 @@ protected:
             config.valid         = false;
             wrong_configs.push_back(config);
         }
+#endif
 
         // dimsA = nullptr
         {

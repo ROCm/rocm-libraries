@@ -116,7 +116,7 @@ int miopenBNFwdTrainPerActivationRunHost(
                         elemStd = in_ptr[index] -
                                   mean_accum; // (x_i - mean) //this is reused but needs recalc
                         variance_accum += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                    }                                        // end for(n)
+                    } // end for(n)
 
                     variance_accum /= static_cast<Tref>(n_batchs); // (1/N)*sum{ (x_i - mean)^2 }
 
@@ -150,10 +150,10 @@ int miopenBNFwdTrainPerActivationRunHost(
                         // y_i = gamma*x_hat + beta
                         out_ptr[index] = scale_ptr[adjIndex] * inhat + bias_ptr[adjIndex];
                     } // end for(n_batchs)
-                }     // for (column)
-            }         // for (row)
-        }             // for (depth)
-    }                 // for (channel)
+                } // for (column)
+            } // for (row)
+        } // for (depth)
+    } // for (channel)
     return (ret);
 }
 
@@ -232,8 +232,8 @@ int miopenBNFwdTrainSpatialRunHost(
                         } // end for (n)
                     }
                 } // end for (column)
-            }     // end for (row)
-        }         // end for (depth)
+            } // end for (row)
+        } // end for (depth)
 #else
         for(int im = 0; im < in_cstride; im += MIO_BN_DIST)
         {
@@ -293,11 +293,11 @@ int miopenBNFwdTrainSpatialRunHost(
                                 (in_ptr[index] -
                                  mean_accum); // (x_i - mean) //this is reused but needs recalc
                             variance_accum += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
-                        }                                          // end for(n)
+                        } // end for(n)
                     }
                 } // end for (column)
-            }     // end for (row)
-        }         // end for (depth)
+            } // end for (row)
+        } // end for (depth)
 
 #else
         for(int im = 0; im < in_cstride; im += MIO_BN_DIST)
@@ -374,9 +374,9 @@ int miopenBNFwdTrainSpatialRunHost(
                         } // end for(n_batchs)
                     }
                 } // for (column)
-            }     // for (row)
-        }         // for (depth)
-    }             // for (channel)
+            } // for (row)
+        } // for (depth)
+    } // for (channel)
     return (ret);
 }
 
@@ -444,7 +444,7 @@ int miopenBNFwdInferPerActivationRunHost(
                             // y_i = gamma*x_hat + beta
                             out_ptr[index] = scale_ptr[adjIndex] * inhat + bias_ptr[adjIndex];
                         } // end for(n_batchs)
-                    }     // for (column)
+                    } // for (column)
                 }
             }
         }
@@ -484,7 +484,7 @@ int miopenBNFwdInferPerActivationRunHost(
                             index   = in_nstride * bidx + adjIndex;
                             elemStd = in_ptr[index] - mean_accum; // (x_i - mean)
                             variance_accum += elemStd * elemStd;  // sum{ (x_i - mean)^2 }
-                        }                                         // end for(n)
+                        } // end for(n)
                         variance_accum /=
                             static_cast<Tref>(n_batchs); // (1/N)*sum{ (x_i - mean)^2 }
 
@@ -504,8 +504,8 @@ int miopenBNFwdInferPerActivationRunHost(
                             // y_i = gamma*x_hat + beta
                             out_ptr[index] = scale_ptr[adjIndex] * inhat + bias_ptr[adjIndex];
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
+                    } // for (column)
+                } // for (row)
             }
         } // for (channel)
     }
@@ -609,9 +609,9 @@ int miopenBNFwdInferSpatialRunHost(
                             // iterating through the stack of images in the mini_batch
                             mean_accum += in_ptr[index];
                         } // end for (n)
-                    }     // end for (column)
-                }         // end for (row)
-            }             // end for (depth)
+                    } // end for (column)
+                } // end for (row)
+            } // end for (depth)
 #else
             int imgIndex = 0;
             // process the batch per channel
@@ -628,8 +628,8 @@ int miopenBNFwdInferSpatialRunHost(
                         // iterating through the stack of images in the mini_batch
                         mean_accum_arr[i] += in_ptr[index];
                     } // end for (n)
-                }     // end for (column)
-            }         // end for (row)
+                } // end for (column)
+            } // end for (row)
             for(int i = 0; i < MIO_BN_DIST; i++)
             {
                 mean_accum += mean_accum_arr[i];
@@ -657,9 +657,9 @@ int miopenBNFwdInferSpatialRunHost(
                             // using out buffer as scratchpad
                             out_ptr[index] = elemStd = (in_ptr[index] - mean_accum); // (x_i - mean)
                             variance_accum += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
-                        }                                          // end for(n)
-                    }                                              // end for (column)
-                }                                                  // end for (row)
+                        } // end for(n)
+                    } // end for (column)
+                } // end for (row)
             }
 #else
             for(int im = 0; im < in_cstride; im += MIO_BN_DIST)
@@ -676,9 +676,9 @@ int miopenBNFwdInferSpatialRunHost(
                         // using out buffer as scratchpad
                         out_ptr[index] = elemStd = (in_ptr[index] - mean_accum); // (x_i - mean)
                         variance_accum_arr[i] += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
-                    }                                                 // end for(n)
-                }                                                     // end for
-            }                                                         // end for
+                    } // end for(n)
+                } // end for
+            } // end for
             for(int i = 0; i < MIO_BN_DIST; i++)
             {
                 variance_accum += variance_accum_arr[i];
@@ -711,11 +711,11 @@ int miopenBNFwdInferSpatialRunHost(
                             // y_i = gamma*x_hat + beta
                             out_ptr[index] = scale_ptr[cidx] * inhat + bias_ptr[cidx];
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for
-        }                 // for (channel)
-    }                     // end if
+                    } // for (column)
+                } // for (row)
+            } // for
+        } // for (channel)
+    } // end if
     return (ret);
 }
 
@@ -811,10 +811,10 @@ int miopenBNBwdPerActivationRunHost(
                             tmp3          = elemInvVar / static_cast<Tref>(n_batchs);
                             dx_ptr[index] = tmp3 * tmp2;
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (didx)
-        }                 // for (cidx)
+                    } // for (column)
+                } // for (row)
+            } // for (didx)
+        } // for (cidx)
     }
     else
     {
@@ -848,9 +848,9 @@ int miopenBNBwdPerActivationRunHost(
                         { // via mini_batch
                             // per (x-dims) channel load a block of data into LDS
                             index   = in_nstride * bidx + adjIndex;
-                            elemStd = x_ptr[index] - mean;       // (x_i - mean)
-                            variance += elemStd * elemStd;       // sum{ (x_i - mean)^2 }
-                        }                                        // end for(n)
+                            elemStd = x_ptr[index] - mean; // (x_i - mean)
+                            variance += elemStd * elemStd; // sum{ (x_i - mean)^2 }
+                        } // end for(n)
                         variance /= static_cast<Tref>(n_batchs); // (1/N)*sum{ (x_i - mean)^2 }
 
                         // #3 add epsilon for numeric stability, sqr_root, and invert
@@ -885,11 +885,11 @@ int miopenBNBwdPerActivationRunHost(
                             tmp3          = elemInvVar / static_cast<Tref>(n_batchs);
                             dx_ptr[index] = tmp3 * tmp2;
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
-        }                 // for (channel)
-    }                     // end else
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
+        } // for (channel)
+    } // end else
 
     return 0;
 }
@@ -956,8 +956,8 @@ int miopenBNBwdSpatialRunHost(
                             dbias_ptr[cidx] += dyelem;
                             dscale_ptr[cidx] += elemStd * invVar * dyelem;
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
+                    } // for (column)
+                } // for (row)
             }
 
             // process the batch per channel
@@ -979,10 +979,10 @@ int miopenBNBwdSpatialRunHost(
                             Tref tmp3 = (scale_ptr[cidx] * invVar) / static_cast<Tref>(NHW);
                             dx_ptr[index] = tmp3 * (tmp2 + tmp1);
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
-        }                 // for (cidx)
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
+        } // for (cidx)
     }
     else
     {
@@ -1030,8 +1030,8 @@ int miopenBNBwdSpatialRunHost(
                             mean += x_ptr[index];
                         }
                     } // for (column)
-                }     // for (row)
-            }         // for (depth)
+                } // for (row)
+            } // for (depth)
 #else
             int imgIndex = 0;
             for(int im = 0; im < in_cstride; im += MIO_BN_DIST)
@@ -1051,7 +1051,7 @@ int miopenBNBwdSpatialRunHost(
                         }
                     }
                 } // end for
-            }     // end for
+            } // end for
             for(int i = 0; i < MIO_BN_DIST; i++)
             {
                 mean += mean_accum_arr[i];
@@ -1078,10 +1078,10 @@ int miopenBNBwdSpatialRunHost(
                             index   = in_nstride * bidx + adjIndex;
                             elemStd = x_ptr[index] - mean; // (x_i - mean)
                             variance += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                        }                                  // end for(n)
-                    }                                      // for (column)
-                }                                          // for (row)
-            }                                              // for (depth)
+                        } // end for(n)
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
 #else
             for(int im = 0; im < in_cstride; im += MIO_BN_DIST)
             {
@@ -1101,7 +1101,7 @@ int miopenBNBwdSpatialRunHost(
                             variance_accum_arr[i] += elemStd * elemStd; // sum{ (x_i - mean)^2 }
                         }
                     } // end for
-                }     // end for
+                } // end for
             }
             for(int i = 0; i < MIO_BN_DIST; i++)
             {
@@ -1137,9 +1137,9 @@ int miopenBNBwdSpatialRunHost(
                             dbias_ptr[cidx] += dyelem;
                             dscale_ptr[cidx] += xhat[xhat_index] * dyelem;
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
 #else
             for(int im = 0; im < in_cstride; im += MIO_BN_DIST)
             {
@@ -1159,8 +1159,8 @@ int miopenBNBwdSpatialRunHost(
                             dscale_accum_arr[i] += elemStd * invVar * dyelem;
                         }
                     } // end for(n_batchs)
-                }     // for (column)
-            }         // for (row)
+                } // for (column)
+            } // for (row)
             for(int i = 0; i < MIO_BN_DIST; i++)
             {
                 dbias_ptr[cidx] += dbias_accum_arr[i];
@@ -1186,9 +1186,9 @@ int miopenBNBwdSpatialRunHost(
                             Tref tmp3 = (scale_ptr[cidx] * invVar) / static_cast<Tref>(NHW);
                             dx_ptr[index] = tmp3 * (tmp2 + tmp1);
                         } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
+                    } // for (column)
+                } // for (row)
+            } // for (depth)
 #else
             for(int im = 0; im < in_cstride; im += MIO_BN_DIST)
             {
@@ -1208,11 +1208,11 @@ int miopenBNBwdSpatialRunHost(
                             dx_ptr[index] = tmp3 * (tmp2 + tmp1);
                         }
                     } // end for(n_batchs)
-                }     // for (column)
-            }         // for (row)
+                } // for (column)
+            } // for (row)
 #endif
         } // for (channel)
-    }     // end else
+    } // end else
 
     return 0;
 }

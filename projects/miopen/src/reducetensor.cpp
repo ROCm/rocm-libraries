@@ -224,9 +224,11 @@ inline int GetDataTypeSize(miopenDataType_t t)
     case miopenInt8: return (1);
     case miopenBFloat16: return (2);
     case miopenInt32: return (4);
-    case miopenInt64:
-    default: MIOPEN_THROW("Only float, half, double, bfloat16, int8 data types are supported.");
+
+    case miopenInt64: break;
     };
+
+    MIOPEN_THROW("Only float, half, double, bfloat16, int8 data types are supported.");
 };
 
 }; // end of namespace detail
@@ -245,11 +247,13 @@ static ck::DataTypeEnum_t mapDataTypeId(miopenDataType_t t)
     case miopenDouble: return DataTypeEnum_t::Double;
     case miopenInt8: return DataTypeEnum_t::Int8;
     case miopenInt32: return DataTypeEnum_t::Int32;
+
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    case miopenInt64:
-    default: MIOPEN_THROW("Only float, half, double data type is supported.");
+    case miopenInt64: break;
     };
+
+    MIOPEN_THROW("Only float, half, double data type is supported.");
 };
 
 static ck::ReduceTensorOp_t mapReduceOpId(miopenReduceTensorOp_t t)
@@ -266,9 +270,9 @@ static ck::ReduceTensorOp_t mapReduceOpId(miopenReduceTensorOp_t t)
     case MIOPEN_REDUCE_TENSOR_AVG: return ReduceTensorOp_t::AVG;
     case MIOPEN_REDUCE_TENSOR_NORM1: return ReduceTensorOp_t::NORM1;
     case MIOPEN_REDUCE_TENSOR_NORM2: return ReduceTensorOp_t::NORM2;
-
-    default: MIOPEN_THROW("Operation is not supported");
     };
+
+    MIOPEN_THROW("Operation is not supported");
 };
 
 static std::string get_network_config_string_from_type_enums(miopenDataType_t TSrc,
@@ -351,8 +355,9 @@ static std::string getReductionMethodStr(ReductionMethod_t reduceImpl)
     case Reduce_DirectWarpWise: return {"warpwise"};
     case Reduce_BlockWise: return {"blockwise"};
     case Reduce_MultiBlock: return {"multiblock"};
-    default: MIOPEN_THROW("Invalid reduction method ID!"); break;
     };
+
+    MIOPEN_THROW("Invalid reduction method ID!");
 };
 
 static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
@@ -364,40 +369,48 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
                                               int BlkGroupSize,
                                               const tunable_generic_reduction* tunable)
 {
-    bool src_need_padding = false;
-    bool dst_need_padding = false;
-    int copySliceLen;
-    int reduceSizePerBlock;
+    auto res = [&]() {
+        bool src_need_padding = false;
+        bool dst_need_padding = false;
+        int copySliceLen;
+        int reduceSizePerBlock;
 
-    switch(reduceImpl)
-    {
-    case Reduce_DirectThreadWise:
-        copySliceLen     = tunable->GredThreadBufferLength;
-        src_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize ||
-                            toReduceLen % copySliceLen > 0);
-        dst_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize);
-        break;
-    case Reduce_DirectWarpWise:
-        copySliceLen = warpSize * tunable->GredAccessesPerThreadInWarp;
-        src_need_padding =
-            (invariantLen < GridSize * BlockSize / warpSize || toReduceLen % copySliceLen > 0);
-        dst_need_padding = (invariantLen < GridSize * BlockSize / warpSize);
-        break;
-    case Reduce_BlockWise:
-        copySliceLen     = BlockSize * tunable->GredAccessesPerThreadInBlock;
-        src_need_padding = (toReduceLen % copySliceLen > 0);
-        break;
-    case Reduce_MultiBlock:
-        copySliceLen = BlockSize * tunable->GredAccessesPerThreadInBlock;
-        reduceSizePerBlock =
-            (((toReduceLen + BlkGroupSize - 1) / BlkGroupSize + copySliceLen - 1) / copySliceLen) *
-            copySliceLen;
-        src_need_padding = (toReduceLen < static_cast<size_t>(reduceSizePerBlock) * BlkGroupSize);
-        break;
-    default: MIOPEN_THROW("Invalid reduction method ID!"); break;
-    };
+        switch(reduceImpl)
+        {
+        case Reduce_DirectThreadWise:
+            copySliceLen     = tunable->GredThreadBufferLength;
+            src_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize ||
+                                toReduceLen % copySliceLen > 0);
+            dst_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize);
+            return std::make_pair(src_need_padding, dst_need_padding);
 
-    return (std::make_pair(src_need_padding, dst_need_padding));
+        case Reduce_DirectWarpWise:
+            copySliceLen = warpSize * tunable->GredAccessesPerThreadInWarp;
+            src_need_padding =
+                (invariantLen < GridSize * BlockSize / warpSize || toReduceLen % copySliceLen > 0);
+            dst_need_padding = (invariantLen < GridSize * BlockSize / warpSize);
+            return std::make_pair(src_need_padding, dst_need_padding);
+
+        case Reduce_BlockWise:
+            copySliceLen     = BlockSize * tunable->GredAccessesPerThreadInBlock;
+            src_need_padding = (toReduceLen % copySliceLen > 0);
+            return std::make_pair(src_need_padding, dst_need_padding);
+
+        case Reduce_MultiBlock:
+            copySliceLen = BlockSize * tunable->GredAccessesPerThreadInBlock;
+            reduceSizePerBlock =
+                (((toReduceLen + BlkGroupSize - 1) / BlkGroupSize + copySliceLen - 1) /
+                 copySliceLen) *
+                copySliceLen;
+            src_need_padding =
+                (toReduceLen < static_cast<size_t>(reduceSizePerBlock) * BlkGroupSize);
+            return std::make_pair(src_need_padding, dst_need_padding);
+        };
+
+        MIOPEN_THROW("Invalid reduction method ID!");
+    }();
+
+    return res;
 };
 
 static std::string get_kernel_file_name(const bool isFirstCall,

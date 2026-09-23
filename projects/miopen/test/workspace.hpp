@@ -64,7 +64,7 @@ class Workspace
 
         auto size() const { return sz_; }
 
-        GPUBuffer(const GPUBuffer&) = delete;
+        GPUBuffer(const GPUBuffer&)            = delete;
         GPUBuffer& operator=(const GPUBuffer&) = delete;
 
         GPUBuffer(GPUBuffer&& that) noexcept : buf_(that.buf_), sz_(that.sz_)
@@ -108,10 +108,10 @@ class Workspace
 public:
     explicit Workspace(size_t sz = 0) : sz_(sz) { AdjustToSize(); }
 
-    Workspace(const Workspace&) = delete;
+    Workspace(const Workspace&)            = delete;
     Workspace& operator=(const Workspace&) = delete;
     Workspace(Workspace&&)                 = default;
-    Workspace& operator=(Workspace&&) = default;
+    Workspace& operator=(Workspace&&)      = default;
 
     size_t size() const { return sz_; }
 

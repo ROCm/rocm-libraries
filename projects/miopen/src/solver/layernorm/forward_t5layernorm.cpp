@@ -49,7 +49,7 @@ bool T5LayernormForward::IsApplicable(const ExecutionContext&,
         return false;
     if(!problem.IsAllPacked())
         return false;
-    if(!(sizeof_local_memory_t5(problem) <= TargetProperties::GetMaxLocalMemorySize()))
+    if(!(sizeof_local_memory(problem, LOCAL_SIZE) <= TargetProperties::GetMaxLocalMemorySize()))
         return false;
     return true;
 }
@@ -66,13 +66,9 @@ T5LayernormForward::GetSolution(const ExecutionContext& context,
         auto dtype        = problem.GetXDesc().GetType();
         auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
         auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
-        auto dims         = problem.GetXDesc().GetLengths();
-
-        auto outer_size =
-            std::accumulate(dims.begin(), dims.end() - 1, 1ULL, std::multiplies<size_t>());
 
         size_t xlocalsize = LOCAL_SIZE;
-        size_t xgridsize  = outer_size * xlocalsize;
+        size_t xgridsize  = problem.outer_size * xlocalsize;
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;
@@ -80,7 +76,7 @@ T5LayernormForward::GetSolution(const ExecutionContext& context,
 
         auto kernel = KernelInfo{};
 
-        kernel.kernel_file = "MIOpenLayerNorm.cpp";
+        kernel.kernel_file = "MIOpenT5LayerNorm.cpp";
         kernel.kernel_name = "T5LayernormFwdContiguous";
 
         const auto build_params = KernelBuildParameters{
@@ -90,10 +86,6 @@ T5LayernormForward::GetSolution(const ExecutionContext& context,
             {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
             {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
             {"LOCAL_SIZE", LOCAL_SIZE},
-            {"MIOPEN_ELEMENTWISE_AFFINE", 0},
-            {"MIOPEN_WEIGHT_BIAS", 1},
-            {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-            {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
             {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
             {"MIOPEN_WEIGHT_BIAS_T5", 5},
         };
@@ -116,15 +108,12 @@ T5LayernormForward::GetSolution(const ExecutionContext& context,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::layernorm::T5InvokeParams>();
 
-            auto dims         = params.xDesc->GetLengths();
-            size_t inner_size = dims[dims.size() - 1];
-
             kernel(params.x,
                    params.weight,
                    params.y,
                    params.rstd,
                    params.epsilon,
-                   inner_size,
+                   params.inner_size,
                    static_cast<bool>(params.mode % 2));
         };
     };

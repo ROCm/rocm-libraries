@@ -1,11 +1,12 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #include <miopen/conv/invokers/impl_gemm.hpp>
 
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/algorithm.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/tensor_ops.hpp>
-
-#include <boost/any.hpp>
 
 namespace miopen {
 namespace conv {

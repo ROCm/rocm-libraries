@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,14 +28,21 @@
 
 #include <miopen/invoker.hpp>
 #include <miopen/kernel.hpp>
+#include <miopen/kernel_info.hpp>
 
 #include <vector>
 
 namespace miopen {
 namespace conv {
 
-InvokerFactory MakeGcnAsm1x1UUSInvokerFactory(
-    int N, int C, int K, int n_groups, int H, int W, std::size_t workspace_sz);
+InvokerFactory MakeGcnAsm1x1UUSInvokerFactory(const solver::KernelInfo& us_kernel_info,
+                                              int N,
+                                              int C,
+                                              int K,
+                                              int n_groups,
+                                              int H,
+                                              int W,
+                                              std::size_t workspace_sz);
 
 } // namespace conv
 } // namespace miopen

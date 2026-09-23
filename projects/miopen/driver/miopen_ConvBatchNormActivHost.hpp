@@ -49,6 +49,7 @@ int miopenBNSpatialFwdInferHost(miopenTensorDescriptor_t& inputTensor,
 {
     int nIn, cIn, hIn, wIn;
     miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
+    const auto tensorLayout = miopen::deref(inputTensor).GetLayoutEnum().value();
 
     int n_batchs = nIn;
     int channels = cIn;
@@ -76,7 +77,9 @@ int miopenBNSpatialFwdInferHost(miopenTensorDescriptor_t& inputTensor,
         { // via rows
             for(int column = 0; column < width; column++)
             { // via columns
-                adjIndex = in_cstride * cidx + width * row + column;
+                adjIndex = (tensorLayout == miopenTensorNCHW)
+                               ? in_cstride * cidx + width * row + column
+                               : width * channels * row + channels * column + cidx;
                 for(int bidx = 0; bidx < n_batchs; bidx++)
                 { // via mini_batch
                     index          = in_nstride * bidx + adjIndex;
@@ -103,6 +106,7 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
 
     int nIn, cIn, hIn, wIn;
     miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
+    const auto tensorLayout = miopen::deref(inputTensor).GetLayoutEnum().value();
 
     int n_batchs = nIn;
     int channels = cIn;
@@ -128,7 +132,9 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
         { // via rows
             for(int column = 0; column < width; column++)
             { // via columns
-                adjIndex          = in_cstride * cidx + width * row + column;
+                adjIndex          = (tensorLayout == miopenTensorNCHW)
+                                        ? in_cstride * cidx + width * row + column
+                                        : width * channels * row + channels * column + cidx;
                 mean              = estimatedMean[adjIndex];
                 variance          = estimatedVariance[adjIndex];
                 double elemInvVar = 1.0 / double(sqrt(variance + epsilon));
@@ -142,7 +148,7 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
                     // y_i = gamma*x_hat + beta
                     out_ptr[index] = (scale_ptr[adjIndex] * inhat) + bias_ptr[adjIndex];
                 } // end for(n_batchs)
-            }     // for (column)
+            } // for (column)
         }
     }
     return (ret);

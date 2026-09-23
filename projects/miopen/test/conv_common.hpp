@@ -56,7 +56,6 @@
 #include "gpu_conv.hpp"
 #include "network_data.hpp"
 #include "miopen/find_db.hpp"
-#include "cpu_bias.hpp"
 #include "random.hpp"
 
 #define TEST_DIRECT_SUPPORTED_CONFIG_ONLY (!MIOPEN_USE_ROCBLAS)
@@ -91,6 +90,7 @@ static inline bool is_direct_fwd_bwd_data_supported(const miopen::Handle& handle
         ctx.general_compile_options = "";
         ctx.SetStream(&handle);
         problem.SetupFloats(ctx);
+        problem.SetupComputeType(ctx);
         if(FindAllDirectSolutions(ctx, problem, {}).empty())
             return false;
     }
@@ -115,6 +115,7 @@ static inline bool is_direct_bwd_wrw_supported(const miopen::Handle& handle,
     ctx.disable_perfdb_access   = true;
     ctx.SetStream(&handle);
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
 
     return !FindAllBwdWrW2DSolutions(ctx, problem, {}).empty();
 }
@@ -581,7 +582,7 @@ struct verify_forward_conv : conv_base<T, Tout>
         /// So we use one Immediate mode call during Find mode tests,
         /// to print solver name onto console.
         miopenConvSolution_t selected = {};
-        bool fallback_path_taken      = false;
+        auto fallback_path_taken      = miopen::FallbackPath();
         std::size_t count             = 0;
 
         Workspace wspace{};
@@ -955,14 +956,13 @@ struct verify_forward_conv : conv_base<T, Tout>
             }
             break;
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
         {
             stats->algorithm   = selected.algorithm;
             stats->solver_name = miopen::solver::Id(selected.solution_id).ToString();
-            if(fallback_path_taken)
+            if(fallback_path_taken != miopen::FallbackPath::None)
                 stats->solver_name += "_fallback";
         }
         rout.data = handle.Read<Tout>(out_dev, rout.data.size());
@@ -1063,7 +1063,7 @@ struct verify_backward_conv : conv_base<T>
         Workspace wspace{};
 
         miopenConvSolution_t selected;
-        bool fallback_path_taken = false;
+        auto fallback_path_taken = miopen::FallbackPath();
         std::size_t count        = 0;
 
         const auto ctx     = ExecutionContext{&handle};
@@ -1310,14 +1310,13 @@ struct verify_backward_conv : conv_base<T>
             break;
         }
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
         {
             stats->algorithm   = selected.algorithm;
             stats->solver_name = miopen::solver::Id(selected.solution_id).ToString();
-            if(fallback_path_taken)
+            if(fallback_path_taken != miopen::FallbackPath::None)
                 stats->solver_name += "_fallback";
         }
         rinput.data = handle.Read<T>(in_dev, rinput.data.size());
@@ -1418,7 +1417,7 @@ struct verify_backward_weights_conv : conv_base<T>
         Workspace wspace{};
 
         miopenConvSolution_t selected;
-        bool fallback_path_taken = false;
+        auto fallback_path_taken = miopen::FallbackPath();
         std::size_t count        = 0;
 
         const auto ctx = ExecutionContext{&handle};
@@ -1570,14 +1569,13 @@ struct verify_backward_weights_conv : conv_base<T>
             break;
         }
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
         {
             stats->algorithm   = selected.algorithm;
             stats->solver_name = miopen::solver::Id(selected.solution_id).ToString();
-            if(fallback_path_taken)
+            if(fallback_path_taken != miopen::FallbackPath::None)
                 stats->solver_name += "_fallback";
         }
         rweights.data = handle.Read<T>(wei_dev, rweights.data.size());
@@ -1728,7 +1726,7 @@ struct verify_forward_conv_int8 : conv_base<T>
         }
 
         // std::cout << "Forward Conv solutions available: " << count << std::endl;
-        bool fallback_path_taken = false;
+        auto fallback_path_taken = miopen::FallbackPath();
         auto solutions           = filter.GetSolutions(ctx, problem, count, &fallback_path_taken);
         count                    = solutions.size();
 
@@ -1772,7 +1770,7 @@ struct verify_forward_conv_int8 : conv_base<T>
         {
             stats->algorithm   = selected.algorithm;
             stats->solver_name = miopen::solver::Id(selected.solution_id).ToString();
-            if(fallback_path_taken)
+            if(fallback_path_taken != miopen::FallbackPath::None)
                 stats->solver_name += "_fallback";
         }
         rout.data = handle.Read<float>(out_dev, rout.data.size());
@@ -1802,7 +1800,8 @@ struct conv_driver : test_driver
     std::size_t batch_size{};
     std::size_t input_channels{};
     std::size_t output_channels{};
-    std::size_t vector_length{};
+    // Default to 1 for non-vectorized tensors (0 causes stride calculation to fail)
+    std::size_t vector_length{1};
     std::size_t tensor_vect{}; // 0: non vectorized, 1: C-vectorized, 2: N-vectorized. keep same
                                // as MIOpenDriver InputFlag "tensor_vect"
     std::string in_layout;
@@ -2254,7 +2253,10 @@ struct conv_driver : test_driver
                   (weights.desc.GetLengths().at(0) % filter.group_count == 0)))) ||
                ((filter.mode == miopenConvolution) &&
                 ((weights.desc.GetLayout_str() == "NCHW") ||
-                 (weights.desc.GetLayout_str() == "NCHWc")) &&
+                 (weights.desc.GetLayout_str() == "NCHWc") ||
+                 (weights.desc.GetLayout_str() == "NHWC") ||
+                 (weights.desc.GetLayout_str() == "NCDHW") ||
+                 (weights.desc.GetLayout_str() == "NDHWC")) &&
                 ((filter.group_count == 1 &&
                   (input.desc.GetLengths().at(1) == weights.desc.GetLengths().at(1))) ||
                  (filter.group_count > 1 &&
@@ -2267,14 +2269,14 @@ struct conv_driver : test_driver
             {
                 auto output = get_output_tensor<T, Tout>(filter, input, weights, out_layout);
 
-                auto gen_positive_value = [=](auto...) {
+                auto gen_positive_value = [=, this](auto...) {
                     auto data_type = input.desc.GetType();
                     int v_max      = is_int8 ? 16 : (data_type == miopenHalf) ? 4 : 17;
                     return gen_float ? prng::gen_canonical<double>()
                                      : static_cast<double>(prng::gen_A_to_B(1, v_max));
                 };
 
-                auto gen_sign_value = [=](auto... is) {
+                auto gen_sign_value = [=, this](auto... is) {
                     auto data_type = input.desc.GetType();
                     int v_max      = is_int8 ? 16 : (data_type == miopenHalf) ? 4 : 17;
                     return gen_float ? prng::gen_A_to_B(-1.0, 1.0)
@@ -2445,6 +2447,9 @@ struct conv_driver : test_driver
                     {
                         verify(verify_forward_conv<api, T>{
                             input, weights, output, filter, stats, preallocate, 0, search, false});
+                        std::cout << "PASSED: Fwd " << input.desc.ToString() << " -> "
+                                  << output.desc.ToString() << " [" << stats.solver_name << "]"
+                                  << std::endl;
                     }
                 }
 
@@ -2452,6 +2457,9 @@ struct conv_driver : test_driver
                 {
                     verify(verify_backward_conv<api, T>{
                         input, weights, output, filter, stats, preallocate, 0, search});
+                    std::cout << "PASSED: Bwd " << output.desc.ToString() << " -> "
+                              << input.desc.ToString() << " [" << stats.solver_name << "]"
+                              << std::endl;
                 }
 
                 if(do_backward_weights && !skip_backward_weights)
@@ -2460,94 +2468,11 @@ struct conv_driver : test_driver
 
                     verify(verify_backward_weights_conv<api, T>{
                         input, weights, output, filter, stats, preallocate, 0, search});
+                    std::cout << "PASSED: WrW " << input.desc.ToString() << " + "
+                              << output.desc.ToString() << " -> " << weights.desc.ToString() << " ["
+                              << stats.solver_name << "]" << std::endl;
                 }
             }
         }
-    }
-};
-
-// CONV BIAS
-//==========================
-template <class T>
-struct verify_backwards_bias
-{
-    tensor<T> output;
-    tensor<T> bias;
-
-    tensor<T> cpu() const
-    {
-        auto rbias = bias;
-        cpu_bias_backward_data(output, rbias);
-        return rbias;
-    }
-
-    tensor<T> gpu() const
-    {
-        auto&& handle = get_handle();
-        auto rbias    = bias;
-
-        auto out_dev  = handle.Write(output.data);
-        auto bias_dev = handle.Write(rbias.data);
-
-        float alpha = 1, beta = 0;
-        ConvolutionBackwardBias(
-            handle, &alpha, output.desc, out_dev.get(), &beta, rbias.desc, bias_dev.get());
-
-        rbias.data = handle.Read<T>(bias_dev, rbias.data.size());
-        return rbias;
-    }
-
-    void fail(int = 0) const
-    {
-        std::cout << "Backwards bias: " << std::endl;
-        std::cout << "Output tensor: " << output.desc.ToString() << std::endl;
-        std::cout << "Bias tensor: " << bias.desc.ToString() << std::endl;
-    }
-};
-
-template <class T>
-struct conv_bias_driver : test_driver
-{
-    tensor<T> output;
-
-    int get_spatial_dim() const
-    {
-        for(int i = 2; i < 4; i++)
-        {
-            if(output.desc.GetNumDims() == i + 2)
-                return i;
-        }
-        return -1;
-    }
-
-    void run()
-    {
-        std::vector<std::size_t> bias_lens(2 + get_spatial_dim(), 1);
-        bias_lens[1] = output.desc.GetLengths()[1];
-
-        tensor<T> bias(bias_lens);
-
-        if(!(bias.desc.GetLengths()[0] == 1 &&
-             bias.desc.GetLengths()[1] == output.desc.GetLengths()[0] &&
-             std::all_of(bias.desc.GetLengths().begin() + 2,
-                         bias.desc.GetLengths().end(),
-                         [](auto v) { return v == 1; })))
-        {
-            return;
-        }
-
-        size_t total_mem =
-            bias.desc.GetNumBytes() + output.desc.GetNumBytes(); // estimate based on backward pass
-        size_t device_mem = get_handle().GetGlobalMemorySize();
-        if(total_mem >= device_mem)
-        {
-            show_command();
-            std::cout << "Config requires " << total_mem
-                      << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
-                      << " Bytes of memory." << std::endl;
-            return;
-        }
-
-        verify(verify_backwards_bias<T>{output, bias});
     }
 };

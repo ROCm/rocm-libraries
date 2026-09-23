@@ -1,0 +1,540 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+#include <miopen/batch_norm.hpp>
+
+#include <miopen/check_numerics.hpp>
+#include <miopen/db.hpp>
+#include <miopen/errors.hpp>
+#include <miopen/handle.hpp>
+#include <miopen/float_equal.hpp>
+#include <miopen/logger.hpp>
+#include <miopen/tensor.hpp>
+#include <miopen/util.hpp>
+#include <miopen/visit_float.hpp>
+/// \todo Get rid of this during implementation of #1938 (60)
+#include <miopen/convolution.hpp>
+#include <miopen/mlo_internal.hpp>
+#include <miopen/stringutils.hpp>
+#include <miopen/batchnorm/invoke_params.hpp>
+#include <miopen/batchnorm/solvers.hpp>
+#include <miopen/batchnorm/problem_description.hpp>
+#include <miopen/find_solution.hpp>
+
+#include <algorithm>
+#include <chrono>
+
+namespace miopen {
+
+namespace batchnorm {
+miopen::PerformanceDb GetDb(const miopen::ExecutionContext& ctx,
+                            const miopen::batchnorm::ProblemDescriptionTag&)
+{
+    return {DbKinds::PerfDb, ctx.GetPerfDbPath("batchnorm"), ctx.GetUserPerfDbPath("batchnorm")};
+}
+} // namespace batchnorm
+
+namespace {
+// Validate batch norm training input dimensions (PyTorch-compatible)
+// PyTorch rejects training when there's insufficient data for statistics computation
+inline void ValidateBatchNormTrainingInput(const TensorDescriptor& xDesc,
+                                           miopenBatchNormMode_t bn_mode)
+{
+    const auto& lengths = xDesc.GetLengths();
+    const auto N        = lengths[0];
+
+    if(bn_mode == miopenBNSpatial)
+    {
+
+        // For Spatial BN: need N*spatial_size > 1 to compute variance
+        // spatial_size = H*W (2D) or D*H*W (3D)
+
+        // dims are always declared in NCHW & NCDHW order
+        size_t spatial_size = 1;
+        for(size_t i = 2; i < lengths.size(); ++i)
+        {
+            spatial_size *= lengths[i];
+        }
+
+        if(N * spatial_size <= 1)
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "BatchNorm Spatial training requires N*spatial_size > 1. "
+                         "Got N=" +
+                             std::to_string(N) + ", spatial=" + std::to_string(spatial_size) +
+                             ". This restriction matches PyTorch behavior.");
+        }
+    }
+    else if(bn_mode == miopenBNPerActivation)
+    {
+        // For PerActivation BN: need N > 1 to compute variance across batch dimension
+        if(N <= 1)
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "BatchNorm PerActivation training requires N > 1. "
+                         "Got N=" +
+                             std::to_string(N) + ". This restriction matches PyTorch behavior.");
+        }
+    }
+}
+} // anonymous namespace
+
+//============ BEGIN FORWARD TRAINING ===============
+
+void BatchNormForwardTraining(const Handle& handle,
+                              miopenBatchNormMode_t bn_mode,
+                              const void* alpha,
+                              const void* beta,
+                              const TensorDescriptor& xDesc,
+                              ConstData_t x,
+                              const TensorDescriptor& yDesc,
+                              Data_t y,
+                              const TensorDescriptor& scaleDesc,
+                              const TensorDescriptor& biasDesc,
+                              const TensorDescriptor& savedMeanDesc,
+                              const TensorDescriptor& savedVarianceDesc,
+                              ConstData_t bnScale,
+                              ConstData_t bnBias,
+                              double expAvgFactor,
+                              Data_t resultRunningMean,
+                              Data_t resultRunningVariance,
+                              double epsilon,
+                              Data_t resultSaveMean,
+                              Data_t resultSaveInvVariance,
+                              const ActivationDescriptor& activDesc)
+{
+    return BatchNormForwardTraining(handle,
+                                    bn_mode,
+                                    alpha,
+                                    beta,
+                                    xDesc,
+                                    x,
+                                    yDesc,
+                                    y,
+                                    scaleDesc,
+                                    biasDesc,
+                                    savedMeanDesc,
+                                    savedVarianceDesc,
+                                    bnScale,
+                                    bnBias,
+                                    expAvgFactor,
+                                    resultRunningMean,
+                                    resultRunningVariance,
+                                    resultRunningMean,
+                                    resultRunningVariance,
+                                    epsilon,
+                                    resultSaveMean,
+                                    resultSaveInvVariance,
+                                    activDesc);
+}
+
+void BatchNormForwardTraining(const Handle& handle,
+                              miopenBatchNormMode_t bn_mode,
+                              const void* alpha,
+                              const void* beta,
+                              const TensorDescriptor& xDesc,
+                              ConstData_t x,
+                              const TensorDescriptor& yDesc,
+                              Data_t y,
+                              const TensorDescriptor& scaleDesc,
+                              const TensorDescriptor& biasDesc,
+                              const TensorDescriptor& savedMeanDesc,
+                              const TensorDescriptor& savedVarianceDesc,
+                              ConstData_t bnScale,
+                              ConstData_t bnBias,
+                              double expAvgFactor,
+                              ConstData_t prevResultRunningMean,
+                              ConstData_t prevResultRunningVariance,
+                              Data_t nextResultRunningMean,
+                              Data_t nextResultRunningVariance,
+                              double epsilon,
+                              Data_t resultSaveMean,
+                              Data_t resultSaveInvVariance,
+                              const ActivationDescriptor& activDesc)
+{
+    if(x == nullptr || y == nullptr || bnScale == nullptr || bnBias == nullptr)
+    {
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+    if(xDesc.GetNumDims() != yDesc.GetNumDims() || xDesc.GetNumDims() != scaleDesc.GetNumDims() ||
+       xDesc.GetNumDims() != biasDesc.GetNumDims() ||
+       xDesc.GetNumDims() != savedMeanDesc.GetNumDims() ||
+       xDesc.GetNumDims() != savedVarianceDesc.GetNumDims())
+    {
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+    if(xDesc.GetType() != yDesc.GetType())
+    {
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+    if(!xDesc.IsPacked())
+    {
+        MIOPEN_LOG_E("Only fully packed tensors supported.");
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+    if(xDesc.GetNumDims() < 3)
+    {
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+
+    // Validate training input dimensions (PyTorch-compatible) - fail fast
+    ValidateBatchNormTrainingInput(xDesc, bn_mode);
+
+    if(!float_equal(*(static_cast<const float*>(alpha)), 1.0) ||
+       !float_equal(*(static_cast<const float*>(beta)), 0.0))
+    {
+        MIOPEN_THROW("Only alpha=1 and beta=0 is supported");
+    }
+    if(miopen::CheckNumericsEnabled())
+    {
+        miopen::checkNumericsInput(handle, xDesc, x);
+        if(bnScale != nullptr)
+            miopen::checkNumericsInput(handle, scaleDesc, bnScale);
+        if(bnBias != nullptr)
+            miopen::checkNumericsInput(handle, biasDesc, bnBias);
+    }
+
+    const auto resultsave = resultSaveMean != nullptr && resultSaveInvVariance != nullptr;
+    const auto resultrunning =
+        prevResultRunningMean != nullptr && prevResultRunningVariance != nullptr &&
+        nextResultRunningMean != nullptr && nextResultRunningVariance != nullptr;
+
+    const auto problem = batchnorm::ProblemDescription{
+        bn_mode,
+        xDesc,
+        yDesc,
+        scaleDesc,
+        biasDesc,
+        savedMeanDesc,
+        savedVarianceDesc,
+        expAvgFactor,
+        epsilon,
+        resultsave,
+        resultrunning,
+        std::max(size_t(1), size_t(0.6f * handle.GetMaxComputeUnits())),
+        activDesc};
+
+    const auto algo = bn_mode == miopenBNSpatial
+                          ? AlgorithmName{"miopenBatchNormForwardTrainingSpatial"}
+                          : AlgorithmName{"miopenBatchNormForwardTrainingPerActivation"};
+
+    const auto invoke_params = [&]() {
+        auto tmp                      = miopen::batchnorm::FwdTrainInvokeParams{};
+        tmp.type                      = InvokeType::Run;
+        tmp.x                         = x;
+        tmp.y                         = y;
+        tmp.bnScale                   = bnScale;
+        tmp.bnBias                    = bnBias;
+        tmp.expAvgFactor              = expAvgFactor;
+        tmp.prevResultRunningMean     = prevResultRunningMean;
+        tmp.prevResultRunningVariance = prevResultRunningVariance;
+        tmp.nextResultRunningMean     = nextResultRunningMean;
+        tmp.nextResultRunningVariance = nextResultRunningVariance;
+        tmp.epsilon                   = epsilon;
+        tmp.resultSaveMean            = resultSaveMean;
+        tmp.resultSaveInvVariance     = resultSaveInvVariance;
+        return tmp;
+    }();
+
+    const auto solvers = solver::SolverContainer<solver::batchnorm::BnFwdTrainingSpatial,
+                                                 solver::batchnorm::BnFwdTrainingPerActivation>{};
+
+    solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
+
+    if(miopen::CheckNumericsEnabled())
+    {
+        miopen::checkNumericsOutput(handle, yDesc, y);
+        if(nextResultRunningMean != nullptr)
+            miopen::checkNumericsOutput(handle, savedMeanDesc, nextResultRunningMean);
+        if(nextResultRunningVariance != nullptr)
+            miopen::checkNumericsOutput(handle, savedVarianceDesc, nextResultRunningVariance);
+        if(resultSaveMean != nullptr)
+            miopen::checkNumericsOutput(handle, savedMeanDesc, resultSaveMean);
+        if(resultSaveInvVariance != nullptr)
+            miopen::checkNumericsOutput(handle, savedVarianceDesc, resultSaveInvVariance);
+    }
+}
+
+//================== END FWD TRAIN ===================
+
+//============ BEGIN FORWARD INFERENCE ===============
+void BatchNormForwardInference(const Handle& handle,
+                               miopenBatchNormMode_t bn_mode,
+                               const void* alpha,
+                               const void* beta,
+                               const TensorDescriptor& xDesc,
+                               ConstData_t x,
+                               const TensorDescriptor& yDesc,
+                               Data_t y,
+                               const TensorDescriptor& scaleDesc,
+                               const TensorDescriptor& biasDesc,
+                               const TensorDescriptor& estMeanDesc,
+                               const TensorDescriptor& estVarianceDesc,
+                               ConstData_t bnScale,
+                               ConstData_t bnBias,
+                               ConstData_t estimatedMean,
+                               ConstData_t estimatedVariance,
+                               std::optional<double> epsilonOpt,
+                               const ActivationDescriptor& activDesc)
+{
+
+    if(miopen::CheckNumericsEnabled())
+    {
+        miopen::checkNumericsInput(handle, xDesc, x);
+        miopen::checkNumericsInput(handle, scaleDesc, bnScale);
+        miopen::checkNumericsInput(handle, biasDesc, bnBias);
+        miopen::checkNumericsInput(handle, estMeanDesc, estimatedMean);
+        miopen::checkNumericsInput(handle, estVarianceDesc, estimatedVariance);
+    }
+
+    if(estimatedMean != nullptr && estimatedVariance != nullptr)
+    {
+        if(x == nullptr || y == nullptr || bnScale == nullptr || bnBias == nullptr)
+        {
+            MIOPEN_THROW(miopenStatusBadParm);
+        }
+        if(xDesc.GetNumDims() != yDesc.GetNumDims() ||
+           xDesc.GetNumDims() != scaleDesc.GetNumDims() ||
+           xDesc.GetNumDims() != biasDesc.GetNumDims() ||
+           xDesc.GetNumDims() != estMeanDesc.GetNumDims() ||
+           xDesc.GetNumDims() != estVarianceDesc.GetNumDims())
+        {
+            MIOPEN_THROW(miopenStatusBadParm);
+        }
+        if(xDesc.GetType() != yDesc.GetType())
+        {
+            MIOPEN_THROW(miopenStatusBadParm);
+        }
+        if(xDesc.GetNumDims() < 3)
+        {
+            MIOPEN_THROW(miopenStatusBadParm);
+        }
+        if(!float_equal(*(static_cast<const float*>(alpha)), 1.0) ||
+           !float_equal(*(static_cast<const float*>(beta)), 0))
+        {
+            MIOPEN_LOG_E("Only alpha=1 and beta=0 is supported");
+            MIOPEN_THROW(miopenStatusBadParm);
+        }
+
+        // The BN forward inference APIs taking an estimated inverse variance rather than a
+        // variance don't require and epsilon paramter. If epsilonOpt doesn't have a value then
+        // treat the estimatedVariance parameter as inverse variance rather than variance.
+        const bool useInverseVariance = !epsilonOpt.has_value();
+        const auto problem            = batchnorm::ProblemDescription{bn_mode,
+                                                           xDesc,
+                                                           yDesc,
+                                                           scaleDesc,
+                                                           biasDesc,
+                                                           estMeanDesc,
+                                                           estVarianceDesc,
+                                                           epsilonOpt,
+                                                           activDesc};
+
+        const auto invoke_params = [&]() {
+            auto tmp              = batchnorm::InfInvokeParams{};
+            tmp.type              = InvokeType::Run;
+            tmp.xDesc             = &xDesc;
+            tmp.x                 = x;
+            tmp.y                 = y;
+            tmp.bnScale           = bnScale;
+            tmp.bnBias            = bnBias;
+            tmp.estimatedMean     = estimatedMean;
+            tmp.estimatedVariance = estimatedVariance;
+            if(!useInverseVariance)
+            {
+                tmp.epsilon = epsilonOpt.value();
+            }
+            return tmp;
+        }();
+
+        const auto algo    = useInverseVariance
+                                 ? AlgorithmName{"miopenBatchNormalizationForwardInferenceInvVariance"}
+                                 : AlgorithmName{"miopenBatchNormalizationForwardInference"};
+        const auto solvers = solver::SolverContainer<solver::batchnorm::BnFwdInference>{};
+
+        solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
+    }
+    else // Need to recalculated everything, let's just call training kernel in that case
+    {
+        MIOPEN_LOG_I2("Call to fwd train from forward inference:: ");
+        BatchNormForwardTraining(handle,
+                                 bn_mode,
+                                 alpha,
+                                 beta,
+                                 xDesc,
+                                 x,
+                                 yDesc,
+                                 y,
+                                 scaleDesc,
+                                 biasDesc,
+                                 estMeanDesc,
+                                 estVarianceDesc,
+                                 bnScale,
+                                 bnBias,
+                                 0,
+                                 nullptr,
+                                 nullptr,
+                                 epsilonOpt.value_or(1e-5),
+                                 nullptr,
+                                 nullptr,
+                                 activDesc);
+    }
+    if(miopen::CheckNumericsEnabled())
+    {
+        miopen::checkNumericsOutput(handle, yDesc, y);
+    }
+}
+
+//================= END FORWARD INFERENCE ====================
+
+//=============== BEGIN BACKWARDS PROPAGATION ================
+
+void BatchNormBackward(const Handle& handle,
+                       miopenBatchNormMode_t bn_mode,
+                       const void* alphaDataDiff,
+                       const void* betaDataDiff,
+                       const void* alphaParamDiff,
+                       const void* betaParamDiff,
+                       const TensorDescriptor& xDesc,
+                       ConstData_t x,
+                       const TensorDescriptor& dyDesc,
+                       ConstData_t dy,
+                       const TensorDescriptor& dxDesc,
+                       Data_t dx,
+                       const TensorDescriptor& scaleDesc,
+                       const TensorDescriptor& biasDesc,
+                       const TensorDescriptor& savedMeanDesc,
+                       const TensorDescriptor& savedVarianceDesc,
+                       ConstData_t bnScale,
+                       ConstData_t bnBias,
+                       Data_t resultBnScaleDiff,
+                       Data_t resultBnBiasDiff,
+                       double epsilon,
+                       ConstData_t savedMean,
+                       ConstData_t savedInvVariance,
+                       const ActivationDescriptor& activDesc)
+{
+
+#if(MIO_BN_TIME_EVERYTHING == 1)
+    auto t_start = std::chrono::high_resolution_clock::now();
+#endif
+    if(miopen::CheckNumericsEnabled())
+    {
+        miopen::checkNumericsInput(handle, xDesc, x);
+        miopen::checkNumericsInput(handle, dyDesc, dy);
+        miopen::checkNumericsInput(handle, scaleDesc, bnScale);
+        miopen::checkNumericsInput(handle, biasDesc, bnScale);
+
+        if(savedMean != nullptr)
+            miopen::checkNumericsInput(handle, savedMeanDesc, savedMean);
+        if(savedInvVariance != nullptr)
+            miopen::checkNumericsInput(handle, savedVarianceDesc, savedInvVariance);
+    }
+
+    if(x == nullptr || dy == nullptr || bnScale == nullptr || dx == nullptr)
+    {
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+    if(xDesc.GetNumDims() != dyDesc.GetNumDims() || xDesc.GetNumDims() != scaleDesc.GetNumDims() ||
+       xDesc.GetNumDims() != biasDesc.GetNumDims() ||
+       xDesc.GetNumDims() != savedMeanDesc.GetNumDims() ||
+       xDesc.GetNumDims() != savedVarianceDesc.GetNumDims())
+    {
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+    if(dxDesc.GetType() != dyDesc.GetType())
+    {
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+    if(xDesc.GetNumDims() < 3)
+    {
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+
+    // Validate training input dimensions (PyTorch-compatible) - fail fast
+    ValidateBatchNormTrainingInput(xDesc, bn_mode);
+
+    if(!float_equal(*(static_cast<const float*>(alphaDataDiff)), 1.0) ||
+       !float_equal(*(static_cast<const float*>(betaDataDiff)), 0))
+    {
+        MIOPEN_LOG_E("Only alphaDataDiff=1 and betaDataDiff=0 is supported");
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+    if(!float_equal(*(static_cast<const float*>(alphaParamDiff)), 1.0) ||
+       !float_equal(*(static_cast<const float*>(betaParamDiff)), 0))
+    {
+        MIOPEN_LOG_E("Only alphaParamDiff=1 and betaParamDiff=0 is supported");
+        MIOPEN_THROW(miopenStatusBadParm);
+    }
+
+    const auto useSaved = savedMean != nullptr && savedInvVariance != nullptr;
+
+    const auto problem = batchnorm::ProblemDescription{
+        bn_mode,
+        xDesc,
+        dyDesc,
+        dxDesc,
+        scaleDesc,
+        biasDesc,
+        savedMeanDesc,
+        savedVarianceDesc,
+        epsilon,
+        useSaved,
+        std::max(size_t(1), size_t(0.6f * handle.GetMaxComputeUnits())),
+        activDesc};
+
+    const auto algo = bn_mode == miopenBNSpatial
+                          ? AlgorithmName{"miopenBatchNormBackwardPropSpatial"}
+                          : AlgorithmName{"miopenBatchNormBackwardPropPerActivation"};
+
+    const auto invoke_params = [&]() {
+        auto tmp              = batchnorm::BwdInvokeParams{};
+        tmp.type              = InvokeType::Run;
+        tmp.x                 = x;
+        tmp.dy                = dy;
+        tmp.dx                = dx;
+        tmp.bnScale           = bnScale;
+        tmp.bnBias            = bnBias;
+        tmp.resultBnScaleDiff = resultBnScaleDiff;
+        tmp.resultBnBiasDiff  = resultBnBiasDiff;
+        tmp.epsilon           = epsilon;
+        tmp.savedMean         = savedMean;
+        tmp.savedInvVariance  = savedInvVariance;
+        return tmp;
+    }();
+
+    const auto solvers = solver::SolverContainer<solver::batchnorm::BnBwdTrainingSpatial,
+                                                 solver::batchnorm::BnBwdTrainingPerActivation>{};
+
+    solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
+
+    if(miopen::CheckNumericsEnabled())
+    {
+        miopen::checkNumericsOutput(handle, dxDesc, dx);
+        miopen::checkNumericsOutput(handle, scaleDesc, resultBnScaleDiff);
+        miopen::checkNumericsOutput(handle, biasDesc, resultBnBiasDiff);
+    }
+}
+} // namespace miopen

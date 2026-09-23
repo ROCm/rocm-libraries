@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/conv/solvers.hpp>
+#include <miopen/kernel_build_params.hpp>
 #include <miopen/generic_search.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS)
@@ -477,7 +478,8 @@ bool ConvAsmBwdWrW1x1::IsApplicable(const ExecutionContext& ctx,
 {
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1))
         return false;
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90")))
         return false;
     if(!ctx.use_asm_kernels)
         return false;
@@ -497,12 +499,9 @@ bool ConvAsmBwdWrW1x1::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
 
-    const std::string name = ctx.GetStream().GetDeviceName();
-    if(name.find("gfx8") == std::string::npos && name.find("gfx9") == std::string::npos)
-        return false;
     if(!problem.IsLayoutDefault())
         return false;
 
@@ -568,6 +567,52 @@ size_t ConvAsmBwdWrW1x1::GetWorkspaceSize(const ExecutionContext&,
         return 0;
 }
 
+static KernelInfo GetSubSampleKernelInfo(const ProblemDescription& problem)
+{
+    // subsampled input, in_height equals to image size after downsampling
+    int in_batch_stride = problem.GetInStrideH() * problem.GetInHeight() * problem.GetOutChannels();
+    int write_unit      = (problem.GetInWidth() % 4 == 0)   ? 4
+                          : (problem.GetInWidth() % 3 == 0) ? 3
+                          : (problem.GetInWidth() % 2 == 0) ? 2
+                                                            : 1;
+    int local_size_x    = 256;
+
+    const auto subsample_kernel_build_params = KernelBuildParameters{
+        {"LOCAL_SIZE_X", local_size_x},
+        {"LOCAL_SIZE_Y", int(1)},
+        {"FILTER0_STRIDE0", problem.GetKernelStrideW()},
+        {"FILTER0_STRIDE1", problem.GetKernelStrideH()},
+        {"WRITE_UNIT", write_unit},
+        {"OUT_CHANNEL_STRIDE", problem.GetInChannelStride()},
+        {"OUT_STRIDE", problem.GetInStrideH()},
+        {"IN_BATCH_STRIDE", in_batch_stride},
+        {"IN0_BATCH_STRIDE", problem.GetOutBatchStride()},
+        {"IN0_CHANNEL_STRIDE", problem.GetOutChannelStride()},
+        {"IN0_STRIDE", problem.GetOutStrideH()},
+        {"MIOPEN_USE_BFP16", static_cast<int>(problem.GetInDataType() == miopenBFloat16)},
+        {"MIOPEN_USE_FP16", static_cast<int>(problem.GetInDataType() == miopenHalf)},
+        {"MIOPEN_USE_FP32", static_cast<int>(problem.GetInDataType() == miopenFloat)}};
+
+    KernelInfo kernel;
+
+    kernel.l_wk.push_back(local_size_x);
+    kernel.l_wk.push_back(1);
+    kernel.l_wk.push_back(1);
+    // output is number of subsampled input maps
+    size_t gbl_wk0 = (in_batch_stride / write_unit);
+    size_t gbl_wk1 = problem.GetBatchSize();
+    size_t gbl_wk2 = 1;
+
+    kernel.g_wk.push_back(gbl_wk0);
+    kernel.g_wk.push_back(gbl_wk1);
+    kernel.g_wk.push_back(gbl_wk2);
+
+    kernel.kernel_file  = "MIOpenSubSample.cpp";
+    kernel.kernel_name  = "SubSample";
+    kernel.comp_options = subsample_kernel_build_params.GenerateFor(kbp::HIP{});
+    return kernel;
+}
+
 ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                                            const ProblemDescription& problem,
                                            const PerformanceConfigConvAsmBwdWrW1x1& config) const
@@ -578,55 +623,7 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
 
     assert(problem.GetPadH() == 0 && problem.GetPadW() == 0);
     int data_len = GetTypeSize(problem.GetOutDataType());
-    if(UseSubsample(problem))
-    {
-        // subsampled input, in_height equals to image size after downsampling
-        int in_batch_stride =
-            problem.GetInStrideH() * problem.GetInHeight() * problem.GetOutChannels();
-        int write_unit   = (problem.GetInWidth() % 4 == 0)   ? 4
-                           : (problem.GetInWidth() % 3 == 0) ? 3
-                           : (problem.GetInWidth() % 2 == 0) ? 2
-                                                             : 1;
-        int n_grp0_size0 = 256;
 
-        // clang-format off
-        const auto subsample_kernel_compilation_options =
-            std::string(" -DMLO_GRP0_SZ0=") + std::to_string(n_grp0_size0) +
-            std::string(" -DMLO_GRP0_SZ1=1 ") + std::string(" -DMLO_GRP0_SZ2=1 ") +
-            std::string(" -DMLO_FILTER0_STRIDE0=") + std::to_string(problem.GetKernelStrideW()) +
-            std::string(" -DMLO_FILTER0_STRIDE1=") + std::to_string(problem.GetKernelStrideH()) +
-            std::string(" -DMLO_WRITE_UNIT=") + std::to_string(write_unit) +
-            std::string(" -DMLO_OUT_CHANNEL_STRIDE=") + std::to_string(problem.GetInChannelStride()) +
-            std::string(" -DMLO_OUT_STRIDE=") + std::to_string(problem.GetInStrideH()) +
-            std::string(" -DMLO_IN_BATCH_STRIDE=") + std::to_string(in_batch_stride) +
-            std::string(" -DMLO_IN0_BATCH_STRIDE=") + std::to_string(problem.GetOutBatchStride()) +
-            std::string(" -DMLO_IN0_CHANNEL_STRIDE=") + std::to_string(problem.GetOutChannelStride()) +
-            std::string(" -DMLO_IN0_STRIDE=") + std::to_string(problem.GetOutStrideH()) +
-            ctx.general_compile_options;
-        // clang-format on
-
-        KernelInfo kernel;
-
-        kernel.l_wk.push_back(n_grp0_size0);
-        kernel.l_wk.push_back(1);
-        kernel.l_wk.push_back(1);
-        // output is number of subsampled input maps
-        size_t gbl_wk0 = (in_batch_stride / write_unit);
-        size_t gbl_wk1 = problem.GetBatchSize();
-        size_t gbl_wk2 = 1;
-
-        kernel.g_wk.push_back(gbl_wk0);
-        kernel.g_wk.push_back(gbl_wk1);
-        kernel.g_wk.push_back(gbl_wk2);
-
-        kernel.kernel_file = "MIOpenUtilKernels3.cl";
-
-        kernel.kernel_name = "SubSample";
-
-        kernel.comp_options = subsample_kernel_compilation_options;
-
-        result.construction_params.push_back(kernel);
-    }
     result.workspace_sz = GetWorkspaceSize(ctx, problem);
     GenerateClangDefsym(options, "stride_h", 1);
     GenerateClangDefsym(options, "stride_w", 1);
@@ -801,37 +798,56 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
 
     if(UseSubsample(problem))
     {
-        result.invoker_factory = [N, C, H, W, K, n_groups](const std::vector<Kernel>& kernels) {
-            return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
-                const auto ss_kernel   = handle.Run(kernels[0]);
-                const auto main_kernel = handle.Run(kernels[1]);
-                const auto& invoke_params =
-                    primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
-                const auto& x         = invoke_params.tensors.x;
-                const auto& dy        = invoke_params.tensors.dy;
-                const auto& dw        = invoke_params.tensors.dw;
-                const auto& workSpace = invoke_params.workSpace;
-                auto elapsed          = 0.f;
+        solver::KernelInfo ss_kernel_info = GetSubSampleKernelInfo(problem);
 
-                if(invoke_params.type != InvokeType::AutoTune)
-                {
-                    ss_kernel(x, workSpace);
+        result.invoker_factory =
+            [N, C, H, W, K, n_groups, ss_kernel_info_ = std::move(ss_kernel_info)](
+                const std::vector<Kernel>& kernels) mutable {
+                return [=, ss_kernel_info2 = std::move(ss_kernel_info_)](
+                           const Handle& handle, const AnyInvokeParams& primitive_params) {
+                    const auto main_kernel = handle.Run(kernels[0]);
+                    const auto& invoke_params =
+                        primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
+                    const auto& x         = invoke_params.tensors.x;
+                    const auto& dy        = invoke_params.tensors.dy;
+                    const auto& dw        = invoke_params.tensors.dw;
+                    const auto& workSpace = invoke_params.workSpace;
+                    float elapsed{0.f};
+
+                    if(invoke_params.type != InvokeType::AutoTune)
+                    {
+                        auto&& ss_kernels = handle.GetKernels(ss_kernel_info2.kernel_name,
+                                                              ss_kernel_info2.comp_options);
+                        if(!ss_kernels.empty())
+                        {
+                            ss_kernels.front()(x, workSpace);
+                        }
+                        else
+                        {
+                            handle.AddKernel(ss_kernel_info2.kernel_name,
+                                             ss_kernel_info2.comp_options,
+                                             ss_kernel_info2.kernel_file,
+                                             ss_kernel_info2.kernel_name,
+                                             ss_kernel_info2.l_wk,
+                                             ss_kernel_info2.g_wk,
+                                             ss_kernel_info2.comp_options)(x, workSpace);
+                        }
+                        if(handle.IsProfilingEnabled())
+                            elapsed += handle.GetKernelTime();
+                    }
+
+                    int unused{0};
+                    int* return_addr = nullptr;
+                    main_kernel(
+                        N, C, H, W, K, n_groups, unused, unused, workSpace, dw, dy, return_addr);
                     if(handle.IsProfilingEnabled())
+                    {
                         elapsed += handle.GetKernelTime();
-                }
-
-                int unused       = 0;
-                int* return_addr = nullptr;
-                main_kernel(
-                    N, C, H, W, K, n_groups, unused, unused, workSpace, dw, dy, return_addr);
-                if(handle.IsProfilingEnabled())
-                {
-                    elapsed += handle.GetKernelTime();
-                    handle.ResetKernelTime();
-                    handle.AccumKernelTime(elapsed);
-                }
+                        handle.ResetKernelTime();
+                        handle.AccumKernelTime(elapsed);
+                    }
+                };
             };
-        };
     }
     else
     {

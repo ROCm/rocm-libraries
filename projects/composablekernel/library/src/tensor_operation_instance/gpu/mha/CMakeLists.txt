@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 set(FMHA_CPP_FOLDER ${CMAKE_CURRENT_BINARY_DIR})
 set(FMHA_SRC_FOLDER ${CMAKE_SOURCE_DIR}/example/ck_tile/01_fmha/)
 set(CK_TILE_SRC_FOLDER ${CMAKE_SOURCE_DIR}/include/ck_tile/)
@@ -8,11 +11,11 @@ set(CK_TILE_SRC_FOLDER ${CMAKE_SOURCE_DIR}/include/ck_tile/)
 if(NOT CK_USE_ALTERNATIVE_PYTHON)
    find_package(Python3 COMPONENTS Interpreter Development)
 else()
-   message("Using alternative python version")
+   message(STATUS "Using alternative python version")
    set(EXTRA_PYTHON_PATH)
    # this is overly restrictive, we may need to be more flexible on the following
    string(REPLACE "/bin/python3.8" "" EXTRA_PYTHON_PATH "${CK_USE_ALTERNATIVE_PYTHON}")
-   message("alternative python path is: ${EXTRA_PYTHON_PATH}")
+   message(STATUS "alternative python path is: ${EXTRA_PYTHON_PATH}")
    find_package(Python3 3.6 COMPONENTS Interpreter REQUIRED)
    add_definitions(-DPython3_EXECUTABLE="${CK_USE_ALTERNATIVE_PYTHON}")
    set(Python3_EXECUTABLE "${CK_USE_ALTERNATIVE_PYTHON}")
@@ -40,7 +43,7 @@ execute_process(
   RESULT_VARIABLE ret
 )
 if(ret AND NOT ret EQUAL 0)
-  message( FATAL_ERROR "CK Tile MHA FAILED to genrate a list of kernels via Python.")
+  message( FATAL_ERROR "CK Tile MHA FAILED to generate a list of kernels via Python.")
 else()
   file(STRINGS ${FMHA_CPP_FOLDER}/blob_list.txt FMHA_GEN_BLOBS)
 endif()
@@ -74,4 +77,3 @@ add_instance_library(device_mha_instance ${device_files})
 if (TARGET device_mha_instance)
   add_dependencies(device_mha_instance generate_cpp_files)
 endif()
-

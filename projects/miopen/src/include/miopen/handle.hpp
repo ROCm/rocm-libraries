@@ -40,8 +40,6 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/target_properties.hpp>
 
-#include <boost/range/adaptor/transformed.hpp>
-
 #include <cstdio>
 #include <cstring>
 #include <ios>
@@ -84,7 +82,7 @@ using hipblasLt_handle_ptr = MIOPEN_MANAGE_PTR(hipblasLtHandle_t, hipblasLtDestr
 
 struct MIOPEN_EXPORT Handle : miopenHandle
 {
-    friend struct TargetProperties;
+    friend class TargetProperties;
 
     Handle();
     Handle(miopenAcceleratorQueue_t stream);
@@ -139,8 +137,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
         auto ks = this->GetKernelsImpl(algorithm, network_config);
         if(ks.empty())
         {
-            MIOPEN_THROW("looking for default kernel (does not exist): " + algorithm + ", " +
-                         network_config);
+            MIOPEN_THROW(std::string("looking for default kernel (does not exist): ") + algorithm +
+                         ", " + network_config);
         }
         return this->Run(ks.front());
     }
@@ -164,7 +162,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     std::size_t GetLocalMemorySize() const;
     std::size_t GetGlobalMemorySize() const;
     std::size_t GetImage3dMaxWidth() const;
-    std::size_t GetWavefrontWidth() const;
+    virtual std::size_t GetWavefrontWidth() const;
     virtual std::size_t GetMaxComputeUnits() const;
     std::size_t GetMaxHardwareComputeUnits() const
     {
@@ -180,23 +178,18 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     std::string GetDeviceName() const;
     virtual const TargetProperties& GetTargetProperties() const;
 
-private:
-    std::string GetDeviceNameImpl() const;
-
-public:
     std::ostream& Print(std::ostream& os) const;
     void Copy(ConstData_t src, Data_t dest, std::size_t size) const;
 
     Allocator::ManageDataPtr Create(std::size_t sz) const;
     Allocator::ManageDataPtr&
     WriteTo(const void* data, Allocator::ManageDataPtr& ddata, std::size_t sz) const;
+    void WriteTo(const void* data, Data_t ddata, std::size_t sz) const;
     void ReadTo(void* data, const Allocator::ManageDataPtr& ddata, std::size_t sz) const;
     void ReadTo(void* data, ConstData_t ddata, std::size_t sz) const;
     shared<Data_t> CreateSubBuffer(Data_t data, std::size_t offset, std::size_t size) const;
-#if MIOPEN_BACKEND_HIP
     shared<ConstData_t>
     CreateSubBuffer(ConstData_t data, std::size_t offset, std::size_t size) const;
-#endif
 
     template <class T>
     Allocator::ManageDataPtr Create(std::size_t sz) const
@@ -246,7 +239,15 @@ public:
 
     std::string GetDbBasename() const
     {
-        return GetDbBasename(GetTargetProperties(), GetMaxComputeUnits());
+        const auto& target = GetTargetProperties();
+        const auto db_id   = target.DbId();
+        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1201")
+        {
+            std::ostringstream ss;
+            ss << db_id << std::hex << GetMaxHardwareComputeUnits();
+            return ss.str();
+        }
+        return GetDbBasename(target, GetMaxComputeUnits());
     }
 
     std::unique_ptr<HandleImpl> impl;
@@ -300,6 +301,9 @@ public:
         return invokers.GetFound1_0SolverId(config, algo);
     }
 
+    miopenTuningPolicy_t GetTuningPolicy() const { return tuning_policy; }
+    void SetTuningPolicy(miopenTuningPolicy_t new_val) { tuning_policy = new_val; };
+
 #if MIOPEN_USE_ROCBLAS
     const rocblas_handle_ptr& rhandle() const;
 #endif
@@ -308,6 +312,8 @@ public:
 #endif
 
 private:
+    std::string GetDeviceNameImpl() const;
+
 #if MIOPEN_USE_ROCBLAS
     rocblas_handle_ptr CreateRocblasHandle(miopenAcceleratorQueue_t streamID) const;
 #endif
@@ -316,6 +322,7 @@ private:
 #endif
 
     mutable InvokerCache invokers;
+    miopenTuningPolicy_t tuning_policy = miopenTuningPolicyNone;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const Handle& handle) { return handle.Print(os); }

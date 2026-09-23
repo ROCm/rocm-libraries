@@ -48,8 +48,8 @@ struct MIOPEN_INTERNALS_EXPORT PerfConfig
     virtual std::string ToString() const;
 
 protected:
-    PerfConfig()                  = default;
-    PerfConfig(const PerfConfig&) = default;
+    PerfConfig()                             = default;
+    PerfConfig(const PerfConfig&)            = default;
     PerfConfig& operator=(const PerfConfig&) = default;
 };
 

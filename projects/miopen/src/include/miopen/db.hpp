@@ -26,15 +26,13 @@
 #ifndef GUARD_MIOPEN_DB_HPP_
 #define GUARD_MIOPEN_DB_HPP_
 
+#include <miopen/config.hpp>
 #include <miopen/db_record.hpp>
 #include <miopen/rank.hpp>
 #include <miopen/filesystem.hpp>
 
-#include <boost/core/explicit_operator_bool.hpp>
-#include <boost/none.hpp>
-#include <boost/optional/optional.hpp>
-
 #include <chrono>
+#include <optional>
 #include <string>
 
 namespace miopen {
@@ -50,16 +48,17 @@ class LockFile;
 constexpr bool DisableUserDbFileIO = MIOPEN_DISABLE_USERDB;
 
 /// No instance of this class should be used from several threads at the same time.
-class MIOPEN_INTERNALS_EXPORT PlainTextDb
+class PlainTextDb
 {
 public:
+    MIOPEN_INTERNALS_EXPORT
     PlainTextDb(DbKinds db_kind_, const fs::path& filename_, bool is_system = false);
 
     /// Searches db for provided key and returns found record or none if key not found in database
-    boost::optional<DbRecord> FindRecord(const std::string& key);
+    MIOPEN_INTERNALS_EXPORT std::optional<DbRecord> FindRecord(const std::string& key);
 
     template <class T>
-    inline boost::optional<DbRecord> FindRecord(const T& problem_config)
+    inline std::optional<DbRecord> FindRecord(const T& problem_config)
     {
         const auto key = DbRecord::SerializeKey(db_kind, problem_config);
         return FindRecord(key);
@@ -69,19 +68,19 @@ public:
     /// replaced by provided record.
     ///
     /// Returns true if store was successful, false otherwise.
-    bool StoreRecord(const DbRecord& record);
+    MIOPEN_INTERNALS_EXPORT bool StoreRecord(const DbRecord& record);
 
     /// Stores provided record in database. If record with same key is already in database it is
     /// updated with values from provided record. Provided records data is also updated via
     /// DbRecord::Merge().
     ///
     /// Returns true if update was successful, false otherwise.
-    bool UpdateRecord(DbRecord& record);
+    MIOPEN_INTERNALS_EXPORT bool UpdateRecord(DbRecord& record);
 
     /// Removes record with provided key from db
     ///
     /// Returns true if remove was successful, false otherwise.
-    bool RemoveRecord(const std::string& key);
+    MIOPEN_INTERNALS_EXPORT bool RemoveRecord(const std::string& key);
 
     /// Removes ID with associated VALUES from record with key PROBLEM_CONFIG from db.
     /// If payload of a record becomes empty after that, also removes the entire record
@@ -95,7 +94,7 @@ public:
         return Remove(key, id);
     }
 
-    bool Remove(const std::string& key, const std::string& id);
+    MIOPEN_INTERNALS_EXPORT bool Remove(const std::string& key, const std::string& id);
 
     template <class T>
     inline bool RemoveRecord(const T& problem_config)
@@ -110,7 +109,7 @@ public:
     ///
     /// Returns updated record or none if update was unsuccessful.
     template <class T, class V>
-    inline boost::optional<DbRecord>
+    inline std::optional<DbRecord>
     Update(const T& problem_config, const std::string& id, const V& values)
     {
         DbRecord record(db_kind, problem_config);
@@ -119,7 +118,7 @@ public:
         if(ok)
             return record;
         else
-            return boost::none;
+            return {};
     }
 
     /// Searches for record with key PROBLEM_CONFIG and gets VALUES under the ID from it.
@@ -144,7 +143,7 @@ protected:
     LockFile& GetLockFile() { return lock_file; }
     const fs::path& GetFileName() const { return filename; }
     bool IsWarningIfUnreadable() const { return warning_if_unreadable; }
-    boost::optional<DbRecord> FindRecordUnsafe(const std::string& key, RecordPositions* pos);
+    std::optional<DbRecord> FindRecordUnsafe(const std::string& key, RecordPositions* pos);
     bool StoreRecordUnsafe(const DbRecord& record);
     bool UpdateRecordUnsafe(DbRecord& record);
     bool RemoveRecordUnsafe(const std::string& key);
@@ -157,7 +156,7 @@ private:
     bool FlushUnsafe(const DbRecord& record, const RecordPositions* pos);
 
     template <class T>
-    inline boost::optional<DbRecord> FindRecordUnsafe(const T& problem_config)
+    inline std::optional<DbRecord> FindRecordUnsafe(const T& problem_config)
     {
         const auto key = DbRecord::Serialize(problem_config);
         return FindRecordUnsafe(key, nullptr);
@@ -202,16 +201,19 @@ public:
         auto users     = _user.FindRecord(args...);
         auto installed = _installed.FindRecord(args...);
 
-        if(users && installed)
+        if(!users)
         {
-            users->Merge(installed.value());
-            return users;
+            users = std::move(installed);
+        }
+        else
+        {
+            if(installed)
+            {
+                users->Merge(installed.value());
+            }
         }
 
-        if(users)
-            return users;
-
-        return installed;
+        return std::move(users);
     }
 
     template <bool merge = merge_records, std::enable_if_t<!merge>* = nullptr, typename... U>
@@ -343,14 +345,17 @@ private:
     template <class TFunc>
     static auto Measure(const std::string& funcName, TFunc&& func)
     {
-        if(!miopen::IsLogging(LoggingLevel::Info2))
-            return func();
-
-        const auto start = std::chrono::high_resolution_clock::now();
-        auto ret         = func();
-        const auto end   = std::chrono::high_resolution_clock::now();
-        MIOPEN_LOG_I2("Db::" << funcName << " time: " << (end - start).count() * .000001f << " ms");
-        return ret;
+        const bool logging = miopen::IsLogging(LoggingLevel::Info2);
+        const auto start   = logging ? std::chrono::high_resolution_clock::now()
+                                     : std::chrono::high_resolution_clock::time_point{};
+        auto ret           = func();
+        if(logging)
+        {
+            const auto end = std::chrono::high_resolution_clock::now();
+            MIOPEN_LOG_I2("Db::" << funcName << " time: " << (end - start).count() * .000001f
+                                 << " ms");
+        }
+        return std::move(ret); // NOLINT(clang-analyzer-cplusplus.Move)
     }
 };
 } // namespace miopen

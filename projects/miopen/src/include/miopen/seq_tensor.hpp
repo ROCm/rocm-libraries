@@ -44,7 +44,7 @@
 
 namespace miopen {
 
-struct MIOPEN_INTERNALS_EXPORT SeqTensorDescriptor : miopenSeqTensorDescriptor
+struct SeqTensorDescriptor : miopenSeqTensorDescriptor
 {
     SeqTensorDescriptor();
 
@@ -67,10 +67,10 @@ struct MIOPEN_INTERNALS_EXPORT SeqTensorDescriptor : miopenSeqTensorDescriptor
                         const std::vector<unsigned int>& layout_in,
                         const std::initializer_list<std::size_t>& lens_in,
                         bool with_padded_seq_layout);
-    SeqTensorDescriptor(miopenDataType_t t,
-                        const std::vector<unsigned int>& layout_in,
-                        const std::vector<std::size_t>& lens_in,
-                        bool with_padded_seq_layout);
+    MIOPEN_INTERNALS_EXPORT SeqTensorDescriptor(miopenDataType_t t,
+                                                const std::vector<unsigned int>& layout_in,
+                                                const std::vector<std::size_t>& lens_in,
+                                                bool with_padded_seq_layout);
 
     SeqTensorDescriptor(miopenDataType_t t,
                         const std::vector<unsigned int>& layout_in,
@@ -79,13 +79,13 @@ struct MIOPEN_INTERNALS_EXPORT SeqTensorDescriptor : miopenSeqTensorDescriptor
                         const std::vector<char>& padding_marker_in,
                         bool use_seq_len,
                         bool with_padded_seq_layout);
-    SeqTensorDescriptor(miopenDataType_t t,
-                        const std::vector<unsigned int>& layout_in,
-                        const std::vector<std::size_t>& lens_in,
-                        const std::vector<std::size_t>& seq_len,
-                        const std::vector<char>& padding_marker_in,
-                        bool use_seq_len,
-                        bool with_padded_seq_layout);
+    MIOPEN_INTERNALS_EXPORT SeqTensorDescriptor(miopenDataType_t t,
+                                                const std::vector<unsigned int>& layout_in,
+                                                const std::vector<std::size_t>& lens_in,
+                                                const std::vector<std::size_t>& seq_len,
+                                                const std::vector<char>& padding_marker_in,
+                                                bool use_seq_len,
+                                                bool with_padded_seq_layout);
 
     SeqTensorDescriptor(miopenDataType_t t,
                         const std::vector<unsigned int>& layout_in,
@@ -102,39 +102,39 @@ struct MIOPEN_INTERNALS_EXPORT SeqTensorDescriptor : miopenSeqTensorDescriptor
                         bool use_seq_len,
                         bool with_padded_seq_layout);
 
-    const std::vector<unsigned int>& GetLayoutVector() const;
-    const std::vector<std::size_t>& GetLengths() const;
+    MIOPEN_INTERNALS_EXPORT const std::vector<unsigned int>& GetLayoutVector() const;
+    MIOPEN_INTERNALS_EXPORT const std::vector<std::size_t>& GetLengths() const;
     const std::vector<std::size_t>& GetPadding() const;
-    const std::vector<std::size_t>& GetSequenceLengthsVector() const;
-    const std::vector<char>& GetPaddingMarkerHolder() const;
+    MIOPEN_INTERNALS_EXPORT const std::vector<std::size_t>& GetSequenceLengthsVector() const;
+    MIOPEN_INTERNALS_EXPORT const std::vector<char>& GetPaddingMarkerHolder() const;
 
     // Get vector of strides only for padded tensor,
     // if IsPaddedSeqLayout()==false function returns an empty vector
     std::vector<std::size_t> GetPaddedStrides() const;
 
-    bool IsPacked() const;
-    bool IsPaddedSeqLayout() const;
-    bool IsSequenceLengthsSorted() const;
+    MIOPEN_INTERNALS_EXPORT bool IsPacked() const;
+    MIOPEN_INTERNALS_EXPORT bool IsPaddedSeqLayout() const;
+    MIOPEN_INTERNALS_EXPORT bool IsSequenceLengthsSorted() const;
     bool IsZeroBytePadding() const;
-    bool IsPaddingMarkerSpecified() const;
+    MIOPEN_INTERNALS_EXPORT bool IsPaddingMarkerSpecified() const;
 
-    miopenDataType_t GetType() const;
+    MIOPEN_INTERNALS_EXPORT miopenDataType_t GetType() const;
 
-    std::size_t GetMaxCountOfSequences() const;
-    std::size_t GetMaxSequenceLength() const;
-    std::size_t GetTotalSequenceLen() const;
+    MIOPEN_INTERNALS_EXPORT std::size_t GetMaxCountOfSequences() const;
+    MIOPEN_INTERNALS_EXPORT std::size_t GetMaxSequenceLength() const;
+    MIOPEN_INTERNALS_EXPORT std::size_t GetTotalSequenceLen() const;
 
     // Calculate the number of tensor significant elements in pieces
     std::size_t GetElementCount() const;
     // Calculating the size of the occupied disk space in bytes
-    std::size_t GetTensorRealByteSpace() const;
+    MIOPEN_INTERNALS_EXPORT std::size_t GetTensorRealByteSpace() const;
     // Calculating the maximal tensor size in bytes if all sequences are of the maximum size
     std::size_t GetTensorMaxByteSpace() const;
 
     bool operator==(const SeqTensorDescriptor& rhs) const;
     bool operator!=(const SeqTensorDescriptor& rhs) const;
 
-    std::vector<size_t> GetBatchesPerSequence() const;
+    MIOPEN_INTERNALS_EXPORT std::vector<size_t> GetBatchesPerSequence() const;
 
     std::string ToString() const;
     friend std::ostream& operator<<(std::ostream& stream, const SeqTensorDescriptor& t);

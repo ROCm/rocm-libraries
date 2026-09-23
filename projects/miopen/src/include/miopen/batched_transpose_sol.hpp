@@ -74,6 +74,59 @@ struct MIOPEN_INTERNALS_EXPORT BatchedTransposeSolution
     bool IsSkippable() const;
     size_t GetOutputTensorSize() const;
 
+    /// Check if the given data type is supported by batched transpose
+    static bool IsApplicable(miopenDataType_t data_type)
+    {
+        return data_type == miopenHalf || data_type == miopenFloat || data_type == miopenInt32 ||
+               data_type == miopenInt8 || data_type == miopenBFloat16;
+    }
+
+    /// Check if dimensions are supported by batched transpose (works for both 4D and 5D)
+    /// For 4D: lens = {N, C, H, W}
+    /// For 5D: lens = {N, C, D, H, W}
+    static bool IsApplicable(miopenDataType_t data_type, const std::vector<size_t>& lens)
+    {
+        // Check data type first
+        if(!IsApplicable(data_type))
+            return false;
+
+        // Must be 4D or 5D
+        if(lens.size() != 4 && lens.size() != 5)
+            return false;
+
+        // Check all dimensions fit in uint32_t
+        for(auto dim : lens)
+        {
+            if(dim > std::numeric_limits<uint32_t>::max())
+                return false;
+        }
+
+        const size_t n = lens[0];
+        const size_t c = lens[1];
+
+        // Compute spatial product (H*W for 4D, D*H*W for 5D) with overflow protection
+        size_t spatial_product = 1;
+        for(size_t i = 2; i < lens.size(); ++i)
+        {
+            // Check for overflow before multiplying
+            if(lens[i] > 0 && spatial_product > std::numeric_limits<uint32_t>::max() / lens[i])
+                return false;
+            spatial_product *= lens[i];
+        }
+
+        // Check c*spatial doesn't overflow uint32_t
+        if(c > 0 && spatial_product > std::numeric_limits<uint32_t>::max() / c)
+            return false;
+
+        const size_t c_spatial = c * spatial_product;
+
+        // Check n*c*spatial doesn't overflow uint32_t
+        if(n > 0 && c_spatial > std::numeric_limits<uint32_t>::max() / n)
+            return false;
+
+        return true;
+    }
+
     miopenDataType_t data_type;
     uint32_t batch;
     uint32_t height;
