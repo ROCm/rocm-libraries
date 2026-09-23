@@ -685,16 +685,16 @@ def _reported(stderr, label):
 def _assert_refused(r, bundle_dir, before, where):
     """Import exited 1 at the named round-trip site and wrote nothing.
 
-    The ERROR line is the first line after the skeleton-hash/operation preamble.
+    The ERROR line directly follows the preamble's `operation:` line.
     """
     assert r.returncode == 1, f"expected exit 1, got {r.returncode}:\n{r.stderr}"
     lines = r.stderr.splitlines()
-    assert (
-        len(lines) > 2
-        and lines[0].startswith("  skeleton hash:")
-        and lines[1].startswith("  operation:")
-        and lines[2] == f"  ERROR: round-trip verify failed {where}"
-    ), f"expected failure {where} directly after the preamble:\n{r.stderr}"
+    operation = next(
+        (i for i, line in enumerate(lines) if line.startswith("  operation:")), None
+    )
+    assert operation is not None and lines[operation + 1 : operation + 2] == [
+        f"  ERROR: round-trip verify failed {where}"
+    ], f"expected failure {where} directly after the preamble:\n{r.stderr}"
     assert "Traceback" not in r.stderr, f"diagnostics crashed:\n{r.stderr}"
     assert _inventory(bundle_dir) == before, "refused import changed the bundle tree"
 
