@@ -1,0 +1,177 @@
+# WIDENED CATALOG: every request carries both tile_k arms so the engine's
+# benchmarked selection has a real choice on every request. Derived from
+# gfx950_conv_fwd.yaml by moving every shape from knobs1 (tile_k=64 only)
+# to knobs0 (tile_k=64 and 128). Shapes and provenance are unchanged.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# Dispatcher-derived catalog: five verification shapes in FP16/BF16, each
+# with tile_k=64/128, plus the default variant for every supported unique
+# request in dnn-benchmarking's headline convolution corpus.
+# Requests and public source hashes: gfx950_conv_fwd.requests.json.
+# Each request's _catalog_tile_k records the arms admitted to this catalog.
+# Source revision: 36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc; headline DVC object:
+# b8e7d9105a49d3e9c566bf26a0f87451 (Workloads/headline/conv.tar.gz.dvc).
+# Regenerate descriptors with generate.py --config this-file --output-dir DIR.
+
+dialect: packaged
+authored_subpath: rocKE/gfx950_conv_fwd
+engine:
+  name: hipkernel:Gfx950ConvFwd
+  sdk_version: 1.0.0
+  knobs:
+  - tile_k
+  heuristic: native
+kmd_fields:
+- name: N
+  type: int
+- name: Hi
+  type: int
+- name: Wi
+  type: int
+- name: C
+  type: int
+- name: K
+  type: int
+- name: Y
+  type: int
+- name: X
+  type: int
+- name: sH
+  type: int
+- name: sW
+  type: int
+- name: pH
+  type: int
+- name: pW
+  type: int
+- name: dH
+  type: int
+- name: dW
+  type: int
+- name: dtype
+  type: string
+- name: layout
+  type: string
+- name: groups
+  type: int
+- name: tile_m
+  type: int
+- name: tile_n
+  type: int
+- name: tile_k
+  type: int
+  default_value: 64
+- name: warp_m
+  type: int
+- name: warp_n
+  type: int
+- name: warp_tile_m
+  type: int
+- name: warp_tile_n
+  type: int
+- name: warp_tile_k
+  type: int
+- name: wave_size
+  type: int
+- name: pipeline
+  type: string
+- name: epilogue
+  type: string
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+graph_match:
+  shape: shared_shape
+  discriminator: none
+packs:
+- name: gfx950_conv_fwd
+  arch:
+  - gfx950
+  kernel_defaults:
+    kind: rocke
+    source: builders/common/convolution_forward.py
+    builder: build_gfx950_conv_fwd
+  variants:
+  - name: gfx950_conv_fwd_{tag}_N{N}_Hi{Hi}_Wi{Wi}_C{C}_K{K}_Y{Y}_X{X}_sH{sH}_sW{sW}_pH{pH}_pW{pW}_dH{dH}_dW{dW}_tile_k{tile_k}
+    metadata: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue]
+    spec_order: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue]
+    vocabulary:
+      dtype:
+        fp16: fp16
+        bf16: bf16
+      layout:
+        NHWC: NHWC
+      pipeline:
+        mem: mem
+      epilogue:
+        cshuffle: cshuffle
+        default: default
+    spec_defaults: {layout: NHWC, groups: 1, tile_m: 64, tile_n: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle}
+    knob_sets:
+      knobs0:
+      - {tile_k: 64, tag: 'dtype{md_dtype}'}
+      - {tile_k: 128, tag: 'dtype{md_dtype}'}
+      knobs1:
+      - {tile_k: 64, tag: 'dtype{md_dtype}'}
+    shapes:
+    - {N: 2, Hi: 14, Wi: 14, C: 32, K: 32, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 14, Wi: 14, C: 32, K: 32, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 8, Wi: 8, C: 32, K: 64, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 1, Hi: 8, Wi: 8, C: 32, K: 64, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 17, Wi: 19, C: 32, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 17, Wi: 19, C: 32, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 15, Wi: 17, C: 32, K: 32, Y: 3, X: 3, sH: 1, sW: 1, pH: 2, pW: 2, dH: 2, dW: 2, dtype: fp16, knobs: knobs0}
+    - {N: 1, Hi: 15, Wi: 17, C: 32, K: 32, Y: 3, X: 3, sH: 1, sW: 1, pH: 2, pW: 2, dH: 2, dW: 2, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 11, Wi: 17, C: 32, K: 64, Y: 3, X: 5, sH: 1, sW: 2, pH: 1, pW: 2, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 11, Wi: 17, C: 32, K: 64, Y: 3, X: 5, sH: 1, sW: 2, pH: 1, pW: 2, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 224, Wi: 224, C: 3, K: 768, Y: 16, X: 16, sH: 16, sW: 16, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 336, Wi: 336, C: 3, K: 1024, Y: 14, X: 14, sH: 14, sW: 14, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 224, Wi: 224, C: 3, K: 128, Y: 4, X: 4, sH: 4, sW: 4, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 14, Wi: 14, C: 768, K: 3072, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 14, Wi: 14, C: 3072, K: 768, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 28, Wi: 28, C: 384, K: 768, Y: 2, X: 2, sH: 2, sW: 2, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 224, Wi: 224, C: 3, K: 192, Y: 4, X: 4, sH: 4, sW: 4, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 224, Wi: 224, C: 3, K: 1536, Y: 14, X: 14, sH: 14, sW: 14, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 24, Wi: 24, C: 80, K: 480, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 192, Wi: 192, C: 24, K: 48, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 128, Wi: 128, C: 32, K: 512, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 448, Wi: 448, C: 3, K: 3200, Y: 14, X: 14, sH: 14, sW: 14, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 56, Wi: 56, C: 24, K: 144, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 28, Wi: 28, C: 144, K: 40, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 640, Wi: 640, C: 3, K: 32, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 28, Wi: 28, C: 256, K: 256, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 14, Wi: 14, C: 256, K: 256, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 56, Wi: 56, C: 64, K: 64, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 56, Wi: 56, C: 128, K: 128, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 56, Wi: 56, C: 64, K: 256, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 56, Wi: 56, C: 256, K: 64, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 7, Wi: 7, C: 512, K: 512, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 256, Hi: 224, Wi: 224, C: 3, K: 64, Y: 7, X: 7, sH: 2, sW: 2, pH: 3, pW: 3, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 224, Wi: 224, C: 3, K: 64, Y: 7, X: 7, sH: 2, sW: 2, pH: 3, pW: 3, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 1, Hi: 1024, Wi: 1024, C: 3, K: 1280, Y: 16, X: 16, sH: 16, sW: 16, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 512, Wi: 512, C: 3, K: 128, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 128, Wi: 128, C: 16, K: 1536, Y: 2, X: 2, sH: 2, sW: 2, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 128, Wi: 128, C: 16, K: 512, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 1024, Wi: 1024, C: 3, K: 128, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 128, Wi: 128, C: 512, K: 512, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 512, Wi: 512, C: 256, K: 256, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 256, Wi: 256, C: 512, K: 512, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 1024, Wi: 1024, C: 128, K: 128, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 1024, Wi: 1024, C: 128, K: 128, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 1024, Wi: 1024, C: 3, K: 128, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 1, Hi: 384, Wi: 384, C: 3, K: 1152, Y: 14, X: 14, sH: 14, sW: 14, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 512, Wi: 512, C: 3, K: 1536, Y: 16, X: 16, sH: 16, sW: 16, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 224, Wi: 224, C: 3, K: 768, Y: 16, X: 16, sH: 16, sW: 16, pH: 0, pW: 0, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 1, Hi: 224, Wi: 224, C: 3, K: 1024, Y: 14, X: 14, sH: 14, sW: 14, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 40, Wi: 40, C: 256, K: 256, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 40, Wi: 40, C: 512, K: 256, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 80, Wi: 80, C: 256, K: 256, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 320, Wi: 320, C: 64, K: 128, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 160, Wi: 160, C: 128, K: 256, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 80, Wi: 80, C: 256, K: 512, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 40, Wi: 40, C: 768, K: 256, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 20, Wi: 20, C: 512, K: 512, Y: 1, X: 1, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 1280, Wi: 1280, C: 3, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 640, Wi: 640, C: 3, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: bf16, knobs: knobs0}
+    - {N: 1, Hi: 640, Wi: 640, C: 3, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}
+    - {N: 1, Hi: 640, Wi: 640, C: 3, K: 16, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, dtype: fp16, knobs: knobs0}

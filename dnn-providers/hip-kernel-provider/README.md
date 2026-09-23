@@ -27,6 +27,7 @@ HipKernelEngine
     - **HIP MLops engine** (`src/engines/hip_mlops_engine/`): Kernel-specific execution logic. Enabled via the compile flag `ENABLE_HIP_MLOPS_ENGINE` (on by default)
     - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default)
     - **HIP Flash2 engine** (`src/engines/hip_flash2_engine/`): Flash-Attention 2 V7 SDPA kernel using precompiled `.co` files for gfx942/gfx950 (FP16). Enabled via `ENABLE_HIP_FLASH2_ENGINE` (off by default)
+    - **Packaged gfx950 convolution** (`hipkernel:Gfx950ConvFwd`): rocKE forward convolution with FP16/BF16 channels-last storage. See the [integration guide](docs/gfx950_conv_fwd/README.md) for catalog scope, packaging flags, and tests.
 - **HIP Infrastructure** (`src/hip/`): HIPRTC wrapper classes for compilation and execution
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces

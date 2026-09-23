@@ -15,6 +15,7 @@ const std::vector<IngestorPack>& ingestorPacks()
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
+        {"hipkernel:Gfx950ConvFwd", &registerGfx950ConvFwdSymbols, &resetGfx950ConvFwdModuleCache},
     };
     return s_packs;
 }

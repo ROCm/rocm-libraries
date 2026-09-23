@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "29423f05-8c7b-468a-930b-9e88ca7c99ee",
+  "name": "hipkernel:Gfx950ConvFwd",
+  "graph_match": {
+    "native": "hipkernel.gfx950_conv_fwd.graph_match"
+  },
+  "metadata": "fb2104d3-bae8-40b7-9a6f-4f7bc7ced8c7",
+  "heuristic": "bca15e6d-a06a-41d3-83d8-8d26ccefa7ff",
+  "knobs": [
+    "tile_k"
+  ]
+}

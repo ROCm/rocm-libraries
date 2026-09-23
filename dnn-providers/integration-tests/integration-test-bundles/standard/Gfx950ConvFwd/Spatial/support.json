@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "claims": {
+    "hipkernel:Gfx950ConvFwd": [
+      {
+        "cases": [
+          "pointwise_half",
+          "pointwise_bfloat16",
+          "strided_half",
+          "strided_bfloat16",
+          "dilated_half",
+          "dilated_bfloat16",
+          "nonsquare_half",
+          "nonsquare_bfloat16",
+          "workload_56x56_bfloat16"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  }
+}
