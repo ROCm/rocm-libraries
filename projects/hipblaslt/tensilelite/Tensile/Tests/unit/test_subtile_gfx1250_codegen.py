@@ -518,6 +518,55 @@ class TestGfx1250MxSubtileTdm:
         # Smoke YAML: not enough k-groups, so Tile0 is MT*mxUnit/numWaves.
         assert "tensor_load_to_lds" not in asm
 
+    def test_a_lr_four_ds_load_b128(self):
+        """32x16 A is 16 VGPRs: four ds_load_b128 per MMA tile."""
+        from Tensile.Components.Subtile.SubtileLREmit import emitSingleDsRead
+        kernel = _fp4_tdm_kernel()
+        writer, tiA, tiB, *_ = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiB.allocOffsetRegisters(writer, kernel)
+        tiA.allocVgprTileRegisters_legacy(writer, kernel)
+        tile = tiA.vgprTiles[0]
+        assert len(tile.regList.indices) == 16
+        assert len(tiA.sharedVgprLROffset) == 8
+        asm = str(emitSingleDsRead(tiA, 0, 0, 0, tile, swizzled=False))
+        assert asm.count("ds_load_b128") == 4
+        for i in range(4):
+            assert "read=%u" % i in asm
+
+    def test_b_lr_dual_ds_load_b128(self):
+        """32x16 B stays 8 VGPRs: two ds_load_b128 per MMA tile."""
+        from Tensile.Components.Subtile.SubtileLREmit import emitSingleDsRead
+        kernel = _fp4_tdm_kernel()
+        writer, tiA, tiB, *_ = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiB.allocOffsetRegisters(writer, kernel)
+        tiB.allocVgprTileRegisters_legacy(writer, kernel)
+        tile = tiB.vgprTiles[0]
+        assert len(tile.regList.indices) == 8
+        assert len(tiB.sharedVgprLROffset) == 4
+        asm = str(emitSingleDsRead(tiB, 0, 0, 0, tile, swizzled=False))
+        assert asm.count("ds_load_b128") == 2
+        assert "read=0" in asm
+        assert "read=1" in asm
+        assert "read=2" not in asm
+
+    def test_lra_maps_a_instm32_and_b_instm16(self):
+        """A and B no longer share one instM; 32x16 needs %32 for A and %16 for B."""
+        from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
+        kernel = _fp4_tdm_kernel()
+        writer, tiA, tiB, *_ = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiB.allocOffsetRegisters(writer, kernel)
+        asm = str(lraTileAssignment(writer, kernel))
+        assert "A: laneId % 32" in asm
+        assert "B: laneId % 16" in asm
+        assert "TDM wave partition" in asm
+        assert "rotation" not in asm.lower()
+
 
 # ---------------------------------------------------------------------------
 # Iterate-mode (large DepthU) tests
