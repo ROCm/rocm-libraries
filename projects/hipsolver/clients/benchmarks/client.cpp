@@ -68,6 +68,9 @@ try
     rocblas_int device_id;
     std::string math_mode;
     std::string emulation_strategy;
+    std::string mantissa_control;
+    int         max_mantissa_bits;
+    int         mantissa_bit_offset;
 
     // take arguments and set default values
     // clang-format off
@@ -121,6 +124,7 @@ try
          value<std::string>(&math_mode)->default_value("default_math"),
             "Floating-point emulation math mode applied to the handle.\n"
             "                           Options are: default_math, fp32_bf16x9, fp64_fixedpoint, fp32_fp64.\n"
+            "                           fp32_bf16x9 is the BF16x9 FP32 emulation; fp64_fixedpoint and fp32_fp64 are the FP64 Ozaki-scheme emulation (require CUDA >= 13.2).\n"
             "                           Emulation modes require CUDA 13 + cuSOLVER; ignored (NOT_SUPPORTED) on rocSOLVER.\n"
             "                           ")
 
@@ -130,6 +134,28 @@ try
             "                           Options are: default, performant, eager.\n"
             "                           performant emulates only when it predicts a speedup; eager emulates whenever possible.\n"
             "                           Requires CUDA 13 + cuSOLVER; ignored (NOT_SUPPORTED) on rocSOLVER.\n"
+            "                           ")
+
+        ("mantissa_control",
+         value<std::string>(&mantissa_control)->default_value("dynamic"),
+            "FP64 Ozaki fixed-point emulation mantissa control applied to the handle.\n"
+            "                           Options are: dynamic, fixed.\n"
+            "                           dynamic picks the mantissa bit count per problem; fixed uses --mantissa_bits.\n"
+            "                           Takes effect only under an FP64 emulation math mode; requires CUDA >= 13.2 + cuSOLVER; ignored on rocSOLVER.\n"
+            "                           ")
+
+        ("mantissa_bits",
+         value<int>(&max_mantissa_bits)->default_value(-1),
+            "FP64 Ozaki fixed-point emulation maximum mantissa bit count applied to the handle.\n"
+            "                           -1 leaves the backend default. Must be >= 53 to match native FP64 accuracy; fewer bits trade accuracy for speed.\n"
+            "                           Takes effect only under an FP64 emulation math mode; requires CUDA >= 13.2 + cuSOLVER; ignored on rocSOLVER.\n"
+            "                           ")
+
+        ("mantissa_bit_offset",
+         value<int>(&mantissa_bit_offset)->default_value(-1),
+            "FP64 Ozaki dynamic fixed-point emulation mantissa bit offset applied to the handle.\n"
+            "                           -1 leaves the backend default. Only meaningful with --mantissa_control dynamic.\n"
+            "                           Takes effect only under an FP64 emulation math mode; requires CUDA >= 13.2 + cuSOLVER; ignored on rocSOLVER.\n"
             "                           ")
 
         // ("singular",
@@ -527,6 +553,21 @@ try
     if(strategy == static_cast<hipsolverEmulationStrategy_t>(-1))
         throw std::invalid_argument("Invalid value for --emulation_strategy");
     set_emulation_strategy(strategy);
+
+    // set FP64 Ozaki fixed-point tuning
+    hipsolverEmulationMantissaControl_t control
+        = string2hipsolver_mantissa_control(mantissa_control);
+    if(control == static_cast<hipsolverEmulationMantissaControl_t>(-1))
+        throw std::invalid_argument("Invalid value for --mantissa_control");
+    set_mantissa_control(control);
+
+    if(max_mantissa_bits < -1)
+        throw std::invalid_argument("Invalid value for --mantissa_bits");
+    set_max_mantissa_bits(max_mantissa_bits);
+
+    if(mantissa_bit_offset < -1)
+        throw std::invalid_argument("Invalid value for --mantissa_bit_offset");
+    set_mantissa_bit_offset(mantissa_bit_offset);
 
     // catch invalid arguments
     argus.validate_precision("precision");

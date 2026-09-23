@@ -271,3 +271,23 @@ std::string hipsolver_emulation_strategy2string(hipsolverEmulationStrategy_t val
         throw std::invalid_argument("Invalid enum");
     }
 }
+
+hipsolverEmulationMantissaControl_t string2hipsolver_mantissa_control(const std::string& value)
+{
+    return value == "dynamic" ? HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC
+           : value == "fixed" ? HIPSOLVER_EMULATION_MANTISSA_CONTROL_FIXED
+                              : static_cast<hipsolverEmulationMantissaControl_t>(-1);
+}
+
+std::string hipsolver_mantissa_control2string(hipsolverEmulationMantissaControl_t value)
+{
+    switch(value)
+    {
+    case HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC:
+        return "dynamic";
+    case HIPSOLVER_EMULATION_MANTISSA_CONTROL_FIXED:
+        return "fixed";
+    default:
+        throw std::invalid_argument("Invalid enum");
+    }
+}

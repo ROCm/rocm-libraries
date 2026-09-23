@@ -78,6 +78,15 @@ hipsolverMathMode_t get_math_mode();
 void                         set_emulation_strategy(hipsolverEmulationStrategy_t strategy);
 hipsolverEmulationStrategy_t get_emulation_strategy();
 
+/*  process-global FP64 Ozaki fixed-point tuning applied to each handle on creation. The bit-count
+    knobs use -1 to mean "leave the handle at its backend default". */
+void set_mantissa_control(hipsolverEmulationMantissaControl_t control);
+hipsolverEmulationMantissaControl_t get_mantissa_control();
+void                                set_max_mantissa_bits(int bits);
+int                                 get_max_mantissa_bits();
+void                                set_mantissa_bit_offset(int offset);
+int                                 get_mantissa_bit_offset();
+
 // /* ============================================================================================
 //  */
 // template <typename T>

@@ -149,3 +149,42 @@ hipsolverEmulationStrategy_t get_emulation_strategy()
 {
     return g_emulation_strategy;
 }
+
+// FP64 Ozaki fixed-point tuning. The two bit-count knobs use -1 to mean "leave the handle at its
+// backend default"; the mantissa control uses DYNAMIC (the backend default) for the same purpose.
+static hipsolverEmulationMantissaControl_t g_mantissa_control
+    = HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC;
+
+void set_mantissa_control(hipsolverEmulationMantissaControl_t control)
+{
+    g_mantissa_control = control;
+}
+
+hipsolverEmulationMantissaControl_t get_mantissa_control()
+{
+    return g_mantissa_control;
+}
+
+static int g_max_mantissa_bits = -1;
+
+void set_max_mantissa_bits(int bits)
+{
+    g_max_mantissa_bits = bits;
+}
+
+int get_max_mantissa_bits()
+{
+    return g_max_mantissa_bits;
+}
+
+static int g_mantissa_bit_offset = -1;
+
+void set_mantissa_bit_offset(int offset)
+{
+    g_mantissa_bit_offset = offset;
+}
+
+int get_mantissa_bit_offset()
+{
+    return g_mantissa_bit_offset;
+}

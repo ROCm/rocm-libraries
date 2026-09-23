@@ -152,6 +152,43 @@ public:
                         "WARNING: could not set requested hipsolver emulation strategy; "
                         "continuing with default strategy\n");
         }
+
+        // Apply the FP64 Ozaki fixed-point tuning knobs, each only if the user overrode it. These
+        // take effect once an FP64 emulation math mode is active; setting them otherwise is
+        // harmless. Same tolerant handling: a failed set is non-fatal. Set the mantissa control
+        // before the dependent bit-count/offset.
+        hipsolverEmulationMantissaControl_t mantissa_control = get_mantissa_control();
+        if(mantissa_control != HIPSOLVER_EMULATION_MANTISSA_CONTROL_DYNAMIC)
+        {
+            hipsolverStatus_t status
+                = hipsolverSetFixedPointEmulationMantissaControl(m_handle, mantissa_control);
+            if(status != HIPSOLVER_STATUS_SUCCESS)
+                fprintf(stderr,
+                        "WARNING: could not set requested hipsolver mantissa control; "
+                        "continuing with default\n");
+        }
+
+        int max_mantissa_bits = get_max_mantissa_bits();
+        if(max_mantissa_bits >= 0)
+        {
+            hipsolverStatus_t status
+                = hipsolverSetFixedPointEmulationMaxMantissaBitCount(m_handle, max_mantissa_bits);
+            if(status != HIPSOLVER_STATUS_SUCCESS)
+                fprintf(stderr,
+                        "WARNING: could not set requested hipsolver max mantissa bit count; "
+                        "continuing with default\n");
+        }
+
+        int mantissa_bit_offset = get_mantissa_bit_offset();
+        if(mantissa_bit_offset >= 0)
+        {
+            hipsolverStatus_t status
+                = hipsolverSetFixedPointEmulationMantissaBitOffset(m_handle, mantissa_bit_offset);
+            if(status != HIPSOLVER_STATUS_SUCCESS)
+                fprintf(stderr,
+                        "WARNING: could not set requested hipsolver mantissa bit offset; "
+                        "continuing with default\n");
+        }
     }
     ~hipsolver_local_handle()
     {

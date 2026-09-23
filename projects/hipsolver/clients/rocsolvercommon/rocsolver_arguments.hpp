@@ -108,6 +108,9 @@ public:
         to_consume.erase("device");
         to_consume.erase("math_mode");
         to_consume.erase("emulation_strategy");
+        to_consume.erase("mantissa_control");
+        to_consume.erase("mantissa_bits");
+        to_consume.erase("mantissa_bit_offset");
     }
 
     void clear()

@@ -114,3 +114,7 @@ std::string hipsolver_math_mode2string(hipsolverMathMode_t value);
 hipsolverEmulationStrategy_t string2hipsolver_emulation_strategy(const std::string& value);
 
 std::string hipsolver_emulation_strategy2string(hipsolverEmulationStrategy_t value);
+
+hipsolverEmulationMantissaControl_t string2hipsolver_mantissa_control(const std::string& value);
+
+std::string hipsolver_mantissa_control2string(hipsolverEmulationMantissaControl_t value);
