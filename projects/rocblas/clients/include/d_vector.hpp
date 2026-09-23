@@ -32,7 +32,9 @@
 #endif
 #include <cinttypes>
 #ifdef GOOGLE_TEST
+#include <memory>
 #include <mutex>
+#include <new>
 #endif
 
 #define MEM_MAX_GUARD_PAD 8192
@@ -67,17 +69,22 @@ template <typename T>
 class d_vector
 {
 private:
-    size_t m_size;
-    size_t m_pad;
-    // Byte length of each guard region (m_pad * sizeof(T)). Modified to zero in
-    // device_vector_setup when a guard write fails so that device_vector_check
-    // does not compare uninitialized device memory against the guard pattern.
-    size_t m_guard_len;
-    size_t m_bytes;
+    // Geometry, fixed at construction. const so the guard offsets used by
+    // device_vector_setup, device_vector_check and device_vector_teardown cannot drift
+    // apart: all three derive their pointer arithmetic from m_pad alone.
+    const size_t m_size;
+    const size_t m_pad;
+    // Byte length of each guard region (m_pad * sizeof(T)).
+    const size_t m_guard_len;
+    const size_t m_bytes;
 
-// Guards one-time initialization of m_guard against concurrent construction.
-// Declared only in GOOGLE_TEST builds, where the guard and call_once are used.
 #ifdef GOOGLE_TEST
+    // Set only once both guard regions actually hold the pattern. Kept separate from
+    // m_guard_len so a failed guard write disables checking without touching geometry.
+    bool m_guard_written = false;
+
+    // Guards one-time initialization of m_guard against concurrent construction.
+    // Declared only in GOOGLE_TEST builds, where the guard and call_once are used.
     static std::once_flag m_init_flag;
 #endif
 
@@ -142,39 +149,31 @@ public:
             d = nullptr;
         }
 #ifdef GOOGLE_TEST
-        else
+        else if(m_pad > 0)
         {
-            if(m_guard_len > 0)
+            // A guard that was not written is a guard that reports corruption later, so the
+            // failure has to be raised here, where the message says what actually went wrong.
+            // EXPECT is the only option in a function that returns a pointer.
+            hipError_t status = hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault);
+            EXPECT_EQ(status, hipSuccess)
+                << "cannot write the guard before the allocation: " << hipGetErrorName(status);
+
+            // Offset past the pre-guard unconditionally, so d names the pointer teardown will
+            // hand to free_ptr_use whether or not the guard writes succeeded. hipFree receives
+            // the base pointer, recovered in teardown by subtracting the same m_pad.
+            d += m_pad;
+
+            if(status == hipSuccess)
             {
-                // A guard that was not written is a guard that reports corruption later, so
-                // the failure has to be raised here where it says what actually went wrong.
-                // EXPECT is the only option in a function that returns a pointer.
-                hipError_t status = hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault);
+                status = hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault);
                 EXPECT_EQ(status, hipSuccess)
-                    << "cannot write the guard before the allocation: " << hipGetErrorName(status);
-
-                // Point to allocated block — always, even on failure, so that d names the
-                // same offset pointer that teardown will pass to free_ptr_use. hipFree
-                // receives the base pointer (after d -= m_pad in teardown), not this one.
-                // m_guard_len is zeroed on failure to disable checking; m_pad is not touched.
-                d += m_pad;
-
-                if(status != hipSuccess)
-                {
-                    // Pre-guard was never written; disable checking for this allocation so
-                    // device_vector_check does not compare uninitialized device memory against
-                    // the guard pattern and report corruption that never happened.
-                    m_guard_len = 0;
-                }
-                else
-                {
-                    status = hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault);
-                    EXPECT_EQ(status, hipSuccess) << "cannot write the guard after the allocation: "
-                                                  << hipGetErrorName(status);
-                    if(status != hipSuccess)
-                        m_guard_len = 0;
-                }
+                    << "cannot write the guard after the allocation: " << hipGetErrorName(status);
             }
+
+            // Checked later only if both regions hold the pattern; otherwise
+            // device_vector_check would compare uninitialised device memory against it and
+            // report corruption that never happened.
+            m_guard_written = (status == hipSuccess);
         }
 #endif
 
@@ -188,46 +187,46 @@ public:
         return d;
     }
 
-    // Reads both guard regions from device and compares them against the reference
-    // pattern. Reports any mismatch as a non-fatal GTest failure. Called from
-    // device_vector_teardown (i.e. from a destructor) so EXPECT not ASSERT is used
-    // throughout, and early return is avoided to ensure both guards are checked.
-    // No-op when m_guard_len == 0 (guards were never written or pad is zero).
+    // Reads both guard regions back from the device and compares them against the reference
+    // pattern, reporting any mismatch as a non-fatal GTest failure. Called from
+    // device_vector_teardown (i.e. from a destructor) so EXPECT rather than ASSERT is used
+    // throughout: ASSERT would return early and skip the second guard.
     void device_vector_check(T* d)
     {
 #ifdef GOOGLE_TEST
-        if(m_guard_len > 0)
+        if(!m_guard_written)
+            return;
+
+        // One host buffer, exactly one guard long, reused for both regions. Heap rather than
+        // an automatic array because m_guard_len is a runtime value, so an array would have to
+        // be sized for MEM_MAX_GUARD_PAD: 128 KB of stack for a 16-byte type, to compare at
+        // most that much. nothrow new rather than std::vector because a throwing allocation in
+        // a destructor calls std::terminate. No alignment needed: hipMemcpy and memcmp are
+        // both byte-wise.
+        std::unique_ptr<unsigned char[]> host_guard(new(std::nothrow) unsigned char[m_guard_len]);
+        if(!host_guard)
         {
-            // One stack buffer per guard: a failed read cannot leave the other guard's
-            // stale bytes in a shared buffer and produce a false pass or miss on the next
-            // comparison. Sized to MEM_MAX_GUARD_PAD (the compile-time cap on m_pad) so
-            // no heap allocation is needed — this runs from a destructor, where std::vector
-            // construction could throw std::bad_alloc and call std::terminate.
-            // Post-guard is checked first because d already points to the user allocation;
-            // pre-guard requires d -= m_pad and is checked second.
-            // EXPECT (not ASSERT): ASSERT would return from device_vector_check early,
-            // skipping the second guard; EXPECT reports and continues.
-            alignas(alignof(T)) unsigned char after_bytes[MEM_MAX_GUARD_PAD * sizeof(T)];
-
-            hipError_t status = hipMemcpy(after_bytes, d + m_size, m_guard_len, hipMemcpyDefault);
-            EXPECT_EQ(status, hipSuccess)
-                << "cannot read the guard after the allocation: " << hipGetErrorName(status);
-
-            if(status == hipSuccess)
-                EXPECT_EQ(memcmp(after_bytes, m_guard, m_guard_len), 0) << "post-guard overwritten";
-
-            // Point to the pre-guard region of the device allocation.
-            d -= m_pad;
-
-            alignas(alignof(T)) unsigned char before_bytes[MEM_MAX_GUARD_PAD * sizeof(T)];
-
-            status = hipMemcpy(before_bytes, d, m_guard_len, hipMemcpyDefault);
-            EXPECT_EQ(status, hipSuccess)
-                << "cannot read the guard before the allocation: " << hipGetErrorName(status);
-
-            if(status == hipSuccess)
-                EXPECT_EQ(memcmp(before_bytes, m_guard, m_guard_len), 0) << "pre-guard overwritten";
+            ADD_FAILURE() << "cannot allocate " << m_guard_len
+                          << " bytes to read the guards back; corruption would go unreported";
+            return;
         }
+
+        // Post-guard first, because d still points at the user allocation. Each comparison is
+        // gated on its own copy succeeding, so a failed read cannot leave the other region's
+        // bytes behind to be compared a second time.
+        hipError_t status = hipMemcpy(host_guard.get(), d + m_size, m_guard_len, hipMemcpyDefault);
+        EXPECT_EQ(status, hipSuccess)
+            << "cannot read the guard after the allocation: " << hipGetErrorName(status);
+        if(status == hipSuccess)
+            EXPECT_EQ(memcmp(host_guard.get(), m_guard, m_guard_len), 0)
+                << "post-guard overwritten";
+
+        // Pre-guard sits m_pad elements below the user pointer.
+        status = hipMemcpy(host_guard.get(), d - m_pad, m_guard_len, hipMemcpyDefault);
+        EXPECT_EQ(status, hipSuccess)
+            << "cannot read the guard before the allocation: " << hipGetErrorName(status);
+        if(status == hipSuccess)
+            EXPECT_EQ(memcmp(host_guard.get(), m_guard, m_guard_len), 0) << "pre-guard overwritten";
 #endif
     }
 
