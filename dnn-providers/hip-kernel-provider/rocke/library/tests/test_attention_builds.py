@@ -2880,6 +2880,49 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                     f"runtime-shape gfx942 name still carries {tok!r}: {name}",
                 )
 
+    def test_grid_still_varies_per_shape_under_one_cache_key(self):
+        """One binary, but a fresh launch grid for every shape.
+
+        The guard above deliberately collapses these specs onto ONE cache key and
+        ONE kernel. That is only correct if the launch geometry is still recomputed
+        per shape: the body derives its query block / query head / batch work item
+        from ``block_id_{x,y,z}``, so a grid memoized alongside the launcher would
+        leave the tail of the larger shapes uncomputed and over-launch the smaller
+        ones. ``attention_dense_grid`` reads the spec, not the cache, and must
+        therefore give a DISTINCT triple for each of ``_SHAPES``.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import attention_dense_grid
+
+        base = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(
+            base.runtime_shape,
+            "test setup error: the base gfx942 spec is not on the runtime-shape path",
+        )
+
+        keys, grids = {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                grids[shape] = attention_dense_grid(spec)
+
+        self.assertEqual(
+            len(set(keys.values())),
+            1,
+            f"test setup error: these shapes no longer share one cache key: {keys}",
+        )
+        self.assertEqual(
+            len(set(grids.values())),
+            len(self._SHAPES),
+            "gfx942 runtime-shape specs sharing ONE cache key produced a repeated "
+            "launch grid " + repr(grids) + " -- the grid stopped tracking the "
+            "problem shape, so the single binary that cache slot serves is launched "
+            "with the wrong CTA count for every shape but the first.",
+        )
+
     def test_baked_shape_specs_split_both_key_and_ir(self):
         """Control: off the runtime path, each shape keeps its own key and IR.
 
@@ -2999,44 +3042,70 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                 f"persistent gfx942 name lost the baked token {tok!r}: {name}",
             )
 
-    def test_signature_matches_the_declared_params(self):
-        """The ABI grew exactly three i32 args, in the position the builder
-        declares them.
+    def test_signature_matches_the_built_kernels_params(self):
+        """``attention_dense_signature`` is checked against the kernel it describes.
 
-        ``attention_dense_signature`` mirrors the ``b.param`` order in
-        ``build_attention_dense`` BY HAND. A skew fails no other CPU test -- it
-        mis-binds kernargs at launch and corrupts results on GPU only.
+        The signature mirrors the ``b.param`` order in ``build_attention_dense`` BY
+        HAND, and a skew mis-binds kernargs at launch -- corrupting results on GPU
+        only. Comparing it to a hand-written list cannot catch that, since both
+        sides are hand-written; the ground truth has to be the built
+        :class:`~rocke.core.ir.KernelDef`, whose ``params`` are the kernargs the
+        emitted body actually reads. Both arms are covered: the runtime-shape path
+        (q/k/v/o + scale + the three i32 shape args) and the baked persistent path,
+        whose body declares no shape params, so an extra kernarg there would be
+        read as garbage.
         """
-        from kernels.gfx942.attention_dense import attention_dense_signature
+        from rocke.core.ir import PtrType
+        from rocke.helpers.spec import ptr_type_str
+        from kernels.gfx942.attention_dense import (
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        def expected_type_str(param):
+            """The signature-side type string for a built ``Param``.
+
+            Pointers are compared field-by-field rather than by string: the
+            signature spells them ``ptr<f16, global>`` while ``PtrType.name`` is
+            ``ptr<f16,global>``, so the structured route through ``pointee`` /
+            ``space`` (re-rendered by the same ``ptr_type_str`` the signature
+            builder uses) is both exact and whitespace-agnostic.
+            """
+            if isinstance(param.type, PtrType):
+                return ptr_type_str(param.type.pointee.name, param.type.space)
+            return param.type.name
 
         rt = self._spec(**self._BASE_KWARGS)
         self.assertTrue(rt.runtime_shape)
-        names = [a["name"] for a in attention_dense_signature(rt)]
-        self.assertEqual(
-            names,
-            [
-                "q_ptr",
-                "k_ptr",
-                "v_ptr",
-                "o_ptr",
-                "scale",
-                "batch",
-                "seqlen_q",
-                "seqlen_kv",
-            ],
-            "runtime-shape gfx942 ABI does not match the declared param order",
-        )
-        by_name = {a["name"]: a for a in attention_dense_signature(rt)}
-        for f in ("batch", "seqlen_q", "seqlen_kv"):
-            self.assertEqual(by_name[f]["type"], "i32", f"{f} is not i32")
-
         baked = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
         self.assertFalse(baked.runtime_shape)
+
+        for arm, spec in (("runtime-shape", rt), ("baked", baked)):
+            with self.subTest(arm=arm):
+                params = build_attention_dense(spec, arch="gfx942").params
+                sig = attention_dense_signature(spec)
+                self.assertEqual(
+                    [a["name"] for a in sig],
+                    [p.name for p in params],
+                    f"gfx942 {arm} ABI: attention_dense_signature does not match "
+                    "the b.param order the builder emits; the launcher would pack "
+                    "kernargs into the wrong slots",
+                )
+                self.assertEqual(
+                    [a["type"] for a in sig],
+                    [expected_type_str(p) for p in params],
+                    f"gfx942 {arm} ABI: attention_dense_signature disagrees with "
+                    "the built kernel on a param type",
+                )
+
+        # The runtime path's whole point: exactly three extra i32 shape kernargs,
+        # after scale.
         self.assertEqual(
-            [a["name"] for a in attention_dense_signature(baked)],
-            ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"],
-            "the baked gfx942 path's ABI must be unchanged -- its body declares "
-            "no shape params, so extra kernargs would be read as garbage",
+            [a["name"] for a in attention_dense_signature(rt)][
+                len(attention_dense_signature(baked)) :
+            ],
+            ["batch", "seqlen_q", "seqlen_kv"],
+            "runtime-shape gfx942 ABI is not the baked ABI plus the three shape args",
         )
 
 

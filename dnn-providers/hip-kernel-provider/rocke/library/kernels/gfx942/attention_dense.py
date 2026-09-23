@@ -1916,8 +1916,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     )
     if _as_gfx942_spec(spec).runtime_shape:
         # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
-        # build_attention_dense. Mirrored BY HAND: a skew here fails no other test --
-        # it mis-binds kernargs at launch and corrupts results on GPU only.
+        # build_attention_dense. Still mirrored BY HAND, but cross-checked against
+        # KernelDef.params by test_signature_matches_the_built_kernels_params in
+        # library/tests/test_attention_builds.py, so a skew fails on CPU.
         sig = (
             sig.scalar("batch", "i32")
             .scalar("seqlen_q", "i32")
