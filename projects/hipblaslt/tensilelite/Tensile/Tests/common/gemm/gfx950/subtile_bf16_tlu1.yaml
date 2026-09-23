@@ -5,10 +5,12 @@
 #
 # NN (TransposeA=0, TransposeB=0) makes A free-dim contiguous, so TLUA=True and A
 # takes the stacked transpose-read geometry AB_B16_TLU1_4x1 (stack 4 = 64 M-rows
-# x 32 K, 128 B LDS column) while B stays TLU=0 on the row-major layout.  bf16 has
-# exactly one admissible stack -- see _SUBTILE_STACK_B16 in SolutionStructs -- so
-# every solution here lands on that one geometry and the sweep varies what sits
-# around it: how many strips the macro tile spans, and how many waves share one.
+# x 32 K, 128 B LDS column) while B stays TLU=0 on the row-major layout.  bf16
+# walks a two-rung stack ladder -- see SUBTILE_STACK_SIZES_B16 in SolutionStructs/Validators/Subtile.py
+# -- so most solutions here land on that 4x1 geometry and the sweep varies what
+# sits around it: how many strips the macro tile spans, and how many waves share
+# one.  The two MT 96/160 shapes at the end of the fork fall to the 2x1 rung
+# instead; they are the shapes a stack of 4 cannot lay out at all.
 #
 # MacroTile0 = MatrixInstM * MIWaveTile[0] * MIWaveGroup[0], and a strip holds 4
 # MMA-M tiles, so the four MI shapes below split into two regimes:
@@ -93,6 +95,11 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1, 8, 2,  2, 2]   # MT  256x64
           - [16, 16, 32, 1,  1, 8, 4,  2, 2]   # MT  256x128
           - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT  256x256
+          # 6 and 10 MMA-M tiles: a partial tail on a stack of 4 (which the GR
+          # emit cannot address), whole strips on a stack of 2.  These are the
+          # shapes the 2x1 rung exists for, and the only ones here that take it.
+          - [16, 16, 32, 1,  1, 6, 2,  1, 4]   # MT   96x128, 3 strips of 2
+          - [16, 16, 32, 1,  1,10, 2,  1, 4]   # MT  160x128, 5 strips of 2
 
         - DepthU: [64, 128]
         - PrefetchGlobalRead: [1]
@@ -117,6 +124,8 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 160]   # tail at both DepthU (2*64+32, 128+32)
           - Exact: [256, 256, 1, 384]
           - Exact: [256, 256, 1, 512]
+          - Exact: [160, 128, 1, 128]   # exercises the 2x1 rung exactly
+          - Exact: [160, 128, 1, 160]   # ... with a K tail at both DepthU
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]

@@ -6,8 +6,9 @@
 This is the bf16 counterpart to the fp4 TLU=1 stacks: `subtileShape=(4, 1)`
 gives a 64-row M extent and a 128 B LDS column, the same column width the fp4
 `(16, 1)` stack reaches.  bf16 gets there at a stack of 4 rather than 16 because
-its element is 4x wider, which is also why bf16 has exactly one usable stack --
-see `SUBTILE_STACK_B16` in SolutionStructs/Validators/Subtile.py.
+its element is 4x wider, which is also why 4 is the tallest stack bf16 has --
+see `SUBTILE_STACK_SIZES_B16` in SolutionStructs/Validators/Subtile.py.  The
+other rung, 2, is a half-line fallback covered by test_gr_lr_roundtrip_b16_tlu1.
 
 Everything here is derived, not configured, so a change to `_tlu1LRGeom`, to the
 GR chunk ramp, or to the geometry table moves these numbers.  That is the point:

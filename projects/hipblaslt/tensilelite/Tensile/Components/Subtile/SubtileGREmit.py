@@ -1535,7 +1535,20 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
                                  comment="TDM: global->LDS for %s" % tc))
     return module
 
-  linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
+  # For TLU=1 the scheduler yields sId0 in MMA-tile units (steps by
+  # subtileShape[0]); convert to a subtile-row index so multi-strip macro tiles
+  # (MT > one subtile) address the right LDS strip and soffset group.
+  isTLU1 = bool(tileInfo.gr and isinstance(tileInfo.gr.config.tag, GRTag_TLU1))
+  stackM = int(tileInfo.subtileShape[0])
+  subtileRow = (sId0 // stackM) if isTLU1 else sId0
+
+  # Linearize from subtileRow, NOT the raw sId0: localSubtileGrid[0] is a count
+  # of subtile ROWS, so pairing it with an MMA-tile-unit sId0 mixes units and
+  # overruns the grid.  MT320 wg[2,2] (5 rows x 4 windows, stack 2) walked sId0
+  # over {0,2,4,6,8} and produced linearIds up to 8 + 5*3 = 23 for a grid whose
+  # last id is 19.  That is inert at loadRatioGR <= 1 -- grBaseId only labels the
+  # load -- but it is what the >1 dedup below partitions on.
+  linearId = tileInfo.getLocalSubtileLinearId(subtileRow, sId1)
   grBaseId = int(math.floor(linearId / tileInfo.loadRatioGR))
 
   if tileInfo.loadRatioGR > 1:
@@ -1547,13 +1560,6 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
   isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
   isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
-
-  # For TLU=1 the scheduler yields sId0 in MMA-tile units (steps by
-  # subtileShape[0]); convert to a subtile-row index so multi-strip macro tiles
-  # (MT > one subtile) address the right LDS strip and soffset group.
-  isTLU1 = bool(tileInfo.gr and isinstance(tileInfo.gr.config.tag, GRTag_TLU1))
-  stackM = int(tileInfo.subtileShape[0])
-  subtileRow = (sId0 // stackM) if isTLU1 else sId0
 
   regListIdx = tileInfo.grRegGroupForSubtileRow(subtileRow)
   regList = tileInfo.localSubtilesRegister[regListIdx]
@@ -1819,6 +1825,10 @@ def _grDTLInitSwap(writer, module, tc):
 # Subroutine to generate DTL M0 LDS buffer swap
 #
 def globalReadLDSBufferSwap(tc, writer, kernel):
+  if kernel.get("1LDSBuffer", 0):
+    # One buffer: nothing to flip to.  See localReadLDSBufferSwap -- the GR
+    # write base has the same problem, and the two must stay in agreement.
+    return Module("GR LDS buffer swap (1LDSBuffer: no-op)")
   if tc in ['A', 'B']:
     ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
     if kernel.get("enableTDM%s" % tc, False):

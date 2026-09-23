@@ -10,13 +10,21 @@ gate and reach the type/MI reject cluster inside
 Tensile/SolutionStructs/Solution.py:assignDerivedParameters, where each fork
 trips a distinct reject branch and early-returns. No valid solution survives.
 
-Solution.py lines that fire during the rejected derivation (probe-confirmed):
-  1968, 1970 : Variant MI [16,16,4,...,3,1] -> waves=3 -> MIWaveGroup=[3,1];
-               the non-power-of-two MIWaveGroup guard in the LraTileAssignment
-               vectorStaticRemainder path rejects.
-  2015, 2016 : Variant MI [4,4,4,4] + ComputeDataType double + ISA (9,4,x)
-               (!= IsaVersion(9,0,10)) + ScheduleIterAlg==3 -> "[4,4,4,4] is
-               disabled" reject.
+Rejects that fire during the derivation (probe-confirmed):
+  Variant MI [16,16,4,...,3,1] -> waves=3 -> MIWaveGroup=[3,1].  This fork used
+  to stop at the non-power-of-two MIWaveGroup guard in the LraTileAssignment
+  vectorStaticRemainder path.  That guard is gone: staticRemainderInPlace now
+  hands the magic-number path a distinct quotient register, so a non-power-of-two
+  wave group is legal (it is what makes MT320 reachable via MIWaveGroup 5).  The
+  fork therefore runs on and rejects further downstream, on load distribution --
+  192 threads cannot divide 256 B-vectors -- and then on DepthU having no
+  candidate left.  Two messages for the one fork, both from the same cause.
+
+  Variant MI [4,4,4,4] + ComputeDataType double + ISA (9,4,x)
+  (!= IsaVersion(9,0,10)) + ScheduleIterAlg==3 -> "[4,4,4,4] is disabled".
+
+What the case pins is unchanged: both forks die during derivation, so no valid
+solution survives.  Only the reason the first one dies moved.
 
 Both forks reject during derivation, so ``len(solutions_from_config(...)) == 0``
 pins the reachable-invalid reject (category A). CPU-only; no GPU, no compile.
@@ -50,8 +58,8 @@ def test_s08_assignderivedparameters_enablema_rejects_with_reason(monkeypatch, c
         monkeypatch,
         capsys,
         [
-            "reject: MIWaveGroup[0]=3 must be a power of two "
-            "(LraTileAssignment vectorStaticRemainder fast path)",
+            "reject: totalVectorsB 256 % NumThreads 192 != 0",
+            "reject: No valid DepthU found",
             "reject: Currently Matrix instructions [4,4,4,4] is disabled.",
         ],
     )
