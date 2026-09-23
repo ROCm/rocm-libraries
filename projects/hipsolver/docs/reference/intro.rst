@@ -98,6 +98,8 @@ LAPACK main functions
 
     :ref:`hipsolverXXgels_bufferSize <gels_bufferSize>`, x, x, x, x
     :ref:`hipsolverXXgels <gels>`, x, x, x, x
+    :ref:`hipsolverXgelsBatched_bufferSize <gels_batched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgelsBatched <gels_batched>`, x, x, x, x
 
 .. csv-table:: Symmetric eigensolvers
     :header: "Function", "single", "double", "single complex", "double complex"
