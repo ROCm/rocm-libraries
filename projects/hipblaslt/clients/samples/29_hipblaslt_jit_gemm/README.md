@@ -1,175 +1,119 @@
-# JIT GEMM through TensileLite
+# Request and execute JIT solutions
 
-JIT GEMM compiles a matrix-multiplication solution when an application requests
-it. `hipblaslt_ext::experimental::getJitGemmAlgo`, declared in
-`hipblaslt/hipblaslt-ext.hpp`, returns an algorithm that can be passed to the
-C `hipblasLtMatmul` API or the C++ extension `Gemm` API. Generation finishes
-before the application submits GPU work.
+The installed `hipblaslt/hipblaslt-jit.hpp` exposes a backend-neutral request API.
+`getJitAlgo` accepts an operation request and configured backend and returns an
+owned solution bundle. The bundle includes the kernels and helpers needed for
+that operation. This sample requests GEMM; no attention provider is implemented.
 
-The `GenerateOptions::configPath` field chooses the source of the kernel recipe.
-An empty path asks Origami to rank kernel parameters for the requested problem;
-TensileLite validates the recipes and compiles the first valid one. If Origami
-cannot model the problem or no ranked recipe is valid, TensileLite tries its
-default and native-instruction recipes. That path preserves the requested
-datatypes and records that no latency estimate was available. An explicit
-YAML path uses `Tensile.SingleSolution` to compile that exact recipe, bypassing
-prediction. [`hipblaslt-bench --jit-gemm`](../../bench/README.jit.md) uses the
-parameter-prediction path.
+The sample uses the following public interfaces:
 
-The sample also demonstrates the separate `JitGemm` owner class. Its `prepare`
-method generates and loads one solution, and `run` submits its kernels without
-regeneration. This class owns the loaded modules and private synchronization
-storage until its destruction; its header remains internal to the sample.
+1. `jit::tensilelite::createBackend` configures the TensileLite provider using
+   options from `hipblaslt/hipblaslt-jit-tensilelite.hpp`. Python, compiler, recipe
+   and output paths belong to this provider.
+2. `jit::makeGemmRequest` captures the existing GEMM descriptors and host scalars.
+3. `jit::getJitAlgo` compiles a solution on the current device.
+4. `jit::getGemmAlgo` adapts that GEMM solution to an ordinary hipBLASLt algorithm.
+5. `hipblasLtMatmul` or `hipblaslt_ext::Gemm` checks workspace and executes it.
+
+Compilation and support checks finish before any GPU work is submitted. The
+sample owns its application buffers and calls `hipblasLtMatmul` and `Gemm`.
 
 ## Build
 
-JIT GEMM is a build-time opt-in feature enabled by
-`HIPBLASLT_ENABLE_JIT_GEMM`. It is disabled by default. The installed extension
-header declares `getJitGemmAlgo` in either build configuration; without JIT
-enabled, the function returns `HIPBLAS_STATUS_NOT_SUPPORTED`.
-
-The `jit-gemm` CMake preset configures the host library, `hipblaslt-bench`, and
-this sample without building a prebuilt device library. The build needs Linux,
-ROCm, Boost headers, TensileLite's Python dependencies, and the locally built
-rocisa extension. From the repository root, with the Python environment for
-those dependencies activated:
+`HIPBLASLT_ENABLE_JIT` is disabled by default. The declarations remain
+available when disabled, and selection returns `HIPBLAS_STATUS_NOT_SUPPORTED`.
+The enabled implementation requires the host library and ROCm. The TensileLite
+provider also requires its Python dependencies and the local rocisa extension.
+Provider processes use POSIX spawning on Linux and `CreateProcessW` on Windows;
+additional Python import paths use the platform separator (`:` or `;`).
+Using an existing configured build and Python environment:
 
 ```bash
-project_root="$PWD"
-project_build="$project_root/projects/hipblaslt/build/release"
-project_python="$(command -v python)"
-
-cmake --preset jit-gemm -S "$project_root/projects/hipblaslt" -B "$project_build" \
-  -DGPU_TARGETS=gfx950 \
-  -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DCMAKE_PREFIX_PATH=/opt/rocm \
+cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
+  -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_ENABLE_HOST=ON \
+  -DHIPBLASLT_ENABLE_DEVICE=OFF -DGPU_TARGETS=gfx950 \
   -DPython_EXECUTABLE="$project_python" -DPython3_EXECUTABLE="$project_python"
-cmake --build "$project_build" --target _rocisa hipblaslt-jit-gemm hipblaslt-bench --parallel
-
+cmake --build "$project_build" --target _rocisa hipblaslt-jit-gemm --parallel
 export PYTHONPATH="$project_build/tensilelite/rocisa:$project_build/tensilelite:$project_root/projects/hipblaslt/tensilelite"
 ```
 
-`GPU_TARGETS` and the ROCm paths should match the local toolchain. If nanobind
-comes from a Python wheel, CMake can find it with
-`-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=ALWAYS` and
-`-Dnanobind_DIR="$(python -m nanobind --cmake_dir)"`. The import paths above let
-the generator use the checkout and its built rocisa module directly.
+Use the compiler and target appropriate for the local device. Generated
+bundles do not depend on a prebuilt hipBLASLt device library.
 
-## Generate and run an explicit recipe
-
-The following example uses a split-K recipe on gfx950. Split-K divides the K
-reduction across GPU workgroups; this recipe combines their partial results
-with an output-conversion kernel. The output path must be new and its parent
-directory must exist. Compiler and generator diagnostics are retained in
-`<output>.log`, with process scratch files in `<output>.cwd`.
+## Run the sample
 
 ```bash
 fixtures="$project_root/projects/hipblaslt/tensilelite/Tensile/Tests/unit/test_data"
-
 "$project_build/clients/staging/hipblaslt-jit-gemm" \
   "$project_python" "$project_root/projects/hipblaslt/tensilelite" \
   "$PYTHONPATH" "$fixtures/single_solution_splitk.yaml" /tmp/jit-gemm-splitk \
-  gfx950:sramecc+:xnack- /opt/rocm/bin/amdclang++ \
-  --k 512 --expect-configured-gsu 4 --expect-min-gsu 4 \
-  --expect-accumulation multiple-buffer --expect-kernels 2 --min-workspace 1
+  gfx950:sramecc+:xnack- /opt/rocm/bin/amdclang++
 ```
 
-This invocation uses the `JitGemm` owner. Adding `--normal-api both` exercises
-the same explicit recipe through `hipblasLtMatmul` and the C++ extension `Gemm`
-instead. These APIs use the handle's existing synchronization storage:
-Stream-K uses a stream-specific region, while MultipleBufferSingleKernel and
-output-amax use shared handle storage. Their existing handle and concurrency
-requirements also apply to generated algorithms. The sample owner provides
-private synchronization buffers when that ownership is needed.
+The sample exercises both execution APIs. It uses M=256, N=128,
+K=512, column-major NN FP16 input/output, FP32 accumulation, alpha=1.25,
+and beta=0.5. The selected YAML must support that problem.
 
-The sample defaults to M=256, N=128, K=128, column-major NN FP16 input/output,
-FP32 accumulation, alpha=1.25, and beta=0.5. `--m`, `--n`, and `--k` change its
-shape. Problem sizes in the YAML are examples for the generator's existing
-schema; they do not select or time a kernel in this entry point.
+The output path must not exist, and its parent directory must exist. Generator
+diagnostics are retained in `<output>.log`, with process scratch files in
+`<output>.cwd`. The sample checks every output against an independently
+computed CPU reference and poisons output storage before each run.
+The separate `hipblaslt-jit-api-test` executable checks copied algorithms, changed
+inputs, workspace errors, invalid tokens, device identity, and retained algorithms
+after another bundle is loaded.
 
-| Recipe | Shape M,N,K | Kernel sequence |
-| --- | --- | --- |
-| `single_solution.yaml` | 256,128,128 | One main kernel; no split-K |
-| `single_solution_splitk.yaml` | 256,128,512 | Split-K main kernel, then output conversion |
-| `single_solution_singlebuffer.yaml` | 256,128,512 | Beta initialization, split-K main kernel, then output conversion |
-| `single_solution_adaptive.yaml` | 128,64,1024 or 128,64,4096 | Runtime-selected split count and accumulation mode |
+## Algorithm lifetime and validation
 
-`DispatchInfo` reports the configured and selected split count, accumulation
-mode, and invoked kernel names. `--expect-kernels`, `--expect-accumulation`, and
-`--min-workspace` let the sample check a recipe's expected behavior. A solution
-can contain more helper variants than a particular problem launches, so helper
-counts in the manifest are not launch counts.
+The returned heuristic result contains the required workspace size. Supply
+that workspace and follow the same handle, stream, and workspace sharing rules
+as `hipblasLtMatmul` and `Gemm` calls using prebuilt algorithms. All helper entrypoints are resolved before submission.
+Stream-K uses the handle's stream-specific synchronization region;
+MultipleBufferSingleKernel and output-amax use its shared synchronization
+storage. Registry synchronization protects algorithm lookup; it does not protect
+application buffers or make simultaneous calls on one `Gemm` object safe.
 
-To generate the bundle without GPU execution, use the Python entry point:
+Copies of an algorithm remain usable on its generating device within the same
+process. Its modules are retained until process exit. Reuse within one program invocation needs no recompilation. A different program
+invocation compiles its own solution: no persistent cache or bundle reload is
+provided. Save recipes and diagnostic manifests for reproduction; never persist
+the opaque algorithm bytes or treat them as a prebuilt library index.
 
-```bash
-python -m Tensile.SingleSolution "$fixtures/single_solution_splitk.yaml" \
-  /tmp/jit-solution-python --architecture gfx950 \
-  --cxx-compiler /opt/rocm/bin/amdclang++
-```
+An empty GEMM output (M=0 or N=0) returns NOT_SUPPORTED from the request factory
+without compilation. K=0 can use a recipe that implements beta*C. TensileLite
+owns its datatype, instruction and scale-layout restrictions. The library
+propagates provider support failures, including a mismatch between the supplied
+physical MX scale layout and the compiled solution.
+
+`clients/tests/jit/test_helper_failures.py` removes helper modules or symbols from a
+valid split-K bundle, checks that C/extension paths leave D and workspace
+untouched, and verifies that failed reinitialization preserves the previous
+extension algorithm. `clients/tests/jit/test_bundle_failures.py` checks malformed
+envelopes, missing code, mismatched solution identity and unsupported problems
+through the same public API. Both scripts run in the shared JIT workflow.
+
+Explicit recipes use TensileLite's target and solution
+validators. Output-amax currently requires one batch, GlobalSplitU=1 and
+StreamK=0. Generation never benchmarks recipes or substitutes another recipe
+when the supplied one fails.
 
 The [single-solution documentation](../../../tensilelite/docs/single-solution.md)
-describes the YAML contract, artifact layout, and Python return value.
+describes the recipe, bundle, and Python builder contracts.
 
-## Preparation, execution, and reuse
+The private provider loader reads `loader.bin`, a bounded, versioned envelope
+published alongside the human-readable `manifest.json`. Corruption tests modify
+the consumed envelope or code objects; JSON is a diagnostic record.
 
-`getJitGemmAlgo` returns a process-local algorithm after generation and support
-checks. The application supplies the reported workspace and uses the C or C++
-extension execution API. Copies of the algorithm can be reused on the same
-device without generating another kernel. Its modules remain registered until
-process exit.
+A searchable JIT solution library and persistent code cache are future work.
+Such a library could index solutions by problem description and look up compatible
+code before requesting generation. The current API retains explicitly selected
+algorithms in one process; it does not search a JIT collection or reuse code from
+an earlier program invocation.
 
-The separate sample owner has an explicit lifetime:
+## Optional automatic selection
 
-1. Construct `JitGemm` with a live handle, then call `setProblem` with matmul
-   descriptors, matrix storage, and host alpha/beta scalars.
-2. Call `prepare` with the YAML and generation options. It compiles and loads
-   the complete solution, checks support, and reports the required workspace.
-3. Allocate workspace and call `initialize` with the workspace and stream.
-   This packs the kernel arguments and resolves every entrypoint before the
-   owner becomes ready. Reinitialization waits for earlier work; failure
-   invalidates readiness.
-4. Call `run` on the initialized stream as often as needed. It enqueues the
-   complete kernel sequence without compiling or synchronizing with the host.
-5. Keep the handle, matrices, workspace, and stream alive until work completes.
-   Calls on each owner must be serialized. Destruction waits for submitted
-   work before unloading modules and releasing private synchronization storage.
-
-A fresh output path is needed only for generation, not for each execution.
-Neither API currently loads a retained disk bundle in a later process or
-maintains a persistent kernel cache. That interface is deferred to future JIT
-library work. Save the YAML and manifest to reproduce a recipe; an opaque
-algorithm value cannot be persisted as a library entry.
-
-## Validation and current limits
-
-The sample independently computes `alpha * A * B + beta * C` on the CPU with
-FP32 accumulation, then compares every GPU output element with that reference.
-It rejects nonfinite results and resets D to NaNs between runs so a missing
-write cannot pass by preserving an earlier result. With `--amax 1` and an
-`OutputAmaxD: true` recipe, it also compares output-amax with the CPU reference.
-
-The sample checks repeated execution, workspace errors, invalidated
-initialization, two owners sharing a handle on separate streams, and
-destruction immediately after submission. The accompanying
-`test_jit_bundle_failures.py` and `test_jit_normal_helper_failures.py` cover
-invalid manifests, metadata, modules, and symbols before GPU submission.
-
-The parameter-prediction path targets gfx90a, gfx942, gfx950, and gfx1250.
-Explicit YAML uses TensileLite's target and solution validators. Compiling
-kernels for a target checks generator and compiler support; checking numerical
-correctness requires execution on that GPU. Both runtime routes preserve the
-physical MX scale layout: gfx950 requires pre-swizzled block32 UE8M0 descriptors
-and a `HostPreSwizzle` solution; gfx1250 requires ordinary block-scale descriptors
-and an `InMemorySwizzle` solution. Incompatible descriptor and solution layouts
-are rejected. Natural gfx950 scale loads need an implementation in the shared
-subtile generator before that layout can be accepted.
-
-Output-amax currently requires one batch, `GlobalSplitU: 1`, and `StreamK: 0`.
-Its reduction needs final output and does not combine batch offsets, so other
-combinations require changes to the reduction and runtime checks. The sample
-owner does not support stream capture; preparation and lifetime handling for
-capture are outside its initial scope. Architecture aliases that do not match
-the device's HIP name also require additional target resolution. Neither API
-tunes kernels or provides a fallback when generation or support checks fail.
+With the provider's `Options::configPath` empty, TensileLite asks Origami for
+ranked candidates and compiles the first one its validators accept. This
+selection policy stays inside the provider; the generic request and solution
+APIs are unchanged. The sample continues to use the supplied recipe. The
+[benchmark guide](../../bench/README.jit.md) demonstrates automatic selection
+and explains its current model limits and failure diagnostics.

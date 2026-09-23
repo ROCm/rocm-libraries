@@ -733,8 +733,8 @@ try
 
     if(hipblaslt_bench_options::jit_gemm())
     {
-#ifndef HIPBLASLT_ENABLE_JIT_GEMM
-        throw std::invalid_argument("--jit-gemm requires a build with HIPBLASLT_ENABLE_JIT_GEMM=ON");
+#ifndef HIPBLASLT_ENABLE_JIT
+        throw std::invalid_argument("--jit-gemm requires a build with HIPBLASLT_ENABLE_JIT=ON");
 #else
         if(tuningEnv)
             throw std::invalid_argument("--jit-gemm cannot be combined with HIPBLASLT_TUNING_FILE");

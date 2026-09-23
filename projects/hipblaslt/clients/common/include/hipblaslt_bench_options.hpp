@@ -8,8 +8,8 @@
 
 #include <cstdint>
 #include <string>
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
-#include <hipblaslt/hipblaslt-ext.hpp>
+#ifdef HIPBLASLT_ENABLE_JIT
+#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
 #endif
 
 // Process-wide CLI knobs that hipblaslt-bench forwards into the matmul
@@ -28,8 +28,8 @@ namespace hipblaslt_bench_options
 {
     bool&        jit_gemm();
     std::string& jit_output_dir();
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
-    hipblaslt_ext::experimental::GenerateOptions jit_generate_options();
+#ifdef HIPBLASLT_ENABLE_JIT
+    hipblaslt_ext::experimental::jit::tensilelite::Options jit_generate_options();
 #endif
     int32_t&     sm_count_target();
     int32_t&     streamk_tile_scheduling_mode();

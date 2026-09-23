@@ -7,16 +7,7 @@ TensileLite runtime. This entry point does not run GPU work or measure kernel
 performance.
 
 The YAML supplies an exact recipe using the existing problem and parameter
-schema. For problem-driven parameter prediction, `hipblaslt-bench --jit-gemm`
-calls `hipblaslt_ext::experimental::getJitGemmAlgo`, which invokes
-`Tensile.JitGemm`. The C++ predictor ranks recipes with Origami;
-`Tensile.JitGemm` validates those recipes and calls this builder for the first
-valid candidate. When Origami cannot model
-the problem or all ranked recipes fail validation, TensileLite tries its
-default and native-instruction recipes without assigning a predicted cost or
-substituting datatypes. The [hipBLASLt JIT documentation](../../clients/bench/README.jit.md)
-describes that path. Passing YAML directly to `SingleSolution` bypasses
-prediction and uses TensileLite's full target and solution validators.
+schema. `SingleSolution` uses TensileLite's full target and solution validators.
 
 ## Python and command-line use
 
@@ -98,7 +89,7 @@ parameters off.
 Output-amax currently requires `GlobalSplitU: 1`, `StreamK: 0`, and one batch.
 Its reduction needs final output and does not combine batch offsets. Supporting
 those combinations requires changes to the reduction and runtime predicates.
-The same restrictions apply when hipBLASLt consumes the generated bundle.
+A consuming runtime must honor the same restrictions.
 
 ## Target and toolchain
 
@@ -152,19 +143,72 @@ bundle directory:
 
 For MsgPack, `library.path` names the physical `.dat.zlib` file and
 `library.logical_path` names `.dat`; the runtime loader understands both.
-Bundles produced through `Tensile.JitGemm` additionally contain
-`jit_prediction`, which records ranking, rejected candidates, selected
-parameters, defaults, and derived values. Physical MX scale layout is retained
-separately in `implementation_parameters`; a candidate cannot reinterpret the
-scale buffers by changing that layout. Selection without an Origami model
-records `tensile.defaults` and a null predicted cost. If ranked recipes were
-tried first, their candidates and rejection reasons are retained separately.
 
 The serialized solution library describes runtime support predicates,
 workspace, and kernel arguments. A host runtime loads every listed code object,
 checks the requested problem, allocates workspace, and uses the ordered
 invocation sequence from `ContractionSolution::solve`. Helper-generator counts
 and code-object counts do not determine the number of launches; the runtime
-problem and selected accumulation path determine that sequence. The
-[hipBLASLt sample](../../clients/samples/29_hipblaslt_jit_gemm/README.md)
-demonstrates that preparation and execution.
+problem and selected accumulation path determine that sequence.
+
+## Select a recipe for a GEMM problem
+
+`Tensile.JitGemm` accepts a JSON request containing a Tensile `problem_type`
+mapping, which specifies storage and arithmetic datatypes and operations.
+The request also contains logical dimensions and physical tensor extents in `problem`,
+an explicit architecture, and ranked `candidates`. Each candidate contains an
+integer ID, its predicted cost or null, and Tensile tuning parameters.
+
+```bash
+python -m Tensile.JitGemm request.json new-request-output --architecture gfx950
+```
+
+The request uses `schema_version: 1`. `model` identifies the caller's prediction
+method, such as `origami.gemm.estimation`. Candidates are tried in the supplied
+order; `predicted_cycles` records a positive estimate or null when none is available.
+Each candidate must supply tuning parameters. Tensile's existing parameter and
+solution validators determine which parameters and values are legal; the interface
+does not restrict a predictor to a fixed list of four parameters.
+
+The module builds the first candidate accepted by solution validation and the
+static size/stride predicates. The shared predicate definitions also control
+early rejection for vector widths, buffer offsets and workgroup counts. Checks
+requiring workspace, scalar values or device state remain with the host runtime,
+which evaluates the complete predicates before execution. The module does not
+run Origami or measure kernel latency. If all supplied candidates are rejected,
+the request fails with their IDs and rejection reasons. It does not add default
+or native-instruction candidates, and an empty parameter recipe is rejected.
+
+Physical MX layout is independent of tuning. Named `scale_mode_a` and
+`scale_mode_b` preserve the descriptor modes, from which the provider derives
+its layout. A supplied `problem.mx_scale_format` must agree with those modes.
+The gfx950 subtile backend requires `HostPreSwizzle` with
+`Block_32_UE8M0_32_8_EXT`; natural scales are not implemented by that backend.
+The gfx1250 TDM backend requires `InMemorySwizzle` with its ordinary block-scale
+modes. A candidate cannot change the supplied physical layout.
+
+The same supplied tuning parameters can be reused with another input or scale
+datatype combination, provided Tensile validates that combination. The MX recipe
+reuse test in `Tensile/Tests/unit/test_JitGemm.py` compiles both operand orders
+and supported scale formats with one fixed gfx1250 recipe. This checks generation
+and compilation; numerical correctness and performance require execution on that GPU.
+
+Bundles generated through this entry point additionally contain
+`jit_prediction`. The record includes selected tuning parameters, descriptor
+`implementation_parameters`, defaults, resolved values, candidate rejections,
+and either a modeled cost or null. Request and selected YAML siblings are
+retained for inspection. Generation still publishes exactly one complete
+solution and never benchmarks candidates.
+
+## hipBLASLt provider integration
+
+The library's TensileLite backend can now create the ranked request internally
+from a generic operation request. Its initial GEMM model supplies
+`MatrixInstruction`, `DepthU`, and `NonTemporalA/B`; this module retains the
+supplied order and validates every candidate before compilation. Descriptor
+scale modes are translated here, separately from tuning parameters, so the C++
+caller does not repeat target-dependent layout rules.
+
+No ranking means no generation. Exhausted rankings report each rejection;
+neither case substitutes an unranked recipe. The [benchmark guide](../../clients/bench/README.jit.md)
+shows this integration through public hipBLASLt execution APIs.

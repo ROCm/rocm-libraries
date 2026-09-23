@@ -5,13 +5,13 @@
  *
  *******************************************************************************/
 #include "hipblaslt_bench_options.hpp"
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+#ifdef HIPBLASLT_ENABLE_JIT
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <random>
 #include <stdexcept>
-#include <vector>
 #endif
 
 namespace hipblaslt_bench_options
@@ -28,36 +28,44 @@ namespace hipblaslt_bench_options
         return value;
     }
 
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
-    hipblaslt_ext::experimental::GenerateOptions jit_generate_options()
+#ifdef HIPBLASLT_ENABLE_JIT
+    hipblaslt_ext::experimental::jit::tensilelite::Options jit_generate_options()
     {
-        namespace fs = std::filesystem;
+        namespace fs    = std::filesystem;
         auto configured = [](const char* name, const char* fallback) {
             const char* value = std::getenv(name);
             return std::string(value && *value ? value : fallback);
         };
-        hipblaslt_ext::experimental::GenerateOptions options;
+        hipblaslt_ext::experimental::jit::tensilelite::Options options;
         options.pythonExecutable = configured("HIPBLASLT_JIT_PYTHON", HIPBLASLT_JIT_PYTHON);
         options.tensileSourceDirectory
             = configured("HIPBLASLT_JIT_TENSILE_SOURCE", HIPBLASLT_JIT_TENSILE_SOURCE);
-        options.pythonPath = configured("HIPBLASLT_JIT_PYTHONPATH", HIPBLASLT_JIT_PYTHONPATH);
-        options.cxxCompiler = configured("HIPBLASLT_JIT_CXX", HIPBLASLT_JIT_CXX);
-        options.offloadBundler
-            = configured("HIPBLASLT_JIT_OFFLOAD_BUNDLER", HIPBLASLT_JIT_BUNDLER);
+        options.pythonPath     = configured("HIPBLASLT_JIT_PYTHONPATH", HIPBLASLT_JIT_PYTHONPATH);
+        options.cxxCompiler    = configured("HIPBLASLT_JIT_CXX", HIPBLASLT_JIT_CXX);
+        options.offloadBundler = configured("HIPBLASLT_JIT_OFFLOAD_BUNDLER", HIPBLASLT_JIT_BUNDLER);
         // Empty configPath requests Origami prediction; the runtime supplies the device ISA.
         try
         {
-            const fs::path root = jit_output_dir().empty() ? fs::temp_directory_path()
-                                                          : fs::absolute(jit_output_dir());
+            const fs::path root = jit_output_dir().empty()
+                                      ? fs::temp_directory_path()
+                                      : fs::absolute(fs::u8path(jit_output_dir()));
             fs::create_directories(root);
-            const std::string pattern = (root / "hipblaslt-jit-XXXXXX").string();
-            std::vector<char> buffer(pattern.begin(), pattern.end());
-            buffer.push_back('\0');
-            if(!mkdtemp(buffer.data()))
-                throw std::invalid_argument(std::string("Cannot create JIT artifact directory: ")
-                                            + std::strerror(errno));
-            // The generator requires an output path which does not exist yet.
-            options.outputPath = (fs::path(buffer.data()) / "solution").string();
+            std::random_device random;
+            bool               created = false;
+            for(int attempt = 0; attempt < 128 && !created; ++attempt)
+            {
+                const auto directory = root
+                                       / ("hipblaslt-jit-" + std::to_string(random()) + "-"
+                                          + std::to_string(random()));
+                if(fs::create_directory(directory))
+                {
+                    const auto path = (directory / "solution").u8string();
+                    options.outputPath.assign(path.begin(), path.end());
+                    created = true;
+                }
+            }
+            if(!created)
+                throw std::invalid_argument("Cannot create a unique JIT artifact directory");
         }
         catch(const fs::filesystem_error& error)
         {

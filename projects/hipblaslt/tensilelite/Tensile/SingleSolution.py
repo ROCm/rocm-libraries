@@ -475,6 +475,40 @@ def _build(
         setVerbosity(savedVerbosity)
 
 
+def _writeLoaderEnvelope(path: Path, manifest: dict) -> None:
+    """Write the private runtime envelope (UTF-8 strings, little-endian lengths)."""
+    import struct
+
+    fields = (
+        str(manifest["schema_version"]), str(manifest["counts"]["solutions"]),
+        str(manifest["counts"]["main_kernels"]), str(manifest["solution"]["index"]),
+        manifest["main_kernel"]["name"], manifest["solution"]["kernel_name"],
+        manifest["solution"]["name"], manifest["architecture"]["requested"],
+        manifest["architecture"]["resolved"], manifest["architecture"]["compiler_target"],
+        manifest["library"]["format"], manifest["main_kernel"]["code_object"],
+        manifest["library"]["path"], manifest["library"]["logical_path"],
+    )
+    objects = manifest["code_objects"]
+    if not 0 < len(objects) <= 4096:
+        raise ValueError("Invalid loader code object count")
+    with path.open("wb") as output:
+        output.write(b"TLJIT001")
+        output.write(struct.pack("<I", len(fields)))
+
+        def write_string(value):
+            encoded = value.encode("utf-8")
+            if not 0 < len(encoded) <= 1048576 or b"\0" in encoded:
+                raise ValueError("Invalid loader field")
+            output.write(struct.pack("<I", len(encoded)))
+            output.write(encoded)
+
+        for value in fields:
+            write_string(value)
+        output.write(struct.pack("<I", len(objects)))
+        for value in objects:
+            write_string(value)
+
+
 def generateAndBuildSingleSolution(
     configPath: str | Path,
     outputPath: str | Path,
@@ -534,6 +568,7 @@ def _generateAndBuild(
         (staging / "manifest.json").write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
+        _writeLoaderEnvelope(staging / "loader.bin", manifest)
         bundle = outputPath / "bundle"
         staging.rename(bundle)
         return SingleSolutionBuildResult(

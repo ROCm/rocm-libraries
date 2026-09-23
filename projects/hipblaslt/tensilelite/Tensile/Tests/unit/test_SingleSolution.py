@@ -138,11 +138,13 @@ def stub_build(monkeypatch):
         (library / "TensileLibrary.dat.zlib").write_bytes(b"library")
         return {
             "schema_version": 2,
-            "architecture": {"resolved": "gfx942"},
+            "architecture": {"requested": "gfx942", "resolved": "gfx942", "compiler_target": "gfx942"},
+            "counts": {"solutions": 1, "main_kernels": 1},
             "main_kernel": {"name": "single", "code_object": "library/gfx942/single.co"},
             "code_objects": ["library/gfx942/single.co"],
-            "solution": {"index": 0, "name": "solution"},
+            "solution": {"index": 0, "name": "solution", "kernel_name": "single"},
             "library": {
+                "format": "msgpack",
                 "path": "library/gfx942/TensileLibrary.dat.zlib",
                 "logical_path": "library/gfx942/TensileLibrary.dat",
             },
@@ -163,6 +165,27 @@ def test_result_is_published_atomically_and_paths_survive_move(tmp_path, stub_bu
     manifest = json.loads(result.manifestPath.read_text())
     assert manifest["schema_version"] == 2
     assert not Path(manifest["main_kernel"]["code_object"]).is_absolute()
+    import struct
+
+    # Decode independently: version and field count precede length-prefixed UTF-8.
+    encoded = (result.bundlePath / "loader.bin").read_bytes()
+    assert encoded[:8] == b"TLJIT001"
+    assert struct.unpack_from("<I", encoded, 8)[0] == 14
+    values = []
+    offset = 12
+    for _ in range(14):
+        length = struct.unpack_from("<I", encoded, offset)[0]
+        offset += 4
+        values.append(encoded[offset:offset + length].decode("utf-8"))
+        offset += length
+    assert values[4:7] == ["single", "single", "solution"]
+    assert values[7:10] == ["gfx942"] * 3
+    assert values[10] == "msgpack"
+    assert struct.unpack_from("<I", encoded, offset)[0] == 1
+    offset += 4
+    length = struct.unpack_from("<I", encoded, offset)[0]
+    assert encoded[offset + 4:] == b"library/gfx942/single.co"
+    assert len(encoded) == offset + 4 + length
     before = result.manifestPath.read_bytes()
     with pytest.raises(SS.SingleSolutionBuildError):
         SS.generateAndBuildSingleSolution(CONFIG, output, architecture="gfx942")
