@@ -329,7 +329,7 @@ sys.exit(status)
     require(not (output / 'unused').exists(), 'Invalid invocation created JIT artifacts')
     report.append({'case': 'output-without-jit', 'pass': True})
 
-    if args.architecture == 'gfx950':
+    if args.architecture == 'gfx950' and not args.negative_only:
         natural = next(case for case in CASES if case['name'] == 'mxfp4-float-output')
         natural_root = output / 'natural-mx-artifacts'
         proc, path, _ = run('negative-natural-mx-layout',

@@ -9,8 +9,9 @@ performance.
 The YAML supplies an exact recipe using the existing problem and parameter
 schema. For problem-driven parameter prediction, `hipblaslt-bench --jit-gemm`
 calls `hipblaslt_ext::experimental::getJitGemmAlgo`, which invokes
-`Tensile.JitGemm`. That module uses Origami to rank recipes, validates them, and
-calls this builder for the first valid candidate. When Origami cannot model
+`Tensile.JitGemm`. The C++ predictor ranks recipes with Origami;
+`Tensile.JitGemm` validates those recipes and calls this builder for the first
+valid candidate. When Origami cannot model
 the problem or all ranked recipes fail validation, TensileLite tries its
 default and native-instruction recipes without assigning a predicted cost or
 substituting datatypes. The [hipBLASLt JIT documentation](../../clients/bench/README.jit.md)
