@@ -58,11 +58,22 @@ void testing_hybmv_bad_arg(const Arguments& argus)
     std::unique_ptr<hyb_struct> unique_ptr_hyb(new hyb_struct);
     hipsparseHybMat_t           hyb = unique_ptr_hyb->hyb;
 
-    testhyb* dhyb = (testhyb*)hyb;
-    dhyb->m       = safe_size;
-    dhyb->n       = safe_size;
-    dhyb->ell_nnz = safe_size;
-    dhyb->coo_nnz = safe_size;
+    const int     h_m       = safe_size;
+    const int     h_n       = safe_size;
+    const int64_t h_ell_nnz = safe_size;
+    const int     h_coo_nnz = safe_size;
+    CHECK_ROCSPARSE_ERROR(rocsparse_hyb_mat_set_info((rocsparse_hyb_mat)hyb,
+                                                     &h_m,
+                                                     &h_n,
+                                                     nullptr,
+                                                     &h_ell_nnz,
+                                                     nullptr,
+                                                     nullptr,
+                                                     nullptr,
+                                                     &h_coo_nnz,
+                                                     nullptr,
+                                                     nullptr,
+                                                     nullptr));
 
     auto dx_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     auto dy_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
@@ -207,10 +218,26 @@ void testing_hybmv(Arguments argus)
     if(argus.unit_check)
     {
         // Copy HYB structure to CPU
-        testhyb* dhyb = (testhyb*)hyb;
-
-        int ell_nnz = dhyb->ell_nnz;
-        int coo_nnz = dhyb->coo_nnz;
+        int64_t     ell_nnz;
+        int         coo_nnz;
+        int         ell_width;
+        const int*  d_ell_col_ind;
+        const void* d_ell_val;
+        const int*  d_coo_row_ind;
+        const int*  d_coo_col_ind;
+        const void* d_coo_val;
+        CHECK_ROCSPARSE_ERROR(rocsparse_hyb_mat_get_info((rocsparse_hyb_mat)hyb,
+                                                         nullptr,
+                                                         nullptr,
+                                                         nullptr,
+                                                         &ell_nnz,
+                                                         &ell_width,
+                                                         &d_ell_col_ind,
+                                                         &d_ell_val,
+                                                         &coo_nnz,
+                                                         &d_coo_row_ind,
+                                                         &d_coo_col_ind,
+                                                         &d_coo_val));
 
         std::vector<int> hell_col(ell_nnz);
         std::vector<T>   hell_val(ell_nnz);
@@ -221,19 +248,19 @@ void testing_hybmv(Arguments argus)
         if(ell_nnz > 0)
         {
             CHECK_HIP_ERROR(hipMemcpy(
-                hell_col.data(), dhyb->ell_col_ind, sizeof(int) * ell_nnz, hipMemcpyDeviceToHost));
-            CHECK_HIP_ERROR(hipMemcpy(
-                hell_val.data(), dhyb->ell_val, sizeof(T) * ell_nnz, hipMemcpyDeviceToHost));
+                hell_col.data(), d_ell_col_ind, sizeof(int) * ell_nnz, hipMemcpyDeviceToHost));
+            CHECK_HIP_ERROR(
+                hipMemcpy(hell_val.data(), d_ell_val, sizeof(T) * ell_nnz, hipMemcpyDeviceToHost));
         }
 
         if(coo_nnz > 0)
         {
             CHECK_HIP_ERROR(hipMemcpy(
-                hcoo_row.data(), dhyb->coo_row_ind, sizeof(int) * coo_nnz, hipMemcpyDeviceToHost));
+                hcoo_row.data(), d_coo_row_ind, sizeof(int) * coo_nnz, hipMemcpyDeviceToHost));
             CHECK_HIP_ERROR(hipMemcpy(
-                hcoo_col.data(), dhyb->coo_col_ind, sizeof(int) * coo_nnz, hipMemcpyDeviceToHost));
-            CHECK_HIP_ERROR(hipMemcpy(
-                hcoo_val.data(), dhyb->coo_val, sizeof(T) * coo_nnz, hipMemcpyDeviceToHost));
+                hcoo_col.data(), d_coo_col_ind, sizeof(int) * coo_nnz, hipMemcpyDeviceToHost));
+            CHECK_HIP_ERROR(
+                hipMemcpy(hcoo_val.data(), d_coo_val, sizeof(T) * coo_nnz, hipMemcpyDeviceToHost));
         }
 
         CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * m, hipMemcpyHostToDevice));
@@ -257,7 +284,7 @@ void testing_hybmv(Arguments argus)
                    n,
                    h_alpha,
                    ell_nnz,
-                   dhyb->ell_width,
+                   ell_width,
                    hell_col.data(),
                    hell_val.data(),
                    coo_nnz,
