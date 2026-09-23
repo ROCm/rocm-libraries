@@ -251,8 +251,18 @@ void trtri_getError(const hipsolverHandle_t   handle,
             }
         }
 
-        *max_err = norm_error('F', n, n, lda, hA[0], hARes[0]);
+        if(uplo == HIPSOLVER_FILL_MODE_UPPER)
+            *max_err = norm_error_upperTr('F', n, n, lda, hA[0], hARes[0]);
+        else
+            *max_err = norm_error_lowerTr('F', n, n, lda, hA[0], hARes[0]);
     }
+
+    // check info for singularities
+    double err = 0;
+    EXPECT_EQ(hInfo[0][0], hInfoRes[0][0]) << "where b = " << 0;
+    if(hInfo[0][0] != hInfoRes[0][0])
+        err++;
+    *max_err += err;
 }
 
 template <testAPI_t API,
