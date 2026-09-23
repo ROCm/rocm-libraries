@@ -1464,6 +1464,8 @@ typedef enum
     /** @brief Trigger: call hipDeviceSynchronize before benchmarking (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT = 60404,
 
+    /** @brief Introduced in hipdnn_backend 0.4.0: the five stall-gate profiling
+     *  attributes below (60405-60409). */
     /** @brief Trigger: stall the stream so the measured span excludes host submission.
      *  Must be set before PROFILING_START_EXT: arming after start is a lifecycle error,
      *  since the delay it exists to exclude has already elapsed

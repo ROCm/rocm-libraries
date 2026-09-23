@@ -4772,6 +4772,8 @@ public:
      * @brief Execute the graph with tensor pointers mapped by UID, while measuring
      *        gap-free device execution time
      *
+     * Introduced in hipdnn_frontend 0.4.0.
+     *
      * Executes the active plan exactly once -- no warmup, no replay -- bracketed by the
      * backend's stall-gate profiling sequence (arm -> start -> execute -> stop -> release
      * -> finalize), and reports the elapsed device time plus how it was obtained. This

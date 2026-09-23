@@ -36,6 +36,65 @@
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
 
+#ifdef HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES
+namespace
+{
+struct HipStreamWaitFaults
+{
+    bool enabled = false;
+    bool unsupported = false;
+    int capabilityQueries = 0;
+    int armCalls = 0;
+    int failFromArm = 0;
+    int rejectedArms = 0;
+    hipError_t lastError = hipSuccess;
+};
+
+thread_local HipStreamWaitFaults gStreamWaitFaults;
+} // namespace
+
+// GNU ld requires these symbol names for test-only HIP call wrapping.
+// NOLINTBEGIN(readability-identifier-naming, bugprone-reserved-identifier)
+extern "C" hipError_t __real_hipStreamWaitValue32(
+    hipStream_t stream, void* ptr, uint32_t value, unsigned int flags, uint32_t mask);
+extern "C" hipError_t
+    __real_hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attribute, int device);
+
+extern "C" hipError_t __wrap_hipStreamWaitValue32(
+    hipStream_t stream, void* ptr, uint32_t value, unsigned int flags, uint32_t mask)
+{
+    if(gStreamWaitFaults.enabled)
+    {
+        ++gStreamWaitFaults.armCalls;
+        if(gStreamWaitFaults.failFromArm > 0
+           && gStreamWaitFaults.armCalls >= gStreamWaitFaults.failFromArm)
+        {
+            // HIP rejects nullptr before enqueueing anything. Exercise a real runtime
+            // error while preserving the valid stream for ordinary event timing.
+            gStreamWaitFaults.lastError
+                = __real_hipStreamWaitValue32(stream, nullptr, value, flags, mask);
+            ++gStreamWaitFaults.rejectedArms;
+            return gStreamWaitFaults.lastError;
+        }
+    }
+    return __real_hipStreamWaitValue32(stream, ptr, value, flags, mask);
+}
+
+extern "C" hipError_t
+    __wrap_hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attribute, int device)
+{
+    if(gStreamWaitFaults.enabled && gStreamWaitFaults.unsupported
+       && attribute == hipDeviceAttributeCanUseStreamWaitValue)
+    {
+        ++gStreamWaitFaults.capabilityQueries;
+        *value = 0;
+        return hipSuccess;
+    }
+    return __real_hipDeviceGetAttribute(value, attribute, device);
+}
+// NOLINTEND(readability-identifier-naming, bugprone-reserved-identifier)
+#endif
+
 /**
  * @file TestBenchmarkPlan.cpp
  * @brief Unit tests for BenchmarkPlan.hpp: construction, workspace sizing, execution
@@ -282,17 +341,14 @@ TestBenchmarkPlan::Timer
                                     const BenchmarkTestHandle& handle,
                                     const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                     uint32_t numDeviceBuffers,
-                                    void* workspace,
-                                    bool stalled) -> TestBenchmarkPlan::TimingResult {
+                                    void* workspace) -> std::optional<double> {
         const auto found = durations.find(&plan);
-        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
         if(found == durations.end())
         {
-            return result;
+            return std::nullopt;
         }
         plan.execute(handle, deviceBuffers, numDeviceBuffers, workspace);
-        result.elapsedMs = found->second;
-        return result;
+        return found->second;
     };
 }
 
@@ -382,19 +438,13 @@ TEST(TestIngestorBenchmarkPlan, TheReductionIgnoresASingleLuckySample)
               const BenchmarkTestHandle& planHandle,
               const hipdnnPluginDeviceBuffer_t* deviceBuffers,
               uint32_t numDeviceBuffers,
-              void* workspace,
-              bool stalled) -> TestBenchmarkPlan::TimingResult {
+              void* workspace) -> std::optional<double> {
         plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
-        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
         if(&plan == steadyRaw)
         {
-            result.elapsedMs = STEADY_SAMPLE;
+            return STEADY_SAMPLE;
         }
-        else
-        {
-            result.elapsedMs = luckySampleIndex++ == 0 ? LUCKY_SAMPLE : LUCKY_TYPICAL;
-        }
-        return result;
+        return luckySampleIndex++ == 0 ? LUCKY_SAMPLE : LUCKY_TYPICAL;
     };
 
     const BenchmarkTestHandle handle;
@@ -446,13 +496,9 @@ TEST(TestIngestorBenchmarkPlan, TheReductionTrimsASingleSlowOutlier)
               const BenchmarkTestHandle& planHandle,
               const hipdnnPluginDeviceBuffer_t* deviceBuffers,
               uint32_t numDeviceBuffers,
-              void* workspace,
-              bool stalled) -> TestBenchmarkPlan::TimingResult {
+              void* workspace) -> std::optional<double> {
         plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
-        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
-        result.elapsedMs
-            = &plan == steadyRaw ? STEADY_SAMPLE : SPIKY_SAMPLES.at(spikySampleIndex++);
-        return result;
+        return &plan == steadyRaw ? STEADY_SAMPLE : SPIKY_SAMPLES.at(spikySampleIndex++);
     };
 
     const BenchmarkTestHandle handle;
@@ -502,6 +548,8 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
 {
     SKIP_IF_NO_DEVICES();
 
+    // Unsupported stream-wait devices must use ordinary event timing from the
+    // first sample, without an extra discarded pass.
     auto sub = std::make_unique<FakePlan>(64);
     const auto* subRaw = sub.get();
 
@@ -509,9 +557,14 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
     candidates.push_back({testId(0x01), std::move(sub)});
 
     const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(std::move(candidates), handle);
+    std::vector<RankedEntry> recorded;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
 
     plan.execute(handle, nullptr, 0, nullptr);
+    ASSERT_EQ(recorded.size(), 1U) << "the HIP-event timer did not produce a usable ranking";
 
     EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 1)
         << "the HIP-event timer failed a sample; the candidate was scored unusable";
@@ -634,124 +687,91 @@ TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutAbortsThePassImmediatelyAndRerun
               SAMPLING_LAUNCHES + delegatedBonus(second.recorded, testId(0x03)));
 }
 
-/// A valid measurement without an actual stall, seen during a requested stalled pass, is
-/// treated exactly like a watchdog timeout: it is not about the candidate, so the whole
-/// comparison restarts unstalled, and the pass that saw it aborts immediately rather than
-/// finishing. Deterministic: the injected timer decides stallUsed itself (the equivalent
-/// of a gate that silently failed to arm), so this needs no device.
-TEST(TestIngestorBenchmarkPlan,
-     AValidUnstalledSampleDuringAStalledPassRestartsTheWholeComparisonUnstalled)
+#ifdef HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES
+class TestIngestorHipTimerFaults : public ::testing::Test
 {
-    auto before = std::make_unique<FakePlan>(64);
-    auto trigger = std::make_unique<FakePlan>(64);
-    auto after = std::make_unique<FakePlan>(64);
-    const auto* beforeRaw = before.get();
-    const auto* triggerRaw = trigger.get();
-    const auto* afterRaw = after.get();
+protected:
+    void SetUp() override
+    {
+        gStreamWaitFaults = {};
+        SKIP_IF_NO_DEVICES();
+        gStreamWaitFaults.enabled = true;
+    }
 
+    void TearDown() override
+    {
+        gStreamWaitFaults = {};
+        static_cast<void>(hipGetLastError());
+    }
+};
+
+TEST_F(TestIngestorHipTimerFaults, ArmErrorRestartsTheWholeComparisonUnstalled)
+{
+    int device = 0;
+    int canWait = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWait == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    std::array<const FakePlan*, 3> plans{};
     std::vector<TestBenchmarkPlan::Candidate> candidates;
-    candidates.push_back({testId(0x01), std::move(before), testId(0xF0), testId(0xD0)});
-    candidates.push_back({testId(0x02), std::move(trigger), testId(0xF0), testId(0xD0)});
-    candidates.push_back({testId(0x03), std::move(after), testId(0xF0), testId(0xD0)});
+    for(size_t index = 0; index < plans.size(); ++index)
+    {
+        auto candidate = std::make_unique<FakePlan>(64);
+        plans[index] = candidate.get();
+        candidates.push_back({testId(static_cast<uint8_t>(index + 1)), std::move(candidate)});
+    }
 
-    // Every sample is a plain valid measurement, except triggerRaw's: it reports
-    // stallUsed=false whenever asked to run stalled, as if its gate never armed.
-    const TestBenchmarkPlan::Timer timer
-        = [triggerRaw](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
-                       const BenchmarkTestHandle& planHandle,
-                       const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                       uint32_t numDeviceBuffers,
-                       void* workspace,
-                       bool stalled) -> TestBenchmarkPlan::TimingResult {
-        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
-        TestBenchmarkPlan::TimingResult result;
-        result.elapsedMs = 1.0;
-        result.stallUsed = stalled && &plan != triggerRaw;
-        return result;
-    };
+    // The first candidate finishes stalled. The next arm and any later attempts
+    // fail in HIP, so recovery must stop arming and remeasure every candidate.
+    gStreamWaitFaults.failFromArm = BENCHMARK_ITERATIONS + 1;
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(gStreamWaitFaults.lastError, hipErrorInvalidValue);
+    EXPECT_EQ(gStreamWaitFaults.rejectedArms, 1);
+    ASSERT_EQ(recorded.size(), plans.size());
+    const std::array<int, 3> expectedLaunches{
+        2 * SAMPLING_LAUNCHES, SAMPLING_LAUNCHES + BENCHMARK_WARMUP_RUNS + 1, SAMPLING_LAUNCHES};
+    for(size_t index = 0; index < plans.size(); ++index)
+    {
+        const int delegated
+            = recorded.front().kernelId == testId(static_cast<uint8_t>(index + 1)) ? 1 : 0;
+        EXPECT_EQ(plans[index]->launchCount(), expectedLaunches[index] + delegated);
+    }
+}
+
+TEST_F(TestIngestorHipTimerFaults, UnsupportedDeviceStartsUnstalledWithoutDiscardingSamples)
+{
+    gStreamWaitFaults.unsupported = true;
+    auto candidate = std::make_unique<FakePlan>(64);
+    const auto* candidatePtr = candidate.get();
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(1), std::move(candidate)});
 
     std::vector<RankedEntry> recorded;
     const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(
-        std::move(candidates), handle, timer, [&recorded](std::vector<RankedEntry> ranking) {
-            recorded = std::move(ranking);
-        });
-
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
     plan.execute(handle, nullptr, 0U, nullptr);
 
-    ASSERT_EQ(recorded.size(), 3U)
-        << "the whole comparison must restart unstalled and re-rank every candidate";
-
-    // Immediate abort, same as the watchdog case: the candidate ordered after the trigger
-    // is never sampled during the aborted stalled pass, only during the unstalled rerun,
-    // while the candidate ordered before it completes both passes. All three samples tie
-    // at 1.0ms, so stable_sort's lowest-index tie-break makes `before` the winner
-    // deterministically; the bonus is still computed from recorded.front() rather than
-    // assumed, matching how a real, timing-driven sweep must be checked.
-    const bool beforeWon = recorded.front().kernelId == testId(0x01);
-    const bool afterWon = recorded.front().kernelId == testId(0x03);
-    EXPECT_EQ(beforeRaw->launchCount(), 2 * SAMPLING_LAUNCHES + (beforeWon ? 1 : 0))
-        << "the candidate before the trigger must be sampled once per pass";
-    EXPECT_EQ(afterRaw->launchCount(), SAMPLING_LAUNCHES + (afterWon ? 1 : 0))
-        << "the candidate after the trigger must not be sampled during the aborted stalled "
-           "pass, only during the unstalled rerun";
+    ASSERT_GT(gStreamWaitFaults.capabilityQueries, 0);
+    EXPECT_EQ(gStreamWaitFaults.armCalls, 0);
+    ASSERT_EQ(recorded.size(), 1U);
+    EXPECT_EQ(candidatePtr->launchCount(), SAMPLING_LAUNCHES + 1);
 }
-
-/// A timer that reports stalled activity (stallUsed or timedOut) while explicitly asked
-/// to run unstalled is inconsistent, and the comparison has no second restart to fall
-/// back on: the one-shot unstalled retry already ran. That candidate is scored unusable
-/// instead of being trusted, while a well-behaved sibling still wins normally.
-TEST(TestIngestorBenchmarkPlan, AnInconsistentStalledSampleDuringTheUnstalledRetryIsRejected)
-{
-    auto good = std::make_unique<FakePlan>(64);
-    auto bad = std::make_unique<FakePlan>(64);
-    const auto* badRaw = bad.get();
-
-    std::vector<TestBenchmarkPlan::Candidate> candidates;
-    candidates.push_back({testId(0x01), std::move(good), testId(0xF0), testId(0xD0)});
-    candidates.push_back({testId(0x02), std::move(bad), testId(0xF0), testId(0xD0)});
-
-    // `bad` times out on the stalled pass, forcing the one-shot restart, then falsely
-    // reports stallUsed on the unstalled retry even though stalled=false was requested.
-    // `good` always reports a plain, mode-consistent measurement.
-    const TestBenchmarkPlan::Timer timer
-        = [badRaw](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
-                   const BenchmarkTestHandle& planHandle,
-                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                   uint32_t numDeviceBuffers,
-                   void* workspace,
-                   bool stalled) -> TestBenchmarkPlan::TimingResult {
-        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
-        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
-        if(&plan == badRaw)
-        {
-            if(stalled)
-            {
-                result.timedOut = true;
-                return result;
-            }
-            result.elapsedMs = 1.0;
-            result.stallUsed = true;
-            return result;
-        }
-        result.elapsedMs = 2.0;
-        result.stallUsed = stalled;
-        return result;
-    };
-
-    std::vector<RankedEntry> recorded;
-    const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(
-        std::move(candidates), handle, timer, [&recorded](std::vector<RankedEntry> ranking) {
-            recorded = std::move(ranking);
-        });
-
-    plan.execute(handle, nullptr, 0U, nullptr);
-
-    ASSERT_EQ(recorded.size(), 1U)
-        << "the mode-inconsistent candidate must be scored unusable, not ranked";
-    EXPECT_EQ(recorded.front().kernelId, testId(0x01));
-}
+#endif
 
 /// A one-candidate composite still samples before delegating to the only candidate.
 TEST(TestIngestorBenchmarkPlan, ASingleCandidateCompositeExecutesThatOne)
@@ -873,20 +893,18 @@ inline TestBenchmarkPlan::Timer
                                       const BenchmarkTestHandle&,
                                       const hipdnnPluginDeviceBuffer_t*,
                                       uint32_t,
-                                      void*,
-                                      bool stalled) -> TestBenchmarkPlan::TimingResult {
+                                      void*) -> std::optional<double> {
         const auto found = std::find(order.begin(), order.end(), &plan);
-        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
         if(found == order.end())
         {
-            return result;
+            return std::nullopt;
         }
         const auto index = static_cast<size_t>(std::distance(order.begin(), found));
         if(index < times.size())
         {
-            result.elapsedMs = times[index];
+            return times[index];
         }
-        return result;
+        return std::nullopt;
     };
 }
 

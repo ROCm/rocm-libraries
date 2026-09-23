@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <memory>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
 #include <stdexcept>
 #include <string>
 

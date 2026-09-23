@@ -60,6 +60,8 @@ namespace hipdnn_data_sdk::utilities
  * retry it unstalled rather than repeatedly arming a workload that may block the host.
  *
  * Not thread-safe for concurrent arm/release: one gate arms one stream at a time.
+ *
+ * Introduced in hipdnn_data_sdk 0.2.0.
  */
 class StallGate
 {

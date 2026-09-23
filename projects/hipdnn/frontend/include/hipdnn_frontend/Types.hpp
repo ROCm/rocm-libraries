@@ -1764,6 +1764,8 @@ inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t m
  * @enum TimingQuality
  * @brief Classifies how a device-time measurement from execute_timed_ext() was obtained
  *
+ * Introduced in hipdnn_frontend 0.4.0.
+ *
  * @see hipdnn_frontend::graph::Graph::execute_timed_ext
  */
 enum class TimingQuality
@@ -1782,6 +1784,8 @@ enum class TimingQuality
  *
  * @c elapsedMs is empty whenever @c quality is TimingQuality::INVALID, and whenever the
  * owning call returned a bad Error.
+ *
+ * Introduced in hipdnn_frontend 0.4.0.
  *
  * @see hipdnn_frontend::graph::Graph::execute_timed_ext
  */

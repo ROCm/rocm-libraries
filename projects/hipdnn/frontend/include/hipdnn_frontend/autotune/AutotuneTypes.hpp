@@ -233,7 +233,7 @@ struct AutotuneResult
     /// UNSTALLED does not necessarily, since the stall gate was not used. Every benchmarked
     /// result in one autotune() call carries the same value, because times measured the two
     /// ways are not comparable and ranking them against each other can pick a slower engine.
-    /// INVALID on a result that was never benchmarked.
+    /// INVALID on a result that was never benchmarked. Introduced in hipdnn_frontend 0.4.0.
     TimingQuality timingQuality = TimingQuality::INVALID;
 
     /// For RUN_UNTIL_STABLE, true when the trailing-window variation fell below

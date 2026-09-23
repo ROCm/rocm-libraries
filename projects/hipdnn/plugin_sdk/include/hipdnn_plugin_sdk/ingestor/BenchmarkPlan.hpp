@@ -106,27 +106,11 @@ public:
         DescriptorId dispatchId{};
     };
 
-    /// One timer's answer for one sample: an elapsed time when the launch could be
-    /// timed, whether a stall gate actually held the stream during it, and whether a
-    /// stall watchdog released the gate late instead of the host. A timeout always
-    /// leaves elapsedMs unset; healthy elapsed is finite and >= 0, including zero.
-    struct TimingResult
-    {
-        std::optional<double> elapsedMs;
-        bool stallUsed = false;
-        bool timedOut = false;
-    };
-
-    /// Times one execute() of a candidate, honoring @p stalled by attempting to hold the
-    /// stream stalled through the timed span when true. Defaults to HIP events on the
-    /// handle's stream; tests substitute a deterministic timer so selection is provable
-    /// without a device.
-    using Timer = std::function<TimingResult(const IPlan<THandle>&,
-                                             const THandle&,
-                                             const hipdnnPluginDeviceBuffer_t*,
-                                             uint32_t,
-                                             void*,
-                                             bool stalled)>;
+    /// Times one execute() of a candidate, returning elapsed milliseconds or nullopt
+    /// when it could not be timed. An injected timer owns its synchronization and
+    /// measurement method; no HIP resources are acquired for it.
+    using Timer = std::function<std::optional<double>(
+        const IPlan<THandle>&, const THandle&, const hipdnnPluginDeviceBuffer_t*, uint32_t, void*)>;
     /// Invoked once, with every usable candidate in benchmarked order, after sampling
     /// resolves the winner. An absent callback means no caching, so BenchmarkPlan needs
     /// no knowledge of the cache's type or lifetime.
@@ -188,6 +172,16 @@ public:
 
 private:
     static constexpr size_t NOT_RESOLVED = std::numeric_limits<size_t>::max();
+    /// One timer's answer for one sample: an elapsed time when the launch could be
+    /// timed, whether a stall gate actually held the stream during it, and whether a
+    /// stall watchdog released the gate late instead of the host. A timeout always
+    /// leaves elapsedMs unset; healthy elapsed is finite and >= 0, including zero.
+    struct TimingResult
+    {
+        std::optional<double> elapsedMs;
+        bool stallUsed = false;
+        bool timedOut = false;
+    };
 
     /// What one sample attempt produced: a usable time, an unusable sample (neither
     /// entered nor blamed on the stall gate), or a request to restart the whole
@@ -208,8 +202,8 @@ private:
     /// so a plan on a non-default stream still measures its own work. @p events and
     /// @p gate are owned by resolveChosen() for the lifetime of one comparison; this
     /// closure only borrows them by reference, so nothing it touches outlives that call.
-    static Timer makeDefaultTimer(std::optional<detail::HipEventPair>& events,
-                                  std::optional<hipdnn_data_sdk::utilities::StallGate>& gate)
+    static auto makeDefaultTimer(std::optional<detail::HipEventPair>& events,
+                                 std::optional<hipdnn_data_sdk::utilities::StallGate>& gate)
     {
         return [&events, &gate, reusable = true](const IPlan<THandle>& plan,
                                                  const THandle& handle,
@@ -245,17 +239,10 @@ private:
             bool armed = false;
             if(stalled)
             {
-                if(!gate.has_value())
-                {
-                    gate.emplace();
-                }
                 armed = gate->arm(stream);
-                if(!armed && gate->isUsable() && gate->lastError() != hipSuccess)
-                {
-                    // An acquired gate failed to enqueue its wait. An unavailable gate,
-                    // by contrast, still permits plain event timing.
-                    return result;
-                }
+                // The previous sample is drained, and a failed arm enqueues no new
+                // wait. Continue timing; a valid unstalled sample makes the caller
+                // restart the comparison without stalling.
             }
             result.stallUsed = armed;
 
@@ -348,13 +335,13 @@ private:
         // returns -- before the ordinary chosen-plan execute() that follows.
         std::optional<detail::HipEventPair> defaultEvents;
         std::optional<hipdnn_data_sdk::utilities::StallGate> defaultGate;
-        Timer defaultTimer;
-        const Timer* timer = &_timer;
+        bool stalled = false;
         if(!_timer)
         {
-            defaultTimer = makeDefaultTimer(defaultEvents, defaultGate);
-            timer = &defaultTimer;
+            defaultGate.emplace();
+            stalled = defaultGate->isUsable();
         }
+        auto defaultTimer = makeDefaultTimer(defaultEvents, defaultGate);
 
         // Every usable candidate's time is retained so a later run whose knob filter
         // excludes the winner can still serve the runner-up.
@@ -370,15 +357,19 @@ private:
         // is re-measured unstalled from scratch. This policy is local to this one
         // comparison: it never reads or writes any state shared with another
         // comparison, another gate, or a standalone timed execution elsewhere.
-        bool stalled = true;
         for(;;)
         {
             ranked.clear();
             bool restartUnstalled = false;
             for(size_t index = 0; index < _candidates.size(); ++index)
             {
-                const auto outcome = sampleCandidate(
-                    index, handle, deviceBuffers, numDeviceBuffers, workspace, *timer, stalled);
+                const auto outcome = sampleCandidate(index,
+                                                     handle,
+                                                     deviceBuffers,
+                                                     numDeviceBuffers,
+                                                     workspace,
+                                                     defaultTimer,
+                                                     stalled);
                 if(stalled && outcome.restartUnstalled)
                 {
                     // Abort this pass immediately rather than finishing it: candidates
@@ -401,10 +392,8 @@ private:
             }
 
             HIPDNN_PLUGIN_LOG_WARN(
-                "ingestor: a candidate could not actually be measured stalled partway "
-                "through benchmarking (a stall watchdog timeout, or the gate never held "
-                "the stream), so this pass mixed stalled and unstalled measurements. "
-                "Discarding it and re-measuring every candidate unstalled.");
+                "ingestor: stalled timing was unavailable or timed out during benchmarking. "
+                "Discarding the pass and re-measuring every candidate unstalled.");
             // The retry runs with stalled=false, so no sample from it can trigger
             // another restart: this can happen at most once.
             stalled = false;
@@ -455,20 +444,19 @@ private:
     /// BENCHMARK_WARMUP_RUNS untimed ones. Any timed iteration that could not actually be
     /// measured stalled while @p stalled was requested -- a watchdog timeout, or a valid
     /// sample the timer reports as unstalled -- returns immediately with restartUnstalled
-    /// set; the two populations must never be averaged together. A sample that reports
-    /// stalled activity while @p stalled was false is a timer inconsistency, not a second
-    /// restart opportunity, so it scores the candidate unusable instead. Any other
-    /// failure to time (or a malformed sample) scores the candidate unusable too.
+    /// set; the two populations must never be averaged together. Any other failure to
+    /// time (or a malformed sample) scores the candidate unusable.
     ///
     /// Samples are reduced with robustMean() rather than by taking the fastest: a kernel
     /// that is usually slower but occasionally lucky would win on its best sample and then
     /// serve its typical time on every dispatch the cached ranking covers.
+    template <typename DefaultTimer>
     SampleOutcome sampleCandidate(size_t index,
                                   const THandle& handle,
                                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                   uint32_t numDeviceBuffers,
                                   void* workspace,
-                                  const Timer& timer,
+                                  DefaultTimer& timer,
                                   bool stalled) const
     {
         const auto& candidate = _candidates[index];
@@ -493,28 +481,20 @@ private:
             samples.reserve(BENCHMARK_ITERATIONS);
             for(int iteration = 0; iteration < BENCHMARK_ITERATIONS; ++iteration)
             {
-                const TimingResult sample = timer(
-                    *candidate.plan, handle, deviceBuffers, numDeviceBuffers, workspace, stalled);
+                const TimingResult sample = _timer ? TimingResult{_timer(*candidate.plan,
+                                                                         handle,
+                                                                         deviceBuffers,
+                                                                         numDeviceBuffers,
+                                                                         workspace),
+                                                                  false,
+                                                                  false}
+                                                   : timer(*candidate.plan,
+                                                           handle,
+                                                           deviceBuffers,
+                                                           numDeviceBuffers,
+                                                           workspace,
+                                                           stalled);
 
-                if(!stalled && (sample.timedOut || sample.stallUsed))
-                {
-                    // The timer reported stalled activity while explicitly asked to run
-                    // unstalled. This pass is already the one-shot unstalled retry, so
-                    // there is no second restart to fall back to: an inconsistent timer
-                    // scores the candidate unusable rather than being trusted.
-                    HIPDNN_PLUGIN_LOG_WARN(
-                        "ingestor: benchmarking candidate '"
-                        << toString(candidate.kernelId)
-                        << "' reported stalled activity during an unstalled pass; scored "
-                           "unusable");
-                    return {std::nullopt, false};
-                }
-                if(sample.timedOut && (!sample.stallUsed || sample.elapsedMs.has_value()))
-                {
-                    HIPDNN_PLUGIN_LOG_WARN(
-                        "ingestor: inconsistent timeout result; candidate scored unusable");
-                    return {std::nullopt, false};
-                }
                 if(sample.timedOut)
                 {
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"

@@ -19,6 +19,7 @@ def test_hip_event_timing_smoke() -> None:
         pytest.skip("No HIP GPU available")
 
     start = fe.HipEvent()
+    assert str(start.ptr()) in repr(start)
     stop = fe.HipEvent()
 
     start.record(0)
