@@ -12,6 +12,8 @@
     "head_size",
     "num_query_heads",
     "num_kv_heads",
-    "causal"
+    "causal",
+    "block_m",
+    "block_n"
   ]
 }
