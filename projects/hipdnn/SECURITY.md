@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-**Do not open a public GitHub issue.** Report privately via one of:
+**Do not open a public GitHub issue.** Report privately via:
 
 - **AMD Product Security portal:** https://www.amd.com/en/resources/product-security.html
 
