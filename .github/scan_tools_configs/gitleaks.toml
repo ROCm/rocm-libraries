@@ -67,3 +67,69 @@ regexes = [
   '''[A-Z][A-Z0-9_]*SHA512\s*[=:]''',
   '''[A-Z][A-Z0-9_]*MD5\s*[=:]''',
 ]
+
+# ---------------------------------------------------------------------------
+# `generic-api-key` fires on any high-entropy value sitting near a word like
+# "key", "token" or "secret". In this tree those words are overwhelmingly GPU
+# kernel vocabulary, so the entries below anchor on the *shape of the value*
+# rather than on file paths -- a real credential in the same files is still
+# reported.
+# ---------------------------------------------------------------------------
+
+[[allowlists]]
+description = "rocFFT solution-map kernel tokens"
+# `{"token":"sbcc_256_dp_ip_complex"}` in library/solution_map/*.dat. The
+# grammar is: optional sbcc/sbcr/sbrc prefix, transform lengths, precision
+# (sp/dp), placement (ip/op), domain.
+regexes = [
+  '''^(?:sb(?:cc|cr|rc)_(?:xy_z_)?)?\d+(?:_\d+)*_(?:sp|dp)_(?:ip|op)_(?:complex|real)$''',
+]
+
+[[allowlists]]
+description = "LLVM / AMDGCN intrinsic and builtin names"
+# e.g. `key = "amdgcn.s.wqm.i32"`, `decl_key = "wmma.scale16.gfx1250.f32..."`.
+regexes = [
+  '''^(?:amdgcn|wmma|mfma|llvm)\.[A-Za-z0-9._]+$''',
+]
+
+[[allowlists]]
+description = "rocBLAS API symbol names"
+# e.g. `arg.api, "rocblas_Xsyr2k"` in the logging tests.
+regexes = [
+  '''^rocblas_[A-Za-z0-9_]+$''',
+]
+
+[[allowlists]]
+description = "Serialised neural-network weight tensors"
+# MIOpen's `*.tn.model` / `*.ktn.model` files are Keras networks whose layer
+# weights are base64 float32 blobs, ~1 KB each and ~1000 per file. Anchored on
+# length rather than on the file path: no credential format is a quarter of a
+# kilobyte of unbroken base64, while a PEM key carries its `-----BEGIN` header
+# into the match and so does not match this.
+regexes = [
+  '''^[A-Za-z0-9+/]{256,}={0,2}$''',
+]
+
+[[allowlists]]
+description = "hipDNN kpack table-of-contents keys"
+# A `toc_key` indexes an entry inside a .kpack archive -- content addressing,
+# not authentication. Requires both the field name and a plain-hex value in
+# the same match, so a real credential parked in a `toc_key` still reports.
+regexTarget = "match"
+regexes = [
+  '''(?i)\btoc_?key["']?\s*[,:=]\s*["'][0-9a-f]{8,64}["']''',
+]
+
+[[allowlists]]
+description = "C/C++ expressions and identifiers misread as secrets"
+# `keys2_end_loc = partition1_loc.second;` (std::pair access), Python-style
+# keyword arguments in kernel comments, and a few library option names that
+# happen to sit next to the word "key".
+regexes = [
+  '''^[A-Za-z_][A-Za-z0-9_]*\.(?:first|second)$''',
+  '''^[a-z_][a-z0-9_]*=[a-z_][a-z0-9_]*$''',
+]
+stopwords = [
+  "Fp16AltImplRound",
+  "Fortran/ILP64",
+]
