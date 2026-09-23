@@ -311,10 +311,11 @@ namespace detail
 // Discovery plus the eager load, shared by both entry points below. Returns
 // nullopt when there is nothing to register; the reason is already on stderr.
 //
-// `countClaimCoverage` seeds the support-claim counters as bundles load. Only the
-// engine binary enforces or authors claims, so the golden-data binary passes
-// false rather than seeding counters no one will ever satisfy.
-inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool countClaimCoverage)
+// `countFound` seeds graphsFound and `countClaims` seeds graphsWithClaims as bundles
+// load. Only the engine binary enforces or authors claims, so the golden-data binary
+// passes false for both rather than seeding counters no one will ever satisfy.
+inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool countFound,
+                                                                       bool countClaims)
 {
     if(!TestConfig::get().allowBundles())
     {
@@ -380,15 +381,16 @@ inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool coun
         // Counted only for bundles that actually register a test. A bundle that
         // failed to load can never be queried, so counting its sidecar would make
         // the coverage guard fire on a gap it cannot close.
-        if(countClaimCoverage)
+        if(countFound)
         {
             supportClaimCoverage().graphsFound++;
-            // The locator the registered test will carry, not a second derivation
-            // of it -- the coverage number has to count the file the run reads.
-            if(std::filesystem::exists(std::get<LoadedBundle>(outcome).claimLocator.sidecarPath))
-            {
-                supportClaimCoverage().graphsWithClaims++;
-            }
+        }
+        // The locator the registered test will carry, not a second derivation of it --
+        // the coverage number has to count the file the run reads.
+        if(countClaims
+           && std::filesystem::exists(std::get<LoadedBundle>(outcome).claimLocator.sidecarPath))
+        {
+            supportClaimCoverage().graphsWithClaims++;
         }
 
         bundles.push_back(std::move(std::get<LoadedBundle>(outcome)));
@@ -415,19 +417,19 @@ inline void registerBundleTests()
     // one. Not keyed on the claim mode: a warn-only run reads the same sidecars and
     // needs the same denominators, and only the cost of a broken claim differs.
     //
-    // This is the same predicate the harness applies per graph, minus the sidecar
-    // check it cannot do this early. Registration seeds the denominators the summary
-    // divides by, so a mismatch here does not merely miscount -- it reattributes
-    // every gap line to the wrong cause.
+    // `graphsWithClaims` uses the same predicate as the harness's shouldObserveClaims(),
+    // with the per-graph sidecar check done as each bundle loads. Registration seeds
+    // the denominators the summary divides by, so a mismatch here does not merely
+    // miscount -- it reattributes every gap line to the wrong cause.
     const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();
-    const bool observing = engineUnderTest.has_value();
+    const bool writing = TestConfig::get().writeSupportClaims();
+    const bool observing = engineUnderTest.has_value() && !writing;
 
     // Write mode needs `graphsFound` as the denominator for what the observer
     // saw: SetUp() can skip a bundle before the observer runs, and such a graph
     // is invisible to the observation log.
-    const bool writing = TestConfig::get().writeSupportClaims();
-
-    auto bundles = detail::discoverAndLoadBundles(observing || writing);
+    auto bundles = detail::discoverAndLoadBundles(/*countFound=*/observing || writing,
+                                                  /*countClaims=*/observing);
     if(!bundles.has_value())
     {
         return;
@@ -447,7 +449,7 @@ inline void registerBundleTests()
 /// than a flag.
 inline void registerGoldenDataValidationTests(ReferenceExecutorType referenceType)
 {
-    auto bundles = detail::discoverAndLoadBundles(/*countClaimCoverage=*/false);
+    auto bundles = detail::discoverAndLoadBundles(/*countFound=*/false, /*countClaims=*/false);
     if(!bundles.has_value())
     {
         return;

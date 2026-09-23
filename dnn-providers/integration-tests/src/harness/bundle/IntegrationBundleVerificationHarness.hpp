@@ -285,14 +285,21 @@ private:
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
     // The single definition of "this graph's claims are this run's business": an engine
-    // was named to check against, and a sidecar exists. Deliberately free of the claim
-    // mode -- what a broken claim costs is enforcedClaimFailure()'s question, and
-    // reading it here too would make a run that cannot fail also unable to report.
+    // was named to check against, this is not an authoring run, and a sidecar exists.
+    // Deliberately free of the claim mode -- what a broken claim costs is
+    // enforcedClaimFailure()'s question, and reading it here too would make a run that
+    // cannot fail also unable to report.
+    //
+    // An authoring run skips every body before the claim check, so counting it would
+    // leave bodies reached with none queried -- the shape the summary calls a harness
+    // defect. Excluded here rather than at each counter, so the counters cannot drift.
+    //
     // Ordered cheapest-first on purpose: carriesSidecar() stats the filesystem on every
     // call, a few times per test, and a run that named no engine must not pay.
     bool shouldObserveClaims() const
     {
-        return _engineUnderTest.has_value() && carriesSidecar();
+        return _engineUnderTest.has_value() && !TestConfig::get().writeSupportClaims()
+               && carriesSidecar();
     }
 
     // "There is a sidecar here", and nothing more -- no engine.
