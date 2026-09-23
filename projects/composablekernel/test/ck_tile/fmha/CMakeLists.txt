@@ -123,10 +123,20 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     set_tests_properties(test_ck_tile_fmha_qr_tdm_causal_mapping PROPERTIES
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 
+    add_gtest_executable(test_ck_tile_fmha_qr_tdm_row_reduce
+        test_qr_tdm_row_reduce.cpp)
+    target_compile_definitions(test_ck_tile_fmha_qr_tdm_row_reduce
+        PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
+    # Hand-derived sums/maxima are exactly representable integers; require exact equality.
+    target_compile_options(test_ck_tile_fmha_qr_tdm_row_reduce PRIVATE -Wno-float-equal)
+    set_tests_properties(test_ck_tile_fmha_qr_tdm_row_reduce PROPERTIES
+        LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+
     set(FMHA_QR_TDM_TEST_TARGETS
         test_ck_tile_fmha_qr_tdm_lds_padding
         test_ck_tile_fmha_qr_tdm_progressive_k_lds
-        test_ck_tile_fmha_qr_tdm_causal_mapping)
+        test_ck_tile_fmha_qr_tdm_causal_mapping
+        test_ck_tile_fmha_qr_tdm_row_reduce)
 endif()
 
 # Python integration test for the fmha_fwd codegen path.

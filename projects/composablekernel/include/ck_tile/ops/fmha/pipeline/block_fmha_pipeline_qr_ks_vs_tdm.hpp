@@ -80,6 +80,48 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
 
+    // A paired-half wave32 reduction has one partial in each 16-lane half.
+    // Exchange those partials on VALU instead of putting a bpermute in the
+    // LDS dependency queue. Other distributions retain the generic path.
+    template <typename Tensor, typename ReduceFunc>
+    CK_TILE_DEVICE static void ReduceRowSync(Tensor& tensor, const ReduceFunc& reduce)
+    {
+        using Dstr                   = typename Tensor::StaticTileDistribution;
+        using Encode                 = typename Dstr::DstrEncode;
+        using Detail                 = typename Encode::detail;
+        constexpr index_t lane_dim   = Dstr::get_num_of_dimension_p() - 1;
+        constexpr bool paired_halves = [] {
+            index_t lane_reductions = 0;
+            bool supported          = true;
+            static_for<0, Dstr::get_num_of_dimension_r(), 1>{}([&](auto r) {
+                if constexpr(Detail::does_p_own_r_[lane_dim][r] && Encode::rs_lengths_[r] > 1)
+                {
+                    ++lane_reductions;
+                    supported &= Encode::rs_lengths_[r] == 2 &&
+                                 Detail::ps_over_rs_derivative_[lane_dim][r] == 16;
+                }
+            });
+            return supported && lane_reductions == 1;
+        }();
+        if constexpr(paired_halves)
+        {
+            using DataType = typename Tensor::DataType;
+
+            static_assert(get_warp_size() == 32);
+            static_assert(sizeof(DataType) == sizeof(int32_t));
+            static_for<0, Tensor::get_thread_buffer_size(), 1>{}([&](auto i) {
+                const auto local              = tensor.get_thread_buffer()[i];
+                const auto remote             = bit_cast<DataType>(__builtin_amdgcn_permlanex16(
+                    0, bit_cast<int32_t>(local), 0x76543210, 0xfedcba98, false, true));
+                tensor.get_thread_buffer()(i) = reduce(local, remote);
+            });
+        }
+        else
+        {
+            block_tile_reduce_sync(tensor, reduce, bool_constant<false>{});
+        }
+    }
+
     static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
 
@@ -1549,7 +1591,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 sequence<1>{},
                 f_max,
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
-            block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
+            ReduceRowSync(m_local, f_max);
 
             static_for<0, 12, 1>{}([&](auto i) {
                 ignore = i;
@@ -1614,7 +1656,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
 
-            block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
+            ReduceRowSync(rowsum_p, f_sum);
 
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
