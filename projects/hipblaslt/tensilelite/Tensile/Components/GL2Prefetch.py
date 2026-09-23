@@ -320,21 +320,6 @@ class GL2PrefetchLoad(GL2Prefetch):
                 mod.add(self.applyGSUChunk(writer, kernel, tp, gsuIterSgpr, \
                     tmpSgprIdx0, tmpSgprIdx2, tmpVgprIdx))
 
-            # skip PGR loads (uses GSU-adjusted increment)
-            if kernel["PrefetchGlobalRead"] > 0:
-                if kernel["PrefetchGlobalRead"] > 1:
-                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
-                        sgpr(tmpSgprIdx2), sgpr(tmpSgprIdx3),
-                        sgpr(f"GL2PrefetchInc{tc}"), kernel["PrefetchGlobalRead"],
-                        tmpVgprIdx, comment="*= PGR"))
-                    mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx2, 2), \
-                        comment="skip PGR loads"))
-                else:
-                    mod.add(SAddU32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), sgpr(f"GL2PrefetchInc{tc}"), \
-                        comment="skip PGR loads"))
-                    mod.add(SAddCU32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), 0, \
-                        comment="skip PGR loads"))
-
             # add all together
             for i in range(tp["gl2nl"]):
                 dst = f"{vgprAddrBaseName}_{i}"
@@ -362,4 +347,32 @@ class GL2PrefetchLoad(GL2Prefetch):
             mod.add(VAddCOU32(vgpr(addrName), VCC(), vgpr(addrName), inc))
             mod.add(VAddCCOU32(vgpr(addrNameHi), VCC(), vgpr(addrNameHi), 0, VCC()))
 
+        return mod
+    
+    def skipPGR(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
+        """Skip PGR loads.
+
+        PGR tiles are already loaded into vgpr/lds, no need to load it into cache again.
+        """
+        mod = Module()
+        tc: str = tp["tensorChar"]
+        inc = sgpr(f"GL2PrefetchInc{tc}")
+        pgr = kernel["PrefetchGlobalRead"]
+        if pgr > 0:
+            if pgr > 1:
+                with writer.allocTmpSgpr(2, 2) as tmpSgprRes:
+                    tmpSgprIdx0 = tmpSgprRes.idx
+                    tmpSgprIdx1 = tmpSgprRes.idx + 1
+                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+                        sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
+                        inc, pgr, comment="*= PGR"))
+                    for i in range(tp["gl2nl"]):
+                        addr = f"GL2PrefetchAddr{tc}_{i}"
+                        mod.add(VAddNCU64(vgpr(addr, 2), vgpr(addr, 2), sgpr(tmpSgprIdx0, 2)))
+            else:
+                for i in range(tp["gl2nl"]):
+                    addr = f"GL2PrefetchAddr{tc}_{i}"
+                    addrHi = addr + "+1"
+                    mod.add(VAddCOU32(vgpr(addr), VCC(), vgpr(addr), inc))
+                    mod.add(VAddCCOU32(vgpr(addrHi), VCC(), vgpr(addrHi), 0, VCC()))
         return mod

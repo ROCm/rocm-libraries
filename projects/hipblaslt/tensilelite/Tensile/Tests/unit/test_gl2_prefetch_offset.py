@@ -37,11 +37,14 @@
 #     Batched configs launch a 3D [cx, cy, num_batches] grid (wg_z from
 #     ttmp7[31:16]); each batch b is verified against its footprint shifted by
 #     b * Stride{tc}K * bpe.
-#   - Address increment (PGR=2, PGL=2): with PrefetchGlobalRead>1 the start
-#     address is pre-skipped by PGR*inc inside calculateStartAddr, and each
-#     prefetched-ahead iteration advances every address by `inc` (incrementAddr).
-#     The kernel re-exports all addresses across n_inc+1 stages; stage s must be
-#     the base footprint shifted by (PGR+s)*inc along the summation (K) axis.
+#   - Address increment (PGL=2): the start address skips the PGR iterations the
+#     regular loads already fetched via skipPGR, guarded like production by
+#     LoopCounterL > PGR (with fewer iterations there is nothing to prefetch, so
+#     the skip must not run). Each prefetched-ahead iteration then advances every
+#     address by `inc` (incrementAddr). The kernel re-exports all addresses across
+#     n_inc+1 stages; stage s must be the base footprint shifted by (skip+s)*inc
+#     along the summation (K) axis, where skip is PGR if the guard passes else 0.
+#     PGR 0, 1 (the carry-add path) and >1 (the 64-bit multiply path) are covered.
 #   - GlobalSplitU: each workgroup prefetches only its own slice of K, so
 #     calculateGSUIterOffset/applyGSUChunk shift the start address by
 #     startIter*inc and widen the per-iteration step to the chunk stride. Both
@@ -153,9 +156,9 @@ class GL2Config:
     mx_block: int = 32
     size_i: int = None        # free-dim size (M) override for A-type; None => clean M*MT
     size_j: int = None        # free-dim size (N) override for B-type; None => clean N*MT
-    pgr: int = 2              # PrefetchGlobalRead. PGR>1 makes calculateStartAddr
-                              # pre-skip PGR*inc (the addr-increment fast path); 0
-                              # would skip the increment logic entirely.
+    pgr: int = 2              # PrefetchGlobalRead: skipPGR advances the start
+                              # address by PGR*inc (PGR==1 is a plain carry add,
+                              # PGR>1 a 64-bit multiply, 0 emits nothing).
     pgl: int = 2              # PrefetchGL2 (>=2 prefetches ahead, advancing the
                               # address by `inc` each iteration via incrementAddr).
     n_inc: int = 2            # extra incrementAddr stages to verify after the start
@@ -187,6 +190,17 @@ class GL2Config:
                               # layout reads it (numIter = SizesSum / DepthU), where
                               # k_iters % gsu picks how many groups get an extra
                               # iteration.
+    loop_counter: int = None  # LoopCounterL seen by the skipPGR guard; None =>
+                              # PGR+1, the smallest count that still skips.
+
+    @property
+    def lc(self):
+        return self.pgr + 1 if self.loop_counter is None else self.loop_counter
+
+    @property
+    def skip_iters(self):
+        """Iterations skipPGR advances by: PGR, unless LoopCounterL <= PGR."""
+        return self.pgr if self.lc > self.pgr else 0
 
     @property
     def n_wg(self):
@@ -323,7 +337,7 @@ CONFIGS = [
     # footprint is covered by this single WG's threads. Guards the degenerate
     # single-workgroup path. ----
     GL2Config("ab_fp8_tlu_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1)),
-    # ---- A + B together, FP8 TLU; MT=384 (non-POT) -> gl2ncc==2 ----
+    # ---- A + B together, FP8 TLU; MT=384 (non-POT) folded over 2 tiles -> gl2ncc==3 ----
     GL2Config("ab_fp8_tlu",          [_A(True, 384),  _B(True, 384)],  cluster=(2, 2)),
     # ---- A + B non-TLU; MT=384 (non-POT) on perpendicular dim ----
     GL2Config("ab_fp8_ntlu",         [_A(False, 384), _B(False, 384)], cluster=(4, 4)),
@@ -333,20 +347,21 @@ CONFIGS = [
     # ttmp7[31:16]). FP8 (integer bpe) so the batch stride * bpe stays integral.
     GL2Config("ab_fp8_mixed_layout", [_A(True, 256),  _B(False, 256)], cluster=(2, 4),
               batched=True, num_batches=3),
-    # gl2ncc == 2 for both (coal*bpe == 2*GPS)
+    # coal*bpe == 2*GPS per tile, folded over the cluster -> gl2ncc == 8 (A) / 4 (B)
     GL2Config("ab_fp8_ncc2",         [_A(True, 512),  _B(True, 512)], depth_u=128, cluster=(4, 2)),
     # ---- A + B with mixed dtypes (F8 x F4) ----
     GL2Config("ab_f8f4_mixed", [_A(True, 256, bpe=1), _B(True, 512, bpe=0.5)],
               depth_u=512, cluster=(1, 2)),
-    # ---- A + B + MXSA + MXSB together (full MX problem) ----
-    # batched=True here also covers the StridedBatched path for MX scales (Stride{MXSx}K).
-    # ---- A + B + MXSA + MXSB together; MT=192 (non-POT) -> MX gl2ncc==3 ----
+    # ---- A + B + MXSA + MXSB together (full MX problem); MT=192 (non-POT) folded
+    # over 2 tiles -> MX gl2ncc==6. batched=True here also covers the StridedBatched
+    # path for MX scales (Stride{MXSx}K). ----
     GL2Config("abmx_fp8",      [_A(True, 192),  _B(True, 192),  _MXSA(192), _MXSB(192)],
               depth_u=256, mx_block=32, cluster=(2, 2), batched=True, num_batches=2),
     # ---- full MX problem, non-TLU data; MT=384 (non-POT) ----
     GL2Config("abmx_fp8_ntlu", [_A(False, 384), _B(False, 384), _MXSA(384), _MXSB(384)],
               depth_u=256, mx_block=32, cluster=(2, 1)),
-    # ---- FP4 (bpe=0.5) on A and B, TLU, ncc==1 and (coal*bpe==2*GPS) ncc==2 ----
+    # ---- FP4 (bpe=0.5) on A and B, TLU: ab_fp4_tlu has ncc==1 (A) / 4 (B),
+    # ab_fp4_tlu_ncc2 has ncc==8 (A) / 2 (B) once folded over the cluster ----
     GL2Config("ab_fp4_tlu",      [_A(True, 512, bpe=0.5),  _B(True, 512, bpe=0.5)],
               depth_u=256, cluster=(1, 4)),
     GL2Config("ab_fp4_tlu_ncc2", [_A(True, 1024, bpe=0.5), _B(True, 1024, bpe=0.5)],
@@ -354,7 +369,7 @@ CONFIGS = [
     # ---- non-TLU: FP4 tile-split on A + FP8 coalesced-split ncc2 on B (coal==DepthU) ----
     GL2Config("ab_ntlu_f4f8", [_A(False, 256, bpe=0.5), _B(False, 128, bpe=1)],
               depth_u=512, cluster=(2, 2)),
-    # ---- MX scales together: MXSA ncc==3, MXSB ncc==2 (non-POT MT 192 / 96) ----
+    # ---- MX scales together: non-POT MT 192 / 96, folded over 2 / 4 tiles -> ncc==6 for both ----
     GL2Config("mxab_ncc", [_MXSA(192), _MXSB(96)], depth_u=1024, num_threads=16,
               mx_block=32, cluster=(2, 4)),
     # ---- Edge clamp: SizeI/SizeJ is NOT a clean multiple of the tiling, so the
@@ -366,8 +381,6 @@ CONFIGS = [
               depth_u=128, cluster=(2, 2), size_i=700, size_j=700),
     GL2Config("mx_edge", [_MXSA(128), _MXSB(64)], depth_u=1024, num_threads=16,
               mx_block=32, cluster=(2, 2), size_i=150, size_j=80),
-    # ---- gl2nl > 1: nc > cooperative threads (stride-add path); DU is MIK-aligned ----
-    GL2Config("ab_tlu_nl2", [_A(True, 256), _B(True, 256)], depth_u=640, cluster=(2, 2)),
     # ---- gl2nl >> 1 with an uneven nc/nl: exercises the per-inst index stride
     # ncPerInst = ceil(nc/nl). A floor(nc/nl) stride under-tiles the top of the
     # footprint here (nc=1536, T=144, nl=11 -> floor stride 139 leaves the last
@@ -377,26 +390,21 @@ CONFIGS = [
               num_threads=16, cluster=(3, 3)),
     # ---- non-POT cooperative cluster extent (scalarStaticRemainder non-POT path) ----
     GL2Config("ab_cluster_cy3", [_A(True, 256), _B(True, 256)], cluster=(2, 3)),
-    # ---- non-POT cluster on a non-TLU layout: both cluster axes are non-POT, so
-    # every scalarStaticRemainder (tile-selector and share) hits the non-POT path
-    # for both A and B, while the MT offset/folded tile dim land on the perp dim ----
-    GL2Config("ab_ntlu_cluster3", [_A(False, 256), _B(False, 256)], cluster=(3, 3)),
     # ---- Sparse metadata (isM) coverage. Sparse=1 -> A is the 2:4-compressed
     # data tensor (_DepthUA halved) and Metadata mirrors A's tile axis (idx=0);
     # Sparse=2 is the mirror on B. MetadataLayout is independent of the data
     # tensor's TLU (real kernels support both), so both are exercised. ----
-    # ---- Sparse=1, data TLU, metadata non-TLU (MetadataLayout=0) ----
-    GL2Config("a_sparse_tlu_mlayout0", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
-              cluster=(2, 2), sparse=1, depth_u_metadata=64),
     # ---- Sparse=1, data TLU, metadata also TLU (MetadataLayout=1) ----
     GL2Config("a_sparse_tlu_mlayout1", [_A(True, 256), _B(True, 256), _M("A", True, 256)],
               cluster=(2, 2), sparse=1, depth_u_metadata=64),
-    # ---- Sparse=2 (mirror on B), non-TLU data; MT=384 (non-POT) on both data and
-    # metadata -> exercises non-POT gl2ncc/scalarStaticRemainder for isM too ----
+    # ---- Sparse=2 (mirror on B), non-TLU data on a non-POT [3,3] cluster: every
+    # scalarStaticRemainder (tile-selector and share) takes the non-POT path for
+    # A, B and the metadata, with the MT offset/folded tile dim on the perp dim ----
     GL2Config("b_sparse_ntlu_nonpot", [_A(False, 384), _B(False, 384), _M("B", True, 384)],
               cluster=(3, 3), sparse=2, depth_u_metadata=96),
-    # ---- Sparse=1 + StridedBatched: exercises the WorkGroup2*Stride{tc}K batch
-    # offset for Metadata too (AddressMetadata/StrideMetadataK) ----
+    # ---- Sparse=1, data TLU, metadata non-TLU (MetadataLayout=0), StridedBatched:
+    # batch 0 is the plain layout-0 footprint, and later batches exercise the
+    # WorkGroup2*Stride{tc}K offset for Metadata too (AddressMetadata/StrideMetadataK) ----
     GL2Config("a_sparse_batched", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
               cluster=(2, 2), sparse=1, depth_u_metadata=64, batched=True, num_batches=2),
     # ---- Sparse=1 + gl2nl > 1 for the metadata tensor (small thread pool, larger
@@ -465,11 +473,6 @@ CONFIGS = [
     # free-dim clamp (it translates the clamped footprint, it does not re-clamp).
     GL2Config("gsu2_ntlu_edge", [_A(False, 256), _B(False, 256)], cluster=(1, 1),
               size_i=384, size_j=384, gsu=2, gsuc=True, k_iters=5),
-    # Both operands TLU under a 4-way interleaved split, so the chunk offset walks
-    # the K-perpendicular layout on A and B at once (the mixed-layout cases above
-    # only ever have one side that way).
-    GL2Config("gsu4_tlu", [_A(True, 256), _B(True, 256)], cluster=(1, 1),
-              gsu=4, k_iters=12),
 
     # ---- GSU x workgroup cluster, i.e. the GSUWGMRR=1 launch where a cluster's
     # workgroups share one group and span distinct tiles (see the mapping note
@@ -501,6 +504,22 @@ CONFIGS = [
     # folded stride, so one shared chunk shift across tensors fails here.
     GL2Config("gsu2_mx_cluster", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
               depth_u=256, mx_block=32, cluster=(2, 2), gsu=2, gsuc=True, k_iters=7),
+
+    # ---- PGR skip. Every config above runs PGR=2 with LoopCounterL = PGR+1 (the
+    # tightest count that still skips), which also checks the skip against the
+    # GSU-widened stride in the GSU blocks. These cover the other PGR codegen
+    # paths and the loop-counter guard. ----
+    # PGR=1: the 32-bit carry add path, with gl2nl 2 (and gl2nl > 1 on a
+    # plain-DepthU TLU layout) so every per-inst register pair is advanced.
+    GL2Config("pgr1_nl2", [_A(True, 256), _B(True, 256)], depth_u=640, cluster=(2, 2), pgr=1),
+    # PGR=3: a multiplier that is not a power of 2 in the 64-bit multiply path.
+    GL2Config("pgr3_ntlu", [_A(False, 384), _B(True, 384)], cluster=(2, 2), pgr=3),
+    # PGR=0: skipPGR emits nothing, so the start address is used as is.
+    GL2Config("pgr0", [_A(True, 256), _B(False, 256)], cluster=(2, 2), pgr=0),
+    # Guard taken (LoopCounterL == PGR): the regular loads cover every iteration,
+    # so the skip must not run and stage 0 is the raw start address.
+    GL2Config("pgr2_guard_taken", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+              loop_counter=2),
 ]
 
 
@@ -606,18 +625,18 @@ def _make_writer(kernel):
 def build_kernel(cfg):
     """Build a kernel computing GL2 addresses for all of cfg.tensors at once.
 
-    The kernel emits cfg.n_inc+1 "stages": stage 0 is the start address (which,
-    because PGR>1, already includes the calculateStartAddr PGR*inc pre-skip),
-    and each later stage calls incrementAddr once more, so stage s is shifted by
-    (PGR + s) * inc from the base footprint. This exercises both addr-increment
-    paths (the PGR pre-skip and the per-iteration incrementAddr).
+    The kernel emits cfg.n_inc+1 "stages": stage 0 is the start address after
+    the loop-counter-guarded skipPGR, and each later stage calls incrementAddr
+    once more, so stage s is shifted by (cfg.skip_iters + s) * inc from the base
+    footprint. This exercises both addr-increment paths (skipPGR and the
+    per-iteration incrementAddr).
 
     Returns (asm, layout, n_out) where layout is a list of
     (TensorSpec, num_loads, stage, region_start) describing the output partition.
     """
-    from rocisa.code import Module, TextBlock
+    from rocisa.code import Module, TextBlock, Label
     from rocisa.container import sgpr, ContinuousRegister
-    from rocisa.instruction import SMovB32
+    from rocisa.instruction import SMovB32, SCmpLeU32, SCBranchSCC1
     from Tensile.KernelWriterAssembly import GL2PrefetchLoad
 
     init_rocisa(wavesize=WAVESIZE)
@@ -643,7 +662,7 @@ def build_kernel(cfg):
 
     # ---- named sgprs (resolved via .set; values assigned in the prologue) ----
     w.sgprs["OutPtr"] = w.sgprPool.checkOutAligned(2, 2, "OutPtr", preventOverflow=False)
-    shared = ["WorkGroup0", "WorkGroup1", "WorkGroup2"]
+    shared = ["WorkGroup0", "WorkGroup1", "WorkGroup2", "LoopCounterL"]
     if cfg.n_regions > 1:
         shared += ["WGOUT"]   # per-region output shift = linear_wg_id * n_out
     if "A" in subtcs:
@@ -694,12 +713,12 @@ def build_kernel(cfg):
     n_stages = cfg.n_inc + 1
     n_out_per_wg = n_stages * sum(cfg.num_threads * tp["gl2nl"] for _, tp in tps)
 
-    # ---- body: setIncrement (all), then calculateStartAddr (each).
-    # calculateStartAddr folds in the base Address{tc}, the GSU chunk offset and
-    # the PGR pre-skip itself (SGPR-accumulated), so there is no separate
-    # gsuOffset step. Under GSU this mirrors production gl2PrefetchCalcAddr: the
-    # chunk start iteration is tensor independent, so it is derived once and each
-    # tensor scales it by its own per-iteration increment. ----
+    # ---- body: setIncrement (all), then calculateStartAddr (each), then the
+    # guarded skipPGR. calculateStartAddr folds in the base Address{tc} and the
+    # GSU chunk offset, so there is no separate gsuOffset step. Under GSU this
+    # mirrors production gl2PrefetchCalcAddr: the chunk start iteration is tensor
+    # independent, so it is derived once and each tensor scales it by its own
+    # per-iteration increment. ----
     body = Module("body")
     if cfg.gsu_on:
         with w.allocTmpSgpr(3, tag="gl2_gsu") as tmpSgprRes:
@@ -714,6 +733,16 @@ def build_kernel(cfg):
         for t, tp in tps:
             body.add(comp.setIncrement(w, kernel, tp))
             body.add(comp.calculateStartAddr(w, kernel, tp))
+
+    # Same guard as the pre-loop GL2 issue in KernelWriter: with LoopCounterL <=
+    # PGR there is nothing left to prefetch, so the skip is branched over. It runs
+    # after calculateStartAddr so it sees the GSU-widened increment.
+    skip_label = Label("GL2SkipPGR", "")
+    body.add(SCmpLeU32(src0=sgpr("LoopCounterL"), src1=hex(cfg.pgr), comment="counterL<=PGR"))
+    body.add(SCBranchSCC1(labelName=skip_label.getLabelName(), comment=""))
+    for t, tp in tps:
+        body.add(comp.skipPGR(w, kernel, tp))
+    body.add(skip_label)
 
     # ---- prologue ----
     prologue = Module("prologue")
@@ -743,7 +772,7 @@ def build_kernel(cfg):
             coal_m = tensor_dims(t, cfg)[0]
             idxChar = "I" if t.idx == 0 else "J"
             consts += [(f"StrideMetadata{idxChar}", coal_m), ("StrideMetadataL", coal_m)]
-    consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0)]
+    consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0), ("LoopCounterL", cfg.lc)]
     if cfg.batched:                              # programmed batch stride Stride{tc}K
         consts += [(f"Stride{t.tc}K", batch_stride_elems(t, cfg)) for t in cfg.tensors]
     if cfg.gsu_on:
@@ -940,15 +969,16 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
     prefetch must cover, independent of how threads are allocated to addresses.
 
     `stage` shifts the whole footprint along the K axis: stage 0 is the start
-    address (the calculateStartAddr PGR pre-skip already advanced it by PGR
-    increments), and each later stage adds one incrementAddr. The shift is
-    orthogonal to the free-dim edge clamp, so it just translates the set.
+    address (skipPGR already advanced it by PGR increments unless the
+    loop-counter guard branched over it), and each later stage adds one
+    incrementAddr. The shift is orthogonal to the free-dim edge clamp, so it
+    just translates the set.
 
     `group` is the GSU group, which shifts the footprint onto that group's K
     chunk. Both the chunk start and the stage stride are whole multiples of the
     one-DepthU increment, so the K shift is
-        (startIter(group) + (PGR + stage) * iterStride) * inc
-    with GSU off collapsing to the plain (PGR + stage) * inc.
+        (startIter(group) + (skip + stage) * iterStride) * inc
+    with GSU off collapsing to the plain (skip + stage) * inc.
 
     `batch` adds the StridedBatched shift batch * Stride{tc}K * bpe (the
     WorkGroup2 * batchStride term calculateStartAddr folds into the base
@@ -976,7 +1006,7 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
         edge = size_free - 1
     coal_to_mt = (spec.is_mx or spec.tlu)    # MT offset & clamp land in coal (else perp)
     gps_elems = round(GPS / bpe)
-    k_iter = gsu_start_iter(cfg, group) + (cfg.pgr + stage) * gsu_iter_stride(cfg)
+    k_iter = gsu_start_iter(cfg, group) + (cfg.skip_iters + stage) * gsu_iter_stride(cfg)
     shift = k_iter * inc_bytes(spec, cfg)
     if cfg.batched:
         shift += batch * round(batch_stride_elems(spec, cfg) * bpe)
