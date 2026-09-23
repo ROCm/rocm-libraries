@@ -108,11 +108,10 @@ TEST_P(SaturationTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(Image_Color, SaturationTest,
                          ::testing::ValuesIn(with_params<SaturationParams>(
                              concat_configs({
-                                 make_configs({DType::U8, DType::F16, DType::F32},
-                                              presets::kLayouts3ChConv, {Roi::Full, Roi::Partial},
-                                              {presets::kTailWidthSize}),
-                                 make_configs({DType::U8, DType::F16, DType::F32},
-                                              presets::kLayouts3Ch, {Roi::Full, Roi::Partial},
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
+                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch,
+                                              {Roi::Full, Roi::Partial},
                                               {presets::kDefaultSize, presets::kSubVectorSize}),
                              }),
                              {SaturationParams{1.5f}})),
