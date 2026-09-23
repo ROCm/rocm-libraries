@@ -40,7 +40,7 @@ inline void ensureTestConfigInitialized()
 /// A policy for a deviceless run: host pointers, so the mocked engine can write
 /// straight into the variant pack and no ITensor ever hipMallocs.
 inline HarnessPolicy hostPolicy(VerificationMode mode = VerificationMode::AUTO,
-                                ClaimMode claims = ClaimMode::REPORT_ONLY)
+                                ClaimMode claims = ClaimMode::WARN)
 {
     HarnessPolicy policy;
     policy.mode = mode;

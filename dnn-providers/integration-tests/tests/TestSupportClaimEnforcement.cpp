@@ -752,10 +752,10 @@ TEST_F(TestSupportClaimEnforcement, ArchSkippedBundleStillCountsAsSelected)
     ASSERT_TRUE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
 }
 
-// A report-only run reads the same sidecars and needs the same denominators; only the
+// A warn-only run reads the same sidecars and needs the same denominators; only the
 // cost of a bad verdict differs. Counting less here would make the summary a run
 // cannot fail on also a summary it cannot read.
-TEST_F(TestSupportClaimEnforcement, ReportOnlyCountsBothSelectedAndReached)
+TEST_F(TestSupportClaimEnforcement, WarnCountsBothSelectedAndReached)
 {
     ::testing::TestPartResultArray results;
 
@@ -763,8 +763,7 @@ TEST_F(TestSupportClaimEnforcement, ReportOnlyCountsBothSelectedAndReached)
     EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(1);
 
     IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::REPORT_ONLY)),
+        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::WARN)),
         makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 }

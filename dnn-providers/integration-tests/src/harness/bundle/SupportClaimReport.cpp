@@ -86,8 +86,8 @@ std::string_view modeLabel(ClaimMode claims)
     {
     case ClaimMode::ENFORCE:
         return " (ENFORCING)";
-    case ClaimMode::REPORT_ONLY:
-        return " (REPORT ONLY -- NOT ENFORCED)";
+    case ClaimMode::WARN:
+        return " (WARNING ONLY -- NOT ENFORCED)";
     default:
         // A header that misdescribes the run is worse than no header: every tally
         // below it is then read in the wrong mode. Throwing keeps a value that is not

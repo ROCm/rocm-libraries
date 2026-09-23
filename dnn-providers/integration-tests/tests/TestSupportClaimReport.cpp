@@ -242,7 +242,7 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
 }
 
 // A summary scraped out of a CI log has to say on its own face whether the failures
-// under it were fatal, because a report-only lane prints the same shape and the same
+// under it were fatal, because a warn-only lane prints the same shape and the same
 // failure list. Asserted on a run that has failures, since that is the case where the
 // header is load-bearing rather than decorative.
 TEST_F(TestSupportClaimReport, PrintHeaderNamesEnforcement)

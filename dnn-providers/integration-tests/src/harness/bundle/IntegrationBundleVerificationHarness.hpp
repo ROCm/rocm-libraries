@@ -245,7 +245,7 @@ private:
     SupportObservation observeSupportClaims(const GraphSession& session);
 
     // The one place the claim mode is read: whether a bad verdict costs anything. The
-    // verdict itself is recorded either way, which is what makes a report-only run
+    // verdict itself is recorded either way, which is what makes a warn-only run
     // worth printing. Needs no shouldObserveClaims() guard on top -- an unqueried graph
     // carries no results, so there is nothing to block on.
     std::optional<VerificationOutcome>

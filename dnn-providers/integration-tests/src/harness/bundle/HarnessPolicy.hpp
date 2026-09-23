@@ -32,7 +32,7 @@ enum class TensorPlacement
 /// The mode decides exactly one thing -- whether a broken claim fails the test.
 enum class ClaimMode : std::uint8_t
 {
-    REPORT_ONLY, ///< query and publish; a broken claim is reported, not failed
+    WARN, ///< query and publish; a broken claim is reported, not failed
     ENFORCE, ///< query and publish; a broken claim fails the test
 };
 
@@ -45,7 +45,7 @@ enum class ClaimMode : std::uint8_t
 struct HarnessPolicy
 {
     VerificationMode mode = VerificationMode::AUTO;
-    ClaimMode claims = ClaimMode::REPORT_ONLY;
+    ClaimMode claims = ClaimMode::WARN;
     TensorPlacement placement = TensorPlacement::DEVICE;
 
     /// Full arch token as detected, e.g. "gfx942:sramecc+:xnack-". Empty when

@@ -412,7 +412,7 @@ inline void registerBundleTests()
     // A named engine is what makes a claim checkable, so a run without --test-engine
     // has nothing to count; seeding the coverage counters anyway would print a summary
     // reporting every claim on disk as unchecked by a run that was never going to check
-    // one. Not keyed on the claim mode: a report-only run reads the same sidecars and
+    // one. Not keyed on the claim mode: a warn-only run reads the same sidecars and
     // needs the same denominators, and only the cost of a broken claim differs.
     //
     // This is the same predicate the harness applies per graph, minus the sidecar
