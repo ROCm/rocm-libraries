@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from .arch.wmma_scale import gfx1250_scaled_wmma
+from .dtypes import dtype_info
 from .ir import (
     KernelDef,
     Op,
@@ -486,6 +487,18 @@ class _Lowerer:
         vec = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_load_vN")
+        byte_count = vec * (dtype_info(elem_name).encoded_bits // 8)
+        align = int(op.attrs.get("align", vec * 2))
+        if align < byte_count:
+            # A vector-pointer dereference would promise natural alignment.
+            # Copy the payload using only the alignment guaranteed by the IR.
+            self._emit(
+                f"{prefix}{vec} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, "
+                f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
+                f"{byte_count});"
+            )
+            return
         self._emit(
             f"{prefix}{vec} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"

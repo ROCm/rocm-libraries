@@ -15,6 +15,7 @@
  * rocke_h_name, rocke_h_type_to_hip, rocke_h_hip_scalar, rocke_h_vec_prefix,
  * rocke_h_smem_set_storage/_storage, rocke_h_fail, rocke_h_live) are NOT defined here.
  */
+#include "rocke/dtypes.h"
 #include "rocke/lower_hip_internal.h"
 
 #include <stdint.h>
@@ -530,6 +531,24 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     elem_name = mem_attr_str(op, "elem_type", "f16");
     prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_load_vN");
     res = rocke_h_name(lw, op->results[0]);
+    const int64_t byte_count = vec * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+    const int64_t align = mem_attr_int(op, "align", vec * 2);
+    if(align < byte_count)
+    {
+        /* Do not strengthen the IR's alignment through a vector-pointer cast. */
+        rocke_h_emitf(
+            lw,
+            "%s%lld %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s + %s, %lld), %lld);",
+            prefix,
+            (long long)vec,
+            res,
+            res,
+            rocke_h_name(lw, ptr),
+            rocke_h_name(lw, idx),
+            (long long)align,
+            (long long)byte_count);
+        return lw->status;
+    }
     rocke_h_emitf(lw,
                   "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
                   prefix,

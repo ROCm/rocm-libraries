@@ -3,6 +3,8 @@
 """Mirrored authoring and bit-pattern placement, independent of MMA support."""
 
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -29,6 +31,7 @@ from rocke.helpers.mma_io import (
 CASES = [
     "fp4",
     "fp6",
+    "fp6_padded",
     "bf6",
     "fp8",
     "bf8",
@@ -42,6 +45,8 @@ CASES = [
 
 def build_transport(dtype):
     b = IRBuilder("transport")
+    padded = dtype == "fp6_padded"
+    dtype = "fp6" if padded else dtype
     patterns = dtype.startswith("pack_")
     unit = I8 if patterns else storage_ir_type(dtype)
     typed = dtype in ("f16", "bf16")
@@ -61,7 +66,12 @@ def build_transport(dtype):
         for j, value in enumerate(values):
             b.global_store(o, b.const_i32(j), value, align=4)
     else:
-        storage = TensorStorage(dtype, (16, 128), alignment_bytes=16)
+        storage = TensorStorage(
+            dtype,
+            (16, 128),
+            row_stride_bytes=97 if padded else None,
+            alignment_bytes=16,
+        )
         layout = (
             MatrixFragmentLayout(FragmentPacking(BitPacking(16), 32, 16, 32), 16, 2, 16)
             if typed
@@ -145,3 +155,28 @@ def test_hip_declares_only_encountered_missing_vector_widths():
     source = lower_kernel_to_hip(build_transport("f16"), arch="gfx1250")
     assert source.count("using f16x32 =") == 1
     assert "using i8x24 =" not in source
+
+
+@pytest.mark.parametrize(
+    "dtype,copy_bytes,alignment",
+    [("fp6", 16, 8), ("fp6_padded", 16, 1), ("f16", 32, 16)],
+)
+def test_hip_compiler_preserves_fragment_load_alignment(dtype, copy_bytes, alignment):
+    """Inspect compiler IR: source parity cannot detect a shared alignment bug."""
+    if not shutil.which("hipcc"):
+        pytest.skip("hipcc not in PATH")
+    from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
+
+    llvm = emit_device_llvm_ir_via_hipcc(
+        build_transport(dtype), arch="gfx950", extra_flags=["-O0"]
+    )
+    source_alignments = [
+        int(align)
+        for align, size in re.findall(
+            r"@llvm\.memcpy[^\n]*?\([^,]+,\s*ptr[^,]*\balign (\d+) [^,]+,\s*i64 (\d+)",
+            llvm,
+        )
+        if int(size) == copy_bytes
+    ]
+    assert source_alignments, "expected unaligned-safe fragment payload copies"
+    assert all(value <= alignment for value in source_alignments), source_alignments

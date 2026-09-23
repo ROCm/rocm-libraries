@@ -33,6 +33,9 @@ static int emit(const char* dtype, bool hip)
 {
     rocke_ir_builder_t b;
     CHECK(rocke_ir_builder_init(&b, "transport") == ROCKE_OK);
+    const bool padded = strcmp(dtype, "fp6_padded") == 0;
+    if(padded)
+        dtype = "fp6";
     bool patterns = strncmp(dtype, "pack_", 5) == 0;
     const auto* unit = patterns ? rocke_i8() : rocke_storage_ir_type(dtype);
     CHECK(unit);
@@ -60,7 +63,8 @@ static int emit(const char* dtype, bool hip)
     else
     {
         rocke_tensor_storage_t storage;
-        CHECK(rocke_tensor_storage_init(&storage, dtype, 16, 128, UINT64_MAX, 0, 0, 16));
+        CHECK(rocke_tensor_storage_init(
+            &storage, dtype, 16, 128, padded ? 97 : UINT64_MAX, 0, 0, 16));
         rocke_matrix_fragment_layout_t layout;
         if(typed)
         {
