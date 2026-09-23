@@ -1,0 +1,30 @@
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+
+BenchmarkProblems:
+  - # Simple FP32 NN GEMM with WGM debug enabled
+    - # Problem Type
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # Benchmark Size
+      - Exact: [256, 256, 1, 256]
+
+    - # Solution with WGM debug enabled
+      ProblemSizes:
+        - Exact: [256, 256, 1, 256]
+
+      InitialSolutionParameters:
+        EnableWGMDebug: 1
+        GlobalSplitU: 1
+        WorkGroup: [16, 16, 1]
+        ThreadTile: [4, 4]
+        PrefetchGlobalRead: 1
+        PrefetchLocalRead: 1
+
+LibraryLogic:

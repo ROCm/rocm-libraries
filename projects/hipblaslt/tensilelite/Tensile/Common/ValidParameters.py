@@ -951,6 +951,16 @@ validParameters = { # we need to make sure this matches develop
     # Used as a co-tenant load kernel for contended-perf benchmarking.
     # Termination is via process death. Requires StreamK = 3.
     "DebugPersistentKernelLoopForever": [False, True],
+    # WGM (workgroup-mapping) instrumentation for visualization. When enabled (1),
+    # GEMM kernels overwrite the top-left element of each workgroup's output tile
+    # with WGM diagnostic data (original pre-WGM 1D workgroup id, packed post-WGM
+    # (WG0<<16)|WG1, XCC id, and the packed WGM sgpr value) instead of the real
+    # GEMM result. This produces INCORRECT RESULTS and is only for WGM visualization.
+    # Works for any output data type (a dedicated 16-byte raw store to the tile
+    # origin is emitted, independent of DestDataType).
+    # 0 = disabled (default, correct GEMM results)
+    # 1 = enabled (WGM instrumentation, incorrect results for visualization only)
+    "EnableWGMDebug": [0, 1],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth

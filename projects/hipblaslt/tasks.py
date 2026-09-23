@@ -507,6 +507,11 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
         "enable_tensile_marker": "Enable Tensile markers.",
         "skip_rocroller": "Skip the rocRoller backend.",
         "quiet": "Build without VERBOSE=1.",
+        "debug_wgm": (
+            "Debug-only: instrument GEMM kernels to write workgroup-mapping (WGM) "
+            "data into the D output instead of the real result (for WGM "
+            "visualization; produces incorrect GEMM results). Requires --debug."
+        ),
         "enable_asm_comments": "Enable assembly comments in generated asm.",
         "build_dir": "Override the build directory.",
         "rocm_path": "Override the ROCm installation path.",
@@ -551,6 +556,7 @@ def build(
     enable_tensile_marker=False,
     skip_rocroller=False,
     quiet=False,
+    debug_wgm=False,
     enable_asm_comments=False,
     build_dir=None,
     rocm_path=None,
@@ -614,6 +620,10 @@ def build(
 
     if gprof and not static:
         print("--gprof requires --static.")
+        sys.exit(2)
+
+    if debug_wgm and build_type != "Debug":
+        print("--debug-wgm requires --debug (WGM instrumentation is a debug-only feature).")
         sys.exit(2)
 
     _validate_asic_revision(asic_revision)
@@ -712,6 +722,8 @@ def build(
 
     if build_type != "Release":
         cmake_opts.append("-DTENSILELITE_ASM_DEBUG=ON")
+    if debug_wgm:
+        cmake_opts.append("-DTENSILELITE_DEBUG_WGM=ON")
     if logic_filter:
         cmake_opts.append(f"-DTENSILELITE_LOGIC_FILTER={logic_filter}")
     if keep_build_tmp:
