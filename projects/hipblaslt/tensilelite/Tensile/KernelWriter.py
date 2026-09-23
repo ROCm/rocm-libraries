@@ -5338,6 +5338,71 @@ class KernelWriter(metaclass=abc.ABCMeta):
            }
 
   ##############################################################################
+  # StinkyTofu post-pass over a finished subtile kernel: the same OptLevel 0
+  # pipeline kernelBody already runs for a classic gfx1250 kernel, adding one pass
+  # per StinkySubtile level. See ValidParameters for the levels and for why none
+  # of them can reorder an instruction or rewrite a wait.
+  #
+  # Returns the optimized assembly, or None to keep the subtile output as-is.
+  ##############################################################################
+  def _stinkyTofuSubtilePostPass(self, kernel, moduleKernelBody, fs):
+    level = kernel["StinkySubtile"]
+    # A kernel from MT320x256 up with PrefetchGL2 >= 1 references a VGPR through
+    # an offset expression, which rocIsaPass's buildGraph rejects with "GPR index
+    # out of range". Unguarded, TensileCreateLibrary drops the kernel with only a
+    # warning, so the library would quietly shrink.
+    try:
+      return self._stinkyTofuSubtileOptimize(kernel, moduleKernelBody, fs, level)
+    except RuntimeError as e:
+      printWarning(f"StinkySubtile={level}: keeping the un-optimized subtile assembly for "
+                   f"{self.states.kernelName}: {e}")
+      return None
+
+  def _stinkyTofuSubtileOptimize(self, kernel, moduleKernelBody, fs, level):
+    # StinkyTofu reasons about physical register numbers, and only rocIsaPass
+    # resolves a symbolic one: buildGraph -> _setName2RegNum turns s[sgprFoo]
+    # into sN. VGPRs carry their own index, so without this every SGPR reaches
+    # StinkyTofu as -1 and Gfx1250HazardPass reads an unrelated register.
+    ripo = rocIsaPassOption()
+    # The bank-conflict analysis behind getCycles throws on a kernel with no
+    # "Local Read Addresses" module, which subtile does not emit.
+    ripo.getCycles = False
+    # Off even though the classic path turns it on for HasSchedMode: delay_alu
+    # placement is scheduling, which Components/Subtile owns.
+    ripo.insertDelayAlu = False
+    ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
+    if kernel["ProblemType"]["ActivationType"] == "all":
+      ripo.removeDupAssign = False
+    rocIsaPass(moduleKernelBody, ripo)
+
+    # Resolved from the same knob as on the classic path, so the flavour is the
+    # config's choice and not this hook's. The knob defaults to Relative(1), not
+    # Auto(-1), so a config that does not mention it gets the PC-relative passes.
+    swpRelEnable, swpAbsEnable = (False, False)
+    if level >= 4:
+      swpRelEnable, swpAbsEnable = resolveSwInstructionPrefetch(
+          kernel.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO),
+          self.states.version == (12, 5, 0),
+          bool(kernel.get("StreamK", 0)),
+          kernel["ProblemType"]["DataType"].isDouble())
+
+    stinky_module_options = {**self._stinkyTofuModuleOptions(kernel),
+                             # The gate that keeps scheduling with Components/Subtile.
+                             "OptLevel": 0,
+                             "EnableHazardCoverage": level >= 2,
+                             "EnableMovePropagation": level >= 3,
+                             "EnableSwInstructionPrefetchRelStatic": swpRelEnable,
+                             "EnableSwInstructionPrefetchAbs": swpAbsEnable,
+                            }
+
+    print2(f"StinkyTofu subtile module options: {stinky_module_options}")
+    moduleKernelBody.body.setParent()
+    stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
+                                         signature=fs, options=stinky_module_options)
+    stModule.runOptimizationPipeline()
+    return stModule.emitAssembly()
+
+  ##############################################################################
   # Kernel Body - Subtiled version
   ##############################################################################
   def kernelBodySubtile(self, kernel, tensorParametersA, tensorParametersB):
@@ -5681,6 +5746,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
+
+    if kernel["StinkySubtile"]:
+      st_asm = self._stinkyTofuSubtilePostPass(kernel, moduleKernelBody, fs)
+      if st_asm is not None:
+        return (error, st_asm)
 
     return (error, str(moduleKernelBody))
 

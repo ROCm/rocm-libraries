@@ -563,6 +563,30 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # How much of the StinkyTofu pipeline runs as a post-pass over a finished
+    # subtile kernel. The classic gfx1250 path already runs this pipeline at
+    # OptLevel 0; the subtile path returns its own assembly and never calls it.
+    # Each level is the previous one plus one pass, so a regression bisects to a
+    # level rather than to a bundle:
+    #
+    #   0  off. Subtile emits its own assembly, StinkyTofu never sees it.
+    #   1  the pipeline itself, with every optional pass off. InsertVgprMsb runs
+    #      from here: it replaces rather than adds to the s_set_vgpr_msb state
+    #      Components/Subtile emitted, so it is a condition of running the
+    #      pipeline rather than one of the features layered on top.
+    #
+    # Higher levels each add one more pass and are enabled in their own change,
+    # once that pass has been measured on hardware on its own.
+    #
+    # No level lets StinkyTofu reorder an instruction or rewrite a wait: OptLevel
+    # 0 keeps the DAG scheduler out, and EnableWaitCntInsertion / EnableESM2 /
+    # ClusterBarrier stay False, which keeps waitcnt insertion, RemoveWaitAlu /
+    # RemoveDelayAlu and InsertWaitAluModule out (see Gfx1250Backend.cpp).
+    # Components/Subtile keeps ownership of instruction order and of every
+    # s_waitcnt / s_wait_alu it emits.
+    #
+    # gfx1250 + UseSubtileImpl only; forced to 0 elsewhere.
+    "StinkySubtile": [0, 1],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

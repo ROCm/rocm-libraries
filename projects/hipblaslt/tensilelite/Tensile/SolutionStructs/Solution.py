@@ -1132,6 +1132,17 @@ class Solution(collections.abc.Mapping):
     isgfx1250 = isa[:2] == (12, 5)
     state["UseSubtileImpl"] = state["UseSubtileImpl"] and (isgfx950 or isgfx1250)
 
+    # StinkySubtile needs a subtile kernel on an ISA StinkyTofu has a backend
+    # for. Ignore the request elsewhere rather than rejecting the solution: a
+    # fleet-wide YAML that sets it must not reject every gfx950 or classic
+    # kernel it touches.
+    if state.get("StinkySubtile", 0):
+      import rocisa
+      if not (state["UseSubtileImpl"] and isgfx1250
+              and rocisa.hasStinkyTofuBackend()
+              and rocisa.isSupportedByStinkyTofu(state["ISA"])):
+        state["StinkySubtile"] = 0
+
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
