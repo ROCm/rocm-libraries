@@ -69,6 +69,9 @@ static bool rocke_mma_is_int_acc(const char* op_id)
 
 static const char* rocke_mma_result_hint(const char* op_id)
 {
+    const char* family = rocke_arch_mma_op_id_family(op_id);
+    if(family && strcmp(family, "wmma_scaled") == 0)
+        return "mxacc";
     size_t i;
     if(op_id)
     {

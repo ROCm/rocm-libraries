@@ -194,6 +194,7 @@ from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
+    check_dense_spec_preflight,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
@@ -583,11 +584,6 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
 _SUPPORTED_DTYPES = ("bf16", "fp16")
 _SUPPORTED_HEAD_SIZES = (64, 128)
 
-# 32-bit addressing ceiling. The dense ABI bakes every extent at build time, so the
-# limits below are static properties of the spec, not runtime conditions.
-_INT32_LIMIT = 2**31
-
-
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
 # / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel emits
 # (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
@@ -884,36 +880,15 @@ def supports_attention_dense(
             f"gfx942 attention_dense scope is D{list(_SUPPORTED_HEAD_SIZES)} "
             f"(D256 is served by its own wide-atom candidates), got D{spec.head_size}"
         )
-    # Re-run the dataclass validators (shape multiples, GQA divisibility, knob
-    # ranges) so a hand-built spec is rejected with a structured reason. Iterate the
-    # BASE class fields deliberately: this re-validates only what the shared
-    # __post_init__ owns, and passing the gfx942-private extras would be a TypeError.
-    # Those extras are validated by the explicit checks further down instead. Catch
-    # ZeroDivisionError too: __post_init__ evaluates `seqlen_kv % block_n` BEFORE it
-    # validates block_n > 0, so block_n=0 raises ZeroDivisionError, not ValueError,
-    # and would escape this (bool, str) API.
-    fields = AttentionDenseSpec.__dataclass_fields__  # type: ignore[attr-defined]
-    try:
-        AttentionDenseSpec(**{f: getattr(spec, f) for f in fields})
-    except (ValueError, ZeroDivisionError) as e:
-        return False, f"invalid AttentionDenseSpec: {e}"
-
-    # --- Positive extents. Every dataclass validator is a divisibility test, and
-    # Python's `%` is sign-following: -256 % 256 == 0 and 8 % -1 == 0, so zero and
-    # negative shapes pass all of them. num_query_heads == 0 is the worst -- gqa =
-    # Hq // Hkv == 0 emits `sdiv i32 %hq, 0` into the kernel -- and negative extents
-    # make the 32-bit checks below vacuously true.
-    for _field in (
-        "batch",
-        "seqlen_q",
-        "seqlen_kv",
-        "num_query_heads",
-        "num_kv_heads",
-        "head_size",
-    ):
-        _value = getattr(spec, _field)
-        if _value <= 0:
-            return False, f"{_field} must be positive, got {_value}"
+    # --- Shared preflight: dataclass re-validation, positive extents, block_n
+    # dividing the query tile, and the 32-bit extent bounds. All four are properties
+    # of the base spec with the same verdict for every dense body, so they live in
+    # kernels.common next to the spec rather than being replicated per arch. The
+    # gfx942-private knobs and the LDS budget are NOT in there -- they need this
+    # body's tile math, and are checked below.
+    ok, why = check_dense_spec_preflight(spec)
+    if not ok:
+        return False, why
 
     # --- Mode scope. The body implements the default-grid AND the P4 persistent
     # grid-stride variant, both uniform dense self-attention. Checked HERE and not
@@ -1018,19 +993,6 @@ def supports_attention_dense(
                 f"v_row_pad=None (derived) or set use_v_swizzle=False to sweep the pad"
             )
 
-    # --- Tile geometry. The causal KV-loop clamp uses n_per = block_m //
-    # block_n, a FLOOR: a block_n that does not divide the query tile silently drops
-    # every key past the last whole sub-tile, and block_n > block_m makes n_per 0
-    # -> zero-trip loop -> l == 0 -> rcp(0) -> NaN. Neither fails loudly, so reject.
-    if spec.block_m % spec.block_n != 0:
-        return False, (
-            f"block_n must divide the {spec.block_m}-row query tile (got "
-            f"block_n={spec.block_n}; the spec also requires block_n % 32 == 0, so "
-            f"use 32, 64, 128 or 256). Load-bearing for causal=True, where "
-            f"n_per = {spec.block_m} // block_n floors and drops keys; enforced "
-            f"unconditionally so the two grids cannot diverge by a knob"
-        )
-
     # --- Wave/tile divisibility, mirrored from the builder so support() and build()
     # agree on exactly one set of specs (the module contract at the top of this file).
     # The condition below is ALSO enforced in _build_attention_dense_single_buffer;
@@ -1070,24 +1032,6 @@ def supports_attention_dense(
             f"D={spec.head_size}, which exceeds the {arch} LDS capacity ({capacity} B)"
         )
 
-    # --- 32-bit addressing. Every offset below is built from IRBuilder add/mul, which
-    # lower to `add nsw` / `mul nsw` i32 -- signed overflow is UB, not a wrap, so LLVM
-    # may poison the whole address chain rather than merely read the wrong place. The
-    # buffer-resource num_records field is unsigned in hardware, but it is emitted via
-    # const_i32 (no range check) and the voffset feeding it is signed i32 arithmetic,
-    # so the signed bound is the binding one on both paths.
-    kv_bytes = spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
-    if kv_bytes >= _INT32_LIMIT:
-        return False, (
-            f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "
-            f"limit ({_INT32_LIMIT} B)"
-        )
-    qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if qo_elems >= _INT32_LIMIT:
-        return False, (
-            f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
-            f"limit ({_INT32_LIMIT})"
-        )
     return True, ""
 
 
@@ -1875,8 +1819,10 @@ def run_attention_dense_torch(
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
-    the launcher cache by ``(arch, concrete frozen spec)``. Every current and future
-    IR-live field therefore participates without relying on manual name tokens.
+    the launcher cache by ``attention_dense_cache_key``. gfx942 declares no
+    ``runtime_param_fields`` -- it bakes the whole problem shape -- so every
+    current and future IR-live field participates in that key without relying on
+    manual name tokens.
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
     ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a

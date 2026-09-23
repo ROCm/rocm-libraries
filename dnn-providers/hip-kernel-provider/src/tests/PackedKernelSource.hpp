@@ -15,6 +15,8 @@ SPDX-License-Identifier: MIT
 
 #include <hip/hip_runtime_api.h>
 
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+
 #include "TestDescriptorRoot.hpp"
 
 namespace hip_kernel_provider::testing
@@ -34,6 +36,7 @@ struct PackedKernelSource
     /// every nested descriptor.
     std::filesystem::path originDirectory;
     std::filesystem::path archive;
+    std::string sha256;
 };
 
 /// The bare arch of device 0 and the directory this build packed for it. `directory` is
@@ -49,8 +52,7 @@ inline void findPackedArchDirectory(hipDeviceProp_t& properties,
 {
     ASSERT_EQ(hipGetDeviceProperties(&properties, 0), hipSuccess);
 
-    const std::string reported = properties.gcnArchName;
-    arch = reported.substr(0, reported.find(':'));
+    arch = std::string(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
 
     const std::filesystem::path candidate = unitKpackRoot() / arch;
     directory = std::filesystem::is_directory(candidate) ? candidate : std::filesystem::path{};
@@ -96,9 +98,14 @@ inline void readPackedKernelSource(const std::filesystem::path& directory,
     const nlohmann::json& source = kernel["kernel_source"];
     ASSERT_TRUE(source.contains("toc_key")) << descriptor;
     ASSERT_TRUE(source.contains("library")) << descriptor;
+    ASSERT_TRUE(source.contains("sha256")) << descriptor;
 
     out.tocKey = source["toc_key"].get<std::string>();
     out.library = source["library"].get<std::string>();
+    // Read rather than recomputed: recomputing would compare the loader's hash against
+    // this test's hash of the same bytes, which passes however wrong both are. The shipped
+    // field is the claim the loader actually checks.
+    out.sha256 = source["sha256"].get<std::string>();
     out.originDirectory = descriptor.parent_path();
     // `library` is relative to the directory holding the descriptor that declared it --
     // the same anchoring KernelDefinition::originDirectory describes. That directory is

@@ -6,7 +6,9 @@
 # additional build configurations that MIOpen must support but TheRock CI does
 # not exercise: the HIPNOGPU backend (used for offline kernel tuning without
 # GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
-# no-CK UBSan debug build, and gtest binary naming convention validation.
+# no-CK UBSan debug build, and gtest binary naming convention validation. It
+# also runs clang-tidy static analysis, migrated in from the shared
+# .github/workflows/clang-tidy.yml so it can be made a required check.
 #
 # The HIP package job additionally carries the two gates on the public/private
 # split: a source-only cross-check of its five hand-maintained files, and the
@@ -89,6 +91,23 @@ jobs:
               -DCMAKE_PREFIX_PATH=/opt/rocm
               -DGPU_TARGETS="gfx942"
             build_target: --target install --target all
+          # clang-tidy's custom "analyze" target (defined in
+          # projects/miopen/cmake/ClangTidy.cmake) is only wired up for the
+          # Ninja generator, and "ninja -k 0" (keep going past failures) below
+          # depends on it -- hence -G Ninja here, unlike the other entries in
+          # this matrix which build with the container's default generator.
+          # TODO: remove -DMIOPEN_USE_MLIR=OFF once rocMLIR is removed from MIOpen.
+          - name: MIOpen clang-tidy
+            job_id: clang-tidy
+            cmake_extra_flags: >-
+              -G Ninja
+              -DBUILD_DEV=ON
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_BACKEND=HIP
+              -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-23
+              -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps"
+              -DROCM_PATH=/opt/rocm
+            build_target: ""
 
     runs-on: azure-linux-scale-rocm
     steps:
@@ -158,12 +177,36 @@ jobs:
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
+      - name: Install clang-tidy deps
+        if: matrix.job_id == 'clang-tidy'
+        run: |
+          # Install clang-tidy-23 and ninja-build (analyze target requires the
+          # Ninja generator; this container is not guaranteed to ship ninja).
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm23.list
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-23 ninja-build
+          # Prepare MIOpen deps for clang-tidy in a venv
+          python3 -m venv .venv
+          VENV_BIN="$(pwd)/.venv/bin"
+          . $VENV_BIN/activate
+          pip install 'cmake<4' https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
+          cp projects/miopen/requirements.txt /tmp/requirements.txt
+          cp projects/miopen/rbuild.ini /tmp/rbuild.ini
+          cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
+          sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
+          cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/rbuild prepare -s develop -d /tmp/miopen-deps
 
       - name: Configure build
         run: |
           export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
           export CXX=/opt/rocm/llvm/bin/clang++
-          export CXXFLAGS=-Werror
+          # -Werror is skipped for clang-tidy: that job's job is to surface lint
+          # findings, not to fail the configure/analyze step on unrelated
+          # compiler warnings-as-errors.
+          if [[ "${{ matrix.job_id }}" != "clang-tidy" ]]; then
+            export CXXFLAGS=-Werror
+          fi
           rm -rf projects/miopen/install
           mkdir projects/miopen/install
           cmake -S projects/miopen -B build \
@@ -171,7 +214,18 @@ jobs:
           ${{ matrix.cmake_extra_flags }}
 
       - name: Build
+        if: matrix.job_id != 'clang-tidy'
         run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
+      - name: Run clang-tidy
+        if: matrix.job_id == 'clang-tidy'
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          # CMake already configured with CLANG_TIDY_EXE via cmake_extra_flags.
+          # -j$(nproc): ninja's default job count can undercount CPUs visible
+          # to a container on a shared runner; pin it explicitly since this
+          # target is almost entirely parallel per-file analysis.
+          ninja -C build -k 0 -j$(nproc) analyze
 
       # The wrapper is off in every configuration here, and off has to mean
       # invisible: a harness that leaked into the default build would otherwise be

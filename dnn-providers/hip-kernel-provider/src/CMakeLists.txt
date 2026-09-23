@@ -10,6 +10,8 @@ add_library(
     core/Utils.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp
+    utilities/Digest.cpp
+    utilities/sha256.cpp
 )
 
 add_subdirectory(engines)
@@ -20,6 +22,7 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/engines/
 )
+
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
@@ -32,7 +35,9 @@ clang_tidy_check(hip_kernel_provider_impl)
 add_clang_tidy_custom_target()
 
 # Static library for unit tests to link against (provides access to internal implementation)
-add_library(hip_kernel_provider_private STATIC $<TARGET_OBJECTS:hip_kernel_provider_impl>)
+add_library(hip_kernel_provider_private STATIC
+    $<TARGET_OBJECTS:hip_kernel_provider_impl>
+)
 target_include_directories(hip_kernel_provider_private PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/include
@@ -103,7 +108,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
-add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
+add_library(hip_kernel_provider SHARED
+    $<TARGET_OBJECTS:hip_kernel_provider_impl>
+)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)

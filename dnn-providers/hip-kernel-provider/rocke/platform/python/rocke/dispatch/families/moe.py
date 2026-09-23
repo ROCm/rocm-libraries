@@ -66,6 +66,7 @@ from ..core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 
 _FAMILY = "moe_fused_mega"
@@ -149,16 +150,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     except KeyError as e:
         errors.append(str(e))
     return errors
-
-
-def _selector_matches(req: MoeRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
 
 
 # gfx942 (CDNA3) departures from the shipped gfx950 geometry. Neither is a
@@ -265,7 +256,7 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, MoeRequest)
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         # Gate on the spec this candidate would actually return, not on a
