@@ -94,9 +94,7 @@
 #
 # A claim only applies to the arch and platform the run is on, and a runner with no
 # device reports no arch, so no claim applies and nothing is enforced. A GPU lane
-# enforces the claims for its own arch; a CPU-only lane sees no change. Measured locally
-# on gfx942 against MIOPEN_ENGINE before flipping it: 5504 claim-bearing graphs queried,
-# 0 broken, 0 errored.
+# enforces the claims for its own arch; a CPU-only lane sees no change.
 #
 # Sidecars are git-tracked, so this does not wait on `dvc pull`; DVC carries the tensor
 # payloads, which claim checking never reads.
