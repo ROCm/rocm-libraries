@@ -118,9 +118,9 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
 
     * - | ``TENSILE_STREAMK_DATA_PARALLEL``
         | Runs Stream-K kernels in data-parallel mode.
-      - | Unset or 0: Use the ``StreamKDataParallel`` value each solution declares in its library-logic file. Solutions that do not declare it run Stream-K normally.
-        | Non-zero: Enable data-parallel mode for every Stream-K solution, including those that do not declare it.
-        | For a solution that declares ``StreamKDataParallel: 1``, this variable cannot turn data-parallel mode off. Set the key to ``0`` in the logic file and rebuild the device library instead.
+      - | Unset or 0: Stream-K kernels run normally.
+        | Non-zero: Enable data-parallel mode for every Stream-K solution.
+        | This is a debug override with no per-device default. To make a solution run data-parallel without setting this variable, declare ``StreamKForceDPOnly: 1`` on it in the library-logic file and rebuild the device library.
 
     * - | ``TENSILE_GRIDBASED_KDTREE``
         | Indexes grid-based solution-selection tables with a k-d tree instead of a linear scan.

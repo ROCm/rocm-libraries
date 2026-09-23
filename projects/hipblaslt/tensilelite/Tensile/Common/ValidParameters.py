@@ -927,14 +927,6 @@ validParameters = { # we need to make sure this matches develop
     # The invariant is no partial output tile fixup and no SK-region processing.
     # Valid only with DP-first, non-atomic StreamK mode 3.
     "StreamKForceDPOnly": [0, 1],
-    # Host-side dispatch only: suppresses the partial-tile workspace reservation so
-    # the launch falls through to pure data-parallel. Distinct from
-    # StreamKForceDPOnly, which is a codegen parameter -- this one never reaches
-    # KernelWriter, so it is deliberately excluded from kernel naming (Naming.py)
-    # and two solutions differing only in it share one code object. Only meaningful
-    # on a StreamK solution; inert (not rejected) elsewhere. Overridable at runtime
-    # by TENSILE_STREAMK_DATA_PARALLEL.
-    "StreamKDataParallel": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles

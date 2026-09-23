@@ -348,11 +348,6 @@ namespace TensileLite
         int    magicDivAlg                = 1;
         int    streamK                    = 0;
         int    streamKForceDPOnly         = 0;
-        // Host-side only: suppresses the partial-tile workspace reservation so the launch
-        // falls through to pure data-parallel. Unlike streamKForceDPOnly it is not a
-        // compile-time kernel parameter, so a logic file may set it without the host
-        // descriptor and the compiled code object disagreeing.
-        int    streamKDataParallel        = 0;
         int    streamKAtomic              = 0;
         int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
@@ -653,15 +648,13 @@ namespace TensileLite
         // --- DP-only ---
         // The three flags below distinguish the source of a data-parallel-only launch:
         //   forceDPOnly              -> sizeMapping.streamKForceDPOnly compile-time param
-        //   streamKDP                -> DP mode: declared by sizeMapping.streamKDataParallel;
-        //                               TENSILE_STREAMK_DATA_PARALLEL overrides either way
+        //   streamKDP                -> DP mode: TENSILE_STREAMK_DATA_PARALLEL debug override
         //   workspaceDPFallbackFired -> runtime workspace-insufficient (below)
         // recomputed: OR of the three DP triggers above.
         bool dpOnly      = false;
         // available: sizeMapping.streamKForceDPOnly param.
         bool forceDPOnly = false;
-        // available: useStreamKDP() (sizeMapping.streamKDataParallel,
-        //            TENSILE_STREAMK_DATA_PARALLEL override).
+        // available: useStreamKDP() (TENSILE_STREAMK_DATA_PARALLEL override).
         bool streamKDP   = false;
 
         // --- Workspace / partials ---

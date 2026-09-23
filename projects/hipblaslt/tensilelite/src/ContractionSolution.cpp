@@ -5384,17 +5384,12 @@ namespace TensileLite
 
     namespace
     {
-        /// StreamK data-parallel: declared per solution by the logic file
-        /// (`StreamKDataParallel`). TENSILE_STREAMK_DATA_PARALLEL can only add -- it turns
-        /// DP on for every solution, and never off for one that asked for it.
-        ///
-        /// Solution-scoped rather than device-scoped: whether suppressing the partial-tile
-        /// workspace pays is a property of the kernel and its tuned sizes, not of the part
-        /// it runs on, and a tuned logic file is where that is already recorded.
-        bool useStreamKDP(SizeMapping const& sizeMapping)
+        /// StreamK data-parallel: debug override only (TENSILE_STREAMK_DATA_PARALLEL).
+        /// There is no in-code arch default -- a logic file that wants a pure
+        /// data-parallel launch declares StreamKForceDPOnly on the solution instead.
+        bool useStreamKDP()
         {
-            return sizeMapping.streamKDataParallel != 0
-                   || Debug::Instance().useStreamKDataParrallel();
+            return Debug::Instance().useStreamKDataParrallel();
         }
     } // namespace
 
@@ -5442,7 +5437,7 @@ namespace TensileLite
                           << "setting GSU to 1." << std::endl;
                 gsu = 1;
             }
-            const bool streamKDP = useStreamKDP(sizeMapping);
+            const bool streamKDP = useStreamKDP();
             const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
             size_t tiles = 0;
             if (useLegacyWorkspaceLogic)
@@ -5963,7 +5958,7 @@ namespace TensileLite
         // below so that fallback sees the reduction the launch will use.
         sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
 
-        const bool streamKDP   = useStreamKDP(sizeMapping);
+        const bool streamKDP   = useStreamKDP();
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
@@ -7020,7 +7015,7 @@ namespace TensileLite
         // the grid lands on a splitting factor below 2 with parallel selected.
         reduction = streamKReconcileReduction(reduction, grid, tiles);
 
-        const bool streamKDP   = useStreamKDP(sizeMapping);
+        const bool streamKDP   = useStreamKDP();
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
         d.streamKDP            = streamKDP;
         d.forceDPOnly          = forceDPOnly;
@@ -7166,7 +7161,7 @@ namespace TensileLite
         if(d.forceDPOnly)
             dpOnlySource = "forceDPOnly(param)";
         else if(d.streamKDP)
-            dpOnlySource = "streamKDP(solution|env)";
+            dpOnlySource = "streamKDP(env)";
         else if(d.workspaceDPFallbackFired)
             dpOnlySource = "workspaceDP(runtime)";
 

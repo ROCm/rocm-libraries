@@ -217,12 +217,6 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
-  # StreamKDataParallel is a host-side dispatch flag: it suppresses a workspace
-  # reservation and never reaches codegen, so two solutions differing only in it
-  # compile to the same code object. Naming it would split one kernel into two and
-  # desync the host descriptor from the built device library.
-  requiredParametersTemp.discard("StreamKDataParallel")
-
   # TDMFuse=0 is the arrangement every shipped kernel already has, so naming it
   # would rename all of them.
   if state.get("TDMFuse", 0):
