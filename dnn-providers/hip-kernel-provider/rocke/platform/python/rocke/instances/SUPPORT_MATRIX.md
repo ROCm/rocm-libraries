@@ -88,6 +88,7 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 | `unified_attention_2d` | ✅ | ✅ | ✅ | scalar (no matrix core) |
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
+| `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV with in-loop latent expansion. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |
 
 ---
 
