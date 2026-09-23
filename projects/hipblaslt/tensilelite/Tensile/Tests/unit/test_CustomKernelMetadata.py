@@ -734,7 +734,8 @@ def test_build_from_metadata_no_args_raises():
 def test_build_from_metadata_streamk_batched_grid():
     ck = _buildCustomKernelFromMetadata(
         "k", _kernel_yaml([_D_ARG]),
-        {"MatrixInstruction": [16, 16, 16, 1], "StreamK": 2, "ProblemType": {"Batched": True}},
+        {"MatrixInstruction": [16, 16, 16, 1], "TileProcessingStrategy": "StreamK",
+         "WorkAssignment": "StaticGrid", "ProblemType": {"Batched": True}},
     )
     assert ck["grid"][0] == "StreamKWithBatch"
 

@@ -174,7 +174,7 @@ def _min_state(swp, isa, streamk):
         "ScheduleIterAlg": 0,
         "SwInstructionPrefetch": swp,
         "ISA": isa,
-        "StreamK": streamk,
+        "TileProcessingStrategy": "StreamK" if streamk else "None",
     }
 
 

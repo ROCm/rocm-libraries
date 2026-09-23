@@ -95,8 +95,10 @@ def minimal_size_mapping_state():
 
 def test_streamk_force_dp_only_is_valid_tuning_parameter():
     assert validParameters["StreamKForceDPOnly"] == [0, 1]
-    assert defaultSolution["StreamKForceDPOnly"] == 0
-    assert "StreamKForceDPOnly" in getRequiredParametersMin()
+    assert "StreamKForceDPOnly" not in defaultSolution
+    assert defaultSolution["TileProcessingStrategy"] == "None"
+    assert "StreamKForceDPOnly" not in getRequiredParametersMin()
+    assert "TileProcessingStrategy" in getRequiredParametersMin()
 
 
 def test_streamk_force_dp_only_type_is_checked_as_int():
@@ -108,8 +110,10 @@ def test_streamk_force_dp_only_defaults_in_size_mapping():
     state = minimal_size_mapping_state()
     size_mapping = SizeMapping.FromOriginalState(state)
 
-    assert "streamKForceDPOnly" in SizeMapping.StateKeys
-    assert size_mapping.streamKForceDPOnly == 0
+    assert "streamKForceDPOnly" not in SizeMapping.StateKeys
+    assert "tileProcessingStrategy" in SizeMapping.StateKeys
+    assert size_mapping.tileProcessingStrategy == "StreamK"
+    assert size_mapping.workAssignment == "StaticGrid"
 
 
 def test_streamk_force_dp_only_round_trips_to_size_mapping():
@@ -118,7 +122,8 @@ def test_streamk_force_dp_only_round_trips_to_size_mapping():
 
     size_mapping = SizeMapping.FromOriginalState(state)
 
-    assert size_mapping.streamKForceDPOnly == 1
+    assert size_mapping.tileProcessingStrategy == "DataParallel"
+    assert size_mapping.workAssignment == "StaticGrid"
 
 
 def test_streamk_force_dp_only_requires_streamk3():

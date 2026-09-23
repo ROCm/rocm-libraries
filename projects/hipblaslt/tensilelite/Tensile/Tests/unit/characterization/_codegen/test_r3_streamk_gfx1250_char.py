@@ -10,21 +10,21 @@ Exercises arch-specific and VGPR-constant paths in
 on ISA=(12,5,0) or arch-caps that only exist on gfx1250:
 
 Target missing ranges (methodology-A):
-  78-79   XCCMappingOn non-power-of-2 branch (StreamKXCCMapping=3, divisor&(divisor-1)!=0)
+  78-79   XCCMappingOn non-power-of-2 branch (PersistentXCCMapping=3, divisor&(divisor-1)!=0)
   141-153 StreamKMemoryOrdering.preVolatileVmem (RequiresXCntForVolatileVMEM=1, gfx1250)
   202-203 StreamKMemoryOrderingDefault.flagBufferMubuf
   206-246 StreamKMemoryOrderingDevScopeFences (HasInvWbDevFences=True)
   276-287 StreamK.shiftSrd for gfx125x (version[:2]==(12,5))
-  315-318 computeTotalIters VReadfirstlane path (isStreamKConstantsToVgprEnabled=True)
+  315-318 computeTotalIters VReadfirstlane path (isPersistentConstantsToVgprEnabled=True)
   342-344 skTileIndex VReadfirstlane paths
   392-409 skExtraIters with skConstsInVgprs=True
 
-gfx1250 triggers ``isStreamKConstantsToVgprEnabled=True`` only for StreamK=3
+gfx1250 triggers ``isPersistentConstantsToVgprEnabled=True`` only for StreamK=3
 (``keepsConstantsInSgpr=False``); modes 4 and 5 suppress it. This inserts
 VReadfirstlane to move StreamK constants from SGPRs to VGPRs, covering the
 branches guarded by that condition throughout StreamK.py.
 
-``StreamKXCCMapping=3`` (non-power-of-2) exercises the ``XCCMappingOn.__call__``
+``PersistentXCCMapping=3`` (non-power-of-2) exercises the ``XCCMappingOn.__call__``
 branch that allocates extra temp SGPRs for non-power-of-2 divisors (lines 78-79).
 
 CPU-only: no GPU required. The emit harness instantiates rocisa and runs

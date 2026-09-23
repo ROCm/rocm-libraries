@@ -23,6 +23,7 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
+from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
@@ -720,10 +721,8 @@ def parseLibraryLogicData(
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
-        # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
-        for key, val in libDefaults.items():
-            if key not in solutionState:
-                solutionState[key] = val
+        # Normalize before global defaults can look like explicit selectors.
+        solutionState = normalize_execution_policy_with_defaults(solutionState, libDefaults)
         for key, val in defaultSolution.items():
             if key not in solutionState:
                 solutionState[key] = val
@@ -757,8 +756,7 @@ def parseLibraryLogicData(
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")
                 return None
-            for key, value in customConfig.items():
-                solutionState[key] = value
+            solutionState = normalize_execution_policy_with_defaults(customConfig, solutionState)
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")

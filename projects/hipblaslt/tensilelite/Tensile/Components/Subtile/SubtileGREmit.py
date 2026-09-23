@@ -16,6 +16,7 @@
 # LR emit lives in a separate file (SubtileLREmit.py).
 ################################################################################
 
+from Tensile.ExecutionPolicy import isDataParallel
 import math
 from functools import singledispatch
 
@@ -1228,7 +1229,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   return mod
 
 
-def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
+def tdmApplyTileKOffsetSubtile(writer, kernel, tP):
   """Apply the StreamK K-offset to the subtile TDM descriptor.
 
   StreamK=3 DP-partial work items have a nonzero StreamKLocalStart and must read
@@ -1243,7 +1244,7 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
   mod = Module(f"TDM StreamK K-offset subtile {tc}")
   # DP-only: StreamKLocalStart == 0, so the K-start offset is 0 and this is a
   # no-op. StreamKLocalStart is not allocated in DP-only mode.
-  if kernel["StreamKForceDPOnly"]:
+  if isDataParallel(kernel):
     return mod
   with writer.allocTmpSgpr(2, alignment=2, tag="tdmSkOffset") as tmpSgprRes:
     o = tmpSgprRes.idx

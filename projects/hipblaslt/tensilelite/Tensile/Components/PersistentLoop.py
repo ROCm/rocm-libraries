@@ -20,6 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from Tensile.ExecutionPolicy import isPersistent
 from math import ceil, log2
 
 from rocisa.code import Module, Label
@@ -53,7 +54,7 @@ class PersistentLoop(Component):
 
 
 class PersistentLoopOff(PersistentLoop):
-    kernel = {"StreamK": 0}
+    kernel = {"TileProcessingStrategy": "None"}
 
     def openPersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop Off openPersistentLoop")
@@ -77,7 +78,7 @@ class PersistentLoopOn(PersistentLoop):
 
     @classmethod
     def matches(cls, writer, debug=False):
-        return writer.states.kernel["StreamK"] > 0
+        return isPersistent(writer.states.kernel)
 
     def openPersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop On openPersistentLoop")
@@ -133,7 +134,7 @@ class PersistentLoopOn(PersistentLoop):
         # Backup is not needed for stream-k since LRA is recalculated at the start of the persistent loop for the new tile or partial tile.
         # Enabling the backup code would require fixing an interaction with the code that reallocates vgprs for the store code.
 
-        # needBackupLRAddr = needRecalc or (kernel["LdsPadA"] and kernel["LdsBlockSizePerPadA"] or kernel["LdsPadB"] and kernel["LdsBlockSizePerPadB"]) and kernel["StreamK"] == 0
+        # needBackupLRAddr = needRecalc or (kernel["LdsPadA"] and kernel["LdsBlockSizePerPadA"] or kernel["LdsPadB"] and kernel["LdsBlockSizePerPadB"]) and not isPersistent(kernel)
 
         # if needBackupLRAddr:
         #     # need to back-up the LRA before reCalculation for wider local read (when no wlr, no need to do this)
@@ -147,48 +148,11 @@ class PersistentLoopOn(PersistentLoop):
         return module
 
     def closePersistentLoop(self, writer, kernel):
-        module = Module("PersistentLoop On closePersistentLoop")
-        skCloseLoopLabel = Label("SK_CloseLoop", "")
-        module.add(skCloseLoopLabel)
+        module = Module("PersistentLoop closePersistentLoop")
+        module.add(Label("PersistentLoopClose", ""))
         if kernel.get("DebugPersistentKernelLoopForever", False):
-            # StreamK 3 has no other exit, so this makes the kernel loop infinitely.
-            with writer.allocTmpSgpr(3, tag="PersistentLoopOn_closePersistentLoop_tmpSgprInfo") as tmpSgprInfo:
-                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
-        elif kernel["StreamK"] == 4:
-            # module.add(SCmpGeU32(src0=sgpr("StreamKTileIdx"), src1=sgpr("SKTiles"), comment="Check if done all StreamK tiles"))
-            module.add(SBarrier(comment="Sync before SK4 persistent re-entry"))
-            with writer.allocTmpSgpr(3, tag="PersistentLoopOn_closePersistentLoop_tmpSgprInfo2") as tmpSgprInfo:
-                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
-        elif kernel["StreamK"] == 5:
-            # Hybrid SK3+SK4: dispatch on the runtime mode bit captured at
-            # preLoop into StreamKHybridMode. SK4 close: barrier + always
-            # restart (dynamic queue drives exit via KernelEnd). SK3 close:
-            # compare StreamKIter against StreamKIterEnd.
-            sk5DynamicCloseLabel = Label("SK5_DynamicClose", "")
-            sk5StaticCloseLabel = Label("SK5_StaticClose", "")
-            sk5CloseDoneLabel = Label("SK5_CloseDone", "")
-            module.add(SCmpEQU32(src0=sgpr("StreamKHybridMode"), src1=0,
-                                 comment="SK5: mode bit == 0 -> SK3 (static) close"))
-            module.add(SCBranchSCC0(labelName=sk5DynamicCloseLabel.getLabelName(),
-                                    comment="SK5: branch to SK4 (dynamic) close"))
-            # SK3 (static) close path
-            module.add(sk5StaticCloseLabel)
-            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"),
-                                 comment="SK5/SK3 path: check if done all StreamK iterations"))
-            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
-            module.add(SBranch(labelName=sk5CloseDoneLabel.getLabelName(),
-                               comment="SK5: skip dynamic close"))
-            # SK4 (dynamic) close path
-            module.add(sk5DynamicCloseLabel)
-            module.add(SBarrier(comment="SK5/SK4 path: sync before persistent re-entry"))
-            with writer.allocTmpSgpr(3) as tmpSgprInfo:
-                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
-            module.add(sk5CloseDoneLabel)
+            with writer.allocTmpSgpr(3, tag="PersistentLoop_close") as tmp:
+                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmp))
         else:
-            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
-            # Under RAP the compute section is peeled, so later tiles re-enter at
-            # the second copy rather than at the loop head; the first copy exists
-            # only to fill the resident registers. Both this branch and the peel
-            # itself read one predicate so they cannot disagree.
-            module.add(writer.longBranchScc0(Label(writer.rapPersistentLoopEntryLabel(kernel), ""), posNeg=-1))
+            module.add(Component.WorkAssignment.find(writer).closeLoop(writer, kernel))
         return module

@@ -42,7 +42,8 @@ def _ck_state(**over):
             "workspaceSizePerElemC": 0,
             "workspaceSizePerElemBias": 0,
         },
-        "StreamK": 0,
+        "TileProcessingStrategy": "None",
+        "WorkAssignment": "StaticGrid",
         "StreamKAtomic": 0,
         "GlobalSplitUAlgorithm": "",
         "ProblemType": problem_type,
@@ -106,7 +107,7 @@ def test_assign_custom_kernel_params_direct_to_lds(dtl, expect_a, expect_b):
 
 
 def test_assign_custom_kernel_params_streamk_partials_accumulation():
-    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
     Solution._assignCustomKernelParameters(state)
     assert state["_GlobalAccumulation"] == "PartialsBuffer"
 
