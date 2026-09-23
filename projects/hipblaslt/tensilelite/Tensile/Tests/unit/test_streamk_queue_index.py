@@ -28,7 +28,7 @@ Invariants pinned (see per-test notes):
   * Both dynamic auto-WGM and SKXCC (WGMXCC>1) queue indices are
     ``StreamKTileIdx & (numQueues-1)`` -- a single mask of the raw-rank carrier,
     never the post-remap PersistentWorkGroupIndex shifts.
-  * Both SK4 and SK5 route their queue index through the shared ``_emitQueueIndex``.
+  * Both SK4 and SK5 route their queue index through the shared ``emitQueueIndex``.
   * The raw-rank snapshot ``s_mov_b32 StreamKTileIdx, WorkGroup0`` is emitted
     BEFORE the wgmXCC workgroup remap.
   * The reused carrier costs ZERO additional persistent SGPRs: ``StreamKQueue``
@@ -56,12 +56,7 @@ from rocisa.instruction import (
 )
 
 from Tensile.KernelWriter import KernelWriter
-from Tensile.Components.StreamK import (
-    StreamK,
-    StreamKDynamic,
-    StreamKHybrid,
-    StreamKTwoTileDPFirst,
-)
+from Tensile.Components.WorkAssignment import WorkAssignment, DynamicWorkQueue, Hybrid
 
 
 pytestmark = pytest.mark.unit
@@ -70,7 +65,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Fakes: just enough of a "writer" for the standalone helper methods.
 #
-# _emitQueueIndex / usesRawQueueRank only touch writer.sgprPool (checkOut) and
+# emitQueueIndex / usesRawQueueRank only touch writer.sgprPool (checkOut) and
 # writer.states.archCaps, so a tiny monotonic pool plus a SimpleNamespace of the
 # per-arch caps is all that is required -- no KernelWriter, no GPU.
 # ---------------------------------------------------------------------------
@@ -135,13 +130,15 @@ def _imm_in(inst, value: int) -> bool:
 
 def _emit_queue_index(streamk: int, wgmXCC: int, skxcc: int = 0,
                       workGroupIdFromTTM: bool = False, numXCD: int = 8) -> list:
-    """Render the shared ``_emitQueueIndex`` for a StreamK variant."""
-    inst = {3: StreamKTwoTileDPFirst, 4: StreamKDynamic, 5: StreamKHybrid}[streamk]()
+    """Render the shared ``emitQueueIndex`` for a StreamK variant."""
+    inst = {4: DynamicWorkQueue, 5: Hybrid}[streamk]()
     writer = _FakeWriter(numXCD=numXCD, workGroupIdFromTTM=workGroupIdFromTTM)
     kernel = _kernel(streamk=streamk, wgmXCC=wgmXCC, skxcc=skxcc)
+    writer.states.kernel = {"TileProcessingStrategy": "StreamK",
+                            "WorkAssignment": "Hybrid" if streamk == 5 else "DynamicWorkQueue"}
     sQueueIdx = writer.sgprPool.checkOut(1, "QueueIdx")
     wsLog2Queues = 3  # log2(8)
-    module = inst._emitQueueIndex(writer, kernel, sQueueIdx, wsLog2Queues)
+    module = inst.emitQueueIndex(writer, kernel, sQueueIdx, wsLog2Queues)
     return _flat(module)
 
 
@@ -243,12 +240,12 @@ class TestCountPreservingFallback:
 
 
 # ===========================================================================
-# 3. Scoping predicate: usesRawQueueRank / skUsesRawQueueRank are True only on
+# 3. Scoping predicate: usesRawQueueRank / usesRawQueueRank are True only on
 #    the raw-rank regimes (NumXCD > 1, not WorkGroupIdFromTTM, StreamK in (4,5))
 #    for either WGMXCC == -1 or (PersistentXCCMapping != 0 and WGMXCC > 1).
 # ===========================================================================
 class _FakeKW:
-    """Minimal stand-in for the KernelWriter self used by skUsesRawQueueRank."""
+    """Minimal stand-in for the KernelWriter self used by usesRawQueueRank."""
 
     def __init__(self, numXCD=8, workGroupIdFromTTM=False):
         self.states = types.SimpleNamespace(
@@ -257,61 +254,61 @@ class _FakeKW:
 
 class TestUsesRawQueueRankScoping:
     def test_true_for_dynamic_auto_wgm(self):
-        assert StreamK.usesRawQueueRank(_FakeWriter(), _kernel(wgmXCC=-1)) is True
+        assert WorkAssignment.usesRawQueueRank(_FakeWriter(), _kernel(wgmXCC=-1)) is True
 
     @pytest.mark.parametrize("wgmXCC", [2, 4, 8])
     def test_true_for_skxcc_fixed_wgmxcc_gt1(self, wgmXCC):
-        assert StreamK.usesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeWriter(), _kernel(wgmXCC=wgmXCC, skxcc=4)) is True
 
     @pytest.mark.parametrize("wgmXCC", [1, 2, 4])
     def test_false_for_fixed_wgmxcc_without_skxcc(self, wgmXCC):
-        assert StreamK.usesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeWriter(), _kernel(wgmXCC=wgmXCC, skxcc=0)) is False
 
     def test_false_for_skxcc_wgmxcc1(self):
         # SKXCC with WGMXCC == 1 is already count-preserving -> cheap else-branch.
-        assert StreamK.usesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeWriter(), _kernel(wgmXCC=1, skxcc=4)) is False
 
     def test_false_for_single_xcd(self):
         w = _FakeWriter(numXCD=1)
-        assert StreamK.usesRawQueueRank(w, _kernel(wgmXCC=-1)) is False
-        assert StreamK.usesRawQueueRank(w, _kernel(wgmXCC=8, skxcc=8)) is False
+        assert WorkAssignment.usesRawQueueRank(w, _kernel(wgmXCC=-1)) is False
+        assert WorkAssignment.usesRawQueueRank(w, _kernel(wgmXCC=8, skxcc=8)) is False
 
     def test_false_for_workgroupidfromttm(self):
         w = _FakeWriter(workGroupIdFromTTM=True)
-        assert StreamK.usesRawQueueRank(w, _kernel(wgmXCC=-1)) is False
-        assert StreamK.usesRawQueueRank(w, _kernel(wgmXCC=8, skxcc=8)) is False
+        assert WorkAssignment.usesRawQueueRank(w, _kernel(wgmXCC=-1)) is False
+        assert WorkAssignment.usesRawQueueRank(w, _kernel(wgmXCC=8, skxcc=8)) is False
 
     @pytest.mark.parametrize("streamk", [4, 5])
     def test_kw_predicate_true_for_dynamic_streamk(self, streamk):
-        assert KernelWriter.skUsesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeKW(), _kernel(streamk=streamk, wgmXCC=-1)) is True
 
     @pytest.mark.parametrize("streamk", [4, 5])
     def test_kw_predicate_true_for_skxcc_wgmxcc_gt1(self, streamk):
-        assert KernelWriter.skUsesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeKW(), _kernel(streamk=streamk, wgmXCC=8, skxcc=8)) is True
 
     @pytest.mark.parametrize("streamk", [0, 3])
     def test_kw_predicate_false_for_non_dynamic_streamk(self, streamk):
         # Only the SK4/SK5 dynamic-queue variants use the raw-rank carrier.
-        assert KernelWriter.skUsesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeKW(), _kernel(streamk=streamk, wgmXCC=-1)) is False
-        assert KernelWriter.skUsesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeKW(), _kernel(streamk=streamk, wgmXCC=8, skxcc=8)) is False
 
     @pytest.mark.parametrize("streamk", [4, 5])
     def test_kw_predicate_false_for_fixed_wgmxcc_without_skxcc(self, streamk):
-        assert KernelWriter.skUsesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeKW(), _kernel(streamk=streamk, wgmXCC=1)) is False
-        assert KernelWriter.skUsesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeKW(), _kernel(streamk=streamk, wgmXCC=2, skxcc=0)) is False
 
     @pytest.mark.parametrize("streamk", [4, 5])
     def test_kw_predicate_false_for_skxcc_wgmxcc1(self, streamk):
-        assert KernelWriter.skUsesRawQueueRank(
+        assert WorkAssignment.usesRawQueueRank(
             _FakeKW(), _kernel(streamk=streamk, wgmXCC=1, skxcc=4)) is False
 
 
@@ -333,12 +330,12 @@ def _is_sk_raw_rank_guard(test) -> bool:
     return (
         isinstance(test, ast.Call)
         and isinstance(test.func, ast.Attribute)
-        and test.func.attr == "skUsesRawQueueRank"
+        and test.func.attr == "usesRawQueueRank"
     )
 
 
 # ===========================================================================
-# 4. Both dynamic fetch helpers route through the shared _emitQueueIndex,
+# 4. Both dynamic fetch helpers route through the shared emitQueueIndex,
 #    rather than each inlining its own PersistentWorkGroupIndex shift/shift/sub derivation.
 #    graWorkGroup must call the helper (PAP pop-once) and must not re-inline
 #    the queue pop.
@@ -346,30 +343,30 @@ def _is_sk_raw_rank_guard(test) -> bool:
 class TestSharedHelperRouting:
     @pytest.mark.parametrize(
         "func",
-        [StreamKDynamic._fetchWorkItemAndBroadcast, StreamKHybrid._fetchWorkItemAndBroadcast],
+        [DynamicWorkQueue.fetchAndBroadcast, Hybrid.fetchAndBroadcast],
     )
     def test_fetch_uses_shared_queue_index_helper(self, func):
-        assert "_emitQueueIndex" in _source_of(func), (
-            "both SK4 and SK5 must derive the queue index via _emitQueueIndex"
+        assert "emitQueueIndex" in _source_of(func), (
+            "both SK4 and SK5 must derive the queue index via emitQueueIndex"
         )
 
     @pytest.mark.parametrize(
-        "func", [StreamKDynamic.graWorkGroup, StreamKHybrid.graWorkGroup]
+        "func", [DynamicWorkQueue.acquireQueueItem, Hybrid.acquireQueueItem]
     )
     def test_grawg_routes_queue_pop_through_fetch_helper(self, func):
         src = _source_of(func)
-        assert "_fetchWorkItemAndBroadcast" in src, (
-            "PAP-extracted pop must stay in _fetchWorkItemAndBroadcast; "
+        assert "fetchAndBroadcast" in src, (
+            "PAP-extracted pop must stay in fetchAndBroadcast; "
             "graWorkGroup must not inline the queue pop"
         )
-        assert "_emitQueueIndex" not in src, (
+        assert "emitQueueIndex" not in src, (
             "queue-index math belongs in the fetch helper, not graWorkGroup"
         )
 
 
 # ===========================================================================
 # 5. The raw-rank snapshot is emitted BEFORE wgmXCC rewrites WorkGroup0, and
-#    only under the skUsesRawQueueRank guard, into the reused StreamKTileIdx
+#    only under the usesRawQueueRank guard, into the reused StreamKTileIdx
 #    carrier. Verified against the real KernelWriterAssembly.defineAndResources
 #    source.
 # ===========================================================================
@@ -400,7 +397,7 @@ class TestSnapshotBeforeWgmXcc:
         )
 
     def test_snapshot_is_guarded_by_predicate(self):
-        # The snapshot must sit inside `if self.skUsesRawQueueRank(kernel):`.
+        # The snapshot must sit inside `if Component.WorkAssignment.usesRawQueueRank(self, kernel):`.
         tree = ast.parse(textwrap.dedent(self._src()))
         guarded = False
         for node in ast.walk(tree):
@@ -408,7 +405,7 @@ class TestSnapshotBeforeWgmXcc:
                 if _mentions_const(node, _CARRIER):
                     guarded = True
         assert guarded, (
-            "the carrier snapshot must be gated by skUsesRawQueueRank"
+            "the carrier snapshot must be gated by usesRawQueueRank"
         )
 
 
@@ -420,41 +417,29 @@ class TestSnapshotBeforeWgmXcc:
 #    net persistent SGPR and cannot regress the SGPR-overflow ceiling.
 # ===========================================================================
 class TestZeroSgprCarrierReuse:
-    def _init_src(self) -> str:
-        return _source_of(KernelWriter._initKernel)
-
-    def _list_literals_with(self, value: str) -> int:
-        """Count list literals (e.g. requiredUnalignedSgprVar += [...]) that
-        include *value* as a string element, across the _initKernel source."""
-        tree = ast.parse(textwrap.dedent(self._init_src()))
-        count = 0
-        for node in ast.walk(tree):
-            if isinstance(node, ast.List) and any(
-                isinstance(e, ast.Constant) and e.value == value
-                for e in node.elts
-            ):
-                count += 1
-        return count
+    def _allocated(self, assignment):
+        kernel = {"TileProcessingStrategy": "StreamK", "WorkAssignment": assignment,
+                  "StreamKAtomic": 0, "SpaceFillingAlgo": [], "WorkQueueStealing": 1}
+        writer = types.SimpleNamespace(
+            states=types.SimpleNamespace(kernel=kernel),
+            isPrefetchAcrossPersistentEnabled=lambda kernel: False)
+        unaligned, aligned = [], []
+        instance = {"DynamicWorkQueue": DynamicWorkQueue, "Hybrid": Hybrid}[assignment]()
+        instance.registerRequirements(writer, kernel, unaligned, aligned)
+        return unaligned + aligned
 
     def test_streamkqueue_sgpr_is_gone(self):
-        # No StreamKQueue anywhere in the SGPR declaration source: neither an
-        # append nor a list-literal element.
-        src = self._init_src()
-        assert '"StreamKQueue"' not in src and "'StreamKQueue'" not in src, (
-            "the dedicated StreamKQueue SGPR must be removed (zero-SGPR reuse)"
-        )
+        for assignment in ("DynamicWorkQueue", "Hybrid"):
+            assert "StreamKQueue" not in self._allocated(assignment)
 
     def test_carrier_is_already_allocated_for_both_variants(self):
-        # StreamKTileIdx is declared in both the SK4 and SK5 blocks (>= 2 list
-        # literals), so the raw-rank snapshot reuses an existing slot for free.
-        assert self._list_literals_with(_CARRIER) >= 2, (
-            "%s must be an already-allocated persistent slot for SK4 and SK5" % _CARRIER
-        )
+        for assignment in ("DynamicWorkQueue", "Hybrid"):
+            assert self._allocated(assignment).count(_CARRIER) == 1
 
     def test_no_streamkqueue_append_remains(self):
         # Belt-and-suspenders AST check: no requiredUnalignedSgprVar.append(
         # "StreamKQueue") survives anywhere.
-        tree = ast.parse(textwrap.dedent(self._init_src()))
+        tree = ast.parse(textwrap.dedent(_source_of(KernelWriter._initKernel)))
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)

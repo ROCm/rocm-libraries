@@ -27,6 +27,7 @@ from types import SimpleNamespace
 import pytest
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from Tensile.Components.PersistentLoop import PersistentKernelState
 
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
@@ -67,8 +68,8 @@ def test_rap_name_abbreviation_is_unique():
 
 # ---------------------------------------------------------------------------
 # Codegen gating. Emitters read kernel["ReuseAcrossPersistent"] directly, the
-# way they read kernel["HalfPLR"], so RAP has no codegen predicate. PAP keeps
-# one, and RAP has to appear in it.
+# way they read kernel["HalfPLR"], so RAP has no codegen predicate. PAP consumes
+# its validated capability through the shared persistent state owner.
 # ---------------------------------------------------------------------------
 def test_rap_has_no_codegen_predicate_to_disagree_with_derivation():
     """Two places deciding whether RAP is on is one too many.
@@ -103,7 +104,8 @@ def _codegenKernel(**overrides):
 def _papEnabled(**overrides):
     from Tensile.KernelWriter import KernelWriter
 
-    return KernelWriter.isPrefetchAcrossPersistentEnabled(
+    assert issubclass(KernelWriter, PersistentKernelState)
+    return PersistentKernelState.isPrefetchAcrossPersistentEnabled(
         SimpleNamespace(), _codegenKernel(**overrides)
     )
 
