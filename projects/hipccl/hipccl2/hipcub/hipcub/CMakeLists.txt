@@ -67,7 +67,7 @@ rocm_install(
   "include/"
   "${PROJECT_BINARY_DIR}/hipcub/cub/include/"
   COMPONENT devel
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.hpp"
