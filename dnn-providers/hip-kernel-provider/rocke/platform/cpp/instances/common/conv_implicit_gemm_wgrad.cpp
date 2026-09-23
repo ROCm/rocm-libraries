@@ -1955,12 +1955,16 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->kloop_k_lo = k_lo;
     /* Python: slice_k = wg_K if k_hi is None else wg_K_padded() // split_k
      *         K_iters = ceil(slice_k / block_k)
-     * k_hi is None exactly when split_k == 1. */
+     * k_hi is None exactly when split_k == 1.
+     * split_k == 0 (runtime degree): the trip count is unknown at build time;
+     * kloop_simple uses c_K_gemm (the runtime upper bound) directly via
+     * scf_for_iter so kloop_num_iters is not consulted -- leave it 0. */
     {
         const int wgk = rocke_wgrad_conv_spec_wg_K(spec);
-        const int slice_k
-            = (k_hi_v == NULL) ? wgk : (rocke_wgrad_conv_spec_wg_K_padded(spec) / spec->split_k);
-        ctx->kloop_num_iters = (slice_k + ctx->block_k - 1) / ctx->block_k;
+        const int slice_k = (k_hi_v == NULL) ? wgk
+                            : (split_k == 0) ? 0 /* runtime: no static trip count */
+                                             : (rocke_wgrad_conv_spec_wg_K_padded(spec) / split_k);
+        ctx->kloop_num_iters = (slice_k > 0) ? (slice_k + ctx->block_k - 1) / ctx->block_k : 0;
     }
 
     /* Chiplet swizzle */
