@@ -129,6 +129,7 @@ def getRequiredParametersMin() -> set:
         'SpaceFillingAlgo',
         'StorePriorityOpt',
         'StoreRemapVectorWidth',
+        'StoreRemapTensorStore',
         'StoreSyncOpt',
         'StoreVectorWidth',
         'TileProcessingStrategy',

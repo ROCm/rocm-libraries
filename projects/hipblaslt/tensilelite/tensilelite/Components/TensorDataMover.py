@@ -684,6 +684,25 @@ class TensorDataMoverStore:
         mod.add(SMovB32(self._sg(group0, 1), ldsAddr))
         return mod
 
+    def setPadding(self, group1: int | str, ldsBlockSizePerPad: int, ldsPadSize: int) -> Module:
+        """Insert ldsPadSize bytes every ldsBlockSizePerPad bytes while walking LDS.
+
+        Same descriptor field as the load side (TensorDataMoverLoad.setPadding) -- group1+0
+        bit20 enable, bit22 interval, bit25 amount -- and the same encoding helpers. The
+        StoreRemap epilogue uses it to describe its per-row pad (block = MT0*bpe, pad =
+        ldsPad*bpe), which lets the DMA read the padded LDS tile as-is instead of forcing
+        the staging layout to be contiguous.
+        """
+        mod = Module()
+        if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+          mod.addComment("TDM store set padding")
+          pad_interval = TensorDataMoverLoad.calPadInterval(ldsBlockSizePerPad)
+          pad_amount = TensorDataMoverLoad.calPadAmount(ldsPadSize)
+          value = hex((1 << 20) | (pad_interval << 22) | (pad_amount << 25))
+          mod.add(SOrB32(self._sg(group1, 0), self._sg(group1, 0), value,
+                         f"set padding {ldsPadSize} per block {ldsBlockSizePerPad}"))
+        return mod
+
     def setTensorDim0(self, group1: int | str, sgprDim0: int | str, writer: "KernelWriterAssembly") -> Module:
         # tensor_dim0 bit176: group1+1 hi16 + group1+2 lo16
         mod = Module()

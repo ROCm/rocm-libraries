@@ -608,6 +608,7 @@ defaultBenchmarkCommonParameters = [
     {"WaveTransposeStoreTDM": [False]},
     {"TensorStore": [False]},
     {"StoreRemapVectorWidth": [0]},
+    {"StoreRemapTensorStore": [-1]},
     {"SourceSwap": [False]},
     {"UseDualFMAC": [False]},
     {"StorePriorityOpt": [False]},
