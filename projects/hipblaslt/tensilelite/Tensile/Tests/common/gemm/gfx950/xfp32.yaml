@@ -94,7 +94,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         #- TransposeLDS: [1] #0,1
         - StaggerU: [0]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - WorkGroupMapping: [6]
         - DirectToLds: [1]
         - UseSgprForGRO: [0]
@@ -200,7 +201,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         #- TransposeLDS: [1] #0,1
         - StaggerU: [0]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - WorkGroupMapping: [6]
         - DirectToLds: [1]
         - UseSgprForGRO: [0]

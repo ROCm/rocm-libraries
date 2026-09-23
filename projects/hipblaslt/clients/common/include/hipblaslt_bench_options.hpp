@@ -26,6 +26,9 @@ namespace hipblaslt_bench_options
     int32_t&     sm_count_target();
     int32_t&     streamk_tile_scheduling_mode();
     std::string& streamk_tile_scheduling_mode_str();
+    std::string& hybrid_assignment_policy_str();
+    int32_t resolve_hybrid_assignment_policy(std::string const& canonical,
+                                            std::string legacy);
     int32_t&     uniform_summation_order();
     std::string& uniform_summation_order_str();
 }

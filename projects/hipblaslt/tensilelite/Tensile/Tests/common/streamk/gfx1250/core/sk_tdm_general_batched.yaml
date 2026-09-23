@@ -22,7 +22,7 @@ GlobalParameters:
   NumWarmups: 0
   # 0 -> static work assignment, 1 -> dynamic per-XCD work queue. Each base
   # problem is replayed once per value so both sub-paths are validated.
-  StreamKHybridMode: [0, 1]
+  HybridAssignmentPolicy: [Default, DynamicWorkQueue]
   SyncsPerBenchmark: 0
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
@@ -52,8 +52,8 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 2, 2]
         - DepthU: [256]
         - TDMInst: [3]
-        - StreamK: [3, 4, 5]
-        - StreamKForceDPOnly: [0]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid, DynamicWorkQueue, Hybrid]
         - TDMIterateMode: [0]
         - LDSTrInst: [False]
         - StaggerU: [0]

@@ -248,11 +248,11 @@ namespace TensileLite
         int         wavefrontSize            = 64;
         int         simdPerCu                = 4;
         int         computeUnitCount         = 0;
-        int         skDynamicGrid            = 6;
-        int         skDynamicWGM             = 0;
-        int         skMaxCUs                 = 0;
-        int         skGridMultiplier         = 1;
-        int         skFixedGrid              = 0;
+        int         persistentDynamicGrid    = 6;
+        int         persistentDynamicWGM     = 0;
+        int         persistentMaxCUs         = 0;
+        int         persistentGridMultiplier = 1;
+        int         persistentFixedGrid      = 0;
         int         skFullTiles              = 1;
         int         skTiles                  = -1;
         int         skSplit                  = -1;
@@ -285,40 +285,48 @@ namespace TensileLite
 
         virtual std::string description() const override;
 
-        const int getSKDynamicGrid() const
+        const int getPersistentDynamicGrid() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_DYNAMIC_GRID");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_DYNAMIC_GRID") ? std::getenv("TENSILE_PERSISTENT_DYNAMIC_GRID") : std::getenv("TENSILE_STREAMK_DYNAMIC_GRID"));
             static const int   value  = (envStr == NULL ? 6 : std::atoi(envStr));
             return value;
         }
 
-        const int getSKDynamicWGM() const
+        const int getPersistentDynamicWGM() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_DYNAMIC_WGM");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_DYNAMIC_WGM") ? std::getenv("TENSILE_PERSISTENT_DYNAMIC_WGM") : std::getenv("TENSILE_STREAMK_DYNAMIC_WGM"));
             static const int   value  = (envStr == NULL ? 0 : std::atoi(envStr));
             return value;
         }
 
-        const int getSKMaxCUs() const
+        const int getPersistentMaxCUs() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_MAX_CUS");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_MAX_CUS") ? std::getenv("TENSILE_PERSISTENT_MAX_CUS") : std::getenv("TENSILE_STREAMK_MAX_CUS"));
             static const int   value  = (envStr == NULL ? 0 : std::atoi(envStr));
             return value;
         }
 
-        const int getSKGridMultiplier() const
+        const int getPersistentGridMultiplier() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_GRID_MULTIPLIER");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_GRID_MULTIPLIER") ? std::getenv("TENSILE_PERSISTENT_GRID_MULTIPLIER") : std::getenv("TENSILE_STREAMK_GRID_MULTIPLIER"));
             static const int   value  = (envStr == NULL ? 1 : std::atoi(envStr));
             return value;
         }
 
-        const int getSKFixedGrid() const
+        const int getPersistentFixedGrid() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_FIXED_GRID");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_FIXED_GRID") ? std::getenv("TENSILE_PERSISTENT_FIXED_GRID") : std::getenv("TENSILE_STREAMK_FIXED_GRID"));
             static const int   value  = (envStr == NULL ? 0 : std::atoi(envStr));
             return value;
         }
+
+        // Legacy source-level accessors. Shared launch policy uses the
+        // persistent names; old environment spellings are read above only.
+        const int getSKDynamicGrid() const { return getPersistentDynamicGrid(); }
+        const int getSKDynamicWGM() const { return getPersistentDynamicWGM(); }
+        const int getSKMaxCUs() const { return getPersistentMaxCUs(); }
+        const int getSKGridMultiplier() const { return getPersistentGridMultiplier(); }
+        const int getSKFixedGrid() const { return getPersistentFixedGrid(); }
 
         const int getSKFullTiles() const
         {

@@ -20,7 +20,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # SGEMM NT - StreamK Dynamic (SK4) PrefetchAcrossPersistent
+  # SGEMM NT - StreamK Dynamic (StreamK/DynamicWorkQueue) PrefetchAcrossPersistent
   #######################################
   -
     - # ProblemType
@@ -36,7 +36,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [4]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [DynamicWorkQueue]
         - GlobalSplitU: [0]
         - WavefrontSize: [64]
         - DepthU: [16]

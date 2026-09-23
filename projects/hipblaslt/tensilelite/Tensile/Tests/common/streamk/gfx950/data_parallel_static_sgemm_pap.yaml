@@ -56,7 +56,7 @@ BenchmarkProblems:
         - Use64bShadowLimit: [False]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # With TENSILE_STREAMK_FIXED_GRID=7 these cover fewer/equal/more
+          # With TENSILE_PERSISTENT_FIXED_GRID=7 these cover fewer/equal/more
           # tiles than workgroups, a nonmultiple, batches, tails, and zero K.
           - Exact: [128, 128, 1, 16]
           - Exact: [128, 896, 1, 32]

@@ -51,9 +51,10 @@ GlobalParameters:
     # - UseSubtileImpl: [0, 1]
     - Groups:
       - - GlobalSplitU: 0
-          StreamK:      3
+          TileProcessingStrategy: StreamK
+          WorkAssignment: StaticGrid
         - GlobalSplitU: -1
-          StreamK:      0
+          TileProcessingStrategy: "None"
       - - UseCustomMainLoopSchedule: 0
           TailloopInNll: True
         - UseCustomMainLoopSchedule: 1
@@ -98,9 +99,10 @@ GlobalParameters:
     # - UseSubtileImpl: [0, 1]
     - Groups: # GSU and StreamK
       - - GlobalSplitU: 0
-          StreamK:      3
+          TileProcessingStrategy: StreamK
+          WorkAssignment: StaticGrid
         - GlobalSplitU: -1
-          StreamK:      0
+          TileProcessingStrategy: "None"
   BenchmarkJoinParameters:
   BenchmarkFinalParameters:
     - ProblemSizes:
@@ -141,7 +143,7 @@ GlobalParameters:
     # - UseSubtileImpl: [0, 1]
     - Groups:
       - - GlobalSplitU: -1
-          StreamK:      0
+          TileProcessingStrategy: "None"
   BenchmarkJoinParameters:
   BenchmarkFinalParameters:
     - ProblemSizes:
