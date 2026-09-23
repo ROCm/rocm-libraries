@@ -39,6 +39,9 @@
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+#include "../../hipblaslt-jit-gemm-internal.hpp"
+#endif
 
 #include <hipblaslt/hipblaslt-opt-in-features.h>
 
@@ -3111,10 +3114,21 @@ namespace
         = nullptr,
         std::shared_ptr<hipDeviceProp_t>*       deviceProp = nullptr,
         std::shared_ptr<TensileLite::Hardware>* hardware   = nullptr,
-        int                                     device     = -1)
+        int                                     device     = -1,
+        const rocblaslt_matmul_algo* algo = nullptr)
     try
     {
-        // TensileHost is initialized on the first call
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+        if(algo && hipblaslt_ext::experimental::detail::isJitAlgo(*algo))
+        {
+            auto context = hipblaslt_ext::experimental::detail::resolveJitAlgo(*algo, device);
+            if(library) *library = context->library;
+            if(deviceProp) *deviceProp = context->properties;
+            if(hardware) *hardware = context->hardware;
+            return context->adapter.get();
+        }
+#endif
+        // TensileHost is initialized only for ordinary prebuilt algorithms.
         static TensileHost host;
 
         if(device == -1)
@@ -3163,13 +3177,13 @@ namespace
     }
     catch(const std::exception& e)
     {
-        std::cerr << "\nrocblaslt error: Could not initialize Tensile host:\n"
+        std::cerr << "\nrocblaslt error: Could not resolve Tensile execution context:\n"
                   << e.what() << std::endl;
         return nullptr;
     }
     catch(...)
     {
-        std::cerr << "\nrocblaslt error: Could not initialize Tensile host:\nUnknown "
+        std::cerr << "\nrocblaslt error: Could not resolve Tensile execution context:\nUnknown "
                      "exception thrown"
                   << std::endl;
         return nullptr;
@@ -3205,6 +3219,14 @@ struct TensileDataGemm
     TensileLite::ContractionInputs             inputs;
     std::vector<TensileLite::KernelInvocation> kernels;
     int                                        algoIndex = std::numeric_limits<int>::max();
+    // Preserve the complete opaque identity for separate initialize/run calls.
+    // JIT registry entries retain the corresponding private context for process lifetime.
+    rocblaslt_matmul_algo selectedAlgo{};
+    // Tensile's logical MX type/block size does not retain the descriptor's physical layout.
+    RocblasltContractionProblem::ScalingFormat scaleAType
+        = RocblasltContractionProblem::ScalingFormat::None;
+    RocblasltContractionProblem::ScalingFormat scaleBType
+        = RocblasltContractionProblem::ScalingFormat::None;
 };
 
 struct TensileDataGroupedGemm
@@ -3218,6 +3240,76 @@ struct TensileDataGroupedGemm
     size_t                                     hipHostMemorySize;
     bool                                       useUserArgs = false;
 };
+
+namespace
+{
+    const rocblaslt_matmul_algo* preparedAlgorithm(rocblaslt::RocGemmType gemmType,
+                                                   const std::shared_ptr<void>& gemmData)
+    {
+        if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM && gemmData)
+            return &std::static_pointer_cast<TensileDataGemm>(gemmData)->selectedAlgo;
+        return nullptr;
+    }
+
+    bool isJitAlgorithm(const rocblaslt_matmul_algo* algo)
+    {
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+        return algo && hipblaslt_ext::experimental::detail::isJitAlgo(*algo);
+#else
+        return false;
+#endif
+    }
+
+    rocblaslt_status validateJitScaleLayout(const rocblaslt_matmul_algo*               algo,
+                                            int                                        device,
+                                            RocblasltContractionProblem::ScalingFormat scaleA,
+                                            RocblasltContractionProblem::ScalingFormat scaleB)
+    {
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+        if(isJitAlgorithm(algo))
+        {
+            try
+            {
+                const auto context
+                    = hipblaslt_ext::experimental::detail::resolveJitAlgo(*algo, device);
+                if(!hipblaslt_ext::experimental::detail::jitScaleLayoutMatches(
+                       *context, scaleA, scaleB))
+                {
+                    log_error(
+                        __func__,
+                        "JIT algorithm MX scale layout differs from the supplied descriptors");
+                    return rocblaslt_status_invalid_value;
+                }
+            }
+            catch(const std::exception& e)
+            {
+                log_error(__func__, e.what());
+                return rocblaslt_status_invalid_value;
+            }
+        }
+#endif
+        return rocblaslt_status_success;
+    }
+
+    rocblaslt_status resolveJitInvocationSymbols(
+        const rocblaslt_matmul_algo* algo,
+        TensileLite::hip::SolutionAdapter* adapter,
+        const std::vector<TensileLite::KernelInvocation>& kernels)
+    {
+        if(isJitAlgorithm(algo))
+            for(const auto& kernel : kernels)
+            {
+                const auto status = adapter->initKernel(kernel.kernelName);
+                if(status != hipSuccess)
+                {
+                    log_error(__func__, "Cannot resolve generated invocation", kernel.kernelName);
+                    return hip2RocStatus(status);
+                }
+            }
+        return rocblaslt_status_success;
+    }
+
+}
 
 TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem& problem)
@@ -3264,6 +3356,12 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
 
     return &data->problem;
+}
+
+TensileLite::ContractionInputs* ExtractInputsGemm(std::shared_ptr<void> gemmData)
+{
+    auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+    return &data->inputs;
 }
 
 // Apply the GemmPreference-supplied StreamK tile scheduling mode onto every
@@ -3459,8 +3557,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
+        if(const auto layoutStatus
+           = validateJitScaleLayout(algo, handle->device, prob.scaleAType, prob.scaleBType);
+           layoutStatus != rocblaslt_status_success)
+            return layoutStatus;
 #ifdef HIPBLASLT_USE_ROCROLLER
-        if(useRocRoller(handle, prob))
+        if(!isJitAlgorithm(algo) && useRocRoller(handle, prob))
             return runRocRollerContractionProblem(handle, algo, prob);
 #endif
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
@@ -3468,7 +3570,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device, algo);
 
         if(!library)
         {
@@ -3503,6 +3605,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         int* solutionIndex = (int*)algo->data;
         data->algoIndex    = *solutionIndex;
+        data->selectedAlgo = *algo;
         data->inputs       = GetTensileInputs(prob);
 
         // A Stream-K solution reads these flags as one int per workgroup, and
@@ -3641,6 +3744,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             auto skInputs = GetTensileInputs(prob);
             bindFlagRegion(prob, *solution, skInputs);
             auto kernels = solution->solve(data->problem, skInputs, *hardware);
+            if(auto resolved = resolveJitInvocationSymbols(algo, adapter, kernels);
+               resolved != rocblaslt_status_success)
+                return resolved;
             // Remove this after supports getting comgr buffers from hip.
             bool isPreloaded = false;
             if(rocblaslt::Debug::Instance().preload())
@@ -3739,6 +3845,10 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
 
             gemmData = std::static_pointer_cast<void>(std::make_shared<TensileDataGemm>(data));
         }
+
+        auto data        = std::static_pointer_cast<TensileDataGemm>(gemmData);
+        data->scaleAType = problem.scaleAType;
+        data->scaleBType = problem.scaleBType;
 
         status = rocblaslt_status_success;
     }
@@ -3893,20 +4003,26 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device, &algo);
 
         if(!library)
         {
             return rocblaslt_status_invalid_pointer;
         }
 
+        if(isJitAlgorithm(&algo) && gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+            return rocblaslt_status_not_implemented;
         int* solutionIndex = (int*)algo.data;
         if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
 
-            data->algoIndex = *solutionIndex;
+            if(const auto layoutStatus
+               = validateJitScaleLayout(&algo, handle->device, data->scaleAType, data->scaleBType);
+               layoutStatus != rocblaslt_status_success)
+                return layoutStatus;
+
             auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
 
             if(data->problem.getParams().uniformSummationOrder())
@@ -3950,6 +4066,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->inputs.workspaceSize = workspaceSizeInBytes;
             data->problem.setWorkspaceSize(workspaceSizeInBytes);
 
+            // Restore the normal GSU/amax region when reinitializing an object
+            // that may previously have packed a Stream-K flag pointer.
+            data->inputs.Synchronizer = handle->Synchronizer;
+
             // The object API learns its stream here, not at create time, and the
             // flag pointer is baked into the kernel arguments by solve() just
             // below. If this solution reads the flags as Stream-K, point them at
@@ -3971,7 +4091,15 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                     data->inputs.Synchronizer = region;
             }
 
-            data->kernels = solution->solve(data->problem, data->inputs, *hardware);
+            auto kernels = solution->solve(data->problem, data->inputs, *hardware);
+            if(auto resolved = resolveJitInvocationSymbols(&algo, adapter, kernels);
+               resolved != rocblaslt_status_success)
+                return resolved;
+            data->kernels = std::move(kernels);
+            // Publish the adapter identity only after arguments are ready. A
+            // failed reinitialization must never pair old kernels with a new bundle.
+            data->algoIndex = *solutionIndex;
+            data->selectedAlgo = algo;
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
         {
@@ -4142,12 +4270,15 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
+        if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM
+           && std::static_pointer_cast<TensileDataGemm>(gemmData)->kernels.empty())
+            return rocblaslt_status_not_initialized;
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                                library;
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
         std::shared_ptr<TensileLite::Hardware> hardware;
 
-        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+        auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device, preparedAlgorithm(gemmType, gemmData));
 
         if(!library)
         {
@@ -5037,7 +5168,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device, algo);
 
     if(rocblaslt_status const st = validateGemmLibraryAndHardware(
            library,
@@ -5048,6 +5179,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
        st != rocblaslt_status_success)
         return st;
 
+    if(isJitAlgorithm(algo) && !std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
+        return rocblaslt_status_not_implemented;
     *workspaceSizeInBytes = 0;
 
     int* const solutionIndex = reinterpret_cast<int*>(algo->data);
@@ -5262,8 +5395,12 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
                                      rocblaslt_matmul_algo*       algo,
                                      size_t*                      workspaceSizeInBytes)
 {
+    if(const auto layoutStatus
+       = validateJitScaleLayout(algo, handle->device, prob.scaleAType, prob.scaleBType);
+       layoutStatus != rocblaslt_status_success)
+        return layoutStatus;
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
+    if(!isJitAlgorithm(algo) && useRocRoller(handle, prob))
         return isRocRollerSolutionSupported(handle, prob, algo, workspaceSizeInBytes);
 #endif
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
@@ -5319,6 +5456,11 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(!data)
             return rocblaslt_status_invalid_pointer;
+
+        if(const auto layoutStatus
+           = validateJitScaleLayout(&algo, handle->device, data->scaleAType, data->scaleBType);
+           layoutStatus != rocblaslt_status_success)
+            return layoutStatus;
 
         auto checkSupportForTypeTag = [&](auto tag) -> rocblaslt_status {
             using T = std::remove_pointer_t<decltype(tag)>;
@@ -5494,7 +5636,8 @@ std::string getKernelNameFromData(rocblaslt_handle             handle,
                                      library;
     std::shared_ptr<hipDeviceProp_t> deviceProp;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, nullptr, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, nullptr, handle->device,
+                                               preparedAlgorithm(gemmType, gemmData));
 
     if(!library)
     {
@@ -5540,7 +5683,7 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device, preparedAlgorithm(gemmType, gemmData));
 
     if(!library)
     {
@@ -5592,7 +5735,7 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
     int* solutionIndex = (int*)algo.data;
 
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(*solutionIndex < 0)
+    if(!isJitAlgorithm(&algo) && *solutionIndex < 0)
     {
         return rocRollerShortKernelNameFromEncodedSolutionIndex(*solutionIndex);
     }
@@ -5603,7 +5746,7 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device, &algo);
 
     if(!library)
     {
@@ -5611,7 +5754,7 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
     }
 
     auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
-    return solution->kernelName;
+    return solution ? solution->kernelName : std::string();
 }
 
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
@@ -5619,7 +5762,7 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblasl
     int* solutionIndex = (int*)algo.data;
  
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(*solutionIndex < 0)
+    if(!isJitAlgorithm(&algo) && *solutionIndex < 0)
     {
         return rocRollerShortKernelNameFromEncodedSolutionIndex(*solutionIndex);
     }
@@ -5630,7 +5773,7 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblasl
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device, &algo);
 
     if(!library)
     {
@@ -5638,7 +5781,7 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblasl
     }
 
     auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
-    return solution->solutionName;
+    return solution ? solution->solutionName : std::string();
 }
 
 /***************************************************************
