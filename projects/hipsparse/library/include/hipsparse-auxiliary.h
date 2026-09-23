@@ -273,6 +273,55 @@ hipsparseStatus_t hipsparseCreateHybMat(hipsparseHybMat_t* hybA);
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA);
+
+/*! \ingroup aux_module
+ *  \brief Get the internal fields of a \p HYB matrix structure.
+ *
+ *  \details
+ *  \p hipsparseHybMatGetInfo exposes the internal fields of a \p HYB matrix
+ *  structure through a backend-agnostic API, for use by test/introspection
+ *  code that would otherwise need to reinterpret the opaque \p hipsparseHybMat_t
+ *  as a raw struct (which is unsafe: on the rocSPARSE backend it depends on the
+ *  internal layout of \p _rocsparse_hyb_mat, and there is no equivalent public
+ *  struct on the cuSPARSE backend either). Any of the output pointers may be
+ *  \p nullptr if that field is not needed.
+ */
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
+                                         int*                     m,
+                                         int*                     n,
+                                         hipsparseHybPartition_t* partition,
+                                         int64_t*                 ell_nnz,
+                                         int*                     ell_width,
+                                         const int**              ell_col_ind,
+                                         const void**             ell_val,
+                                         int*                     coo_nnz,
+                                         const int**              coo_row_ind,
+                                         const int**              coo_col_ind,
+                                         const void**             coo_val);
+
+/*! \ingroup aux_module
+ *  \brief Set the internal fields of a \p HYB matrix structure.
+ *
+ *  \details
+ *  \p hipsparseHybMatSetInfo is the counterpart to \ref hipsparseHybMatGetInfo,
+ *  intended for test/internal use so that callers never need to reinterpret the
+ *  opaque \p hipsparseHybMat_t as a raw struct. Any of the input pointers may be
+ *  \p nullptr, in which case the corresponding field is left untouched.
+ */
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t              hyb,
+                                         const int*                     m,
+                                         const int*                     n,
+                                         const hipsparseHybPartition_t* partition,
+                                         const int64_t*                 ell_nnz,
+                                         const int*                     ell_width,
+                                         int* const*                    ell_col_ind,
+                                         void* const*                   ell_val,
+                                         const int*                     coo_nnz,
+                                         int* const*                    coo_row_ind,
+                                         int* const*                    coo_col_ind,
+                                         void* const*                   coo_val);
 #endif
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)

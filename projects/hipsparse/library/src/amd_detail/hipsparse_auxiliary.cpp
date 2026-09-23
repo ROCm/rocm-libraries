@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -219,6 +219,101 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA)
 {
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_destroy_hyb_mat((rocsparse_hyb_mat)hybA));
+}
+
+hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
+                                         int*                     m,
+                                         int*                     n,
+                                         hipsparseHybPartition_t* partition,
+                                         int64_t*                 ell_nnz,
+                                         int*                     ell_width,
+                                         const int**              ell_col_ind,
+                                         const void**             ell_val,
+                                         int*                     coo_nnz,
+                                         const int**              coo_row_ind,
+                                         const int**              coo_col_ind,
+                                         const void**             coo_val)
+{
+    rocsparse_hyb_partition rocsparse_partition;
+    rocsparse_int           rocsparse_m;
+    rocsparse_int           rocsparse_n;
+    rocsparse_int           rocsparse_ell_width;
+    rocsparse_int           rocsparse_coo_nnz;
+    hipsparseStatus_t       status = hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_hyb_mat_get_info((rocsparse_hyb_mat)hyb,
+                                   m != nullptr ? &rocsparse_m : nullptr,
+                                   n != nullptr ? &rocsparse_n : nullptr,
+                                   &rocsparse_partition,
+                                   ell_nnz,
+                                   ell_width != nullptr ? &rocsparse_ell_width : nullptr,
+                                   (const rocsparse_int**)ell_col_ind,
+                                   ell_val,
+                                   coo_nnz != nullptr ? &rocsparse_coo_nnz : nullptr,
+                                   (const rocsparse_int**)coo_row_ind,
+                                   (const rocsparse_int**)coo_col_ind,
+                                   coo_val));
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    if(m != nullptr)
+    {
+        *m = rocsparse_m;
+    }
+    if(n != nullptr)
+    {
+        *n = rocsparse_n;
+    }
+    if(partition != nullptr)
+    {
+        *partition = hipsparse::HCCHybPartToHIPHybPart(rocsparse_partition);
+    }
+    if(ell_width != nullptr)
+    {
+        *ell_width = rocsparse_ell_width;
+    }
+    if(coo_nnz != nullptr)
+    {
+        *coo_nnz = rocsparse_coo_nnz;
+    }
+    return HIPSPARSE_STATUS_SUCCESS;
+}
+
+hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t              hyb,
+                                         const int*                     m,
+                                         const int*                     n,
+                                         const hipsparseHybPartition_t* partition,
+                                         const int64_t*                 ell_nnz,
+                                         const int*                     ell_width,
+                                         int* const*                    ell_col_ind,
+                                         void* const*                   ell_val,
+                                         const int*                     coo_nnz,
+                                         int* const*                    coo_row_ind,
+                                         int* const*                    coo_col_ind,
+                                         void* const*                   coo_val)
+{
+    const rocsparse_int           rocsparse_m         = (m != nullptr) ? *m : 0;
+    const rocsparse_int           rocsparse_n         = (n != nullptr) ? *n : 0;
+    const rocsparse_int           rocsparse_ell_width = (ell_width != nullptr) ? *ell_width : 0;
+    const rocsparse_int           rocsparse_coo_nnz   = (coo_nnz != nullptr) ? *coo_nnz : 0;
+    const rocsparse_hyb_partition rocsparse_partition
+        = (partition != nullptr) ? hipsparse::hipHybPartToHCCHybPart(*partition)
+                                 : rocsparse_hyb_partition_auto;
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_hyb_mat_set_info((rocsparse_hyb_mat)hyb,
+                                   m != nullptr ? &rocsparse_m : nullptr,
+                                   n != nullptr ? &rocsparse_n : nullptr,
+                                   partition != nullptr ? &rocsparse_partition : nullptr,
+                                   ell_nnz,
+                                   ell_width != nullptr ? &rocsparse_ell_width : nullptr,
+                                   (rocsparse_int* const*)ell_col_ind,
+                                   ell_val,
+                                   coo_nnz != nullptr ? &rocsparse_coo_nnz : nullptr,
+                                   (rocsparse_int* const*)coo_row_ind,
+                                   (rocsparse_int* const*)coo_col_ind,
+                                   coo_val));
 }
 
 hipsparseStatus_t hipsparseCreateBsrsv2Info(bsrsv2Info_t* info)
