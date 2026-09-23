@@ -66,7 +66,7 @@ allocations.
 
 #### Environment support
 
-ocFFT supports a variety of OSes, as defined in the [ROCm compatibility
+rocFFT supports a variety of OSes, as defined in the [ROCm compatibility
 documentation](https://rocm.docs.amd.com/en/latest/compatibility/compatibility.html). Continuous
 integration (CI) in TheRock currently covers four device architectures and two operating
 systems. Support for later versions of C++ is often unavailable in older Linux OSes; not testing
@@ -74,7 +74,7 @@ compilation and smoke tests in these environments may break compilation or execu
 
 #### Unit tests
 
-it tests are correctness tests that verify library infrastructure. For example, they cover API
+Unit tests are correctness tests that verify library infrastructure. For example, they cover API
 behavior for invalid parameters and whether internal infrastructure behaves as expected.
 
 API correctness tests live in `rocfft-test`. GoogleTest names use the `rocfft_UnitTest.*` filter.
