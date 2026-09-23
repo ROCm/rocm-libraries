@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "bindings.hpp"
+#include "dlpack_adapter.hpp"
 
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
@@ -283,28 +284,26 @@ void graphBindings(nb::module_& m)
             "execute",
             [](const graph::Graph& g,
                const nb::object& handle,
-               std::unordered_map<int64_t, uintptr_t>& variantPack,
-               uintptr_t workspace) {
+               const nb::dict& variantPack,
+               const nb::object& workspace) {
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-                std::unordered_map<int64_t, void*> cppVariantPack;
-                for(const auto& [key, value] : variantPack)
-                {
-                    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                    cppVariantPack[key] = reinterpret_cast<void*>(value);
-                }
-
-                // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                void* workspacePtr = workspace.is_none()
+                                         ? nullptr
+                                         : hipdnn_python::toDevicePointer(workspace, "workspace");
 
                 return g.execute(rawHandle, cppVariantPack, workspacePtr);
             },
             nb::arg("handle"),
             nb::arg("variant_pack"),
             nb::arg("workspace") = 0,
-            "Execute the graph with the given handle, variant pack, and optional workspace")
+            "Execute the graph with the given handle, variant pack, and optional workspace. "
+            "variant_pack values and workspace may be int pointers, DeviceBuffer objects, or "
+            "__dlpack__ producers on the current ROCm device; callers must keep producers "
+            "alive until the HIP work completes.")
         .def("get_execution_plan_count",
              &graph::Graph::get_execution_plan_count,
              "Number of compiled plans, including ones that failed to compile. Use with "
@@ -335,23 +334,17 @@ void graphBindings(nb::module_& m)
             "execute_plan_at_index",
             [](const graph::Graph& g,
                const nb::object& handle,
-               const std::unordered_map<int64_t, uintptr_t>& variantPack,
-               uintptr_t workspace,
+               const nb::dict& variantPack,
+               const nb::object& workspace,
                int64_t planIndex) {
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-                std::unordered_map<int64_t, void*> cppVariantPack;
-                cppVariantPack.reserve(variantPack.size());
-                for(const auto& [key, value] : variantPack)
-                {
-                    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                    cppVariantPack[key] = reinterpret_cast<void*>(value);
-                }
-
-                // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                void* workspacePtr = workspace.is_none()
+                                         ? nullptr
+                                         : hipdnn_python::toDevicePointer(workspace, "workspace");
 
                 return g.execute_plan_at_index(rawHandle, cppVariantPack, workspacePtr, planIndex);
             },
@@ -361,7 +354,9 @@ void graphBindings(nb::module_& m)
             nb::arg("plan_index"),
             "Execute one compiled plan without making it active. Returns an Error whose "
             "is_bad() is set for an out-of-bounds, barred or uncompiled plan, so a manual "
-            "tuning loop can skip it and continue.")
+            "tuning loop can skip it and continue. variant_pack values and workspace may be "
+            "int pointers, DeviceBuffer objects, or __dlpack__ producers on the current ROCm "
+            "device; callers must keep producers alive until the HIP work completes.")
         .def(
             "get_workspace_size_plan_at_index",
             [](const graph::Graph& g, int64_t planIndex) {
@@ -750,7 +745,19 @@ void graphBindings(nb::module_& m)
                     nb::arg("tensor"),
                     nb::rv_policy::reference)
         .def_static(
-            "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "")
+            "tensor_like",
+            [](nb::handle tensor, const std::string& name) {
+                if(nb::isinstance<graph::TensorAttributes>(tensor))
+                {
+                    return graph::Graph::tensor_like(
+                        nb::cast<std::shared_ptr<graph::TensorAttributes>>(tensor), name);
+                }
+                return hipdnn_python::tensorAttributesFromDlpack(tensor, name);
+            },
+            nb::arg("tensor"),
+            nb::arg("name") = "",
+            "Create a tensor with the metadata of a hipdnn Tensor or a __dlpack__ producer. "
+            "A single-element host tensor becomes a compile-time-constant scalar.")
         .def(
             "to_json",
             [](graph::Graph& g) {
@@ -817,4 +824,12 @@ void graphBindings(nb::module_& m)
             "Deserialize graph structure from binary without a handle.\n"
             "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
             "Call build_operation_graph(handle) after to finalize for execution.");
+
+    // Private test hook: resolves a variant-pack value exactly as execute() does.
+    m.def(
+        "_dlpack_device_ptr",
+        [](nb::handle value) {
+            return reinterpret_cast<uintptr_t>(hipdnn_python::toDevicePointer(value, "value"));
+        },
+        nb::arg("value"));
 }

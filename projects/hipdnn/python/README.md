@@ -135,6 +135,32 @@ python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 The wheel package uses a `src/` layout, so running pytest from
 `frontend_wheel_package/` does not accidentally import the source package.
 
+## DLPack Interoperability
+
+`Graph.execute()` and `Graph.execute_plan_at_index()` accept these kinds for
+each `variant_pack` value and for `workspace`:
+
+- An `int` device pointer.
+- A `hipdnn.DeviceBuffer`.
+- Any object that implements `__dlpack__` (for example a PyTorch or CuPy
+  tensor) on the current ROCm device. The bindings use the DLPack data pointer
+  plus its byte offset and do not copy data.
+
+Host memory, other device types, and tensors on a different device raise
+`ValueError`. The caller must keep each producer alive until the HIP work
+completes.
+
+`Graph.tensor_like(obj, name="")` also accepts a `__dlpack__` producer. It
+infers the dims, the element strides (row-major when the producer reports
+none), and the data type. A single-element host tensor becomes a
+compile-time-constant pass-by-value scalar with dims `[1]`.
+
+```python
+x = torch.randn(8, 16, device="cuda")
+t = hipdnn.Graph.tensor_like(x, "x")
+graph.execute(handle, {t_uid: x, y_uid: y}, workspace)
+```
+
 ## Running the Samples
 
 Sample scripts are source-tree utilities and are not included in the wheel.
