@@ -68,6 +68,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -d, --dependencies        Install build dependencies"
             echo "  -c, --clients             Build library clients"
             echo "  -g, --debug               Debug build"
+            echo "  --debug-wgm               Debug-only: instrument GEMM kernels to write workgroup-mapping (WGM) data into the D output for visualization (requires --debug; produces incorrect results)"
             echo "  -k, --relwithdebinfo      RelWithDebInfo build"
             echo "  -a, --architecture <arch>  GPU target(s)"
             echo "  --asic-revision <rev>  build only one gfx1250 ASIC-revision tree, 'v0' or 'v1' (default: build both; runtime selects by asicRevision)"
@@ -90,6 +91,7 @@ while [[ $# -gt 0 ]]; do
         -d|--dependencies)  INVOKE_ARGS="$INVOKE_ARGS --install-deps" ;;
         -c|--clients)       INVOKE_ARGS="$INVOKE_ARGS --clients" ;;
         -g|--debug)         INVOKE_ARGS="$INVOKE_ARGS --debug" ;;
+        --debug-wgm)        INVOKE_ARGS="$INVOKE_ARGS --debug-wgm" ;;
         -k|--relwithdebinfo) INVOKE_ARGS="$INVOKE_ARGS --relwithdebinfo" ;;
         -a|--architecture)  shift; INVOKE_ARGS="$INVOKE_ARGS --architecture='$1'" ;;
         --asic-revision) shift; INVOKE_ARGS="$INVOKE_ARGS --asic-revision='$1'" ;;

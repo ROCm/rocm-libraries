@@ -1,0 +1,56 @@
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+  ValidationMaxToPrint: 0
+  ValidationPrintValids: False
+
+BenchmarkProblems:
+
+  ########################################
+  # Simple FP32 NN GEMM for WGM Debug
+  ########################################
+  - # ProblemType
+    OperationType: GEMM
+    DataType: s
+    TransposeA: False
+    TransposeB: False
+    UseBeta: True
+    Batched: True
+
+  - # BenchmarkProblemSizeGroup
+    InitialSolutionParameters:
+    BenchmarkCommonParameters:
+      - EdgeType: ["ShiftPtr"]
+      - LoopTail: [True]
+      - KernelLanguage: ["Assembly"]
+    ForkParameters:
+      - PrefetchLocalRead: [True]
+      - PrefetchGlobalRead: [True]
+      - ThreadTile:
+        - [ 4, 4 ]
+        - [ 8, 8 ]
+      - WorkGroup:
+        - [ 16, 16, 1 ]
+        - [ 32, 8, 1 ]
+      - EnableWGMDebug: [0, 1]  # Test both normal and WGM debug versions
+      - GlobalSplitU: [1]
+      - DepthU: [ 8, 16 ]
+      - VectorWidth: [-1]
+    BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [ 512, 512, 1, 512 ]
+        - Exact: [ 1024, 1024, 1, 1024 ]
+
+LibraryLogic:
+    ScheduleName: "vega20"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+
+LibraryClient:

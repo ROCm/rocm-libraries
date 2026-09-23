@@ -43,6 +43,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
 from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
+from ..Common.GlobalParameters import globalParameters
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -2420,6 +2421,14 @@ class GlobalWriteBatchWriter:
                                      mGuardOffset=1, rowScaleShift=rowScaleShift)
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpInrSgpr, self.laneSGPRC), "apply exec mask"))
             self._epilogScratchFree(tmpInrSgpr)
+          # Debug-only WGM instrumentation: for the top-left element of each
+          # workgroup's output tile (first element of the first batch), overwrite
+          # the store data with workgroup-mapping diagnostics. Only meaningful for
+          # a >=4-dword store (e.g. fp32 GlobalWriteVectorWidth 4), which is the
+          # intended visualization target. Every runtime store path (beta/edge
+          # variants) is instrumented since only one executes per launch.
+          if self.kernel.get("EnableWGMDebug", 0) and self.batchIdx == 0 and elementIdx == 0 and self.gwvw >= 4:
+            storeCodeModule.add(self.parentWriter.wgmDebugStoreValues(self.kernel, sumIdx))
           # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
           # An EDGE batch under fused A2A takes this path (is16bitSubtile requires not
           # self.edge), so it needs the same sc1 as the subtile path above.

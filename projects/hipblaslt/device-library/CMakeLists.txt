@@ -6,6 +6,7 @@ include(hipblaslt_codegen)
 set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING "Number of CPU cores to use for building device libraries (will use nproc if unset).")
 set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
 set(TENSILELITE_ASM_DEBUG "" CACHE STRING "Keep debug information for built code objects.")
+set(TENSILELITE_DEBUG_WGM "" CACHE STRING "Debug-only: instrument GEMM kernels to write workgroup-mapping (WGM) data into the D output instead of the real result (for WGM visualization; produces incorrect results).")
 set(TENSILELITE_LOGIC_FILTER "" CACHE STRING "Cutomsized logic filter, default is *, i.e. all logics.")
 set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object files.")
 set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
@@ -15,6 +16,7 @@ mark_as_advanced(
     TENSILELITE_BUILD_PARALLEL_LEVEL
     TENSILELITE_KEEP_BUILD_TMP
     TENSILELITE_ASM_DEBUG
+    TENSILELITE_DEBUG_WGM
     TENSILELITE_LOGIC_FILTER
     TENSILELITE_NO_COMPRESS
     TENSILELITE_EXPERIMENTAL

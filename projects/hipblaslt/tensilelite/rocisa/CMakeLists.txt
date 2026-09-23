@@ -150,6 +150,11 @@ block()
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
 
+    # In debug builds, disable nanobind's strict leak detection
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_definitions(_rocisa PRIVATE NB_ABORT_ON_LEAK=0)
+    endif()
+
     if(ROCISA_ENABLE_COVERAGE)
         target_compile_options(_rocisa PRIVATE -fprofile-instr-generate -fcoverage-mapping)
         target_link_options(_rocisa PRIVATE -fprofile-instr-generate)
