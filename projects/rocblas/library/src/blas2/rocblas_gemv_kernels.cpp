@@ -118,40 +118,81 @@ inline int rocblas_gemvn_sm_split_count(rocblas_int n)
     return int(std::min(split, size_t(rocblas_gemvn_sm_max_split())));
 }
 
-// Largest m the split is used for. gemvn tiles the output as
-// (m - 1) / (DIM_X * 4) + 1 for real/complex-float types, and
-// (m - 1) / DIM_X + 1 for double-complex (one quarter as many tiles).
-// Below the crossover the grid cannot fill the device and the split is a
-// large win; above it the arch-tuned single-stage kernel already saturates
-// and the extra reduction pass is a small loss.
-//
-// For m=1024, the split preempts the CDNA-tuned 512-thread kernel already
-// fast at that size. Therefore, we set the crossover to 512 for all real
-// and complex-float types, where the performance gains are solid across all
-// the archs. For double-complex the block formula uses DIM_X (not DIM_X*4),
-// so the equivalent tile count is reached at m=256.
-template <typename T>
-inline size_t rocblas_gemvn_sm_crossover()
-{
-    if constexpr(std::is_same_v<T, rocblas_double_complex>)
-        return 256;
-    return 512;
-}
-
 // Below this the reduction is not long enough to cover a second launch.
 inline size_t rocblas_gemvn_sm_min_elems()
 {
     return size_t(1) << 20;
 }
 
+// Returns the number of output tiles the ordinary gemvn kernel uses for a
+// given m. This matches the blocks formula in the launcher:
+//   real / complex-float: (m - 1) / (DIM_X * 4) + 1
+//   double-complex:       (m - 1) / DIM_X + 1   (DIM_X * 4 is too wide)
+// Both use DIM_X = 32.
+template <typename T>
+inline rocblas_int rocblas_gemvn_output_tiles(rocblas_int m)
+{
+    constexpr int DIM_X = 32;
+    if constexpr(std::is_same_v<T, rocblas_double_complex>)
+        return (m - 1) / DIM_X + 1;
+    return (m - 1) / (DIM_X * 4) + 1;
+}
+
+// Minimum number of column splits required to justify the second launch.
+// Fewer splits means the split adds launch overhead without proportional
+// parallelism — the regression at (m=1024, n=2048) is one such case (n_split=1).
+constexpr int rocblas_gemvn_sm_min_splits()
+{
+    return 2;
+}
+
+// Output length below which the split is always taken (given the element
+// floor), regardless of the split count. This preserves the original crossover
+// behaviour: a short output cannot fill the device, so the split helps even at
+// n_split == 1 on architectures with a high compute-to-bandwidth ratio (e.g.
+// gfx950), where the single-stage kernel leaves the card idle. Real and
+// complex-float share the DIM_X * 4 tiling (crossover 512); double-complex uses
+// DIM_X, so its equivalent crossover is a quarter of that (128).
+template <typename T>
+inline rocblas_int rocblas_gemvn_sm_crossover()
+{
+    using element = std::remove_cv_t<std::remove_pointer_t<T>>;
+    if constexpr(std::is_same_v<element, rocblas_double_complex>)
+        return 128;
+    return 512;
+}
+
+// Gate: use the split path when transA == none, m and n are positive, the
+// operand is large enough to amortise a second launch (m * n >= 2^20), and
+// EITHER of the following holds:
+//   A. the output grid has at most 8 tiles AND the split produces at least
+//      min_splits (2) parallel column blocks — the general n-split win, sized
+//      by the work rather than by the output length; or
+//   B. the output length is at or below the crossover — a short output cannot
+//      fill the device, so the split is worthwhile even with a single column
+//      block. This is the behaviour of the prior m-crossover path and is kept
+//      as a floor so no shape it already accelerated is dropped.
+//
+// The union never splits fewer shapes than the crossover alone did, so it
+// cannot regress against a build that shipped the crossover. Condition A adds
+// the larger-m, long-reduction shapes the crossover missed. The gate stays a
+// pure function of (transA, m, n): workspace sizing and launch selection use
+// it identically and cannot disagree.
 template <typename T>
 inline bool rocblas_gemvn_skinny_m(rocblas_operation transA, rocblas_int m, rocblas_int n)
 {
     if(transA != rocblas_operation_none || m <= 0 || n <= 0)
         return false;
-    if(size_t(m) > rocblas_gemvn_sm_crossover<T>())
+    if(size_t(m) * size_t(n) < rocblas_gemvn_sm_min_elems())
         return false;
-    return size_t(m) * size_t(n) >= rocblas_gemvn_sm_min_elems();
+
+    // B: short output — split even at a single column block.
+    if(m <= rocblas_gemvn_sm_crossover<T>())
+        return true;
+
+    // A: general n-split — enough output tiling headroom and column parallelism.
+    return rocblas_gemvn_output_tiles<T>(m) <= 8
+           && rocblas_gemvn_sm_split_count(n) >= rocblas_gemvn_sm_min_splits();
 }
 
 template <typename T>
@@ -162,8 +203,8 @@ inline bool rocblas_gemvt_fat_n(rocblas_int m, rocblas_int n, int gfx_arch)
         bool fat = n / 4 >= m;
         return fat
                && ((std::is_same_v<T, float> && m <= 768)
-                   || ((std::is_same_v<T, double> || std::is_same_v<T, rocblas_float_complex>)&&m
-                       <= 384)
+                   || ((std::is_same_v<T, double> || std::is_same_v<T, rocblas_float_complex>)
+                       && m <= 384)
                    || (std::is_same_v<T, rocblas_double_complex> && m <= 128));
     }
     else if(gfx_arch == 942)
@@ -262,13 +303,10 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
     static constexpr bool is_float = std::is_same_v<Ti, float> || std::is_same_v<Ti, float const*>;
     static constexpr bool is_double
         = std::is_same_v<Ti, double> || std::is_same_v<Ti, double const*>;
-    static constexpr bool is_complex_float
-        = std::is_same_v<Ti,
-                         rocblas_float_complex> || std::is_same_v<Ti, rocblas_float_complex const*>;
-    static constexpr bool is_complex_double
-        = std::is_same_v<
-              Ti,
-              rocblas_double_complex> || std::is_same_v<Ti, rocblas_double_complex const*>;
+    static constexpr bool is_complex_float = std::is_same_v<Ti, rocblas_float_complex>
+                                             || std::is_same_v<Ti, rocblas_float_complex const*>;
+    static constexpr bool is_complex_double = std::is_same_v<Ti, rocblas_double_complex>
+                                              || std::is_same_v<Ti, rocblas_double_complex const*>;
     const bool is_atomics_allowed = handle->atomics_mode == rocblas_atomics_allowed ? true : false;
 
     //Identifying the architecture to have an appropriate optimization
