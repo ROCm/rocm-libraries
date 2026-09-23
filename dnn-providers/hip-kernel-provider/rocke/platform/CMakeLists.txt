@@ -419,8 +419,12 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_test}\"")
     endforeach()
+    # pytest-timeout applies per test item and is intentionally well below the
+    # CTest limit so a hung import or structural check produces pytest diagnostics.
+    # CTest remains the hard backstop for collection, cumulative runtime, and
+    # failures outside an individual test item.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_conv_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TESTS} -v --timeout=120)\n")
+           "add_test(rocke_library_conv_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TESTS} -v --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
