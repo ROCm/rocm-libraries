@@ -1246,6 +1246,55 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
               << (passedTests * 100 / totalTests) << "%)\n";
 }
 
+TEST(LogicalToAsmComprehensive, SBarrierPreservesExplicitSemantics) {
+    struct BarrierCase {
+        bool separate;
+        bool wait;
+        bool clusterBarrier;
+        std::vector<UnifiedOpcode> expectedOpcodes;
+        int expectedId;
+    };
+
+    const std::vector<BarrierCase> cases = {
+        {false, false, false, {GFX::s_barrier_signal, GFX::s_barrier_wait}, -1},
+        {true, false, false, {GFX::s_barrier_signal}, -1},
+        {true, true, false, {GFX::s_barrier_wait}, -1},
+        {false, false, true, {GFX::s_barrier_signal, GFX::s_barrier_wait}, -3},
+        {true, false, true, {GFX::s_barrier_signal}, -3},
+        {true, true, true, {GFX::s_barrier_wait}, -3},
+    };
+
+    for (const BarrierCase& testCase : cases) {
+        Function func("kernel");
+        BasicBlock* bb = func.createBasicBlock("test");
+        bb->appendIR(static_cast<IRBase*>(
+            SBarrier(testCase.separate, testCase.wait, testCase.clusterBarrier, "barrier")));
+
+        PassManager pm;
+        GemmTileConfig config;
+        config.arch = {12, 5, 0};
+        pm.setGemmTileConfig(config);
+        pm.addPass(createToStinkyAsmPass());
+        pm.run(func);
+
+        std::vector<StinkyInstruction*> lowered;
+        for (BasicBlock& block : func)
+            for (IRBase& ir : block)
+                if (auto* inst = dyn_cast<StinkyInstruction>(&ir)) lowered.push_back(inst);
+
+        ASSERT_EQ(lowered.size(), testCase.expectedOpcodes.size());
+        for (size_t i = 0; i < lowered.size(); ++i) {
+            EXPECT_EQ(lowered[i]->getUnifiedOpcode(), testCase.expectedOpcodes[i]);
+            ASSERT_EQ(lowered[i]->getSrcRegs().size(), size_t{1});
+            const StinkyRegister& src = lowered[i]->getSrcRegs()[0];
+            ASSERT_EQ(src.dataType, StinkyRegister::Type::LiteralInt);
+            EXPECT_EQ(src.getLiteralInt(), testCase.expectedId);
+        }
+        ASSERT_NE(lowered.back()->getModifier<CommentData>(), nullptr);
+        EXPECT_EQ(lowered.back()->getModifier<CommentData>()->comment, "barrier");
+    }
+}
+
 /**
  * @brief Dedicated test for gfx1250-specific instructions
  *

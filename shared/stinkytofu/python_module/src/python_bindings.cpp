@@ -734,6 +734,16 @@ NB_MODULE(_stinkytofu, m) {
     // Special Instruction Classes (manually defined)
     // ========================================================================
 
+    // SBarrier - preserve split/wait/cluster semantics when requested.
+    // The generated comment-only overload remains available for the default form.
+    m.def(
+        "SBarrier",
+        [](bool separate, bool wait, bool clusterBarrier, const std::string& comment) {
+            return makeLogicalInstructionShared(SBarrier(separate, wait, clusterBarrier, comment));
+        },
+        nb::arg("separate"), nb::arg("wait"), nb::arg("clusterBarrier"), nb::arg("comment") = "",
+        "Create an SBarrier instruction with explicit barrier semantics");
+
     // MFMA - Matrix Fused Multiply-Add
     m.def(
         "MFMA",
