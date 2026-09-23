@@ -39,9 +39,7 @@
 #include "libcxx.hpp" // IWYU pragma: export
 
 // For _CCCL_IMPLICIT_SYSTEM_HEADER
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    #include _HIPCUB_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
-#endif
+#include _HIPCUB_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
 
 #define HIPCUB_NAMESPACE hipcub
 
@@ -174,14 +172,9 @@ BEGIN_HIPCUB_NAMESPACE
 /// If `error` is not `hipSuccess`, prints an error message containing the source filename and
 /// line information to the standard error output.
 /// \note This only happens if `HIPCUB_STDERR` is defined.
-inline
-hipError_t Debug(
-    hipError_t      error,
-    const char*     filename,
-    int             line)
+inline hipError_t
+    Debug(hipError_t error, [[maybe_unused]] const char* filename, [[maybe_unused]] int line)
 {
-    (void)filename;
-    (void)line;
 #ifdef HIPCUB_STDERR
     if (error)
     {
@@ -239,13 +232,76 @@ END_HIPCUB_NAMESPACE
     #endif
 #endif // HIPCUB_ROCPRIM_API
 
-// This API needs to be deprecated once libhipcxx is available.
-#if !defined(_CCCL_PRAGMA_UNROLL_FULL)
-    #define _CCCL_PRAGMA_UNROLL_FULL() _Pragma("unroll")
-#endif // !defined(_CCCL_PRAGMA_UNROLL_FULL)
+/// \brief Wrapper macro for C++20 'requires'.
+///
+/// Currently, HIP's backend does not support C++20, so the HIPCUB_REQUIRES is just
+/// a wrapper around the 'std::enable_if' construction that enforces the requirement.
+#ifndef HIPCUB_REQUIRES
+    #if defined(__HIP_PLATFORM_NVIDIA__)
+        #include <cuda/std/__concepts/concept_macros.h>
+        #define HIPCUB_REQUIRES(...) _CCCL_REQUIRES(__VA_ARGS__)
+    #else
+        #define HIPCUB_REQUIRES(...) typename std::enable_if<(__VA_ARGS__)>::type* = nullptr
+    #endif
+#endif // HIPCUB_REQUIRES
 
-#if !defined(_CCCL_PRAGMA_NOUNROLL)
-    #define _CCCL_PRAGMA_NOUNROLL() _Pragma("nounroll")
-#endif // !defined(_CCCL_PRAGMA_NOUNROLL)
+#ifndef HIPCUB_TRAIT
+    #if defined(__HIP_PLATFORM_NVIDIA__)
+        #define HIPCUB_TRAIT(__TRAIT, ...) _CCCL_TRAIT(__TRAIT, __VA_ARGS__)
+    #else
+        #define HIPCUB_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
+    #endif
+#endif // HIPCUB_TRAIT
+
+// This API needs to be deprecated once libhipcxx is available.
+#ifndef HIPCUB_PRAGMA_UNROLL_FULL
+    #define HIPCUB_PRAGMA_UNROLL_FULL() _Pragma("unroll")
+#endif // HIPCUB_PRAGMA_UNROLL_FULL
+
+#ifndef HIPCUB_PRAGMA_NOUNROLL
+    #define HIPCUB_PRAGMA_NOUNROLL() _Pragma("nounroll")
+#endif // HIPCUB_PRAGMA_NOUNROLL
+
+#ifndef HIPCUB_RETURN_ON_ERROR
+    #define HIPCUB_RETURN_ON_ERROR(...)       \
+        do                                    \
+        {                                     \
+            hipError_t error = (__VA_ARGS__); \
+            if(error != hipSuccess)           \
+            {                                 \
+                return error;                 \
+            }                                 \
+        }                                     \
+        while(0)
+#endif // HIPCUB_RETURN_ON_ERROR
+
+#ifndef HIPCUB_TRY_CUDA_API
+    #define HIPCUB_TRY_CUDA_API(_NAME, _MSG, ...)                               \
+        do                                                                      \
+        {                                                                       \
+            const ::hipError_t __status = _NAME(__VA_ARGS__);                   \
+            switch(__status)                                                    \
+            {                                                                   \
+                case ::hipSuccess: break;                                       \
+                default:                                                        \
+                    (void)::hipGetLastError();                                  \
+                    _HIPCUB_LIBCXX::__throw_cuda_error(__status, _MSG, #_NAME); \
+            }                                                                   \
+        }                                                                       \
+        while(0)
+#endif // HIPCUB_TRY_CUDA_API
+
+#ifndef HIPCUB_ASSERT_CUDA_API
+    #define HIPCUB_ASSERT_CUDA_API(_NAME, _MSG, ...)     \
+        do                                               \
+        {                                                \
+            [[maybe_unused]]                             \
+            const ::hipError_t __status                  \
+                = _NAME(__VA_ARGS__);                    \
+            (void)::hipGetLastError();                   \
+            _CCCL_ASSERT(__status == cudaSuccess, _MSG); \
+        }                                                \
+        while(0)
+#endif // HIPCUB_ASSERT_CUDA_API
 
 #endif // HIPCUB_CONFIG_HPP_

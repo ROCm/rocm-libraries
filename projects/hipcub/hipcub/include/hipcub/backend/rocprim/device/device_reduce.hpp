@@ -33,6 +33,7 @@
 #include "../../../config.hpp"
 
 #include "../../../util_deprecated.hpp"
+#include "../detail/util_env.hpp"
 #include "../iterator/arg_index_input_iterator.hpp"
 #include "../thread/thread_operators.hpp"
 
@@ -199,6 +200,37 @@ public:
 
     template<typename InputIteratorT,
              typename OutputIteratorT,
+             typename ReductionOpT,
+             typename T,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Reduce(InputIteratorT  d_in,
+                             OutputIteratorT d_out,
+                             NumItemsT       num_items,
+                             ReductionOpT    reduction_op,
+                             T               init,
+                             EnvT            env = {})
+    {
+        // Note: determinism is not yet supported in libhipcxx, so it is not checked here
+
+        // Env-based reduce invoke
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return Reduce(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_in,
+                                                    d_out,
+                                                    num_items,
+                                                    reduction_op,
+                                                    init,
+                                                    stream);
+                                  });
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
              typename ReduceOpT,
              typename T,
              typename NumItemsT>
@@ -245,6 +277,37 @@ public:
                       stream);
     }
 
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        Sum(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        using InputT            = detail::it_value_t<InputIteratorT>;
+        using OutputT           = detail::it_value_t<OutputIteratorT>;
+        using InitT             = detail::non_void_value_t<OutputT, InputT>;
+        using ReductionOpT      = _HIPCUB_STD::plus<>;
+        const auto reduction_op = ReductionOpT{};
+
+        // Note: determinism is not yet supported in libhipcxx, so it is not checked here
+
+        // Env-based reduce invoke
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return Reduce(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_in,
+                                                    d_out,
+                                                    num_items,
+                                                    reduction_op,
+                                                    InitT(0),
+                                                    stream);
+                                  });
+    }
+
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
         Sum(void*           d_temp_storage,
@@ -273,11 +336,7 @@ public:
                       d_in,
                       d_out,
                       num_items,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
                       _HIPCUB_LIBCXX::minimum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? b : a;},
-#endif
                       detail::get_max_value<T>(),
                       stream);
     }
@@ -394,11 +453,7 @@ public:
                       d_in,
                       d_out,
                       num_items,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
                       _HIPCUB_LIBCXX::maximum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? a : b;},
-#endif
                       detail::get_lowest_value<T>(),
                       stream);
     }

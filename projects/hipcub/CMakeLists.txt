@@ -38,8 +38,8 @@ endif()
 set(VERSION_STRING "5.0.0")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 3)
-set(HIPCUB_CCCL_VERSION_MINOR 0)
-set(HIPCUB_CCCL_VERSION_PATCH 3)
+set(HIPCUB_CCCL_VERSION_MINOR 1)
+set(HIPCUB_CCCL_VERSION_PATCH 4)
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "5.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
@@ -115,13 +115,22 @@ set(ROCPRIM_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocPRIM depen
 
 # This function checks to see if the fetch method variable it's passed is defined, and contains a valid value.
 # If it does not contain a valid value, it issues a fatal failure with an error message.
-function(check_fetch_method method)
-  if (DEFINED ${method} AND NOT ${${method}} IN_LIST FETCH_METHOD_OPTIONS)
-    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${FETCH_METHOD_OPTIONS}.")
+function(check_fetch_method method fetch_method_options)
+  if (DEFINED ${method} AND NOT ${${method}} IN_LIST ${fetch_method_options})
+    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${fetch_method_options}.")
   endif()
 endfunction()
 
-check_fetch_method(ROCPRIM_FETCH_METHOD)
+check_fetch_method(ROCPRIM_FETCH_METHOD FETCH_METHOD_OPTIONS)
+
+# TODO: update code below to use the above fetch options when that is possible
+# Set up options for obtaining dependency libhipcxx
+# PACKAGE: Search for an install package that contains the dependency.
+set(LIBHIPCXX_FETCH_METHOD_OPTIONS "PACKAGE")
+
+set(LIBHIPCXX_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the libhipcxx dependency")
+
+check_fetch_method(LIBHIPCXX_FETCH_METHOD LIBHIPCXX_FETCH_METHOD_OPTIONS)
 
 # Add hipCUB's CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

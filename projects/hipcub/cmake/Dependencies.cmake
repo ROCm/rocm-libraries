@@ -391,7 +391,7 @@ endif(USER_BUILD_TEST)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 3.0.0)
+  set(CCCL_MINIMUM_VERSION 3.1.4)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
@@ -453,6 +453,20 @@ else()
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
     endif()
     restore_cache_variable(BUILD_CODE_COVERAGE BOOL)
+  endif()
+
+  # libhipcxx (only for ROCm platform)
+  # TODO: use fetch_dep when it's possible
+  set(REPO_NAME "libhipcxx")
+  message(STATUS "Searching for ${REPO_NAME} package")
+
+  # Add default install location for WIN32 and non-WIN32 as hint
+  find_package(${REPO_NAME} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/${REPO_NAME}")
+
+  if(NOT ${${REPO_NAME}_FOUND})
+    message(STATUS "No existing ${REPO_NAME} package was found.")
+  else()
+    message(STATUS "Package found (${${REPO_NAME}_DIR}) with version ${libhipcxx_VERSION}")
   endif()
 endif()
 

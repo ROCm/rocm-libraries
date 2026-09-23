@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -41,7 +41,6 @@ BEGIN_HIPCUB_NAMESPACE
  * @{
  */
 
-
 /**
  * \brief GridQueue is a descriptor utility for dynamic queue management.
  *
@@ -57,7 +56,7 @@ BEGIN_HIPCUB_NAMESPACE
  * will be filling.
  *
  * \par
- * Similarly, a "draining" GridQueue works by works by atomically-incrementing a
+ * Similarly, a "draining" GridQueue works by atomically-incrementing a
  * zero-initialized counter, returning a unique offset for the calling thread to
  * read its items. Threads can safely drain until the array's logical fill-size is
  * exceeded.  The drain counter must be reset using GridQueue::ResetDrain or
@@ -107,13 +106,12 @@ public:
         d_counters((OffsetT*) d_storage)
     {}
 
-
-    /// This operation sets the fill-size and resets the drain counter, preparing the GridQueue for draining in the next kernel instance.  To be called by the host or by a kernel prior to that which will be draining.
-    HIPCUB_DEVICE hipError_t FillAndResetDrain(
-        OffsetT fill_size,
-        hipStream_t stream = 0)
+    /// This operation sets the fill-size and resets the drain counter, preparing the GridQueue for
+    /// draining in the next kernel instance.  To be called by the host or by a kernel prior to the one
+    /// which will be draining.
+    HIPCUB_DEVICE
+    hipError_t FillAndResetDrain(OffsetT fill_size, [[maybe_unused]] hipStream_t stream = 0)
     {
-        (void)stream;
         d_counters[FILL] = fill_size;
         d_counters[DRAIN] = 0;
         return hipSuccess;
@@ -132,10 +130,11 @@ public:
                                           stream));
     }
 
-    /// This operation resets the drain so that it may advance to meet the existing fill-size.  To be called by the host or by a kernel prior to that which will be draining.
-    HIPCUB_DEVICE hipError_t ResetDrain(hipStream_t stream = 0)
+    /// This operation resets the drain so that it may advance to meet the existing fill-size.
+    /// To be called by the host or by a kernel prior to the one which will be draining.
+    HIPCUB_DEVICE
+    hipError_t ResetDrain([[maybe_unused]] hipStream_t stream = 0)
     {
-        (void)stream;
         d_counters[DRAIN] = 0;
 
         return hipSuccess;
@@ -147,11 +146,11 @@ public:
         return HipcubDebug(hipMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
     }
 
-
-    /// This operation resets the fill counter.  To be called by the host or by a kernel prior to that which will be filling.
-    HIPCUB_DEVICE hipError_t ResetFill(hipStream_t stream = 0)
+    /// This operation resets the fill counter.
+    /// To be called by the host or by a kernel prior to the one which will be filling.
+    HIPCUB_DEVICE
+    hipError_t ResetFill([[maybe_unused]] hipStream_t stream = 0)
     {
-        (void)stream;
         d_counters[FILL] = 0;
         return hipSuccess;
     }
@@ -162,13 +161,10 @@ public:
         return HipcubDebug(hipMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
     }
 
-
     /// Returns the fill-size established by the parent or by the previous kernel.
-    HIPCUB_DEVICE hipError_t FillSize(
-        OffsetT &fill_size,
-        hipStream_t stream = 0)
+    HIPCUB_DEVICE
+    hipError_t FillSize(OffsetT& fill_size, [[maybe_unused]] hipStream_t stream = 0)
     {
-        (void)stream;
         fill_size = d_counters[FILL];
 
         return hipSuccess;

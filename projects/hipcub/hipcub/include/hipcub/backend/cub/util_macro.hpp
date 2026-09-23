@@ -34,4 +34,6 @@
 
 #include <cub/util_macro.cuh> // IWYU pragma: export
 
+#define HIPCUB_SORT_MAYBE_UNROLL() _CCCL_SORT_MAYBE_UNROLL()
+
 #endif // HIPCUB_CUB_MACRO_HPP_
