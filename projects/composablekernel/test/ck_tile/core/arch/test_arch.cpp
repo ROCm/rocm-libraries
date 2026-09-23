@@ -232,7 +232,9 @@ TEST(ArchTest, GcnArchNameStringMapsToSpirv)
 // For amdgcnspirv, this macro resolves at runtime via __builtin_amdgcn_processor_is(), not compile
 // time.
 __global__ void test_buffer_resource_3rd_dword_kernel(uint32_t* out)
-{ *out = CK_TILE_BUFFER_RESOURCE_3RD_DWORD; }
+{
+    *out = CK_TILE_BUFFER_RESOURCE_3RD_DWORD;
+}
 
 // Expected value per arch, mirroring the bucket table in CK_TILE_BUFFER_RESOURCE_3RD_DWORD's
 // __SPIRV__ branch. Returns -1 for arches the macro does not special-case (falls to the gfx9
