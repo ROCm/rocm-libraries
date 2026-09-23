@@ -6,12 +6,12 @@
 from dataclasses import dataclass
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, SMEMModifiers, GLOBALModifiers, EXEC, ContinuousRegister, DSModifiers, MemTokenData
-from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBarrier, SCBranchSCC0, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32, SEndpgm
+from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBarrier, SCBranchSCC0, SCMovB32, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32, SEndpgm
 import abc
 from ..Component import Component
 from ..Common import log2, clusterEnabled, persistentSpatialCluster, persistentMulticast
 from rocisa.enum import CacheScope
-from rocisa.functions import scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder, sMagicDiv2
+from rocisa.functions import scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder
 from ..ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment
 
 @dataclass(frozen=True)
@@ -32,6 +32,9 @@ class StaticPartition:
     bound: str
     grid: str
     initial_rank: str
+    tile_units: bool = False
+
+RESERVED_MASK = 0x80000000
 
 def _mailboxLds0Token(writer):
     return MemTokenData([writer.states.memTokenLdsBuffer0])
@@ -688,33 +691,6 @@ class WorkAssignment(Component):
 
         return module, sWorkItemIdx
 
-    def activateFullTileRange(self, writer, kernel, processing, tPA, tPB):
-        module = Module('Persistent TwoTileDPFirst graWorkGroup')
-        constantsInVgprs = writer.isPersistentConstantsToVgprEnabled(kernel)
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, 'PersistentMappingTemp', preventOverflow=False)
-        sIpt = writer.acquirePersistentConstSgpr(kernel, 'ItersPerTile')
-        if constantsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs['ItersPerTile'])))
-        module.add(processing.computeTotalTiles(writer, kernel, sTmp + 3))
-        module.add(SMulI32(dst=sgpr(sTmp + 3), src0=sgpr(sTmp + 3), src1=sgpr(sIpt), comment='dpSectionSize = totalTiles * ItersPerTile'))
-        module.add(SCmpLtU32(src0=sgpr('PersistentIteration'), src1=sgpr(sTmp + 3), comment="Make sure there's DP work to do"))
-        module.add(writer.longBranchScc0(Label('KernelEnd', ''), posNeg=1))
-        writer.releasePersistentConstSgpr(sIpt)
-        module.add(processing.mapIterationToTile(writer, kernel, sTmp, tPA, tPB))
-        sIpt = writer.acquirePersistentConstSgpr(kernel, 'ItersPerTile')
-        sGrid = writer.acquirePersistentConstSgpr(kernel, 'skGrid')
-        if constantsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs['ItersPerTile'])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.persistentConstVgprs['skGrid'])))
-        module.add(SMulI32(dst=sgpr(sTmp + 1), src0=sgpr(sGrid), src1=sgpr(sIpt), comment='DP iterations shift'))
-        writer.releasePersistentConstSgpr(sGrid)
-        writer.releasePersistentConstSgpr(sIpt)
-        module.add(SAddU32(dst=sgpr(sTmp + 1), src0=sgpr(sTmp + 1), src1=sgpr('PersistentIteration'), comment='Add DP shift'))
-        module.add(SMovB32(dst=sgpr('PersistentIteration'), src=sgpr(sTmp + 1), comment='Store next DP iteration'))
-        module.add(processing.tileIndexToWorkGroup(writer, kernel, sTmp))
-        writer.sgprPool.checkIn(sTmp)
-        return module
-
 
 class StaticGrid(WorkAssignment):
     kernel = {"WorkAssignment": "StaticGrid"}
@@ -786,14 +762,24 @@ class StaticGrid(WorkAssignment):
             module.add(self.persistentMulticastPrologueSignal(writer, kernel))
 
 
-        module.add(processing.initializePartition(writer, kernel))
+        if partition.tile_units:
+            module.add(processing.computeTotalTiles(writer, kernel, partition.bound))
+            module.add(SCmpLtU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment="Initial tile is in range"))
+            module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+        else:
+            module.add(processing.initializePartition(writer, kernel))
         return module
 
     def activateReservedOrAcquire(self, writer, kernel, processing, tPA, tPB):
         writer.states.currentTileWork = processing.tileWork(kernel)
-        if writer.states.currentTileWork.k_start is None:
-            return self.activateFullTileRange(writer, kernel, processing, tPA, tPB)
-        return self.activateStaticRange(writer, kernel, processing, tPA, tPB)
+        partition = processing.staticPartition()
+        if not partition.tile_units:
+            return self.activateStaticRange(writer, kernel, processing, tPA, tPB)
+        module = Module("StaticGrid activate tile")
+        module.add(processing.materializeTile(writer, kernel, partition.cursor, tPA, tPB))
+        module.add(SAddU32(dst=sgpr(partition.cursor), src0=sgpr(partition.cursor), src1=sgpr(partition.grid), comment="Advance by the persistent grid in tile units"))
+        module.add(SCSelectB32(dst=sgpr(partition.cursor), src0=sgpr(partition.bound), src1=sgpr(partition.cursor), comment="A wrapped cursor is exhausted"))
+        return module
 
     def __call__(self):
         raise NotImplementedError
@@ -801,42 +787,24 @@ class StaticGrid(WorkAssignment):
     def reserveNext(self, writer, kernel, skipLabel):
         module = Module("StaticGrid reserveNext")
         partition = Component.TileProcessingStrategy.find(writer).staticPartition()
+        module.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="Reserve next static assignment once"))
+        module.add(SCMovB32(dst=sgpr("PersistentPrefetchState"), src=hex(RESERVED_MASK), comment="Reserved; no data issued yet"))
         module.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment="No next persistent iteration"))
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
         return module
 
     def peekTileBatch(self, writer, kernel, dstSgpr):
-        """Batch index of the tile ``PersistentIteration`` currently points at, into ``dstSgpr``.
-
-        Repeats the arithmetic ``mapIterationToTile`` and ``tileIndexToWorkGroup`` perform -- tile
-        index from ``PersistentIteration``, then tile index over the tiles per batch -- but
-        writes only ``dstSgpr`` and temporaries. ``mapIterationToTile`` also resets the
-        local-read offsets and ``tileIndexToWorkGroup`` claims ``WorkGroup0/1/2``, neither of
-        which may happen at a point that might still branch away.
-
-        Valid only at a persistent-loop entry, where ``PersistentIteration`` still names the
-        tile about to be computed; ``graWorkGroup`` advances it past that point.
-
-        ReuseAcrossPersistent calls this at both entries to decide whether the
-        resident A belongs to the tile this iteration will compute.
-        """
-        module = Module('Persistent rapTileBatch')
-        constantsInVgprs = writer.isPersistentConstantsToVgprEnabled(kernel)
-        with writer.allocTmpSgpr(4, 2, 'RAPTileBatchTemp') as sTmpRes:
-            sTmp = sTmpRes.idx
-            sMagicNum = writer.acquirePersistentConstSgpr(kernel, 'MagicNumberItersPerTile')
-            sMagicShift = writer.acquirePersistentConstSgpr(kernel, 'MagicShiftItersPerTile')
-            if constantsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sMagicNum), src=vgpr(writer.states.persistentConstVgprs['MagicNumberItersPerTile'])))
-                module.add(VReadfirstlaneB32(dst=sgpr(sMagicShift), src=vgpr(writer.states.persistentConstVgprs['MagicShiftItersPerTile'])))
-            module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp + 1), sgpr('PersistentIteration'), sgpr(sMagicNum), sgpr(sMagicShift), sgpr(sTmp + 2)))
-            writer.releasePersistentConstSgpr(sMagicNum)
-            writer.releasePersistentConstSgpr(sMagicShift)
-            module.add(SMulI32(dst=sgpr(sTmp + 1), src0=sgpr('NumWorkGroups0'), src1=sgpr('NumWorkGroups1'), comment='RAP: tiles per batch'))
-            tmpVgpr = writer.vgprPool.checkOut(2, 'rapTileBatchDiv')
-            tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
-            module.add(scalarUInt32DivideAndRemainder(qReg=dstSgpr, dReg=sTmp, divReg=sTmp + 1, rReg=sTmp + 3, tmpVgprRes=tmpVgprRes, wavewidth=kernel['WavefrontSize'], doRemainder=False, comment='RAP: batch of the tile at PersistentIteration'))
-            writer.vgprPool.checkIn(tmpVgpr)
+        """Inspect the next tile without reserving or advancing assignment."""
+        partition = Component.TileProcessingStrategy.find(writer).staticPartition()
+        assert partition.tile_units, "RAP needs whole-tile assignment"
+        module = Module("StaticGrid peekTileBatch")
+        with writer.allocTmpSgpr(2, 2, "PersistentBatchPeek") as tmp:
+            module.add(SMulI32(dst=sgpr(tmp.idx), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Tiles per batch"))
+            vtmp = writer.vgprPool.checkOut(2, "PersistentBatchDivide")
+            module.add(scalarUInt32DivideAndRemainder(qReg=dstSgpr, dReg=partition.cursor, divReg=tmp.idx, rReg=tmp.idx + 1,
+                tmpVgprRes=ContinuousRegister(idx=vtmp, size=2), wavewidth=kernel["WavefrontSize"], doRemainder=False,
+                comment="Batch of the next assigned tile"))
+            writer.vgprPool.checkIn(vtmp)
         return module
 
     def closeLoop(self, writer, kernel):
@@ -899,6 +867,9 @@ class DynamicWorkQueue(WorkAssignment):
         """
         partition = Component.TileProcessingStrategy.find(writer).queuePartition()
         module = Module("StreamK Dynamic papHasNextPersistentIteration")
+        reserved = Label(writer.labels.getNameInc("PAP_AlreadyReserved"), "")
+        module.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="Has this next assignment already been reserved?"))
+        module.add(SCBranchSCC0(labelName=reserved.getLabelName(), comment="Reuse work or exhaustion reservation without another pop"))
         # The OptNLL PAP window runs near the SGPR high-water mark, so let the
         # pop's scratch check-outs grow the pool (preventOverflow=False) instead
         # of tripping the preventOverflow guard.
@@ -907,8 +878,9 @@ class DynamicWorkQueue(WorkAssignment):
         module.add(SMovB32(dst=sgpr("NextWorkItem"), src=sgpr(sWorkItemIdx), comment="PAP: stash popped work item for persistent back-edge"))
         # Mark primed BEFORE the drain check so the back-edge reuses the stashed
         # work item (never re-pops) even when this pop drained the queue.
-        module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=1, comment="PAP: next work item already popped"))
+        module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=hex(RESERVED_MASK), comment="PAP: next work item reserved; no data issued"))
         writer.sgprPool.checkIn(sWorkItemIdx)
+        module.add(reserved)
         module.add(SCmpGeU32(src0=sgpr("NextWorkItem"), src1=sgpr(partition.total_items), comment="PAP: queue drained (no next tile)?"))
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="drained: skip next-tile prefetch"))
         return module

@@ -214,7 +214,7 @@ def test_explicit_reduction_controls_require_streamk(strategy, option):
 
 
 
-@pytest.mark.parametrize("version", (-1, 1, 2, False, True, "1"))
+@pytest.mark.parametrize("version", (-1, 2, False, True, "1"))
 def test_unknown_persistent_argument_layout_is_rejected(version):
     with pytest.raises(ValueError, match="Unsupported PersistentLoopArgsVersion"):
         normalize_execution_policy({"TileProcessingStrategy": "DataParallel", "InternalSupportParams": {"PersistentLoopArgsVersion": version}}, regenerate=False)
@@ -226,15 +226,28 @@ def test_boolean_outer_argument_versions_remain_rejected(version):
         normalize_execution_policy({"TileProcessingStrategy": "DataParallel", "InternalSupportParams": {"KernArgsVersion": version}}, regenerate=False)
 
 
+@pytest.mark.parametrize("strategy", ("None", "StreamK"))
+def test_native_whole_tile_layout_requires_data_parallel(strategy):
+    with pytest.raises(ValueError, match="PersistentLoopArgsVersion=1 requires DataParallel/StaticGrid"):
+        normalize_execution_policy({"TileProcessingStrategy": strategy, "InternalSupportParams": {"PersistentLoopArgsVersion": 1}}, regenerate=False)
+
+
+def test_prebuilt_dp_defaults_to_legacy_layout_and_preserves_explicit_native_layout():
+    state = normalize_execution_policy({"StreamK": 3, "StreamKForceDPOnly": 1}, regenerate=False)
+    assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 0
+    native = normalize_execution_policy({"TileProcessingStrategy": "DataParallel", "InternalSupportParams": {"PersistentLoopArgsVersion": 1}}, regenerate=False)
+    assert native["InternalSupportParams"]["PersistentLoopArgsVersion"] == 1
+
+
 @pytest.mark.parametrize("outer", (0, 1, 2, 3))
 @pytest.mark.parametrize("regenerate", (False, True))
-def test_data_parallel_preserves_legacy_argument_layout(outer, regenerate):
+def test_data_parallel_selects_layout_at_the_generation_boundary(outer, regenerate):
     state = normalize_execution_policy({
         "StreamK": 3,
         "StreamKForceDPOnly": 1,
         "InternalSupportParams": {"KernArgsVersion": outer},
     }, regenerate=regenerate)
     assert state["InternalSupportParams"] == {
-        "KernArgsVersion": outer,
-        "PersistentLoopArgsVersion": 0,
+        "KernArgsVersion": 3 if regenerate else outer,
+        "PersistentLoopArgsVersion": int(regenerate),
     }

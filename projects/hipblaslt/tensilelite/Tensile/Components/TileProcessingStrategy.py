@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Optional
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister
-from rocisa.instruction import VMovB32, SBranch, SAndB32, SCSelectB32, SCBranchSCC0, SCmpEQU32, SMaxI32, SMovB32, SMulI32, SNop, SSubU32, SAddU32, SCmpLtU32, VReadfirstlaneB32
-from rocisa.functions import scalarStaticDivideAndRemainder, BranchIfNotZero, scalarUInt32DivideAndRemainder, sMagicDiv2
+from rocisa.instruction import VMovB32, SBranch, SAndB32, SCSelectB32, SCBranchSCC0, SCmpEQU32, SMaxI32, SMovB32, SMulI32, SNop, SSubU32
+from rocisa.functions import scalarStaticDivideAndRemainder, BranchIfNotZero, scalarUInt32DivideAndRemainder
 from ..Component import Component
 import abc
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
@@ -91,41 +91,43 @@ class DataParallel(TileProcessingStrategy):
         return []
 
     def staticPartition(self):
-        return StaticPartition("PersistentIteration", "PersistentIterationEnd", "skGrid", "PersistentWorkGroupIndex")
+        return StaticPartition("NextTile", "TotalTiles", "PersistentGrid", "NextTile", tile_units=True)
 
+    def materializeTile(self, writer, kernel, tile, tPA, tPB, skipLroReset=False):
+        """Map a full-K tile; assignment owns all cursor changes."""
+        module = Module("DataParallel materializeTile")
+        if kernel["PrefetchGlobalRead"] and not skipLroReset:
+            if kernel["UseSubtileImpl"]:
+                module.add(localReadResetOffsetsSubtile(writer, kernel))
+            else:
+                module.add(writer.localReadResetOffsets(kernel, tPA))
+                if kernel["ProblemType"]["MXBlockA"] and "MX" in tPA:
+                    module.add(writer.localReadResetOffsets(kernel, tPA["MX"]))
+                if kernel["ProblemType"]["MXBlockB"] and "MX" in tPB:
+                    module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
+                module.add(writer.localReadResetOffsets(kernel, tPB))
+        with writer.allocTmpSgpr(3, 2, "PersistentTileMapping") as tmp:
+            module.add(SMovB32(dst=sgpr(tmp.idx), src=sgpr(tile), comment="Assigned output tile"))
+            module.add(self.tileIndexToWorkGroup(writer, kernel, tmp.idx))
+        return module
 
     def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tPA, tPB, skipLroReset=False):
-        """Recompute Persistent tile locals and map tile index to WorkGroup* for the *next* tile.
-
-        After each persistent iteration's main body, ``PersistentIteration`` already holds the starting
-        global iteration index for the next chunk (set at the beginning of ``graWorkGroup``).
-        Running ``mapIterationToTile`` + ``tileIndexToWorkGroup`` + WGM remapping here matches the start of the
-        next ``setupNewTile`` / ``graWorkGroup`` (without advancing ``PersistentIteration`` again), so
-        SGPRs are warm before the persistent back-edge.
-
-        When ``skipLroReset`` is True the local-read-offset reset inside
-        ``mapIterationToTile`` is suppressed.  This is needed when PAP runs *before*
-        the NLL body: the NLL still needs the current tile's read pointers."""
         from Tensile.Components.WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
-        module = Module('Persistent prefetchAcrossPersistentSetupNextTile')
-        with writer.allocTmpSgpr(4, 2, 'PersistentPrefetchTemp') as sTmpRes:
-            sTmp = sTmpRes.idx
-            module.add(self.mapIterationToTile(writer, kernel, sTmp, tPA, tPB, skipLroReset=skipLroReset))
-            module.add(self.tileIndexToWorkGroup(writer, kernel, sTmp))
-        if len(kernel['SpaceFillingAlgo']):
-            writer.states.WGMTransformLevels = len(kernel['SpaceFillingAlgo'])
-            module.add(SpaceFillingCurveWalk(writer, kernel, 'WGM'))
+        module = self.materializeTile(writer, kernel, self.staticPartition().cursor, tPA, tPB, skipLroReset=skipLroReset)
+        if kernel["SpaceFillingAlgo"]:
+            writer.states.WGMTransformLevels = len(kernel["SpaceFillingAlgo"])
+            module.add(SpaceFillingCurveWalk(writer, kernel, "WGM"))
         else:
-            module.add(DefaultWGM(writer, kernel, 'WGM'))
+            module.add(DefaultWGM(writer, kernel, "WGM"))
         return module
 
     def calculateLoopNumIter(self, writer, kernel, loopCounterName, loopIdx, tmpSgprInfo):
         module = Module('Persistent Common calculateLoopNumIter')
-        sIpt = writer.acquirePersistentConstSgpr(kernel, 'ItersPerTile')
-        if writer.isPersistentConstantsToVgprEnabled(kernel):
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs['ItersPerTile'])))
-        module.add(SMovB32(dst=sgpr(loopCounterName), src=sgpr(sIpt), comment='Persistent loop counter = ItersPerTile (DP-only full tile)'))
-        writer.releasePersistentConstSgpr(sIpt)
+        module.add(SMovB32(dst=sgpr(loopCounterName), src=sgpr("ItersPerTile"), comment="Full-tile K loop count"))
+        # The scheduling ABI reserves one iteration for K=0 so every output
+        # tile is visited. Its compute loop must still skip the empty sum.
+        module.add(SCmpEQU32(src0=sgpr("SizesSum+%u" % writer.states.unrollIdx), src1=0, comment="Empty summation"))
+        module.add(SCSelectB32(dst=sgpr(loopCounterName), src0=0, src1=sgpr(loopCounterName), comment="K=0 still stores the tile but issues no compute"))
         alphaLabel2 = Label(writer.labels.getNameInc('PersistentAlphaCheck'), '')
         module.add(BranchIfNotZero('Alpha', kernel['ProblemType']['ComputeDataType'].toEnum(), alphaLabel2))
         module.add(SMovB32(dst=sgpr(loopCounterName), src=0, comment='Skip iterations'))
@@ -209,58 +211,4 @@ class DataParallel(TileProcessingStrategy):
 
     def kernelEnd(self, writer, kernel):
         module = Module("DataParallel kernelEnd")
-        return module
-
-    def initializePartition(self, writer, kernel):
-        module = Module("DataParallel iteration partition")
-        constantsInVgprs = writer.isPersistentConstantsToVgprEnabled(kernel)
-        sIdx = writer.acquirePersistentConstSgpr(kernel, 'PersistentWorkGroupIndex')
-        sIpt = writer.acquirePersistentConstSgpr(kernel, 'ItersPerTile')
-        if constantsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.persistentConstVgprs['PersistentWorkGroupIndex'])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs['ItersPerTile'])))
-        module.add(SMulI32(dst=sgpr('PersistentIteration'), src0=sgpr(sIdx), src1=sgpr(sIpt), comment='DP starting iteration'))
-        writer.releasePersistentConstSgpr(sIdx)
-        with writer.allocTmpSgpr(1, tag='TotalIters') as sTmpRes:
-            sTmp = sTmpRes.idx
-            module.add(self.computeTotalTiles(writer, kernel, sTmp))
-            module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sIpt), comment='totalIters = totalTiles * itersPerTile'))
-            module.add(SMovB32(dst=sgpr('PersistentIterationEnd'), src=sgpr(sTmp), comment='DP ending iteration'))
-            module.add(SCmpLtU32(src0=sgpr('PersistentIteration'), src1=sgpr(sTmp), comment="Make sure there's work to do"))
-        writer.releasePersistentConstSgpr(sIpt)
-        module.add(writer.longBranchScc0(Label('KernelEnd', ''), posNeg=1))
-        return module
-
-    def mapIterationToTile(self, writer, kernel, sTmp, tPA, tPB, skipLroReset=False):
-        module = Module('Persistent mapIterationToTile')
-        constantsInVgprs = writer.isPersistentConstantsToVgprEnabled(kernel)
-        if kernel['PrefetchGlobalRead'] and (not skipLroReset):
-            if not kernel['UseSubtileImpl']:
-                module.add(writer.localReadResetOffsets(kernel, tPA))
-                if kernel['ProblemType']['MXBlockA'] and 'MX' in tPA:
-                    module.add(writer.localReadResetOffsets(kernel, tPA['MX']))
-                if kernel['ProblemType']['MXBlockB'] and 'MX' in tPB:
-                    module.add(writer.localReadResetOffsets(kernel, tPB['MX']))
-                module.add(writer.localReadResetOffsets(kernel, tPB))
-            else:
-                module.add(localReadResetOffsetsSubtile(writer, kernel))
-        module.addComment0('Persistent calculate tile idx and map to WG')
-        sMagicNum = writer.acquirePersistentConstSgpr(kernel, 'MagicNumberItersPerTile')
-        sMagicShift = writer.acquirePersistentConstSgpr(kernel, 'MagicShiftItersPerTile')
-        if constantsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sMagicNum), src=vgpr(writer.states.persistentConstVgprs['MagicNumberItersPerTile'])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sMagicShift), src=vgpr(writer.states.persistentConstVgprs['MagicShiftItersPerTile'])))
-        sMaskedShift = None
-        sMagicShiftForDiv = sMagicShift
-        module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp + 1), sgpr('PersistentIteration'), sgpr(sMagicNum), sgpr(sMagicShiftForDiv), sgpr(sTmp + 2)))
-        if sMaskedShift is not None:
-            writer.sgprPool.checkIn(sMaskedShift)
-        writer.releasePersistentConstSgpr(sMagicNum)
-        writer.releasePersistentConstSgpr(sMagicShift)
-        sIpt = writer.acquirePersistentConstSgpr(kernel, 'ItersPerTile')
-        if constantsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs['ItersPerTile'])))
-        module.add(SMulI32(dst=sgpr(sTmp + 1), src0=sgpr(sTmp), src1=sgpr(sIpt), comment='Tile start iteration'))
-        module.add(SAddU32(dst=sgpr(sTmp + 2), src0=sgpr(sTmp + 1), src1=sgpr(sIpt), comment='Tile end iteration'))
-        writer.releasePersistentConstSgpr(sIpt)
         return module
