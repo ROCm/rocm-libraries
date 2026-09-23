@@ -20,6 +20,9 @@ The hipThreads project is located in `ROCm/rocm-libraries <https://github.com/RO
     * :doc:`Install hipThreads <install/install>`
     * :doc:`Build from source <install/source-build>`
 
+.. grid:: 2
+  :gutter: 3
+
   .. grid-item-card:: Conceptual
 
     * :ref:`hipThreads execution model <execution-model>`
@@ -28,6 +31,10 @@ The hipThreads project is located in `ROCm/rocm-libraries <https://github.com/RO
 
     * :doc:`Add hipThreads to a CMake project <./how-to/hipThreads-in-a-project>`
     * :doc:`Tune scheduler concurrency <./how-to/hipThreads-tune-scheduler-concurrency>`
+
+  .. grid-item-card:: Examples
+
+    * `Examples <https://github.com/ROCm/rocm-examples/tree/amd-staging/Libraries/hipThreads>`_
 
   .. grid-item-card:: Reference
 
