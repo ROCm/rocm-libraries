@@ -12,10 +12,20 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     * GEHRD
 
 ### Changed
+
+* `abstol` in SYEVJ/HEEVJ, GESVDJ, and SYGVJ/HEGVJ is now a relative tolerance: convergence requires every off-diagonal element to satisfy `|a_ij| <= abstol * sqrt(|a_ii| * |a_jj|)`, rather than the off-diagonal norm to fall below a multiple of the norm of the whole matrix. Callers that tuned `abstol` may see a different number of sweeps.
+
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed SYEVJ/HEEVJ and GESVDJ silently returning an undiagonalized matrix when one entry dominates the norm. The convergence test compared the global off-diagonal norm against a multiple of the norm of the whole matrix, so a single large entry could mask a block that had not been rotated at all, and the routine returned after zero sweeps with `info = 0`. In fp32, `GESVDJ` broke at a largest singular value of 3.4e3, `SYEVJ` at 5.9e6.
+* Fixed SYEVJ/HEEVJ never reporting non-convergence for matrices with `n <= 58`. The small-size kernel tested the sweep counter with a condition that was always true, so `info` was unconditionally 0.
+
 ### Known issues
+
+* GESVDJ computes the SVD from the eigendecomposition of `A^H A`, which squares the condition number. Its accuracy on ill-conditioned matrices is correspondingly lower than GESVD's, independently of the convergence fix above.
+
 ### Upcoming changes
 
 

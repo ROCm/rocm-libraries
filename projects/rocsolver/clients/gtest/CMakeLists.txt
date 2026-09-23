@@ -144,6 +144,7 @@ set(rocrefact_test_source
 set(rocunit_test_source
   # gemm
   unit/gemm_gtest.cpp
+  unit/syevj_convergence_gtest.cpp
   # generate helpers
   unit/gerand_gtest.cpp
   unit/herand_gtest.cpp
