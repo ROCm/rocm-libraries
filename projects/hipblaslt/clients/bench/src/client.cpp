@@ -289,6 +289,7 @@ try
     std::string filter;
     std::string activation_type;
     std::string aux_type;
+    std::string int4_encoding;
     int         scaleAFormat;
     int         scaleBFormat;
     int         scaleCFormat;
@@ -594,10 +595,11 @@ try
          "1011 = VEC128_ZP. The scale element type is --b_type.")
 
         ("int4_encoding",
-         value<int32_t>(&arg.int4_encoding)->default_value(0),
+         value<std::string>(&int4_encoding)->default_value("signed"),
          "w4a16 only: encoding of the int4 weights in A (hipblasLtInt4Encoding_t). "
-         "0 = signed two's complement, 1 = unsigned with an implicit zero-point of 8 (GPTQ), "
-         "2 = as 1 with the ExLlama [0,2,4,6,1,3,5,7] dword shuffle.")
+         "signed = two's complement, unsigned_bias8 = unsigned with an implicit "
+         "zero-point of 8 (GPTQ), unsigned_bias8_exllama = unsigned_bias8 with the "
+         "ExLlama [0,2,4,6,1,3,5,7] dword shuffle. The numerals 0, 1 and 2 are also accepted.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
@@ -1223,6 +1225,12 @@ try
     // matches B's. All three travel together, so reject any partial request here
     // rather than in the library.
     {
+        const auto encoding = string_to_int4_encoding(int4_encoding);
+        if(encoding == HIPBLASLT_INT4_ENCODING_END_EXT)
+            throw std::invalid_argument("Invalid --int4_encoding "s + int4_encoding
+                                        + "; expected one of " + c_int4_encoding_names);
+        arg.int4_encoding = static_cast<int32_t>(encoding);
+
         const bool int4A = (arg.a_type == HIP_R_4I);
         if(int4A != isW4A16Scaling(arg.scaleA))
             throw std::invalid_argument(
@@ -1234,9 +1242,6 @@ try
             if(arg.b_type != HIP_R_16BF && arg.b_type != HIP_R_16F)
                 throw std::invalid_argument("w4a16 requires --b_type bf16_r or f16_r, got "s
                                             + hip_datatype_to_string(arg.b_type));
-            if(arg.int4_encoding < 0 || arg.int4_encoding > 2)
-                throw std::invalid_argument("Invalid --int4_encoding "s
-                                            + std::to_string(arg.int4_encoding));
         }
     }
 

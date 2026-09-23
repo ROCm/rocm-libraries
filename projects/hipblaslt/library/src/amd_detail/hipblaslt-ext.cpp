@@ -239,7 +239,7 @@ namespace hipblaslt_ext
     {
         // Same range check the C API applies to
         // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT.
-        if(encoding < 0 || encoding >= HIPBLASLT_INT4_ENCODING_END_EXT)
+        if(static_cast<int>(encoding) < 0 || encoding >= HIPBLASLT_INT4_ENCODING_END_EXT)
         {
             std::cerr << "Unsupported int4 encoding for A matrix: "
                       << static_cast<int>(encoding) << std::endl;

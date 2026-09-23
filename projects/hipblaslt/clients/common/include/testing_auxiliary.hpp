@@ -2804,6 +2804,24 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
         std::string_view{rocblaslt_compute_type_to_string(static_cast<rocblaslt_compute_type>(999))}
         == "Invalid");
 
+    // Test hipblaslt_int4_encoding_to_string / string_to_int4_encoding. log_bench
+    // emits the name and hipblaslt-bench parses it back, so every encoding must
+    // survive the round trip for a logged w4a16 command to replay.
+    for(int e = 0; e < HIPBLASLT_INT4_ENCODING_END_EXT; ++e)
+    {
+        const auto  encoding = static_cast<hipblasLtInt4Encoding_t>(e);
+        const char* name     = hipblaslt_int4_encoding_to_string(encoding);
+        ASSERT_TRUE(std::string_view{name} != "invalid");
+        ASSERT_TRUE(string_to_int4_encoding(name) == encoding);
+        // The numerals stay accepted for pre-existing scripts.
+        ASSERT_TRUE(string_to_int4_encoding(std::to_string(e)) == encoding);
+    }
+    ASSERT_TRUE(std::string_view{hipblaslt_int4_encoding_to_string(
+                    static_cast<hipblasLtInt4Encoding_t>(HIPBLASLT_INT4_ENCODING_END_EXT))}
+                == "invalid");
+    ASSERT_TRUE(string_to_int4_encoding("nonsense") == HIPBLASLT_INT4_ENCODING_END_EXT);
+    ASSERT_TRUE(string_to_int4_encoding("") == HIPBLASLT_INT4_ENCODING_END_EXT);
+
     // Test rocblaslt_matrix_layout_attributes_to_string
     ASSERT_TRUE(std::string_view{rocblaslt_matrix_layout_attributes_to_string(
                     ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT)}
