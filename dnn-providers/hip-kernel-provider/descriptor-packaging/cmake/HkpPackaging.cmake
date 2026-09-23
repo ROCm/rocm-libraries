@@ -155,7 +155,7 @@ endfunction()
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
 #   no ordering edge between them, so the generator runs them at once: the test
 #   roots name a small cap so their pools do not multiply, and the product root
-#   omits it because it is the only root large enough to repay a full pool.
+#   omits it because it is the root expected to be large enough to repay a full pool.
 #
 #   NAME is the source label written into every descriptor's provenance. NAME, the
 #   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
