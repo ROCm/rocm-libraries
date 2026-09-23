@@ -15,6 +15,7 @@ flag_management:
       statuses:
       - type: project
         target: auto
+        threshold: 0.2%
     - name: TensileLite-Unit
       carryforward: true
       statuses:
