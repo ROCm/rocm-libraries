@@ -102,8 +102,8 @@ def _derive_states(cfg_path):
 
 def _mc_state(**overrides):
     st = {
-        "StreamK": 3, "StreamKForceDPOnly": 1,
-        "StreamKAtomic": 0, "StreamKXCCMapping": 0, "ClusterDim": [4, 1],
+        "TileProcessingStrategy": "DataParallel", "WorkAssignment": "StaticGrid",
+        "StreamKAtomic": 0, "PersistentXCCMapping": 0, "ClusterDim": [4, 1],
         "ISA": [12, 5, 0], "TDMInst": 3, "PrefetchGlobalRead": 1,
     }
     st.update(overrides)
@@ -159,22 +159,22 @@ class TestValidation:
             assert streamKMulticast(st)
 
     def test_xcc_mapping_forced_to_zero(self, tmp_path):
-        """StreamKXCCMapping is coerced to 0 (not rejected) under StreamK+ClusterDim.
+        """PersistentXCCMapping is coerced to 0 (not rejected) under StreamK+ClusterDim.
 
         The general Stream-K + ClusterDim reconciliation force-sets
-        StreamKXCCMapping = 0 (the WGM/XCC WorkGroup0 remap has no cluster
+        PersistentXCCMapping = 0 (the WGM/XCC WorkGroup0 remap has no cluster
         awareness) *before* _validateStreamKMulticast runs. That coerced value is
         exactly what StreamKMulticast requires (XCC == 0), so the solution is
         accepted with the remap disabled rather than rejected. Our
         _validateStreamKMulticast XCC check remains as redundant safety."""
         cfg = _write_variant(tmp_path, "xcc.yaml",
-                             fork_overrides={"StreamKXCCMapping": [3]})
+                             fork_overrides={"PersistentXCCMapping": [3]})
         states = _derive_states(cfg)
         assert states, "expected the XCC=3 config to be accepted with XCC coerced to 0"
         for st in states:
             assert streamKCluster(st)
             assert streamKMulticast(st)
-            assert st["StreamKXCCMapping"] == 0, st["StreamKXCCMapping"]
+            assert st["PersistentXCCMapping"] == 0, st["PersistentXCCMapping"]
 
     def test_ck_greater_than_one_also_multicasts_a(self, tmp_path):
         # ClusterDim = [2, 2] adds Ck = 2 N-axis peers on top of the Cs = 2 M-axis
@@ -202,7 +202,7 @@ class TestValidation:
     # --- direct _validateStreamKMulticast reject branches ------------------
     # Several reject branches are unreachable through the config-derivation path
     # (the collapse only auto-derives StreamKMulticast for SK3 and force-coerces
-    # StreamKXCCMapping=0, and the designed configs are always gfx1250 with full
+    # PersistentXCCMapping=0, and the designed configs are always gfx1250 with full
     # caps), so drive them directly with the module-level hand-built state
     # (_mc_state / _isa_map) -- the same pattern test_accept_pgr2 uses.
     def test_streamk_not_3_is_not_multicast_path(self):
@@ -212,7 +212,7 @@ class TestValidation:
         # ClusterDim is rejected by the general Stream-K reconciliation (cluster
         # support is SK3-only), not by this validator.
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
-        st = _mc_state(StreamK=4)
+        st = _mc_state(TileProcessingStrategy="StreamK", WorkAssignment="DynamicWorkQueue")
         assert streamKCluster(st) is False
         assert streamKMulticast(st) is False
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
@@ -220,7 +220,7 @@ class TestValidation:
     def test_reject_xcc_mapping_direct(self):
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
-            _mc_state(StreamKXCCMapping=3), False, _isa_map()) is False
+            _mc_state(PersistentXCCMapping=3), False, _isa_map()) is False
 
     def test_reject_non_gfx1250_isa(self):
         # The ISA gate rejects before indexing isaInfoMap, so a foreign ISA need
@@ -276,9 +276,9 @@ class TestMulticastGate:
         assert streamKMulticast(st)
 
     def test_prefetch_handshake_inert_without_multicast(self):
-        from Tensile.Components.StreamK import StreamKTwoTileDPFirst
-        sk = StreamKTwoTileDPFirst()
-        mod = sk.streamKMulticastProloguePrefetchHandshake(
+        from Tensile.Components.WorkAssignment import StaticGrid
+        assignment = StaticGrid()
+        mod = assignment.persistentMulticastProloguePrefetchHandshake(
             writer=None, kernel=_mc_state(Multicast=False))
         items = mod.flatitems() if hasattr(mod, "flatitems") else mod.items()
         assert list(items) == []
