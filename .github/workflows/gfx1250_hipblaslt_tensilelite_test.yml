@@ -2,21 +2,16 @@
 # SPDX-License-Identifier: MIT
 
 # hipBLASLt + TensileLite tests on a gfx1250 runner, run against a prebuilt ROCm
-# artifact inside a container
+# artifact inside a container.
 #
-# Triggers:
-#   - workflow_run: after a TheRock Multi-Arch CI build on a hipBLASLt/TensileLite
-#     PR, fetch that build's gfx1250 artifact and test it (scoped by the scope job).
-#   - workflow_dispatch: manually test a specific build by run-id.
-#
+# On-demand only: workflow_dispatch. A developer supplies the run-id of a completed
+# "TheRock Multi-Arch CI" gfx125X-dcgpu build and picks which suites to run. There is
+# no per-PR auto-trigger — the gfx1250 runners are scarce, so runs are manual.
 
 name: gfx1250 HW hipBLASLt + TensileLite Tests
-run-name: ${{ github.event.workflow_run.head_branch || github.ref_name }} @ ${{ github.event.workflow_run.head_sha || github.sha }}
+run-name: ${{ github.ref_name }} @ ${{ github.sha }}
 
 on:
-  workflow_run:
-    workflows: ["TheRock Multi-Arch CI"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       build_run_id:
@@ -43,106 +38,19 @@ on:
         description: "hipBLASLt --gtest_filter (e.g. -*MX* to exclude MXFP). Empty = run all."
         type: string
         default: ""
-      pytest_workers:
-        description: "pytest-xdist workers for TensileLite common tests (one per visible GPU on this runner)"
-        type: string
-        default: "1"
 
 permissions:
   contents: read
   actions: read
-  pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Cheap gate: resolve the PR and check org-member label + hipBLASLt/TensileLite
-  # paths BEFORE claiming the scarce gfx1250 runner. workflow_dispatch always runs.
-  scope:
-    name: Scope check
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-      run_hipblaslt: ${{ steps.check.outputs.run_hipblaslt }}
-      run_tensilelite: ${{ steps.check.outputs.run_tensilelite }}
-    steps:
-      - name: Resolve PR + check org-member label and paths
-        id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          EVENT: ${{ github.event_name }}
-          IN_RUN_HIPBLASLT: ${{ inputs.run_hipblaslt }}
-          IN_RUN_TENSILELITE: ${{ inputs.run_tensilelite }}
-          WR_EVENT: ${{ github.event.workflow_run.event }}
-          PR_FROM_EVENT: ${{ github.event.workflow_run.pull_requests[0].number }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT" = "workflow_dispatch" ]; then
-            echo "Manual dispatch (hipblaslt=$IN_RUN_HIPBLASLT tensilelite=$IN_RUN_TENSILELITE)."
-            echo "run_hipblaslt=$IN_RUN_HIPBLASLT" >> "$GITHUB_OUTPUT"
-            echo "run_tensilelite=$IN_RUN_TENSILELITE" >> "$GITHUB_OUTPUT"
-            if [ "$IN_RUN_HIPBLASLT" = "true" ] || [ "$IN_RUN_TENSILELITE" = "true" ]; then
-              echo "should_run=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "No suite selected; skipping."
-              echo "should_run=false" >> "$GITHUB_OUTPUT"
-            fi
-            exit 0
-          fi
-          # workflow_run: proceed for any COMPLETED pull_request build. We do NOT
-          # require the whole multi-arch run to succeed — only that the gfx1250 build
-          # produced an artifact, which the fetch step checks. This keeps an unrelated
-          # arch's failure from blocking gfx1250 testing.
-          if [ "$WR_EVENT" != "pull_request" ]; then
-            echo "Not a pull_request build ($WR_EVENT); skipping."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          # Resolve the PR: same-repo PRs are in the event; fork PRs are not, so
-          # look them up by head commit.
-          PR_NUMBER="$PR_FROM_EVENT"
-          if [ -z "$PR_NUMBER" ] && [ -n "$HEAD_SHA" ]; then
-            PR_NUMBER="$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" --jq '.[0].number' 2>/dev/null || true)"
-          fi
-          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            echo "No PR found for this build; skipping."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          # Trust gate (allows fork PRs): require an org-member label.
-          LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
-          if ! echo "$LABELS" | grep -qxE 'organization: (ROCm|streamhpc)'; then
-            echo "PR #$PR_NUMBER lacks an org-member label; skipping (a maintainer can add 'organization: ROCm')."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename')"
-          # hipBLASLt gtest: any hipBLASLt change (incl. its tensilelite subtree) + shared deps.
-          RUN_HIP=false
-          if echo "$FILES" | grep -qE '^(projects/hipblaslt/|shared/origami/|shared/stinkytofu/|shared/mxdatagenerator/)'; then
-            RUN_HIP=true
-          fi
-          # TensileLite common: only the tensilelite subtree + shared deps — a pure
-          # hipBLASLt-library change does not affect the kernel generator's own tests.
-          RUN_TL=false
-          if echo "$FILES" | grep -qE '^(projects/hipblaslt/tensilelite/|shared/origami/|shared/stinkytofu/|shared/mxdatagenerator/)'; then
-            RUN_TL=true
-          fi
-          echo "run_hipblaslt=$RUN_HIP" >> "$GITHUB_OUTPUT"
-          echo "run_tensilelite=$RUN_TL" >> "$GITHUB_OUTPUT"
-          if [ "$RUN_HIP" = "true" ] || [ "$RUN_TL" = "true" ]; then
-            echo "PR #$PR_NUMBER: run hipblaslt=$RUN_HIP tensilelite=$RUN_TL"
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "PR #$PR_NUMBER does not touch hipBLASLt/TensileLite; skipping."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          fi
-
   gfx1250-tests:
     name: gfx1250 hipBLASLt + TensileLite
-    needs: scope
-    if: needs.scope.outputs.should_run == 'true'
+    if: ${{ inputs.run_hipblaslt || inputs.run_tensilelite }}
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 360
     # Test container: no ROCm baked in, so the fetched artifact's libraries load
@@ -211,7 +119,7 @@ jobs:
       - name: Fetch prebuilt gfx1250 ROCm artifact
         id: fetch
         env:
-          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
           BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -254,7 +162,7 @@ jobs:
 
       - name: Run hipBLASLt tests
         timeout-minutes: 120
-        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_hipblaslt == 'true' }}
+        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && inputs.run_hipblaslt }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
         run: |
@@ -274,10 +182,9 @@ jobs:
 
       - name: Run TensileLite common tests
         timeout-minutes: 240
-        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_tensilelite == 'true' }}
+        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && inputs.run_tensilelite }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
-          TL_WORKERS: ${{ inputs.pytest_workers || '1' }}
         run: |
           set -o pipefail  # a failing test must propagate through `| tee`, not be masked
           mkdir -p tensilelite_test_results
@@ -298,7 +205,7 @@ jobs:
             ccache -z >/dev/null 2>&1 || true
           fi
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" -v -rxX \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n 1 -v -rfxX \
             --gpu-targets "$TL_TARGET" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
