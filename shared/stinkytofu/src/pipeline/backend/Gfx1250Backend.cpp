@@ -267,10 +267,14 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
 
-    mpm.addPass(createFunctionToModuleAdaptor(createAsmMovePropagationPass()));
+    if (moduleOptions.EnableMovePropagation) {
+        mpm.addPass(createFunctionToModuleAdaptor(createAsmMovePropagationPass()));
+    }
 
     // MSB is materialized for the entry function and every callable function
-    // (each function owns its VGPR MSB hardware state).
+    // (each function owns its VGPR MSB hardware state). Unconditional: the pass
+    // owns the whole MSB state rather than adding to it, so a pipeline that
+    // skips it emits no s_set_vgpr_msb at all.
     mpm.addPass(createFunctionToModuleAdaptor(createInsertVgprMsbPass()));
 
     // Rebuild the CFG on every function.
@@ -281,7 +285,9 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         mpm.addPass(createInsertWaitAluModulePass(moduleOptions.EnableESM2TrackValuVsrc));
     }
 
-    mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));
+    if (moduleOptions.EnableHazardCoverage) {
+        mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));
+    }
 
     if (runScheduler) {
         mpm.addPass(createFunctionToModuleAdaptor(createInsertDelayAluPass(/*minWavesPerSimd=*/2)));
@@ -307,7 +313,9 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     // covers final per-function code, while SW-prefetch owns its hints' XCnt
     // waits.
     constexpr bool kEnableXcntDrainProfile = false;
-    mpm.addPass(createGfx1250HazardModulePass(kEnableXcntDrainProfile));
+    if (moduleOptions.EnableHazardCoverage) {
+        mpm.addPass(createGfx1250HazardModulePass(kEnableXcntDrainProfile));
+    }
 
     // Flatten callees + byte-layout tail (entry only, single linear stream).
     {
