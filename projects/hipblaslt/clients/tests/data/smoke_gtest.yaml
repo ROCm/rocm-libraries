@@ -20,6 +20,27 @@ Definitions:
     - { transA: T, transB: T }
 
 Tests:
+- name: matmul_pointer_array_distinct_c_d_layout_smoke
+  category: smoke
+  function:
+    matmul: *single_precision
+  M: 128
+  N: 128
+  K: 128
+  lda: 128
+  ldb: 128
+  # Cover both layout directions, including a source larger than D's allocation.
+  ldc: [160, 384]
+  ldd: [160, 384]
+  batch_mode: 1
+  batch_count: 3
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 2
+  c_equal_d: false
+  unit_check: 1
+
 - name: matmul_distinct_c_d_layout_smoke
   category: smoke
   function:

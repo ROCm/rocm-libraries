@@ -3626,7 +3626,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                 //// copy data from CPU to device end
                 if(size_D_copy[i])
                 {
-                    copy_buf(hC[batchCount], hD_gold[batchCount], To);
+                    // Each pointer-array entry contains one matrix. Seed the
+                    // in-place BLAS reference using D's leading dimension.
+                    const size_t elementBytes = realDataTypeSize(To);
+                    std::memset(hD_gold[batchCount].buf(), 0, hD_gold[batchCount].getNumBytes());
+                    hipblaslt_copy_matrix(hC[batchCount].as<char>(),
+                                          hD_gold[batchCount].as<char>(),
+                                          M[i] * elementBytes,
+                                          N[i],
+                                          ldc[i] * elementBytes,
+                                          ldd[i] * elementBytes);
                 }
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
