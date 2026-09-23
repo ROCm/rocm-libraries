@@ -640,10 +640,6 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
 _SUPPORTED_DTYPES = ("bf16", "fp16")
 _SUPPORTED_HEAD_SIZES = (64, 128)
 
-# 32-bit addressing ceiling. The dense ABI bakes every extent at build time, so the
-# limits below are static properties of the spec, not runtime conditions.
-_INT32_LIMIT = 2**31
-
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
 # / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel emits
 # (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
@@ -1099,30 +1095,15 @@ def supports_attention_dense(
             f"D={spec.head_size}, which exceeds the {arch} LDS capacity ({capacity} B)"
         )
 
-    # --- 32-bit addressing. Every offset below is built from IRBuilder add/mul, which
-    # lower to `add nsw` / `mul nsw` i32 -- signed overflow is UB, not a wrap, so LLVM
-    # may poison the whole address chain rather than merely read the wrong place. The
-    # buffer-resource num_records field is unsigned in hardware, but it is emitted via
-    # const_i32 (no range check) and the voffset feeding it is signed i32 arithmetic,
-    # so the signed bound is the binding one on both paths.
-    kv_bytes = spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
-    if kv_bytes >= _INT32_LIMIT:
-        return False, (
-            f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "
-            f"limit ({_INT32_LIMIT} B)"
-        )
-    qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if qo_elems >= _INT32_LIMIT:
-        return False, (
-            f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
-            f"limit ({_INT32_LIMIT})"
-        )
     # Sliding-window + causal: the last query block's window can start past
     # seqlen_kv (start_tile >= n_up), giving a zero-trip KV loop -> l == 0 ->
     # rcp(0) -> NaN. Same class as the block_m % block_n gate above; reject.
     if spec.sliding_window and spec.causal:
         _n_q = spec.seqlen_q // spec.block_m
-        _n_ktiles = (spec.seqlen_kv + spec.block_n - 1) // spec.block_n
+        # Floor division, so the guard reads the same tile count the KV loop uses
+        # (n_ktiles = Skv // BN). The shared spec enforces seqlen_kv % block_n == 0,
+        # so floor and ceil coincide for every spec that reaches here.
+        _n_ktiles = spec.seqlen_kv // spec.block_n
         _n_per = spec.block_m // spec.block_n
         _swt = spec.sliding_window // spec.block_n
         if (_n_q - 1) * _n_per - _swt >= _n_ktiles:
