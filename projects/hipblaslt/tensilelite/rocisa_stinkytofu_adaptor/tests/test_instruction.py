@@ -264,6 +264,8 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     FlatStoreB64,
     FlatStoreB128,
     FlatAtomicCmpswapB32,
+    GlobalInv,
+    GlobalWb,
     DSLoadU8,
     DSLoadU16,
     DSLoadB32,
@@ -1183,6 +1185,46 @@ class TestCollectLogicalIntegration(unittest.TestCase):
         m = Module()
         m.add(SNop(waitState=0))
         self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestScopedGlobalFences(unittest.TestCase):
+    def test_scope_is_rendered_like_rocisa(self):
+        self.assertEqual(str(GlobalWb()), "global_wb scope:SCOPE_DEV\n")
+        self.assertEqual(
+            str(GlobalInv(scope=CacheScope.SCOPE_CU)),
+            "global_inv scope:SCOPE_CU\n",
+        )
+        self.assertEqual(
+            str(GlobalWb(scope=CacheScope.SCOPE_NONE)),
+            "global_wb\n",
+        )
+
+    def test_deepcopy_preserves_scope(self):
+        inst = GlobalInv(scope=CacheScope.SCOPE_SYS, comment="acquire")
+        clone = copy.deepcopy(inst)
+        inst.scope = CacheScope.SCOPE_NONE
+        self.assertEqual(clone.scope, CacheScope.SCOPE_SYS)
+        self.assertIn("global_inv scope:SCOPE_SYS", str(clone))
+        self.assertIn("// acquire", str(clone))
+
+    def test_scope_is_forwarded_to_logical_global_modifier(self):
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        fake_st.GlobalWb = unittest.mock.Mock(return_value=logical)
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}):
+            GlobalWb(scope=CacheScope.SCOPE_DEV).to_stinky_logical()
+        logical.set_global.assert_called_once_with(
+            scope=int(CacheScope.SCOPE_DEV),
+        )
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_emitted_assembly_contains_scope(self):
+        module = Module("scoped_global_fences")
+        module.add(GlobalInv(scope=CacheScope.SCOPE_DEV))
+        module.add(GlobalWb(scope=CacheScope.SCOPE_DEV))
+        text = module.to_stinky_asm([12, 5, 0]).emitAssembly()
+        self.assertIn("global_inv scope:SCOPE_DEV", text)
+        self.assertIn("global_wb scope:SCOPE_DEV", text)
 
 
 # ===========================================================================
