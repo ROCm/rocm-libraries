@@ -184,7 +184,7 @@ jobs:
             -DTENSILELITE_BUILD_TESTING=OFF -DTENSILELITE_ENABLE_CLIENT=OFF \
             2>&1 | tee jit-test-logs/configure.log
           cmake --build "$JIT_BUILD_DIR" --parallel "$jobs" \
-            --target _rocisa hipblaslt-jit-gemm hipblaslt-jit-backend-test \
+            --target _rocisa hipblaslt-jit-gemm hipblaslt-jit-api-test hipblaslt-jit-backend-test \
               hipblaslt-jit-process-test hipblaslt-jit-artifacts-test \
             2>&1 | tee jit-test-logs/build.log
       - name: Execute generic JIT and public C/C++ GEMM regressions

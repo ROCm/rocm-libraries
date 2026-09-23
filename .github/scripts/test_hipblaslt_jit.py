@@ -27,12 +27,14 @@ def main():
         "--case",
         action="append",
         choices=(
+            "sample",
             "streamk-api",
             "amax-api",
             "alternate-backend",
             "process-runner",
             "artifact-loader",
             "splitk-api",
+            "bundle-failures",
             "helper-failures",
             "disabled-api",
         ),
@@ -45,7 +47,7 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     tensile = source / "projects/hipblaslt/tensilelite"
     fixtures = tensile / "Tensile/Tests/unit/test_data"
-    sample = build / "clients/staging/hipblaslt-jit-gemm"
+    sample = build / "clients/staging/hipblaslt-jit-api-test"
     env = dict(os.environ)
     for key in tuple(env):
         if key.startswith(("HIPBLASLT_JIT_", "TENSILE_STREAMK_")):
@@ -149,7 +151,24 @@ def main():
         )
 
     fixture_suffix = "_gfx1250" if args.architecture == "gfx1250" else ""
-    # These are the sample's public C hipblasLtMatmul and C++ Gemm routes.
+    commands.append(
+        (
+            "sample",
+            [
+                str(staging / "hipblaslt-jit-gemm"),
+                sys.executable,
+                str(tensile),
+                env["PYTHONPATH"],
+                str(fixtures / f"single_solution_splitk{fixture_suffix}.yaml"),
+                str(output / "sample"),
+                args.architecture,
+                compiler,
+            ],
+            {},
+            420,
+        )
+    )
+    # These are the public C hipblasLtMatmul and C++ Gemm routes.
     # They use the same generic JIT selection API as any application.
     for feature, options in [
         ("streamk", ["--k", "4096", "--workspace-fallback", "1"]),
@@ -179,7 +198,8 @@ def main():
         commands.append((name, command, streamk, 420))
 
     if not args.case or any(
-        case in args.case for case in ("splitk-api", "helper-failures")
+        case in args.case
+        for case in ("splitk-api", "helper-failures", "bundle-failures")
     ):
         commands.append(
             (
@@ -207,11 +227,31 @@ def main():
                     sys.executable,
                     str(
                         source
-                        / "projects/hipblaslt/clients/samples/29_hipblaslt_jit_gemm/test_jit_helper_failures.py"
+                        / "projects/hipblaslt/clients/tests/jit/test_helper_failures.py"
                     ),
                     str(sample),
                     str(output / "splitk-api/bundle"),
                     str(output / "helper-failures"),
+                ],
+                {},
+                420,
+            )
+        )
+
+        commands.append(
+            (
+                "bundle-failures",
+                [
+                    sys.executable,
+                    str(
+                        source
+                        / "projects/hipblaslt/clients/tests/jit/test_bundle_failures.py"
+                    ),
+                    str(sample),
+                    str(output / "splitk-api/bundle"),
+                    str(output / "bundle-failures"),
+                    "--architecture",
+                    args.architecture,
                 ],
                 {},
                 420,
@@ -223,7 +263,12 @@ def main():
         if (
             args.case
             and name not in args.case
-            and not (name == "splitk-api" and "helper-failures" in args.case)
+            and not (
+                name == "splitk-api"
+                and any(
+                    case in args.case for case in ("helper-failures", "bundle-failures")
+                )
+            )
         ):
             continue
         print(f"RUN {name} on native {args.architecture}", flush=True)
