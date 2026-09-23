@@ -4391,12 +4391,9 @@ class GlobalWriteBatchWriter:
       return module, 0
 
     module.addComment1("TensorStore: flush full MT via ONE per-wave tensor_store_from_lds (disjoint N-slice, colsPerWave=%d)" % colsPerWave)
-    # dscnt=0 drains this wave's staging, then a cross-wave barrier: the wave's N-slice was written by
-    # OTHER waves too (the full-MT image is interleaved). [stinky-keep]: the tensor_store is lowered in
-    # a separate region so WaitCntInsertion never re-derives this dscnt (stripping it => stale LDS on hw).
-    module.add(SWaitCnt(dscnt=0, comment="wait all LDS staging writes (before barrier) [stinky-keep]"))
-    module.add(self.parentWriter._syncThreads(self.kernel, "TensorStore: all waves finished MT staging"))
-
+    # The descriptor build below (waveId, lds/global addr, dims) is independent of the LDS staging, so
+    # emit it FIRST — it overlaps with the ds_store drain. Only the tensor_store READ must wait, so the
+    # dscnt=0 + barrier go right before issueStore (avoids serializing the drain wait and the setup).
     tdm = TensorDataMoverStore()
     tdm.setMemToken([self.parentWriter.states.memTokenLdsBuffer0])
     kw  = self.parentWriter
@@ -4440,6 +4437,12 @@ class GlobalWriteBatchWriter:
             module.add(SLShiftLeftB32(dst=sgpr(aLo), shiftHex=int(log2(bpe)), src=sgpr(aLo), comment="* bpe"))
           module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(aLo), comment="global_addr += waveN"))
           module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=0, comment="carry"))
+      # Now that the descriptor is fully built, drain this wave's staging (dscnt=0) and barrier across
+      # waves (the N-slice was written by OTHER waves too), then immediately issue the tensor_store.
+      # [stinky-keep]: the store is lowered separately so WaitCntInsertion never re-derives this dscnt
+      # (stripping it => stale LDS on hw).
+      module.add(SWaitCnt(dscnt=0, comment="wait all LDS staging writes (before barrier) [stinky-keep]"))
+      module.add(self.parentWriter._syncThreads(self.kernel, "TensorStore: all waves finished MT staging"))
       module.add(tdm.issueStore(g0, g1))
     return module, 1
 
