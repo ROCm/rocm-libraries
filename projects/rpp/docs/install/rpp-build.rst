@@ -84,6 +84,13 @@ Then use ``git checkout`` to check out the branch you need. For example, to chec
 
    git checkout develop
 
+The develop branch is intended for users who want to preview new features or
+contribute to the RPP code base.
+
+If you don't intend to contribute to the RPP code base and won't be previewing
+features, use a branch that matches the version of ROCm installed on your
+system.
+
 .. _rpp-build-linux:
 
 Build on Linux
