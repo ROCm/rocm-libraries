@@ -43,9 +43,10 @@ arch_spec:
   module: kernels.gfx950.attention_dense
   class: Gfx950AttentionDenseSpec
 
-# Metadata fields the compiled binary specializes on. block_m/block_n are
-# internal tile metadata: never engine knobs, and a record omitting them
-# completes to the 256/64 baseline tile.
+# Metadata fields the compiled binary specializes on. block_m/block_n are the
+# tile, also public engine knobs; a record omitting them completes to the
+# 256/64 baseline tile, and with no tile knob set, cold selection prefers the
+# applicable 256/64 candidate.
 metadata_fields:
   - dtype
   - head_size
@@ -124,6 +125,8 @@ engine:
     - num_query_heads
     - num_kv_heads
     - causal
+    - block_m
+    - block_n
   heuristic: native
 
 kmd_fields:

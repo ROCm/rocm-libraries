@@ -29,6 +29,8 @@ engine:
   - num_query_heads
   - num_kv_heads
   - causal
+  - block_m
+  - block_n
   heuristic: native
 kmd_fields:
 - name: dtype
@@ -60,8 +62,9 @@ kmd_fields:
 - name: seqlen_kv
   type: int
   default_value: 512
-# Internal tile metadata: never an engine knob. A record omitting either field
-# completes to the 256/64 baseline tile through these defaults.
+# Tile metadata, also public engine knobs. A record omitting either field
+# completes to the 256/64 baseline tile through these defaults; with no tile
+# knob set, cold selection prefers the applicable 256/64 candidate.
 - name: block_m
   type: int
   default_value: 256
