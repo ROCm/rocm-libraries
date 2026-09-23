@@ -32,6 +32,16 @@ struct DeviceProperties
     int64_t ldsSize = -1;
 };
 
+/// Does @p properties describe a device matching can use? Requires a nonempty arch,
+/// positive warp size and multiprocessor count, and a nonnegative LDS capacity; a
+/// reported LDS of zero is resolved. Default-constructed properties are unresolved.
+/// Every device-keyed ingestor path checks this before it matches or caches.
+inline bool isResolved(const DeviceProperties& properties)
+{
+    return !properties.gcnArchName.empty() && properties.warpSize > 0
+           && properties.multiProcessorCount > 0 && properties.ldsSize >= 0;
+}
+
 /// Does @p arch (a KDP's supported-target list; empty admits everything) admit
 /// @p deviceArch? Entries are base ids and the device carries its features, so this is
 /// the PREFIX match, not SUBSTRING or equality: `gfx942` admits a device reporting

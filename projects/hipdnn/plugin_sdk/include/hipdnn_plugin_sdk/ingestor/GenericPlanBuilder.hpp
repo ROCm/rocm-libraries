@@ -445,15 +445,20 @@ private:
     /// An arch-independent pack (empty `arch` list, itself legal) passes `archSupports`
     /// regardless of device identity, so the catalog can be non-empty with no device
     /// resolved.
+    ///
+    /// Resolvers are expected to publish only resolved facts (see IDeviceResolver), so
+    /// for a conforming resolver the isResolved() check below never fires. It stays as
+    /// the backstop for resolvers that do not conform, and it is what guarantees a
+    /// MatchContext is only ever built with a resolved device id and resolved facts.
     MatchContext contextFor(const THandle& handle, const IGraph& opGraph) const
     {
         const auto deviceId = _deviceResolver.deviceId(handle);
         const auto& deviceProperties = _deviceResolver.deviceProperties(deviceId);
-        if(deviceId == NO_DEVICE || deviceProperties.gcnArchName.empty())
+        if(deviceId == NO_DEVICE || !isResolved(deviceProperties))
         {
             const auto* reason = deviceId == NO_DEVICE
                                      ? "the device could not be resolved from the handle"
-                                     : "the resolved device reports no gcnArchName";
+                                     : "the resolved device reports incomplete device facts";
             HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '" << _engine.name
                                                          << "' cannot build a plan: " << reason);
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

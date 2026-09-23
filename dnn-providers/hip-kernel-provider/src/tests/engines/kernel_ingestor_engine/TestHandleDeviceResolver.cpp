@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -385,6 +386,18 @@ TEST(TestHandleDeviceResolver, RejectsUnterminatedIdentityAndRetries)
     resolver.properties = validHipProperties();
     EXPECT_EQ(resolver.deviceProperties(7).gcnArchName, "gfx000");
     EXPECT_EQ(resolver.queryCount.load(), 2);
+}
+
+TEST(TestHandleDeviceResolver, AcceptsIdentityFillingTheArchBuffer)
+{
+    // The terminator search spans the whole buffer, so an identity reaching its last byte
+    // is complete rather than truncated.
+    FakeQueryResolver resolver;
+    const auto archBufferSize = sizeof(resolver.properties.gcnArchName);
+    std::memset(resolver.properties.gcnArchName, 'x', archBufferSize);
+    resolver.properties.gcnArchName[archBufferSize - 1] = '\0';
+
+    EXPECT_EQ(resolver.deviceProperties(7).gcnArchName, std::string(archBufferSize - 1, 'x'));
 }
 
 TEST(TestHandleDeviceResolver, RejectsUnwrittenLdsWithoutLosingReportedZero)

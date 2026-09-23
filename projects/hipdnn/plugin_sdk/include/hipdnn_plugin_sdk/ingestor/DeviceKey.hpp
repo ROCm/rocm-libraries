@@ -22,6 +22,10 @@ namespace hipdnn_plugin_sdk::ingestor
 /// bytes, and the struct has unspecified padding.
 ///
 /// `DeviceId` is absent -- it identifies a slot, not a device.
+///
+/// Widening `DeviceProperties` does not extend the key on its own; a new field is
+/// hashed only once `fold()` below emits it. `TestDeviceKey.cpp` pins the field set
+/// with a structured binding that fails to compile when the struct grows.
 struct DeviceKey
 {
     DeviceKey() = default;

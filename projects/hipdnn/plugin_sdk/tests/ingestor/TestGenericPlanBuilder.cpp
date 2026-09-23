@@ -254,11 +254,17 @@ public:
     }
 };
 
-/// Reports a resolved device (deviceId != NO_DEVICE) whose properties are unresolvable
-/// by arch, distinct from ThrowingDeviceResolver's outright query failure above.
+/// Reports a resolved device (deviceId != NO_DEVICE) whose properties fail isResolved(),
+/// distinct from ThrowingDeviceResolver's outright query failure above. Default
+/// properties leave every fact unresolved, including the arch.
 class UnresolvedArchDeviceResolver : public IDeviceResolver<TestHandle>
 {
 public:
+    explicit UnresolvedArchDeviceResolver(DeviceProperties properties = {})
+        : _properties(std::move(properties))
+    {
+    }
+
     DeviceId deviceId(const TestHandle& /*handle*/) const override
     {
         return 0;
@@ -308,6 +314,29 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnre
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x94));
+
+    EXPECT_FALSE(builder.isApplicable(0, graph));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, engine.name))
+        << recorder.getRecordedLogsAsString();
+}
+
+// A resolver can publish an arch while leaving another fact unresolved. The guard must
+// reject that too: matching on it would key winner-cache records the cache can never
+// read back.
+TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenAnyDeviceFactIsUnresolved)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    auto properties = testDeviceProperties();
+    properties.ldsSize = -1;
+    const UnresolvedArchDeviceResolver resolver(properties);
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x95));
 
     EXPECT_FALSE(builder.isApplicable(0, graph));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, engine.name))

@@ -166,7 +166,12 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties testDeviceProperties()
     return {"gfx000", 64, 48, 65536};
 }
 
-/// Returns checked device properties, or unresolved values if no device is current.
+/// The current device's validated facts.
+///
+/// Returns unresolved values when no device is current. Throws
+/// hipdnn_plugin_sdk::HipdnnPluginException when a device is current but the HIP query
+/// fails or reports an invalid fact, so a caller running on a device is asserting that
+/// device works.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
 {
     const HandleDeviceResolver resolver;

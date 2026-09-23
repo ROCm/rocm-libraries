@@ -28,6 +28,22 @@ DeviceProperties propertiesFor(std::string arch,
     return properties;
 }
 
+// THE FIELD-SET PIN. A structured binding must name every member of the aggregate, so
+// this stops compiling the moment DeviceProperties grows a field -- which is the point.
+// A new field is not hashed until DeviceKey::fold() emits it, and nothing else in the
+// build would notice. If this fails to compile: add the field to fold(), add a
+// discriminates-on test below, then extend this binding.
+TEST(TestIngestorDeviceKey, TheHashedFieldSetIsPinnedAtCompileTime)
+{
+    const auto properties = propertiesFor("gfx942");
+    const auto& [gcnArchName, warpSize, multiProcessorCount, ldsSize] = properties;
+
+    EXPECT_EQ(gcnArchName, "gfx942");
+    EXPECT_EQ(warpSize, 64);
+    EXPECT_EQ(multiProcessorCount, 48);
+    EXPECT_EQ(ldsSize, 65536);
+}
+
 TEST(TestIngestorDeviceKey, IdenticalPropertiesCompareEqual)
 {
     EXPECT_EQ(DeviceKey{propertiesFor("gfx942")}, DeviceKey{propertiesFor("gfx942")});

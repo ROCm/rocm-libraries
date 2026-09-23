@@ -772,6 +772,39 @@ TEST(TestIngestorWinnerCache, UnresolvedLdsCapacityCannotRoundTripAsReportedZero
     EXPECT_EQ(resolved->first, keyFor(graph, unresolved));
 }
 
+// The reader rejects a record keyed by an unresolved device, so persisting one would
+// append an unreadable line to the append-only shard on every fresh miss.
+TEST(TestIngestorWinnerCacheStateManager, AnUnresolvedDeviceIsNeitherPersistedNorCached)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("unresolved_device");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    auto unresolved = suffixedDeviceProperties();
+    unresolved.ldsSize = -1;
+    const auto path = winnerCacheShardPath("test:UnresolvedDevice", unresolved.gcnArchName);
+
+    const auto manager = makeNamedStateManager("test:UnresolvedDevice");
+    for(int i = 0; i < 2; ++i)
+    {
+        manager->recordWinner(
+            keyFor(graph, unresolved), recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+    EXPECT_FALSE(manager->winnerFor(keyFor(graph, unresolved)).has_value());
+    EXPECT_EQ(manager->winnerCacheSize(), 0U);
+    EXPECT_FALSE(std::filesystem::exists(path));
+
+    // The same device with a reported LDS of zero is resolved and persists normally.
+    auto zeroLds = unresolved;
+    zeroLds.ldsSize = 0;
+    manager->recordWinner(
+        keyFor(graph, zeroLds), recordFor(0x32, 1.0), WinnerWriteCause::FRESH_MISS);
+    const auto reader = makeNamedStateManager("test:UnresolvedDevice");
+    const auto served = reader->winnerFor(keyFor(graph, zeroLds));
+    ASSERT_TRUE(served.has_value());
+    ASSERT_EQ(served->size(), 1U);
+    EXPECT_EQ(served->front().kernelId, testId(0x32));
+}
+
 struct InvalidDeviceField
 {
     std::string name;

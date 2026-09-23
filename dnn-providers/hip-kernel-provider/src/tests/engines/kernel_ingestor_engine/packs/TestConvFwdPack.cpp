@@ -604,7 +604,9 @@ TEST(TestConvFwdDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
     ASSERT_NO_FATAL_FAILURE(hip_kernel_provider::testing::readPackedKernelSource(
         packed, PACKED_UKD_DESCRIPTOR, source));
 
-    // Match the archive's base architecture name, without feature flags.
+    // hipGetDeviceProperties reports the arch with its feature flags ("gfx1152:xnack-"),
+    // while the packer names its shards with the bare arch. Override the resolved name
+    // with the stripped spelling so the archive lookup asks for a shard that exists.
     auto deviceProperties = currentDeviceProperties();
     deviceProperties.gcnArchName = arch;
 

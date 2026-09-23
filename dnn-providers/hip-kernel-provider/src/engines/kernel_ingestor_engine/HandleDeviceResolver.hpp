@@ -16,6 +16,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 
 #include "core/Handle.hpp"
@@ -78,24 +79,45 @@ public:
         const auto status = queryDeviceProperties(&properties, deviceId);
         if(status != hipSuccess)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "hipGetDeviceProperties failed for device " + std::to_string(deviceId) + ": "
-                    + hipGetErrorString(status));
+            failDeviceQuery("hipGetDeviceProperties failed for device " + std::to_string(deviceId)
+                            + ": " + hipGetErrorString(status));
         }
+
+        // Each fact is checked on its own so the message names the offending field and the
+        // value behind it. This fires on a machine the reporter cannot rebuild, so the message
+        // is the whole diagnosis. A new fact adds a check here, not a term to a condition.
+        const auto rejectFact = [deviceId](const std::string& fact) {
+            failDeviceQuery("hipGetDeviceProperties returned an invalid device fact for device "
+                            + std::to_string(deviceId) + ": " + fact);
+        };
 
         const auto archEnd
             = std::find(std::begin(properties.gcnArchName), std::end(properties.gcnArchName), '\0');
-        if(archEnd == std::begin(properties.gcnArchName)
-           || archEnd == std::end(properties.gcnArchName) || properties.warpSize <= 0
-           || properties.multiProcessorCount <= 0
-           || properties.sharedMemPerBlock
-                  > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        if(archEnd == std::begin(properties.gcnArchName))
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "hipGetDeviceProperties returned invalid device facts for device "
-                    + std::to_string(deviceId));
+            rejectFact("gcnArchName is empty");
+        }
+        if(archEnd == std::end(properties.gcnArchName))
+        {
+            rejectFact("gcnArchName has no NUL terminator in its "
+                       + std::to_string(sizeof(properties.gcnArchName)) + " byte buffer");
+        }
+        if(properties.warpSize <= 0)
+        {
+            rejectFact("warpSize is " + std::to_string(properties.warpSize)
+                       + ", expected a positive thread count");
+        }
+        if(properties.multiProcessorCount <= 0)
+        {
+            rejectFact("multiProcessorCount is " + std::to_string(properties.multiProcessorCount)
+                       + ", expected a positive count");
+        }
+        if(properties.sharedMemPerBlock
+           > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        {
+            rejectFact("sharedMemPerBlock is " + std::to_string(properties.sharedMemPerBlock)
+                       + " bytes, above the " + std::to_string(std::numeric_limits<int64_t>::max())
+                       + " byte limit");
         }
 
         // Cache only complete, validated properties.
@@ -129,6 +151,15 @@ protected:
     }
 
 private:
+    /// Logs before throwing so the reason survives in the plugin log even when a caller
+    /// turns the exception into a status code and drops its message.
+    [[noreturn]] static void failDeviceQuery(const std::string& message)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("ingestor: " << message);
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       message);
+    }
+
     mutable std::mutex _mutex;
     mutable std::unordered_map<hipdnn_plugin_sdk::ingestor::DeviceId,
                                hipdnn_plugin_sdk::ingestor::DeviceProperties>

@@ -347,8 +347,12 @@ TEST(TestJsonValue, EqualityIsStrictAcrossKinds)
     EXPECT_NE(V(0), V(V::Array{}));
     EXPECT_NE(V(""), V());
 
-    // Null Values compare equal. Expression comparisons return null instead
-    // if either operand is unresolved.
+    // Two nulls are equal *here*, because operator== is plain variant
+    // equality for nulls. The decline lives one layer up: OpNode::eval gates
+    // on containsUnresolved, so `==` never sees an unresolved operand and a
+    // rule comparing two absent paths yields null rather than true. The
+    // rule-level behaviour is pinned in
+    // TestJsonExpression.NullPropagatesThroughEveryOtherOperator.
     EXPECT_EQ(V(), V());
     EXPECT_TRUE(V().containsUnresolved());
 

@@ -78,11 +78,11 @@ inline bool isPlainArchComponent(std::string_view arch)
     });
 }
 
-/// Reads a JSON integer within nonnegative bounds, or returns nullopt.
-inline std::optional<int64_t> readBoundedInt64(const nlohmann::json& parent,
-                                               const char* field,
-                                               int64_t minimum,
-                                               int64_t maximum)
+/// Reads a JSON integer representable as @p T, or returns nullopt. nlohmann's get<T>()
+/// accepts a float and static-casts an out-of-range value, which is UB for the latter.
+/// Representability only: whether the value is a valid device fact is isResolved()'s call.
+template <typename T>
+std::optional<T> readRepresentableInteger(const nlohmann::json& parent, const char* field)
 {
     const auto found = parent.find(field);
     if(found == parent.end() || !found->is_number_integer())
@@ -92,18 +92,21 @@ inline std::optional<int64_t> readBoundedInt64(const nlohmann::json& parent,
     if(found->is_number_unsigned())
     {
         const auto raw = found->get<uint64_t>();
-        if(raw < static_cast<uint64_t>(minimum) || raw > static_cast<uint64_t>(maximum))
+        if(raw > static_cast<uint64_t>(std::numeric_limits<T>::max()))
         {
             return std::nullopt;
         }
-        return static_cast<int64_t>(raw);
+        return static_cast<T>(raw);
     }
     const auto raw = found->get<int64_t>();
-    if(raw < minimum || raw > maximum)
+    if constexpr(sizeof(T) < sizeof(int64_t))
     {
-        return std::nullopt;
+        if(raw < std::numeric_limits<T>::min() || raw > std::numeric_limits<T>::max())
+        {
+            return std::nullopt;
+        }
     }
-    return raw;
+    return static_cast<T>(raw);
 }
 
 } // namespace detail
@@ -250,25 +253,25 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
         DeviceProperties properties;
         properties.gcnArchName
             = deviceField->at(detail::WINNER_LINE_GCN_ARCH_NAME_FIELD).get<std::string>();
-        const auto warpSize = detail::readBoundedInt64(
-            *deviceField, detail::WINNER_LINE_WARP_SIZE_FIELD, 1, std::numeric_limits<int>::max());
-        const auto multiProcessorCount
-            = detail::readBoundedInt64(*deviceField,
-                                       detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD,
-                                       1,
-                                       std::numeric_limits<int>::max());
-        const auto ldsSize = detail::readBoundedInt64(*deviceField,
-                                                      detail::WINNER_LINE_LDS_SIZE_FIELD,
-                                                      0,
-                                                      std::numeric_limits<int64_t>::max());
-        if(properties.gcnArchName.empty() || !warpSize.has_value()
-           || !multiProcessorCount.has_value() || !ldsSize.has_value())
+        const auto warpSize = detail::readRepresentableInteger<int>(
+            *deviceField, detail::WINNER_LINE_WARP_SIZE_FIELD);
+        const auto multiProcessorCount = detail::readRepresentableInteger<int>(
+            *deviceField, detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD);
+        const auto ldsSize = detail::readRepresentableInteger<int64_t>(
+            *deviceField, detail::WINNER_LINE_LDS_SIZE_FIELD);
+        if(!warpSize.has_value() || !multiProcessorCount.has_value() || !ldsSize.has_value())
         {
             return std::nullopt;
         }
-        properties.warpSize = static_cast<int>(*warpSize);
-        properties.multiProcessorCount = static_cast<int>(*multiProcessorCount);
+        properties.warpSize = *warpSize;
+        properties.multiProcessorCount = *multiProcessorCount;
         properties.ldsSize = *ldsSize;
+        // The same rule every device-keyed path applies, so a record the state manager
+        // would refuse to write is also one it refuses to read.
+        if(!isResolved(properties))
+        {
+            return std::nullopt;
+        }
 
         const auto entriesField = json.find(detail::WINNER_LINE_ENTRIES_FIELD);
         if(entriesField == json.end() || !entriesField->is_array())

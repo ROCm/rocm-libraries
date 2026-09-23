@@ -33,13 +33,21 @@
 
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr
 {
-/// Maximum nesting depth for values returned by a data source.
+/// How deeply a Value handed back by a data source may nest.
 ///
-/// Reading or freeing nested arrays can recurse, so data sources must check
-/// depth when building a Value to avoid stack overflow. Copying an array Value does not recurse.
+/// A Value is a tree, and every consumer of one walks it recursively:
+/// containsUnresolved, dump, toNumber over an array, structural equality, and
+/// the destructor of the last owner of the shared storage. None of those can
+/// bound their own depth after the fact, so the bound belongs where a Value is
+/// built. Copying an array Value shares that storage instead of recursing, so
+/// depth costs stack only on the walks, not on passing a value around.
 ///
-/// This limit applies to document values, not rules (see MAX_EXPRESSION_DEPTH).
-/// JsonDataSource returns null for values nested too deeply, so predicates decline.
+/// MAX_EXPRESSION_DEPTH bounds a *rule*; this bounds a *document*. The two are
+/// separate limits on separate inputs that happen to share a magnitude, and a
+/// document is no more trusted than a rule: both are read off disk. A data
+/// source must not build a Value deeper than this. JsonDataSource stops at the
+/// bound and yields null, which the language reads as unresolved, so the
+/// enclosing predicate declines rather than the process overflowing its stack.
 inline constexpr std::size_t MAX_VALUE_DEPTH = 256;
 
 // ---- runtime value --------------------------------------------------------
