@@ -4294,6 +4294,15 @@ class GlobalWriteBatchWriter:
     coordOffset0/coordOffset1 (from AsmStoreState, already VW/swap-aware) is added as the ds_store OFFSET
     immediate. + TensorStoreLdsByteOffset places the staging after the main-loop LDS (disjoint)."""
     module = Module("TensorStoreSetup")
+    # OVERLAP mode reuses the main-loop LDS from offset 0, so before the FIRST staging ds_store of this
+    # epilogue variant we must fence the main loop's LDS readers/loaders (WAR). tensorcnt=0 drains async
+    # tensor_load_to_lds (dscnt does NOT cover it); _syncThreads = s_wait dscnt 0 (drain main-loop
+    # ds_reads) + s_barrier (cross-wave) — mirrors StoreRemap's "StoreRemap Start". Disjoint mode skips
+    # this (its staging is a fresh region past the main-loop LDS). Once per variant (batchIdx==0).
+    if self.kernel.get("TensorStoreOverlap", False) and self.batchIdx == 0:
+      if self.kernel.get("enableTDMA") or self.kernel.get("enableTDMB"):
+        module.add(SWaitTensorcnt(tensorcnt=0, comment="TensorStore overlap: drain async tensor_load_to_lds (WAR)"))
+      module.add(self.parentWriter._syncThreads(self.kernel, "TensorStore overlap start: main loop done with LDS (WAR)"))
     bpe   = self.parentWriter.states.bpeCexternal
     ws    = self.kernel["WavefrontSize"]
     matM  = self.kernel["MatrixInstM"]

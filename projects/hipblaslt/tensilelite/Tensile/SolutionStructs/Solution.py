@@ -6112,13 +6112,21 @@ class Solution(collections.abc.Mapping):
             and state["GlobalSplitU"] == 1
             and state.get("StoreRemapVectorWidth", 0) == 0
             and not state["WaveContiguousOutput"]
-            and (mt1 % numWaves == 0)
-            and (ldsNumBytes + fullMTBytes <= state["MaxLDS"]))
-      if ok:
-        # Disjoint staging region AFTER the main-loop/epilogue LDS (like the TDM store), so the
-        # local-write phase never clobbers main-loop LDS another wave may still be reading.
+            and (mt1 % numWaves == 0))
+      # LDS placement: prefer a DISJOINT staging region after the main-loop LDS (additive) when it fits
+      # — no extra barrier needed (fresh region). If disjoint overflows MaxLDS, OVERLAP the main-loop LDS
+      # from offset 0 (the A/B tiles are dead by store time), which costs one start-barrier (WAR fence,
+      # added in _emitTensorStoreSetup) and requires the epilogue to use no LDS at offset 0 (no bias / no
+      # ScaleAlphaVec). If neither fits, disable (fall back to the normal store).
+      noEpilogueLds = (not state["ProblemType"]["UseBias"]) and (not state["ProblemType"]["UseScaleAlphaVec"])
+      if ok and (ldsNumBytes + fullMTBytes <= state["MaxLDS"]):
         state["TensorStoreLdsByteOffset"] = ldsNumBytes
         ldsNumBytes += fullMTBytes
+        state["TensorStoreOverlap"] = False
+      elif ok and noEpilogueLds and (fullMTBytes <= state["MaxLDS"]):
+        state["TensorStoreLdsByteOffset"] = 0
+        ldsNumBytes = max(ldsNumBytes, fullMTBytes)
+        state["TensorStoreOverlap"] = True
       else:
         state["TensorStore"] = False
 
