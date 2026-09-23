@@ -189,11 +189,11 @@
 #endif
 
 // LDS direct loads using inline assembly
-// #if defined(__gfx125__)
-// #define CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM 1
-// #else
+#if defined(__gfx125__)
+#define CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM 1
+#else
 #define CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM 0
-// #endif
+#endif
 
 // cluster launch support for gfx1250
 #ifndef CK_ENABLE_CLUSTER_LAUNCH

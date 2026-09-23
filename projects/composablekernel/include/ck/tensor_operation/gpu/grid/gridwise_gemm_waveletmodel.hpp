@@ -158,120 +158,92 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         constexpr auto I0 = Number<0>{};
         constexpr auto I1 = Number<1>{};
 
-        // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-        // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
-        // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-        // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+        // Split src descriptor index VALU and loading VMEM instructions
+        // We want to issue VMEM instruction as soon as possible so we pre-compute the
+        // indices of the src in the previous step and in the current step we load
+        // immediately and then pre-compute indices for the next step.
 
         __builtin_amdgcn_sched_barrier(0);
-        a_blockwise_copy.PrecomputeIdx(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-        b_blockwise_copy.PrecomputeIdx(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        a_blockwise_copy.PrecomputeIdx(a_grid_desc);
+        b_blockwise_copy.PrecomputeIdx(b_grid_desc);
+
+        // First prefetch buffer A0, B0
         __builtin_amdgcn_sched_barrier(0);
-        b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
-        a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
+        b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I0));
         __builtin_amdgcn_sched_barrier(0);
 
         __builtin_amdgcn_sched_barrier(0);
         a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
         b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-        a_blockwise_copy.PrecomputeIdx(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-        b_blockwise_copy.PrecomputeIdx(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+        a_blockwise_copy.PrecomputeIdx(a_grid_desc);
+        b_blockwise_copy.PrecomputeIdx(b_grid_desc);
         __builtin_amdgcn_sched_barrier(0);
 
         wait_dscnt();
         block_sync_lds_direct_load();
 
-        // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-        // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
-        // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-        // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-
+        // Second prefetch buffer A1, B1
         __builtin_amdgcn_sched_barrier(0);
-        a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-        b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+        a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I1));
+        b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I1));
         __builtin_amdgcn_sched_barrier(0);
 
         a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
         b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-        a_blockwise_copy.PrecomputeIdx(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-        b_blockwise_copy.PrecomputeIdx(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        a_blockwise_copy.PrecomputeIdx(a_grid_desc);
+        b_blockwise_copy.PrecomputeIdx(b_grid_desc);
         __builtin_amdgcn_sched_barrier(0);
 
         if constexpr(HasMainLoop)
         {
             index_t i = 0;
 
+            // Note: In case of odd num_loop, the last iteration is doing an extra load of A1 and
+            // B1. We force MNKPadding, so all lanes will issue ds_store and fill LDS with 0s. The
+            // math waves will not use this data and go directly to the epilogue which is using LDS
+            // from A0 and B0, so this is safe and it allows to simplify the code and the kernel
+            // invoker.
             do
             {
+                wait_dscnt();
+                block_sync_lds_direct_load();
+
+                // Load A0, B0. Precompute indices for A1, B1
                 __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";; HotLoop Start Load");
+                b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I0));
+                a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I0));
+                __builtin_amdgcn_sched_barrier(0);
+
+                a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+                a_blockwise_copy.PrecomputeIdx(a_grid_desc);
+                b_blockwise_copy.PrecomputeIdx(b_grid_desc);
                 __builtin_amdgcn_sched_barrier(0);
 
                 wait_dscnt();
                 block_sync_lds_direct_load();
 
-                // __builtin_amdgcn_sched_barrier(0);
-
-                // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
-
-                // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-
+                // Load A1, B1. Precompute indices for A0, B0
                 __builtin_amdgcn_sched_barrier(0);
-                b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
-                a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-                __builtin_amdgcn_sched_barrier(0);
-
-                __builtin_amdgcn_sched_barrier(0);
-                a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-                a_blockwise_copy.PrecomputeIdx(
-                    a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-                b_blockwise_copy.PrecomputeIdx(
-                    b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
-                __builtin_amdgcn_sched_barrier(0);
-
-                wait_dscnt();
-                block_sync_lds_direct_load();
-
-                // wait_dscnt();
-                // block_sync_lds_direct_load();
-
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";; HotLoop Mid Load");
-                __builtin_amdgcn_sched_barrier(0);
-
-                // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
-
-                // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-
-                __builtin_amdgcn_sched_barrier(0);
-                a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-                b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+                a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I1));
+                b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I1));
                 __builtin_amdgcn_sched_barrier(0);
 
                 a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
                 b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-                a_blockwise_copy.PrecomputeIdx(
-                    a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-                b_blockwise_copy.PrecomputeIdx(
-                    b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+                a_blockwise_copy.PrecomputeIdx(a_grid_desc);
+                b_blockwise_copy.PrecomputeIdx(b_grid_desc);
                 __builtin_amdgcn_sched_barrier(0);
 
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";; HotLoop End Load");
-                __builtin_amdgcn_sched_barrier(0);
                 i += 2;
             } while(i < (num_loop - 2));
         }
 
         // tail
-        if constexpr(TailNum == TailNumber::Odd) {}
-        else if constexpr(TailNum == TailNumber::Even)
+        if constexpr(TailNum == TailNumber::Even)
         {
+            // Wait for last load of A1, B1 (to be processed by math waves)
             wait_dscnt();
             block_sync_lds_direct_load();
         }
@@ -361,22 +333,18 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
             do
             {
                 __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";; HotLoop Start Compute");
-                __builtin_amdgcn_sched_barrier(0);
                 // GEMM A0, B0
                 block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf);
 
                 block_sync_lds();
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";; HotLoop Mid Compute");
+
                 __builtin_amdgcn_sched_barrier(0);
 
                 // GEMM A1, B1
                 block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf);
 
                 block_sync_lds();
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";; HotLoop End Compute");
+
                 __builtin_amdgcn_sched_barrier(0);
                 i += 2;
             } while(i < (num_loop - 2));

@@ -1255,11 +1255,23 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
                                                       const index_t lds_offset,
                                                       const bool is_src_valid)
 {
+    // Full assembly implementation of async load global with oob checks
+    // Set exec mask based on is_src_valid and then issue global_load_async_to_lds.
+    // If lanes are not active, then instruction is not issued.
+    // Then, flip the exec mask so lanes that were not active are storing 0 to LDS (ds_store).
+    // Finally, restore the exec mask to its original state.
+    // Notes:
+    //  - this works correctly if all lanes are active right before the inline assembly which
+    //    is the case for GEMM and convolution.
+    //  - because on inline assembly for both global_load_async_to_lds and ds_store,
+    //    we need to explicitly wait for both asynccnt and dscnt
     constexpr auto bytes_per_thread = sizeof(T) * NumElemsPerThread;
 
     using dst_vector_type = vector_type_maker_t<T, NumElemsPerThread>;
     using dst_vector_t    = typename dst_vector_type::type;
 
+    // offset is 16 bit so if the static_dst_offset is too large, we limit it and shift lds_ptr
+    // further
     constexpr index_t offset_limit = 1 << 16; // 65536
     constexpr uint32_t static_dst_offset_ =
         std::min(static_dst_offset, static_cast<index_t>(offset_limit / sizeof(T) - 1));
