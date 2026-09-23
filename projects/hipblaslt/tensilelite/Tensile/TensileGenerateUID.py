@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import LibraryIO
-from .Common.SolutionIdGen import regenerate_solution_uid
+from .Common.SolutionIdGen import encode_solution_uid, regenerate_solution_uid
 
 
 def find_solution_by_index(
@@ -136,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print(new_uid)
+    print(encode_solution_uid(new_uid))
     return 0
 
 

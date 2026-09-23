@@ -17,6 +17,8 @@ from Tensile.Common.SolutionIdGen import (
     RANDOM_SHIFT,
     _ms_since_epoch,
     decode_solution_id,
+    decode_solution_uid,
+    encode_solution_uid,
     ensure_solution_uid,
     generate_solution_id,
     read_solution_uid,
@@ -109,7 +111,7 @@ def test_decode_solution_id_splits_40_plus_24_layout() -> None:
 
 def test_read_solution_uid_reads_solution_uid_field() -> None:
     """SolutionUID in YAML state should be returned as-is."""
-    assert read_solution_uid({"SolutionUID": 5}) == 5
+    assert read_solution_uid({"SolutionUID": "0u5"}) == 5
 
 
 def test_read_solution_uid_generates_when_missing() -> None:
@@ -120,10 +122,11 @@ def test_read_solution_uid_generates_when_missing() -> None:
 
 def test_ensure_solution_uid_assigns_solution_uid() -> None:
     """Missing UID fields should be assigned as SolutionUID."""
-    solution: dict[str, int] = {}
+    solution: dict[str, str] = {}
     ensure_solution_uid(solution)
     assert "SolutionUID" in solution
-    assert solution["SolutionUID"] > 0
+    assert solution["SolutionUID"].startswith("0u")
+    assert decode_solution_uid(solution["SolutionUID"]) > 0
 
 
 def test_multi_winner_batch_assigns_unique_solution_uids() -> None:
@@ -136,7 +139,7 @@ def test_multi_winner_batch_assigns_unique_solution_uids() -> None:
     for solution in solutions:
         ensure_solution_uid(solution)
 
-    uids = [solution["SolutionUID"] for solution in solutions]
+    uids = [decode_solution_uid(solution["SolutionUID"]) for solution in solutions]
     assert len(set(uids)) == winner_count
     expected_ms = now_ms - EPOCH_MS
     assert all(decode_solution_id(uid)[0] >= expected_ms for uid in uids)
@@ -202,9 +205,9 @@ def test_ensure_solution_uid_preserves_existing_uid() -> None:
     Raises:
         AssertionError: If an existing UID is overwritten.
     """
-    solution = {"SolutionUID": 42}
+    solution = {"SolutionUID": "0ug"}
     ensure_solution_uid(solution)
-    assert solution["SolutionUID"] == 42
+    assert solution["SolutionUID"] == "0ug"
 
 
 def test_regenerate_solution_uid_replaces_existing_value() -> None:
@@ -219,7 +222,7 @@ def test_regenerate_solution_uid_replaces_existing_value() -> None:
     Raises:
         AssertionError: If the previous UID is kept.
     """
-    solution = {"SolutionUID": 42}
+    solution = {"SolutionUID": "0ug"}
     new_uid = regenerate_solution_uid(solution)
     assert new_uid != 42
-    assert solution["SolutionUID"] == new_uid
+    assert solution["SolutionUID"] == encode_solution_uid(new_uid)

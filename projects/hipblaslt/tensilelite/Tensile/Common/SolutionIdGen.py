@@ -23,6 +23,73 @@ MS_MASK = (1 << 40) - 1
 RANDOM_BITS = 24
 RANDOM_MASK = (1 << RANDOM_BITS) - 1
 RANDOM_SHIFT = RANDOM_BITS
+BASE62_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+BASE62_LOOKUP = {character: index for index, character in enumerate(BASE62_ALPHABET)}
+BASE62_PREFIX = "0u"
+UINT64_MAX = (1 << 64) - 1
+
+
+def encode_solution_uid(solution_uid: int) -> str:
+    """Encode a 64-bit solution UID in canonical ``0u`` base62 form.
+
+    Args:
+        solution_uid: Unsigned 64-bit solution identifier.
+
+    Returns:
+        Canonical unpadded base62 representation prefixed with ``0u``.
+
+    Raises:
+        ValueError: If ``solution_uid`` is outside the unsigned 64-bit range.
+    """
+    if solution_uid < 0 or solution_uid > UINT64_MAX:
+        raise ValueError(
+            f"SolutionUID ({solution_uid}) is out of range for uint64 "
+            f"(0..{UINT64_MAX})"
+        )
+
+    if solution_uid == 0:
+        return f"{BASE62_PREFIX}0"
+
+    digits = []
+    value = solution_uid
+    while value:
+        value, remainder = divmod(value, len(BASE62_ALPHABET))
+        digits.append(BASE62_ALPHABET[remainder])
+    return BASE62_PREFIX + "".join(reversed(digits))
+
+
+def decode_solution_uid(encoded_uid: str) -> int:
+    """Decode a canonical ``0u`` or ``0U`` base62 solution UID.
+
+    Args:
+        encoded_uid: Canonical prefixed, unpadded base62 representation.
+
+    Returns:
+        Unsigned 64-bit solution identifier.
+
+    Raises:
+        TypeError: If ``encoded_uid`` is not a string.
+        ValueError: If the representation is malformed, non-canonical, or
+            outside the unsigned 64-bit range.
+    """
+    if not isinstance(encoded_uid, str):
+        raise TypeError("SolutionUID representation must be a string")
+    if len(encoded_uid) < 3 or encoded_uid[:2] not in {"0u", "0U"}:
+        raise ValueError("SolutionUID must start with 0u or 0U")
+
+    payload = encoded_uid[2:]
+    if len(payload) > 1 and payload[0] == "0":
+        raise ValueError("SolutionUID base62 payload must not contain leading zeros")
+
+    value = 0
+    for character in payload:
+        digit = BASE62_LOOKUP.get(character)
+        if digit is None:
+            raise ValueError(f"Invalid SolutionUID base62 character: {character!r}")
+        if value > (UINT64_MAX - digit) // len(BASE62_ALPHABET):
+            raise ValueError("SolutionUID is out of range for uint64")
+        value = value * len(BASE62_ALPHABET) + digit
+    return value
 
 
 def _ms_since_epoch(now_ms: int) -> int:
@@ -91,7 +158,7 @@ def read_solution_uid(solution: dict) -> int:
         64-bit solution UID.
     """
     if "SolutionUID" in solution:
-        return int(solution["SolutionUID"])
+        return decode_solution_uid(solution["SolutionUID"])
     return generate_solution_id()
 
 
@@ -105,7 +172,7 @@ def ensure_solution_uid(solution: dict) -> None:
         ValueError: Propagated from :func:`generate_solution_id` on time overflow.
     """
     if "SolutionUID" not in solution:
-        solution["SolutionUID"] = generate_solution_id()
+        solution["SolutionUID"] = encode_solution_uid(generate_solution_id())
 
 
 def regenerate_solution_uid(solution: dict) -> int:
@@ -121,5 +188,5 @@ def regenerate_solution_uid(solution: dict) -> int:
         ValueError: Propagated from :func:`generate_solution_id` on time overflow.
     """
     uid = generate_solution_id()
-    solution["SolutionUID"] = uid
+    solution["SolutionUID"] = encode_solution_uid(uid)
     return uid

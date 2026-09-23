@@ -239,7 +239,7 @@ class TestLoadData:
             AssertionError: If conversion drops or misorders ``SolutionUID``.
         """
         data = deepcopy(list_logic)
-        data[5][0]["SolutionUID"] = 2579693048624924199
+        data[5][0]["SolutionUID"] = "0u34Z1KlVFjgl"
         out = convertToDict(data, "fixture.yaml")
         keys = list(out["Solutions"][0].keys())
         assert keys[:4] == [

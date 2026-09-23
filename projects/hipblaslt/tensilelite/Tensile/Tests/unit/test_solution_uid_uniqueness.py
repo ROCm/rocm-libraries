@@ -12,6 +12,8 @@ from typing import Dict, List, Tuple
 
 import pytest
 
+from Tensile.Common.SolutionIdGen import decode_solution_uid, encode_solution_uid
+
 pytestmark = pytest.mark.unit
 
 DEFAULT_LOGIC_ROOT = (
@@ -79,7 +81,9 @@ def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
         ``missing_count`` counts solutions without the field.
 
     Raises:
-        ValueError: If a UID or index value is not an integer.
+        TypeError: If a UID value is not a string.
+        ValueError: If a UID is malformed, zero, out of range, or an index
+            value is not an integer.
     """
     entries: List[Tuple[int, str, int]] = []
     missing = 0
@@ -115,7 +119,13 @@ def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
                 flush_solution()
                 current_index = int(stripped.split(":", 1)[1].strip())
             elif current_index is not None and stripped.startswith("SolutionUID:"):
-                current_uid = int(stripped.split(":", 1)[1].strip())
+                encoded_uid = stripped.split(":", 1)[1].strip()
+                current_uid = decode_solution_uid(encoded_uid)
+                if current_uid == 0:
+                    raise ValueError(
+                        f"Stored SolutionUID must not be zero: {yaml_path} "
+                        f"(SolutionIndex={current_index})"
+                    )
 
     flush_solution()
     return entries, missing
@@ -191,7 +201,7 @@ def test_solution_uid_unique_across_logic_files(logic_root: Path) -> None:
     if duplicates:
         lines = ["Duplicate SolutionUID values detected:"]
         for uid, locations in sorted(duplicates.items()):
-            lines.append(f"  uid {uid}:")
+            lines.append(f"  uid {encode_solution_uid(uid)}:")
             for yaml_path, local_index in locations:
                 lines.append(f"    {yaml_path} (SolutionIndex={local_index})")
         pytest.fail("\n".join(lines))

@@ -12,7 +12,13 @@ from pathlib import Path
 import pytest
 
 from Tensile import LibraryIO
-from Tensile.Common.SolutionIdGen import decode_solution_id, RANDOM_MASK, RANDOM_SHIFT
+from Tensile.Common.SolutionIdGen import (
+    RANDOM_MASK,
+    RANDOM_SHIFT,
+    decode_solution_id,
+    decode_solution_uid,
+    encode_solution_uid,
+)
 from Tensile.TensileGenerateUID import (
     find_solution_by_index,
     main,
@@ -34,14 +40,14 @@ def _sample_logic_data() -> dict:
         "Solutions": [
             {
                 "SolutionIndex": 0,
-                "SolutionUID": 100,
+                "SolutionUID": "0u1c",
                 "SolutionNameMin": "sol0",
                 "KernelNameMin": "kern0",
                 "NumThreads": 256,
             },
             {
                 "SolutionIndex": 1,
-                "SolutionUID": 200,
+                "SolutionUID": "0u3E",
                 "SolutionNameMin": "sol1",
                 "KernelNameMin": "kern1",
                 "NumThreads": 128,
@@ -54,7 +60,7 @@ def test_find_solution_by_index_returns_matching_solution() -> None:
     """``find_solution_by_index`` locates the requested solution."""
     data = _sample_logic_data()
     solution = find_solution_by_index(data, 1)
-    assert solution["SolutionUID"] == 200
+    assert solution["SolutionUID"] == "0u3E"
 
 
 def test_find_solution_by_index_raises_when_missing() -> None:
@@ -97,11 +103,11 @@ def test_find_solution_by_index_skips_non_dict_and_missing_index() -> None:
         "Solutions": [
             "not-a-solution",
             {"SolutionNameMin": "no-index"},
-            {"SolutionIndex": 3, "SolutionUID": 300},
+            {"SolutionIndex": 3, "SolutionUID": "0u4q"},
         ]
     }
     solution = find_solution_by_index(data, 3)
-    assert solution["SolutionUID"] == 300
+    assert solution["SolutionUID"] == "0u4q"
 
 
 def test_regenerate_uid_for_solution_replaces_uid(tmp_path: Path) -> None:
@@ -114,8 +120,8 @@ def test_regenerate_uid_for_solution_replaces_uid(tmp_path: Path) -> None:
     assert new_uid != 200
 
     updated = LibraryIO.readYAML(str(yaml_path))
-    assert updated["Solutions"][0]["SolutionUID"] == 100
-    assert updated["Solutions"][1]["SolutionUID"] == new_uid
+    assert updated["Solutions"][0]["SolutionUID"] == "0u1c"
+    assert updated["Solutions"][1]["SolutionUID"] == encode_solution_uid(new_uid)
 
 
 def test_regenerate_uid_for_solution_without_inplace_does_not_write(
@@ -130,7 +136,7 @@ def test_regenerate_uid_for_solution_without_inplace_does_not_write(
     assert new_uid != 100
 
     unchanged = LibraryIO.readYAML(str(yaml_path))
-    assert unchanged["Solutions"][0]["SolutionUID"] == 100
+    assert unchanged["Solutions"][0]["SolutionUID"] == "0u1c"
 
 
 def test_regenerate_uid_uses_40_plus_24_layout(tmp_path: Path) -> None:
@@ -154,8 +160,8 @@ def test_main_prints_uid_and_returns_zero(capsys, tmp_path: Path) -> None:
     captured = capsys.readouterr()
 
     assert rc == 0
-    assert captured.out.strip().isdigit()
-    assert int(captured.out.strip()) != 100
+    assert captured.out.strip().startswith("0u")
+    assert decode_solution_uid(captured.out.strip()) != 100
 
 
 def test_main_inplace_updates_file(tmp_path: Path) -> None:
@@ -167,7 +173,7 @@ def test_main_inplace_updates_file(tmp_path: Path) -> None:
     assert rc == 0
 
     updated = LibraryIO.readYAML(str(yaml_path))
-    assert updated["Solutions"][1]["SolutionUID"] != 200
+    assert updated["Solutions"][1]["SolutionUID"] != "0u3E"
 
 
 def test_main_returns_error_for_missing_index(tmp_path: Path) -> None:

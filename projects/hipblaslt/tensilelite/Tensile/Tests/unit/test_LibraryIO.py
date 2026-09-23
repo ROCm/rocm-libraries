@@ -296,7 +296,7 @@ def test_reorder_solutions_params_puts_solution_uid_after_index() -> None:
         "Solutions": [
             {
                 "WorkGroupMapping": 8,
-                "SolutionUID": 2579693048624924199,
+                "SolutionUID": "0u34Z1KlVFjgl",
                 "SolutionIndex": 3,
                 "KernelNameMin": "kern_min",
                 "SolutionNameMin": "sol_min",
