@@ -577,9 +577,11 @@ validParameters = { # we need to make sure this matches develop
     #   2  + InsertCoexecHazard and Gfx1250HazardModule: s_wait_xcnt coverage,
     #      which Components/Subtile emits none of.
     #   3  + AsmMovePropagation, which folds away redundant v_mov_b32 copies.
-    #
-    # Higher levels each add one more pass and are enabled in their own change,
-    # once that pass has been measured on hardware on its own.
+    #   4  + the SwInstructionPrefetch passes, which then follow the existing
+    #      SwInstructionPrefetch knob rather than adding a second control. Prefer
+    #      SwInstructionPrefetch 2 (Absolute) here: it measures neutral to +2.3%
+    #      on entry-dominated shapes where the knob's Relative default measures
+    #      negative.
     #
     # No level lets StinkyTofu reorder an instruction or rewrite a wait: OptLevel
     # 0 keeps the DAG scheduler out, and EnableWaitCntInsertion / EnableESM2 /
@@ -589,7 +591,7 @@ validParameters = { # we need to make sure this matches develop
     # s_waitcnt / s_wait_alu it emits.
     #
     # gfx1250 + UseSubtileImpl only; forced to 0 elsewhere.
-    "StinkySubtile": [0, 1, 2, 3],
+    "StinkySubtile": [0, 1, 2, 3, 4],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
