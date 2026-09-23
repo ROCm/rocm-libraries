@@ -63,7 +63,9 @@ class GL2PrefetchLoad(GL2Prefetch):
             coalescedDim, perpendicularDim = (mt * numTileWGs, du) if tp["tlu"] else (du, mt * numTileWGs)
 
         tp["gl2ncp"] = perpendicularDim
-        tp["gl2ncc"] = max(1, round(coalescedDim * bpe) // globalPrefetchSize)
+        coalescedBytes = round(coalescedDim * bpe)
+        # Number of chunks for the complete coalesced byte range.
+        tp["gl2ncc"] = max(1, (coalescedBytes + globalPrefetchSize - 1) // globalPrefetchSize)
         tp["gl2nc"] = tp["gl2ncp"] * tp["gl2ncc"]
         tp["gl2nl"] = max(1, ceil(tp["gl2nc"] / numCooperativeThreads))
 

@@ -208,7 +208,8 @@ def tensor_dims(spec, cfg):
     else:
         du = data_depth_u(spec, cfg)
         coal, perp = (spec.mt * M, du) if spec.tlu else (du, spec.mt * M)
-    ncc = max(1, round(coal * spec.bpe) // GLOBAL_PREFETCH_SIZE)
+    coal_bytes = round(coal * spec.bpe)
+    ncc = max(1, (coal_bytes + GLOBAL_PREFETCH_SIZE - 1) // GLOBAL_PREFETCH_SIZE)
     return coal, perp, ncc, perp * ncc
 
 
@@ -257,7 +258,10 @@ CONFIGS = [
     # footprint is covered by this single WG's threads. Guards the degenerate
     # single-workgroup path. ----
     GL2Config("ab_fp8_tlu_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1)),
-    # ---- A + B together, FP8 TLU; MT=384 (non-POT) -> gl2ncc==2 ----
+    # ---- 384-byte coalesced range with two 256-byte prefetch chunks. ----
+    GL2Config("ab_fp8_ncc_partial",    [_A(True, 384), _B(True, 384)],
+              depth_u=128, cluster=(1, 1)),
+    # ---- A + B FP8 TLU: two MT384 tiles give gl2ncc==3. ----
     GL2Config("ab_fp8_tlu",          [_A(True, 384),  _B(True, 384)],  cluster=(2, 2)),
     # ---- A + B non-TLU; MT=384 (non-POT) on perpendicular dim ----
     GL2Config("ab_fp8_ntlu",         [_A(False, 384), _B(False, 384)], cluster=(4, 4)),
