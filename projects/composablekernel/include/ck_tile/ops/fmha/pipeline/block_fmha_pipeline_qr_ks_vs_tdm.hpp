@@ -1396,9 +1396,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                         static_assert(sizeof(typename Window::Traits::vector_t) == 16);
                         static_assert(Tile::get_thread_buffer_size() == 64);
 
-                        // On the final M iteration, each WMMA consumes its K fragment for the
-                        // last time. Reload that fragment for the next head-dimension slice while
-                        // the remaining old-fragment WMMAs execute.
+                        // On the final M iteration, reload pairs of K fragments after both
+                        // WMMAs have consumed them for the last time. Grouping the four DS reads
+                        // keeps the next head-dimension slice in the same register storage.
                         gemm_0.RunWithAfterWarp(
                             s_acc,
                             get_slice_tile(q_tile,
@@ -1406,7 +1406,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                            sequence<kM0, (i_k0 + 1) * kK0>{}),
                             k_tile,
                             [&k_lds_read_window, &k_tile](auto mIter, auto nIter, auto kIter) {
-                                if constexpr(mIter == Gemm0::MIterPerWarp - 1 && kIter == 0)
+                                if constexpr(mIter == Gemm0::MIterPerWarp - 1 && kIter == 0 &&
+                                             decltype(nIter)::value % 2 == 1)
                                 {
                                     // Allow VALU/SALU/VMEM/DS-write/TRANS/LDSDMA to cross while
                                     // keeping MFMA/WMMA and DS-read ordered around the reload.
@@ -1414,8 +1415,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         0x002 | 0x004 | 0x010 | 0x020 | 0x040 | 0x200 | 0x400 |
                                         0x800;
                                     __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
-                                    constexpr index_t begin = 2 * decltype(nIter)::value;
-                                    k_lds_read_window.template load_access_range<begin, begin + 2>(
+                                    constexpr index_t begin = 2 * (decltype(nIter)::value - 1);
+                                    k_lds_read_window.template load_access_range<begin, begin + 4>(
                                         k_tile);
                                     __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
                                 }
