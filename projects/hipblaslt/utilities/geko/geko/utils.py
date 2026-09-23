@@ -132,6 +132,7 @@ def build_tensilelite_client(hipblaslt_path: str | Path, build_dir: str | Path =
         logger.info(f"Building tensilelite client in '{build_dir}'")
         run_silent_command(["invoke", "build-client", "--build-dir", build_dir], cwd=tensilelite_path)
 
+        Path(hash_file_path).parent.mkdir(parents=True, exist_ok=True)
         with open(hash_file_path, "w") as f:
             f.write(current_hash)
     else:

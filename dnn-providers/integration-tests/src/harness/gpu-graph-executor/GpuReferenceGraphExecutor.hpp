@@ -138,20 +138,33 @@ private:
         {
         case NodeAttrs::ConvolutionFwdAttributes:
             return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::LayernormAttributes:
+            return detail::GpuLayernormFwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::LayernormBackwardAttributes:
+            return detail::GpuLayernormBwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::PointwiseAttributes:
+            return detail::GpuPointwiseSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::ReductionAttributes:
+            return detail::GpuReductionSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::RMSNormAttributes:
+            return detail::GpuRMSNormFwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::RMSNormBackwardAttributes:
+            return detail::GpuRMSNormBwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::BatchnormInferenceAttributes:
+            return detail::GpuBatchnormFwdInfSignatureKey(
+                node, tensorMap, node.compute_data_type());
+        case NodeAttrs::BatchnormInferenceAttributesVarianceExt:
+            return detail::GpuBatchnormFwdInfVarianceSignatureKey(
+                node, tensorMap, node.compute_data_type());
+        case NodeAttrs::SdpaAttributes:
+            return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
 
         // Node types with no GPU plan yet - throw descriptive error
-        case NodeAttrs::PointwiseAttributes:
-        case NodeAttrs::BatchnormInferenceAttributes:
-        case NodeAttrs::BatchnormInferenceAttributesVarianceExt:
         case NodeAttrs::BatchnormBackwardAttributes:
         case NodeAttrs::BatchnormAttributes:
         case NodeAttrs::ConvolutionBwdAttributes:
         case NodeAttrs::ConvolutionWrwAttributes:
         case NodeAttrs::MatmulAttributes:
-        case NodeAttrs::LayernormAttributes:
-        case NodeAttrs::RMSNormAttributes:
-        case NodeAttrs::RMSNormBackwardAttributes:
-        case NodeAttrs::SdpaAttributes:
         case NodeAttrs::SdpaBackwardAttributes:
         case NodeAttrs::BlockScaleDequantizeAttributes:
         case NodeAttrs::BlockScaleQuantizeAttributes:

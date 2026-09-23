@@ -1,0 +1,80 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 32
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  Architecture: gfx950
+  PrintLevel: 2
+  ISA: [[9, 5, 0]]
+  # Exercise BOTH deterministic SK5 hybrid sub-paths under PAP in one run:
+  #   0 -> static (SK3-like) work assignment  -> PAP static next-tile handoff
+  #   1 -> dynamic per-XCD work-queue path    -> PAP pop-and-prime handoff
+  # Each base problem is replayed once per value, so reference vs kernel
+  # numerical validation runs for both PAP sub-paths and confirms equivalence.
+  StreamKHybridMode: [0, 1]
+
+BenchmarkProblems:
+  #######################################
+  # SGEMM NT - StreamK Hybrid (SK5) PrefetchAcrossPersistent
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - SK5 hybrid + PAP, PGR/WGM/stagger coverage
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [5]
+        - GlobalSplitU: [0]
+        - WavefrontSize: [64]
+        - DepthU: [16]
+        - 1LDSBuffer: [0]
+        - DirectToLds: [0]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 4, 1, 1, 2, 4, 2, 2]
+        - MIArchVgpr: [false]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [4]
+        - TransposeLDS: [0]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [1, 8]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - UseSgprForGRO: [0]
+        - StaggerU: [0, 32]
+        - StaggerUStride: [256]
+        - Use64bShadowLimit: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 2048, 1, 512]
+          - Exact: [4104, 2056, 1, 512]

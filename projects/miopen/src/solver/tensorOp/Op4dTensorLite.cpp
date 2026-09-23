@@ -77,13 +77,6 @@ bool Op4dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
     return false;
 }
 
-std::size_t Op4dTensorLite::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
-{
-    return 0;
-}
-
 ConvSolution Op4dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext& context,
                                          const miopen::tensorOp::ProblemDescription& problem) const
 {

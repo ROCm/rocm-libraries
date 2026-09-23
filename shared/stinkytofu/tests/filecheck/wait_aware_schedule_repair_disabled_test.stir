@@ -1,0 +1,23 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --WaitAwareScheduleRepairPass=kSlotsToMovePastAnchor=-1 --print-output
+#
+# A non-positive slot count disables the repair pass and preserves input order.
+#
+# CHECK-LABEL: @wait_aware_schedule_repair_disabled
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s_cmp_lt_u32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_cselect_b32
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 55
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+
+st.func @wait_aware_schedule_repair_disabled() {
+^entry:
+  "st.s_wait_dscnt"(56) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 56, dscnt = -1, kmcnt = -1 } }
+  v[22:29] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[540:555], v[798:813], v[22:29], v0, v10) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  SCC0 = "st.s_cmp_lt_u32"(s21, 137216) { issueCycles = 1, latencyCycles = 2 }
+  s6 = "st.s_mov_b32"(-137216) { issueCycles = 1, latencyCycles = 2 }
+  s6 = "st.s_cselect_b32"(137216, s6, SCC0) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(55) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 55, dscnt = -1, kmcnt = -1 } }
+  v[30:37] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[556:571], v[798:813], v[30:37], v1, v10) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+}

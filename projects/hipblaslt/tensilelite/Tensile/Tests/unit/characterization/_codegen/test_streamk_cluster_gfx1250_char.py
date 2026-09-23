@@ -18,7 +18,7 @@ import os
 
 import pytest
 
-from config_harness import emit_kernels_from_config
+from config_harness import assert_assembles, emit_kernels_from_config
 
 pytestmark = pytest.mark.unit
 
@@ -43,6 +43,7 @@ def test_streamk_cluster_gfx1250_emits_assembly():
         + str([(b, e) for (b, _s, e) in results if e != 0])
     )
     for base, src, _err in results:
+        assert_assembles(src, base)
         assert src and len(src.splitlines()) > 50, (
             f"Kernel {base!r} emitted suspiciously short source"
         )

@@ -43,9 +43,14 @@ directory. Ask if either is missing.
    - Do NOT rename files in `hip/` or `tests/mocks/` -- update namespace only.
    - Do NOT rename kernel infrastructure: `templates/*.in`,
      `EmbedKernelSources.cmake`, `KERNEL_GENERATED_SOURCES`.
-   - Do NOT rename `HIPDNN_REGISTER_ENGINE` macro calls or their arguments
-     (`EXAMPLE_PROVIDER_RELU_ENGINE`, `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`)
-     -- the example engines are placeholders to be replaced by the user.
+   - DO rename the `HIPDNN_REGISTER_ENGINE` arguments
+     (`EXAMPLE_PROVIDER_RELU_ENGINE`, `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`) and
+     every `_NAME`/`_ID` constant derived from them, in
+     `src/ExampleProviderContainer.cpp` and `sample/ExampleProviderSample.cpp`.
+     An engine's ID is a hash of its name, and a name identifies an engine
+     across the whole process, so a renamed plugin that keeps the example names
+     collides with the example plugin: whichever loads second has those engines
+     refused, and it then serves nothing.
    - Rename version infrastructure: `version.json` (update key name),
      `templates/version.h.in` (rename header guard and macro prefix),
      `cmake/VersionUtils.cmake` (rename the three function names).
@@ -56,8 +61,7 @@ directory. Ask if either is missing.
 
 5. Grep the target directory for remaining occurrences of
    `example_provider`, `ExampleProvider`, `EXAMPLE_PROVIDER`,
-   `EXAMPLEPROVIDER_`, `hipdnn_example`, and `hipdnn-example` to verify nothing was missed. Engine registration
-   identifiers (`EXAMPLE_PROVIDER_RELU_ENGINE`,
-   `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`) are expected to remain.
+   `EXAMPLEPROVIDER_`, `hipdnn_example`, and `hipdnn-example` to verify nothing was missed.
+   Nothing should remain, including the engine registration identifiers.
 
 6. Build and run tests if ROCm/hipDNN is available.

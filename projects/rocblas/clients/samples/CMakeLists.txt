@@ -58,7 +58,7 @@ if ( BUILD_FORTRAN_CLIENTS )
   set( sample_list_fortran rocblas-example-fortran-axpy rocblas-example-fortran-scal rocblas-example-fortran-gemv )
 endif()
 
-if( BUILD_WITH_TENSILE )
+if( BUILD_WITH_TENSILE OR BUILD_WITH_HIPBLASLT_ONLY )
   add_executable( rocblas-example-user-driven-tuning example_user_driven_tuning.cpp ${rocblas_samples_common} )
 
   set( sample_list_tensile rocblas-example-user-driven-tuning )

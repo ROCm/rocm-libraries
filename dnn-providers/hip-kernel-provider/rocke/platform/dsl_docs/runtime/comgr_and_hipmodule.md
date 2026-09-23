@@ -80,6 +80,12 @@ For the kernels in `rocke`, most performance comes from IR-level decisions (atom
 
 ## Adding Compiler Options
 
+For durable scheduler tuning, attach a validated `CodegenPolicy` to the kernel
+and compile through `compile_kernel()`. See
+[`../optimization/scheduler-policy.md`](../optimization/scheduler-policy.md).
+The policy is emitted as an `amdgpu-sched-strategy` LLVM function attribute and
+survives the serialized-IR handoff to either LLVM lowerer.
+
 `build_hsaco_from_llvm_ir(ir_text, options=[...])` passes any list of strings to `amd_comgr_action_info_set_option_list`. Useful examples:
 
 ```text
@@ -89,7 +95,9 @@ For the kernels in `rocke`, most performance comes from IR-level decisions (atom
 "-Wl,--strip-debug"
 ```
 
-This is not currently exposed through `compile_kernel`; call `build_hsaco_from_llvm_ir` directly when you need custom options.
+Arbitrary options are intentionally not exposed through `compile_kernel`; call
+`build_hsaco_from_llvm_ir` directly for isolated compiler diagnostics. Raw
+options are not automatically validated or included in artifact identity.
 
 ## HIP Module Layer
 

@@ -72,7 +72,6 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(8, buffer_size);
 
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                                   false,
                                    static_cast<int64_t>(1),
                                    m,
                                    m,

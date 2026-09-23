@@ -35,7 +35,7 @@ class TuningConfigWriter:
     """Serialize a config dict (with :class:`ForkParameter` values) to Tensile YAML.
 
     Emits GlobalParameters, BenchmarkProblems (including ForkParameters and Groups),
-    LibraryLogic, optional ductile GA section, in one pass without post-processing.
+    LibraryLogic, optional ductile section, in one pass without post-processing.
     """
 
     @staticmethod
@@ -230,7 +230,7 @@ class TuningConfigWriter:
         return lines
 
     def _write_backend(self, backend: Dict[str, Any]) -> List[str]:
-        """Serialize GA ``ductile`` block: scalar keys plus ``weights`` list."""
+        """Serialize ``Backend`` block including optional Ductile config weights."""
         simple = {k: v for k, v in backend.items() if k != 'Config'}
         lines = ['Backend:\n'] + self._write_mapping(simple)
         if "Config" not in backend:

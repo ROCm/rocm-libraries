@@ -5,35 +5,31 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
 namespace hipdnn_plugin_sdk
 {
 
 /**
- * @brief Manages a collection of engines within a plugin.
+ * @brief Owns a plugin's engine registry: lookup, applicability checks, and dispatch by id.
+ * Typically owned by an EnginePluginContainer and shares its lifespan.
  *
- * The EngineManager is responsible for:
- * - Maintaining a registry of all engines in the plugin
- * - Finding applicable engines for a given operation graph
- * - Delegating operations to the appropriate engine based on engine ID
+ * @tparam THandle Plugin handle type (e.g. HipdnnMiopenHandle).
+ * @tparam TSettings Plugin settings type.
+ * @tparam TContext Plugin execution context type.
  *
- * This class is typically owned by an EnginePluginContainer and shares
- * its lifespan with it.
- *
- * @tparam THandle The plugin-specific handle type (e.g., HipdnnMiopenHandle).
- * @tparam TSettings The plugin-specific settings type (e.g., HipdnnMiopenSettings).
- * @tparam TContext The plugin-specific context type (e.g., HipdnnMiopenContext).
- *
- * @note Implementations should be stateless or thread-safe, as the engine
- *       manager may be accessed from multiple threads concurrently.
+ * @note Thread-safe: may be accessed from multiple threads concurrently.
  */
 template <typename THandle, typename TSettings, typename TContext>
 class EngineManager
@@ -46,30 +42,36 @@ public:
     EngineManager() = default;
     virtual ~EngineManager() = default;
 
-    // Disallow copy and assignment
     EngineManager(const EngineManager&) = delete;
     EngineManager& operator=(const EngineManager&) = delete;
 
-    // Allow move
     EngineManager(EngineManager&&) = default;
     EngineManager& operator=(EngineManager&&) = default;
 
     /**
-     * @brief Adds an engine to this manager.
+     * @brief Adds an engine, keyed by its id.
      *
-     * @param engine The engine to add. Ownership is transferred.
+     * An id already claimed keeps the incumbent and logs the loser rather than throwing:
+     * two engines hashing onto one id (RFC 0003) is an authoring collision, and this is
+     * the backstop for pairs the descriptor policy can't see -- RFC 0020 §10.2.1 drops
+     * every UED in a name collision before it reaches this list, but two hand-written
+     * engines have no such gate, and refusing both here would take a working engine down
+     * to punish one duplicate.
+     *
+     * @param name Optional declared name, used to identify the loser in that log. Only the
+     * caller can supply it for a runtime-discovered engine, which has no registry entry.
      */
-    void addEngine(std::unique_ptr<Engine> engine)
+    void addEngine(std::unique_ptr<Engine> engine, std::string_view name = {})
     {
         auto id = engine->id();
-        _engines.emplace(id, std::move(engine));
+        if(!_engines.emplace(id, std::move(engine)).second)
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("engine manager: an engine with id "
+                                    << describeEngine(id, name)
+                                    << " is already registered; the duplicate is discarded");
+        }
     }
 
-    /**
-     * @brief Returns the IDs of all engines managed by this manager.
-     *
-     * @return Vector of all engine IDs.
-     */
     std::vector<int64_t> getAllEngineIds() const
     {
         std::vector<int64_t> ids;
@@ -81,13 +83,6 @@ public:
         return ids;
     }
 
-    /**
-     * @brief Returns the IDs of engines that can handle the given graph.
-     *
-     * @param handle The engine plugin handle.
-     * @param opGraph The operation graph to check.
-     * @return Vector of applicable engine IDs.
-     */
     std::vector<int64_t> getApplicableEngineIds(THandle& handle, const IGraph& opGraph)
     {
         std::vector<int64_t> applicable;
@@ -101,14 +96,6 @@ public:
         return applicable;
     }
 
-    /**
-     * @brief Gets the details of a specific engine.
-     *
-     * @param handle The engine plugin handle.
-     * @param opGraph The operation graph (may be used for context).
-     * @param engineId The ID of the engine.
-     * @param engineDetailsOut Output parameter for the engine details.
-     */
     void getEngineDetails(THandle& handle,
                           const IGraph& opGraph,
                           int64_t engineId,
@@ -118,14 +105,6 @@ public:
         engine.getDetails(handle, opGraph, engineDetailsOut);
     }
 
-    /**
-     * @brief Gets the workspace size for a specific engine and graph.
-     *
-     * @param handle The engine plugin handle.
-     * @param opGraph The operation graph.
-     * @param engineConfig The engine configuration.
-     * @return The required workspace size in bytes.
-     */
     size_t getMaxWorkspaceSize(const THandle& handle,
                                const IGraph& opGraph,
                                const IEngineConfig& engineConfig) const
@@ -134,17 +113,7 @@ public:
         return engine.getMaxWorkspaceSize(handle, opGraph, engineConfig);
     }
 
-    /**
-     * @brief Initializes an execution context with a plan for the given graph.
-     *
-     * Creates a plan using the appropriate engine and attaches it to the
-     * execution context.
-     *
-     * @param handle The engine plugin handle.
-     * @param opGraph The operation graph.
-     * @param engineConfig The engine configuration.
-     * @param executionContext The execution context to initialize.
-     */
+    /// Builds a plan via the resolved engine and attaches it to @p executionContext.
     void initializeExecutionContext(const THandle& handle,
                                     const IGraph& opGraph,
                                     const IEngineConfig& engineConfig,
@@ -155,13 +124,7 @@ public:
     }
 
 protected:
-    /**
-     * @brief Gets an engine by ID.
-     *
-     * @param engineId The ID of the engine to get.
-     * @return Reference to the engine.
-     * @throws HipdnnPluginException if the engine is not found.
-     */
+    /// @throws HipdnnPluginException if @p engineId is not registered.
     Engine& getEngine(int64_t engineId) const
     {
         auto it = _engines.find(engineId);
@@ -175,6 +138,28 @@ protected:
     }
 
 private:
+    /// Renders an engine as its id, suffixed with a name when one can be had. The id is never
+    /// dropped: it is what correlates the line with the admission and resolution logs.
+    static std::string describeEngine(int64_t id, std::string_view name)
+    {
+        auto label = hipdnn_data_sdk::utilities::formatEngineIdHex(id);
+        if(name.empty())
+        {
+            const auto& idToName = hipdnn_data_sdk::utilities::getEngineIdToNameMap();
+            if(const auto it = idToName.find(id); it != idToName.end())
+            {
+                name = it->second;
+            }
+        }
+        if(!name.empty())
+        {
+            label += " (";
+            label += name;
+            label += ")";
+        }
+        return label;
+    }
+
     std::unordered_map<int64_t, std::unique_ptr<Engine>> _engines;
 };
 

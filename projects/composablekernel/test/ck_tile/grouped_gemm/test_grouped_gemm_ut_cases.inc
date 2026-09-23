@@ -39,11 +39,17 @@ TYPED_TEST(TEST_CKTILE_GGEMM_SUITE_NAME, SplitK)
     std::vector<int> stride_Bs;
     std::vector<int> stride_Cs;
 
+    // IsSupportedArgument requires ceil(K / K_Warp_Tile) >= k_batch; k_batch * K_Warp_Tile is
+    // a safe conservative floor for that. Read the tile size from the config the kernel is
+    // actually instantiated with, so this stays correct on both the WMMA and MFMA paths.
+    constexpr int k_warp_tile = TestFixture::ActiveKernelParam::K_Warp_Tile;
+    const int k_start         = std::max(64, kbatch * k_warp_tile);
+
     for(int i = 0; i < group_count; i++)
     {
         Ms.push_back(64 + 64 * i);
         Ns.push_back(128 + 64 * i);
-        Ks.push_back(64 + 32 * i);
+        Ks.push_back(k_start + 32 * i);
 
         stride_As.push_back(0);
         stride_Bs.push_back(0);

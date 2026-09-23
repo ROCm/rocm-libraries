@@ -118,11 +118,13 @@ typedef struct rocke_gfx942_attention_tiled_2d_supports_args
     bool use_k_single_buffer; /* default False                              */
     bool use_conflict_free_v_store; /* default False                              */
     bool use_k_sliced_ring; /* default False                              */
+    int ring_depth; /* default 3; read only when the ring is on    */
+    int k_slice_hd; /* default 32; read only when the ring is on   */
 } rocke_gfx942_attention_tiled_2d_supports_args_t;
 
-/* Defaulted args (num_warps=1, block_m_per_warp=16, everything else 0/NULL/
- * false). The caller sets head_size/block_size/dtype/num_queries_per_kv before
- * use. */
+/* Defaulted args (num_warps=1, block_m_per_warp=16, ring_depth=3,
+ * k_slice_hd=32, everything else 0/NULL/false). The caller sets
+ * head_size/block_size/dtype/num_queries_per_kv before use. */
 rocke_gfx942_attention_tiled_2d_supports_args_t
     rocke_gfx942_attention_tiled_2d_supports_args_default(void);
 

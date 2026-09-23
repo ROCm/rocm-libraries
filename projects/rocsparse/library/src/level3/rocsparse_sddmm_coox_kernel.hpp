@@ -39,33 +39,25 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_KERNEL_W(BLOCKSIZE, 1)
-    void sddmm_coox_kernel(rocsparse_operation transA,
-                           rocsparse_operation transB,
-                           rocsparse_order     orderA,
-                           rocsparse_order     orderB,
-                           J                   M,
-                           J                   N,
-                           J                   K,
-                           I                   nnz,
-                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                           const A* __restrict__ dense_A,
-                           int64_t lda,
-                           const B* __restrict__ dense_B,
-                           int64_t ldb,
-                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                           C* __restrict__ coo_val,
-                           const I* __restrict__ coo_row_ind,
-                           const I* __restrict__ coo_col_ind,
-                           rocsparse_index_base coo_base,
-                           bool                 is_host_mode)
+    ROCSPARSE_DEVICE_ILF void sddmm_coox_device(rocsparse_operation transA,
+                                                rocsparse_operation transB,
+                                                rocsparse_order     orderA,
+                                                rocsparse_order     orderB,
+                                                J                   M,
+                                                J                   N,
+                                                J                   K,
+                                                I                   nnz,
+                                                T                   alpha,
+                                                const A* __restrict__ dense_A,
+                                                int64_t lda,
+                                                const B* __restrict__ dense_B,
+                                                int64_t ldb,
+                                                T       beta,
+                                                C* __restrict__ coo_val,
+                                                const I* __restrict__ coo_row_ind,
+                                                const I* __restrict__ coo_col_ind,
+                                                rocsparse_index_base coo_base)
     {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
-        {
-            return;
-        }
         //
         // Each group treats one row / column
         //
@@ -114,6 +106,83 @@ namespace rocsparse
         if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)
         {
             coo_val[innz] = rocsparse::fma<T>(beta, coo_val[innz], alpha * sum);
+        }
+    }
+
+    template <rocsparse_int BLOCKSIZE,
+              rocsparse_int NTHREADS_PER_DOTPRODUCT,
+              bool          AOS,
+              typename T,
+              typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void sddmm_coox_kernel(rocsparse_operation transA,
+                           rocsparse_operation transB,
+                           rocsparse_order     orderA,
+                           rocsparse_order     orderB,
+                           J                   M,
+                           J                   N,
+                           J                   K,
+                           I                   nnz,
+                           int64_t             batch_count,
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                           const A* __restrict__ dense_A,
+                           int64_t lda,
+                           int64_t batch_stride_A,
+                           const B* __restrict__ dense_B,
+                           int64_t ldb,
+                           int64_t batch_stride_B,
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                           C* __restrict__ coo_val,
+                           int64_t values_batch_stride_C,
+                           const I* __restrict__ coo_row_ind,
+                           int64_t row_indices_batch_stride_C,
+                           const I* __restrict__ coo_col_ind,
+                           int64_t              col_indices_batch_stride_C,
+                           rocsparse_index_base coo_base,
+                           bool                 is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
+        {
+            return;
+        }
+
+        // COO has a single per-batch stride (configured by the user via
+        // rocsparse_coo_set_strided_batch) which applies to all three COO
+        // buffers (row indices, column indices and values). The caller is
+        // therefore required to lay out the three buffers with that same
+        // stride, and to broadcast A or B across batches the caller passes
+        // batch_stride_A == 0 or batch_stride_B == 0. For COO AoS the row and
+        // column indices are interleaved in a single buffer (two index entries
+        // per nonzero), so the row/column index strides are twice the value
+        // stride; these strides are computed by the caller and passed in
+        // separately here.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::sddmm_coox_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT, AOS>(
+                transA,
+                transB,
+                orderA,
+                orderB,
+                M,
+                N,
+                K,
+                nnz,
+                alpha,
+                load_pointer(dense_A, batch, batch_stride_A),
+                lda,
+                load_pointer(dense_B, batch, batch_stride_B),
+                ldb,
+                beta,
+                load_pointer(coo_val, batch, values_batch_stride_C),
+                load_pointer(coo_row_ind, batch, row_indices_batch_stride_C),
+                load_pointer(coo_col_ind, batch, col_indices_batch_stride_C),
+                coo_base);
         }
     }
 

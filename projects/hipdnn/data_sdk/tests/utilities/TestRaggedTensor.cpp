@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <hip/hip_runtime.h>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
@@ -347,6 +348,90 @@ TEST(TestRaggedTensor, SharedAuxBacksTwoTensors)
 }
 
 // ============================================================================
+// ragged_offset_multiplier: stored (token) offsets recovered to element units
+// ============================================================================
+
+// Token-unit offsets {0,2,5} with multiplier == seqStride (H*D == 4) recover the
+// canonical element offsets {0,8,20}, so addressing, sizing, and iteration must all
+// match the multiplier==1 element form exactly.
+TEST(TestRaggedTensor, MultiplierRecoversElementOffsets)
+{
+    const int64_t multiplier = K_STRIDES[1]; // seqStride = H*D = 4
+    const std::vector<int64_t> tokenOffsets = {0, 2, 5};
+
+    auto aux = makeOffsetAux<int32_t>(tokenOffsets);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux, std::nullopt, multiplier);
+    tensor.fillWithValue(0.0f);
+
+    checkReporting(tensor, K_OFFSETS.back()); // token off[B]=5 -> 20 elements
+    checkAddressing(tensor, K_DIMS, K_STRIDES, K_OFFSETS);
+    checkIteration(tensor, K_OFFSETS);
+}
+
+// getIndex bases at the element offset (stored * multiplier), not the raw token offset.
+TEST(TestRaggedTensor, MultiplierScalesGetIndexBase)
+{
+    const std::vector<int64_t> tokenOffsets = {0, 2, 5};
+    auto aux = makeOffsetAux<int32_t>(tokenOffsets);
+    const RaggedTensor<float> tensor(
+        K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/4);
+
+    EXPECT_EQ(tensor.getIndex(1), 8); // token 2 * multiplier 4
+    EXPECT_EQ(tensor.getIndex(0), 0);
+    EXPECT_EQ(tensor.getIndex(1, 2, 1, 1), 19); // 8 + 2*4 + 1*2 + 1
+}
+
+// An explicit physicalElementCount must match the multiplier-scaled ragged_offset[B].
+TEST(TestRaggedTensor, MultiplierScalesExplicitPhysicalElementCount)
+{
+    const std::vector<int64_t> tokenOffsets = {0, 2, 5};
+    auto auxOk = makeOffsetAux<int32_t>(tokenOffsets);
+    const RaggedTensor<float> ok(K_DIMS,
+                                 K_STRIDES,
+                                 BSHD_SEQ_AXIS,
+                                 auxOk,
+                                 static_cast<size_t>(20),
+                                 /*raggedOffsetMultiplier=*/4);
+    EXPECT_EQ(ok.elementSpace(), 20u);
+
+    auto auxBad = makeOffsetAux<int32_t>(tokenOffsets);
+    EXPECT_THROW(const RaggedTensor<float> bad(
+                     K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, auxBad, static_cast<size_t>(5), 4),
+                 std::invalid_argument);
+}
+
+TEST(TestRaggedTensor, MultiplierBelowOneThrows)
+{
+    auto aux = makeOffsetAux<int32_t>({0, 2, 5});
+    EXPECT_THROW(
+        const RaggedTensor<float> tensor(
+            K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/0),
+        std::invalid_argument);
+}
+
+// Per-tensor multiplier: one shared token-offset aux addresses two tensors with distinct
+// multipliers (the D_qk != D_v case where Q and O share a token offset).
+TEST(TestRaggedTensor, SharedAuxDistinctMultipliers)
+{
+    auto aux = makeOffsetAux<int32_t>({0, 1, 2}); // one token per batch
+
+    // Q-like: H*D_qk = 4.
+    const std::vector<int64_t> dimsQ = {2, 1, 2, 2};
+    const std::vector<int64_t> stridesQ = {4, 4, 2, 1};
+    // O-like: H*D_v = 8.
+    const std::vector<int64_t> dimsO = {2, 1, 2, 4};
+    const std::vector<int64_t> stridesO = {8, 8, 4, 1};
+
+    const RaggedTensor<float> q(
+        dimsQ, stridesQ, BSHD_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/4);
+    const RaggedTensor<float> o(
+        dimsO, stridesO, BSHD_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/8);
+
+    EXPECT_EQ(q.getIndex(1), 4); // token 1 * 4
+    EXPECT_EQ(o.getIndex(1), 8); // token 1 * 8
+}
+
+// ============================================================================
 // Single batch (B == 1): batch-carry in operator++ with rowOffsets of size 2
 // ============================================================================
 
@@ -467,4 +552,97 @@ TEST(TestRaggedTensor, ValidationSeqAxisOutOfRangeThrows)
     // Sequence axis must be strictly less than the rank.
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, 4, aux),
                  std::invalid_argument);
+}
+
+// ============================================================================
+// Fill Tests
+// ============================================================================
+
+TEST(TestRaggedTensor, FillWithValuesHostGenerator)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    struct UniformCpuGenerator
+    {
+        explicit UniformCpuGenerator(float min, float max, unsigned int seed)
+            : _min(min)
+            , _max(max)
+            , _seed(seed)
+        {
+        }
+
+        void operator()(float* data, size_t count) const
+        {
+            std::mt19937 rng(_seed);
+            std::uniform_real_distribution<float> dist(_min, _max);
+
+            for(size_t i = 0; i < count; ++i)
+            {
+                data[i] = static_cast<float>(dist(rng));
+            }
+        }
+
+    private:
+        float _min;
+        float _max;
+        unsigned int _seed;
+    };
+
+    const float min = 2.0f;
+    const float max = 5.0f;
+    tensor.fillWithValues(UniformCpuGenerator(min, max, std::random_device{}()), true);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*static_cast<const float*>((*it)))};
+        EXPECT_GE(val, min);
+        EXPECT_LE(val, max);
+    }
+}
+
+TEST(TestRaggedTensor, FillWithValuesDeviceGenerator)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    struct DeviceGpuGenerator
+    {
+        void operator()(float* data, size_t count) const
+        {
+            std::vector<float> writeData(count);
+            std::iota(writeData.begin(), writeData.end(), 0.0f);
+
+            auto err = hipMemcpyWithStream(
+                data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
+            if(err != hipSuccess)
+            {
+                throw std::runtime_error("hipMemcpyWithStream failed");
+            }
+        }
+    };
+
+    tensor.fillWithValues(DeviceGpuGenerator(), false);
+
+    auto hostData = static_cast<float*>(tensor.rawHostData());
+    for(size_t i = 0; i < tensor.elementSpace(); i++)
+    {
+        EXPECT_EQ(hostData[i], static_cast<float>(i));
+    }
+}
+
+TEST(TestRaggedTensor, FillWithRandomValues)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    tensor.fillWithRandomValues(1.0f, 3.0f);
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*static_cast<const float*>((*it)))};
+        EXPECT_GE(val, 1.0f);
+        EXPECT_LE(val, 3.0f);
+    }
 }

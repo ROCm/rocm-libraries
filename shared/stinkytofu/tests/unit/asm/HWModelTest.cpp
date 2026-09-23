@@ -42,7 +42,7 @@ TEST(HWModel, Gfx1250KnownDefaults) {
     const HWModel& hw = hwModelForArch(kGfx1250);
 
     EXPECT_EQ(hw.lds.readQueueDepth, 16);
-    EXPECT_EQ(hw.lds.readDrainLatency, 72);
+    EXPECT_EQ(hw.lds.readDrainLatency, 0);
     EXPECT_EQ(hw.lds.readThrottleLatency, 72);
 
     EXPECT_EQ(hw.barrier.signalToWaitLatency, 11);

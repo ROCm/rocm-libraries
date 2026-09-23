@@ -6,6 +6,8 @@
 #
 ################################################################################
 
+import copy
+import re
 from contextlib import contextmanager
 from copy import deepcopy
 from types import SimpleNamespace
@@ -18,7 +20,8 @@ from rocisa.register import RegisterPool
 import Tensile.KernelWriter as kw_module
 from Tensile.KernelWriter import KernelWriter
 import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Components.StreamK import StreamKTwoTileDPFirst
+from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
+from Tensile.Components.TDMFuse import TDM_GROUPS, tdmGrouping, tdmPapRejectReason, tdmScaleSharesDataSet
 from Tensile.Common.GlobalParameters import defaultSolution, globalParameters
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.Types import IsaInfo, IsaVersion, SemanticVersion
@@ -77,9 +80,12 @@ class _ClassicPapWriter:
         self.states = SimpleNamespace(
             a=SimpleNamespace(numVgprGlobalReadOffsets=2),
             b=SimpleNamespace(numVgprGlobalReadOffsets=2),
+            dcpTokenGate=False,
+            kernel={"TDMPlusLdsBuf": 0},
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
+            numLDSBlk=2,
             staggerUCode=False,
             unrollIdx=0,
             use64bShadowLimit=use64b_shadow,
@@ -151,23 +157,43 @@ class _ClassicPapWriter:
 
 
 _ClassicPapWriter.setupPrefetchAcrossPersistentLoads = KernelWriter.setupPrefetchAcrossPersistentLoads
+_ClassicPapWriter._nextLdsToken = KernelWriter._nextLdsToken
+_ClassicPapWriter._dcpDivergent = kwa_module.KernelWriterAssembly._dcpDivergent
+_ClassicPapWriter._dcpThickThinIssueOrder = KernelWriter._dcpThickThinIssueOrder
 
 
 class _SetupNewTilePapTdmWriter:
     def __init__(self):
         self.states = SimpleNamespace(
             actualSummationLoops=1,
+            dcpTokenGate=False,
             doShadowInit=2,
             IncLdsBufSwitch=False,
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
+            numLDSBlk=2,
             staggerUCode=False,
             unrollIdx=0,
+            # Capability/kernel state consumed by ClusterLoadTDM.find()'s
+            # PartialMatch (asmCaps HasTDM + kernel TDMInst==3), mirroring the
+            # real writer.states on a gfx1250 TDM path so the component matches.
+            asmCaps={"HasTDM": True},
+            kernel={"TDMInst": 3, "TDMPlusLdsBuf": 0},
+            waveIdxReleasedAfterStagger=False,
+            tdmParityPackedInArgType=False,
         )
         self.do = {"executeToInitEnd": False}
         self.dontAppendCode = False
         self.labels = _StubLabels()
+        # releaseWaveIdxAfterStagger runs for real here (it asserts the pool slot is
+        # still checked out and latches against a second check-in), so back the mock
+        # with a real RegisterPool rather than stubbing the release out.
+        self.sgprPool = RegisterPool(
+            8, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False
+        )
+        self.sgprPool.add(0, 8, "unit")
+        self.sgprs = {"WaveIdx": self.sgprPool.checkOut(1, "WaveIdx")}
 
     def _module(self, name):
         return _module_with_comment(name, "unit: %s" % name)
@@ -205,8 +231,39 @@ class _SetupNewTilePapTdmWriter:
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
 
+    def tdmFusePaired(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def _tdmPairedParityOrder(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
+
+    def tdmSeparateABDescriptors(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmSeparateABDescriptors(self, kernel)
+
+    def _dcpDivergent(self, kernel):
+        return kwa_module.KernelWriterAssembly._dcpDivergent(self, kernel)
+
+    def tdmWaveIdxReadAfterPrologue(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmWaveIdxReadAfterPrologue(self, kernel)
+
+    def isTdmWaveIdxLive(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(self, kernel)
+
     def undefineSgpr(self, name):
+        # Mirror the real undefineSgpr: return the slot to the pool but keep the name
+        # in self.sgprs, so the latch stays the only guard against a double check-in.
+        if name in self.sgprs:
+            self.sgprPool.checkIn(self.sgprs[name])
         return self._module("undefineSgpr_%s" % name)
+
+    def releaseWaveIdxAfterStagger(self, kernel):
+        return kwa_module.KernelWriterAssembly.releaseWaveIdxAfterStagger(self, kernel)
+
+    def hoistWaveParityWrapUSel(self, kernel, tpa, tpb):
+        return self._module("hoistWaveParityWrapUSel")
+
+    def packTdmParityIntoArgType(self, kernel):
+        return self._module("packTdmParityIntoArgType")
 
     def declareStaggerParms(self, kernel):
         return self._module("declareStaggerParms")
@@ -225,6 +282,9 @@ class _SetupNewTilePapTdmWriter:
 
     def isPrefetchAcrossPersistentEnabled(self, kernel):
         return KernelWriter.isPrefetchAcrossPersistentEnabled(self, kernel)
+
+    def _nextLdsToken(self, idx):
+        return KernelWriter._nextLdsToken(self, idx)
 
     def papTdmRestoreLdsBank(self, kernel, tpa, tpb):
         return self._module("papTdmRestoreLdsBank")
@@ -312,7 +372,10 @@ class _StubLabels:
 class _ClassicPapWrapperWriter:
     def __init__(self):
         self.labels = _StubLabels()
-        self.states = SimpleNamespace(unrollIdx=0)
+        # rapInPapNextTilePrefetch: prefetchAcrossPersistent raises it over the
+        # window where WorkGroup* names the next tile, so RAP's A silencing can
+        # tell a next-tile load from an in-loop one.
+        self.states = SimpleNamespace(unrollIdx=0, rapInPapNextTilePrefetch=False)
         self.vgprPool = _TrackingRegisterPool(RegisterType.Vgpr)
 
     def isPrefetchAcrossPersistentEnabled(self, kernel):
@@ -345,6 +408,9 @@ class _ClassicPapWrapperWriter:
 
 
 class _StubStreamK:
+    def papHasNextPersistentIteration(self, writer, kernel, skipLabel):
+        return _module_with_comment("papHasNextPersistentIteration", "unit: has next persistent iteration")
+
     def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tpa, tpb, skipLroReset=False):
         return _module_with_comment("prefetchAcrossPersistentSetupNextTile", "unit: setup next tile")
 
@@ -386,6 +452,7 @@ _CLASSIC_KERNEL_BASE = {
     "PrefetchGlobalRead": 2,
     "PrefetchGL2": 0,
     "ProblemType": _problem_type(),
+    "ReuseAcrossPersistent": 0,
     "StreamKForceDPOnly": 0,
     "UseGeneralizedNLCOneA": False,
     "UseGeneralizedNLCOneB": False,
@@ -556,10 +623,10 @@ def _pap_solution_config(**overrides):
     return config
 
 
-def _pap_solution(**overrides):
+def _pap_solution(*, rocm_version=SemanticVersion(6, 4, 0), **overrides):
     assembler = SimpleNamespace(
         code_object_version="default",
-        rocm_version=SemanticVersion(6, 4, 0),
+        rocm_version=rocm_version,
     )
     return Solution(
         _pap_solution_config(**overrides),
@@ -609,7 +676,7 @@ def _instruction_index(items, instruction_type, dst, src):
     )
 
 
-def _setup_new_tile_module_names(prefetch_across_persistent, stagger_u_code=False):
+def _setup_new_tile_writer_and_names(prefetch_across_persistent, stagger_u_code=False):
     tpa, tpb = _tensor_parameters(with_metadata=True)
     writer = _SetupNewTilePapTdmWriter()
     writer.states.staggerUCode = stagger_u_code
@@ -619,7 +686,16 @@ def _setup_new_tile_module_names(prefetch_across_persistent, stagger_u_code=Fals
         tpa,
         tpb,
     )
-    return _module_names(module)
+    return writer, _module_names(module)
+
+
+def _setup_new_tile_module_names(prefetch_across_persistent, stagger_u_code=False):
+    return _setup_new_tile_writer_and_names(prefetch_across_persistent, stagger_u_code)[1]
+
+
+def _waveidx_is_in_pool(writer):
+    status = writer.sgprPool.getPool()[writer.sgprs["WaveIdx"]].status
+    return status == RegisterPool.Status.Available
 
 
 def _prefetch_across_persistent(monkeypatch, *, skip_barrier=False, **kernel_overrides):
@@ -678,6 +754,57 @@ def test_pap_is_valid_solution_parameter():
 def test_solution_validation_accepts_minimal_pap_tdm_contract():
     assert _pap_solution()["Valid"] is True
 
+@pytest.mark.parametrize(
+    "rocm_version, expected_preload",
+    [
+        pytest.param(SemanticVersion(6, 0, 32649), False, id="rocm_6_before_floor"),
+        pytest.param(SemanticVersion(6, 0, 32650), True, id="rocm_6_at_floor"),
+        pytest.param(SemanticVersion(7, 1, 25424), True, id="rocm_7_low_build"),
+    ],
+)
+def test_solution_applies_preload_gate_from_assembler_version(
+    rocm_version, expected_preload
+):
+    solution = _pap_solution(
+        rocm_version=rocm_version,
+        PreloadKernArgs=True,
+    )
+
+    assert solution["Valid"] is True
+    assert solution["PreloadKernArgs"] is expected_preload
+
+
+def test_solution_validation_accepts_pap_streamk_dynamic():
+    # PAP is allowed for StreamK==4 (StreamKDynamic) in addition to StreamK==3.
+    # The validation gate accepts StreamK in (3, 4, 5); every other PAP axis
+    # restriction is StreamK-agnostic and still applies. TDM is disabled here
+    # (TDMInst=0): the TDM+PAP twin gate is intentionally kept SK3-only, so
+    # SK4 PAP is supported for the non-TDM path only.
+    assert _pap_solution(StreamK=4, TDMInst=0)["Valid"] is True
+
+
+def test_solution_validation_rejects_pap_streamk_dynamic_with_tdm(capsys):
+    # The TDM + PAP twin gate is deliberately NOT relaxed for SK4: TDM+PAP
+    # remains StreamK==3 only.
+    assert _pap_solution(StreamK=4, TDMInst=3)["Valid"] is False
+    assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
+
+
+def test_solution_validation_accepts_pap_streamk_hybrid():
+    # PAP is allowed for StreamK==5 (StreamKHybrid) in addition to StreamK==3
+    # and StreamK==4. The validation gate accepts StreamK in (3, 4, 5). A
+    # single PAP-enabled SK5 kernel is correct for BOTH runtime sub-paths
+    # (static SK3-like and dynamic SK4-like) via StreamKHybridMode dispatch.
+    # TDM is disabled here (TDMInst=0): the TDM+PAP twin gate is intentionally
+    # kept SK3-only, so SK5 PAP is supported for the non-TDM path.
+    assert _pap_solution(StreamK=5, TDMInst=0)["Valid"] is True
+
+
+def test_solution_validation_rejects_pap_streamk_hybrid_with_tdm(capsys):
+    # The TDM + PAP twin gate is deliberately NOT relaxed for SK5: TDM+PAP
+    # remains StreamK==3 only (hybrid TDM+PAP deferred).
+    assert _pap_solution(StreamK=5, TDMInst=3)["Valid"] is False
+    assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
 
 @pytest.mark.parametrize(
     "overrides, reason",
@@ -698,6 +825,11 @@ def test_solution_validation_accepts_minimal_pap_tdm_contract():
             {"PrefetchGlobalRead": 3, "ScheduleIterAlg": 3},
             "PrefetchAcrossPersistent requires PrefetchGlobalRead in [1, 2]",
             id="rejects_pgr_above_two",
+        ),
+        pytest.param(
+            {"PrefetchGlobalRead": 2, "PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2},
+            "PrefetchGlobalReadA/B: PrefetchAcrossPersistent is not",
+            id="rejects_decoupled_pgr",
         ),
     ],
 )
@@ -770,17 +902,69 @@ def test_setup_new_tile_releases_waveidx_for_pap_wave_separated_tdm(monkeypatch)
     assert pap_module_names.index("undefineSgpr_WaveIdx") < pap_module_names.index("papTdmRestoreLdsBank")
 
 
-def test_setup_new_tile_keeps_waveidx_for_wave_separated_tdm_staggeru(monkeypatch):
+def test_setup_new_tile_releases_waveidx_after_stagger_for_wave_separated_tdm(monkeypatch):
+    """WaveIdx survives the stagger prologue, then dies before the unroll loop.
+
+    The stagger prologue reads wave parity straight out of s[sgprWaveIdx], so the
+    release cannot happen at the usual spot above calculateLoopNumIter. It must still
+    happen inside setupNewTile: WaveIdx sits at a low physical index and holding it
+    across the main loop pushes the tightest gfx1250 StreamK configs over MaxSgpr.
+    """
     monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
 
     for pap in (0, 1):
-        module_names = _setup_new_tile_module_names(
+        writer, module_names = _setup_new_tile_writer_and_names(
             prefetch_across_persistent=pap, stagger_u_code=True
         )
         # Confirm we really took the stagger path before asserting on its effect.
         assert "calculateStagger_A" in module_names
         assert "calculateStagger_B" in module_names
+        # The release is not the plain undefineSgpr emitted on the non-stagger path;
+        # it goes through releaseWaveIdxAfterStagger after packing parity into
+        # ArgType bit 8. Later sites use that packed bit, not a live WaveIdx.
         assert "undefineSgpr_WaveIdx" not in module_names
+        assert "ReleaseWaveIdxAfterStagger" in module_names
+        assert "hoistWaveParityWrapUSel" in module_names
+        assert "packTdmParityIntoArgType" in module_names
+        assert module_names.index("calculateStagger_B") < module_names.index(
+            "hoistWaveParityWrapUSel"
+        )
+        assert module_names.index("hoistWaveParityWrapUSel") < module_names.index(
+            "packTdmParityIntoArgType"
+        )
+        assert module_names.index("packTdmParityIntoArgType") < module_names.index(
+            "ReleaseWaveIdxAfterStagger"
+        )
+        assert writer.states.waveIdxReleasedAfterStagger is True
+        assert _waveidx_is_in_pool(writer)
+
+
+def test_setup_new_tile_releases_waveidx_at_most_once(monkeypatch):
+    """A second setupNewTile emit must not check the WaveIdx slot in twice."""
+    monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
+
+    tpa, tpb = _tensor_parameters(with_metadata=True)
+    writer = _SetupNewTilePapTdmWriter()
+    writer.states.staggerUCode = True
+    kernel = _setup_new_tile_tdm_kernel(prefetch_across_persistent=1)
+
+    first = KernelWriter.setupNewTile(writer, kernel, tpa, tpb)
+    second = KernelWriter.setupNewTile(writer, kernel, tpa, tpb)
+
+    def release_module(module):
+        found = [
+            item
+            for item in _module_items(module)
+            if isinstance(item, Module) and item.name == "ReleaseWaveIdxAfterStagger"
+        ]
+        assert len(found) == 1, f"expected one ReleaseWaveIdxAfterStagger, got {len(found)}"
+        return found[0]
+
+    assert _module_names(release_module(first)) == ["undefineSgpr_WaveIdx"]
+    # The second emit still calls the helper, but the latch must make it come back
+    # empty -- a second undefineSgpr would check the same pool slot in twice.
+    assert _module_names(release_module(second)) == []
+    assert writer.states.waveIdxReleasedAfterStagger is True
 
 
 def test_pap_tdm_descriptor_refresh_threads_temporary_waveidx(monkeypatch):
@@ -978,3 +1162,514 @@ def test_streamk_pap_next_tile_setup_applies_wgm_remap(
     assert tile_index < index_to_wg
     assert index_to_wg < wgm_remap
     assert writer.states.WGMTransformLevels == expected_transform_levels
+
+
+def test_streamk3_pap_has_next_persistent_iteration_uses_streamkiter_compare():
+    # The PAP "is there a next persistent iteration?" predicate is now a
+    # StreamK-component seam. The static StreamK variants (SK3 TwoTileDPFirst,
+    # and the SK3/static path of SK5) keep the historical
+    # StreamKIter >= StreamKIterEnd compare + skip branch, byte-for-byte, so
+    # relaxing the seam for SK4 (StreamKDynamic) does not perturb SK3 codegen.
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_unit", "")
+    module = StreamKTwoTileDPFirst().papHasNextPersistentIteration(
+        writer=None, kernel={}, skipLabel=skip_label
+    )
+    rendered = str(module)
+    assert "s_cmp_ge_u32 s[sgprStreamKIter], s[sgprStreamKIterEnd]" in rendered
+    assert "No next persistent iteration" in rendered
+    assert "s_cbranch_scc1 label_SK_SkipNllPAP_unit" in rendered
+
+
+class _PapFetchWriter:
+    def __init__(self):
+        self.labels = _StubLabels()
+        self.sgprPool = RegisterPool(
+            0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False
+        )
+
+
+def _fake_fetch(self, writer, kernel, preventOverflow=True, uniqueLabels=False):
+    sidx = writer.sgprPool.checkOut(1, "workItemIdx")
+    return _module_with_comment("fakeFetch", "unit: queue pop"), sidx
+
+
+def test_sk4_pap_has_next_primes_before_drain_check(monkeypatch):
+    # SK4 PAP must stash SkNextWorkItem and set SkPrefetchPrimed before the
+    # TotalItems drain compare so the back-edge never re-pops a termination token.
+    monkeypatch.setattr(StreamKDynamic, "_fetchWorkItemAndBroadcast", _fake_fetch)
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_sk4", "")
+    module = StreamKDynamic().papHasNextPersistentIteration(
+        _PapFetchWriter(), {"StreamK": 4}, skip_label
+    )
+    rendered = str(module)
+    primed = rendered.find("s[sgprSkPrefetchPrimed]")
+    drain = rendered.find("s[sgprTotalItems]")
+    assert primed != -1 and drain != -1 and primed < drain
+    assert "s[sgprSkNextWorkItem]" in rendered
+
+
+def test_sk5_pap_has_next_dispatches_static_and_dynamic(monkeypatch):
+    # SK5 PAP is a runtime hybrid: mode==0 keeps the SK3 StreamKIter compare;
+    # mode!=0 reuses the SK4 pop-and-prime handoff.
+    monkeypatch.setattr(StreamKHybrid, "_fetchWorkItemAndBroadcast", _fake_fetch)
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_sk5", "")
+    module = StreamKHybrid().papHasNextPersistentIteration(
+        _PapFetchWriter(), {"StreamK": 5}, skip_label
+    )
+    rendered = str(module)
+    assert "s[sgprStreamKHybridMode]" in rendered
+    assert "s[sgprStreamKIter]" in rendered
+    assert "s[sgprSkPrefetchPrimed]" in rendered
+    assert "s[sgprSkNextWorkItem]" in rendered
+
+
+def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
+    monkeypatch.setattr(
+        StreamKDynamic,
+        "_computeNextTileIdentity",
+        lambda self, writer, kernel, sidx, tpa, tpb: _module_with_comment(
+            "computeNextTileIdentity", "unit: tile identity"
+        ),
+    )
+    module = StreamKDynamic().prefetchAcrossPersistentSetupNextTile(
+        _PapFetchWriter(),
+        {"StreamK": 4},
+        {"tensorChar": "A"},
+        {"tensorChar": "B"},
+    )
+    rendered = str(module)
+    assert "s[sgprSkNextWorkItem]" in rendered
+    assert "unit: tile identity" in rendered
+
+
+# ---------------------------------------------------------------------------
+# ReuseAcrossPersistent silences A for the whole reuse copy, but one load in it
+# belongs to the next tile, and that tile may not be able to reuse A.
+# ---------------------------------------------------------------------------
+class _RapTdmNullWriter:
+    """Just enough writer to render rapNullTdmDescriptorForEvenWaves.
+
+    tdmParityPackedInArgType picks the parity form that needs no scratch, so what
+    comes out is the parity compare plus the selects under test and nothing else.
+    The real _emitTdmWaveParitySCC is borrowed rather than stubbed: the point of
+    the test is how the batch condition composes with parity.
+    """
+
+    _emitTdmWaveParitySCC = kwa_module.KernelWriterAssembly._emitTdmWaveParitySCC
+
+    def __init__(self, in_pap_next_tile_prefetch):
+        self.states = SimpleNamespace(
+            rapDropAResidentLoads=True,
+            rapInPapNextTilePrefetch=in_pap_next_tile_prefetch,
+            tdmParityPackedInArgType=True,
+        )
+
+    def isTdmWaveIdxLive(self, kernel):
+        return False
+
+    @contextmanager
+    def allocTmpSgpr(self, num, alignment=None, tag=None):
+        yield SimpleNamespace(idx=90, size=num)
+
+
+def _rap_null_tdm(in_pap_next_tile_prefetch):
+    return str(
+        kwa_module.KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves(
+            _RapTdmNullWriter(in_pap_next_tile_prefetch),
+            {"WavefrontSize": 32},
+            "tdmAGroup0+0",
+        )
+    )
+
+
+def test_rap_silences_a_unconditionally_for_the_reuse_copy_own_loads():
+    """Every in-loop load in the reuse copy serves the tile A is resident for."""
+    rendered = _rap_null_tdm(in_pap_next_tile_prefetch=False)
+    assert "s[sgprtdmAGroup0+0]" in rendered
+    for batchState in ("sgprRAPResidentBatch", "sgprWorkGroup2"):
+        assert batchState not in rendered, (
+            "an in-loop load consulted %s; the tile it serves cannot have changed "
+            "batch mid-iteration" % batchState
+        )
+
+
+def test_rap_lets_the_next_tile_prefetch_fetch_a_when_the_batch_changes():
+    """The last load in the reuse copy is PAP's, and it feeds the next tile.
+
+    Silencing A there is only right while that tile goes on reusing the resident
+    registers. When it changes batch the RAP_IterN guard diverts it to the fill
+    copy, which computes from whatever this prefetch left behind -- so A has to be
+    fetched. Silencing it unconditionally is invisible to any MX test (the client
+    generator gives every batch the same A) and to any single-batch test, which is
+    how it survived the first round of this fix.
+
+    WorkGroup2 is the next tile's here: prefetchAcrossPersistent raises the flag
+    only between setupNextTile and papRestoreCurrentTileIdentity.
+    """
+    rendered = _rap_null_tdm(in_pap_next_tile_prefetch=True)
+    assert "s[sgprWorkGroup2], s[sgprRAPResidentBatch]" in rendered
+    assert "s[sgprtdmAGroup0+0]" in rendered
+
+
+# PrefetchAcrossPersistent against the non-default TDM descriptor groupings.
+
+
+# Snapshot defaultSolution at import so construction is not order-dependent.
+_PRISTINE_TDMFUSE_SOLUTION = copy.deepcopy(dict(defaultSolution))
+
+
+# MIWaveGroup [2,2] -> NumWaves 4 (TDMFuse=2's split; TDMFuse=1 needs >= 2 waves).
+_MI_W4 = [16, 16, 128, 1, 1, 2, 4, 2, 2]
+
+
+# Canonical PAP grouping-reject phrase.
+_PAP_GROUPING_MSG = "needs each TDM scale on its own descriptor set"
+
+
+# TDMFuse decline phrase; must keep precedence over the PAP reject.
+_FUSE_DECLINED_MSG = "was declined"
+
+
+# ---------------------------------------------------------------------------
+# Pure predicate: derived from the grouping, not from the TDMFuse integer.
+# ---------------------------------------------------------------------------
+def _ks(fuse=1, **ov):
+    ks = {
+        "TDMFuse": fuse,
+        "TDMInst": 3,
+        "TDMSplit": False,
+        "enableTDMA": True,
+        "enableTDMB": True,
+        "NumWaves": 4,
+        "UseSubtileImpl": False,
+        "PrefetchGlobalRead": 2,
+        "PrefetchGlobalReadA": -1,
+        "PrefetchGlobalReadB": -1,
+        "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
+    }
+    ks.update(ov)
+    return ks
+
+
+@pytest.mark.parametrize("fuse, expected", [(0, ()), (1, (("A", "MXSA"), ("MXSB", "B"))),
+                                            (2, (("A", "MXSA", "MXSB"),))])
+def test_shared_sets_read_off_the_resolved_grouping(fuse, expected):
+    assert tdmScaleSharesDataSet(_ks(fuse=fuse)) == expected
+
+
+@pytest.mark.parametrize("fuse", [1, 2])
+def test_reason_fires_for_every_sharing_grouping(fuse):
+    reason = tdmPapRejectReason(_ks(fuse=fuse))
+    assert reason is not None
+    assert _PAP_GROUPING_MSG in reason
+    # Must name the aliased register ranges, not merely the knob.
+    assert "tdmMXSAGroup0/tdmMXSBGroup0" in reason
+    assert "tdmAGroup0/tdmBGroup0" in reason
+    assert tdmGrouping(_ks(fuse=fuse)).name in reason
+
+
+def test_default_grouping_is_not_rejected():
+    assert tdmPapRejectReason(_ks(fuse=0)) is None
+
+
+@pytest.mark.parametrize("decline", [{"NumWaves": 1}, {"TDMSplit": True},
+                                     {"UseSubtileImpl": True}, {"TDMInst": 1}])
+def test_declined_grouping_answers_with_the_fallback(decline):
+    """A grouping TDMFuse asked for but the predicates declined shares nothing."""
+    assert tdmPapRejectReason(_ks(fuse=1, **decline)) is None
+    assert tdmPapRejectReason(_ks(fuse=2, **decline)) is None
+
+
+@pytest.mark.parametrize("missing", [{"MXBlockA": 0, "MXBlockB": 32},
+                                     {"MXBlockA": 32, "MXBlockB": 0},
+                                     {"MXBlockA": 0, "MXBlockB": 0}])
+def test_scale_less_types_share_nothing(missing):
+    """No live MXSA/MXSB means no scale to seat on a data tensor's set."""
+    assert tdmPapRejectReason(_ks(fuse=1, ProblemType=missing)) is None
+
+
+@pytest.mark.parametrize("row, shares", [("MX_AB", False), ("paired", True),
+                                         ("A_MX", True), ("B_MX", True)])
+def test_every_grouping_row_answers_without_a_new_branch(row, shares):
+    assert bool(tdmScaleSharesDataSet(_ks(), TDM_GROUPS[row])) is shares
+
+
+# ---------------------------------------------------------------------------
+# Solution level: real gfx1250 caps + assembler, assignDerivedParameters
+# end-to-end. Mirrors test_halfplr_streamk_rejects.py's harness.
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def gfx1250_iim():
+    from Tensile.Common.Architectures import gfxToIsa
+    from Tensile.Common.Capabilities import makeIsaInfoMap
+    from Tensile.Toolchain.Validators import validateToolchain
+
+    cxx = validateToolchain("amdclang++")
+    isa = gfxToIsa("gfx1250")
+    iim = makeIsaInfoMap([isa], cxx)
+    if not iim[isa].asmCaps["SupportedISA"]:
+        pytest.skip("amdclang++ in this environment does not support gfx1250")
+    return iim
+
+
+@pytest.fixture(scope="module")
+def assembler():
+    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
+    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+
+    cxx = validateToolchain("amdclang++")
+    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
+    return makeAssemblyToolchain(cxx, bundler, "default").assembler
+
+
+@pytest.fixture(scope="module")
+def _gp_gfx1250(gfx1250_iim):
+    from Tensile.Common.GlobalParameters import assignGlobalParameters
+
+    saved_gp = copy.deepcopy(dict(globalParameters))
+    saved_vp = copy.deepcopy(dict(validParameters))
+    saved_ds = copy.deepcopy(dict(defaultSolution))
+    defaultSolution.clear()
+    defaultSolution.update(copy.deepcopy(_PRISTINE_TDMFUSE_SOLUTION))
+    assignGlobalParameters({}, gfx1250_iim)
+    yield
+    globalParameters.clear()
+    globalParameters.update(saved_gp)
+    validParameters.clear()
+    validParameters.update(saved_vp)
+    defaultSolution.clear()
+    defaultSolution.update(saved_ds)
+
+
+def _make_params(gfx1250_iim, mi=None, **overrides):
+    """Smallest PAP+TDM shape: TN MXF8F4 StreamK=3, StreamKForceDPOnly=1."""
+    from Tensile.Common.Architectures import gfxToIsa
+    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+        matrixInstructionToMIParameters,
+    )
+
+    isa = gfxToIsa("gfx1250")
+    mi = mi or _MI_W4
+    pt = overrides.pop("ProblemType", {})
+    problem_type = {
+        "OperationType": "GEMM", "MacDataTypeA": "F8", "MacDataTypeB": "F4",
+        "DataType": "F8", "DestDataType": "s", "ComputeDataType": "s",
+        "HighPrecisionAccumulate": True, "TransposeA": True, "TransposeB": False,
+        "UseBeta": True, "Batched": True, "MXBlockA": 32, "MXBlockB": 32,
+        "DataTypeMXSA": "E8", "DataTypeMXSB": "E8",
+    }
+    problem_type.update(pt)
+    params = {
+        "ProblemType": problem_type, "ISA": isa, "MatrixInstruction": mi,
+        "WorkGroup": [16, 16, 1], "WavefrontSize": 32, "DepthU": 256,
+        "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+        "ScheduleIterAlg": 4, "StaggerU": 0, "GlobalSplitU": 1, "InnerUnroll": 1,
+        "TransposeLDS": -1, "LdsPadA": -1, "LdsPadB": -1,
+        "LdsBlockSizePerPadA": -1, "LdsBlockSizePerPadB": -1, "1LDSBuffer": 0,
+        "VectorWidthA": -1, "VectorWidthB": -1, "StoreVectorWidth": -1,
+        "GlobalReadVectorWidthA": -1, "GlobalReadVectorWidthB": -1,
+        "LocalReadVectorWidth": -1, "SourceSwap": False, "ExpandPointerSwap": False,
+        "GlobalSplitUAlgorithm": "MultipleBuffer", "TDMInst": 3, "LDSTrInst": False,
+        "StreamK": 3, "StreamKForceDPOnly": 1, "PrefetchAcrossPersistent": 0,
+        "UseSubtileImpl": False, "StoreRemapVectorWidth": 0,
+        "DirectToVgprA": False, "DirectToVgprB": False,
+        "DirectToVgprSparseMetadata": False, "WorkGroupMapping": 1,
+        "TDMFuse": 0, "TDMSplit": False, "InitCIterWmma": 0,
+    }
+    params.update(overrides)
+    params.update(matrixInstructionToMIParameters(
+        mi, isa, params["WavefrontSize"], problem_type, params["WorkGroup"], gfx1250_iim))
+    return params
+
+
+def _derive(gfx1250_iim, assembler, capsys, **overrides):
+    from Tensile.SolutionStructs.Solution import Solution
+    sol = Solution(_make_params(gfx1250_iim, **overrides), False, True, False,
+                   assembler, gfx1250_iim)
+    return sol, capsys.readouterr().out
+
+
+def test_pap_on_the_default_grouping_is_accepted(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """Default grouping accepts PAP."""
+    sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=1)
+    assert sol.get("Valid") is True, "expected accept, rejected with: %r" % out
+    assert sol.get("PrefetchAcrossPersistent") == 1, \
+        "PrefetchAcrossPersistent was reset"
+    assert sol.get("LdsOffsetA_Blk") != 0, \
+        "LdsOffsetA_Blk == 0 folds the LDS-bank helpers out entirely"
+
+
+@pytest.mark.parametrize("fuse", [1, 2])
+def test_pap_with_a_shared_scale_set_is_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=1, TDMFuse=fuse)
+    assert sol.get("Valid") is False, "TDMFuse=%d + PAP was accepted" % fuse
+    assert _PAP_GROUPING_MSG in out, "rejected for another reason: %r" % out
+    assert _FUSE_DECLINED_MSG not in out
+
+
+@pytest.mark.parametrize("fuse", [1, 2])
+def test_the_same_grouping_without_pap_is_still_accepted(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    """The rejection is about PAP, not about the grouping."""
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=0, TDMFuse=fuse)
+    assert sol.get("Valid") is True, "expected accept, rejected with: %r" % out
+    assert _PAP_GROUPING_MSG not in out
+
+
+def test_tdmfuse_own_guards_keep_precedence(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=1,
+                       TDMFuse=2, mi=[16, 16, 128, 1, 1, 2, 4, 2, 4])
+    assert sol.get("Valid") is False
+    assert "TDMFuse=2 requires NumWaves=4 for its 2/1/1 split" in out
+    assert _PAP_GROUPING_MSG not in out
+
+
+@pytest.mark.parametrize("fuse", [0, 1, 2, 3])
+def test_no_accepted_pap_solution_aliases_a_scale_onto_a_data_set(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    """The invariant every PAP TDM helper is written against."""
+    sol, _ = _derive(gfx1250_iim, assembler, capsys,
+                     PrefetchAcrossPersistent=1, TDMFuse=fuse)
+    if not sol.get("Valid"):
+        pytest.skip("TDMFuse=%d + PAP is refused, nothing to check" % fuse)
+    assert tdmScaleSharesDataSet(sol) == (), (
+        "accepted a PAP solution whose %s grouping shares a descriptor set with "
+        "a scale tensor" % tdmGrouping(sol).name)
+
+
+# Non-idempotent `s_add_u32 dst, dst, x` sites. papTdmSetTailLdsBank is excluded:
+# it normalizes to bank 0 first, so applying it more than once is by design.
+_NON_IDEMPOTENT_BANK_SITES = {
+    "papTdmRestoreLdsBank": ("shift A/B descriptor to PAP bank",
+                             "shift MX descriptor to PAP bank"),
+    "papTdmUpdateDescriptor": ("restore PAP LDS bank after descriptor refresh",),
+}
+
+
+_LDS_ADDR_SYMBOLS = ("sgprtdmAGroup0+1", "sgprtdmBGroup0+1",
+                     "sgprtdmMXSAGroup0+1", "sgprtdmMXSBGroup0+1")
+
+
+def _resolve_sets(asm):
+    """symbol -> physical register, honouring the first .set and skipping UNDEF."""
+    raw = {}
+    for m in re.finditer(r"^\s*\.set\s+(\S+?),\s*(.+?)\s*$", asm, re.M):
+        name, value = m.group(1), m.group(2).strip()
+        if name in raw or value == "UNDEF":
+            continue
+        raw[name] = value
+
+    def resolve(name, depth=0):
+        if depth > 40:
+            return None
+        value = raw.get(name)
+        if value is None:
+            return None
+        if re.fullmatch(r"-?\d+", value):
+            return int(value)
+        m = re.fullmatch(r"([A-Za-z_]\w*)\s*\+\s*(\d+)", value)
+        if m:
+            base = resolve(m.group(1), depth + 1)
+            return None if base is None else base + int(m.group(2))
+        return resolve(value, depth + 1)
+
+    out = {name: resolve(name) for name in raw}
+
+    def phys(symbol):
+        m = re.fullmatch(r"(\w+?)\+(\d+)", symbol)
+        if m:
+            base = out.get(m.group(1))
+            return None if base is None else base + int(m.group(2))
+        return out.get(symbol)
+
+    return out, phys
+
+
+def _emit_asm(gfx1250_iim, assembler, **overrides):
+    """(solution, assembly text or None). CPU-only; no GPU is touched."""
+    import shutil
+    import rocisa
+    from Tensile.Common.Types import DebugConfig
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from Tensile.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+                                                  processKernelSource)
+    from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
+    sol = Solution(_make_params(gfx1250_iim, **overrides), False, True, False,
+                   assembler, gfx1250_iim)
+    if not sol.get("Valid"):
+        return sol, None
+    with preserve_rocisa_kernel_state():
+        kwa = KernelWriterAssembly(assembler, DebugConfig())
+        pieces = []
+        for kernel in generateKernelObjectsFromSolutions([sol]):
+            ri = rocisa.rocIsa.getInstance()
+            ri.init(tuple(kernel["ISA"]),
+                    shutil.which("amdclang++") or "/usr/bin/amdclang++")
+            ri.setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
+            kernel.duplicate = False
+            kernel["BaseName"] = getKernelFileBase(False, kernel)
+            res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
+            src = res.src
+            if isinstance(src, (bytes, bytearray)):
+                src = src.decode(errors="replace")
+            pieces.append(src or "")
+    return sol, "\n".join(pieces)
+
+
+@pytest.mark.parametrize("fuse", [0, 1, 2, 3])
+def test_pap_shifts_each_descriptor_lds_bank_exactly_once(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    """Every non-idempotent bank shift lands on its own physical register."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1, TDMFuse=fuse)
+    capsys.readouterr()
+    if asm is None:
+        pytest.skip("TDMFuse=%d + PAP is refused, nothing to emit" % fuse)
+    _, phys = _resolve_sets(asm)
+
+    shifted = {}
+    for line in asm.splitlines():
+        m = re.search(r"s_add_u32 s\[(sgprtdm\w+Group0\+1)\], s\[\1\], \S+\s*//\s*(.*)",
+                      line)
+        if not m:
+            continue
+        comment = m.group(2).strip()
+        for site, comments in _NON_IDEMPOTENT_BANK_SITES.items():
+            if comment in comments:
+                shifted.setdefault(site, []).append((m.group(1), phys(m.group(1))))
+
+    for site, hits in shifted.items():
+        regs = [reg for _, reg in hits]
+        duplicated = sorted({r for r in regs if regs.count(r) > 1})
+        assert not duplicated, (
+            "%s shifts s%s more than once via aliased spellings %s" %
+            (site, duplicated, [sym for sym, _ in hits]))
+
+    # Complement: aliasing also drops the sibling's shift entirely.
+    if "papTdmRestoreLdsBank" in shifted:
+        allocated = {phys(s) for s in _LDS_ADDR_SYMBOLS if phys(s) is not None}
+        assert {reg for _, reg in shifted["papTdmRestoreLdsBank"]} == allocated, (
+            "papTdmRestoreLdsBank shifted %s but the kernel allocates %s" %
+            (sorted({reg for _, reg in shifted["papTdmRestoreLdsBank"]}), sorted(allocated)))
+
+
+@pytest.mark.parametrize("fuse", [0, 1, 2, 3])
+def test_pap_never_names_an_unallocated_tdm_increment(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    """Every tdm*Incs the kernel reads has a defineSgpr behind it."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1, TDMFuse=fuse)
+    capsys.readouterr()
+    if asm is None:
+        pytest.skip("TDMFuse=%d + PAP is refused, nothing to emit" % fuse)
+    resolved, _ = _resolve_sets(asm)
+    referenced = set(re.findall(r"\bsgprtdm\w*Incs\b", asm))
+    undefined = sorted(s for s in referenced if resolved.get(s) is None)
+    assert not undefined, "referenced with no .set: %s" % undefined

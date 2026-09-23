@@ -4,6 +4,7 @@
 #pragma once
 
 #include <optional>
+#include <unordered_map>
 
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -53,6 +54,25 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> createShall
 {
     return std::make_unique<hipdnn_data_sdk::utilities::ShallowTensor<T>>(
         ptr, tensorDetails.dims, tensorDetails.strides);
+}
+
+/// Binds a required tensor from the variant pack. Throws std::out_of_range
+/// (via unordered_map::at) when the UID is absent, matching existing plans.
+template <typename T>
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>>
+    bindShallowTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorDetails,
+                      const std::unordered_map<int64_t, void*>& variantPack)
+{
+    return createShallowTensor<T>(tensorDetails, variantPack.at(tensorDetails.uid));
+}
+
+/// Binds an optional tensor; returns nullptr when the operand is not present.
+template <typename T>
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> bindOptionalShallowTensor(
+    const std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>& tensorDetails,
+    const std::unordered_map<int64_t, void*>& variantPack)
+{
+    return tensorDetails.has_value() ? bindShallowTensor<T>(*tensorDetails, variantPack) : nullptr;
 }
 
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>

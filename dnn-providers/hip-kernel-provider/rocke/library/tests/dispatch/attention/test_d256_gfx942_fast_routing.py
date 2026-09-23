@@ -141,6 +141,42 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
         )
         self.assertTrue(ok, msg=why)
 
+    def test_d256_entry_delegates_to_lean_natural_qk_body(self):
+        """HD==256 must build via the lean natural-QK body
+        (``_build_gfx942_4warp_gqa_lean``): K/Q streamed direct-from-global,
+        single-buffer ``V_lds`` staged once, one masked kv-loop. Regression guard for the
+        develop D256 slowdown -- fails if the lean builder is absent or the ``HD==256``
+        entry stops delegating to it (the emitted IR would then diverge)."""
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        self.assertTrue(hasattr(t2d, "_build_gfx942_4warp_gqa_lean"))
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem())
+            via_entry = _lower_kernel_to_llvm_python(
+                t2d.build_gfx942_4warp_gqa(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm20",
+            )
+            via_lean = _lower_kernel_to_llvm_python(
+                t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm20",
+            )
+        self.assertEqual(
+            via_entry, via_lean, "D256 entry must delegate to the lean natural-QK body"
+        )
+
+    def test_lean_body_rejects_sliding_window(self):
+        """The lean D256 body is causal-only -- it has no sliding-window mask and
+        never reads ``spec.sliding_window``. It must fail loud on a windowed spec
+        rather than silently ignore the window and emit full-attention output. Today
+        the external ``_d256_gfx942_fast`` gate enforces ``window == 0``; this guard
+        makes the builder self-protecting if a future D256+SWA routing is wired up."""
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem(sliding_window=256))
+            with self.assertRaises(NotImplementedError):
+                t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942")
+
 
 if __name__ == "__main__":
     unittest.main()

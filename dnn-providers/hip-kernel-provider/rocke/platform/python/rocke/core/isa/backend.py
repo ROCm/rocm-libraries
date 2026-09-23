@@ -31,6 +31,7 @@ from __future__ import annotations
 from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
+from ..arch.wmma_scale import gfx1250_scaled_wmma
 
 
 class ISABackend:
@@ -510,6 +511,19 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         # dedicated ``ASYNCcnt`` drained via ``s_wait_asynccnt``.
         return True
 
+    @property
+    def blocks_ds_load_tr16(self) -> bool:
+        # gfx1250: the AMDGPU LLVM backend replaces a ``load <8 x half>`` from
+        # addrspace(3) with ``ds_load_tr16_b128`` (transposed LDS read) when it
+        # detects the load feeds a WMMA instruction.  This assumes LDS is stored
+        # column-major, but conv/GEMM kernels store row-major for coalesced
+        # global-to-LDS writes, so the substitution produces wrong WMMA inputs
+        # (factor ~136x wrong in single-element tests).  Marking LDS loads
+        # ``volatile`` in the emitted IR is opaque to this pass and forces the
+        # plain ``ds_read_b128`` instruction.  The volatile fence has zero cost on
+        # AMDGPU because LDS is sequentially consistent within a wave.
+        return True
+
     def ds_tr16_b128_spec(self, elem_type: str = "f16"):
         # gfx1250 (gfx1250) wave32 ``ds_load_tr16_b128`` is overloaded on the
         # result element type. Select the intrinsic matching the op's element
@@ -545,15 +559,24 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lowerer._current().emit("  call void @llvm.amdgcn.s.wait.dscnt(i16 0)")
 
     def emit_wmma(self, lowerer, op) -> None:
+        scale_spec = gfx1250_scaled_wmma(op.name)
+        if scale_spec is not None:
+            self._emit_wmma_scale(lowerer, op)
+            return
         fp8_spec = _GFX1250_WMMA_FP8.get(op.name)
         if fp8_spec is not None:
             self._emit_wmma_fp8(lowerer, op, fp8_spec)
             return
         spec = _GFX1250_WMMA.get(op.name)
         if spec is None:
+            scaled_ops = [
+                f"tile.{atom.op_id}"
+                for atom in self.arch.mma.ops
+                if gfx1250_scaled_wmma(atom.op_id) is not None
+            ]
             raise NotImplementedError(
                 f"WMMA op {op.name!r} not yet wired for {self.arch.gfx}; "
-                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8)}"
+                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8) + sorted(scaled_ops)}"
             )
         decl_key, intrinsic, elt = spec
         a, b, c = op.operands
@@ -585,6 +608,39 @@ class Gfx1250Backend(Gfx12RdnaBackend):
             f"<8 x i32> {lowerer._operand(a)}, "
             f"<8 x i32> {lowerer._operand(b)}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i1 false, i1 false)"
+        )
+
+    def _emit_wmma_scale(self, lowerer, op) -> None:
+        """Emit the gfx1250 SCALE/SCALE16 intrinsic using the resolved operand contract."""
+        if lowerer._flavor != "llvm23":
+            raise NotImplementedError(
+                f"{op.name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
+            )
+        if len(op.operands) != 5:
+            raise ValueError(f"{op.name} expects 5 operands, got {len(op.operands)}")
+        spec = gfx1250_scaled_wmma(op.name)
+        if spec is None:
+            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        # Declarations describe physical signatures, independently of matrix encodings.
+        decl_key = spec.declaration_key
+        intrinsic = spec.intrinsic
+        scale_ty = spec.scales.llvm_type
+        fmt0, fmt1 = spec.matrix_formats
+        a, b, c, a_scale, b_scale = op.operands
+        if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
+            raise ValueError(
+                f"{op.name} expects {scale_ty} scale operands, got "
+                f"{a_scale.type.name}/{b_scale.type.name}"
+            )
+        lowerer._need(decl_key)
+        lowerer._current().emit(
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
+            f"i32 {fmt0}, {spec.matrix_llvm_types[0]} {lowerer._operand(a)}, "
+            f"i32 {fmt1}, {spec.matrix_llvm_types[1]} {lowerer._operand(b)}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
+            f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
             f"i1 false, i1 false)"
         )
 

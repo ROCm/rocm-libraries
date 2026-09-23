@@ -37,6 +37,11 @@ else()
     set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
 endif()
 
+# Set ROCM_LIBRARIES_ROOT for monorepo builds (shared ctest infrastructure)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
 set(USING_THE_ROCK OFF)
 if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
@@ -432,6 +437,17 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/rpp_version.h
 # install Test
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cmake DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test COMPONENT test)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/utilities/test_suite/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test COMPONENT test)
+
+# Install shared ctest infrastructure for test filtering (quick, standard, comprehensive, full labels)
+# Files are installed to cmake/shared/ctest/ to match the path expected by TestCategories.cmake
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest")
+    install(FILES
+        ${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake
+        ${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_ctest_categories.py
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/cmake/shared/ctest
+        COMPONENT test
+    )
+endif()
 
 # set license information
 set(CPACK_RESOURCE_FILE_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")

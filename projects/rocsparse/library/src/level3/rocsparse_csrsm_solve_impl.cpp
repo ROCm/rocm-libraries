@@ -228,7 +228,7 @@ namespace rocsparse
 
             if(blockdim == 64)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<64, true>),
@@ -281,7 +281,7 @@ namespace rocsparse
             }
             else if(blockdim == 128)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<128, true>),
@@ -334,7 +334,7 @@ namespace rocsparse
             }
             else if(blockdim == 256)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<256, true>),
@@ -387,7 +387,7 @@ namespace rocsparse
             }
             else if(blockdim == 512)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<512, true>),
@@ -440,7 +440,7 @@ namespace rocsparse
             }
             else if(blockdim == 1024)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<1024, true>),
@@ -568,7 +568,6 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
             const int64_t inc_y           = static_cast<int64_t>(1);
 
             _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                                       false,
                                        batch_count,
                                        m,
                                        m,

@@ -71,6 +71,11 @@ inline std::ostream& operator<<(std::ostream& os, const SWaitTensorCntData& wait
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const SWaitAsyncCntData& waitAsyncCntData) {
+    os << "asynccnt=" << (int)waitAsyncCntData.asynccnt;
+    return os;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const SDelayAluData& delayAluData) {
     auto typeToString = [](SDelayAluData::InstType type) -> const char* {
         switch (type) {

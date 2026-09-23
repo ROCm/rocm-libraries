@@ -38,14 +38,17 @@ public:
         return _wrapper->asDescriptor<{{ op.class_name }}>();
     }
 
-    void setTensors() const
+    void setTensors(std::optional<hipdnnBackendAttributeName_t> excluded = std::nullopt) const
     {
         auto desc = getDescriptor();
 {% for tf in op.tensor_fields %}
-        desc->setAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
-                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                           1,
-                           &{{ tf.member_name }});
+        if(!excluded || *excluded != {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }})
+        {
+            desc->setAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               &{{ tf.member_name }});
+        }
 {% endfor %}
     }
 {% if op.mode_rules %}
@@ -64,9 +67,12 @@ public:
         }
 {% endfor %}
 {% if op.has_compute_data_type %}
-        const auto computeType = HIPDNN_DATA_FLOAT;
-        desc->setAttribute(
-            {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        if(!excluded || *excluded != {{ op.compute_data_type_attr }})
+        {
+            const auto computeType = HIPDNN_DATA_FLOAT;
+            desc->setAttribute(
+                {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        }
 {% endif %}
 
         switch(mode)
@@ -107,6 +113,9 @@ public:
 {% endif %}
 
 
+{# Only emitted when the operation has data fields to set; ops whose descriptor carries just
+   tensors and a compute type would otherwise get an empty hook and dead call sites. #}
+{% if op.data_fields %}
     void {{ op.effective_test_params_method_name }}() const
     {
         auto desc = getDescriptor();
@@ -129,15 +138,22 @@ public:
 {% endif %}
 {% endfor %}
     }
+{% endif %}
 
-    void setRequiredAttributes() const
+    void setRequiredAttributes(
+        std::optional<hipdnnBackendAttributeName_t> excluded = std::nullopt) const
     {
-        setTensors();
+        setTensors(excluded);
+{% if op.data_fields %}
         {{ op.effective_test_params_method_name }}();
+{% endif %}
 {% if op.has_compute_data_type %}
-        auto computeType = HIPDNN_DATA_FLOAT;
-        getDescriptor()->setAttribute(
-            {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        if(!excluded || *excluded != {{ op.compute_data_type_attr }})
+        {
+            auto computeType = HIPDNN_DATA_FLOAT;
+            getDescriptor()->setAttribute(
+                {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        }
 {% endif %}
 {% for ef in op.enum_fields %}
         auto {{ ef.camel_name }} = static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }});
@@ -226,45 +242,38 @@ TEST_F(Test{{ op.class_name }}, FinalizeWithRequiredAttributes)
     ASSERT_NO_THROW(getDescriptor()->finalize());
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
-{% if op.mode_rules %}
 
+{% if op.required_tensor_fields or op.has_compute_data_type %}
+// The parameter is the one required attribute to leave unset. Every other required attribute is
+// set, so each case proves the omitted attribute alone is what finalize() rejects.
 class Test{{ op.class_name }}FinalizeFailsWithout
     : public Test{{ op.class_name }},
       public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>
 {
 };
 
-TEST_P(Test{{ op.class_name }}FinalizeFailsWithout, RequiredTensor)
+TEST_P(Test{{ op.class_name }}FinalizeFailsWithout, FinalizeFailsWithout)
 {
+{% if op.mode_rules %}
     setModeRuleAttributes({{ op.mode_rule_mode_field.test_backend_value }}, GetParam());
+{% else %}
+    setRequiredAttributes(GetParam());
+{% endif %}
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    RequiredTensors,
+    RequiredAttributes,
     Test{{ op.class_name }}FinalizeFailsWithout,
     ::testing::Values(
 {% for tf in op.required_tensor_fields %}
-        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}{% if not loop.last %},{% endif %}
-{% endfor %}
-    ));
-{% else %}
-{% for tf in op.required_tensor_fields %}
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}{% if not loop.last or op.has_compute_data_type %},{% endif %}
 
-TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ tf.pascal_name }}Tensor)
-{
-    auto desc = getDescriptor();
-{% for tf2 in op.tensor_fields %}
-{% if tf2.name != tf.name %}
-    desc->setAttribute(
-        {{ op.operation_attr_prefix }}_{{ tf2.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf2.member_name }});
+{% endfor %}
+{% if op.has_compute_data_type %}
+        {{ op.compute_data_type_attr }}
 {% endif %}
-{% endfor %}
-    {{ op.effective_test_params_method_name }}();
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-{% endfor %}
+    ));
 {% endif %}
 {% if op.mode_rules %}
 {% set tf_by_name = op.tensor_field_by_name %}
@@ -368,31 +377,14 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ df.name | replace('_', ' 
 }
 {% endif %}
 {% endfor %}
-{% if op.has_compute_data_type %}
-
-TEST_F(Test{{ op.class_name }}, FinalizeFailsWithoutComputeType)
-{
-    setTensors();
-    {{ op.effective_test_params_method_name }}();
-{% for ef in op.enum_fields %}
-    auto {{ ef.camel_name }} = static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }});
-    getDescriptor()->setAttribute(
-        {{ ef.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ ef.camel_name }});
-{% endfor %}
-{% for cf in op.mode_fields %}
-    auto {{ cf.camel_name }} = {{ cf.test_backend_value }};
-    getDescriptor()->setAttribute(
-        {{ cf.attr_name }}, {{ cf.backend_type }}, 1, &{{ cf.camel_name }});
-{% endfor %}
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-{% endif %}
 {% for ef in op.enum_fields %}
 
 TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ ef.enum_short_type }})
 {
     setTensors();
+{% if op.data_fields %}
     {{ op.effective_test_params_method_name }}();
+{% endif %}
     auto computeType = HIPDNN_DATA_FLOAT;
     getDescriptor()->setAttribute(
         {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -404,7 +396,9 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ ef.enum_short_type }})
 TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ cf.enum_short_type }})
 {
     setTensors();
+{% if op.data_fields %}
     {{ op.effective_test_params_method_name }}();
+{% endif %}
     auto computeType = HIPDNN_DATA_FLOAT;
     getDescriptor()->setAttribute(
         {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);

@@ -5,12 +5,14 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Types.hpp>
 
+#include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
@@ -36,7 +38,7 @@ protected:
     Handle _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 
-    void setupMockCompileChain()
+    void setupFpropMockCompileChain()
     {
         hipDeviceProp_t deviceProps = {};
         deviceProps.multiProcessorCount = 60;
@@ -53,6 +55,35 @@ protected:
         auto mockProgram = std::make_unique<MockCompiledProgram>();
         EXPECT_CALL(*mockProgram, getKernel(::testing::_))
             .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
+
+        EXPECT_CALL(_mockKernelCompiler, compile(::testing::_, ::testing::_))
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
+    }
+
+    void setupBpropMockCompileChain()
+    {
+        hipDeviceProp_t deviceProps = {};
+        deviceProps.multiProcessorCount = 60;
+        deviceProps.warpSize = 64;
+        std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", "gfx942");
+
+        EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
+            .WillOnce(::testing::Return(deviceProps));
+
+        auto mockKernel = std::make_unique<MockRunnableKernel>();
+        EXPECT_CALL(*mockKernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        auto mockKernelScaleBias = std::make_unique<MockRunnableKernel>();
+        EXPECT_CALL(*mockKernelScaleBias, setBlockSize(::testing::_, ::testing::_, ::testing::_))
+            .Times(1);
+        EXPECT_CALL(*mockKernelScaleBias, setGridSize(::testing::_, ::testing::_, ::testing::_))
+            .Times(1);
+
+        auto mockProgram = std::make_unique<MockCompiledProgram>();
+        EXPECT_CALL(*mockProgram, getKernel("LayernormBwd"))
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
+        EXPECT_CALL(*mockProgram, getKernel("LayernormBwdScaleBias"))
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernelScaleBias))));
 
         EXPECT_CALL(_mockKernelCompiler, compile(::testing::_, ::testing::_))
             .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
@@ -84,6 +115,15 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabled
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidBpropGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
 // ============================================================================
@@ -129,11 +169,24 @@ TEST_F(TestLayernormPlanBuilder, IsNotApplicableForNonF32ComputeType)
 // buildPlan - valid graphs
 // ============================================================================
 
-TEST_F(TestLayernormPlanBuilder, BuildPlanSetsPlanForSingleNode)
+TEST_F(TestLayernormPlanBuilder, BuildPlanSetsPlanForSingleFpropNode)
 {
-    setupMockCompileChain();
+    setupFpropMockCompileChain();
 
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    Context ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestLayernormPlanBuilder, BuildPlanSetsPlanForSingleBpropNode)
+{
+    setupBpropMockCompileChain();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -146,7 +199,7 @@ TEST_F(TestLayernormPlanBuilder, BuildPlanSetsPlanForSingleNode)
 // getMaxWorkspaceSize
 // ============================================================================
 
-TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
+TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeFpropReturnsZero)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -156,13 +209,71 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 0u);
 }
 
+TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropReturnsZero)
+{
+    SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
+
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const Settings settings;
+
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 0u);
+}
+
+TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropParallelReturnsNonzero)
+{
+    SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
+
+    // The answer is dependent on the number of multiprocessors
+    auto multiProcessorCount = static_cast<int64_t>(
+        hip_kernel_provider_common::getDeviceProperties(_dummyHandle.getStream())
+            .multiProcessorCount);
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        {3072 * multiProcessorCount, 1024 * multiProcessorCount, 32, 1},
+        {4, 3, 32 * multiProcessorCount, 32});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const Settings settings;
+
+    // The answer is `sizeof(float) * 2 * innerSize * parallelSize` = `4 * 2 * (32 * 32 * 3 * multiProcessorCount) * 2` = `49152 * multiProcessorCount`
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings),
+              49152u * multiProcessorCount);
+}
+
+TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropWithoutOptionalTensorsReturnsNonzero)
+{
+    SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
+
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        {150528, 50176, 224, 1},
+        {2, 3, 224, 224},
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const Settings settings;
+
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 16u);
+}
+
 // ============================================================================
 // getCustomKnobs
 // ============================================================================
 
-TEST_F(TestLayernormPlanBuilder, GetCustomKnobsReturnsEmpty)
+TEST_F(TestLayernormPlanBuilder, GetCustomKnobsReturnsEmptyFprop)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    EXPECT_TRUE(knobs.empty());
+}
+
+TEST_F(TestLayernormPlanBuilder, GetCustomKnobsReturnsEmptyBprop)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

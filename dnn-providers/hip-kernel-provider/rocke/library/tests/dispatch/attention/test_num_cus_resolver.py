@@ -4,14 +4,17 @@
 """CPU-only tests for the dispatch-layer num_cus resolver + target_ctas knob.
 
 ``num_cus`` drives 2D<->3D routing and the 3D segment count. It historically
-defaulted to a stale 120, under-subscribing gfx942 (304 CUs). The resolver turns
-the sentinel default into the live gfx942 CU count behind an explicit-caller
-override seam. Auto-resolution is scoped to gfx942 for now; other archs keep the
-legacy 120 (Future Scope). ``target_ctas`` is the direct device-subscription
-target override: when > 0 it replaces ``num_cus * 4`` for routing/segmentation
-without a device CU count. These tests mock the device query/arch (no GPU) and
-assert the resolution order plus the downstream routing/segment effects.
+defaulted to a stale 120, under-subscribing the device (e.g. 304-CU gfx942,
+~256-CU gfx950). The resolver turns the sentinel default into the live device CU
+count behind an explicit-caller override seam. Auto-resolution covers the arches
+in ``_AUTO_RESOLVE_ARCHS`` (gfx942 and gfx950); every other arch keeps the legacy
+120. gfx950's segment clamp is conservative -- the num_cus bump never raises an
+already-3D split. ``target_ctas`` is the direct device-subscription target
+override: when > 0 it replaces ``num_cus * 4`` for routing/segmentation without a
+device CU count. These tests mock the device query/arch (no GPU) and assert the
+resolution order plus the downstream routing/segment effects.
 """
+
 from __future__ import annotations
 
 import dispatch.attention as A
@@ -81,15 +84,49 @@ def test_gfx942_fallback_off_box():
         p.restore()
 
 
-def test_other_archs_keep_legacy_120():
-    """Non-gfx942 archs are NOT auto-resolved yet (Future Scope) -> legacy 120."""
+def test_gfx950_device_query():
+    """gfx950 on a gfx950 box -> the live CU count (256 on a 256-CU part)."""
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
         p.attr(AC, "_device_num_cus", lambda: 256)
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 256
+        p.attr(AC, "_device_num_cus", lambda: 208)  # smaller-CU gfx950 variant
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 208
+    finally:
+        p.restore()
+
+
+def test_gfx950_fallback_off_box():
+    """gfx950 request off-box (running box != gfx950) -> legacy 120, never the wrong device's count."""
+    p = _Patch()
+    try:
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")  # a gfx942 box
+        p.attr(AC, "_device_num_cus", lambda: 304)  # must NOT be consulted
         assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 120
+        p.attr(hipm, "get_device_arch", lambda *a, **k: None)  # no visible device
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 120
+    finally:
+        p.restore()
+
+
+def test_non_autoresolve_archs_keep_legacy_120():
+    """Archs outside the auto-resolve set keep the legacy 120 AND never touch the
+    device CU query (the arch gate short-circuits before _device_num_cus)."""
+    p = _Patch()
+    calls = {"n": 0}
+
+    def _spy():
+        calls["n"] += 1
+        return 256  # a value that must never be used for a non-auto arch
+
+    try:
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx90a")
+        p.attr(AC, "_device_num_cus", _spy)
         assert _resolve_num_cus(_req(num_cus=0, arch="gfx90a")) == 120
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx1250")) == 120
         assert _resolve_num_cus(_req(num_cus=0, arch="gfxZZZ")) == 120
+        assert calls["n"] == 0, "device CU query consulted for a non-auto-resolve arch"
     finally:
         p.restore()
 
@@ -106,7 +143,7 @@ def test_explicit_caller_wins_any_arch():
         p.restore()
 
 
-def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
+def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0, clamp_arch=None):
     return UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -121,6 +158,7 @@ def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
         use_sinks=False,
         num_cus=num_cus,
         target_ctas=tctas,
+        clamp_arch=clamp_arch,
     )
 
 
@@ -154,6 +192,36 @@ def test_target_ctas_threaded_through_problem():
     prob2 = A._problem(_req(num_cus=200, target_ctas=0))
     assert prob2.target_ctas == 0  # unset => auto
     assert prob2._effective_target_ctas == 800  # 200*4
+
+
+def test_problem_lowercases_arch_for_the_clamp():
+    """``_problem`` lowercases ``req.arch`` into ``clamp_arch`` before it reaches
+    the clamp, which compares against lowercase literals ("gfx942" / "gfx950") --
+    an exact string match, so a mixed-case arch would silently skip the clamp
+    rather than error.
+
+    Scope: this pins ``_problem``'s normalization ONLY. It is defence in depth,
+    not a reachable input -- the dispatch path rejects mixed case earlier, in
+    ``_request_errors``, because ``ArchTarget.from_gfx`` is case-sensitive
+    (``from_gfx("GFX950")`` raises ``KeyError``). Entry here is deliberately
+    below that gate. See ``test_request_layer_rejects_mixed_case_arch``.
+    """
+    for raw in ("GFX950", "Gfx950", "gfx950"):
+        assert A._problem(_req(num_cus=200, arch=raw)).clamp_arch == "gfx950", raw
+    # Driven through _problem + _num_segments, casing must not change the segment
+    # count: both normalize to gfx950 and take the same clamp.
+    p_mixed = A._problem(_req(num_cus=256, arch="GFX950"))
+    p_lower = A._problem(_req(num_cus=256, arch="gfx950"))
+    assert au._num_segments(p_mixed) == au._num_segments(p_lower)
+
+
+def test_request_layer_rejects_mixed_case_arch():
+    """Pins the reason the test above is defence in depth: the request layer is
+    case-sensitive, so a mixed-case arch never reaches ``_problem`` at all."""
+    for raw in ("GFX950", "Gfx950", "GFX942"):
+        errors = AC._request_errors(_req(num_cus=0, arch=raw))
+        assert any("unknown gfx target" in e for e in errors), (raw, errors)
+    assert AC._request_errors(_req(num_cus=0, arch="gfx950")) == []
 
 
 def test_segments_bounded_after_bump():
@@ -199,6 +267,195 @@ def test_segments_bounded_after_bump():
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
         p.restore()
+
+
+def test_gfx950_segments_conservatively_clamped():
+    """Conservative gfx950 clamp: the num_cus bump never raises the 3D split for
+    ANY already-3D shape (including D64 / long-kv that gfx942 leaves uncapped)."""
+    p = _Patch()
+    try:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.attr(au, "_resolve_attention_arch", lambda: "gfx950")
+        # Live gfx950 count ~256; every case must equal its num_cus=120 split.
+        cases = [
+            dict(nq=32, nk=8, D=128, kv=2048, batch=1),
+            dict(nq=32, nk=8, D=128, kv=8192, batch=1),
+            dict(
+                nq=32, nk=8, D=128, kv=32768, batch=1
+            ),  # gfx942 uncaps this; gfx950 clamps it
+            dict(
+                nq=32, nk=4, D=64, kv=8192, batch=1
+            ),  # gfx942 uncaps D64; gfx950 clamps it
+            dict(nq=32, nk=4, D=64, kv=32768, batch=1),
+        ]
+        for c in cases:
+            s120 = au._num_segments(_prob(120, **c))
+            s256 = au._num_segments(_prob(256, **c))
+            assert s120 == s256, f"gfx950 over-split {c}: {s120} -> {s256}"
+    finally:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.restore()
+
+
+def test_target_ctas_bypasses_the_gfx950_clamp():
+    """An explicit ``target_ctas > 0`` is a deliberate caller override and skips
+    the conservative gfx950 clamp, restoring the pre-clamp split.
+
+    A BIGGER target alone cannot do this: ``target_ctas`` raises the raw split via
+    ``_effective_target_ctas``, but ``_pre_bump_segments`` is derived from the fixed
+    ``_PRE_BUMP_CUS`` and ignores it, so ``min(segments, pre_bump)`` would cap any
+    target straight back to the 120-baseline ceiling. The bypass therefore has to
+    live in the branch GUARD -- which is what this test pins.
+    """
+    p = _Patch()
+    try:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.attr(au, "_resolve_attention_arch", lambda: "gfx950")
+        shape = dict(nq=8, nk=8, D=128, kv=8192, batch=1)  # num_2d=8 -> pre_bump 64
+        ceiling = au._pre_bump_segments(_prob(120, clamp_arch="gfx950", **shape))
+
+        # Default callers: clamped to the pre-bump ceiling regardless of the bump.
+        assert au._num_segments(_prob(120, clamp_arch="gfx950", **shape)) == ceiling
+        assert au._num_segments(_prob(256, clamp_arch="gfx950", **shape)) == ceiling
+
+        # Explicit target_ctas: clamp steps aside, caller gets the raw split.
+        pinned = _prob(120, tctas=1024, clamp_arch="gfx950", **shape)
+        raw = pinned.select_3d()[0].NUM_SEGMENTS_PER_SEQ
+        assert (
+            raw > ceiling
+        ), f"shape no longer exercises the bypass: {raw} <= {ceiling}"
+        assert au._num_segments(pinned) == raw, (
+            "explicit target_ctas must bypass the gfx950 clamp: "
+            f"got {au._num_segments(pinned)}, want the unclamped {raw}"
+        )
+
+        # The bypass is scoped to gfx950's blanket clamp; gfx942 keeps its measured
+        # carve-outs, which are NOT a target_ctas override surface.
+        p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
+        g942 = _prob(120, tctas=1024, clamp_arch="gfx942", **shape)
+        assert au._num_segments(g942) <= au._pre_bump_segments(g942)
+    finally:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.restore()
+
+
+def test_partition_floor_is_gfx950_only():
+    """A partitioned device (CPX / NPS4) reports the PARTITION CU count (~32).
+
+    gfx950 floors that to the legacy 120 baseline so the routing target never
+    drops below 480 and flips already-3D shapes back to 2D -- the gfx950 segment
+    clamp's byte-identical guarantee is defined against that baseline.
+
+    gfx942 is NOT floored: it shipped unfloored on develop, and flooring would
+    silently change its 2D/3D routing and segment counts on partitioned parts.
+    This PR targets gfx950 only, so gfx942 must resolve exactly as develop does.
+    """
+    p = _Patch()
+    try:
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
+        p.attr(AC, "_device_num_cus", lambda: 32)  # a CPX/NPS4 partition
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 120
+        # A full-device count is above the floor and passes through unchanged.
+        p.attr(AC, "_device_num_cus", lambda: 256)
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 256
+
+        # gfx942 on a partitioned gfx942 box: raw live count, no floor.
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
+        for partition_cus in (32, 38, 64):
+            p.attr(AC, "_device_num_cus", lambda n=partition_cus: n)
+            assert _resolve_num_cus(_req(num_cus=0, arch="gfx942")) == partition_cus
+        # ...and a full gfx942 part is unaffected either way.
+        p.attr(AC, "_device_num_cus", lambda: 304)
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx942")) == 304
+    finally:
+        p.restore()
+
+
+def test_gfx942_partition_routing_matches_develop():
+    """The floor scoping is observable downstream, not just in the resolver.
+
+    On a partitioned gfx942 the resolved count feeds select_path/_num_segments.
+    Pin the develop behaviour for the shapes a 120 floor would have moved: at 38
+    CUs they must stay on the path/split that 38 CUs produces, NOT the 120 one.
+    """
+    p = _Patch()
+    try:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
+        p.attr(AC, "_device_num_cus", lambda: 38)  # CPX partition
+        for shape in (
+            dict(nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=1),
+            dict(
+                nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=16
+            ),
+            dict(nhead_q=32, nhead_k=4, hdim_q=64, hdim_v=64, seqlen_k=32768, batch=4),
+            dict(
+                nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=4096, batch=32
+            ),
+        ):
+            resolved = A._problem(_req(num_cus=0, arch="gfx942", **shape))
+            unfloored = A._problem(_req(num_cus=38, arch="gfx942", **shape))
+            assert resolved.num_cus == 38, shape
+            assert resolved.select_path() == unfloored.select_path(), shape
+            assert au._num_segments(resolved) == au._num_segments(unfloored), shape
+    finally:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.restore()
+
+
+def test_segment_clamp_keys_on_request_arch():
+    """The split-KV clamp keys on the arch the problem TARGETS, not the running
+    box. When ``problem.clamp_arch`` is set the running-box resolver is never
+    consulted, so an off-box build targeting one arch can't pick up another
+    arch's clamp."""
+    p = _Patch()
+    calls = {"n": 0}
+
+    def _spy():
+        calls["n"] += 1
+        return "gfx950"  # the running box
+
+    shape = dict(nq=32, nk=4, D=64, kv=32768, batch=1)
+    try:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.attr(au, "_resolve_attention_arch", _spy)
+        # clamp_arch set -> resolver is never consulted.
+        au._num_segments(_prob(256, clamp_arch="gfx942", **shape))
+        assert calls["n"] == 0, "running-box arch consulted despite clamp_arch set"
+        # clamp_arch unset -> falls back to the running-box resolver.
+        au._num_segments(_prob(256, **shape))
+        assert calls["n"] >= 1, "running-box resolver not used as fallback"
+    finally:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.restore()
+
+
+def test_every_auto_resolve_arch_clamps_the_split():
+    """Membership in _AUTO_RESOLVE_ARCHS grants an arch the num_cus bump; the
+    matching per-arch branch in ``_num_segments`` is what keeps that bump from
+    over-splitting already-3D shapes. The two live in different modules and are
+    kept in sync by hand, so pin the other half of the bargain here: an arch
+    added to the set without a clamp fails this test instead of silently
+    shipping an uncapped split.
+
+    The shape is chosen so the unclamped formula blows past the safe ceiling
+    (raw 128 vs pre-bump 64) AND so gfx942's head-size-specific branch also
+    fires -- D128 decode at kv <= 2048. A shape gfx942 deliberately leaves
+    uncapped (D256, or long-kv D128) would fail for a legitimate reason."""
+    shape = dict(nq=8, nk=8, D=128, kv=2048, batch=1)
+    for arch in sorted(AC._AUTO_RESOLVE_ARCHS):
+        prob = _prob(256, clamp_arch=arch, **shape)
+        raw = prob.select_3d()[0].NUM_SEGMENTS_PER_SEQ
+        ceiling = au._pre_bump_segments(prob)
+        assert raw > ceiling, (
+            f"test shape no longer exercises the clamp on {arch}: "
+            f"raw {raw} <= ceiling {ceiling}"
+        )
+        assert au._num_segments(prob) <= ceiling, (
+            f"{arch} is in _AUTO_RESOLVE_ARCHS but has no segment clamp: "
+            f"split {au._num_segments(prob)} exceeds the pre-bump ceiling {ceiling}"
+        )
 
 
 if __name__ == "__main__":

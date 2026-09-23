@@ -401,3 +401,105 @@ st.func @vm_many_ds() {
   v13 = "st.ds_load_b32"(v3) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
 }
+
+#--- g_enableESM2SuppressValuToGlobalVaVdst gate on global_prefetch_b8: a VALU
+#--- writes a vaddr VGPR (v0), then global_prefetch_b8 reads it. The gate drops the
+#--- src-RAW va_vdst wait (the DAG already spaces the producer >=32 cycles). Two
+#--- unrelated VALUs sit between, so WITHOUT the suppression a non-zero va_vdst wait
+#--- would be emitted before the prefetch.
+#---
+#--- Regression for the classifier fix: global_prefetch_b8 does NOT carry
+#--- IF_GLOBALLoad, so the original isGLOBALOrAtomic-only gate silently skipped it,
+#--- leaving the wait in place. The gate must also classify it via isGlobalPrefetch().
+#--- No s_wait_alu va_vdst may appear between the producer and the prefetch.
+# CHECK-LABEL: @valu_to_global_prefetch_suppressed
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: "st.global_prefetch_b8"
+
+st.func @valu_to_global_prefetch_suppressed() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  "st.global_prefetch_b8"(v0, s[0:1]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Async LDS->global store reads its address VGPRs; a later VALU clobbering
+#--- one is a vm_vsrc WAR, same as any VMEM read.
+# CHECK-LABEL: @async_store_to_valu_war
+# CHECK: "st.global_store_async_from_lds_b64"
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @async_store_to_valu_war() {
+^entry:
+  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- global_atomic_inc_u32's DATA operand (v0, not vaddr) is a genuine RAW the
+#--- DAG scheduler does not space -- only vaddr/prefetch producers get the
+#--- >=32-cycle guarantee (isVmemAddrHazardConsumer). Two unrelated VALUs sit
+#--- between, so a non-zero va_vdst wait must be emitted before the atomic.
+#---
+#--- Regression for the classifier fix: the suppression gate must not apply to
+#--- atomics, only to isGLOBALLoad()/isGlobalPrefetch() producers.
+# CHECK-LABEL: @valu_to_global_atomic_data_raw_not_suppressed
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
+# CHECK: "st.global_atomic_inc_u32"
+
+st.func @valu_to_global_atomic_data_raw_not_suppressed() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.global_atomic_inc_u32"(v20, v0, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+}
+
+#--- Same store, clobbering the vsrc operand (v2, the LDS address) rather than the
+#--- vaddr pair. Both are S slots, so both stamp.
+# CHECK-LABEL: @async_store_lds_addr_to_valu_war
+# CHECK: "st.global_store_async_from_lds_b64"
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @async_store_lds_addr_to_valu_war() {
+^entry:
+  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 100 }
+  v2 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- global_prefetch_b8 reads a vaddr VGPR and writes nothing; clobbering that
+#--- vaddr is a vm_vsrc WAR like any other VMEM read.
+# CHECK-LABEL: @global_prefetch_to_valu_war
+# CHECK: "st.global_prefetch_b8"
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @global_prefetch_to_valu_war() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], s[30:31]) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- global_load_tr_* reads a vaddr VGPR and writes a VGPR dest; clobbering the
+#--- vaddr is a vm_vsrc WAR.
+# CHECK-LABEL: @global_load_tr_to_valu_war
+# CHECK: "st.global_load_tr_b64"
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @global_load_tr_to_valu_war() {
+^entry:
+  v[10:11] = "st.global_load_tr_b64"(v0, s[0:1]) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}

@@ -14,6 +14,7 @@
 #include <hipdnn_test_sdk/utilities/pointwise/CpuDeviceExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/UnaryOperationFunctors.hpp>
+#include <type_traits>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -25,6 +26,7 @@ struct PointwiseParams
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseMode pointwiseMode,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& in0Attributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* optionalIn1Attributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* optionalIn2Attributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& out0Attributes,
         std::optional<float> reluLowerClipLocal,
         std::optional<float> reluUpperClipLocal,
@@ -46,10 +48,15 @@ struct PointwiseParams
         {
             in1Tensor = unpackTensorAttributes(*optionalIn1Attributes);
         }
+        if(optionalIn2Attributes != nullptr)
+        {
+            in2Tensor = unpackTensorAttributes(*optionalIn2Attributes);
+        }
     }
 
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT in0Tensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> in1Tensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> in2Tensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT out0Tensor;
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode;
 
@@ -61,7 +68,7 @@ struct PointwiseParams
     std::optional<float> softplusBeta;
 };
 
-template <typename Input0Type, typename Input1Type, typename OutputType>
+template <typename Input0Type, typename Input1Type, typename Input2Type, typename OutputType>
 class PointwisePlan : public IGraphNodePlanExecutor
 {
 public:
@@ -115,6 +122,34 @@ private:
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
                 pointwiseCompute(
                     _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
+        }
+        else if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(_params.mode))
+        {
+            if constexpr(std::is_same_v<Input2Type, bool>)
+            {
+                if(!_params.in1Tensor.has_value() || !_params.in2Tensor.has_value())
+                {
+                    throw std::runtime_error(
+                        "Ternary pointwise operation requires in1 and in2 tensors");
+                }
+
+                auto shallowIn1Tensor = createShallowTensor<Input1Type>(
+                    _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
+                auto shallowIn2Tensor = createShallowTensor<Input2Type>(
+                    _params.in2Tensor.value(), variantPack.at(_params.in2Tensor.value().uid));
+
+                utilities::
+                    CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type, Input2Type>::
+                        pointwiseCompute(_params.mode,
+                                         *shallowOut0Tensor,
+                                         *shallowIn0Tensor,
+                                         *shallowIn1Tensor,
+                                         *shallowIn2Tensor);
+            }
+            else
+            {
+                throw std::runtime_error("Ternary pointwise masks must have BOOLEAN data type");
+            }
         }
         else
         {
@@ -175,6 +210,7 @@ private:
 
 template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType Input2DataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum>
 class PointwisePlanBuilder : public IGraphNodePlanBuilder
@@ -182,6 +218,7 @@ class PointwisePlanBuilder : public IGraphNodePlanBuilder
 public:
     using Input0Type = utilities::DataTypeToNative<Input0DataTypeEnum>;
     using Input1Type = utilities::DataTypeToNative<Input1DataTypeEnum>;
+    using Input2Type = utilities::DataTypeToNative<Input2DataTypeEnum>;
     using ComputeType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
     using OutputType = utilities::DataTypeToNative<OutputDataTypeEnum>;
 
@@ -216,6 +253,11 @@ public:
                 = hipdnn_flatbuffers_sdk::utilities::isImplementedBinaryPointwiseMode(mode);
         }
 
+        else if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(mode))
+        {
+            isImplemented
+                = hipdnn_flatbuffers_sdk::utilities::isImplementedTernaryPointwiseMode(mode);
+        }
         if(!isImplemented)
         {
             return false;
@@ -229,12 +271,19 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->in_0_tensor_uid(), Input0DataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_0_tensor_uid(), OutputDataTypeEnum);
 
-        // Check optional tensors based on operation mode
-        if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(mode))
+        if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(mode)
+           || hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(mode))
         {
             CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->in_1_tensor_uid());
             CHECK_OPTIONAL_TENSOR_TYPE(
                 tensorMap, nodeAttributes->in_1_tensor_uid(), Input1DataTypeEnum);
+        }
+
+        if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(mode))
+        {
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->in_2_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(
+                tensorMap, nodeAttributes->in_2_tensor_uid(), Input2DataTypeEnum);
         }
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
@@ -262,6 +311,19 @@ public:
         const auto* in1Tensor = (nodeAttributes->in_1_tensor_uid().has_value()
                                      ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
                                      : nullptr);
+        const auto* in2Tensor = (nodeAttributes->in_2_tensor_uid().has_value()
+                                     ? tensorMap.at(*nodeAttributes->in_2_tensor_uid())
+                                     : nullptr);
+
+        if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(nodeAttributes->operation())
+           && (nodeAttributes->relu_lower_clip().has_value()
+               || nodeAttributes->relu_upper_clip().has_value()
+               || nodeAttributes->relu_lower_clip_slope().has_value()
+               || nodeAttributes->swish_beta().has_value()))
+        {
+            throw std::runtime_error("Parameterized ternary pointwise operations are not supported "
+                                     "in PointwisePlanBuilder for the Cpu Graph Executor");
+        }
 
         if(nodeAttributes->elu_alpha().has_value() || nodeAttributes->softplus_beta().has_value())
         {
@@ -269,10 +331,11 @@ public:
                                      "in PointwisePlanBuilder for the Cpu Graph Executor yet");
         }
 
-        return std::make_unique<PointwisePlan<Input0Type, Input1Type, OutputType>>(
+        return std::make_unique<PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType>>(
             PointwiseParams(nodeAttributes->operation(),
                             *in0Tensor,
                             in1Tensor,
+                            in2Tensor,
                             *out0Tensor,
                             nodeAttributes->relu_lower_clip(),
                             nodeAttributes->relu_upper_clip(),

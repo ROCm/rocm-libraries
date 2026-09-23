@@ -21,7 +21,7 @@ def show_node_info() {
         hostname
         lsb_release -sd
         uname -r
-        cat /sys/module/amdgpu/version
+        cat /sys/module/amdgpu/version 2>/dev/null || echo "amdgpu driver: not loaded"
         ls /opt/ -la
     """
 }
@@ -74,7 +74,12 @@ def gitNetRetry(String label, Closure body) {
 
 def cloneUpdateRefRepo() {
     def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
-    def lockLabel = "git ref repo lock - ${env.NODE_NAME}"
+    // The mirror lives on the machine's filesystem, so the lock has to be keyed on the machine.
+    // NODE_NAME is per Jenkins agent, and several agents can now share one machine, which would
+    // let them clone/fetch into the same mirror concurrently.
+    // MIOpen shares this mirror and locks on the same label, so the two must be kept identical.
+    def hostId = sh(script: 'hostname', returnStdout: true).trim()
+    def lockLabel = "git ref repo lock - ${hostId}"
     def folderExists = sh(
         script: "test -d ${refRepoPath}/refs",
         returnStatus: true
@@ -547,16 +552,13 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
-                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}") {
-                    sh 'echo "The updated workspace is: $WORKSPACE"'
-                    attemptNode = env.NODE_NAME
-                    echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
-                    // Derive GPU requirement from the node label: only "nogpu" stages
-                    // skip the driver/device checks. A new non-GPU label would need
-                    // adding here (otherwise preflight would wrongly demand a GPU).
-                    preflight(!label.contains('nogpu'))
-                    runInPlace(body, transientRetries)
-                }
+                attemptNode = env.NODE_NAME
+                echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
+                // Derive GPU requirement from the node label: only "nogpu" stages
+                // skip the driver/device checks. A new non-GPU label would need
+                // adding here (otherwise preflight would wrongly demand a GPU).
+                preflight(!label.contains('nogpu'))
+                runInPlace(body, transientRetries)
             }
             return
         }
@@ -655,11 +657,15 @@ def buildDocker(install_prefix){
 
 def get_docker_options(){
     def dockerOpts
+    // Deliberately no --network=host: the container-local listeners we start (stunnel on
+    // 127.0.0.1:6379 and the sccache server on 4226) would land in the host netns and
+    // collide when several jobs share a node. Bridge networking gives each job its own
+    // loopback, and everything we talk to (redis/sccache, registries, github) is outbound.
     if ( params.BUILD_INSTANCES_ONLY ){
-        dockerOpts = "--network=host --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
+        dockerOpts = "--group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
     }
     else{ //only add kfd and dri paths if you actually going to run somthing on GPUs
-        dockerOpts = "--network=host --device=/dev/kfd --device=/dev/dri --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
+        dockerOpts = "--device=/dev/kfd --device=/dev/dri --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
     }
     if (params.COMPILER_VERSION == "develop" || params.COMPILER_VERSION == "amd-staging" || params.COMPILER_VERSION == "therock" || params.COMPILER_COMMIT != ""){
     // the  --env COMPRESSED_BUNDLE_FORMAT_VERSION=2 env variable is required when building code with offload-compress flag with
@@ -943,7 +949,11 @@ def cmake_build(Map conf=[:]){
                     }
                     else{ //do not run tests on gfx1250, just build everything
                         echo "Building for gfx1250"
-                        sh "ninja -j${nt} install"
+                        sh """
+                            export HSA_MODEL_LIB=/libhsakmtmodel.so
+                            export HSA_MODEL_TOPOLOGY=/topology/mi450
+                            ninja -j${nt} install smoke
+                        """
                     }
                     if (params.RUN_ROCM_CK_TESTS) {
                         sh 'ninja check-rocm-ck'
@@ -951,7 +961,7 @@ def cmake_build(Map conf=[:]){
                     if(params.BUILD_PACKAGES || params.BUILD_INSTANCES_ONLY){
                         echo "Build ckProfiler packages"
                         sh 'ninja -j64 package'
-                        sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.2.0_amd64_${arch_name}.deb"
+                        sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.3.0_amd64_${arch_name}.deb"
                         stash includes: "composablekernel-ckprofiler**.deb", name: "profiler_package_${arch_name}"
                     }
                 }
@@ -1053,9 +1063,11 @@ def buildAndTest(Map conf=[:]){
                             }
                             sh """#!/bin/bash
                                 cd projects/hiptensor && mkdir -p build &&
-                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install" &&
+                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install" -DCMAKE_INSTALL_PREFIX="${env.WORKSPACE}/projects/hiptensor/install" &&
                                 cmake --build build -- -j &&
-                                ctest --test-dir build
+                                cd build &&
+                                make install &&
+                                ctest -R 'quick' --output-on-failure --test-dir "${env.WORKSPACE}/projects/hiptensor/install/bin/hiptensor"
                             """
                         }
                     }
@@ -1392,115 +1404,6 @@ def runComprehensiveConvDatasetTests() {
     )
 }
 
-def runTileEngineBasicTests(String compiler) {
-    buildAndTest(
-        setup_args: "NO_CK_BUILD",
-        build_type: 'Release',
-        execute_cmd: """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx942" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_UNIVERSAL_CONFIG_FILE="default_ci_config.json" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_MULTI_D_CONFIG_FILE="default_ci_config.json" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D GEMM_PRESHUFFLE_CONFIG_FILE="default_ci_config.json" .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json"""
-    )
-}
-
-def runTileEngineGemmTests(String arch, String compiler) {
-    def execute_cmd
-    if (arch == "gfx942") {
-        execute_cmd = """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx942" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16;bf8;bf16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_STREAMK_DATATYPE="fp8;fp16" \
-                -D GEMM_STREAMK_LAYOUT="rcr" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D GROUPED_GEMM_DATATYPE="fp8;fp16" \
-                -D GROUPED_GEMM_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_MULTI_ABD_DATATYPE="fp16" \
-                -D GEMM_MULTI_ABD_LAYOUT="rcrr" \
-                -D BATCHED_CONTRACTION_DATATYPE="fp16" \
-                -D BATCHED_CONTRACTION_LAYOUT="rcr" \
-                -D GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
-                -D GEMM_ROWCOLQUANT_LAYOUT="rcr" \
-                -D GEMM_TENSOR_QUANT_DATATYPE="fp8;bf8" \
-                -D GEMM_TENSOR_QUANT_LAYOUT="rcr" \
-                -D GROUPED_GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
-                -D GROUPED_GEMM_ROWCOLQUANT_LAYOUT="rcr" \
-                -D GROUPED_GEMM_TENSORQUANT_DATATYPE="fp8;bf8" \
-                -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
-                -D BATCHED_GEMM_DATATYPE="fp16" \
-                -D BATCHED_GEMM_LAYOUT="rcr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm/grouped_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --group-counts 8 --warmup 5 --repeat 5 --verbose --json grouped_gemm_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_abd/gemm_multi_abd_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_abd_results.json && \
-            python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_rowcolquant/gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_rowcolquant_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_tensor_quant/gemm_tensor_quant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_tensor_quant_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json  && \
-            python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json """
-    } else if (arch == "gfx950") {
-        execute_cmd = """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx950" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D GEMM_MULTI_D_DATATYPE="fp16" \
-                -D GEMM_MULTI_D_LAYOUT="rcrr;rrrr;crrr;ccrr" \
-                -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
-                -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
-                -D MX_GEMM_DATATYPE="fp4;fp8" \
-                -D MX_GEMM_LAYOUT="rcr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
-            python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json """
-    } else if (arch == "gfx1201") {
-        execute_cmd = """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx1201" \
-                -D GEMM_UNIVERSAL_DATATYPE="fp16" \
-                -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
-                -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json"""
-    }
-    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
-}
-
 def runBuildCKAndTests(String arch) {
     def gpuTarget
     def extraSetupArgs = ""
@@ -1510,13 +1413,12 @@ def runBuildCKAndTests(String arch) {
     switch (arch) {
         case "gfx90a":
             gpuTarget = "gfx90a"
-            extraSetupArgs = " -DCK_CXX_STANDARD=\"17\""
             execute_cmd = build_client_examples(gpuTarget)
             break
         case "gfx1250":
             gpuTarget = "gfx1250"
             extraSetupArgs = " -DDISABLE_DL_KERNELS=\"ON\""
-            extraBuildArgs = [docker_name: "${env.CK_DOCKERHUB_PRIVATE}:ck_ub24.04_gfx1250"]
+            extraBuildArgs = [docker_name: "${env.CK_DOCKERHUB}:ck_ub24.04_gfx1250_ffm"]
             break
         case "gfx10-1-generic":
         case "gfx10-3-generic":

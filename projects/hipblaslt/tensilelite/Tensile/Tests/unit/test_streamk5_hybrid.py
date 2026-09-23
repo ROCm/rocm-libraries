@@ -10,7 +10,7 @@ is covered by sk_hybrid.yaml kernel tests.
 # Prime the component registry before StreamK imports (avoids circular import).
 from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 
-from rocisa.instruction import SAndB32, SLShiftRightB32
+from rocisa.instruction import SAndB32, SLShiftLeftB32, SLShiftRightB32, SXorB32
 
 from Tensile.Common.ValidParameters import validParameters
 from Tensile.Components.StreamK import (
@@ -53,25 +53,46 @@ class TestStreamK5ModeExtraction:
     def test_mode_extraction_shifts_bit_30(self):
         module = emit_mode_extraction_module()
         shift_inst = next(
-            inst for inst in module.flatitems() if isinstance(inst, SLShiftRightB32)
+            inst
+            for inst in module.flatitems()
+            if isinstance(inst, SLShiftRightB32)
+            and reg_name(list(inst.getParams())[1]) == "sgprMagicShiftItersPerTile"
         )
         params = list(shift_inst.getParams())
         assert reg_name(params[0]) == "sgprStreamKHybridMode"
-        assert reg_name(params[1]) == "sgprMagicShiftItersPerTile"
         assert params[2] == hex(30)
 
-    def test_mode_extraction_masks_magic_shift_with_bfffffff(self):
+    def test_mode_extraction_clears_bit_30_via_xor_of_extracted_mode(self):
+        """Clear MagicShift bit 30 by XOR with the extracted mode at bit 30."""
         module = emit_mode_extraction_module()
-        mask_insts = [
-            inst for inst in module.flatitems() if isinstance(inst, SAndB32)
-        ]
-        clear_inst = next(
-            inst
-            for inst in mask_insts
-            if reg_name(list(inst.getParams())[0]) == "sgprMagicShiftItersPerTile"
+        xor_inst = next(
+            inst for inst in module.flatitems() if isinstance(inst, SXorB32)
         )
-        params = list(clear_inst.getParams())
-        assert params[2] == hex(0xBFFFFFFF)
+        params = list(xor_inst.getParams())
+        assert reg_name(params[0]) == "sgprMagicShiftItersPerTile"
+        assert reg_name(params[1]) == "sgprMagicShiftItersPerTile"
+        assert reg_name(params[2]) == "sgprStreamKHybridMode"
+        and_dests = [
+            reg_name(list(inst.getParams())[0])
+            for inst in module.flatitems()
+            if isinstance(inst, SAndB32)
+        ]
+        assert "sgprMagicShiftItersPerTile" not in and_dests
+
+    def test_mode_extraction_restores_hybrid_mode_to_0_1(self):
+        module = emit_mode_extraction_module()
+        lshl = next(
+            inst for inst in module.flatitems() if isinstance(inst, SLShiftLeftB32)
+        )
+        assert list(lshl.getParams())[2] == hex(30)
+        restore = [
+            inst
+            for inst in module.flatitems()
+            if isinstance(inst, SLShiftRightB32)
+            and reg_name(list(inst.getParams())[1]) == "sgprStreamKHybridMode"
+        ]
+        assert restore
+        assert list(restore[-1].getParams())[2] == hex(30)
 
     def test_mode_extraction_does_not_use_bit_31(self):
         module = emit_mode_extraction_module()

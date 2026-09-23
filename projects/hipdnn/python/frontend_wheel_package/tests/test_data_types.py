@@ -3,11 +3,19 @@
 
 """Tests for non-FLOAT data type coverage on a conv_fprop graph."""
 
+import numpy as np
 import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import build_operation_graph
+from .helpers import build_all_plans, execute_zeros
+
+# numpy has no native bfloat16; a same-width uint16 zero buffer is bit-identical
+# to a zeroed bfloat16 buffer, so it's a safe stand-in for an execute-only check.
+_NUMPY_DTYPES = {
+    hipdnn.DataType.HALF: np.float16,
+    hipdnn.DataType.BFLOAT16: np.uint16,
+}
 
 
 def build_typed_conv_graph(
@@ -40,7 +48,7 @@ def build_typed_conv_graph(
     y.set_name("output_y")
     y.set_output(True)
 
-    return graph
+    return graph, x, weight, y
 
 
 @pytest.mark.parametrize(
@@ -52,11 +60,25 @@ class TestNonFloatDataTypes:
 
     def test_validates(self, data_type):
         """A conv graph with a non-FLOAT data type passes validation (no GPU)."""
-        graph = build_typed_conv_graph(data_type)
+        graph, _x, _weight, _y = build_typed_conv_graph(data_type)
         assert graph.validate().is_good()
 
     @pytest.mark.gpu
-    def test_builds_operation_graph(self, data_type):
-        """A conv graph with a non-FLOAT data type lowers to an operation graph."""
-        graph = build_typed_conv_graph(data_type)
-        build_operation_graph(graph)
+    def test_execution_succeeds(self, data_type):
+        """A conv graph with a non-FLOAT data type executes against the stub engine."""
+        graph, x, weight, y = build_typed_conv_graph(data_type)
+        dtype = _NUMPY_DTYPES[data_type]
+
+        handle = build_all_plans(graph)
+        execute_zeros(graph, [(x, dtype), (weight, dtype), (y, dtype)], handle)
+
+
+def test_operation_configuration_enums_are_importable():
+    """Operation attribute enums expose their public values to Python."""
+    assert hipdnn.ReductionMode.ADD.name == "ADD"
+    assert hipdnn.ResampleMode.MAXPOOL.name == "MAXPOOL"
+    assert hipdnn.PaddingMode.ZERO_PAD.name == "ZERO_PAD"
+    assert hipdnn.NormFwdPhase.TRAINING.name == "TRAINING"
+    assert hipdnn.DiagonalAlignment.BOTTOM_RIGHT.name == "BOTTOM_RIGHT"
+    assert hipdnn.AttentionImplementation.UNIFIED.name == "UNIFIED"
+    assert hipdnn.MoeGroupedMatmulMode.SCATTER.name == "SCATTER"

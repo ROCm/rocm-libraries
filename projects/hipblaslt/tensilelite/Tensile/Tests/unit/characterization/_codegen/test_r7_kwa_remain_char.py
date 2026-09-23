@@ -29,6 +29,11 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _rocisa_gfx942():
+    _init_rocisa()
+
 # Force full Tensile package init before component imports.
 import rocisa  # noqa: F401
 import Tensile.KernelWriter  # noqa: F401
@@ -311,9 +316,6 @@ class TestGlobalReadIncrementNonStagger:
     9928 (else), 9929-9933 (incUpper=0 + srcGRInc + incrementSrd).
     """
 
-    def setup_method(self):
-        _init_rocisa()
-
     def test_non_stagger_bufferload_emits_module(self):
         """Non-stagger BufferLoad=True path returns non-empty Module."""
         from rocisa.code import Module
@@ -374,9 +376,6 @@ class TestGlobalReadIncrementFlat:
     The ``else`` branch at line 9956 iterates over nrp/nrpv/nrc/nrcv and
     emits VAddCOU32 + VAddCCOU32 pairs using VGPR increments (lines 9963-9975).
     """
-
-    def setup_method(self):
-        _init_rocisa()
 
     def test_flat_path_emits_module(self):
         """Flat-addressing path returns non-empty Module (isTr=False, BufferLoad=False)."""
@@ -474,9 +473,6 @@ class TestExtractPackedCoord1ToRowStart:
     Line 2997: i==0 -> VMulLOU32 into tmpV3.
     Line 3010: extract final idx (element 1).
     """
-
-    def setup_method(self):
-        _init_rocisa()
 
     def test_packed_coord_emits_module(self):
         """extractPackedCoord1ToRowStart returns a non-empty Module."""

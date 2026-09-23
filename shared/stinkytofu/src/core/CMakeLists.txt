@@ -9,4 +9,5 @@ target_sources(stinkytofu_objs PRIVATE
     PassManager.cpp
     ModulePassManager.cpp
     DebugPrintInstrumentation.cpp
+    Version.cpp
 )

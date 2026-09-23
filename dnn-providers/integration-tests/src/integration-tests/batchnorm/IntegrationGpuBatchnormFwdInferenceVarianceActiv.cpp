@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "common/ActivationCommon.hpp"
@@ -103,7 +104,7 @@ public:
         yTensorAttr->set_data_type(intermediateDataType);
 
         graph::PointwiseAttributes pointwiseAttrs;
-        pointwiseAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        pointwiseAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             pointwiseAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());

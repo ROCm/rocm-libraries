@@ -28,7 +28,7 @@ project( hipfft-clients-samples-rocfft LANGUAGES CXX )
 set( CMAKE_CXX_STANDARD 20 )
 
 if( NOT TARGET hipfft )
-  find_package( hipfft REQUIRED CONFIG PATHS )
+  find_package( hipfft REQUIRED CONFIG )
 endif( )
 
 set( sample_list
@@ -38,24 +38,12 @@ set( sample_list
   hipfft_2d_d2z
   hipfft_3d_z2z
   hipfft_3d_d2z
+  hipfft_callback
   hipfft_planmany_2d_z2z
   hipfft_planmany_2d_r2c
   hipfft_multigpu_2d_z2z
   hipfft_setworkarea
   )
-
-# callback sample has its own HIP code, so it needs to be built with hipcc or clang++
-if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang" )
-  # on cuFFT backend, use of callbacks requires linking against the
-  # static cuFFT library
-  if( NOT (BUILD_WITH_LIB STREQUAL "CUDA") OR NOT BUILD_SHARED_LIBS )
-    list( APPEND sample_list hipfft_callback )
-  else()
-    message( STATUS "hipfft_callback sample disabled on non-static CUDA build" )
-  endif()
-else()
-  message( STATUS "hipfft_callback sample disabled, requires hipcc or Clang++ build" )
-endif()
 
 foreach( sample ${sample_list} )
 
@@ -121,11 +109,9 @@ endforeach()
 if( hipfft_callback IN_LIST sample_list )
   if( BUILD_WITH_LIB STREQUAL "CUDA" )
     target_compile_options( hipfft_callback PRIVATE -dc )
+    target_link_libraries( hipfft_callback PRIVATE CUDA::nvrtc )
   else()
-    # -fgpu-rdc causes failure at link stage on Windows
-    if (NOT WIN32)
-      target_compile_options( hipfft_callback PRIVATE -fgpu-rdc )
-      target_link_options( hipfft_callback PRIVATE -fgpu-rdc )
-    endif()
+    find_package( hiprtc REQUIRED CONFIG HINTS ${ROCM_PATH} )
+    target_link_libraries( hipfft_callback PRIVATE hiprtc::hiprtc )
   endif()
 endif()

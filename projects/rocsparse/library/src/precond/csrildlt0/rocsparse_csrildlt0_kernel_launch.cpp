@@ -34,7 +34,7 @@ rocsparse_status rocsparse::csrildlt0_kernel_launch(rocsparse_handle         han
                                                     size_t                   buffer_size,
                                                     void*                    buffer)
 {
-    const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908
+    const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908
                         && handle->asic_rev < 2);
 
     auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);

@@ -434,7 +434,7 @@ struct BlockFmhaPipelineQRKSVS
             {
                 return make_tile_window(k_scale_dram_block_window_tmp.get_bottom_tensor_view(),
                                         k_scale_dram_block_window_tmp.get_window_lengths(),
-                                        {seqlen_k_start, 0});
+                                        {kv_load_start, 0});
             }
             else
             {
@@ -446,7 +446,7 @@ struct BlockFmhaPipelineQRKSVS
             {
                 return make_tile_window(v_scale_dram_block_window_tmp.get_bottom_tensor_view(),
                                         v_scale_dram_block_window_tmp.get_window_lengths(),
-                                        {0, seqlen_k_start / kVScaleGranularity},
+                                        {0, kv_load_start / kVScaleGranularity},
                                         Policy::template MakeVScaleRegTileDistribution<Problem>());
             }
             else
@@ -579,17 +579,22 @@ struct BlockFmhaPipelineQRKSVS
                     {
                         static_for<1, kGemm0KItersPerBlock, 1>{}([&](auto i_tail_k_iter) {
                             constexpr index_t kTailKIters = i_tail_k_iter;
-                            constexpr index_t kTailK0     = kTailKIters * kGemm0WarpK;
 
                             if(gemm0_tail_k_iters == kTailKIters)
                             {
+                                // gfx12 WMMA accumulates (c = a*b + c), so a K=kTailK0 tail
+                                // equals kTailKIters accumulating warp-K(=kGemm0WarpK) sub-GEMMs.
+                                // Slicing the Q A-operand register tile at warp-K granularity
+                                // divides the register layout cleanly for any tail multiple of
+                                // kGemm0WarpK (16/32/48), avoiding the reverse_slice_sequence
+                                // static_assert that a monolithic K=48 slice triggers on WMMA.
                                 using Gemm0TailProblem = BlockGemmProblem<
                                     QDataType,
                                     KDataType,
                                     SaccDataType,
                                     Problem::kNumGemm0Warps * get_warp_size(),
                                     TileGemmShape<
-                                        sequence<kM0, kN0, kTailK0>,
+                                        sequence<kM0, kN0, kGemm0WarpK>,
                                         typename BlockFmhaShape::Gemm0BlockWarps,
                                         sequence<BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
                                                  BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
@@ -598,14 +603,20 @@ struct BlockFmhaPipelineQRKSVS
                                     BlockGemmARegBSmemCRegV2<Gemm0TailProblem,
                                                              typename BlockGemm0::Policy>{};
 
-                                auto q_slice =
-                                    get_slice_tile(q_tile,
-                                                   sequence<0, i_k0 * kK0>{},
-                                                   sequence<kM0, i_k0 * kK0 + kTailK0>{});
-                                auto k_tail_window = make_tile_window(
-                                    k_lds, make_tuple(number<kN0>{}, number<kTailK0>{}), {0, 0});
+                                static_for<0, kTailKIters, 1>{}([&](auto j) {
+                                    constexpr index_t kSubKOffset = j.value * kGemm0WarpK;
 
-                                gemm_0_tail(s_acc, q_slice, k_tail_window);
+                                    auto q_slice = get_slice_tile(
+                                        q_tile,
+                                        sequence<0, i_k0 * kK0 + kSubKOffset>{},
+                                        sequence<kM0, i_k0 * kK0 + kSubKOffset + kGemm0WarpK>{});
+                                    auto k_tail_window = make_tile_window(
+                                        k_lds,
+                                        make_tuple(number<kN0>{}, number<kGemm0WarpK>{}),
+                                        {0, kSubKOffset});
+
+                                    gemm_0_tail(s_acc, q_slice, k_tail_window);
+                                });
                             }
                         });
                         return;
@@ -776,7 +787,16 @@ struct BlockFmhaPipelineQRKSVS
             }
             if constexpr(kHasSink)
             {
-                if(i_total_loops == 0)
+                // Jump out of the sink prefix on its last iteration, not on the first.
+                // num_sink_loop comes from sink_seq_end and therefore from mask.sink alone;
+                // a learnable-softmax sink only turns kHasSink on, it never adds sink tiles.
+                // Two cases this guard covers:
+                //   num_sink_loop == 0: bias_dram_window already starts at kv_load_start,
+                //     which equals seqlen_k_start here, so moving would offset it twice.
+                //   num_sink_loop >= 2: the first sink tile is not the last one, so moving
+                //     on iteration 0 would leave the prefix a tile early.
+                // Matches the batch_prefill pipeline.
+                if(i_total_loops == num_sink_loop - 1)
                     move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
             }
             move_tile_window(bias_dram_window, {0, kN0});
@@ -1015,7 +1035,10 @@ struct BlockFmhaPipelineQRKSVS
                         return seqlen_k_start + i_total_loops * kN0;
 
                     const bool in_sink_phase = (num_sink_loop > i_total_loops);
-                    if(i_total_loops == num_sink_loop)
+                    // Same reasoning as the bias window above, expressed for a window that
+                    // is moved lazily on the first post-prefix iteration: with
+                    // num_sink_loop == 0 it already starts at seqlen_k_start, so skip.
+                    if(num_sink_loop > 0 && i_total_loops == num_sink_loop)
                         move_tile_window(randval_dram_window, {0, seqlen_k_start - sink_seq_end});
 
                     return in_sink_phase ? (kv_load_start + i_total_loops * kN0)
@@ -1188,10 +1211,24 @@ struct BlockFmhaPipelineQRKSVS
             // move K tile windows
             if constexpr(kHasSink)
             {
-                if(i_total_loops == 0)
+                // Same guard as the bias window: with num_sink_loop == 0 the K/V windows
+                // already start at seqlen_k_start and moving offsets them twice, and with
+                // num_sink_loop >= 2 the move belongs on the last sink tile. Unlike the
+                // async pipeline (which increments i_total_loops before its check), here
+                // the check is live, so getting it wrong read the wrong K/V tiles.
+                if(i_total_loops == num_sink_loop - 1)
                 {
                     move_tile_window(k_dram_block_window, {seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(v_dram_window, {0, seqlen_k_start - sink_seq_end});
+                    if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+                    {
+                        // The scale windows advance in lockstep with K/V, so they take the
+                        // same jump, expressed in scale elements for V.
+                        move_tile_window(k_scale_dram_block_window,
+                                         {seqlen_k_start - sink_seq_end, 0});
+                        move_tile_window(v_scale_dram_window,
+                                         {0, (seqlen_k_start - sink_seq_end) / kVScaleGranularity});
+                    }
                 }
             }
             move_tile_window(k_dram_block_window, {kN0, 0});

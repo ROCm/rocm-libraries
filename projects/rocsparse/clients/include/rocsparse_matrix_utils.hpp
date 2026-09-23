@@ -231,14 +231,14 @@ struct rocsparse_matrix_utils
     // @param[out] result Define a \p device_csr_matrix resulting from the conversion of \p that.
     // @param[in] that That matrix to compress.
     //
-    template <typename T>
-    static void convert(const device_csr_matrix<T>& that,
-                        rocsparse_direction         dirb,
-                        rocsparse_int               row_block_dim,
-                        rocsparse_int               col_block_dim,
-                        rocsparse_index_base        base,
-                        rocsparse_storage_mode      storage,
-                        device_gebsr_matrix<T>&     result)
+    template <typename T, typename I, typename J>
+    static void convert(const device_csr_matrix<T, I, J>& that,
+                        rocsparse_direction               dirb,
+                        rocsparse_int                     row_block_dim,
+                        rocsparse_int                     col_block_dim,
+                        rocsparse_index_base              base,
+                        rocsparse_storage_mode            storage,
+                        device_gebsr_matrix<T, I, J>&     result)
     {
         // Currently this routine only works on sorted input and output matrices
         if(storage == rocsparse_storage_mode_unsorted)
@@ -248,80 +248,129 @@ struct rocsparse_matrix_utils
             throw rocsparse_status_internal_error;
         }
 
-        rocsparse_int mb = (that.m + row_block_dim - 1) / row_block_dim;
-        rocsparse_int nb = (that.n + col_block_dim - 1) / col_block_dim;
+        //
+        // The underlying csr2gebsr device API is only available for rocsparse_int-indexed
+        // matrices. For other index types -- e.g. an i32 matrix while the library is built
+        // with --rocsparse_ILP64 (rocsparse_int == int64) -- convert through rocsparse_int
+        // intermediates and cast the result back to I/J. The rocsparse_int case (below)
+        // runs the conversion directly on the device.
+        //
+        if constexpr(!(std::is_same<I, rocsparse_int>::value
+                       && std::is_same<J, rocsparse_int>::value))
+        {
+            host_csr_matrix<T, I, J> h_that(that);
 
-        rocsparse_int nnzb = 0;
+            host_csr_matrix<T, rocsparse_int, rocsparse_int> h_ri(
+                static_cast<rocsparse_int>(h_that.m),
+                static_cast<rocsparse_int>(h_that.n),
+                static_cast<rocsparse_int>(h_that.nnz),
+                h_that.base);
+            for(size_t i = 0; i < h_that.ptr.size(); ++i)
+                h_ri.ptr[i] = static_cast<rocsparse_int>(h_that.ptr[i]);
+            for(size_t i = 0; i < h_that.ind.size(); ++i)
+                h_ri.ind[i] = static_cast<rocsparse_int>(h_that.ind[i]);
+            for(size_t i = 0; i < h_that.val.size(); ++i)
+                h_ri.val[i] = h_that.val[i];
 
-        result.define(dirb, mb, nb, nnzb, row_block_dim, col_block_dim, base);
+            device_csr_matrix<T, rocsparse_int, rocsparse_int>   dA_ri(h_ri);
+            device_gebsr_matrix<T, rocsparse_int, rocsparse_int> dB_ri;
+            convert(dA_ri, dirb, row_block_dim, col_block_dim, base, storage, dB_ri);
 
-        rocsparse_handle handle;
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_create_handle(&handle));
+            host_gebsr_matrix<T, rocsparse_int, rocsparse_int> h_ri_out(dB_ri);
+            host_gebsr_matrix<T, I, J>                         h_out(dirb,
+                                             static_cast<J>(h_ri_out.mb),
+                                             static_cast<J>(h_ri_out.nb),
+                                             static_cast<I>(h_ri_out.nnzb),
+                                             static_cast<J>(h_ri_out.row_block_dim),
+                                             static_cast<J>(h_ri_out.col_block_dim),
+                                             base);
+            for(size_t i = 0; i < h_ri_out.ptr.size(); ++i)
+                h_out.ptr[i] = static_cast<I>(h_ri_out.ptr[i]);
+            for(size_t i = 0; i < h_ri_out.ind.size(); ++i)
+                h_out.ind[i] = static_cast<J>(h_ri_out.ind[i]);
+            for(size_t i = 0; i < h_ri_out.val.size(); ++i)
+                h_out.val[i] = h_ri_out.val[i];
+            result(h_out);
+            return;
+        }
+        else
+        {
 
-        rocsparse_mat_descr that_descr;
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_create_mat_descr(&that_descr));
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_set_mat_index_base(that_descr, that.base));
+            rocsparse_int mb = (that.m + row_block_dim - 1) / row_block_dim;
+            rocsparse_int nb = (that.n + col_block_dim - 1) / col_block_dim;
 
-        rocsparse_mat_descr result_descr;
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_create_mat_descr(&result_descr));
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_set_mat_index_base(result_descr, base));
+            rocsparse_int nnzb = 0;
 
-        // Convert CSR to GEBSR
-        size_t buffer_size = 0;
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_csr2gebsr_buffer_size<T>(handle,
-                                                                       result.block_direction,
-                                                                       that.m,
-                                                                       that.n,
-                                                                       that_descr,
-                                                                       that.val,
-                                                                       that.ptr,
-                                                                       that.ind,
-                                                                       result.row_block_dim,
-                                                                       result.col_block_dim,
-                                                                       &buffer_size));
+            result.define(dirb, mb, nb, nnzb, row_block_dim, col_block_dim, base);
 
-        int* buffer = NULL;
-        CHECK_HIP_THROW_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+            rocsparse_handle handle;
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_create_handle(&handle));
 
-        CHECK_ROCSPARSE_THROW_ERROR(
-            rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_csr2gebsr_nnz(handle,
-                                                            result.block_direction,
-                                                            that.m,
-                                                            that.n,
-                                                            that_descr,
-                                                            that.ptr,
-                                                            that.ind,
-                                                            result_descr,
-                                                            result.ptr,
-                                                            result.row_block_dim,
-                                                            result.col_block_dim,
-                                                            &nnzb,
-                                                            buffer));
+            rocsparse_mat_descr that_descr;
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_create_mat_descr(&that_descr));
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_set_mat_index_base(that_descr, that.base));
 
-        result.define(dirb, mb, nb, nnzb, row_block_dim, col_block_dim, base);
+            rocsparse_mat_descr result_descr;
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_create_mat_descr(&result_descr));
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_set_mat_index_base(result_descr, base));
 
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_csr2gebsr<T>(handle,
-                                                           result.block_direction,
-                                                           that.m,
-                                                           that.n,
-                                                           that_descr,
-                                                           that.val,
-                                                           that.ptr,
-                                                           that.ind,
-                                                           result_descr,
-                                                           result.val,
-                                                           result.ptr,
-                                                           result.ind,
-                                                           result.row_block_dim,
-                                                           result.col_block_dim,
-                                                           buffer));
+            // Convert CSR to GEBSR
+            size_t buffer_size = 0;
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_csr2gebsr_buffer_size<T>(handle,
+                                                                           result.block_direction,
+                                                                           that.m,
+                                                                           that.n,
+                                                                           that_descr,
+                                                                           that.val,
+                                                                           that.ptr,
+                                                                           that.ind,
+                                                                           result.row_block_dim,
+                                                                           result.col_block_dim,
+                                                                           &buffer_size));
 
-        CHECK_HIP_THROW_ERROR(rocsparse_hipFree(buffer));
+            int* buffer = NULL;
+            CHECK_HIP_THROW_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
 
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_destroy_mat_descr(result_descr));
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_destroy_mat_descr(that_descr));
-        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_destroy_handle(handle));
+            CHECK_ROCSPARSE_THROW_ERROR(
+                rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_csr2gebsr_nnz(handle,
+                                                                result.block_direction,
+                                                                that.m,
+                                                                that.n,
+                                                                that_descr,
+                                                                that.ptr,
+                                                                that.ind,
+                                                                result_descr,
+                                                                result.ptr,
+                                                                result.row_block_dim,
+                                                                result.col_block_dim,
+                                                                &nnzb,
+                                                                buffer));
+
+            result.define(dirb, mb, nb, nnzb, row_block_dim, col_block_dim, base);
+
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_csr2gebsr<T>(handle,
+                                                               result.block_direction,
+                                                               that.m,
+                                                               that.n,
+                                                               that_descr,
+                                                               that.val,
+                                                               that.ptr,
+                                                               that.ind,
+                                                               result_descr,
+                                                               result.val,
+                                                               result.ptr,
+                                                               result.ind,
+                                                               result.row_block_dim,
+                                                               result.col_block_dim,
+                                                               buffer));
+
+            CHECK_HIP_THROW_ERROR(rocsparse_hipFree(buffer));
+
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_destroy_mat_descr(result_descr));
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_destroy_mat_descr(that_descr));
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_destroy_handle(handle));
+        }
     }
 
     //

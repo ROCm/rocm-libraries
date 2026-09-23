@@ -4,6 +4,7 @@
 #ifdef _WIN32
 // Must precede every include: <stdlib.h> only declares rand_s when this is already defined, and
 // any header that reaches it first silently leaves rand_s undeclared.
+// NOLINTNEXTLINE(bugprone-reserved-identifier) - name is mandated by the CRT.
 #define _CRT_RAND_S
 #endif
 
@@ -33,8 +34,8 @@ std::filesystem::path getCurrentModuleDirectory()
        == TRUE)
     {
         std::array<char, MAX_PATH> dst{};
-        DWORD len = GetModuleFileNameA(moduleHandle, dst.data(), MAX_PATH);
-        std::string modulePathStr(dst.data());
+        const DWORD len = GetModuleFileNameA(moduleHandle, dst.data(), MAX_PATH);
+        const std::string modulePathStr(dst.data());
 
         if(len > 0 && len < MAX_PATH)
         {

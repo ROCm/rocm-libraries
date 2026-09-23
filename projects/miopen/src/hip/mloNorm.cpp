@@ -216,11 +216,6 @@ void mlo_construct_norm::mloConstructFwd()
         _g_wk.push_back(static_cast<size_t>(g_wk_height) * _grp_tile1);
         _g_wk.push_back(static_cast<size_t>(_problem.GetOutChannels()) * _problem.GetBatchSize());
     }
-    int data_len = miopen::GetTypeSize(_problem.GetOutDataType());
-
-    // calculate workspace
-    size_t scale_sz = static_cast<size_t>(_problem.GetBatchSize()) * scale_batch_stride * data_len;
-    _workspace_sz   = (doBackward()) ? scale_sz : 0;
 }
 
 void mlo_construct_norm::mloConstructBwd()

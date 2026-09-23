@@ -18,7 +18,9 @@ namespace example_provider
 // (1) Update the engine names and IDs in the HIPDNN_REGISTER_ENGINE calls (one call for each
 //     engine provided by this plugin).
 // (2) Update s_engineDefinitions to create your PlanBuilders instead of
-//     ReluPlanBuilder/ConvFwdPlanBuilder.
+//     ReluPlanBuilder/ConvFwdPlanBuilder. Each entry pairs the generated _ID and _NAME
+//     constants, so an engine's ID and its reported name cannot drift apart.
+// (3) Keep ExampleProviderContainer::getEngineName() as-is; it serves the whole table.
 //
 // The s_engineDefinitions vector is one approach to reduce coupling between creating
 // engines (in the ExampleProviderContainer constructor) and returning the list of engine
@@ -37,21 +39,45 @@ const std::vector<ExampleProviderContainer::EngineDefinition>&
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = {
         {EXAMPLE_PROVIDER_RELU_ENGINE_ID,
+         EXAMPLE_PROVIDER_RELU_ENGINE_NAME,
          [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
-             auto engine = std::make_unique<ExampleProviderEngine>(EXAMPLE_PROVIDER_RELU_ENGINE_ID);
+             auto engine = std::make_unique<ExampleProviderEngine>(
+                 EXAMPLE_PROVIDER_RELU_ENGINE_ID, EXAMPLE_PROVIDER_RELU_ENGINE_NAME);
              engine->addPlanBuilder(std::make_unique<ReluPlanBuilder>(compiler));
              return engine;
          }},
         {EXAMPLE_PROVIDER_CONV_FWD_ENGINE_ID,
+         EXAMPLE_PROVIDER_CONV_FWD_ENGINE_NAME,
          [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
-             auto engine
-                 = std::make_unique<ExampleProviderEngine>(EXAMPLE_PROVIDER_CONV_FWD_ENGINE_ID);
+             auto engine = std::make_unique<ExampleProviderEngine>(
+                 EXAMPLE_PROVIDER_CONV_FWD_ENGINE_ID, EXAMPLE_PROVIDER_CONV_FWD_ENGINE_NAME);
              engine->addPlanBuilder(std::make_unique<ConvFwdPlanBuilder>(compiler));
              return engine;
          }},
     };
 
     return s_engineDefinitions;
+}
+
+hipdnnPluginStatus_t ExampleProviderContainer::getEngineName(int64_t engineId, const char** name)
+{
+    if(name == nullptr)
+    {
+        return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+    }
+
+    for(const auto& engineDefinition : getEngineDefinitions())
+    {
+        if(engineDefinition.id == engineId)
+        {
+            *name = engineDefinition.name;
+            return HIPDNN_PLUGIN_STATUS_SUCCESS;
+        }
+    }
+
+    HIPDNN_PLUGIN_LOG_INFO("Engine ID " << engineId << " is not provided by this plugin");
+
+    return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
 }
 
 uint32_t ExampleProviderContainer::copyEngineIds(int64_t* engineIds,

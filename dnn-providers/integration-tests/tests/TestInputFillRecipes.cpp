@@ -99,33 +99,6 @@ TEST(TestInputFillRecipes, GetUnknownUidReturnsDefault)
     EXPECT_FLOAT_EQ(fill.hi, 1.0f);
 }
 
-// ── unfilled only checks ownedUids ──────────────────────────────────────────
-
-TEST(TestInputFillRecipes, UnfilledReportsStructuredAndDerived)
-{
-    InputFillRecipes recipes;
-    recipes.set(1, FillRecipe::free(-1.0f, 1.0f));
-    recipes.set(2, FillRecipe::structured());
-    recipes.set(3, FillRecipe::derived());
-    recipes.set(4, FillRecipe::fixed(0.5f));
-
-    const auto missing = recipes.unfilled({1, 2, 3, 4});
-    EXPECT_EQ(missing.size(), 2u);
-    EXPECT_NE(std::find(missing.begin(), missing.end(), 2), missing.end());
-    EXPECT_NE(std::find(missing.begin(), missing.end(), 3), missing.end());
-}
-
-TEST(TestInputFillRecipes, UnfilledIgnoresNonOwnedUids)
-{
-    InputFillRecipes recipes;
-    recipes.set(1, FillRecipe::free(-1.0f, 1.0f));
-    recipes.set(2, FillRecipe::structured());
-
-    // Only check uid 1 — uid 2 (structured) is not owned, should be ignored
-    const auto missing = recipes.unfilled({1});
-    EXPECT_TRUE(missing.empty());
-}
-
 // ── seed resolution ─────────────────────────────────────────────────────────
 
 TEST(TestInputFillRecipes, ResolveSeedPerTensor)
@@ -152,17 +125,6 @@ TEST(TestInputFillRecipes, GlobalSeedCanBeSet)
 
 // ── seed() does not block setDefault() (regression for the footgun) ─────────
 
-TEST(TestInputFillRecipes, SeedThenSetDefaultStillShowsUnfilled)
-{
-    InputFillRecipes recipes;
-    recipes.setSeed(1, 100);
-    recipes.setDefault(1, FillRecipe::derived());
-
-    const auto missing = recipes.unfilled({1});
-    EXPECT_EQ(missing.size(), 1u);
-    EXPECT_EQ(missing[0], 1);
-}
-
 // ── JSON round-trip ─────────────────────────────────────────────────────────
 
 TEST(TestInputFillRecipes, ToJsonAndLoadFromJsonRoundTrip)
@@ -170,7 +132,6 @@ TEST(TestInputFillRecipes, ToJsonAndLoadFromJsonRoundTrip)
     InputFillRecipes original;
     original.set(1, FillRecipe::free(-2.0f, 2.0f));
     original.set(2, FillRecipe::fixed(0.5f));
-    original.set(3, FillRecipe::structured());
     original.setSeed(1, 42);
 
     const auto json = original.toJson();
@@ -194,9 +155,6 @@ TEST(TestInputFillRecipes, ToJsonAndLoadFromJsonRoundTrip)
     const auto f2 = loaded.fill(2);
     EXPECT_EQ(f2.kind, FillRecipe::Kind::FIXED);
     EXPECT_FLOAT_EQ(f2.value, 0.5f);
-
-    const auto f3 = loaded.fill(3);
-    EXPECT_EQ(f3.kind, FillRecipe::Kind::STRUCTURED);
 
     // Verify seed survived
     EXPECT_EQ(loaded.resolveSeed(1), 42u);

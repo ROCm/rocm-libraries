@@ -1,10 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 table MatmulAttributes {
-    a_tensor_uid: long;
-    b_tensor_uid: long;
-    c_tensor_uid: long;
+    a_tensor_uid: long (cache_uid);
+    b_tensor_uid: long (cache_uid);
+    c_tensor_uid: long (cache_uid);
 }

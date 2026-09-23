@@ -34,6 +34,7 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <typeinfo>
@@ -50,6 +51,7 @@
 #include "instruction/mem.hpp"
 #include "instruction/mfma.hpp"
 #include "stinkytofu/Config/Config.h"
+#include "stinkytofu/Version.h"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
@@ -60,6 +62,11 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
+
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
+#include "HelloWorldPass.hpp"  // declares stinkytofu::registerHelloWorldPassPlugin()
+#endif
 
 namespace nb = nanobind;
 
@@ -282,6 +289,8 @@ stinkytofu::DPPModifiers convertDPPModifiers(const rocisa::DPPModifiers& rocMod)
     } else if (rocMod.quad_perm.size() == 4) {
         ctrl = stinkytofu::dppQuadPerm(rocMod.quad_perm[0], rocMod.quad_perm[1],
                                        rocMod.quad_perm[2], rocMod.quad_perm[3]);
+    } else if (rocMod.row_xmask != kUnset) {
+        ctrl = stinkytofu::dppRowXmask(rocMod.row_xmask);
     }
 
     // bound_ctrl is {0, 1}. Anything else (unset -1, or stray) -> default 0.
@@ -650,41 +659,49 @@ void handleSWaitLoadcntModifiers(StinkyInstruction* stinkyInst,
     }
 }
 
-/// Helper to handle VCvt instruction True16 modifiers
-void handleVCvtTrue16Modifiers(StinkyInstruction* stinkyInst,
-                               const rocisa::VCvtInstruction* vcvtInst) {
-    if (vcvtInst->true16.empty()) {
+/// Derive true16 ".l"/".h" selects from operand halfSelect and attach a
+/// True16Modifiers so the suffixes survive lowering.
+void attachTrue16ModifiersFromOperands(StinkyInstruction* stinkyInst,
+                                       const std::shared_ptr<rocisa::Container>& dst,
+                                       const std::shared_ptr<rocisa::Container>& dst1,
+                                       const std::vector<InstructionInput>& srcs) {
+    // rocisa and stinkytofu share the same HighBitSel values (NONE=-1, LOW=0, HIGH=1).
+    auto regHalf = [](const rocisa::Container* cont) -> stinkytofu::HighBitSel {
+        auto* reg = dynamic_cast<const rocisa::RegisterContainer*>(cont);
+        if (reg && reg->halfSelect.has_value()) {
+            return static_cast<stinkytofu::HighBitSel>(static_cast<int>(*reg->halfSelect));
+        }
+        return stinkytofu::HighBitSel::NONE;
+    };
+    auto inputHalf = [&](const InstructionInput& in) -> stinkytofu::HighBitSel {
+        if (auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&in)) {
+            return regHalf(pptr->get());
+        }
+        return stinkytofu::HighBitSel::NONE;
+    };
+
+    stinkytofu::HighBitSel dst0 = regHalf(dst.get());
+    stinkytofu::HighBitSel dstHi = regHalf(dst1.get());
+    std::vector<stinkytofu::HighBitSel> srcSels;
+    for (const auto& src : srcs) {
+        srcSels.push_back(inputHalf(src));
+    }
+
+    // No operand tagged -> legacy / non-true16 op; emit no true16 modifier.
+    bool any = dst0 != stinkytofu::HighBitSel::NONE || dstHi != stinkytofu::HighBitSel::NONE;
+    for (auto s : srcSels) {
+        any = any || s != stinkytofu::HighBitSel::NONE;
+    }
+    if (!any) {
         return;
     }
 
-    // Convert rocisa::True16Modifiers to stinkytofu True16Modifiers
-    // rocisa uses indices: DST=0, DST1=1, SRC0=2, SRC1=3, ...
-    stinkytofu::HighBitSel dst0 = stinkytofu::HighBitSel::NONE;
-    stinkytofu::HighBitSel dst1 = stinkytofu::HighBitSel::NONE;
-    std::vector<stinkytofu::HighBitSel> srcs;
-
-    for (size_t i = 0; i < vcvtInst->true16.size(); ++i) {
-        stinkytofu::HighBitSel highBit =
-            static_cast<stinkytofu::HighBitSel>(static_cast<int>(vcvtInst->true16[i].high_bit));
-
-        if (i == 0)  // DST
-        {
-            dst0 = highBit;
-        } else if (i == 1)  // DST1
-        {
-            dst1 = highBit;
-        } else  // SRC0, SRC1, ...
-        {
-            srcs.push_back(highBit);
-        }
-    }
-
     // Assert that source count is within the 2-bit encoding limit (max 6 sources)
-    assert(srcs.size() <= 6 &&
+    assert(srcSels.size() <= 6 &&
            "True16Modifiers: source count must be <= 6 for uint16_t 2-bit encoding");
 
     stinkyInst->addModifier<stinkytofu::True16Modifiers>(
-        stinkytofu::True16Modifiers(dst0, dst1, srcs));
+        stinkytofu::True16Modifiers(dst0, dstHi, srcSels));
 }
 
 /// Add modifiers to StinkyInstruction (DS, FLAT, MUBUF, SMEM, WaitCnt, DelayAlu)
@@ -744,11 +761,17 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             TRY_ADD_MOD(CommonInstruction, sdwa, stinkytofu::SDWAModifiers, convertSDWAModifiers)
             TRY_ADD_MOD(CommonInstruction, dpp, stinkytofu::DPPModifiers, convertDPPModifiers)
 
+            // true16: 16-bit operands carry their half-word select as a .l/.h suffix
+            // on the register. Attach generically; no-op when no operand is tagged,
+            // so packed (v_pk_*) and 32-bit ops are unaffected.
+            HANDLE_INST_TYPE(rocisa::CommonInstruction,
+                             attachTrue16ModifiersFromOperands(stinkyInst, typedInst->dst,
+                                                               typedInst->dst1, typedInst->srcs))
+
             // VOP/SOP instructions - these can overlap with CommonInstruction base class
             HANDLE_INST_TYPE(rocisa::MXMFMAInstruction, handleMXMFMAModifiers(stinkyInst, itemToString(inst)))
             else HANDLE_INST_TYPE(rocisa::MFMAInstruction, handleMFMAModifiers(stinkyInst, itemToString(inst)))
             else HANDLE_INST_TYPE(rocisa::SMFMAInstruction, handleSMFMAModifiers(stinkyInst, itemToString(inst)))
-            else HANDLE_INST_TYPE(rocisa::VCvtInstruction, handleVCvtTrue16Modifiers(stinkyInst, typedInst))
 
             // Control/Synchronization instructions, separate from VOP/SOP
             else HANDLE_INST_TYPE(rocisa::SDelayAlu,
@@ -1268,18 +1291,6 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const bool hasPGR = (pgrStartIdx != -1 && loopBodyIdx != -1 && pgrStartIdx <= loopBodyIdx);
     static const std::string kPGR = "loopWithPrefetch";
 
-    // Recursively check whether an item's subtree contains a Label with \p name.
-    std::function<bool(const rocisa::Item*, const std::string&)> containsLabel =
-        [&](const rocisa::Item* item, const std::string& name) -> bool {
-        if (const auto* lbl = dynamic_cast<const rocisa::Label*>(item))
-            return lbl->getLabelName() == name;
-        if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
-            for (const auto& child : mod->itemList)
-                if (containsLabel(child.get(), name)) return true;
-        }
-        return false;
-    };
-
     // Recursively check whether an item is, or contains, a Module named \p name.
     std::function<bool(const rocisa::Item*, const std::string&)> containsModule =
         [&](const rocisa::Item* item, const std::string& name) -> bool {
@@ -1291,39 +1302,20 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         return false;
     };
 
-    // Auto-detect the expertScheduleMode2 region: from the top-level item whose
-    // subtree contains label_Preload_Offset_Start (kernel-body entry, before the
-    // first VGPR producer) through Module("noLoadLoopBody"). This is the region
-    // the wait-alu / mode2 ScopeAdaptor operates on — it deliberately excludes
-    // the epilogue (Global Write), where all activation calls live and which must
-    // stay in mode0.
-    // Anchor the region start at label_ASM_Start, the main-body entry. It
-    // precedes label_Preload_Offset_Start in program order, so starting here
-    // keeps BOTH entry labels inside the region: the non-preload path enters at
-    // label_ASM_Start and falls through; the kernarg-preload path jumps to
-    // label_Preload_Offset_Start (further in). InsertWaitAluPass then enables
-    // mode2 at each entry label it finds, covering both paths. Fall back to
-    // label_Preload_Offset_Start if label_ASM_Start is somehow absent.
-    int scopeStartIdx = -1;
-    int scopeEndIdx = -1;
+    // Tag every top-level item whose subtree holds Module("GlobalWriteElements"),
+    // from the first such item through the last. Covers both the main store
+    // epilogue and the separate GSU-split OptNLL store.
+    int epilogueStartIdx = -1;
+    int epilogueEndIdx = -1;
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
-        const auto& item = module.itemList[i];
-        if (scopeStartIdx == -1 && containsLabel(item.get(), "label_ASM_Start")) {
-            scopeStartIdx = i;
-        }
-        if (containsModule(item.get(), "noLoadLoopBody")) scopeEndIdx = i;
-    }
-    if (scopeStartIdx == -1) {
-        for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
-            if (containsLabel(module.itemList[i].get(), "label_Preload_Offset_Start")) {
-                scopeStartIdx = i;
-                break;
-            }
+        if (containsModule(module.itemList[i].get(), "GlobalWriteElements")) {
+            if (epilogueStartIdx == -1) epilogueStartIdx = i;
+            epilogueEndIdx = i;
         }
     }
-    const bool hasScope =
-        (scopeStartIdx != -1 && scopeEndIdx != -1 && scopeStartIdx <= scopeEndIdx);
-    static const std::string kScope = "expertScheduleMode2";
+    const bool hasEpilogue =
+        (epilogueStartIdx != -1 && epilogueEndIdx != -1 && epilogueStartIdx <= epilogueEndIdx);
+    static const std::string kEpilogue = "globalWriteEpilogue";
 
     // Traverse top-level items, injecting the loopWithPrefetch group name
     // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx]
@@ -1331,10 +1323,10 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
         const auto& item = module.itemList[i];
         const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
-        const bool inScope = hasScope && (i >= scopeStartIdx && i <= scopeEndIdx);
+        const bool inEpilogue = hasEpilogue && (i >= epilogueStartIdx && i <= epilogueEndIdx);
 
         std::vector<const std::string*> base;
-        if (inScope) base.push_back(&kScope);
+        if (inEpilogue) base.push_back(&kEpilogue);
         if (inPGR) base.push_back(&kPGR);
         base.push_back(&module.name);
 
@@ -1384,6 +1376,22 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 ///
 /// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
+    // rocisa was compiled against whichever stinkytofu/Version.h it saw at build
+    // time (STINKYTOFU_FULL_VERSION, a compile-time macro expansion in this TU).
+    // stinkytofu::getRuntimeVersion() instead reports the truth about whatever
+    // stinkytofu is actually loaded/linked right now — a separately-installed
+    // shared lib, a vendored copy, or (in a static build) the same binary this
+    // function itself lives in. A mismatch means a different stinkytofu build
+    // than the one rocisa was compiled against is present at runtime; rocisa
+    // does not support running against a different stinkytofu build, so fail
+    // loudly at import time rather than risk silent ABI/behavior drift.
+    if (!stinkytofu::versionsMatch(STINKYTOFU_FULL_VERSION, stinkytofu::getRuntimeVersion())) {
+        throw std::runtime_error(
+            std::string("rocisa was built against stinkytofu ") + STINKYTOFU_FULL_VERSION +
+            " but " + stinkytofu::getRuntimeVersion() +
+            " is loaded at runtime — rebuild rocisa against a matching stinkytofu.");
+    }
+
     // Pipeline extension point enum
     nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
         .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
@@ -1399,6 +1407,13 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
           "Absolute path to StinkyTofu's bundled example plugin, or \"\" if it was not built. "
           "For tests/demos; consumers with their own plugins pass their path to loadPlugin().");
 
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
+    m.def("registerExamplePlugin", &stinkytofu::registerHelloWorldPassPlugin,
+          "Register StinkyTofu's built-in example HelloWorldPass, compiled directly into "
+          "rocisa (LLVM-style static-plugin pattern). Only available when rocisa was built "
+          "with ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON.");
+#endif
+
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",
@@ -1410,6 +1425,19 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");
+    m.def(
+        "isMnemonicSupportedByStinkyTofu",
+        [](const std::string& mnemonic, nb::object arch_obj) {
+            std::array<int, 3> archArray = convertArch(arch_obj);
+            const auto* info =
+                ArchHelper::getInstance().getArchInfo(archArray[0], archArray[1], archArray[2]);
+            if (!info) return false;
+            const auto& map = info->getMnemonicToIsaOpcodeMap();
+            return map.find(mnemonic) != map.end();
+        },
+        nb::arg("mnemonic"), nb::arg("arch"),
+        "Check if StinkyTofu has a hardware instruction definition for the mnemonic on this "
+        "architecture. Lets rocisa ask before emitting an instruction StinkyTofu cannot lower.");
     // Wrapper class to add signature support to StinkyAsmModule
     class StinkyAsmModuleWithSignature {
        private:
@@ -1468,10 +1496,28 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             if (signature_) {
                 int64_t totalBytes = module_->getTotalInstructionBytes();
                 if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
+                refreshSgprCount();
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
             return result;
+        }
+
+        /// A pass that rewrites operands invalidates the declared SGPR count, so
+        /// it is taken from the final code here rather than trusted from the
+        /// producer. Only that count moves: everything else in the descriptor
+        /// says what the hardware does before entry. Never raised, so a flow
+        /// whose registers did not move keeps the producer's number.
+        void refreshSgprCount() const {
+            stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            uint32_t required = 0;
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                required = std::max(required, stinkytofu::requiredSgprCount(
+                                                  *function, kd.numSgprPreload, kd.sgprWorkGroup));
+            }
+            if (required == 0 || static_cast<int>(required) >= kd.totalSgprs) return;
+            signature_->setGprs(kd.totalVgprs, kd.totalAgprs, static_cast<int>(required));
         }
 
         // Plugin data forwarding
@@ -1551,11 +1597,10 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Override with options dict if provided
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            // Sentinel: <0 means use CDNA5's built-in dsReadPerWmma/dsReadOrder defaults, since 0
-            // is itself a valid (if extreme) value for the former and a valid enumerator for the
-            // latter (ProgramOrder), so 0 can't double as "not provided" the way it does for the
-            // other DAG-scheduler knobs below.
-            moduleOptions.DsReadPerWmma = -1;
+            // Sentinels: DsReadPerWmma / DsReadOrder / throttle / Rule3 lead default to -1
+            // (= unset) via ModuleOptions; Gfx1250Backend resolves unset knobs through
+            // SchedulingKnobHeuristics. DsReadOrder keeps an explicit -1 here because 0 is
+            // a valid enumerator (ProgramOrder) and must not mean "not provided".
             moduleOptions.DsReadOrder = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
@@ -1574,6 +1619,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     }
 
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION)
+#define SET_MODULE_OPTION_WITH_DEFAULT(name, type, value) SET_MODULE_OPTION(name, type)
+                MODULE_OPTIONS_WITH_DEFAULTS_LIST(SET_MODULE_OPTION_WITH_DEFAULT)
+#undef SET_MODULE_OPTION_WITH_DEFAULT
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
             }

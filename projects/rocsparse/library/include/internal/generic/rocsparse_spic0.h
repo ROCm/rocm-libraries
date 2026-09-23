@@ -87,18 +87,23 @@ rocsparse_status rocsparse_spic0_buffer_size(rocsparse_handle            handle,
    *  \p rocsparse_spic0 computes the incomplete Cholesky factorization with 0 fill-ins
    *  and no pivoting of a sparse \f$m \times m\f$ matrix \f$A\f$, such that
    *  \f[
-   *    A \approx LL^T
+   *    A \approx LL^H
    *  \f]
    *  where the lower triangular matrix \f$L\f$ is computed using:
    *  \f[
    *    L_{ij} = \left\{
    *    \begin{array}{ll}
-   *        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \\
-   *        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
+   *        \sqrt{A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2}},   & \text{if i == j} \\
+   *        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times \overline{L_{jk}}), & \text{if i > j}
    *    \end{array}
    *    \right.
    *  \f]
    *  for each entry found in the matrix \f$A\f$.
+   *
+   *  \note
+   *  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$ (note the
+   *  conjugation in the formula above). For real data types \f$L^H = L^T\f$, so it reduces to the standard
+   *  \f$A \approx L L^T\f$.
    *
    *  Performing the above operation requires two stages, the stage \ref rocsparse_spic0_stage_analysis and the stage \ref rocsparse_spic0_stage_compute.
    *  The stage \ref rocsparse_spic0_stage_analysis is required to perform the stage \ref rocsparse_spic0_stage_compute and only needs to be called once for a given sparse matrix \f$A\f$, while the stage \ref rocsparse_spic0_stage_compute can be repeatedly used with different matrices \f$A\f$ that have the same sparsity pattern.

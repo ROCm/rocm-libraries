@@ -21,9 +21,32 @@ struct BaseGemmPipelineAgBgCrCompV3
     static constexpr index_t GlobalBufferNum  = 1;
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
 
+    // The NumWarps==8 special-cased hot-loop/tail schedule below was written for
+    // wave64 512-thread blocks (gfx9xx / MFMA). On any wave32 WMMA target (gfx11,
+    // gfx12) an 8-warp block is only 256 threads -- the same thread count as a
+    // 4-warp wave64 block -- so it must follow the STANDARD (<=4-warp) schedule.
+    // Using the wave64 8-warp schedule there miscomputes has_hot_loop /
+    // tail_number and makes the intrawave RUN path execute an extra block_gemm
+    // on a non-existent K-tile, producing wrong results (ROCm/rocm-libraries#11161).
+    // Disable the 8-warp special case on gfx11/gfx12 so those blocks use the
+    // standard path.
+    // NOTE: all users of these functions are CK_TILE_DEVICE (the pipeline
+    // operator() and the grouped/persistent kernel launchers), and TailHandler's
+    // scenarios[] compiles in the same device pass, so this __gfx11__/__gfx12__
+    // guard is host/device consistent. Both are defined in core/config.hpp
+    // (__gfx12__ already covers gfx1250, gfx1200, gfx1201, gfx12_generic;
+    // __gfx11__ covers gfx1100/1101/1102/1103/1150/1151/1152/1153/gfx11_generic)
+    // -- do not use the nonexistent __GFX12__ (uppercase), which silently never
+    // activates and leaves every wave32 WMMA target on the buggy path.
+#if defined(__gfx11__) || defined(__gfx12__)
+    static constexpr bool Use8WarpSchedule = false;
+#else
+    static constexpr bool Use8WarpSchedule = (Problem::BlockGemmShape::NumWarps == 8);
+#endif
+
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {
-        if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+        if constexpr(Use8WarpSchedule)
             return num_loop > 3;
         else
             return num_loop > PrefetchStages;
@@ -32,14 +55,14 @@ struct BaseGemmPipelineAgBgCrCompV3
     CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
     {
         if(BlockHasHotloop(num_loop) || num_loop == 3)
-            if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+            if constexpr(Use8WarpSchedule)
                 return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
             else
                 return TailNumber::Odd;
         else if(num_loop == 2)
             return TailNumber::Even;
         else
-            return (Problem::BlockGemmShape::NumWarps == 8) ? TailNumber::One : TailNumber::Odd;
+            return Use8WarpSchedule ? TailNumber::One : TailNumber::Odd;
     }
 
     template <size_t I = 0, typename RunFunction>
@@ -54,7 +77,7 @@ struct BaseGemmPipelineAgBgCrCompV3
         const TailNumber tail_number_first_lane = amd_wave_read_first_lane(tail_number);
 
         constexpr auto scenarios = []() {
-            if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+            if constexpr(Use8WarpSchedule)
                 return std::array<std::pair<bool, ck_tile::TailNumber>, 5>{
                     std::make_pair(false, TailNumber::One),  // 1 loop
                     std::make_pair(false, TailNumber::Even), // 2 loop

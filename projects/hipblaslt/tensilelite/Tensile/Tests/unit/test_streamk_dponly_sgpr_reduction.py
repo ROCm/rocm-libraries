@@ -32,6 +32,7 @@ from rocisa.code import Label, Module
 from rocisa.container import sgpr, vgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
+    SAndB32,
     SBranch,
     SCmpEQU32,
     SCmpEQU64,
@@ -102,6 +103,9 @@ class _SKWriter:
     def __init__(self):
         self.labels = _StubLabels()
         self.sgprPool = _SimpleSgprPool()
+        # Hands out indices and records them, which is all a vgpr pool has to do
+        # for these methods, so the same stub serves both files.
+        self.vgprPool = _SimpleSgprPool()
         self.states = SimpleNamespace(
             unrollIdx=0,
             indexChars=["I", "J", "K", "L", "M"],
@@ -128,11 +132,23 @@ class _SKWriter:
     def isStreamKConstantsToVgprEnabled(self, kernel):
         return False
 
+    def cmpNamedArgTypeEq(self, module, value, comment=""):
+        kw_module.KernelWriter.cmpNamedArgTypeEq(self, module, value, comment)
+
     def strideRef(self, tc, idx):
         return 1
 
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
+
+    def isTdmWaveSeparated(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
+    def tdmFusePaired(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def _tdmPairedParityOrder(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
 
 
 def _sk_common_kernel(dp_only):
@@ -154,7 +170,9 @@ def _sk():
 
 # ---------------------------------------------------------------------------
 # 1. classic PAP: the AddressFlags "parallel reduction: skip PAP" compare is
-#    folded out under DP-only; the StreamKIter >= StreamKIterEnd check remains.
+#    folded out under DP-only. StreamKIter >= StreamKIterEnd lives in the
+#    papHasNextPersistentIteration seam (nested Module), not as a top-level
+#    instruction in prefetchAcrossPersistent.
 # ---------------------------------------------------------------------------
 def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
     _, dp_items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1)
@@ -162,12 +180,16 @@ def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
 
     # DP-only: no AddressFlags synchronizer compare ...
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
-    # ... but the last-tile StreamKIter/StreamKIterEnd check is still emitted.
-    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="StreamKIter")
-
     # non-DP-only: the AddressFlags compare is present (path unchanged).
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
-    assert _instruction_indices(nodp_items, SCmpGeU32, src_contains="StreamKIter")
+
+    skip_label = Label("SK_SkipNllPAP_unit", "")
+    sk3_items = _module_items(
+        StreamKTwoTileDPFirst().papHasNextPersistentIteration(
+            writer=None, kernel={}, skipLabel=skip_label
+        )
+    )
+    assert _instruction_indices(sk3_items, SCmpGeU32, src_contains="StreamKIter")
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +251,7 @@ def _strided_or_general_items(dp_only):
         "StreamKForceDPOnly": 1 if dp_only else 0,
         "ProblemType": {"SupportUserArgs": True},
     }
-    module = _sk().stridedBatchOrGeneralBatch(strided, general, kernel)
+    module = _sk().stridedBatchOrGeneralBatch(_SKWriter(), strided, general, kernel)
     return _module_items(module), general.getLabelName()
 
 
@@ -240,12 +262,14 @@ def test_general_batched_flag_check_folded_under_dp_only():
     # DP-only: no AddressFlags compare, and an unconditional branch to general.
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
     assert any(isinstance(i, SBranch) and general_name in str(i) for i in dp_items)
-    # The ArgType==3 dispatch compare is retained in both variants.
-    assert _instruction_indices(dp_items, SCmpEQU32, src_contains="ArgType")
+    # Named ArgType==3 is masked (bit 8 = TDM wave-parity) then compared.
+    assert _instruction_indices(dp_items, SAndB32, src_contains="ArgType")
+    assert _instruction_indices(dp_items, SCmpEQU32)
 
     # non-DP-only: the AddressFlags synchronizer compare is present.
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
-    assert _instruction_indices(nodp_items, SCmpEQU32, src_contains="ArgType")
+    assert _instruction_indices(nodp_items, SAndB32, src_contains="ArgType")
+    assert _instruction_indices(nodp_items, SCmpEQU32)
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +357,52 @@ def test_tdm_apply_streamk_offset_wave_separated_noop_under_dp_only():
 
     assert dp_mod.itemsSize() == 0
     assert _instruction_indices(_module_items(nodp_mod), SMulI32, src_contains="StreamKLocalStart")
+
+
+def _tdm_setup_increment_items(dp_only):
+    writer = _SKWriter()
+    tpa, tpb = _tensor_parameters(with_mx=True)
+    # Keys so TDMFuse=2 actually resolves; the increment reads the grouping table.
+    kernel = {
+        "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TDMFuse": 2,
+        "TDMInst": 3,
+        "NumWaves": 4,
+        "TDMSplit": False,
+        "UseSubtileImpl": False,
+        "enableTDMA": True,
+        "enableTDMB": True,
+        "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
+    }
+    return _module_items(
+        kwa_module.KernelWriterAssembly.tdmSetupIncrementWaveSeparated(writer, kernel, tpa, tpb)
+    )
+
+
+@pytest.mark.parametrize("dp_only", [True, False])
+def test_tdm_shared_set_increment_is_seeded_regardless_of_dp_only(dp_only):
+    """TDMFuse=2 shares one descriptor; a wave matching no arm still needs A's increment in tdmABIncs."""
+    items = _tdm_setup_increment_items(dp_only)
+    writes = [i for i in items if "tdmABIncs" in str(getattr(i, "dst", ""))]
+    assert writes, "tdmABIncs is never written"
+    first = writes[0]
+    srcs = [str(src) for src in getattr(first, "srcs", [])]
+    assert any("GlobalReadIncsA" in src for src in srcs), srcs
+    assert not any("tdmABIncs" in src for src in srcs), (
+        "the first write to tdmABIncs reads it back, so a wave taking no arm "
+        "advances the shared descriptor by whatever the register held: %s" % srcs)
+
+
+def test_tdm_streamk_offset_applier_never_writes_the_shared_set_increment():
+    writer = _SKWriter()
+    tpa, tpb = _tensor_parameters()
+    for dp_only in (0, 1):
+        items = _module_items(
+            kwa_module.KernelWriterAssembly.tdmApplyStreamKOffsetWaveSeparated(
+                writer, {"StreamKForceDPOnly": dp_only}, tpa, tpb
+            )
+        )
+        assert not [i for i in items if "tdmABIncs" in str(getattr(i, "dst", ""))]
 
 
 def test_tdm_apply_streamk_offset_subtile_noop_under_dp_only():
@@ -531,3 +601,42 @@ def test_non_dp_only_kernel_asm_retains_workspace_and_local_sgpr_symbols(
     src = _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only=False)
     for symbol in _DEAD_SGPR_SYMBOLS:
         assert symbol in src, "non-DP-only asm unexpectedly missing %s" % symbol
+
+
+# ---------------------------------------------------------------------------
+# 10. rapTileBatch: the batch of the tile at StreamKIter, with none of the
+#     side effects that would make it unsafe where ReuseAcrossPersistent
+#     needs it.
+# ---------------------------------------------------------------------------
+def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
+    """RAP asks for this before it knows whether it will run the tile here.
+
+    The reuse copy can only serve tiles in the batch its resident A was filled
+    from, so it opens by comparing the pending tile's batch against that one and
+    branching to the fill copy when they differ. The comparison therefore runs at
+    a point that may still jump away, and the two emitters that already compute
+    this batch cannot: ``skTileIndex`` resets the local-read offsets and
+    ``skIndexToWG`` claims WorkGroup0/1/2 for the tile.
+
+    So rapTileBatch repeats their arithmetic and writes only its destination. A
+    later edit that reaches for skIndexToWG instead would leave WorkGroup* set
+    for a tile the fill copy then re-derives, which no build failure would catch.
+    """
+    writer = _SKWriter()
+    kernel = _sk_common_kernel(dp_only=True)
+    kernel["StreamK"] = 3
+    kernel["WavefrontSize"] = 32
+
+    rendered = str(_sk().rapTileBatch(writer, kernel, "RAPResidentBatch"))
+
+    # StreamKIter still names the pending tile here; graWorkGroup advances it.
+    assert "s[sgprStreamKIter]" in rendered
+    # Tiles per batch, the divisor that turns a tile index into a batch.
+    assert "s[sgprNumWorkGroups0], s[sgprNumWorkGroups1]" in rendered
+    assert "s[sgprRAPResidentBatch]" in rendered
+
+    for claimed in ("sgprWorkGroup0", "sgprWorkGroup1", "sgprWorkGroup2"):
+        assert claimed not in rendered, (
+            "rapTileBatch claimed %s for a tile it may hand back to the fill copy"
+            % claimed
+        )

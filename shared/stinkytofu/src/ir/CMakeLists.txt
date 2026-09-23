@@ -3,6 +3,7 @@
 
 target_sources(stinkytofu_objs PRIVATE
     DumpStinkyModulePass.cpp
+    DumpMemTokenIRStructurePass.cpp
 )
 
 add_subdirectory(logical)

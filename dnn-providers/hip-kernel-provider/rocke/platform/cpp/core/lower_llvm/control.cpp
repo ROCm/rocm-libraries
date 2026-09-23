@@ -997,24 +997,53 @@ static void _op_tile_sync_lds_only(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
 }
 
-/* Python _op_tile_s_waitcnt: explicit s_waitcnt from attrs. */
+/* Python _op_tile_s_waitcnt: explicit s_waitcnt from attrs.
+ *
+ * gfx1250: the monolithic llvm.amdgcn.s.waitcnt is not selectable. Emit
+ * split llvm.amdgcn.s.wait.loadcnt (vmcnt) / llvm.amdgcn.s.wait.dscnt
+ * (lgkmcnt) instead, mirroring Python _op_tile_s_waitcnt (lower_llvm.py
+ * lines 4083-4099). */
 static void _op_tile_s_waitcnt(rocke_lower_t* L, const rocke_op_t* op)
 {
     if(!rocke_ll_live(L))
     {
         return;
     }
-    /* gfx1250: the split wait counters are inserted by the backend and the
-     * legacy s_waitcnt intrinsic is not selectable, so emit nothing. */
-    if(L->backend && !L->backend->emits_legacy_s_waitcnt)
-    {
-        return;
-    }
-    rocke_ll_need(L, "s.waitcnt");
     int64_t vm = -1, lk = -1, ec = -1;
     rocke_attr_get_int(&op->attrs, "vmcnt", &vm);
     rocke_attr_get_int(&op->attrs, "lgkmcnt", &lk);
     rocke_attr_get_int(&op->attrs, "expcnt", &ec);
+
+    if(L->backend && !L->backend->emits_legacy_s_waitcnt)
+    {
+        /* gfx1250: emit split wait intrinsics. Mapping:
+         *   vmcnt  -> loadcnt (drain pending global loads)
+         *             storecnt (drain pending global stores)
+         *   lgkmcnt -> dscnt  (drain pending LDS ops)
+         *              kmcnt  (drain pending scalar memory ops)
+         *   expcnt -> expcnt  (drain pending exports / VSRC writes) */
+        if(vm >= 0)
+        {
+            rocke_ll_need(L, "s.wait.loadcnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.loadcnt(i16 %d)", (int)vm);
+            rocke_ll_need(L, "s.wait.storecnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.storecnt(i16 %d)", (int)vm);
+        }
+        if(lk >= 0)
+        {
+            rocke_ll_need(L, "s.wait.dscnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.dscnt(i16 %d)", (int)lk);
+            rocke_ll_need(L, "s.wait.kmcnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.kmcnt(i16 %d)", (int)lk);
+        }
+        if(ec >= 0)
+        {
+            rocke_ll_need(L, "s.wait.expcnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.expcnt(i16 %d)", (int)ec);
+        }
+        return;
+    }
+    rocke_ll_need(L, "s.waitcnt");
     int mask = ll_backend_waitcnt(L, (int)vm, (int)ec, (int)lk);
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
 }
@@ -1041,6 +1070,46 @@ static void ll_check_u16(rocke_lower_t* L, const char* op, const char* field, in
     }
 }
 
+static void ll_require_gfx1250_llvm23(rocke_lower_t* L, const char* op)
+{
+    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires gfx1250, got %s",
+                      op,
+                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
+    }
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires LLVM flavor llvm23, got %s",
+                      op,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+}
+
+static const char*
+    ll_named_barrier_ptr(rocke_lower_t* L, const char* op, const rocke_value_t* value)
+{
+    const char* type = rocke_ll_llvm_type(L, value->type);
+    if(strcmp(type, "ptr addrspace(3)") == 0)
+        return rocke_ll_operand(L, value);
+    if(strcmp(type, "i64") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s local pointer must be i64 or ptr addrspace(3), got %s",
+                      op,
+                      type);
+    }
+    const char* ptr = rocke_ll_fresh(L, "lds_ptr");
+    rocke_ll_emitf(
+        L, "  %s = inttoptr i64 %s to ptr addrspace(3)", ptr, rocke_ll_operand(L, value));
+    return ptr;
+}
+
 static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
 {
     int64_t n = 0;
@@ -1053,6 +1122,105 @@ static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
     ll_check_u16(L, "s_wait_asynccnt", "n", n);
     rocke_ll_need(L, "s.wait.asynccnt");
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.asynccnt(i16 %lld)", (long long)n);
+}
+
+static void _op_tile_s_wait_tensorcnt(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t n = 0;
+    ll_require_gfx1250_llvm23(L, "s_wait_tensorcnt");
+    rocke_attr_get_int(&op->attrs, "n", &n);
+    ll_check_u16(L, "s_wait_tensorcnt", "n", n);
+    rocke_ll_need(L, "s.wait.tensorcnt");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.tensorcnt(i16 %lld)", (long long)n);
+}
+
+static void _op_tile_s_barrier_signal(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t barrier_type = 0;
+    ll_require_gfx1250_llvm23(L, "s_barrier_signal");
+    rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
+    if(barrier_type < 0 || (uint64_t)barrier_type > UINT32_MAX)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "s_barrier_signal barrier_type must fit unsigned i32");
+    rocke_ll_need(L, "s.barrier.signal");
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.s.barrier.signal(i32 %llu)",
+                   (unsigned long long)(uint64_t)barrier_type);
+}
+
+static void _op_tile_s_barrier_wait(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t barrier_type = 0;
+    ll_require_gfx1250_llvm23(L, "s_barrier_wait");
+    rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
+    ll_check_u16(L, "s_barrier_wait", "barrier_type", barrier_type);
+    rocke_ll_need(L, "s.barrier.wait");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.barrier.wait(i16 %lld)", (long long)barrier_type);
+}
+
+static void ll_named_barrier_count(rocke_lower_t* L,
+                                   const rocke_op_t* op,
+                                   const char* short_name,
+                                   const char* intrinsic)
+{
+    if(op->num_operands != 2)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects barrier and member_count", short_name);
+    const rocke_value_t* barrier = op->operands[0];
+    const rocke_value_t* count = op->operands[1];
+    if(!count->type || count->type->kind != ROCKE_TYPE_SCALAR
+       || count->type->scalar != ROCKE_SCALAR_I32)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s member_count must be i32", short_name);
+    ll_require_gfx1250_llvm23(L, short_name);
+    const char* ptr = ll_named_barrier_ptr(L, short_name, barrier);
+    rocke_ll_need(L, intrinsic);
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.%s(ptr addrspace(3) %s, i32 %s)",
+                   intrinsic,
+                   ptr,
+                   rocke_ll_operand(L, count));
+}
+
+static void _op_tile_s_barrier_init(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_named_barrier_count(L, op, "s_barrier_init", "s.barrier.init");
+}
+
+static void _op_tile_s_barrier_signal_var(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_named_barrier_count(L, op, "s_barrier_signal_var", "s.barrier.signal.var");
+}
+
+static void ll_named_barrier_one(rocke_lower_t* L,
+                                 const rocke_op_t* op,
+                                 const char* short_name,
+                                 const char* intrinsic)
+{
+    if(op->num_operands != 1)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects one barrier pointer", short_name);
+    ll_require_gfx1250_llvm23(L, short_name);
+    const char* ptr = ll_named_barrier_ptr(L, short_name, op->operands[0]);
+    rocke_ll_need(L, intrinsic);
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.%s(ptr addrspace(3) %s)", intrinsic, ptr);
+}
+
+static void _op_tile_s_barrier_join(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_named_barrier_one(L, op, "s_barrier_join", "s.barrier.join");
+}
+
+static void _op_tile_s_wakeup_barrier(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_named_barrier_one(L, op, "s_wakeup_barrier", "s.wakeup.barrier");
+}
+
+static void _op_tile_s_barrier_leave(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t barrier_type = 0;
+    ll_require_gfx1250_llvm23(L, "s_barrier_leave");
+    rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
+    ll_check_u16(L, "s_barrier_leave", "barrier_type", barrier_type);
+    rocke_ll_need(L, "s.barrier.leave");
+    rocke_ll_emitf(
+        L, "  call void @llvm.amdgcn.s.barrier.leave(i16 %lld)", (long long)barrier_type);
 }
 
 static void _op_tile_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
@@ -1696,6 +1864,64 @@ static void
     }
 }
 
+/* Python _op_tile_exec_and_saveexec: s_and_saveexec_b64 dst, src.
+ * exec = exec & src; dst = old exec (i64). */
+static void _op_tile_exec_and_saveexec(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_results < 1)
+        return;
+    const rocke_value_t* mask = op->operands[0];
+    const rocke_value_t* res = op->results[0];
+    rocke_ll_emitf(L,
+                   "  %s = call i64 asm sideeffect "
+                   "\"s_and_saveexec_b64 $0, $1\", \"=s,s\"(i64 %s)",
+                   res->name,
+                   rocke_ll_operand(L, mask));
+}
+
+/* Python _op_tile_exec_xor: s_xor_b64 dst, exec, src.
+ * dst = exec XOR src (complement mask). */
+static void _op_tile_exec_xor(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_results < 1)
+        return;
+    const rocke_value_t* saved = op->operands[0];
+    const rocke_value_t* res = op->results[0];
+    rocke_ll_emitf(L,
+                   "  %s = call i64 asm sideeffect "
+                   "\"s_xor_b64 $0, exec, $1\", \"=s,s\"(i64 %s)",
+                   res->name,
+                   rocke_ll_operand(L, saved));
+}
+
+/* Python _op_tile_exec_or_saveexec: s_or_saveexec_b64 dst, src.
+ * exec |= src; dst = old exec (i64). */
+static void _op_tile_exec_or_saveexec(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_results < 1)
+        return;
+    const rocke_value_t* compl_v = op->operands[0];
+    const rocke_value_t* res = op->results[0];
+    rocke_ll_emitf(L,
+                   "  %s = call i64 asm sideeffect "
+                   "\"s_or_saveexec_b64 $0, $1\", \"=s,s\"(i64 %s)",
+                   res->name,
+                   rocke_ll_operand(L, compl_v));
+}
+
+/* Python _op_tile_exec_or: s_or_b64 exec, exec, src.
+ * Restore exec to all lanes (void, side-effect only). */
+static void _op_tile_exec_or(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1)
+        return;
+    const rocke_value_t* saved = op->operands[0];
+    rocke_ll_emitf(L,
+                   "  call void asm sideeffect "
+                   "\"s_or_b64 exec, exec, $0\", \"s\"(i64 %s)",
+                   rocke_ll_operand(L, saved));
+}
+
 /* Python _op_scf_if: i1 cond branch into a fresh then-block, lower the
  * then-region, then a join block, with a deferred %IF_END placeholder.
  *
@@ -1743,6 +1969,76 @@ static void _op_scf_if(rocke_lower_t* L, const rocke_op_t* op)
     {
         const char* repl = rocke_arena_printf(&L->arena, "%%%s", end_blk->label);
         ll_block_replace(L, cur, "%IF_END", repl);
+    }
+}
+
+/* Python _op_scf_if_else: true LLVM if/else with a shared join block.
+ *
+ * Both branches converge at the same join block, which keeps s_barrier calls
+ * alive through simplifycfg (LLVM cannot remove a barrier reachable from both
+ * sides of a conditional branch).
+ *
+ * LLVM IR shape:
+ *     br i1 %cond, label %if.then, label %if.else
+ *   if.then:
+ *     [then region]
+ *     br label %if.end
+ *   if.else:
+ *     [else region]
+ *     br label %if.end
+ *   if.end:
+ *     [continuation]
+ *
+ * Mirrors Python _op_scf_if_else (lower_llvm.py lines 5276-5346).
+ */
+static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_regions < 2)
+        return;
+    const rocke_value_t* cond = op->operands[0];
+    rocke_ll_block_t* cur = rocke_ll_current(L);
+    rocke_ll_block_t* then_blk = rocke_ll_new_block(L, "if.then");
+    if(cur && then_blk)
+    {
+        /* emit conditional branch; use %IF_ELSE placeholder for the else label. */
+        rocke_ll_block_emitf(L,
+                             cur,
+                             "  br i1 %s, label %%%s, label %%IF_ELSE",
+                             rocke_ll_operand(L, cond),
+                             then_blk->label);
+        cur->terminated = true;
+    }
+    /* Lower then branch. */
+    rocke_ll_lower_region(L, op->regions[0]);
+    rocke_ll_block_t* then_last = rocke_ll_current(L);
+    /* then falls through to join; use %IF_END placeholder. */
+    if(then_last && !then_last->terminated)
+    {
+        rocke_ll_block_emitf(L, then_last, "  br label %%IF_END");
+        then_last->terminated = true;
+    }
+    /* Create else block (becomes _current). */
+    rocke_ll_block_t* else_blk = rocke_ll_new_block(L, "if.else");
+    /* Lower else branch. */
+    rocke_ll_lower_region(L, op->regions[1]);
+    rocke_ll_block_t* else_last = rocke_ll_current(L);
+    /* Create join block. */
+    rocke_ll_block_t* end_blk = rocke_ll_new_block(L, "if.end");
+    if(else_last && !else_last->terminated && end_blk)
+    {
+        rocke_ll_block_emitf(L, else_last, "  br label %%%s", end_blk->label);
+        else_last->terminated = true;
+    }
+    /* Backpatch placeholders. */
+    if(cur && else_blk)
+    {
+        const char* else_repl = rocke_arena_printf(&L->arena, "%%%s", else_blk->label);
+        ll_block_replace(L, cur, "%IF_ELSE", else_repl);
+    }
+    if(then_last && end_blk)
+    {
+        const char* end_repl = rocke_arena_printf(&L->arena, "%%%s", end_blk->label);
+        ll_block_replace(L, then_last, "%IF_END", end_repl);
     }
 }
 
@@ -1820,6 +2116,14 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_BARE, _op_tile_s_barrier_bare);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAITCNT, _op_tile_s_waitcnt);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_ASYNCCNT, _op_tile_s_wait_asynccnt);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_TENSORCNT, _op_tile_s_wait_tensorcnt);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_SIGNAL, _op_tile_s_barrier_signal);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_WAIT, _op_tile_s_barrier_wait);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_INIT, _op_tile_s_barrier_init);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_SIGNAL_VAR, _op_tile_s_barrier_signal_var);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_JOIN, _op_tile_s_barrier_join);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAKEUP_BARRIER, _op_tile_s_wakeup_barrier);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_LEAVE, _op_tile_s_barrier_leave);
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNCMARK, _op_tile_asyncmark);
     rocke_ll_set_handler(ROCKE_OP_TILE_WAIT_ASYNCMARK, _op_tile_wait_asyncmark);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_EVENT, _op_tile_s_wait_event);
@@ -1829,9 +2133,16 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_GROUP_BARRIER, _op_tile_sched_group_barrier);
 
+    /* tile.* -- exec-mask (wavelet pipeline, MFMA path) */
+    rocke_ll_set_handler(ROCKE_OP_TILE_EXEC_AND_SAVEEXEC, _op_tile_exec_and_saveexec);
+    rocke_ll_set_handler(ROCKE_OP_TILE_EXEC_XOR, _op_tile_exec_xor);
+    rocke_ll_set_handler(ROCKE_OP_TILE_EXEC_OR_SAVEEXEC, _op_tile_exec_or_saveexec);
+    rocke_ll_set_handler(ROCKE_OP_TILE_EXEC_OR, _op_tile_exec_or);
+
     /* scf.* / cf.* control flow */
     rocke_ll_set_handler(ROCKE_OP_SCF_FOR, _op_scf_for);
     rocke_ll_set_handler(ROCKE_OP_SCF_IF, _op_scf_if);
+    rocke_ll_set_handler(ROCKE_OP_SCF_IF_ELSE, _op_scf_if_else);
     rocke_ll_set_handler(ROCKE_OP_SCF_YIELD, _op_scf_yield);
     rocke_ll_set_handler(ROCKE_OP_CF_RETURN, _op_cf_return);
 }

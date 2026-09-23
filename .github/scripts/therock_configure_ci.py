@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 import sys
-from therock_matrix import subtree_to_project_map, collect_projects_to_run
+from therock_matrix import collect_projects_to_run, subtree_to_project_map
 from typing import Optional, Iterable, List
 import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
@@ -188,16 +188,28 @@ def select_build_runner(platform: str) -> str:
 
 
 def retrieve_projects(args):
+    # by default, we select standard tests
+    test_type = "standard"
+
+    # Skip CI entirely for draft PRs so repeated work-in-progress pushes don't
+    # burn full Linux/Windows build/test capacity. Checked first (before
+    # diffing modified paths) so this stays cheap. The setup job itself still
+    # runs to completion and succeeds rather than being skipped, so the
+    # existing "{platform}_projects != '[]'" gate on the build/test jobs (and
+    # the required TheRock CI Summary check) don't need any extra
+    # skip-cascade handling.
+    if args.get("is_pull_request") and args.get("is_draft"):
+        logging.info("Pull request is a draft, skipping CI")
+        return [], test_type
+
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
 
-    # by default, we select standard tests
-    test_type = "standard"
-
     # Variables to track if labels override defaults
     label_projects = []
     label_test_type = None
+    pr_labels = []
 
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
@@ -223,7 +235,7 @@ def retrieve_projects(args):
             logging.info("`skip-therockci` label was added, skipping CI")
             return [], test_type
 
-    subtrees = get_changed_path_projects(modified_paths)
+    subtrees = list(get_changed_path_projects(modified_paths))
 
     # If test: labels are present (only for pull requests), add those projects to the build/test list
     if label_projects and args.get("is_pull_request"):
@@ -239,7 +251,7 @@ def retrieve_projects(args):
                     break  # Only need one representative subtree per project
         if "test:hipblaslt" in pr_labels:
             # The generic BLAS representative may be a different subtree.
-            # Preserve the explicit hipBLASLt request for rocjitsu selection.
+            # Preserve the explicit hipBLASLt request for matrix selection.
             label_subtrees.append("projects/hipblaslt")
 
         # Combine file-based detection with label-based selection
@@ -295,6 +307,7 @@ if __name__ == "__main__":
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
     args["is_nightly"] = github_event_name == "schedule"
+    args["is_draft"] = os.environ.get("IS_DRAFT", "false").lower() == "true"
 
     args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 

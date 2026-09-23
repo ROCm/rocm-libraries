@@ -1,0 +1,307 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# gfx12 (RDNA4) transpose-load memory-safety test.
+#
+# global_load_tr has no num_records field, so unlike buffer_load nothing bounds it
+# in hardware. BoundsCheck: 3 (GuardPageBack) puts each tensor's last byte at the
+# end of mapped memory, so an over-read faults instead of landing in allocator
+# slack; NumElementsToValidate: -1 checks correctness in the same run.
+#
+# One group per (data type, operand). Operands are isolated because the process
+# aborts on the first fault -- with both using transpose loads, an A-side
+# regression hides behind B's. NT is required: only there are TLUA and TLUB both
+# true. K sizes are mostly not multiples of DepthU, to exercise the tail loop.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  BoundsCheck: 3
+
+BenchmarkProblems:
+
+  ######## bf16 -> global_load_tr_b128, operand A ########
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 1, 2, 2]
+        - DirectToVgprA: [True]
+        - DirectToVgprB: [False]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096,  16, 1, 207]   # narrow N, K tail (the reported repro)
+          - Exact: [4096,  16, 1,  87]
+          - Exact: [4096,  32, 1, 207]   # full N tile, K tail
+          - Exact: [1024, 128, 1, 129]   # full tile both dims
+          - Exact: [4096,  16, 1, 256]   # K multiple of DepthU: no tail (control)
+          - Exact: [4040,  16, 1,  87]   # A-side reproducer shapes
+          - Exact: [3992,  16, 1,  87]
+          - Exact: [4096,  32, 4, 207]   # batched, full free-dim tile
+
+  ######## bf16 -> global_load_tr_b128, operand B ########
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 1, 2, 2]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [True]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096,  16, 1, 207]
+          - Exact: [4096,  16, 1,  87]
+          - Exact: [4096,  32, 1, 207]
+          - Exact: [1024, 128, 1, 129]
+          - Exact: [4096,  16, 1, 256]
+          - Exact: [4096,  32, 4, 207]   # batched, full free-dim tile
+
+  ######## fp16 -> global_load_tr_b128, operand A ########
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 1, 2, 2]
+        - DirectToVgprA: [True]
+        - DirectToVgprB: [False]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096,  16, 1, 207]
+          - Exact: [4096,  16, 1,  87]
+          - Exact: [4096,  32, 1, 207]
+          - Exact: [1024, 128, 1, 129]
+          - Exact: [4096,  16, 1, 256]
+          - Exact: [4040,  16, 1,  87]   # A-side reproducer shapes
+          - Exact: [3992,  16, 1,  87]
+          - Exact: [4096,  32, 4, 207]   # batched, full free-dim tile
+
+  ######## fp16 -> global_load_tr_b128, operand B ########
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 1, 2, 2]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [True]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096,  16, 1, 207]
+          - Exact: [4096,  16, 1,  87]
+          - Exact: [4096,  32, 1, 207]
+          - Exact: [1024, 128, 1, 129]
+          - Exact: [4096,  16, 1, 256]
+          - Exact: [4096,  32, 4, 207]   # batched, full free-dim tile
+
+  ######## fp8 -> global_load_tr_b64, operand A ########
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: S
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 1, 2, 2]
+        - DirectToVgprA: [True]
+        - DirectToVgprB: [False]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096,  16, 1, 207]
+          - Exact: [4096,  16, 1,  87]
+          - Exact: [4096,  32, 1, 207]
+          - Exact: [1024, 128, 1, 129]
+          - Exact: [4096,  16, 1, 256]
+          - Exact: [4040,  16, 1,  87]   # A-side reproducer shapes
+          - Exact: [3992,  16, 1,  87]
+          - Exact: [4096,  32, 4, 207]   # batched, full free-dim tile
+
+  ######## fp8 -> global_load_tr_b64, operand B ########
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: S
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 1, 2, 2]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [True]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096,  16, 1, 207]
+          - Exact: [4096,  16, 1,  87]
+          - Exact: [4096,  32, 1, 207]
+          - Exact: [1024, 128, 1, 129]
+          - Exact: [4096,  16, 1, 256]
+          - Exact: [4096,  32, 4, 207]   # batched, full free-dim tile
+

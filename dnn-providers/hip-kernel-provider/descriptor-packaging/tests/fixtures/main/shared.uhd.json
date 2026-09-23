@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "uhd-shared",
+  "name": "Shared static-order heuristic",
+  "kind": "native",
+  "payload": "hipkernel.shared.score"
+}

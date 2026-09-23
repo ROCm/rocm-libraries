@@ -60,12 +60,15 @@ else()
     message(STATUS "hipDNN: SDPA support disabled")
 endif()
 
-# Gates the generic kernel ingestor build-time logic (dynamic engine loading,
-# kpack bundling/packaging, dynamic engine registration). See RFC 0017
-# (docs/rfcs/0017_UniversalKernelDescriptor.md). No gated code exists yet;
-# this option is declared ahead of it so TheRock's forwarded
-# -DHIPDNN_ENABLE_KERNEL_INGESTOR=<value> (FLAGS.cmake) has a receiver.
-option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
+# Gates the generic kernel ingestor (RFC 0017: Universal Kernel Descriptors), set by
+# TheRock's THEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor (RFC 0017)" OFF)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    message(STATUS "hipDNN: kernel ingestor enabled")
+    add_compile_definitions(HIPDNN_ENABLE_KERNEL_INGESTOR)
+else()
+    message(STATUS "hipDNN: kernel ingestor disabled")
+endif()
 
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
 # tests. The shim sources always exist in the tree; this option controls only
@@ -224,6 +227,7 @@ include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
 include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
+include(cmake/ResourceCompiler.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
@@ -339,6 +343,15 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
+        # hipdnn_frontend_dynamic_load_tests is the only object here that maps
+        # DynamicBackendLibrary.hpp's resolveSymbol and its resolveBackendSymbol<>
+        # instantiations; dropping it under-reports coverage for that header.
+        # resolveSymbol's null-handle early return stays uncovered regardless --
+        # nothing reaches it while the backend loads -- and the never-run static-check
+        # translation unit's inline instantiations are COMDAT-folded onto counters the
+        # executed tests already increment.
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_dynamic_load_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object

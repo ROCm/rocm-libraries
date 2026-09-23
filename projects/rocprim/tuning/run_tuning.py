@@ -65,7 +65,22 @@ def import_module_from_file(file_path: str, module_name: str) -> Optional[Module
 def get_available_algorithms() -> List[str]:
     """Return list of supported tuning algorithms."""
     return [
-        "device_merge"
+        "device_merge",
+        "device_partition_flag",
+        "device_partition_predicate",
+        "device_partition_three_way",
+        "device_partition_two_way_flag",
+        "device_partition_two_way_predicate",
+        "device_select_predicated_flag",
+        "device_select_unique_by_key",
+        "device_select_flag",
+        "device_select_predicate",
+        "device_select_unique",
+        "device_scan",
+        "device_scan_by_key"
+        "device_reduce",
+        "device_segmented_reduce",
+        "device_reduce_by_key"
         # Add new algorithms here
     ]
 

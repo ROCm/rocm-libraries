@@ -375,6 +375,30 @@ TEST(TestKnobStringConstraint, ConstraintWithValidValues)
     EXPECT_NE(str.find("\"option3\""), std::string::npos);
 }
 
+TEST(TestKnobIntConstraint, KindReportsInt)
+{
+    const hipdnn_frontend::IntConstraint constraint(0, 100, 1);
+    EXPECT_EQ(constraint.kind(), hipdnn_frontend::ConstraintKind::INT);
+}
+
+TEST(TestKnobFloatConstraint, KindReportsFloat)
+{
+    const hipdnn_frontend::FloatConstraint constraint(0.0, 1.0);
+    EXPECT_EQ(constraint.kind(), hipdnn_frontend::ConstraintKind::FLOAT);
+}
+
+TEST(TestKnobStringConstraint, KindReportsString)
+{
+    const hipdnn_frontend::StringConstraint constraint(100);
+    EXPECT_EQ(constraint.kind(), hipdnn_frontend::ConstraintKind::STRING);
+}
+
+TEST(TestEmptyConstraint, KindReportsEmpty)
+{
+    const hipdnn_frontend::EmptyConstraint constraint;
+    EXPECT_EQ(constraint.kind(), hipdnn_frontend::ConstraintKind::EMPTY);
+}
+
 // ============================================================================
 // Validation Tests
 // ============================================================================

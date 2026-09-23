@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,8 +48,10 @@ namespace fs = std::experimental::filesystem;
 
 #ifdef ROCSOLVER_CLIENTS_TEST
 #define ROCSOLVER_TEST_CHECK(T, max_error, tol) ASSERT_LE((max_error), (tol)*get_epsilon<T>())
+#define ROCSOLVER_TEST_CHECK2(err2, err1) ASSERT_LE((err2), (err1))
 #else // ROCSOLVER_CLIENTS_BENCH
 #define ROCSOLVER_TEST_CHECK(T, max_error, tol)
+#define ROCSOLVER_TEST_CHECK2(err2, err1)
 #endif
 
 #define ROCSOLVER_FORMAT_HASH(h) fmt::format("0x{:x}", h)
@@ -60,6 +62,7 @@ typedef enum rocsolver_inform_type_
     inform_invalid_size,
     inform_invalid_args,
     inform_mem_query,
+    inform_not_implemented,
 } rocsolver_inform_type;
 
 inline void rocsolver_bench_inform(rocsolver_inform_type it, size_t arg = 0)
@@ -70,6 +73,7 @@ inline void rocsolver_bench_inform(rocsolver_inform_type it, size_t arg = 0)
     case inform_invalid_size: fmt::print("Invalid size arguments...\n"); break;
     case inform_invalid_args: fmt::print("Invalid value in arguments...\n"); break;
     case inform_mem_query: fmt::print("{} bytes of device memory are required...\n", arg); break;
+    case inform_not_implemented: fmt::print("Method returned not implemented...\n"); break;
     }
     fmt::print("No performance data to collect.\n");
     fmt::print("No computations to verify.\n");

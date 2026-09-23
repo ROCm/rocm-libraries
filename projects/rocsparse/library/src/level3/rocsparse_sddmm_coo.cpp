@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -124,18 +124,25 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
                                     const T*             alpha,
                                     const A*             A_val,
                                     int64_t              A_ld,
+                                    int64_t              batch_stride_A,
                                     const B*             B_val,
                                     int64_t              B_ld,
+                                    int64_t              batch_stride_B,
                                     const T*             beta,
                                     const I*             C_row_data,
+                                    int64_t              offsets_batch_stride_C,
                                     const J*             C_col_data,
+                                    int64_t              indices_batch_stride_C,
                                     C*                   C_val_data,
+                                    int64_t              values_batch_stride_C,
+                                    int64_t              batch_count,
                                     rocsparse_index_base C_base,
                                     rocsparse_mat_descr  C_descr,
                                     rocsparse_sddmm_alg  alg,
                                     void*                buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
@@ -148,6 +155,12 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
             if(buffer == nullptr)
             {
                 return rocsparse_status_invalid_pointer;
+            }
+
+            // Batched computation is not supported for the dense algorithm.
+            if(batch_count > 1)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
 
             char* ptr   = reinterpret_cast<char*>(buffer);
@@ -236,7 +249,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
 
 #define LAUNCH(K_)                                                                       \
     int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
-    dim3    blocks(num_blocks_x);                                                        \
+    dim3    blocks(num_blocks_x, get_batch_grid_size(batch_count));                      \
     dim3    threads(NB);                                                                 \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_coox_kernel<NB, K_, false, T>), \
                                        blocks,                                           \
@@ -251,15 +264,21 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
                                        n,                                                \
                                        k,                                                \
                                        nnz,                                              \
+                                       batch_count,                                      \
                                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha), \
                                        A_val,                                            \
                                        A_ld,                                             \
+                                       batch_stride_A,                                   \
                                        B_val,                                            \
                                        B_ld,                                             \
+                                       batch_stride_B,                                   \
                                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),  \
                                        C_val_data,                                       \
+                                       values_batch_stride_C,                            \
                                        C_row_data,                                       \
+                                       offsets_batch_stride_C,                           \
                                        C_col_data,                                       \
+                                       indices_batch_stride_C,                           \
                                        C_base,                                           \
                                        handle->pointer_mode == rocsparse_pointer_mode_host)
 

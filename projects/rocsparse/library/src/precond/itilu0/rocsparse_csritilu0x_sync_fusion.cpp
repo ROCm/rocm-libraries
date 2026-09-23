@@ -30,6 +30,10 @@
 #include "rocsparse_csritilu0x_driver.hpp"
 #include <iomanip>
 
+// The sync_split_fusion algorithm is deprecated and no longer exercised by the
+// test suite; exclude its implementation from coverage reporting.
+// LCOV_EXCL_START
+
 namespace rocsparse
 {
     template <int BLOCKSIZE, int WFSIZE, typename T, typename I, typename J>
@@ -1218,3 +1222,5 @@ INSTANTIATE(float, rocsparse_int);
 INSTANTIATE(double, rocsparse_int);
 
 #undef INSTANTIATE
+
+// LCOV_EXCL_STOP

@@ -63,11 +63,17 @@ rocblas_status rocblas_internal_symv_hemv_launcher_64(rocblas_handle handle,
         auto    y_ptr       = adjust_ptr_batch(y, b_base, stridey);
         auto    A_ptr       = adjust_ptr_batch(A, b_base, strideA);
         int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
+        auto    alpha_ptr   = rocblas_pointer_mode_device == handle->pointer_mode
+                                  ? alpha + b_base * stride_alpha
+                                  : alpha;
+        auto    beta_ptr    = rocblas_pointer_mode_device == handle->pointer_mode
+                                  ? beta + b_base * stride_beta
+                                  : beta;
 
         rocblas_status status = rocblas_internal_symv_hemv_launcher<IS_HEMV>(handle,
                                                                              uplo,
                                                                              (rocblas_int)n_64,
-                                                                             alpha,
+                                                                             alpha_ptr,
                                                                              stride_alpha,
                                                                              A_ptr,
                                                                              offsetA,
@@ -77,7 +83,7 @@ rocblas_status rocblas_internal_symv_hemv_launcher_64(rocblas_handle handle,
                                                                              offsetx,
                                                                              incx,
                                                                              stridex,
-                                                                             beta,
+                                                                             beta_ptr,
                                                                              stride_beta,
                                                                              y_ptr,
                                                                              offsety,

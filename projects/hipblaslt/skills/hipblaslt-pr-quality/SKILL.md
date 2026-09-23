@@ -120,6 +120,26 @@ on the merge-target still accepts it.
 Changes to the high-coupling files above need **≥ 2 hipBLASLt code-owner approvals** after the
 local team review (stricter than a generic base approval count).
 
+### Adds — prose and style for written artifacts
+When writing the PR description, review comments, handoffs, or design notes, apply the style guide in
+[`prose-style-context.md`](prose-style-context.md) (same directory). It sets the reader model,
+length limits, the sentence-level gate, warning-word list, and the evidence/scope discipline for
+prose. It governs how findings are written; it never relaxes a base or overlay MUST-rule.
+
+### Adds — recommend a description rewrite (author and review)
+Both **Author assist** and **Review assist** must produce a concrete recommended PR-description
+rewrite, not just a critique.
+- **Author:** after drafting the description from the base template, run the draft through the
+  `prose-style-context.md` sentence-level gate and final acceptance test, then present the revised
+  description as the recommendation.
+- **Review:** read the PR's current description, check it against the same gate, and when it fails
+  any check (undefined term, vague-improvement or hand-waving word, missing evidence/scope,
+  repetition or length that obscures the change, or a heading that cannot be answered from the
+  body) output a specific rewrite the author can paste in. Cite which gate items failed.
+- The rewrite is **advisory**. Per base operating principle 1, never post it to GitHub or edit the
+  PR without explicit human approval; present it in the chat/`BLOCKING`-items output only. Preserve
+  every repository-required heading and the JIRA/issue line.
+
 ### Adds — `W-TUNE`
 Component-specific waiver for tuning-only PRs, on top of the base waiver set.
 

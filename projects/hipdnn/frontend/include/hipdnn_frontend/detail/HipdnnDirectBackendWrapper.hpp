@@ -208,6 +208,14 @@ public:
             handle, numPluginPaths, pluginPaths, maxStringLen);
     }
 
+    hipdnnStatus_t getEngineNameByIdExt(hipdnnHandle_t handle,
+                                        int64_t engineId,
+                                        char* engineName,
+                                        size_t* engineNameLen) override
+    {
+        return hipdnnGetEngineNameById_ext(handle, engineId, engineName, engineNameLen);
+    }
+
     hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t handle, size_t* numPolicies) override
     {
         return hipdnnGetHeuristicPolicyCount_ext(handle, numPolicies);
@@ -254,6 +262,17 @@ public:
     hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* level) override
     {
         return hipdnnBackendGetGlobalLogLevel_ext(level);
+    }
+
+    hipdnnStatus_t writeEngineRankingResultsExt(hipdnnHandle_t handle,
+                                                hipdnnBackendDescriptor_t graphDescriptor,
+                                                const int64_t* engineIdsInRankOrder,
+                                                size_t engineIdCount,
+                                                hipdnnAutotuneCacheWriteOutcome_ext_t* outcome
+                                                = nullptr) override
+    {
+        return hipdnnBackendWriteEngineRankingResults_ext(
+            handle, graphDescriptor, engineIdsInRankOrder, engineIdCount, outcome);
     }
 
 private:

@@ -33,7 +33,6 @@
 #include <miopen/op_kernel_args.hpp>
 
 #include <array>
-#include <cassert>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -241,8 +240,16 @@ struct HIPOCKernel
                 std::vector<size_t> global_dims)
         : program(p), name(kernel_name)
     {
-        assert(!local_dims.empty() && local_dims.size() <= 3);
-        assert(!global_dims.empty() && global_dims.size() <= 3);
+        if(local_dims.empty() || local_dims.size() > ldims.size())
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Invalid local work dimensions: size " +
+                             std::to_string(local_dims.size()) + " (expected 1.." +
+                             std::to_string(ldims.size()) + ").");
+        if(global_dims.empty() || global_dims.size() > gdims.size())
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Invalid global work dimensions: size " +
+                             std::to_string(global_dims.size()) + " (expected 1.." +
+                             std::to_string(gdims.size()) + ").");
         ldims.fill(1);
         gdims.fill(1);
         std::copy(local_dims.begin(), local_dims.end(), ldims.begin());
