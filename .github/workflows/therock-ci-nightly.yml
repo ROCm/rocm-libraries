@@ -52,7 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: ${{ inputs.therock_ref_override || '90d12f3a151c4b3ae22e30417676ab7fe84a1d14' }}
+          ref: ${{ inputs.therock_ref_override || '5c677058a44d6cc4a06587857cf8fca3c9abc925' }}
 
       - name: Log locked TheRock ref
         run: |
