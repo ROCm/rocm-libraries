@@ -24,8 +24,8 @@ without inventing a replacement recipe. Compilation does not benchmark recipes.
 | --- | --- | --- |
 | One-solution builder | Implemented | One YAML recipe and target produce a complete kernel/helper bundle through `Tensile.SingleSolution` and the existing validators/compiler |
 | Ranked recipe selector | Implemented | Supplied candidates and problem facts produce one validated recipe or rejection reasons; `Tensile.JitGemm` calls the builder without running a model |
-| Generic JIT interface and TensileLite provider | TBD in a later layer | Opaque `Request` and configured `Backend` produce an owned `Solution`; provider settings stay outside the common types |
-| GEMM request and execution adapters | TBD in a later layer | `makeGemmRequest` captures existing descriptors; `getGemmAlgo` connects a compiled GEMM solution to C/C++ execution |
+| Generic JIT interface and TensileLite provider | Implemented | Opaque `Request` and configured `Backend` produce an owned `Solution`; provider settings stay outside the common types |
+| GEMM request and execution adapters | Implemented | `makeGemmRequest` captures existing descriptors; `getGemmAlgo` connects a compiled GEMM solution to C/C++ execution |
 | Public sample | TBD in a later layer | Application buffers and descriptors pass through the generic API using an explicit recipe and checked C/C++ execution |
 | Provider prediction and benchmark | TBD in a later layer | Origami ranks matrix instructions, reduction depths and cache hints; a private plan is consumed immediately by the selector/builder before benchmark checks and timing |
 
@@ -37,13 +37,13 @@ they are not available behavior in the current API.
 | Planned component | Input and output | Intended interaction |
 | --- | --- | --- |
 | Searchable `JustInTime` solution library and equality-first priority | A problem description selects existing tuned equality results before JIT is considered | The library would prefer a matching tuned result, then search compatible JIT entries before requesting another compilation |
-| Separate planning and prediction-input protocol | Operation, target and specialization facts produce a structured compilation plan | The library could inspect the plan and check for existing code before invoking a backend compiler; today's provider combines these steps |
+| Separate planning and prediction-input protocol | Operation, target and specialization facts produce a structured compilation plan | The library could inspect the plan and check for existing code before invoking a backend compiler; the initial provider design combines these steps |
 | Persistent code cache | A plan identity and compatibility information locate a stored bundle | A cache hit would supply the bundle to the loader; a miss would compile and then store it |
-| Exact epilogue specialization | Concrete output operations, such as bias and activation, become specialization inputs | Planning would include these operations when selecting or compiling code; the initial model omits their cost |
+| Exact epilogue specialization | Concrete output operations, such as bias and activation, become specialization inputs | Planning would include these operations when selecting or compiling code; the initial prediction model does not account for their cost |
 | Tuning blueprints | Stored knowledge supplies choices that the performance model does not predict | A provider would combine those choices with predicted parameters before validation |
 | Additional operation adapters and providers | An operation-specific description becomes a generic request and an executable result | Attention is a possible later operation; no Attention request factory or provider is implemented |
 
-The backend interface is private and compiled into the library. A stable plugin
+The backend interface is designed as a private interface compiled into the library. A stable plugin
 binary interface and dynamic provider discovery are also TBD. Keeping provider
 options and tuning schemas out of the public common types leaves room to add
 these components without turning every request into a TensileLite recipe.
@@ -53,3 +53,4 @@ these components without turning every request into a TensileLite recipe.
 The [single-solution guide](single-solution.md) explains how to compile a supplied
 recipe and inspect its complete bundle.
 Its ranked-selection section describes candidate validation and rejection diagnostics.
+The [JIT API guide](../../docs/jit.md) explains backend configuration, request ownership, GEMM adapters and execution lifetime.

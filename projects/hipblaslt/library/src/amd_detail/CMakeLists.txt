@@ -17,15 +17,9 @@ if(HIPBLASLT_ENABLE_JIT)
     target_link_libraries(hipblaslt PRIVATE ZLIB::ZLIB)
     target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
     target_sources(hipblaslt PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp")
-    add_executable(hipblaslt-jit-gemm
-        "${PROJECT_SOURCE_DIR}/clients/samples/29_hipblaslt_jit_gemm/sample_hipblaslt_jit_gemm.cpp")
-    target_link_libraries(hipblaslt-jit-gemm PRIVATE roc::hipblaslt hip::device)
-    target_compile_features(hipblaslt-jit-gemm PRIVATE cxx_std_17)
-    set_target_properties(hipblaslt-jit-gemm PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
 endif()
 
 if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
@@ -61,7 +55,14 @@ if(HIPBLASLT_BUILD_TESTING AND NOT HIPBLASLT_ENABLE_JIT)
     target_link_libraries(hipblaslt-jit-disabled-test PRIVATE roc::hipblaslt hip::host)
 endif()
 
-foreach(jit_test IN ITEMS backend process artifacts disabled)
+if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
+    add_executable(hipblaslt-jit-api-test
+        "${PROJECT_SOURCE_DIR}/clients/tests/jit/public_gemm_test.cpp")
+    target_compile_features(hipblaslt-jit-api-test PRIVATE cxx_std_17)
+    target_link_libraries(hipblaslt-jit-api-test PRIVATE roc::hipblaslt hip::device)
+endif()
+
+foreach(jit_test IN ITEMS api backend process artifacts disabled)
     if(TARGET hipblaslt-jit-${jit_test}-test)
         set_target_properties(hipblaslt-jit-${jit_test}-test PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")

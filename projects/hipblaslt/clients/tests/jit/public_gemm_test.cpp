@@ -42,6 +42,7 @@ namespace
     int         M = 256, N = 128, K = 128;
     bool        transposeB             = false;
     bool        outputAmax             = false;
+    bool        zeroAlphaInputs        = false;
     bool        allowWorkspaceFallback = false;
     std::string secondConfig, secondPython;
     bool        expectHelperFailure = false;
@@ -54,7 +55,7 @@ namespace
         hipStream_t         stream      = nullptr;
         __half *            a = nullptr, *b = nullptr, *c = nullptr, *d = nullptr;
         void*               workspace = nullptr;
-        float               alpha = 1.25f, beta = 0.5f;
+        float               alpha = zeroAlphaInputs ? 0.0f : 1.25f, beta = 0.5f;
         float*              amax         = nullptr;
         float               expectedAmax = 0;
         std::vector<__half> hostA, hostB, hostC, hostD;
@@ -290,9 +291,9 @@ namespace
             auto                       status = experimental::jit::makeGemmRequest(p.handle,
                                                              p.desc,
                                                              &p.alpha,
-                                                             p.a,
+                                                             zeroAlphaInputs ? nullptr : p.a,
                                                              p.aLayout,
-                                                             p.b,
+                                                             zeroAlphaInputs ? nullptr : p.b,
                                                              p.bLayout,
                                                              &p.beta,
                                                              p.c,
@@ -327,9 +328,9 @@ namespace
             return hipblasLtMatmul(p.handle,
                                    p.desc,
                                    &p.alpha,
-                                   p.a,
+                                   zeroAlphaInputs ? nullptr : p.a,
                                    p.aLayout,
-                                   p.b,
+                                   zeroAlphaInputs ? nullptr : p.b,
                                    p.bLayout,
                                    &p.beta,
                                    p.c,
@@ -372,9 +373,9 @@ namespace
         Gemm   gemm(p.handle,
                   p.desc,
                   &p.alpha,
-                  p.a,
+                  zeroAlphaInputs ? nullptr : p.a,
                   p.aLayout,
-                  p.b,
+                  zeroAlphaInputs ? nullptr : p.b,
                   p.bLayout,
                   &p.beta,
                   p.c,
@@ -387,7 +388,13 @@ namespace
         require(gemm.isAlgoSupported(invalid, required) != HIPBLAS_STATUS_SUCCESS,
                 "Unknown JIT algorithm passed extension support");
         gemm.setMaxWorkspaceBytes(workspaceBytes);
-        check(gemm.initialize(algo, p.workspace, false, p.stream), "C++ Gemm initialize");
+        GemmTuning noOverrides;
+        // Only non-atomic Stream-K requires binding its flag region to a stream.
+        // Other bundles can initialize on the default stream and run on p.stream.
+        check(allowWorkspaceFallback
+                  ? gemm.initialize(algo, noOverrides, p.workspace, true, p.stream)
+                  : gemm.initialize(algo, noOverrides, p.workspace),
+              "C++ Gemm initialize");
         require(!gemm.getKernelName().empty() && !gemm.getSolutionName().empty(),
                 "C++ Gemm lost JIT names");
         for(int run = 0; run < 2; ++run)
@@ -533,6 +540,8 @@ int main(int argc, char** argv)
                 secondPython = value;
             else if(key == "--expect-helper-failure")
                 expectHelperFailure = integer(value) != 0;
+            else if(key == "--alpha-zero")
+                zeroAlphaInputs = integer(value) != 0;
             else if(key == "--amax")
                 outputAmax = integer(value) != 0;
             else if(key == "--trans-b")

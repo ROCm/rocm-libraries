@@ -3,20 +3,20 @@
 The installed `hipblaslt/hipblaslt-jit.hpp` exposes a backend-neutral request API.
 `getJitAlgo` accepts an operation request and configured backend and returns an
 owned solution bundle. The bundle includes the kernels and helpers needed for
-that operation. This sample requests GEMM; no attention provider is implemented.
+that operation. GEMM is implemented; an attention request adapter and provider
+remain future work.
 
-The sample uses the following public interfaces:
+An application configures the TensileLite provider through
+`jit::tensilelite::createBackend`, using options from
+`hipblaslt/hipblaslt-jit-tensilelite.hpp`. Python, compiler, recipe and output
+paths belong to this provider. It then uses `jit::makeGemmRequest` to capture
+existing GEMM descriptors and host scalars, and `jit::getJitAlgo` to compile on
+the selected device. Finally, `jit::getGemmAlgo` adapts the solution to the
+algorithm accepted by `hipblasLtMatmul` and `hipblaslt_ext::Gemm`.
 
-1. `jit::tensilelite::createBackend` configures the TensileLite provider using
-   options from `hipblaslt/hipblaslt-jit-tensilelite.hpp`. Python, compiler, recipe
-   and output paths belong to this provider.
-2. `jit::makeGemmRequest` captures the existing GEMM descriptors and host scalars.
-3. `jit::getJitAlgo` compiles a solution on the current device.
-4. `jit::getGemmAlgo` adapts that GEMM solution to an ordinary hipBLASLt algorithm.
-5. `hipblasLtMatmul` or `hipblaslt_ext::Gemm` checks workspace and executes it.
-
-Compilation and support checks finish before any GPU work is submitted. The
-sample owns its application buffers and calls `hipblasLtMatmul` and `Gemm`.
+The application owns its buffers and workspace. The request owns descriptor
+values and host scalars; it does not take ownership of device pointers.
+Compilation and support checks finish before GPU work is submitted.
 
 ## Build
 
@@ -31,36 +31,19 @@ Using an existing configured build and Python environment:
 ```bash
 cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
   -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_ENABLE_HOST=ON \
+  -DHIPBLASLT_BUILD_TESTING=ON \
   -DHIPBLASLT_ENABLE_DEVICE=OFF -DGPU_TARGETS=gfx950 \
   -DPython_EXECUTABLE="$project_python" -DPython3_EXECUTABLE="$project_python"
-cmake --build "$project_build" --target _rocisa hipblaslt-jit-gemm --parallel
+cmake --build "$project_build" --target _rocisa hipblaslt-jit-api-test --parallel
 export PYTHONPATH="$project_build/tensilelite/rocisa:$project_build/tensilelite:$project_root/projects/hipblaslt/tensilelite"
 ```
 
 Use the compiler and target appropriate for the local device. Generated
 bundles do not depend on a prebuilt hipBLASLt device library.
 
-## Run the sample
-
-```bash
-fixtures="$project_root/projects/hipblaslt/tensilelite/Tensile/Tests/unit/test_data"
-"$project_build/clients/staging/hipblaslt-jit-gemm" \
-  "$project_python" "$project_root/projects/hipblaslt/tensilelite" \
-  "$PYTHONPATH" "$fixtures/single_solution_splitk.yaml" /tmp/jit-gemm-splitk \
-  gfx950:sramecc+:xnack- /opt/rocm/bin/amdclang++ --k 512
-```
-
-The sample exercises both execution APIs. It defaults to M=256, N=128,
-K=128, column-major NN FP16 input/output, FP32 accumulation, alpha=1.25,
-and beta=0.5. `--m`, `--n`, `--k`, `--trans-b`, and `--amax` select the test
-problem. The selected YAML must support that problem.
-
-The output path must not exist, and its parent directory must exist. Generator
-diagnostics are retained in `<output>.log`, with process scratch files in
-`<output>.cwd`. The sample checks every output against an independently
-computed CPU reference, poisons output storage before each run, and exercises
-copied algorithms, changed inputs, workspace errors, invalid tokens, device
-identity, and retained algorithms after another bundle is loaded.
+The `jit` CMake preset enables this feature for a new configuration. The
+commands above show how to enable it in an existing build. The shared workflow
+runs the public API regression executable and an independent test backend.
 
 ## Algorithm lifetime and validation
 
@@ -84,15 +67,19 @@ owns its datatype, instruction and scale-layout restrictions. The library
 propagates provider support failures, including a mismatch between the supplied
 physical MX scale layout and the compiled solution.
 
-`test_jit_helper_failures.py` removes helper modules or symbols from a
+`../clients/tests/jit/test_helper_failures.py` removes helper modules or symbols from a
 valid split-K bundle, checks that C/extension paths leave D and workspace
 untouched, and verifies that failed reinitialization preserves the previous
-extension algorithm. Explicit recipes use TensileLite's target and solution
+extension algorithm. `../clients/tests/jit/test_bundle_failures.py` checks malformed
+envelopes, missing code, mismatched solution identity and unsupported problems
+through the same public API. Both scripts run in the shared JIT workflow.
+
+Explicit recipes use TensileLite's target and solution
 validators. Output-amax currently requires one batch, GlobalSplitU=1 and
 StreamK=0. Generation never benchmarks recipes or substitutes another recipe
 when the supplied one fails.
 
-The [single-solution documentation](../../../tensilelite/docs/single-solution.md)
+The [single-solution documentation](../tensilelite/docs/single-solution.md)
 describes the recipe, bundle, and Python builder contracts.
 
 The private provider loader reads `loader.bin`, a bounded, versioned envelope
@@ -104,3 +91,6 @@ Such a library could index solutions by problem description and look up compatib
 code before requesting generation. The current API retains explicitly selected
 algorithms in one process; it does not search a JIT collection or reuse code from
 an earlier program invocation.
+
+
+The [component roadmap](../tensilelite/docs/jit-roadmap.md) describes the complete flow and remaining planning, search and cache work.
