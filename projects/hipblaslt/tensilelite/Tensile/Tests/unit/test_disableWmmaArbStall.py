@@ -59,16 +59,17 @@ def _caps_for(arch):
     return _ARCH_CAPS[arch]
 
 
-def _emit(archCaps):
+def _emit(archCaps, disableXdlArbStall=True):
     """Run disableWmmaArbStall against a stub holding only the arch caps.
 
-    The method reads exactly one thing -- self.states.archCaps
-    ["WmmaArbStallBitOffset"] -- so an unbound call on a SimpleNamespace is a
-    complete stand-in for a KernelWriterAssembly, without the kernel and
-    toolchain setup a real instance needs.
+    The method reads exactly two things -- self.states.archCaps
+    ["WmmaArbStallBitOffset"] and kernel["DisableXdlArbStall"] -- so an unbound
+    call on a SimpleNamespace is a complete stand-in for a KernelWriterAssembly,
+    without the kernel and toolchain setup a real instance needs.
     """
     stub = SimpleNamespace(states=SimpleNamespace(archCaps=archCaps))
-    return KernelWriterAssembly.disableWmmaArbStall(stub)
+    kernel = {"DisableXdlArbStall": disableXdlArbStall}
+    return KernelWriterAssembly.disableWmmaArbStall(stub, kernel)
 
 
 def _emitted_bits(src):
@@ -105,6 +106,13 @@ def test_emits_no_other_bit(arch, bit):
 def test_one_instruction_is_emitted(arch, bit):
     """The s_setreg is the whole module -- no wait or restore around it."""
     assert len(_emit(_caps_for(arch)).items()) == 1
+
+
+@pytest.mark.parametrize("arch, bit", ARCHS)
+def test_emits_nothing_when_the_kernel_opts_out(arch, bit):
+    """The gate is on the kernel, not the arch, so an arch that declares the bit
+    still emits nothing here. This is the sparse path."""
+    assert len(_emit(_caps_for(arch), disableXdlArbStall=False).items()) == 0
 
 
 def test_emits_nothing_where_the_field_is_absent():

@@ -2761,10 +2761,10 @@ class KernelWriterAssembly(KernelWriter):
         module.add(label_nonEarlyStop)
     return module
 
-  def disableWmmaArbStall(self) -> Module:
+  def disableWmmaArbStall(self, kernel) -> Module:
     mod = Module()
     bitPos = self.states.archCaps["WmmaArbStallBitOffset"]
-    if bitPos >= 0:
+    if bitPos >= 0 and kernel["DisableXdlArbStall"]:
       mod.add(SSetRegIMM32B32(HWRegContainer(reg="26", value=[bitPos, 1]), src=1, comment="Disable WMMA arb stall"))
     return mod
 

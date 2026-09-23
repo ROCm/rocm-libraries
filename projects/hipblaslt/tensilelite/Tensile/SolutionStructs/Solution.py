@@ -3414,6 +3414,10 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
+    # Let WMMAs issue back to back (SCHED_MODE DISABLE_XDL_ARB_STALL).
+    def evaluateDisableXdlArbStall() -> bool:
+      return not state["ProblemType"]["Sparse"]
+
     # Track VALU source operands on VA_VDST (src-operand WAR hazard).
     def evaluateEnableESM2TrackValuVsrc() -> bool:
       return True
@@ -3421,6 +3425,7 @@ class Solution(collections.abc.Mapping):
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
     state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
+    state["DisableXdlArbStall"] = evaluateDisableXdlArbStall()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
