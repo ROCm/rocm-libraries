@@ -14,6 +14,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 
 * `abstol` in SYEVJ/HEEVJ, GESVDJ, and SYGVJ/HEGVJ is now a relative tolerance: convergence requires every off-diagonal element to satisfy `|a_ij| <= abstol * sqrt(|a_ii| * |a_jj|)`, rather than the off-diagonal norm to fall below a multiple of the norm of the whole matrix. Callers that tuned `abstol` may see a different number of sweeps.
+* SYEVJ/HEEVJ for `n <= 58` can now return `info = 1`. It previously returned 0 unconditionally, so callers that treated a nonzero `info` as unreachable for these sizes should be rechecked. SYEVDJ/HEEVDJ and SYGVDJ/HEGVDJ inherit this through their Jacobi sub-solver.
 
 ### Removed
 ### Optimized

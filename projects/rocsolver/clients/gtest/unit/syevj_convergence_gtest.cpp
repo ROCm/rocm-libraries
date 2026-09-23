@@ -58,7 +58,6 @@ vector<T> dominant_axis_matrix(rocblas_int n, double K)
     return A;
 }
 
-template <typename T>
 vector<double> exact_sigma(rocblas_int n, double K)
 {
     vector<double> s;
@@ -90,6 +89,14 @@ void run_gesvdj(rocblas_int n,
     device_strided_batch_vector<rocblas_int> dsweeps(1, 1, 1, 1);
     device_strided_batch_vector<rocblas_int> dinfo(1, 1, 1, 1);
 
+    CHECK_HIP_ERROR(dA.memcheck());
+    CHECK_HIP_ERROR(dS.memcheck());
+    CHECK_HIP_ERROR(dU.memcheck());
+    CHECK_HIP_ERROR(dV.memcheck());
+    CHECK_HIP_ERROR(dres.memcheck());
+    CHECK_HIP_ERROR(dsweeps.memcheck());
+    CHECK_HIP_ERROR(dinfo.memcheck());
+
     CHECK_HIP_ERROR(hipMemcpy(dA.data(), hA.data(), sizeof(T) * hA.size(), hipMemcpyHostToDevice));
 
     CHECK_ROCBLAS_ERROR(rocsolver_gesvdj(false, handle, rocblas_svect_all, rocblas_svect_all, n, n,
@@ -114,7 +121,7 @@ TEST(checkin_lapack, SYEVJ_dominant_axis_does_not_mask_block)
     for(rocblas_int n : {3, 4, 8, 32, 59})
     {
         auto hA = dominant_axis_matrix<float>(n, 4096.0);
-        auto exact = exact_sigma<float>(n, 4096.0);
+        auto exact = exact_sigma(n, 4096.0);
 
         vector<float> hS;
         rocblas_int n_sweeps = -1, info = -1;

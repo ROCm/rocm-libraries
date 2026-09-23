@@ -128,7 +128,6 @@ __device__ void run_syevj(const rocblas_int dimx,
     rocblas_int even_n = n + n % 2;
     rocblas_int half_n = even_n / 2;
     S local_res = 0;
-    S local_diag = 0;
 
     if(tiy == 0)
     {
@@ -139,7 +138,6 @@ __device__ void run_syevj(const rocblas_int dimx,
             for(i = tix; i < n; i += dimx)
             {
                 aij = A[i + i * lda];
-                local_diag += std::norm(aij);
                 Acpy[i + i * n] = aij;
 
                 if(evect != rocblas_evect_none)
@@ -165,7 +163,6 @@ __device__ void run_syevj(const rocblas_int dimx,
             for(i = tix; i < n; i += dimx)
             {
                 aij = A[i + i * lda];
-                local_diag += std::norm(aij);
                 Acpy[i + i * n] = aij;
 
                 if(evect != rocblas_evect_none)
@@ -187,7 +184,6 @@ __device__ void run_syevj(const rocblas_int dimx,
             }
         }
         cosines_res[tix] = local_res;
-        sines_diag[tix] = local_diag;
 
         // initialize top/bottom pairs
         for(i = tix; i < half_n; i += dimx)
@@ -198,14 +194,9 @@ __device__ void run_syevj(const rocblas_int dimx,
     }
     __syncthreads();
 
-    // set tolerance
     local_res = 0;
-    local_diag = 0;
     for(i = 0; i < dimx; i++)
-    {
         local_res += cosines_res[i];
-        local_diag += std::real(sines_diag[i]);
-    }
     S small_num = get_safemin<S>() / eps;
 
     // convergence is measured per off-diagonal pair, against that pair's own diagonal entries
@@ -2063,7 +2054,6 @@ ROCSOLVER_KERNEL void syevj_calc_norm(const rocblas_int n,
                                       const S abstol,
                                       S* residual,
                                       T* AcpyA,
-                                      S* norms,
                                       rocblas_int* completed)
 {
     rocblas_int tid = hipThreadIdx_x;
@@ -2645,7 +2635,7 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
             // compute new residual
             h_sweeps++;
             ROCSOLVER_LAUNCH_KERNEL(syevj_calc_norm<T>, grid, threads, lmemsizeInit, stream, n,
-                                    h_sweeps, atol, residual, Acpy, norms, completed);
+                                    h_sweeps, atol, residual, Acpy, completed);
         }
 
         // set outputs and sort eigenvalues & vectors
