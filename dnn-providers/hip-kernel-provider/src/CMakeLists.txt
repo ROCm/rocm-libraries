@@ -241,6 +241,13 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                          "\n# External integration test (cross-provider suite)\n${_external_staging}"
                     )
                 endif()
+                # Consumed. External targets registered BELOW this point -- the gfx950
+                # attention ones are -- stage after this drain and would otherwise never
+                # reach the installed file at all. A second drain further down catches
+                # them, and emptying the property here is what stops that second pass
+                # re-emitting everything above.
+                set_property(GLOBAL PROPERTY
+                    "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider" "")
                 # Install tree.
                 apply_ctest_category_labels(
                     "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
@@ -319,8 +326,15 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         )
     endif()
 
+    # The same predicate the census uses. The feature flags say the engine COULD be
+    # built; only the authored content says this configuration actually ships it for
+    # gfx950. A build with every flag ON but `product` redirected to another bundle
+    # would otherwise register an engine-pinned target for an engine that never
+    # registers, which fails as a missing engine rather than reading as absent.
+    hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
        AND HIPKERNELPROVIDER_ENABLE_ROCKE
+       AND _hkp_gfx950_attention_dense
        AND TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check
@@ -332,8 +346,59 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         )
         message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check target")
     else()
-        message(STATUS "HIPDNN_ENABLE_KERNEL_INGESTOR/SDPA/ROCKE not all ON - skipping gfx950-attention-dense-external-integration-check")
+        message(STATUS "hipkernel:Gfx950AttentionDense is not shipped for gfx950 by this configuration - skipping gfx950-attention-dense-external-integration-check")
     endif()
+
+    # Second drain of the external staging, after BOTH gfx950 registrations above.
+    #
+    # The first drain runs beside the cross-provider target, far higher up, so it can
+    # only ever carry what was staged before it. The GPU-reference target stays
+    # deliberately uncategorized and stages rather than appending through
+    # INSTALL_TEST_FILE, and the external-integration target registers below that first
+    # drain, so without this pass the artifact ships neither. The property was emptied
+    # when it was consumed, so what remains here is exactly the late entries.
+    #
+    # Only the YAML path needs it. Without categorization there is no common file to
+    # append to and install_provider_ctest_files() below does its own drain, which
+    # already runs after every registration.
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
+        get_property(_late_external_staging GLOBAL
+            PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider"
+        )
+        if(_late_external_staging)
+            file(APPEND "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                 "\n# External integration tests registered after the first drain\n${_late_external_staging}"
+            )
+            set_property(GLOBAL PROPERTY
+                "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider" "")
+
+            # Label what was just folded in. The parser keys on add_test() names in the
+            # file, so entries appended after the earlier pass carry no tier until it is
+            # run again over the grown file. Re-labelling an already-labelled entry is
+            # harmless: ctest honours the last set_tests_properties() per test, which is
+            # the same property the earlier pass relies on.
+            if(COMMAND apply_ctest_category_labels)
+                apply_ctest_category_labels(
+                    "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+                    "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                )
+            endif()
+        endif()
+    endif()
+
+    # Materialise the installed census now that every registration has run and the
+    # common file exists. The census registrations live in tests/, which was added well
+    # above, so they could only accumulate; this is where they land.
+    #
+    # Called in both YAML modes. Under categorization the common file carries the
+    # discovery stub; without it there is no common file to append to and only the
+    # per-architecture shard files are written, which is what keeps the shards
+    # themselves independent of categorization.
+    hkp_finalize_census_install(
+        COMMON_TEST_FILE   "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+        BINDIR             "${CMAKE_INSTALL_BINDIR}"
+        PLUGIN_ENGINE_DIR  "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}"
+    )
 
     # Install the ctest files. When YAML-based categorization is active, install the
     # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's

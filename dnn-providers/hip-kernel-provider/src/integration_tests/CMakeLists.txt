@@ -168,8 +168,15 @@ if(NOT COMMAND add_external_integration_test_target)
 endif()
 
 # Register the gfx950 dense attention kpack engine integration test target.
+#
+# Gated on the same predicate as the census and the external integration target: the
+# feature flags say the engine could be built, the authored content says whether this
+# configuration ships it for gfx950. Pinned by ENGINE_NAME, so a build that does not
+# ship it registers a target whose engine never appears.
+hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
    AND HIPKERNELPROVIDER_ENABLE_ROCKE
+   AND _hkp_gfx950_attention_dense
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     add_external_integration_test_target(
         TARGET_NAME hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests
