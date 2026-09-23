@@ -1110,6 +1110,19 @@ namespace
         return isW4A16(problem) ? 0 : benchScaleModeA(problem);
     }
 
+    /// hipblaslt-bench --int4_encoding spelling, or "" when there is nothing to
+    /// log. An unrecognized encoding yields "" rather than "invalid" so the flag
+    /// and its value are dropped together instead of leaving a bare --flag.
+    inline const char* benchInt4Encoding(const TensileLite::ContractionProblemGemm& problem)
+    {
+        if(!isW4A16(problem))
+            return "";
+        const int encoding = static_cast<int>(problem.int4EncodingA());
+        if(encoding < 0 || encoding >= HIPBLASLT_INT4_ENCODING_END_EXT)
+            return "";
+        return hipblaslt_int4_encoding_to_string(static_cast<hipblasLtInt4Encoding_t>(encoding));
+    }
+
     inline void logBenchFromTensileDataGemm(const TensileLite::ContractionProblemGemm& problem,
                                             const TensileLite::ContractionInputs&      inputs,
                                             const int&     solutionIndex,
@@ -1121,6 +1134,7 @@ namespace
     {
         bool isComplexInput = (problem.a().dataType() == rocisa::DataType::ComplexFloat
                                || problem.a().dataType() == rocisa::DataType::ComplexDouble);
+        const char* int4Encoding = benchInt4Encoding(problem);
         auto s = log_str(
             __func__,
             "--api_method",
@@ -1181,8 +1195,8 @@ namespace
             benchScaleModeA(problem),
             "--scaleB",
             benchScaleModeB(problem),
-            isW4A16(problem) ? "--int4_encoding" : "",
-            isW4A16(problem) ? std::to_string(static_cast<int>(problem.int4EncodingA())) : "",
+            int4Encoding[0] ? "--int4_encoding" : "",
+            int4Encoding,
             problem.useScaleCD() ? "--scaleC" : "",
             problem.useScaleCD() ? "--scaleD" : "",
             problem.swizzleTensorA() ? "--swizzleA" : "",
@@ -1527,6 +1541,7 @@ namespace
                            .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
                            .strides()[2];
         }
+        const char* int4Encoding = benchInt4Encoding(problem.gemms[0]);
         auto s = log_str(
             __func__,
             "--api_method",
@@ -1547,10 +1562,8 @@ namespace
             benchScaleModeA(problem.gemms[0]),
             "--scaleB",
             benchScaleModeB(problem.gemms[0]),
-            isW4A16(problem.gemms[0]) ? "--int4_encoding" : "",
-            isW4A16(problem.gemms[0])
-                ? std::to_string(static_cast<int>(problem.gemms[0].int4EncodingA()))
-                : "",
+            int4Encoding[0] ? "--int4_encoding" : "",
+            int4Encoding,
             problem.gemms[0].useScaleCD() ? "--scaleC" : "",
             problem.gemms[0].useScaleCD() ? "--scaleD" : "",
             problem.gemms[0].swizzleTensorA() ? "--swizzleA" : "",
