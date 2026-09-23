@@ -11980,7 +11980,8 @@ inline hipsolverStatus_t hipsolver_trtri(testAPI_t           API,
                                          size_t              lworkOnDevice,
                                          float*              hwork,
                                          size_t              lworkOnHost,
-                                         int*                devInfo)
+                                         int*                devInfo,
+                                         int                 bc)
 {
     switch(API)
     {
@@ -12013,7 +12014,8 @@ inline hipsolverStatus_t hipsolver_trtri(testAPI_t           API,
                                          size_t              lworkOnDevice,
                                          double*             hwork,
                                          size_t              lworkOnHost,
-                                         int*                devInfo)
+                                         int*                devInfo,
+                                         int                 bc)
 {
     switch(API)
     {
@@ -12046,7 +12048,8 @@ inline hipsolverStatus_t hipsolver_trtri(testAPI_t           API,
                                          size_t              lworkOnDevice,
                                          hipsolverComplex*   hwork,
                                          size_t              lworkOnHost,
-                                         int*                devInfo)
+                                         int*                devInfo,
+                                         int                 bc)
 {
     switch(API)
     {
@@ -12079,7 +12082,8 @@ inline hipsolverStatus_t hipsolver_trtri(testAPI_t               API,
                                          size_t                  lworkOnDevice,
                                          hipsolverDoubleComplex* hwork,
                                          size_t                  lworkOnHost,
-                                         int*                    devInfo)
+                                         int*                    devInfo,
+                                         int                     bc)
 {
     switch(API)
     {

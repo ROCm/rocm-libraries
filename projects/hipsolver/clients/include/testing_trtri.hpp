@@ -43,11 +43,13 @@ void trtri_checkBadArgs(const hipsolverHandle_t   handle,
                         const SIZE                dlwork,
                         ThWork                    hWork,
                         const SIZE                hlwork,
-                        Ud                        dInfo)
+                        Ud                        dInfo,
+                        const int                 bc)
 {
     // handle
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_trtri(API, nullptr, uplo, diag, n, dA, lda, dWork, dlwork, hWork, hlwork, dInfo),
+        hipsolver_trtri(
+            API, nullptr, uplo, diag, n, dA, lda, dWork, dlwork, hWork, hlwork, dInfo, bc),
         HIPSOLVER_STATUS_NOT_INITIALIZED);
 
     // values
@@ -62,7 +64,8 @@ void trtri_checkBadArgs(const hipsolverHandle_t   handle,
                                           dlwork,
                                           hWork,
                                           hlwork,
-                                          dInfo),
+                                          dInfo,
+                                          bc),
                           HIPSOLVER_STATUS_INVALID_ENUM);
     EXPECT_ROCBLAS_STATUS(hipsolver_trtri(API,
                                           handle,
@@ -75,24 +78,25 @@ void trtri_checkBadArgs(const hipsolverHandle_t   handle,
                                           dlwork,
                                           hWork,
                                           hlwork,
-                                          dInfo),
+                                          dInfo,
+                                          bc),
                           HIPSOLVER_STATUS_INVALID_ENUM);
 
 #if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
     // pointers
     EXPECT_ROCBLAS_STATUS(
         hipsolver_trtri(
-            API, handle, uplo, diag, n, (Td) nullptr, lda, dWork, dlwork, hWork, hlwork, dInfo),
+            API, handle, uplo, diag, n, (Td) nullptr, lda, dWork, dlwork, hWork, hlwork, dInfo, bc),
         HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(
         hipsolver_trtri(
-            API, handle, uplo, diag, n, dA, lda, dWork, dlwork, hWork, hlwork, (Ud) nullptr),
+            API, handle, uplo, diag, n, dA, lda, dWork, dlwork, hWork, hlwork, (Ud) nullptr, bc),
         HIPSOLVER_STATUS_INVALID_VALUE);
 
     // quick return with invalid pointers
     EXPECT_ROCBLAS_STATUS(
         hipsolver_trtri(
-            API, handle, uplo, diag, 0, (Td) nullptr, lda, dWork, dlwork, hWork, hlwork, dInfo),
+            API, handle, uplo, diag, 0, (Td) nullptr, lda, dWork, dlwork, hWork, hlwork, dInfo, bc),
         HIPSOLVER_STATUS_SUCCESS);
 #endif
 }
@@ -106,6 +110,7 @@ void testing_trtri_bad_arg()
     I                      lda  = 10;
     hipsolverFillMode_t    uplo = HIPSOLVER_FILL_MODE_LOWER;
     hipsolverDiagType_t    diag = HIPSOLVER_DIAG_NON_UNIT;
+    int                    bc   = 1;
 
     if(BATCHED)
     {
@@ -124,7 +129,7 @@ void testing_trtri_bad_arg()
 
         // // check bad arguments
         // trtri_checkBadArgs<API>(handle, uplo, diag, n, dA.data(), lda,
-        //                         dWork.data(), size_dW, hWork.data(), size_hW, dInfo.data());
+        //                         dWork.data(), size_dW, hWork.data(), size_hW, dInfo.data(), bc);
     }
     else
     {
@@ -152,26 +157,30 @@ void testing_trtri_bad_arg()
                                 size_dW,
                                 hWork.data(),
                                 size_hW,
-                                dInfo.data());
+                                dInfo.data(),
+                                bc);
     }
 }
 
 template <bool CPU, bool GPU, typename T, typename Td, typename Th>
-void trtri_initData(const int n, Td& dA, const int lda, Th& hA)
+void trtri_initData(const int n, Td& dA, const int lda, const int bc, Th& hA)
 {
     if(CPU)
     {
         rocblas_init<T>(hA, true);
 
-        // scale A to avoid singularities
-        for(int i = 0; i < n; i++)
+        for(int b = 0; b < bc; ++b)
         {
-            for(int j = 0; j < n; j++)
+            // scale A to avoid singularities
+            for(int i = 0; i < n; i++)
             {
-                if(i == j)
-                    hA[0][i + j * lda] = hA[0][i + j * lda] / 10.0 + 1;
-                else
-                    hA[0][i + j * lda] = (hA[0][i + j * lda] - 4) / 10.0;
+                for(int j = 0; j < n; j++)
+                {
+                    if(i == j)
+                        hA[b][i + j * lda] = hA[b][i + j * lda] / 10.0 + 1;
+                    else
+                        hA[b][i + j * lda] = (hA[b][i + j * lda] - 4) / 10.0;
+                }
             }
         }
     }
@@ -204,6 +213,7 @@ void trtri_getError(const hipsolverHandle_t   handle,
                     ThWork&                   hWork,
                     const SIZE                lworkOnHost,
                     Ud&                       dInfo,
+                    const int                 bc,
                     Th&                       hA,
                     Th&                       hARes,
                     Uh&                       hInfo,
@@ -211,7 +221,7 @@ void trtri_getError(const hipsolverHandle_t   handle,
                     double*                   max_err)
 {
     // input data initialization
-    trtri_initData<true, true, T>(n, dA, lda, hA);
+    trtri_initData<true, true, T>(n, dA, lda, bc, hA);
 
     // execute computations
     // GPU lapack
@@ -226,42 +236,50 @@ void trtri_getError(const hipsolverHandle_t   handle,
                                         lworkOnDevice,
                                         hWork.data(),
                                         lworkOnHost,
-                                        dInfo.data()));
+                                        dInfo.data(),
+                                        bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
     // CPU lapack
-    cpu_trtri(uplo, diag, n, hA[0], lda, hInfo[0]);
+    for(rocblas_int b = 0; b < bc; ++b)
+        cpu_trtri(uplo, diag, n, hA[b], lda, hInfo[0]);
 
     // error is ||hA - hARes|| / ||hA||
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
     // IT MIGHT BE REVISITED IN THE FUTURE)
     // using frobenius norm
-    if(hInfoRes[0][0] == 0)
+    for(rocblas_int b = 0; b < bc; ++b)
     {
-        // for unit diagonal, trtri does not define the output diagonal values,
-        // so zero them out in both results before comparing
-        // specifically cuSOLVER does not mention if they reference or do not reference the diagonal values
-        if(diag == HIPSOLVER_DIAG_UNIT)
+        if(hInfoRes[b][0] == 0)
         {
-            for(I i = 0; i < n; i++)
+            // for unit diagonal, trtri does not define the output diagonal values,
+            // so zero them out in both results before comparing
+            // specifically cuSOLVER does not mention if they reference or do not reference the diagonal values
+            if(diag == HIPSOLVER_DIAG_UNIT)
             {
-                hA[0][i + i * lda]    = T(0);
-                hARes[0][i + i * lda] = T(0);
+                for(I i = 0; i < n; i++)
+                {
+                    hA[b][i + i * lda]    = T(0);
+                    hARes[b][i + i * lda] = T(0);
+                }
             }
-        }
 
-        if(uplo == HIPSOLVER_FILL_MODE_UPPER)
-            *max_err = norm_error_upperTr('F', n, n, lda, hA[0], hARes[0]);
-        else
-            *max_err = norm_error_lowerTr('F', n, n, lda, hA[0], hARes[0]);
+            if(uplo == HIPSOLVER_FILL_MODE_UPPER)
+                *max_err = norm_error_upperTr('F', n, n, lda, hA[b], hARes[b]);
+            else
+                *max_err = norm_error_lowerTr('F', n, n, lda, hA[b], hARes[b]);
+        }
     }
 
     // check info for singularities
     double err = 0;
-    EXPECT_EQ(hInfo[0][0], hInfoRes[0][0]) << "where b = " << 0;
-    if(hInfo[0][0] != hInfoRes[0][0])
-        err++;
+    for(rocblas_int b = 0; b < bc; ++b)
+    {
+        EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
+        if(hInfo[b][0] != hInfoRes[b][0])
+            err++;
+    }
     *max_err += err;
 }
 
@@ -286,6 +304,7 @@ void trtri_getPerfData(const hipsolverHandle_t   handle,
                        ThWork&                   hWork,
                        const SIZE                lworkOnHost,
                        Ud&                       dInfo,
+                       const int                 bc,
                        Th&                       hA,
                        Uh&                       hInfo,
                        double*                   gpu_time_used,
@@ -295,20 +314,21 @@ void trtri_getPerfData(const hipsolverHandle_t   handle,
 {
     if(!perf)
     {
-        trtri_initData<true, false, T>(n, dA, lda, hA);
+        trtri_initData<true, false, T>(n, dA, lda, bc, hA);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
-        cpu_trtri(uplo, diag, n, hA[0], lda, hInfo[0]);
+        for(rocblas_int b = 0; b < bc; ++b)
+            cpu_trtri(uplo, diag, n, hA[b], lda, hInfo[b]);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    trtri_initData<true, false, T>(n, dA, lda, hA);
+    trtri_initData<true, false, T>(n, dA, lda, bc, hA);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        trtri_initData<false, true, T>(n, dA, lda, hA);
+        trtri_initData<false, true, T>(n, dA, lda, bc, hA);
 
         CHECK_ROCBLAS_ERROR(hipsolver_trtri(API,
                                             handle,
@@ -321,7 +341,8 @@ void trtri_getPerfData(const hipsolverHandle_t   handle,
                                             lworkOnDevice,
                                             hWork.data(),
                                             lworkOnHost,
-                                            dInfo.data()));
+                                            dInfo.data(),
+                                            bc));
     }
 
     // gpu-lapack performance
@@ -331,7 +352,7 @@ void trtri_getPerfData(const hipsolverHandle_t   handle,
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        trtri_initData<false, true, T>(n, dA, lda, hA);
+        trtri_initData<false, true, T>(n, dA, lda, bc, hA);
 
         timer.start(stream);
         hipsolver_trtri(API,
@@ -345,7 +366,8 @@ void trtri_getPerfData(const hipsolverHandle_t   handle,
                         lworkOnDevice,
                         hWork.data(),
                         lworkOnHost,
-                        dInfo.data());
+                        dInfo.data(),
+                        bc);
         timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
@@ -361,8 +383,10 @@ void testing_trtri(Arguments& argus)
     I                      n     = argus.get<rocblas_int>("n");
     I                      lda   = argus.get<rocblas_int>("lda");
 
-    hipsolverFillMode_t uplo = char2hipsolver_fill(uploC);
-    hipsolverDiagType_t diag = char2hipsolver_diag(diagC);
+    hipsolverFillMode_t uplo      = char2hipsolver_fill(uploC);
+    hipsolverDiagType_t diag      = char2hipsolver_diag(diagC);
+    int                 bc        = argus.batch_count;
+    int                 hot_calls = argus.iters;
 
     // check non-supported values
     // N/A
@@ -388,7 +412,8 @@ void testing_trtri(Arguments& argus)
                                               0,
                                               (T*)nullptr,
                                               0,
-                                              (int*)nullptr),
+                                              (int*)nullptr,
+                                              bc),
                               HIPSOLVER_STATUS_INVALID_VALUE);
 
         if(argus.timing)
@@ -429,7 +454,8 @@ void testing_trtri(Arguments& argus)
                                               size_dW,
                                               hWork.data(),
                                               size_hW,
-                                              dInfo.data()),
+                                              dInfo.data(),
+                                              bc),
                               HIPSOLVER_STATUS_SUCCESS);
 
         if(argus.timing)
@@ -451,6 +477,7 @@ void testing_trtri(Arguments& argus)
                                hWork,
                                size_hW,
                                dInfo,
+                               bc,
                                hA,
                                hARes,
                                hInfo,
@@ -470,6 +497,7 @@ void testing_trtri(Arguments& argus)
                                   hWork,
                                   size_hW,
                                   dInfo,
+                                  bc,
                                   hA,
                                   hInfo,
                                   &gpu_time_used,
