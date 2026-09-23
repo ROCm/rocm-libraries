@@ -39,7 +39,8 @@ enum class StinkyErrorCode : int {
 /// GEMM-specific tile configuration
 /// This configuration is specific to GEMM kernels and their tiling strategy
 /// Note: WavefrontSize is NOT included here as it's derived from architecture,
-///       not a user-configurable parameter. Use getWaveFrontSize(arch) to query it.
+///       not a user-configurable parameter. Use getWaveFrontSize(arch) to query
+///       it.
 struct GemmTileConfig {
     std::array<int, 3> arch{0, 0, 0};  ///< GPU architecture [gfx, major, minor]
     uint32_t TileA0;                   ///< Tile size for A dimension 0
@@ -71,8 +72,8 @@ struct PassFeatureConfig {
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
-        /// Max in-flight tensor_load_to_lds credits (HW queue depth, to connect to sw math cycles).
-        /// 0 disables the throttle (current behavior).
+        /// Max in-flight tensor_load_to_lds credits (HW queue depth, to connect to
+        /// sw math cycles). 0 disables the throttle (current behavior).
         int globalReadQueueDepth = 0;
         /// Modeled cycles until one tensor_load_to_lds credit frees. Fed from the
         /// cost/cycle model; varies with layout and problem size.
@@ -96,20 +97,16 @@ struct PassFeatureConfig {
         /// Internal tuning knob only — deliberately not surfaced as a module
         /// option, so TensileLite cannot set it.
         int mergeBarrierThreshold = 0;
-        /// Run the per-window WMMA hide-budget pre-scan (analyzeWmmaHideBudget) at the
-        /// top of each scheduling region, and report it through --remarks.
-        ///
-        /// OFF by default. The pre-scan is a pure measurement — nothing in the pick
-        /// paths gates on its verdict yet — so running it in production would be cost
-        /// for no decision. A follow-up wires the budget into the scheduler and turns
-        /// this on. Internal knob only, like mergeBarrierThreshold above: deliberately
-        /// not surfaced as a module option, so TensileLite cannot set it and only
-        /// stinkytofu-opt --enable-wmma-hide-budget-prescan reaches it.
+        /// Run the per-window WMMA hide-budget policy at the top of each
+        /// scheduling region. The budget gates WMMA selection until enough
+        /// non-WMMA work has issued. The gfx1250 production backend enables it;
+        /// standalone/custom pass pipelines opt in explicitly.
         bool enableWmmaHideBudgetPrescan = false;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup
         /// barriers. Enables the scheduler's cluster-barrier SCC rule and the
-        /// CDNA5ReadyQueue paths that enforce it (see ReadyQueue::clusterBarrierEnabled).
+        /// CDNA5ReadyQueue paths that enforce it (see
+        /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
     };
 

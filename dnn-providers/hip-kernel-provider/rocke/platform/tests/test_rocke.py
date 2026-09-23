@@ -68,18 +68,22 @@ from rocke.helpers import (
     make_gemm_manifest,
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
-from rocke.instances import (
-    ConvProblem,
+from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConv16cSpec,
     DirectConvProblem,
+    build_direct_conv_4c,
+    build_direct_conv_16c,
+)
+from kernels.common.conv_implicit_gemm import (
+    ConvProblem,
     ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+)
+from rocke.instances import (
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
-    build_direct_conv_4c,
-    build_direct_conv_16c,
-    build_implicit_gemm_conv,
     build_universal_gemm,
 )
 
@@ -666,6 +670,59 @@ class TestHelpers(unittest.TestCase):
             LdsLayout.padded_k(64, 8).validate_for_async()
         with self.assertRaises(ValueError):
             LdsLayout(logical_cols=64, swizzle="xor").validate_for_async()
+
+    def test_wgrad_async_rejects_non_packed_lds_layout(self):
+        """An explicit lds_layout must reach validate_for_async() for wgrad too.
+
+        The scalar ``lds_k_pad`` guard cannot stand in for this: an explicit
+        ``lds_layout`` object beats the scalar in ``effective_lds_layout()``, and
+        the xor swizzle has no scalar analogue at all. Without the call these
+        specs build and only fail deep inside the emitter, which the sweep
+        drivers turn into a silent skip. Mirrors the conv/dgrad behaviour.
+        """
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            WgradConvSpec,
+            is_valid_wgrad_spec,
+        )
+
+        def _spec(**over):
+            return WgradConvSpec(
+                problem=ConvProblem(N=1, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+                name="wgrad_async_guard",
+                data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                wave_size=64,
+                pipeline="mem",
+                epilogue="cshuffle",
+                split_k=1,
+                lds_k_outer=True,
+                async_dma=True,
+                **over,
+            )
+
+        # The packed layout the async intrinsic actually writes is accepted.
+        _spec(lds_layout=LdsLayout.packed_async(64)).validate()
+
+        for bad in (
+            LdsLayout.padded_k(64, 8),
+            LdsLayout(logical_cols=64, swizzle="xor"),
+        ):
+            spec = _spec(lds_layout=bad)
+            with self.assertRaises(ValueError):
+                spec.validate()
+            # And the soft validator reports it rather than skipping silently.
+            ok, why = is_valid_wgrad_spec(spec, "gfx950")
+            self.assertFalse(ok)
+            self.assertTrue(why)
 
     def test_schedule_policy_emits_expected_hints(self):
         b = IRBuilder("sched_smoke")
@@ -1699,6 +1756,41 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         finally:
             comgr_mod.resolved_lib_rocm_version = orig_ver
             comgr_mod.resolved_lib_path = orig_path
+
+    def test_comgr_load_failure_names_every_candidate(self):
+        """A failed comgr load reports every candidate, not just the last.
+
+        Resolution walks a candidate list and falls through on OSError, so when
+        it ends in failure the only way to tell which library was meant to load,
+        and why it did not, is for each candidate to appear in the error.
+        """
+        from rocke.runtime import comgr as comgr_mod
+
+        candidates = ["/first/libamd_comgr.so", "/second/libamd_comgr.so"]
+        with patch.object(
+            comgr_mod, "_candidate_lib_paths", return_value=candidates
+        ), patch.object(comgr_mod, "_add_dll_dir"), patch.object(
+            comgr_mod.ctypes, "CDLL", side_effect=OSError("cannot open shared object")
+        ):
+            with self.assertRaises(comgr_mod.ComgrError) as cm:
+                comgr_mod._load_lib()
+        message = str(cm.exception)
+        for path in candidates:
+            self.assertIn(path, message)
+        self.assertIn("cannot open shared object", message)
+
+    def test_comgr_load_with_no_candidates_is_distinguishable(self):
+        """No candidate produced is a different fault from every candidate failing.
+
+        The two want different fixes -- nothing to try versus tried and failed --
+        so they must not share a message.
+        """
+        from rocke.runtime import comgr as comgr_mod
+
+        with patch.object(comgr_mod, "_candidate_lib_paths", return_value=[]):
+            with self.assertRaises(comgr_mod.ComgrError) as cm:
+                comgr_mod._load_lib()
+        self.assertIn("no candidate path", str(cm.exception))
 
     def test_no_hand_rolled_flavor_membership_lists(self):
         """Flavor membership must go through :data:`LLVM_FLAVORS`.
@@ -2849,7 +2941,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
     def test_implicit_gemm_conv_chiplet_swizzle_compiles(self):
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
         )
@@ -2897,7 +2989,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         """The async-DMA conv must hoist the per-wave LDS base into
         an SGPR via ``to_sgpr_u32`` (``readfirstlane`` + SGPR-pin asm).
         """
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
         )
@@ -3206,6 +3298,87 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         # Regression: the handler used to request a decl key ("ds.swizzle") that
         # does not exist, so the declare was silently omitted.
         self.assertIn("declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)", ll)
+
+    # ---- quad_perm ----
+    def test_quad_perm_encodes_lane_selection(self):
+        # [1,0,3,2] -> 1 | (0 << 2) | (3 << 4) | (2 << 6) == 177.
+        ll = self._lower("qperm", lambda b: b.quad_perm(b.const_i32(1), [1, 0, 3, 2]))
+        self.assertIn("declare i32 @llvm.amdgcn.update.dpp.i32(", ll)
+        self.assertIn(
+            "call i32 @llvm.amdgcn.update.dpp.i32("
+            "i32 1, i32 1, i32 177, i32 15, i32 15, i1 true)",
+            ll,
+        )
+
+    def test_quad_perm_emits_hip_builtin(self):
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        b = IRBuilder("qperm_hip")
+        b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+        hip = lower_kernel_to_hip(b.kernel)
+        self.assertIn(
+            "__builtin_amdgcn_update_dpp(c1, c1, 177, 15, 15, 1)",
+            hip,
+        )
+
+    def test_quad_perm_is_pure(self):
+        from rocke.core.ir import is_pure_op_name
+
+        b = self._builder("qperm_pure")
+        value = b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+        self.assertTrue(value.op.is_pure)
+        self.assertTrue(is_pure_op_name("tile.quad_perm"))
+
+    def test_quad_perm_rejects_bad_perm_and_type(self):
+        b = self._builder("qperm_bad")
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_i32(1), [0, 1, 2])
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_i32(1), [0, 1, 2, 4])
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_f32(1.0), [0, 1, 2, 3])
+
+    def test_quad_perm_lowering_rejects_out_of_range_ctrl(self):
+        """Malformed IR must fail loudly, not truncate into a valid permute.
+
+        The builder validates selectors, but IR that reaches a lowerer by
+        another route (deserialized, rewritten by a pass, hand-built) does
+        not pass through it. Masking ``ctrl`` to eight bits turned 256 into
+        0 (``[0,0,0,0]``, a lane-0 broadcast) and -1 into 255
+        (``[3,3,3,3]``) -- a silently different shuffle, so a wrong
+        reduction computes wrong numbers instead of failing.
+        """
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for bad_ctrl in (256, -1):
+            with self.subTest(ctrl=bad_ctrl):
+                b = self._builder(f"qperm_ctrl_{bad_ctrl}")
+                value = b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+                value.op.attrs["ctrl"] = bad_ctrl
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.assertRaisesRegex(
+                        ValueError, r"ctrl must be in 0\.\.255"
+                    ):
+                        lower(b.kernel)
+
+    def test_warp_shuffle_xor_quad_maps_masks(self):
+        ll = self._lower(
+            "qperm_xor",
+            lambda b: (
+                b.warp_shuffle_xor_quad(b.const_i32(1), 1),
+                b.warp_shuffle_xor_quad(b.const_i32(1), 2),
+            ),
+        )
+        self.assertIn("i32 177, i32 15, i32 15, i1 true)", ll)
+        self.assertIn("i32 78, i32 15, i32 15, i1 true)", ll)
+
+    def test_warp_shuffle_xor_quad_rejects_out_of_quad_mask(self):
+        b = self._builder("qperm_xor_bad")
+        with self.assertRaises(ValueError):
+            b.warp_shuffle_xor_quad(b.const_i32(1), 4)
 
     # ---- mov_dpp8 ----
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
@@ -4963,7 +5136,7 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
 
     def test_16c_kernel_lowers_to_llvm(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv16cSpec,
             DirectConvProblem,
             build_direct_conv_16c,
@@ -4981,7 +5154,7 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
 
     def test_4c_kernel_lowers_to_llvm(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
             build_direct_conv_4c,
@@ -5212,11 +5385,11 @@ class TestCkTileLowering(unittest.TestCase):
             self.assertIn(line, src)
 
     def test_conv_source_references_grouped_convolution_kernel(self):
-        from rocke.core import lower_spec_to_cktile
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
         )
+        from rocke.core import lower_spec_to_cktile
 
         spec = ImplicitGemmConvSpec(
             problem=ConvProblem(
@@ -5329,13 +5502,12 @@ class TestCkTileLowering(unittest.TestCase):
         """``lower_spec_to_cktile`` must dispatch to gemm vs conv emitters
         based on the spec type without the caller knowing about them.
         """
-        from rocke.core import lower_spec_to_cktile
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
-            TileSpec,
-            UniversalGemmSpec,
         )
+        from rocke.core import lower_spec_to_cktile
+        from rocke.instances import TileSpec, UniversalGemmSpec
 
         gemm = UniversalGemmSpec(
             name="d_gemm",
@@ -5469,7 +5641,7 @@ class TestHipLoweringCoverage(unittest.TestCase):
         )
 
     def test_implicit_gemm_conv_lowers(self):
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
@@ -6382,6 +6554,33 @@ class TestPackArgsKernargABI(unittest.TestCase):
                 [{"name": "p", "type": "ptr<f16,global>"}], {"p": "not a pointer"}
             )
 
+    def test_compile_packer_matches_pack_args_byte_for_byte(self):
+        # KernelLauncher swaps in ``compile_packer`` for the per-launch
+        # pack, so it must be a byte-identical oracle for ``pack_args`` on
+        # the same signature -- any divergence silently corrupts kernargs.
+        from rocke.runtime.packing import compile_packer, pack_args
+
+        for sig, vals in (
+            (self._MIXED_SIG, self._MIXED_VALS),
+            (
+                [
+                    {"name": "p", "type": "ptr<f32,global>"},
+                    {"name": "i", "type": "i32"},
+                    {"name": "q", "type": "i64"},
+                    {"name": "f", "type": "f32"},
+                ],
+                {"p": 0x10, "i": 7, "q": 0x1122334455, "f": 1.5},
+            ),
+            ([{"name": "p", "type": "ptr<f16,global>"}], {"p": None}),
+        ):
+            self.assertEqual(compile_packer(sig)(vals), pack_args(sig, vals))
+        # Error parity: unknown type is rejected when the packer is built,
+        # a missing arg when the packer is called.
+        with self.assertRaises(ValueError):
+            compile_packer([{"name": "x", "type": "f16"}])
+        with self.assertRaises(KeyError):
+            compile_packer([{"name": "x", "type": "i32"}])({})
+
 
 class TestHostBufferReExportShim(unittest.TestCase):
     """The manifest_runner.utils re-export shim over rocke.runtime.host_buffers.
@@ -6441,6 +6640,100 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             result = _torch_bundled_lib("amdhip64")
             self.assertIsNone(result)
             self.assertNotIn("torch", sys.modules)
+
+    def test_rocm_version_parsed_from_versioned_libdir(self):
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        self.assertEqual(_rocm_version_from_libdir("/opt/rocm-7.2.3/lib"), (7, 2))
+        # core-7.13 is a *component* version living under release 7.2.0. The
+        # result is compared against torch.version.hip, which reports the
+        # release, so the component number must not win: reading (7, 13) here
+        # would make a torch on ROCm 7.10 look older than a 7.2 install.
+        self.assertEqual(
+            _rocm_version_from_libdir("/opt/rocm-7.2.0/core-7.13/lib"), (7, 2)
+        )
+
+    def test_rocm_version_resolves_unversioned_symlink(self):
+        import os
+        import tempfile
+
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        # The distro default is ROCM_PATH=/opt/rocm, an unversioned symlink to
+        # /opt/rocm-X.Y.Z. Parsing only the literal path finds no digits in
+        # "rocm" and reports the version unknown, which silently disables the
+        # stale-comgr demotion on the exact layout it exists for.
+        with tempfile.TemporaryDirectory() as tmp:
+            real_root = os.path.join(tmp, "rocm-7.2.3")
+            os.makedirs(os.path.join(real_root, "lib"))
+            link_root = os.path.join(tmp, "rocm")
+            os.symlink(real_root, link_root)
+
+            self.assertEqual(
+                os.path.basename(link_root),
+                "rocm",
+                "the link name must be unversioned for this test to mean anything",
+            )
+            self.assertEqual(
+                _rocm_version_from_libdir(os.path.join(link_root, "lib")), (7, 2)
+            )
+
+    def test_rocm_version_unknown_when_nothing_is_versioned(self):
+        import os
+        import tempfile
+
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        # Unknown must stay unknown: _torch_comgr_is_stale keeps the historical
+        # resolution order rather than guessing when either side is unreadable.
+        # Built under a tmpdir because a literal /opt/rocm is a symlink to a
+        # versioned root on a real ROCm box -- which would make this pass for
+        # the wrong reason there and fail everywhere else.
+        with tempfile.TemporaryDirectory() as tmp:
+            libdir = os.path.join(tmp, "rocm", "lib")
+            os.makedirs(libdir)
+            self.assertIsNone(_rocm_version_from_libdir(libdir))
+
+    def test_component_version_never_outranks_the_release(self):
+        import sys
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # torch on ROCm 7.10 beside a packaged release 7.2.0 whose runtime
+        # lives in core-7.13. torch is NEWER, so nothing may be demoted --
+        # comparing against the component version would invert that.
+        torch_stub = types.ModuleType("torch")
+        torch_stub.version = types.SimpleNamespace(hip="7.10.0-abc123")
+
+        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            with mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=["/opt/rocm-7.2.0/core-7.13/lib"]
+            ):
+                self.assertEqual(rc._torch_rocm_version(), (7, 10))
+                self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
+                self.assertFalse(rc._torch_comgr_is_stale())
+
+    def test_stale_comgr_demotion_fires_through_a_symlinked_root(self):
+        import sys
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        torch_stub = types.ModuleType("torch")
+        torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+
+        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            with mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
+            ):
+                with mock.patch.object(
+                    rc.os.path, "realpath", return_value="/opt/rocm-7.2.3/lib"
+                ):
+                    self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
+                    self.assertTrue(rc._torch_comgr_is_stale())
 
 
 # ---------------------------------------------------------------------

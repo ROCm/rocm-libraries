@@ -13,8 +13,8 @@
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
-#include "ScratchDirectory.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
@@ -41,6 +41,7 @@ using hipdnn_integration_tests::bundle::toString;
 using hipdnn_integration_tests::bundle::verdictDetail;
 using hipdnn_integration_tests::bundle::VerificationDepth;
 using hipdnn_integration_tests::bundle::VerificationOutcome;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -73,9 +74,9 @@ RankedEngines ranked(ErrorCode status, std::vector<int64_t> ids, std::string mes
     return engines;
 }
 
-ScopedDirectory makeScopedTestDir(const std::string& prefix)
+ScopedDirectory makeScopedTestDir(const std::string& label)
 {
-    return hipdnn_integration_tests::scratch::makeDir(prefix + "_");
+    return claimScratchDirectory(label);
 }
 
 // Single-graph sidecar claiming `engines` for (arch, platform).

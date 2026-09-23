@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <memory>
@@ -36,9 +37,9 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
-#include "ContentCarryingTestGraph.hpp"
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
+#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
 /**
  * @file TestGenericPlanBuilder.cpp
@@ -51,6 +52,27 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
+
+class CountingBytesGraph final
+    : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph
+{
+public:
+    explicit CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls)
+        : _bytesCalls(std::move(bytesCalls))
+    {
+    }
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        ++*_bytesCalls;
+        return ContentCarryingTestGraph::bytes();
+    }
+
+private:
+    std::shared_ptr<std::atomic_uint> _bytesCalls;
+};
+
 using ::testing::_;
 using ::testing::Ref;
 using ::testing::Return;
@@ -1039,6 +1061,38 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
 }
 
+TEST(TestIngestorGenericPlanBuilder, ASecondColdMissWithBenchmarkingOffDoesNotReadGraphBytes)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
+    const CountingBytesGraph graph(bytesCalls);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    bytesCalls->store(0);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+    EXPECT_EQ(bytesCalls->load(), 0U)
+        << "a second cold miss with benchmarking off must not read graph bytes";
+}
+
 /// prepare() fails for one kernel and succeeds for the rest: the shape of a code object
 /// that cannot be loaded -- a kpack archive missing from the install, a symbol the module
 /// does not export -- which is a property of that one kernel, not of its pack.
@@ -1082,6 +1136,79 @@ private:
     int64_t _failingBlockSize;
 };
 
+/// Rejects the front candidate the way a malformed descriptor does, rather than the way a
+/// kernel that merely does not fit does. INVALID_VALUE is the status buildPlan() keys its
+/// rethrow on.
+class MalformedAtBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    explicit MalformedAtBlockSizeHandler(int64_t malformedBlockSize)
+        : _malformedBlockSize(malformedBlockSize)
+    {
+    }
+
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == _malformedBlockSize)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "kernel source names a library outside the descriptor's directory");
+        }
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+
+private:
+    int64_t _malformedBlockSize;
+};
+
+/// Fails every candidate, naming the block size in each reason, so the reasons the error
+/// gathers can be told apart from one another.
+class FailsToPrepareEveryBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "no code object at block size " + std::to_string(kernel.getIntMetadata(BLOCK_SIZE)));
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
+
 /// Constructing a GenericPlan runs prepare(), so the ranked front is where an unloadable
 /// code object surfaces -- after applicability already promised the graph. kernel_64 fails,
 /// kernel_128 takes the plan, and the WARN is the only record that a slower kernel is
@@ -1120,6 +1247,169 @@ TEST(TestIngestorGenericPlanBuilder, FallsBackWhenTheFrontCandidateCannotPrepare
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
                                           "the archive holds no code object for this "
                                           "kernel"));
+}
+
+TEST(TestIngestorGenericPlanBuilder, RethrowsAMalformedDescriptorInsteadOfServingTheNextKernel)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const MalformedAtBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xB7));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected a malformed descriptor to be reported, not skipped";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        // The author's own status and wording, not the aggregate one: falling past this
+        // kernel would have served kernel_128 and hidden the fault entirely.
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("outside the descriptor's directory"),
+                  std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenNothingCanBeBuilt)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareEveryBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xB8));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected the exhausted candidate walk to be reported";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(what.find("3 applicable kernel(s)"), std::string::npos) << what;
+        // Every candidate's reason, not just the last: the per-kernel WARN lines that
+        // carry the same information are suppressed at the default log level, so this
+        // message is the only place the cause survives.
+        EXPECT_NE(what.find("block size 64"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 128"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 256"), std::string::npos) << what;
+        EXPECT_NE(what.find(toString(testId(0x70))), std::string::npos) << what;
+        EXPECT_NE(what.find(toString(testId(0x72))), std::string::npos) << what;
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder, RethrowsAMalformedDescriptorWhileBenchmarking)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const MalformedAtBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    // The only difference from RethrowsAMalformedDescriptorInsteadOfServingTheNextKernel:
+    // whether a malformed descriptor is reported or absorbed must not follow a tuning setting.
+    const TestGraph graph(makeGraphId(0xB9));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(handle, graph, engineConfig, context);
+        FAIL() << "expected a malformed descriptor to be reported, not dropped from the "
+                  "benchmarking set";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("outside the descriptor's directory"),
+                  std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenBenchmarkingBuildsNothing)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareEveryBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    // The benchmarking half of NamesEveryCandidateReasonWhenNothingCanBeBuilt.
+    const TestGraph graph(makeGraphId(0xBA));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(handle, graph, engineConfig, context);
+        FAIL() << "expected the exhausted candidate set to be reported";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(what.find("3 applicable kernel(s)"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 64"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 128"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 256"), std::string::npos) << what;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1178,7 +1468,7 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1222,7 +1512,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultU
         record.push_back(rankedEntryFor(*kernel, time));
         time += 1.0;
     }
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     const auto knobs = builder.getCustomKnobs(0, graph);
 
@@ -1269,7 +1559,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1313,7 +1603,7 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffFallsBackT
         }
     }
     ASSERT_EQ(record.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1353,7 +1643,7 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
         entry.packId = testId(0xEE);
         record.push_back(entry);
     }
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1405,7 +1695,7 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyStaleRecordWithBenchmarkingOnTrig
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig
@@ -1461,7 +1751,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFal
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1474,6 +1764,67 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFal
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 128)
         << "rank 0 (kernel_64) cannot prepare; the plan must build from rank 1 instead "
            "of throwing";
+}
+
+/// The other half of the walk above: carrying past a kernel that cannot be prepared is
+/// what the ranked walk is for, but a malformed descriptor is the author's mistake and
+/// stops the build. The same descriptor reaching the empty-cache walk already throws, so
+/// absorbing it here would make the diagnosis depend on whether a record happened to
+/// exist.
+TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelIsMalformedRethrows)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const MalformedAtBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xDD));
+    const auto properties = testDeviceProperties();
+
+    // Fully covering, so the ranked walk runs at all, and ranking kernel_64 -- the
+    // malformed one -- first. kernel_128 and kernel_256 both prepare, so a walk that
+    // absorbed the throw would serve kernel_128 and report nothing.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    const std::map<int64_t, double> timeByBlockSize{{64, 0.1}, {128, 0.2}, {256, 0.3}};
+    WinnerRecord record;
+    for(const auto& kernel : catalog)
+    {
+        record.push_back(
+            rankedEntryFor(kernel, timeByBlockSize.at(kernel.getIntMetadata(BLOCK_SIZE))));
+    }
+    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected a malformed descriptor at rank 0 to be reported, not skipped "
+                  "in favour of rank 1";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        // The author's own status and wording, as on the cache-free walks.
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("outside the descriptor's directory"),
+                  std::string::npos)
+            << error.what();
+    }
 }
 
 /// A record keyed on a different device must never be served here. This is why the key
@@ -1505,7 +1856,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
             record.push_back(rankedEntryFor(kernel, 0.1));
         }
     }
-    manager->recordWinner(winnerKeyFor(graph, otherDevice), record);
+    manager->recordWinner(winnerKeyFor(graph, otherDevice), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1550,7 +1901,8 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherGraphIsNotServed)
             record.push_back(rankedEntryFor(kernel, 0.1));
         }
     }
-    manager->recordWinner(winnerKeyFor(otherGraph, properties), record);
+    manager->recordWinner(
+        winnerKeyFor(otherGraph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1594,7 +1946,7 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), narrow);
+    manager->recordWinner(winnerKeyFor(graph, properties), narrow, WinnerWriteCause::FRESH_MISS);
 
     // Now a WIDE run, unfiltered, with benchmarking on.
     flatbuffers::FlatBufferBuilder fbb;
@@ -1647,7 +1999,7 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
     std::stable_sort(ranking.begin(), ranking.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), ranking);
+    manager->recordWinner(winnerKeyFor(graph, properties), ranking, WinnerWriteCause::FRESH_MISS);
 
     // The post-priming plan: benchmarking still ON, exactly as autotune leaves it.
     flatbuffers::FlatBufferBuilder fbb;
@@ -2017,7 +2369,7 @@ TEST(TestIngestorGenericPlanBuilder,
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), narrow);
+    manager->recordWinner(winnerKeyFor(graph, properties), narrow, WinnerWriteCause::FRESH_MISS);
 
     // Now a WIDE run, unfiltered, with benchmarking on, so sampling produces real
     // usable candidates and write-back actually fires.

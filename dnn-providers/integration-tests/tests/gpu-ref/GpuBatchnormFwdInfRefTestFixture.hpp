@@ -116,9 +116,72 @@ void runGpuVsCpuBatchnormFwdInf(const std::vector<int64_t>& ioDims, const Tensor
     assertAllClose(outputCpu, outputGpu, tolerance);
 }
 
-// ============================================================================
-// BatchnormFwdInfTestSuite — parameterized fixture for shape-based CPU-vs-GPU tests
-// ============================================================================
+template <typename InputDataType,
+          typename OutputDataType = InputDataType,
+          typename ScaleBiasDataType = InputDataType,
+          typename MeanVarDataType = InputDataType,
+          typename ComputeDataType = double>
+void runGpuVsCpuBatchnormFwdInfWithVariance(const std::vector<int64_t>& ioDims,
+                                            const TensorLayout& layout)
+{
+    std::vector<int64_t> affineDims(ioDims.size(), 1);
+    affineDims[1] = ioDims[1];
+    auto inputTensor = Tensor<InputDataType>(ioDims, layout);
+    auto scaleTensor = Tensor<ScaleBiasDataType>(affineDims, layout);
+    auto biasTensor = Tensor<ScaleBiasDataType>(affineDims, layout);
+    auto estimatedMeanTensor = Tensor<MeanVarDataType>(affineDims, layout);
+    auto varianceTensor = Tensor<MeanVarDataType>(affineDims, layout);
+    auto outputCpu = Tensor<OutputDataType>(ioDims, layout);
+    auto outputGpu = Tensor<OutputDataType>(ioDims, layout);
+    constexpr float MEAN = 1e-3f;
+    constexpr float STDDEV = 1e2f;
+    constexpr float VARIANCE = STDDEV * STDDEV; // 1e4
+    constexpr float SCALE_BIAS_RANGE = 1.0f;
+    constexpr double EPSILON = 1e-5;
+    const float tolerance = getToleranceInferenceWithVariance<OutputDataType>();
+    /*
+      The kernel computes invVariance = 1 / sqrt(variance + epsilon) internally, so with
+      VARIANCE = 1e4 the effective inverse variance is ~1e-2.
+      |x-MEAN| -> range ~[0, 1e2]
+      inhat = |(x-MEAN)| / sqrt(VARIANCE + epsilon) -> range ~[0, 1]
+      y = |SCALE_BIAS_RANGE| * inhat + |SCALE_BIAS_RANGE| -> range ~[0, 2]
+      Expected output values on the order of 1e0 will be above all the tolerance thresholds and
+      provide test coverage.
+    */
+    unsigned int seed = getGlobalTestSeed();
+    inputTensor.fillWithValues(NormalDistGenerator<InputDataType>(seed++, MEAN, STDDEV), true);
+    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
+                                     static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
+                                     seed++);
+    biasTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
+                                    static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
+                                    seed++);
+    estimatedMeanTensor.fillWithValue(static_cast<MeanVarDataType>(MEAN));
+    varianceTensor.fillWithValue(static_cast<MeanVarDataType>(VARIANCE));
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance<InputDataType,
+                                                      ScaleBiasDataType,
+                                                      MeanVarDataType,
+                                                      OutputDataType,
+                                                      ComputeDataType>(inputTensor,
+                                                                       scaleTensor,
+                                                                       biasTensor,
+                                                                       estimatedMeanTensor,
+                                                                       varianceTensor,
+                                                                       outputCpu,
+                                                                       EPSILON);
+    GpuFpReferenceBatchnorm::fwdInferenceWithVariance<InputDataType,
+                                                      ScaleBiasDataType,
+                                                      MeanVarDataType,
+                                                      OutputDataType,
+                                                      ComputeDataType>(inputTensor,
+                                                                       scaleTensor,
+                                                                       biasTensor,
+                                                                       estimatedMeanTensor,
+                                                                       varianceTensor,
+                                                                       outputGpu,
+                                                                       EPSILON);
+    assertAllClose(outputCpu, outputGpu, tolerance);
+}
 
 using BnFwdInfTestCase = std::tuple<TensorLayout, BatchnormTestCase>;
 
@@ -140,6 +203,27 @@ protected:
                                    ScaleBiasDataType,
                                    MeanVarDataType,
                                    ComputeDataType>(bnTestCase.ioDims, layout);
+    }
+};
+
+template <typename InputDataType,
+          typename OutputDataType = InputDataType,
+          typename ScaleBiasDataType = InputDataType,
+          typename MeanVarDataType = InputDataType,
+          typename ComputeDataType = double>
+class BatchnormFwdInfVarTestSuite : public ::testing::TestWithParam<BnFwdInfTestCase>
+{
+protected:
+    void runBatchnormFwdInfWithVarianceTest()
+    {
+        SKIP_IF_NO_DEVICES();
+        const auto& tc = GetParam();
+        const auto& [layout, bnTestCase] = tc;
+        runGpuVsCpuBatchnormFwdInfWithVariance<InputDataType,
+                                               OutputDataType,
+                                               ScaleBiasDataType,
+                                               MeanVarDataType,
+                                               ComputeDataType>(bnTestCase.ioDims, layout);
     }
 };
 

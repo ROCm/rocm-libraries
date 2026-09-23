@@ -33,6 +33,9 @@ test_categories:
       # -DBUILD_CPP_GRAPH_TESTS=ON build gets the rest back.
       - "quick_*"
       - "Smoke/*"
+      # "Quick/*" and "Standard/*" match the C++ suites that carry an explicit
+      # tier prefix (layernorm uses Quick/Standard/Comprehensive/Full).
+      - "Quick/*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -45,6 +48,8 @@ test_categories:
       - "quick_*"
       - "standard_*"
       - "Smoke/*"
+      - "Quick/*"
+      - "Standard/*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -53,8 +58,29 @@ test_categories:
 
   comprehensive:
     description: "Nightly comprehensive external integration coverage"
+    # An include list, like quick and standard above, rather than "*". With "*"
+    # this tier was byte-identical to "full" below, so the C++ tier prefixes
+    # meant nothing: a suite's Full tier ran in the nightly job as well as the
+    # weekly one.
+    #
+    # Two namespaces are in play and both are needed. Lowercase "quick_*" /
+    # "standard_*" / "full_*" are bundle suites, named after their on-disk tier
+    # under integration-test-bundles/. Capitalised "Smoke/" / "Quick/" /
+    # "Standard/" / "Comprehensive/" are C++ gtest prefixes. "full_*" is listed
+    # and "Full/*" is not: the bundle full tier is nightly coverage this tier has
+    # always carried, while the C++ Full tier is the weekly-only set that "full"
+    # below still runs.
     test_patterns:
-      - "*"
+      - "quick_*"
+      - "standard_*"
+      - "full_*"
+      - "Smoke/*"
+      - "Quick/*"
+      - "Standard/*"
+      - "Comprehensive/*"
+      # The always-built C++ tests that carry no tier prefix
+      # (IntegrationIsSupportedExtPerformance, IntegrationCpuSdpaFwdBwdChained).
+      - "Integration*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -74,6 +100,10 @@ test_categories:
     description: "Fast-feedback mechanism (FFM) quick tier: currently mirrors the quick tier's coverage, with a 2 hour timeout"
     test_patterns:
       - "Smoke/*"
+      # Mirrors the quick tier: suites that carry an explicit tier prefix put
+      # their cheapest cases under "Quick/", so without this the ops that moved
+      # off "Smoke/" (layernorm) would drop out of fast feedback entirely.
+      - "Quick/*"
       - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
