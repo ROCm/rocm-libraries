@@ -151,10 +151,11 @@ invocation sequence from `ContractionSolution::solve`. Helper-generator counts
 and code-object counts do not determine the number of launches; the runtime
 problem and selected accumulation path determine that sequence.
 
-## Select a recipe from a canonical request
+## Select a recipe for a GEMM problem
 
-`Tensile.JitGemm` accepts a JSON request containing the canonical Tensile
-`problem_type`, logical dimensions and physical tensor extents in `problem`,
+`Tensile.JitGemm` accepts a JSON request containing a Tensile `problem_type`
+mapping, which specifies storage and arithmetic datatypes and operations.
+The request also contains logical dimensions and physical tensor extents in `problem`,
 an explicit architecture, and ranked `candidates`. Each candidate contains an
 integer ID, its predicted cost or null, and Tensile tuning parameters.
 
@@ -162,14 +163,21 @@ integer ID, its predicted cost or null, and Tensile tuning parameters.
 python -m Tensile.JitGemm request.json new-request-output --architecture gfx950
 ```
 
-The request uses `schema_version: 1`. `model: "origami.gemm.estimation"` means
-the caller supplied modeled candidates in increasing `predicted_cycles` order.
-This module validates those recipes through the existing Tensile solution
-machinery and builds the first supported candidate. It does not run Origami
-or measure kernel latency itself. If modeled candidates cannot be used,
-`model: "tensile.defaults"` selects actual default/native-instruction recipes
-with null cost and records the original ranking and rejection reasons.
-Tensor datatypes and operation semantics are preserved during fallback.
+The request uses `schema_version: 1`. `model` identifies the caller's prediction
+method, such as `origami.gemm.estimation`. Candidates are tried in the supplied
+order; `predicted_cycles` records a positive estimate or null when none is available.
+Each candidate must supply tuning parameters. Tensile's existing parameter and
+solution validators determine which parameters and values are legal; the interface
+does not restrict a predictor to a fixed list of four parameters.
+
+The module builds the first candidate accepted by solution validation and the
+static size/stride predicates. The shared predicate definitions also control
+early rejection for vector widths, buffer offsets and workgroup counts. Checks
+requiring workspace, scalar values or device state remain with the host runtime,
+which evaluates the complete predicates before execution. The module does not
+run Origami or measure kernel latency. If all supplied candidates are rejected,
+the request fails with their IDs and rejection reasons. It does not add default
+or native-instruction candidates, and an empty parameter recipe is rejected.
 
 Physical MX layout belongs to `problem.mx_scale_format` and is independent of
 tuning. Named `scale_mode_a` and `scale_mode_b` preserve the descriptor modes.
@@ -177,6 +185,12 @@ The gfx950 subtile backend requires `HostPreSwizzle` with
 `Block_32_UE8M0_32_8_EXT`; natural scales are not implemented by that backend.
 The gfx1250 TDM backend requires `InMemorySwizzle` with its ordinary block-scale
 modes. A candidate cannot change the supplied physical layout.
+
+The same supplied tuning parameters can be reused with another input or scale
+datatype combination, provided Tensile validates that combination. The MX recipe
+reuse test in `Tensile/Tests/unit/test_JitGemm.py` compiles both operand orders
+and supported scale formats with one fixed gfx1250 recipe. This checks generation
+and compilation; numerical correctness and performance require execution on that GPU.
 
 Bundles generated through this entry point additionally contain
 `jit_prediction`. The record includes selected tuning parameters, descriptor
