@@ -1,6 +1,6 @@
 # Changelog for rocALUTION
 
-Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
+Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
 ## (Unreleased) rocALUTION 4.1.1
 
