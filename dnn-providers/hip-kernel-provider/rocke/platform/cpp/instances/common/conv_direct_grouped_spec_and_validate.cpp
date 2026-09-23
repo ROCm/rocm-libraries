@@ -438,6 +438,21 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype != "fp16": raise ValueError(...) — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
+                         "is fp16-only on CDNA; use 8c/16c/32c for bf16");
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     /* if p.cpg != 4 or p.kpg != 4: raise ValueError(...) */
     if(p->cpg != 4 || p->kpg != 4)
     {
@@ -522,6 +537,15 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     }
 
     p = &spec->problem;
+    /* if p.dtype != "fp16": return False, ... — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0)
+        {
+            CK_DCONV4C_REJECT("DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
+                              "is fp16-only on CDNA; use 8c/16c/32c for bf16");
+        }
+    }
     /* if p.cpg != 4 or p.kpg != 4: return False, ... */
     if(p->cpg != 4 || p->kpg != 4)
     {
@@ -1387,13 +1411,21 @@ rocke_status_t rocke_direct_conv_dgrad_kernel_name(const rocke_direct_conv_dgrad
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bq{block_q}", f"bg{block_groups}") */
+    /* kernel_name_join(name, p.short(), f"bq{block_q}", f"bg{block_groups}",
+     *                  flags={"bf16": dtype=="bf16"}) */
     snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
     snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
     parts[0] = prob_short;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names[1] = {"bf16"};
+        int flag_on[1];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_dgrad_validate(const rocke_direct_conv_dgrad_spec_t* spec,
@@ -1406,6 +1438,18 @@ rocke_status_t rocke_direct_conv_dgrad_validate(const rocke_direct_conv_dgrad_sp
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConvDgradSpec: unsupported dtype '%s'", dt);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg < 1)
     {
         if(reason && reason_cap > 0)
@@ -1461,6 +1505,19 @@ bool rocke_direct_conv_dgrad_is_valid_spec(const rocke_direct_conv_dgrad_spec_t*
         return false;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): return False, ... */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(
+                    reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            }
+            return false;
+        }
+    }
     if(p->cpg < 1)
     {
         if(reason && reason_cap > 0)

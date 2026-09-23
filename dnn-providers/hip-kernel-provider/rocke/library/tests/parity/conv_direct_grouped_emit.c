@@ -305,6 +305,39 @@ static int make_cfg(int idx,
         *kind = KIND_DW_DGRAD;
         *arch = "gfx950";
         return 0;
+    case 17:
+        /* 16c bf16: exercises bf16 I/O, bf16 load/store taps, mfma_f32_16x16x16_bf16 */
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 16;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dtype = "bf16";
+        *s16 = rocke_direct_conv_16c_spec_default();
+        s16->problem = p;
+        s16->block_groups = 8;
+        s16->fold_k32 = false;
+        *kind = KIND_16C;
+        *arch = "gfx950";
+        return 0;
+    case 18:
+        /* 8c bf16: exercises bf16 I/O, bf16 load/store taps, mfma_f32_16x16x16_bf16 */
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 16;
+        p.cpg = 8;
+        p.kpg = 8;
+        p.dtype = "bf16";
+        *s8 = rocke_direct_conv_8c_spec_default();
+        s8->problem = p;
+        s8->block_q = 16;
+        s8->block_groups = 8;
+        s8->double_buffer = true;
+        *kind = KIND_8C;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

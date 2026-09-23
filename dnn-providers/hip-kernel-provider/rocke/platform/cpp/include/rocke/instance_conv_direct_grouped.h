@@ -95,11 +95,17 @@ typedef struct rocke_direct_conv_problem
     int KW; /* default 3 */
     int PAD; /* default 1 */
     int stride; /* default 1 */
-    const char* dtype; /* "fp16" or "bf16"; default "fp16" */
+    const char* dtype; /* "fp16" or "bf16"; NULL is treated as "fp16" by all
+                        * build functions.  Always set this field explicitly or
+                        * use rocke_direct_conv_problem_default() which sets it
+                        * to "fp16".  Zero-initialising the struct leaves dtype
+                        * NULL, which silently selects fp16 and will silently
+                        * drop a bf16 request. */
 } rocke_direct_conv_problem_t;
 
 /* DirectConvProblem with dataclass defaults (KH=KW=3, PAD=1, stride=1) and the
- * six required dims zeroed. Caller fills N,H,W,groups,cpg,kpg. */
+ * six required dims zeroed.  dtype is initialised to "fp16".
+ * Caller fills N,H,W,groups,cpg,kpg; override dtype for bf16. */
 rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void);
 
 /* @property total_c -> groups * cpg. */

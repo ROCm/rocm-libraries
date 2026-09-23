@@ -101,7 +101,7 @@ typedef struct rocke_dconv_16c_ctx
     int LOAD_VEC; /* 4                                         */
     int NUM_VEC4; /* LDS_ROW_FP16 / LOAD_VEC                    */
     int PASSES; /* ceil(NUM_VEC4 / THREADS)                  */
-    int lds_total_fp16; /* PASSES * THREADS * LOAD_VEC                */
+    int lds_total_elems; /* PASSES * THREADS * LOAD_VEC                */
     int q_subtiles; /* BLOCK_Q // 16                             */
     int n_iters; /* H + KH - 1                                */
 
@@ -125,7 +125,7 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* c_BG_cpg; /* const_i32(BLOCK_GROUPS * cpg)        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                         */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                 */
-    rocke_value_t* fp16x4_zero; /* zero_vec_f16(4)                      */
+    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                      */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                      */
 
     /* ---- thread / wave / lane decode (SSA) -- */
@@ -147,7 +147,7 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* q_tile_start; /* bx * BLOCK_Q                         */
 
     /* ---- LDS ping-pong buffers + buffer rsrcs -- */
-    rocke_value_t* A_smem; /* smem_alloc lds_a [1, lds_total_fp16] */
+    rocke_value_t* A_smem; /* smem_alloc lds_a [1, lds_total_elems] */
     rocke_value_t* B_smem; /* smem_alloc lds_b (or == A_smem)      */
     rocke_value_t* a_rsrc; /* buffer_rsrc(A, A_bytes)              */
     rocke_value_t* b_rsrc; /* buffer_rsrc(Bp, B_bytes)            */
@@ -225,7 +225,7 @@ typedef struct rocke_dconv_4c_ctx
     rocke_value_t* c_kpg; /* const_i32(kpg)                        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                          */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                  */
-    rocke_value_t* fp16x4_zero; /* zero_vec_f16(4)                       */
+    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                       */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                       */
 
     /* ---- thread / wave / lane decode (SSA) -- */
@@ -398,7 +398,7 @@ typedef struct rocke_dconv_8c_ctx
     int LOAD_VEC;
     int NUM_VEC4;
     int PASSES;
-    int lds_total_fp16;
+    int lds_total_elems;
     int q_subtiles; /* BLOCK_Q / 16 */
     int n_iters;
 
@@ -420,7 +420,7 @@ typedef struct rocke_dconv_8c_ctx
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
-    rocke_value_t* fp16x4_zero;
+    rocke_value_t* io_vec4_zero;
     rocke_value_t* zero_acc; /* <4 x float> */
 
     rocke_value_t* tid;
@@ -499,7 +499,7 @@ typedef struct rocke_dconv_32c_ctx
     int NUM_VEC4;
     int PASSES;
     int N_CH_BLOCKS; /* cpg / 4 = 8 for cpg=32 */
-    int lds_total_fp16;
+    int lds_total_elems;
     int q_subtiles; /* BLOCK_Q / 32 */
     int n_iters;
 
@@ -521,7 +521,7 @@ typedef struct rocke_dconv_32c_ctx
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
-    rocke_value_t* fp16x4_zero;
+    rocke_value_t* io_vec4_zero;
     rocke_value_t* zero_acc; /* <16 x float> */
 
     rocke_value_t* tid;

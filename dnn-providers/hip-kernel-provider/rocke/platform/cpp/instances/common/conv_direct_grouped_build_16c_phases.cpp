@@ -169,11 +169,11 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     ctx->q_tile_start = rocke_b_mul(b, ctx->bx, ctx->c_BQ);
 
     /* ---- LDS ping-pong buffers ---- */
-    ctx->lds_total_fp16 = ctx->PASSES * ctx->THREADS * ctx->LOAD_VEC;
+    ctx->lds_total_elems = ctx->PASSES * ctx->THREADS * ctx->LOAD_VEC;
     {
         int shape[2];
         shape[0] = 1;
-        shape[1] = ctx->lds_total_fp16;
+        shape[1] = ctx->lds_total_elems;
         ctx->A_smem = rocke_b_smem_alloc(b, ctx->io_type, shape, 2, "lds_a");
         if(spec->double_buffer)
             ctx->B_smem = rocke_b_smem_alloc(b, ctx->io_type, shape, 2, "lds_b");
@@ -188,7 +188,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
 
     ctx->c_half_bytes = rocke_b_const_i32(b, 2);
     ctx->oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
-    ctx->fp16x4_zero = rocke_b_zero_vec(b, ctx->io_type, 4);
+    ctx->io_vec4_zero = rocke_b_zero_vec(b, ctx->io_type, 4);
     ctx->zero_acc = rocke_b_zero_vec_f32(b, 4);
 
     return rocke_ir_builder_ok(b);
@@ -206,6 +206,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
 void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
+    const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
     int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
 
     /* TensorDescriptor.naive("B", lengths=[total_k, KH, KW, cpg],
@@ -255,7 +256,7 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off_k32, &valid);
             }
-            if(ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0)
+            if(is_bf16)
                 ctx->weights_k32[r_const] = rocke_b_buffer_load_vN_bf16(
                     b, ctx->b_rsrc, rocke_b_mul(b, w_off_k32, ctx->c_half_bytes), ctx->c0, 4);
             else
@@ -274,7 +275,7 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off_s2, &valid);
             }
-            if(ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0)
+            if(is_bf16)
                 w_s2 = rocke_b_buffer_load_vN_bf16(
                     b, ctx->b_rsrc, rocke_b_mul(b, w_off_s2, ctx->c_half_bytes), ctx->c0, 4);
             else
@@ -304,7 +305,7 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 in_values[3] = ctx->ch_lane_k16;
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off, &valid);
-                if(ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0)
+                if(is_bf16)
                     ctx->weights[ctx->n_weights++] = rocke_b_buffer_load_vN_bf16(
                         b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
                 else

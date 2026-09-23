@@ -42,6 +42,7 @@ int rocke_dconv16c_issue_dram_load(rocke_dconv_16c_ctx_t* ctx,
                                    int out_cap)
 {
     rocke_ir_builder_t* b = ctx->b;
+    const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
     int count = 0;
     int i;
 
@@ -101,12 +102,12 @@ int rocke_dconv16c_issue_dram_load(rocke_dconv_16c_ctx_t* ctx,
         /* safe_off = b.select(valid, a_off_bytes, oob_sentinel) */
         safe_off = rocke_b_select(b, valid, a_off_bytes, ctx->oob_sentinel);
         /* a_vec = _buf_load_vN(a_rsrc, safe_off, c0, 2) -- dtype-dispatched */
-        if(ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0)
+        if(is_bf16)
             a_vec = rocke_b_buffer_load_vN_bf16(b, ctx->a_rsrc, safe_off, ctx->c0, 2);
         else
             a_vec = rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_off, ctx->c0, 2);
-        /* a_vec = b.select(valid, a_vec, fp16x4_zero) */
-        a_vec = rocke_b_select(b, valid, a_vec, ctx->fp16x4_zero);
+        /* a_vec = b.select(valid, a_vec, io_vec4_zero) */
+        a_vec = rocke_b_select(b, valid, a_vec, ctx->io_vec4_zero);
         /* lds_idx = b.mul(cm["chunk_idx"], b.const_i32(4)) */
         lds_idx = rocke_b_mul(b, ctx->chunk_meta[i].chunk_idx, rocke_b_const_i32(b, 4));
 
@@ -305,6 +306,7 @@ void rocke_dconv16c_prologue_prefetch(rocke_dconv_16c_ctx_t* ctx)
 rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
+    const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
     const rocke_direct_conv_problem_t* p = &ctx->p;
     int KH = p->KH;
     int KW = p->KW;
@@ -422,7 +424,7 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
                      * shape-dependent way. Op order matches Python:
                      *   acc_in = mfma_f32_16x16x32_{f16,bf16}(weights_k32[r], in_k32, acc_in)
                      *   acc_in = mfma_f32_16x16x32_{f16,bf16}(weights_s2_k32[r], in_s2, acc_in) */
-                    if(ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0)
+                    if(is_bf16)
                     {
                         acc_in = rocke_b_mfma_f32_16x16x32_bf16(
                             b, ctx->weights_k32[r_const], in_k32[qt], acc_in);
@@ -444,7 +446,7 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
                     {
                         /* w_idx = r_const * KW + s_const */
                         int w_idx = r_const * KW + s_const;
-                        if(ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0)
+                        if(is_bf16)
                             acc_in = rocke_b_mfma_f32_16x16x16_bf16(
                                 b, ctx->weights[w_idx], in_s[qt][s_const], acc_in);
                         else
@@ -545,7 +547,7 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
                 /* safe_d_off = b.select(out_q_valid, d_base_bytes, oob_sentinel) */
                 safe_d_off = rocke_b_select(b, out_q_valid, d_base_bytes, ctx->oob_sentinel);
                 /* acc_h = vec_trunc_f32_to_{f16,bf16}(acc_to_flush) */
-                if(ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0)
+                if(is_bf16)
                 {
                     acc_h = rocke_b_vec_trunc_f32_to_bf16(b, acc_to_flush);
                     rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe_d_off, ctx->c0, acc_h, 2);

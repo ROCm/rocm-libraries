@@ -195,6 +195,46 @@ def _spec(idx: int):
             DirectDepthwiseDgradSpec(problem=p, block_w=8, block_waves=1),
             "gfx950",
         )
+    if idx == 17:
+        # 16c bf16: exercises bf16 I/O, bf16 load/store taps, mfma_f32_16x16x16_bf16
+        p = DirectConvProblem(
+            N=32,
+            H=200,
+            W=200,
+            groups=16,
+            cpg=16,
+            kpg=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "16c",
+            DirectConv16cSpec(problem=p, block_groups=8, fold_k32=False),
+            "gfx950",
+        )
+    if idx == 18:
+        # 8c bf16: exercises bf16 I/O, bf16 load/store taps, mfma_f32_16x16x16_bf16
+        p = DirectConvProblem(
+            N=32,
+            H=200,
+            W=200,
+            groups=16,
+            cpg=8,
+            kpg=8,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "8c",
+            DirectConv8cSpec(problem=p, block_q=16, block_groups=8, double_buffer=True),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

@@ -57,7 +57,7 @@ def _skip_reason() -> str:
 _SKIP_REASON = _skip_reason()
 
 _TOL = 5e-2
-_TOL_BF16 = 1e-1  # bf16 has ~3× less mantissa precision than f16
+_TOL_BF16 = 1e-1  # bf16 has 3 fewer mantissa bits than fp16 (~8x coarser precision)
 
 
 # ---------------------------------------------------------------------------
@@ -966,6 +966,22 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
         for s in _BF16_DGRAD_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_dgrad(s)
+
+
+class TestDirectConvValidation(unittest.TestCase):
+    """Validation-only tests that do not require a GPU."""
+
+    def test_cpg4_bf16_rejected(self):
+        """cpg=4 + bf16 must raise ValueError (no mfma_f32_4x4x4_bf16 on CDNA)."""
+        from kernels.common.conv_direct_grouped import (
+            DirectConv4cSpec,
+            DirectConvProblem,
+        )
+
+        p = DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="bf16")
+        spec = DirectConv4cSpec(problem=p)
+        with self.assertRaises(ValueError):
+            spec.validate()
 
 
 if __name__ == "__main__":

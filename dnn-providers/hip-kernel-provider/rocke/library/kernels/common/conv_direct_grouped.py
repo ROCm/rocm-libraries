@@ -81,6 +81,7 @@ from rocke.core.ir import (
     PtrType,
     Value,
 )
+from rocke.helpers.transforms import TensorDescriptor, embed, unmerge_magic
 
 
 def _io_type(dtype: str):
@@ -100,8 +101,8 @@ def _buf_load_vN(
     """Dtype-dispatch for vectorised buffer load.
 
     ``dwords`` matches the ``dwords`` parameter of ``buffer_load_vN_f16`` /
-    ``buffer_load_vN_bf16``: each dword holds two 16-bit elements (dwords=1 →
-    2 elements, dwords=2 → 4 elements, dwords=4 → 8 elements).
+    ``buffer_load_vN_bf16``: each dword holds two 16-bit elements (dwords=1 ->
+    2 elements, dwords=2 -> 4 elements, dwords=4 -> 8 elements).
     Uses the type-specific op names to stay byte-identical with the C++ engine.
     """
     if dtype == "bf16":
@@ -129,7 +130,31 @@ def _buf_store_vN(
         b.buffer_store_vN_f16(rsrc, voff, soff, val, dwords)
 
 
-from rocke.helpers.transforms import TensorDescriptor, embed, unmerge_magic
+def _trunc_f32(b: IRBuilder, dtype: str, val: Value) -> Value:
+    """Truncate a vector of f32 accumulators to the output dtype."""
+    if dtype == "bf16":
+        return b.vec_trunc_f32_to_bf16(val)
+    return b.vec_trunc_f32_to_f16(val)
+
+
+def _mfma(
+    b: IRBuilder,
+    dtype: str,
+    shape: str,
+    a: Value,
+    b_val: Value,
+    acc: Value,
+) -> Value:
+    """Dtype-dispatch for a single MFMA call.
+
+    ``shape`` is the size suffix without the dtype, e.g. ``"16x16x16"``,
+    ``"16x16x32"``, or ``"32x32x8"``.
+    """
+    if dtype == "bf16":
+        fn = getattr(b, f"mfma_f32_{shape}_bf16")
+    else:
+        fn = getattr(b, f"mfma_f32_{shape}_f16")
+    return fn(a, b_val, acc)
 
 
 @dataclass(frozen=True)
@@ -810,32 +835,29 @@ def build_direct_conv_16c(
                     # Migrating the C-accumulator readout + A/B K-pack to
                     # c_layout().coord would delete this whole hazard class at
                     # the source; tracked as a follow-up.
-                    if p.dtype == "bf16":
-                        acc_in = b.mfma_f32_16x16x32_bf16(
-                            weights_k32[r_const], input_k32, acc_in
-                        )
-                        acc_in = b.mfma_f32_16x16x32_bf16(
-                            weights_s2_k32[r_const], input_s2, acc_in
-                        )
-                    else:
-                        acc_in = b.mfma_f32_16x16x32_f16(
-                            weights_k32[r_const], input_k32, acc_in
-                        )
-                        acc_in = b.mfma_f32_16x16x32_f16(
-                            weights_s2_k32[r_const], input_s2, acc_in
-                        )
+                    acc_in = _mfma(
+                        b, p.dtype, "16x16x32", weights_k32[r_const], input_k32, acc_in
+                    )
+                    acc_in = _mfma(
+                        b,
+                        p.dtype,
+                        "16x16x32",
+                        weights_s2_k32[r_const],
+                        input_s2,
+                        acc_in,
+                    )
                 else:
                     inputs = inputs_by_q[qt]
                     for s_const in range(p.KW):
                         w_idx = r_const * p.KW + s_const
-                        if p.dtype == "bf16":
-                            acc_in = b.mfma_f32_16x16x16_bf16(
-                                weights[w_idx], inputs[s_const], acc_in
-                            )
-                        else:
-                            acc_in = b.mfma_f32_16x16x16_f16(
-                                weights[w_idx], inputs[s_const], acc_in
-                            )
+                        acc_in = _mfma(
+                            b,
+                            p.dtype,
+                            "16x16x16",
+                            weights[w_idx],
+                            inputs[s_const],
+                            acc_in,
+                        )
                 accs[p_idx] = acc_in
 
         if loads_next is not None:
@@ -899,13 +921,9 @@ def build_direct_conv_16c(
                 # k_out = g*kpg + c4*4 + [0..3].  Store them as one
                 # 64-bit vector instead of four scalar buffer_store_short
                 # ops.
-                if p.dtype == "bf16":
-                    acc_h = b.vec_trunc_f32_to_bf16(acc_to_flush)
-                    b.buffer_store_vN_bf16(d_rsrc, safe_d_off, c0, acc_h, 2)
-                else:
-                    acc_h = b.vec_trunc_f32_to_f16(acc_to_flush)
-                    b.buffer_store_vN_f16(d_rsrc, safe_d_off, c0, acc_h, 2)
-        # Unconditional slot reset — kills early-iter leaks before they
+                acc_h = _trunc_f32(b, p.dtype, acc_to_flush)
+                _buf_store_vN(b, p.dtype, d_rsrc, safe_d_off, c0, acc_h, 2)
+        # Unconditional slot reset - kills early-iter leaks before they
         # pollute a later output row.
         for qt in range(q_subtiles):
             acc_tiles[qt][P_FLUSH] = zero_acc
@@ -944,7 +962,7 @@ class DirectConv4cSpec:
         p = self.problem
         if p.dtype != "fp16":
             raise ValueError(
-                f"DirectConv4cSpec: bf16 is not supported — the mfma_f32_4x4x4 atom "
+                f"DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
                 f"is fp16-only on CDNA; use fp16 dtype or a different cpg variant"
             )
         if p.cpg != 4 or p.kpg != 4:
@@ -983,7 +1001,7 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     p = spec.problem
     if p.dtype != "fp16":
         return False, (
-            f"DirectConv4cSpec: bf16 not supported — no mfma_f32_4x4x4_bf16 atom on CDNA"
+            f"DirectConv4cSpec: bf16 not supported - no mfma_f32_4x4x4_bf16 atom on CDNA"
         )
     if p.stride != 1:
         return False, f"stride > 1 is not supported (got {p.stride})"
@@ -1191,8 +1209,8 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
                 safe_d = b.select(out_q_ok, b.mul(d_base, c_half_bytes), oob_sentinel)
                 # MFMA 4x4x4 wave64 per-lane output layout:
                 #   acc[i] -> D[n, ho_row, out_q, g*kpg + i]  for i in 0..3
-                acc_h = b.vec_trunc_f32_to_f16(acc)
-                b.buffer_store_vN_f16(d_rsrc, safe_d, c0, acc_h, 2)
+                acc_h = _trunc_f32(b, p.dtype, acc)
+                _buf_store_vN(b, p.dtype, d_rsrc, safe_d, c0, acc_h, 2)
         for qt in range(q_tiles_per_wave):
             acc_tiles[qt][P_FLUSH] = zero_acc
 
@@ -1623,22 +1641,13 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
                 p_idx = (y - r_const) % p.KH
                 acc_in = accs[p_idx]
                 # Main atom: s=0 and s=1 folded into K=16.
-                if p.dtype == "bf16":
-                    acc_in = b.mfma_f32_16x16x16_bf16(
-                        weights_main[r_const], inp_main, acc_in
-                    )
-                    # Residual atom: s=2, zero-padded to K=16 (upper lanes carry zeros).
-                    acc_in = b.mfma_f32_16x16x16_bf16(
-                        weights_s2[r_const], inp_s2, acc_in
-                    )
-                else:
-                    acc_in = b.mfma_f32_16x16x16_f16(
-                        weights_main[r_const], inp_main, acc_in
-                    )
-                    # Residual atom: s=2, zero-padded to K=16 (upper lanes carry zeros).
-                    acc_in = b.mfma_f32_16x16x16_f16(
-                        weights_s2[r_const], inp_s2, acc_in
-                    )
+                acc_in = _mfma(
+                    b, p.dtype, "16x16x16", weights_main[r_const], inp_main, acc_in
+                )
+                # Residual atom: s=2, zero-padded to K=16 (upper lanes carry zeros).
+                acc_in = _mfma(
+                    b, p.dtype, "16x16x16", weights_s2[r_const], inp_s2, acc_in
+                )
                 accs[p_idx] = acc_in
 
         if loads_next is not None:
@@ -1671,12 +1680,8 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
                 d_base_bytes = b.mul(d_base, c_half_bytes)
                 store_valid = b.land(out_q_valid, c4_valid)
                 safe_d_off = b.select(store_valid, d_base_bytes, oob_sentinel)
-                if p.dtype == "bf16":
-                    acc_h = b.vec_trunc_f32_to_bf16(acc_to_flush)
-                    b.buffer_store_vN_bf16(d_rsrc, safe_d_off, c0, acc_h, 2)
-                else:
-                    acc_h = b.vec_trunc_f32_to_f16(acc_to_flush)
-                    b.buffer_store_vN_f16(d_rsrc, safe_d_off, c0, acc_h, 2)
+                acc_h = _trunc_f32(b, p.dtype, acc_to_flush)
+                _buf_store_vN(b, p.dtype, d_rsrc, safe_d_off, c0, acc_h, 2)
         for qt in range(q_subtiles):
             acc_tiles[qt][P_FLUSH] = zero_acc
 
@@ -2065,18 +2070,14 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
                 acc_in = accs[p_idx]
                 for s_const in range(p.KW):
                     for atom_idx in range(4):
-                        if p.dtype == "bf16":
-                            acc_in = b.mfma_f32_32x32x8_bf16(
-                                weights[r_const][s_const][atom_idx],
-                                inputs_by_q[qt][s_const][atom_idx],
-                                acc_in,
-                            )
-                        else:
-                            acc_in = b.mfma_f32_32x32x8_f16(
-                                weights[r_const][s_const][atom_idx],
-                                inputs_by_q[qt][s_const][atom_idx],
-                                acc_in,
-                            )
+                        acc_in = _mfma(
+                            b,
+                            p.dtype,
+                            "32x32x8",
+                            weights[r_const][s_const][atom_idx],
+                            inputs_by_q[qt][s_const][atom_idx],
+                            acc_in,
+                        )
                 accs[p_idx] = acc_in
 
         if loads_next is not None:
@@ -2116,12 +2117,8 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
                         e0 = b.vec_extract(acc_to_flush, slot0)
                         e1 = b.vec_extract(acc_to_flush, slot1)
                         pair_acc = b.vec_pack([e0, e1], F32)
-                        if p.dtype == "bf16":
-                            pair_h = b.vec_trunc_f32_to_bf16(pair_acc)
-                            b.buffer_store_vN_bf16(d_rsrc, safe_d_off, c0, pair_h, 1)
-                        else:
-                            pair_h = b.vec_trunc_f32_to_f16(pair_acc)
-                            b.buffer_store_vN_f16(d_rsrc, safe_d_off, c0, pair_h, 1)
+                        pair_h = _trunc_f32(b, p.dtype, pair_acc)
+                        _buf_store_vN(b, p.dtype, d_rsrc, safe_d_off, c0, pair_h, 1)
         for qt in range(q_subtiles):
             acc_tiles[qt][P_FLUSH] = zero_acc
 
@@ -2810,40 +2807,15 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 w_frag_pw = preloaded_w[
                                     (r_const, s_const, local_atom, m)
                                 ]
-                                if FOLD_K32:
-                                    if p.dtype == "bf16":
-                                        acc_tiles[qt][m][p_idx] = (
-                                            b.mfma_f32_16x16x32_bf16(
-                                                w_frag_pw,
-                                                x_frag_pw,
-                                                acc_tiles[qt][m][p_idx],
-                                            )
-                                        )
-                                    else:
-                                        acc_tiles[qt][m][p_idx] = (
-                                            b.mfma_f32_16x16x32_f16(
-                                                w_frag_pw,
-                                                x_frag_pw,
-                                                acc_tiles[qt][m][p_idx],
-                                            )
-                                        )
-                                else:
-                                    if p.dtype == "bf16":
-                                        acc_tiles[qt][m][p_idx] = (
-                                            b.mfma_f32_16x16x16_bf16(
-                                                w_frag_pw,
-                                                x_frag_pw,
-                                                acc_tiles[qt][m][p_idx],
-                                            )
-                                        )
-                                    else:
-                                        acc_tiles[qt][m][p_idx] = (
-                                            b.mfma_f32_16x16x16_f16(
-                                                w_frag_pw,
-                                                x_frag_pw,
-                                                acc_tiles[qt][m][p_idx],
-                                            )
-                                        )
+                                mfma_shape = "16x16x32" if FOLD_K32 else "16x16x16"
+                                acc_tiles[qt][m][p_idx] = _mfma(
+                                    b,
+                                    p.dtype,
+                                    mfma_shape,
+                                    w_frag_pw,
+                                    x_frag_pw,
+                                    acc_tiles[qt][m][p_idx],
+                                )
                     continue  # skip the runtime s_loop/atom_loop below
 
                 # ---- Runtime K-atom loop path (runtime_k_loop=True) ----
@@ -2944,24 +2916,15 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                     c0,
                                     LOAD_VEC // 2,
                                 )
-                                if FOLD_K32:
-                                    if p.dtype == "bf16":
-                                        new_k_accs_rk[m] = b.mfma_f32_16x16x32_bf16(
-                                            w_frag_rk, x_frag_rk, new_k_accs_rk[m]
-                                        )
-                                    else:
-                                        new_k_accs_rk[m] = b.mfma_f32_16x16x32_f16(
-                                            w_frag_rk, x_frag_rk, new_k_accs_rk[m]
-                                        )
-                                else:
-                                    if p.dtype == "bf16":
-                                        new_k_accs_rk[m] = b.mfma_f32_16x16x16_bf16(
-                                            w_frag_rk, x_frag_rk, new_k_accs_rk[m]
-                                        )
-                                    else:
-                                        new_k_accs_rk[m] = b.mfma_f32_16x16x16_f16(
-                                            w_frag_rk, x_frag_rk, new_k_accs_rk[m]
-                                        )
+                                mfma_shape = "16x16x32" if FOLD_K32 else "16x16x16"
+                                new_k_accs_rk[m] = _mfma(
+                                    b,
+                                    p.dtype,
+                                    mfma_shape,
+                                    w_frag_rk,
+                                    x_frag_rk,
+                                    new_k_accs_rk[m],
+                                )
                         b.scf_yield(*new_k_accs_rk)
                     for m in range(N_M_TILES):
                         acc_tiles[qt][m][p_idx] = k_loop_rk.results[m]
@@ -3068,24 +3031,10 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             if p.cpg % K_ATOM_SIZE != 0:
                                 w_frag = b.select(c4_oob, _zero_std, w_frag)
 
-                            if FOLD_K32:
-                                if p.dtype == "bf16":
-                                    new_acc = b.mfma_f32_16x16x32_bf16(
-                                        w_frag, x_frag, atom_accs[m]
-                                    )
-                                else:
-                                    new_acc = b.mfma_f32_16x16x32_f16(
-                                        w_frag, x_frag, atom_accs[m]
-                                    )
-                            else:
-                                if p.dtype == "bf16":
-                                    new_acc = b.mfma_f32_16x16x16_bf16(
-                                        w_frag, x_frag, atom_accs[m]
-                                    )
-                                else:
-                                    new_acc = b.mfma_f32_16x16x16_f16(
-                                        w_frag, x_frag, atom_accs[m]
-                                    )
+                            mfma_shape = "16x16x32" if FOLD_K32 else "16x16x16"
+                            new_acc = _mfma(
+                                b, p.dtype, mfma_shape, w_frag, x_frag, atom_accs[m]
+                            )
                             new_atom_accs.append(new_acc)
 
                         b.scf_yield(*new_atom_accs)
@@ -3203,23 +3152,15 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             safe_d = b.select(
                                 store_ok, b.mul(d_base, c_half_bytes), oob_sentinel
                             )
-                            if p.dtype == "bf16":
-                                acc_h = b.vec_trunc_f32_to_bf16(partial)
-                                b.buffer_store_vN_bf16(d_rsrc, safe_d, c0, acc_h, 2)
-                            else:
-                                acc_h = b.vec_trunc_f32_to_f16(partial)
-                                b.buffer_store_vN_f16(d_rsrc, safe_d, c0, acc_h, 2)
+                            acc_h = _trunc_f32(b, p.dtype, partial)
+                            _buf_store_vN(b, p.dtype, d_rsrc, safe_d, c0, acc_h, 2)
                         b.sync()  # allow red_lds reuse by next flush
                     else:
                         safe_d = b.select(
                             store_ok, b.mul(d_base, c_half_bytes), oob_sentinel
                         )
-                        if p.dtype == "bf16":
-                            acc_h = b.vec_trunc_f32_to_bf16(acc_to_flush)
-                            b.buffer_store_vN_bf16(d_rsrc, safe_d, c0, acc_h, 2)
-                        else:
-                            acc_h = b.vec_trunc_f32_to_f16(acc_to_flush)
-                            b.buffer_store_vN_f16(d_rsrc, safe_d, c0, acc_h, 2)
+                        acc_h = _trunc_f32(b, p.dtype, acc_to_flush)
+                        _buf_store_vN(b, p.dtype, d_rsrc, safe_d, c0, acc_h, 2)
 
         for qt in range(q_subtiles):
             for m in range(N_M_TILES):
@@ -3511,10 +3452,7 @@ def build_direct_reorganize_weights(
         b.mul(tid, b.const_i32(ELEMS_PER_LANE)),
     )
     safe_dst = b.select(src_ok, b.mul(dst_off, c_half_bytes), oob_sentinel)
-    if p.dtype == "bf16":
-        b.buffer_store_vN_bf16(d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE // 2)
-    else:
-        b.buffer_store_vN_f16(d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE // 2)
+    _buf_store_vN(b, p.dtype, d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE // 2)
 
     return b.kernel
 
@@ -3622,10 +3560,7 @@ def build_direct_coalesced_weights_dgrad(
         b.mul(tid, b.const_i32(4)),
     )
     safe_dst = b.select(k_ok, b.mul(dst_off, c_half_bytes), oob_sentinel)
-    if p.dtype == "bf16":
-        b.buffer_store_vN_bf16(d_rsrc, safe_dst, c0, val, 2)
-    else:
-        b.buffer_store_vN_f16(d_rsrc, safe_dst, c0, val, 2)
+    _buf_store_vN(b, p.dtype, d_rsrc, safe_dst, c0, val, 2)
 
     return b.kernel
 
@@ -3669,6 +3604,7 @@ def build_direct_mfma_dgrad(
         KW=orig_p.KW,
         PAD=orig_p.KH - 1 - orig_p.PAD,  # undo the PAD swap
         stride=1,
+        dtype=orig_p.dtype,
     )
     transpose_kernel = build_direct_transpose_weights_dgrad(
         DirectTransposeWeightsDgradSpec(problem=orig_problem), arch=arch
@@ -3721,6 +3657,7 @@ def make_dgrad_fprop_spec(
         KW=p.KW,
         PAD=pad_new,
         stride=1,
+        dtype=p.dtype,
     )
     return DirectConvSpec(
         problem=transposed_problem,
@@ -4117,6 +4054,10 @@ class DirectDepthwiseDgradSpec:
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype != "fp16":
+            raise ValueError(
+                f"DirectDepthwiseDgradSpec: bf16 not supported; depthwise kernels are fp16-only"
+            )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
                 f"DirectDepthwiseDgradSpec requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
@@ -4368,6 +4309,10 @@ class DirectDepthwiseDgradStreamSpec:
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype != "fp16":
+            raise ValueError(
+                f"DirectDepthwiseDgradStreamSpec: bf16 not supported; depthwise kernels are fp16-only"
+            )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
                 f"DirectDepthwiseDgradStreamSpec requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
@@ -4639,11 +4584,14 @@ class DirectDepthwiseSpec:
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype != "fp16":
+            raise ValueError(
+                f"DirectDepthwiseSpec: bf16 not supported; depthwise kernels are fp16-only"
+            )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
                 f"DirectDepthwiseSpec requires cpg=kpg=1 (got cpg={p.cpg}, kpg={p.kpg})"
             )
-        pass
 
 
 def is_valid_depthwise_spec(
@@ -5001,6 +4949,10 @@ class DirectDepthwiseSpatialSpec:
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype != "fp16":
+            raise ValueError(
+                f"DirectDepthwiseSpatialSpec: bf16 not supported; depthwise kernels are fp16-only"
+            )
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
                 f"DirectDepthwiseSpatialSpec requires cpg=kpg=1 "
