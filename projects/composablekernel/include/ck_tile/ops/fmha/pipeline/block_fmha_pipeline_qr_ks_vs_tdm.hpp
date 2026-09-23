@@ -81,6 +81,8 @@ struct BlockFmhaPipelineQRKSVSTdm
     // Single source of truth, shared with the warp GEMM that GetPVBlockGemm()
     // selects -- the two must agree or a scaled call lands on a dense MMA.
     static constexpr bool kHwGemm1Scale = Policy::template IsPVMxScaled<Problem>();
+    // Likewise for gemm_0; its scale operands are always neutral.
+    static constexpr bool kHwGemm0Scale = Policy::template IsQKMxScaled<Problem>();
 
     static constexpr index_t kScaleBytes        = 4;
     static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
@@ -132,17 +134,32 @@ struct BlockFmhaPipelineQRKSVSTdm
         return pin_to_vgpr(static_cast<int32_t>(packed.data()));
     }
 
-    template <typename Gemm1>
-    CK_TILE_DEVICE static auto make_gemm1_scale([[maybe_unused]] int32_t scale)
+    template <typename Gemm, bool kHwScale>
+    CK_TILE_DEVICE static auto make_gemm_scale([[maybe_unused]] int32_t scale)
     {
-        if constexpr(kHwGemm1Scale)
+        if constexpr(kHwScale)
         {
             return [scale](auto, auto) { return scale; };
         }
         else
         {
-            return typename remove_cvref_t<Gemm1>::no_scale{};
+            return typename remove_cvref_t<Gemm>::no_scale{};
         }
+    }
+
+    template <typename Gemm1>
+    CK_TILE_DEVICE static auto make_gemm1_scale(int32_t scale)
+    {
+        return make_gemm_scale<Gemm1, kHwGemm1Scale>(scale);
+    }
+
+    // Neutral scales only. Left in an SGPR, the MMA reads bits [7:0] and broadcasts
+    // them to all four 32-K blocks, which is harmless for 0x7F7F7F7F but not for a
+    // per-block scale -- that one would need pinning to a VGPR.
+    template <typename Gemm0>
+    CK_TILE_DEVICE static auto make_gemm0_scale()
+    {
+        return make_gemm_scale<Gemm0, kHwGemm0Scale>(e8m0_one());
     }
 
     // Every softmax site here calls exp2 directly; there is no exp() path to fall back to.
@@ -256,6 +273,9 @@ struct BlockFmhaPipelineQRKSVSTdm
             static_assert(kPMI * kPKI == 1,
                           "qr_tdm pipeline: the dynamic P scale needs the (MIter,KIter) repack "
                           "to be the identity");
+            // With gemm_1's Octa access a lane holds K = 16s + 8h + e, so a run of
+            // 16 buffer values plus the partner lane's run is exactly one 32-K
+            // scale block -- the grouping cast_tile_mx_wmma assumes.
             using WG = typename Gemm1::WarpGemm;
             const auto packed =
                 cast_tile_mx_wmma<kPScaleGranularity,
@@ -283,41 +303,31 @@ struct BlockFmhaPipelineQRKSVSTdm
         return p_tile;
     }
 
-    // Re-wrap the transposed V tile into the encoding gemm_1 asserts on.
+    // Hand the transposed V tile to gemm_1, which must see it in exactly the
+    // encoding it was loaded with.
     //
     // MakeVRegTileDistribution pushes gemm_1's B encoding through
-    // InputTileDistributionTraits, whose normalization splits a terminal K
-    // sub-dim that is a strict multiple of SubtileMinorDimension (the ds_read_tr
-    // width divided by the element width; on gfx1250 that is 8 for both 8- and
-    // 16-bit types, from a 64-bit and a 128-bit instruction respectively). The
-    // fp8 16x16x128 warp tile has 64 there and is split into 8 x 8; the 16-bit
-    // 16x16x32 tile has 16 and is split into 2 x 8. Either way the encoding
-    // gains one Y dim.
-    // load_tile_transpose reverses the transpose but not the split, so the
-    // tile comes back one Y dim finer than BlockGemmARegBRegCRegV2 expects.
-    // The split is a pure refactorization of the same Y order, so the thread
-    // buffer is bit-identical and the re-wrap is a no-op at runtime -- but the
-    // gemm compares encodings by type, so it has to be spelled out.
+    // InputTileDistributionTraits, which splits the per-lane K run into
+    // ds_load_tr-wide subtiles (8 elements on gfx1250 for both 8- and 16-bit
+    // types). Each ds_load_tr fills its subtile interleaved across the two
+    // lane halves, so V arrives with K strided, not contiguous per lane.
+    // GetPVBlockGemm declares the matching number of accesses (Double for the
+    // 16-bit 16x16x32 tile, Octa for the 8-bit 16x16x128 one), which makes the
+    // two encodings identical.
+    //
+    // Copying the thread buffer into any other encoding is NOT a no-op: it
+    // permutes K against P and was measured to corrupt O for both bf16 and
+    // fp8, so the mismatch is a compile error rather than a fallback.
     template <typename Gemm1, typename VTensor>
     CK_TILE_DEVICE static auto MakeVForGemm1(const VTensor& v_tile)
     {
         constexpr auto v_dstr =
             make_static_tile_distribution(Gemm1::MakeBBlockDistributionEncode());
-
-        if constexpr(std::is_same_v<remove_cvref_t<decltype(v_dstr)>,
-                                    remove_cvref_t<decltype(VTensor::get_tile_distribution())>>)
-        {
-            return v_tile;
-        }
-        else
-        {
-            auto v_for_gemm = make_static_distributed_tensor<typename VTensor::DataType>(v_dstr);
-            static_assert(remove_cvref_t<decltype(v_for_gemm)>::get_thread_buffer_size() ==
-                              VTensor::get_thread_buffer_size(),
-                          "qr_tdm pipeline: V re-wrap changed the per-thread element count");
-            v_for_gemm.get_thread_buffer() = v_tile.get_thread_buffer();
-            return v_for_gemm;
-        }
+        static_assert(std::is_same_v<remove_cvref_t<decltype(v_dstr)>,
+                                     remove_cvref_t<decltype(VTensor::get_tile_distribution())>>,
+                      "qr_tdm pipeline: V must reach gemm_1 in gemm_1's B encoding exactly; "
+                      "re-wrapping its thread buffer permutes K");
+        return v_tile;
     }
 
     // Decode (single shared-memory buffer)
@@ -653,7 +663,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                            get_slice_tile(q_tile,
                                           sequence<0, i_k0 * kK0>{},
                                           sequence<kM0, (i_k0 + 1) * kK0>{}),
-                           k_tile);
+                           k_tile,
+                           make_gemm0_scale<decltype(gemm_0)>(),
+                           make_gemm0_scale<decltype(gemm_0)>());
 
                     // loop over along the [K]ey head dimension
                     move_tile_window(k_dram_window, {0, kK0});
@@ -672,7 +684,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                    get_slice_tile(q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kM0, k0_loops * kK0>{}),
-                   k_tile);
+                   k_tile,
+                   make_gemm0_scale<decltype(gemm_0)>(),
+                   make_gemm0_scale<decltype(gemm_0)>());
 
             if constexpr(kBlockScale)
             {
@@ -1380,7 +1394,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                            get_slice_tile(q_tile,
                                           sequence<0, i_k0 * kK0>{},
                                           sequence<kM0, (i_k0 + 1) * kK0>{}),
-                           k_tile);
+                           k_tile,
+                           make_gemm0_scale<decltype(gemm_0)>(),
+                           make_gemm0_scale<decltype(gemm_0)>());
 
                     k_tile = k_tile_switch;
                 });
@@ -1392,7 +1408,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                    get_slice_tile(q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kM0, k0_loops * kK0>{}),
-                   k_tile);
+                   k_tile,
+                   make_gemm0_scale<decltype(gemm_0)>(),
+                   make_gemm0_scale<decltype(gemm_0)>());
 
             if constexpr(kBlockScale)
             {

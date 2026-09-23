@@ -492,6 +492,22 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                                             detail::kQrTdmLdsAccessBytes>();
     }
 
+    // An 8-bit gemm_0 with a K=128 warp tile goes through the E8M0-scaled MMA with
+    // neutral scales instead of the dense v_wmma_*_16x16x128_{fp8,bf8}_* family,
+    // which returns garbage on gfx1250 ASIC revision 0 (the dense K=64 form and the
+    // f8f6f4 forms are correct there). The revision is not visible at compile time,
+    // so every gfx1250 target takes this path. As with IsPVMxScaled(), the warp GEMM
+    // and the pipeline's scale operands both read this.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool IsQKMxScaled()
+    {
+        static_assert(is_any_of<typename Problem::QDataType, fp8_t, bf8_t>::value ==
+                          is_any_of<typename Problem::KDataType, fp8_t, bf8_t>::value,
+                      "qr_tdm pipeline: Q and K must both be 8-bit or both not");
+        return is_any_of<typename Problem::QDataType, fp8_t, bf8_t>::value &&
+               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}) == 128;
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemm()
     {
@@ -512,7 +528,14 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
                                             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
                                             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
-                                            true>;
+                                            true,                         // TransposeC
+                                            false,                        // SwizzleA
+                                            false,                        // UseStructuredSparsity
+                                            WGAttrNumAccessEnum::Default, // AttrNumAccessA
+                                            WGAttrNumAccessEnum::Default, // AttrNumAccessB
+                                            false,                        // IsScale16
+                                            false,                        // UsePackedNumAccess
+                                            IsQKMxScaled<Problem>()>;     // UseMxScale
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::QDataType,
@@ -552,20 +575,31 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 
         constexpr bool kUseMxScale = IsPVMxScaled<Problem>();
 
+        // V reaches gemm_1 through ds_load_tr, which hands each lane its K
+        // elements as 8-wide subtiles interleaved across the lane halves: two
+        // per lane for a 16-bit 16x16x32 warp tile, eight for an 8-bit
+        // 16x16x128 one. The operands have to be declared with the same number
+        // of accesses; with fewer the gemm walks K in a different order than
+        // the one P was laid out in, and the P.V product is silently permuted
+        // along K (measured on both bf16 and fp8).
+        constexpr bool kIs8BitV = is_any_of<typename Problem::VDataType, fp8_t, bf8_t>::value;
+        constexpr auto kPVNumAccess =
+            kIs8BitV ? WGAttrNumAccessEnum::Octa : WGAttrNumAccessEnum::Double;
+
         using WarpGemm = WarpGemmDispatcher<typename Problem::PDataType,
                                             typename Problem::VDataType,
                                             typename Problem::OaccDataType,
                                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
                                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
                                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                                            true,                         // TransposeC
-                                            false,                        // SwizzleA
-                                            false,                        // UseStructuredSparsity
-                                            WGAttrNumAccessEnum::Default, // AttrNumAccessA
-                                            WGAttrNumAccessEnum::Default, // AttrNumAccessB
-                                            false,                        // IsScale16
-                                            false,                        // UsePackedNumAccess
-                                            kUseMxScale>;                 // UseMxScale
+                                            true,         // TransposeC
+                                            false,        // SwizzleA
+                                            false,        // UseStructuredSparsity
+                                            kPVNumAccess, // AttrNumAccessA
+                                            kPVNumAccess, // AttrNumAccessB
+                                            false,        // IsScale16
+                                            false,        // UsePackedNumAccess
+                                            kUseMxScale>; // UseMxScale
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::PDataType,
