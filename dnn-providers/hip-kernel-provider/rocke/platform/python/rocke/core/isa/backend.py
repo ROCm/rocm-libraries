@@ -21,10 +21,9 @@ encoders emit) fails loudly here instead of silently truncating a partial wait
 into a full VMEM drain. See
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("ISA Backend").
 
-This module imports architecture metadata and local ISA helpers at module load;
-the shared LLVM constants are pulled from ``core/lower_llvm`` lazily inside
-methods to avoid an import cycle (``lower_llvm`` imports :func:`backend_for` at
-module top).
+This module imports from ``core/arch`` at module load; the shared LLVM
+constants are pulled from ``core/lower_llvm`` lazily inside methods to avoid an
+import cycle (``lower_llvm`` imports :func:`backend_for` at module top).
 """
 
 from __future__ import annotations
