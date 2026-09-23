@@ -9,6 +9,9 @@ performance.
 The YAML supplies an exact recipe using the existing problem and parameter
 schema. `SingleSolution` uses TensileLite's full target and solution validators.
 
+The [component roadmap](jit-roadmap.md) explains how this builder connects to
+ranked selection, a generic JIT API, and application execution.
+
 ## Python and command-line use
 
 ```python

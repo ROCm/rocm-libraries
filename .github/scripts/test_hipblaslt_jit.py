@@ -30,6 +30,7 @@ def main():
             "sample",
             "streamk-api",
             "amax-api",
+            "alpha-zero-api",
             "alternate-backend",
             "process-runner",
             "artifact-loader",
@@ -170,9 +171,10 @@ def main():
     )
     # These are the public C hipblasLtMatmul and C++ Gemm routes.
     # They use the same generic JIT selection API as any application.
-    for feature, options in [
-        ("streamk", ["--k", "4096", "--workspace-fallback", "1"]),
-        ("amax", ["--amax", "1"]),
+    for feature, fixture, options in [
+        ("streamk", "streamk", ["--k", "4096", "--workspace-fallback", "1"]),
+        ("amax", "amax", ["--amax", "1"]),
+        ("alpha-zero", "amax", ["--amax", "1", "--alpha-zero", "1"]),
     ]:
         name = f"{feature}-api"
         command = [
@@ -180,7 +182,7 @@ def main():
             sys.executable,
             str(tensile),
             env["PYTHONPATH"],
-            str(fixtures / f"single_solution_{feature}{fixture_suffix}.yaml"),
+            str(fixtures / f"single_solution_{fixture}{fixture_suffix}.yaml"),
             str(output / name),
             args.architecture,
             compiler,

@@ -645,7 +645,7 @@ namespace
         BLAS(gemm.isAlgoSupported(copiedAlgo, dimensionWorkspace));
         require(dimensionWorkspace == bytes, "Dimension-based workspace mismatch");
         gemm.setMaxWorkspaceBytes(bytes);
-        BLAS(gemm.initialize(copiedAlgo, p.W.pointer, false, p.stream));
+        BLAS(gemm.initialize(copiedAlgo, p.W.pointer, true, p.stream));
         BLAS(gemm.run(p.stream));
         p.verify(0.75f, -0.25f);
         std::cout << "PASS dimension-based C++ GEMM retains host scalar values\n";
@@ -667,9 +667,16 @@ namespace
         }
         size_t needed = 0;
         BLAS(gemm.isAlgoSupported(copiedAlgo, needed));
+        hipblaslt_ext::GemmTuning noOverrides;
+        BLAS(gemm.isAlgoSupported(copiedAlgo, noOverrides, needed));
+        hipblaslt_ext::GemmTuning overrides;
+        overrides.setSplitK(2);
+        require(gemm.isAlgoSupported(copiedAlgo, overrides, needed) == HIPBLAS_STATUS_NOT_SUPPORTED,
+                "JIT support accepted a tuning override");
+        BLAS(gemm.isAlgoSupported(copiedAlgo, needed));
         require(needed == bytes, "C++ support returned an incorrect workspace size");
         gemm.setMaxWorkspaceBytes(bytes);
-        BLAS(gemm.initialize(copiedAlgo, p.W.pointer, false, p.stream));
+        BLAS(gemm.initialize(copiedAlgo, p.W.pointer, true, p.stream));
         BLAS(gemm.run(p.stream, p.start, p.stop));
         HIP(hipEventSynchronize(p.stop));
         float elapsed = -1;

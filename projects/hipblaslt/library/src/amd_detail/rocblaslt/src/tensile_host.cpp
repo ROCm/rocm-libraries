@@ -4051,7 +4051,8 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 #ifdef HIPBLASLT_ENABLE_JIT
     if(isJitAlgorithm(&algo))
     {
-        if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM || useUserArgs || tuning)
+        if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM
+           || (tuning && (tuning->gsu || tuning->wgm)))
             return rocblaslt_status_not_supported;
         if(!gemmData)
             return rocblaslt_status_invalid_pointer;
@@ -5531,7 +5532,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
     if(isJitAlgorithm(&algo))
     {
         workspaceSizeInBytes = 0;
-        if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM || tuning)
+        if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM
+           || (tuning && (tuning->gsu || tuning->wgm)))
             return rocblaslt_status_not_supported;
         if(!gemmData)
             return rocblaslt_status_invalid_pointer;
@@ -6000,11 +6002,12 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
             std::shared_ptr<TensileLite::hip::SolutionAdapter> adapter;
             std::vector<TensileLite::KernelInvocation>         kernels;
             hipStream_t                                        preparedStream;
+            bool                                               streamBound = false;
             hipblasStatus_t
                 run(hipStream_t stream, hipEvent_t start, hipEvent_t stop) const override
             {
                 // Stream-K flags are bound to this stream during preparation.
-                if(stream != preparedStream)
+                if(streamBound && stream != preparedStream)
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 return adapter->launchKernels(kernels, stream, start, stop, true) == hipSuccess
                            ? HIPBLAS_STATUS_SUCCESS
@@ -6032,7 +6035,6 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
         auto problem = ConstructTensileProblem(request->problem);
-        updateTensileProblem(request->problem, problem);
         auto solution = library->solutions.at(0);
         problem.setWorkspaceSize(limit);
         problem.setParams().setFallbackStatus(solution->isFallbackForHW(*hardware));
@@ -6091,14 +6093,16 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
                 return RocBlasLtStatusToHIPStatus(status);
         }
         auto problem = ConstructTensileProblem(raw);
-        updateTensileProblem(raw, problem);
         problem.setParams().setWGMXCC(solution->isFallbackForHW(*hardware) ? 1 : 0);
         auto inputs = GetTensileInputs(raw);
         bindFlagRegion(raw, *solution, inputs);
         auto launch            = std::make_shared<Launch>();
         launch->adapter        = adapter;
         launch->preparedStream = execution.stream;
-        launch->kernels        = solution->solve(problem, inputs, *hardware);
+        launch->streamBound    = solution->sizeMapping.streamK > 0
+                              && solution->sizeMapping.streamKAtomic == 0
+                              && !solution->problemType.outputAmaxD;
+        launch->kernels = solution->solve(problem, inputs, *hardware);
         if(launch->kernels.empty())
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         for(const auto& kernel : launch->kernels)
