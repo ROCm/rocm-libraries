@@ -17,7 +17,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
-#include <hipblaslt/hipblaslt-ext.hpp>
+#include "hipblaslt-jit-gemm.hpp"
 #include <iostream>
 #include <limits>
 #include <mutex>
@@ -480,4 +480,419 @@ namespace hipblaslt_ext::experimental
         }
     }
 
+    struct JitGemm::Impl
+    {
+        hipblasLtHandle_t                                  handle;
+        int                                                device = -1;
+        TensileLite::ContractionProblemGemm                problem;
+        TensileLite::ContractionInputs                     inputs;
+        std::vector<TensileLite::KernelInvocation>         kernels;
+        bool                                               hasProblem = false;
+        RocblasltContractionProblem::ScalingFormat         scaleAType
+            = RocblasltContractionProblem::ScalingFormat::None;
+        RocblasltContractionProblem::ScalingFormat scaleBType
+            = RocblasltContractionProblem::ScalingFormat::None;
+        std::shared_ptr<TensileLite::Hardware>             hardware;
+        std::shared_ptr<Master>                            library;
+        std::shared_ptr<TensileLite::ContractionSolution>  solution;
+        std::unique_ptr<TensileLite::hip::SolutionAdapter> adapter;
+        hipEvent_t                                         completion        = nullptr;
+        hipStream_t                                        stream            = nullptr;
+        bool                                               submitted         = false;
+        bool                                               drainRequired     = false;
+        bool                                               prepared          = false;
+        bool                                               initialized       = false;
+        size_t                                             workspaceRequired = 0;
+        size_t                                             generations       = 0;
+        std::string                                        error, manifest, kernel;
+        DispatchInfo                                       dispatch;
+        void*                                              synchronizer      = nullptr;
+        size_t                                             synchronizerBytes = 0;
+
+        explicit Impl(hipblasLtHandle_t value)
+            : handle(value)
+        {
+            if(handle)
+                device = reinterpret_cast<rocblaslt_handle>(handle)->device;
+        }
+
+        ~Impl()
+        {
+            if(!adapter && !completion && !synchronizer)
+                return;
+            int  previous      = -1;
+            auto status        = hipGetDevice(&previous);
+            bool changedDevice = false;
+            if(status == hipSuccess && previous != device)
+            {
+                status        = hipSetDevice(device);
+                changedDevice = status == hipSuccess;
+            }
+            const bool correctDevice = status == hipSuccess;
+            if(correctDevice && submitted)
+            {
+                status = drainRequired ? hipStreamSynchronize(stream)
+                                       : hipEventSynchronize(completion);
+                if(status != hipSuccess)
+                    status = hipStreamSynchronize(stream);
+            }
+            if(status == hipSuccess)
+            {
+                adapter.reset();
+                if(synchronizer)
+                {
+                    status = hipFree(synchronizer);
+                    if(status != hipSuccess)
+                        std::cerr << "JitGemm synchronizer cleanup: " << hipGetErrorString(status)
+                                  << '\n';
+                }
+                if(completion)
+                {
+                    status = hipEventDestroy(completion);
+                    if(status != hipSuccess)
+                        std::cerr << "JitGemm event cleanup: " << hipGetErrorString(status) << '\n';
+                }
+            }
+            else
+            {
+                // Completion/context could not be established. Leaking this private
+                // module/event/synchronizer is safer than unloading code that may still be executing.
+                adapter.release();
+                std::cerr << "JitGemm retained module/event/synchronizer after cleanup failure: "
+                          << hipGetErrorString(status) << '\n';
+            }
+            if(changedDevice)
+            {
+                status = hipSetDevice(previous);
+                if(status != hipSuccess)
+                    std::cerr << "JitGemm device restore: " << hipGetErrorString(status) << '\n';
+            }
+        }
+
+        hipblasStatus_t fail(const std::string& message,
+                             hipblasStatus_t    status = HIPBLAS_STATUS_INVALID_VALUE)
+        {
+            error = message;
+            return status;
+        }
+
+        void checkDevice() const
+        {
+            int current;
+            checkHip(hipGetDevice(&current), "hipGetDevice");
+            require(handle && current == device, "Use the device on which the handle was created");
+        }
+
+        void wait()
+        {
+            if(submitted)
+            {
+                checkHip(drainRequired ? hipStreamSynchronize(stream)
+                                       : hipEventSynchronize(completion),
+                         "Wait for previous JIT GEMM");
+                submitted     = false;
+                drainRequired = false;
+            }
+        }
+
+        void support(size_t workspaceBytes)
+        {
+            problem.setParams().resetInternalArgs();
+            problem.setParams().setFallbackStatus(solution->isFallbackForHW(*hardware));
+            problem.setWorkspaceSize(workspaceBytes);
+            TensileLite::Task  task(*hardware, problem, *solution);
+            std::ostringstream detail;
+            bool               softwareMatch
+                = problem.getParams().uniformSummationOrder()
+                      ? TensileLite::softwarePredicate(
+                            TensileLite::SolutionLibrarySearchType::DEFAULT,
+                            task,
+                            *hardware,
+                            *solution,
+                            problem)
+                      : (*solution->problemPredicate)(problem) && (*solution->taskPredicate)(task);
+            bool match = (*solution->hardwarePredicate)(*hardware) && softwareMatch;
+            if(!match)
+            {
+                solution->hardwarePredicate->debugEval(*hardware, detail);
+                solution->problemPredicate->debugEval(problem, detail);
+                solution->taskPredicate->debugEval(task, detail);
+            }
+            require(match,
+                    "Generated solution does not support this problem/device: " + detail.str());
+        }
+    };
+
+    JitGemm::JitGemm(hipblasLtHandle_t handle)
+        : m_impl(std::make_unique<Impl>(handle))
+    {
+    }
+    JitGemm::~JitGemm() = default;
+
+    hipblasStatus_t JitGemm::setProblem(hipblasLtMatmulDesc_t   desc,
+                                        const void*             alpha,
+                                        const void*             A,
+                                        hipblasLtMatrixLayout_t layoutA,
+                                        const void*             B,
+                                        hipblasLtMatrixLayout_t layoutB,
+                                        const void*             beta,
+                                        const void*             C,
+                                        hipblasLtMatrixLayout_t layoutC,
+                                        void*                   D,
+                                        hipblasLtMatrixLayout_t layoutD)
+    {
+        auto& p = *m_impl;
+        p.error.clear();
+        if(!p.prepared)
+            p.hasProblem = false;
+        if(p.prepared || !p.handle || !desc || !layoutA || !layoutB || !layoutC || !layoutD)
+            return p.fail("setProblem requires valid descriptors and an unprepared object");
+        try
+        {
+            p.checkDevice();
+            std::shared_ptr<void>           opaque;
+            size_t                          count = 0;
+            rocblaslt::RocGemmProblemTypeV2 type;
+            auto                            status = RocBlasLtStatusToHIPStatus(
+                rocblaslt_gemm_create_cpp(reinterpret_cast<rocblaslt_handle>(p.handle),
+                                          reinterpret_cast<rocblaslt_matmul_desc>(desc),
+                                          alpha,
+                                          A,
+                                          reinterpret_cast<rocblaslt_matrix_layout>(layoutA),
+                                          B,
+                                          reinterpret_cast<rocblaslt_matrix_layout>(layoutB),
+                                          beta,
+                                          C,
+                                          reinterpret_cast<rocblaslt_matrix_layout>(layoutC),
+                                          D,
+                                          reinterpret_cast<rocblaslt_matrix_layout>(layoutD),
+                                          type,
+                                          opaque,
+                                          count));
+            if(status != HIPBLAS_STATUS_SUCCESS)
+                return p.fail("Canonical GEMM descriptor translation failed", status);
+            require(count == 1 && opaque, "Expected one GEMM problem");
+            p.problem    = *ExtractProblemGemm(opaque);
+            p.inputs     = *ExtractInputsGemm(opaque);
+            const auto rocDesc = reinterpret_cast<rocblaslt_matmul_desc>(desc);
+            p.scaleAType       = rocDesc->scaleAType;
+            p.scaleBType       = rocDesc->scaleBType;
+            p.hasProblem = true;
+            return HIPBLAS_STATUS_SUCCESS;
+        }
+        catch(const std::exception& e)
+        {
+            return p.fail(e.what());
+        }
+    }
+
+    hipblasStatus_t JitGemm::prepare(const GenerateOptions& options, size_t& workspaceBytes)
+    {
+        auto& p = *m_impl;
+        p.error.clear();
+        workspaceBytes = 0;
+        if(p.prepared || !p.hasProblem)
+            return p.fail("prepare requires a bound problem and an unprepared object");
+        try
+        {
+            p.checkDevice();
+            hipDeviceProp_t properties;
+            checkHip(hipGetDeviceProperties(&properties, p.device), "hipGetDeviceProperties");
+            require(targetMatchesDevice(options.architecture, properties.gcnArchName),
+                    "Requested architecture does not match device; this runtime accepts its HIP "
+                    "architecture and feature qualifiers");
+            require(detail::jitMXScaleFormat(p.scaleAType, p.scaleBType, properties.gcnArchName)
+                        != -2,
+                    "Unsupported MX scale layout for this device");
+            ++p.generations;
+            generate(options);
+            auto context = loadGeneratedBundle(options, properties, p.device);
+            require(detail::jitScaleLayoutMatches(*context, p.scaleAType, p.scaleBType),
+                    "Generated solution MX scale layout differs from the supplied descriptors");
+            p.manifest   = context->manifest;
+            p.kernel     = context->kernel;
+            p.hardware   = context->hardware;
+            p.library    = context->library;
+            p.solution   = p.library->solutions.at(0);
+            p.support(std::numeric_limits<size_t>::max());
+            p.workspaceRequired = p.solution->requiredWorkspaceSize(p.problem, *p.hardware);
+            p.support(p.workspaceRequired);
+            p.adapter = std::move(context->adapter);
+            checkHip(hipEventCreateWithFlags(&p.completion, hipEventDisableTiming),
+                     "Create completion event");
+            p.prepared     = true;
+            workspaceBytes = p.workspaceRequired;
+            return HIPBLAS_STATUS_SUCCESS;
+        }
+        catch(const std::exception& e)
+        {
+            p.adapter.reset();
+            p.solution.reset();
+            p.library.reset();
+            return p.fail(e.what());
+        }
+    }
+
+    hipblasStatus_t JitGemm::initialize(void* workspace, size_t workspaceBytes, hipStream_t stream)
+    {
+        auto& p = *m_impl;
+        p.error.clear();
+        p.initialized = false;
+        p.dispatch    = {};
+        if(!p.prepared || workspaceBytes < p.workspaceRequired
+           || (p.workspaceRequired && !workspace))
+            return p.fail("initialize requires a prepared object and sufficient workspace");
+        try
+        {
+            p.checkDevice();
+            hipDevice_t streamDevice;
+            checkHip(hipStreamGetDevice(stream, &streamDevice), "Query stream device");
+            require(streamDevice == p.device, "Stream belongs to a different device");
+            hipStreamCaptureStatus capture;
+            checkHip(hipStreamIsCapturing(stream, &capture), "Query stream capture");
+            require(capture == hipStreamCaptureStatusNone,
+                    "JitGemm does not support stream capture");
+            p.wait();
+            p.support(workspaceBytes);
+            p.problem.setParams().setWGMXCC(p.solution->isFallbackForHW(*p.hardware) ? 1 : 0);
+            p.inputs.ws            = workspace;
+            p.inputs.workspaceSize = workspaceBytes;
+            // An owner may run concurrently with another owner sharing its handle.
+            // Keep reduction counters and Stream-K flags private through completion.
+            auto syncBytes = p.solution->requiredSynchronizerSize(p.problem, *p.hardware);
+            if(p.solution->sizeMapping.streamK > 0 && p.solution->sizeMapping.streamKAtomic == 0)
+                syncBytes
+                    = std::max(syncBytes, size_t(TensileLite::StreamKFlagElements) * sizeof(int));
+            if(p.solution->problemType.outputAmaxD)
+                syncBytes = std::max(syncBytes, sizeof(int));
+            if(syncBytes > p.synchronizerBytes)
+            {
+                void* storage = nullptr;
+                checkHip(hipMalloc(&storage, syncBytes), "Allocate private GEMM synchronizer");
+                if(p.synchronizer)
+                {
+                    const auto status = hipFree(p.synchronizer);
+                    if(status != hipSuccess)
+                    {
+                        const auto cleanup = hipFree(storage);
+                        checkHip(cleanup, "Release unused GEMM synchronizer");
+                        checkHip(status, "Resize private GEMM synchronizer");
+                    }
+                }
+                p.synchronizer      = storage;
+                p.synchronizerBytes = syncBytes;
+            }
+            if(p.synchronizer)
+                p.inputs.Synchronizer = p.synchronizer;
+            auto invocations = p.solution->solve(p.problem, p.inputs, *p.hardware);
+            require(std::count_if(
+                        invocations.begin(),
+                        invocations.end(),
+                        [&](const auto& invocation) { return invocation.kernelName == p.kernel; })
+                        == 1,
+                    "Solution solve must emit its manifest main kernel exactly once");
+            DispatchInfo dispatch;
+            dispatch.configuredGlobalSplitU = p.solution->sizeMapping.globalSplitU;
+            dispatch.globalSplitU           = p.problem.getParams().gsu() > 0
+                                                  ? p.problem.getParams().gsu()
+                                                  : p.solution->calculateAutoGSU(p.problem, p.hardware.get());
+            const auto accumulation         = p.problem.getAccumulation(
+                *p.hardware, p.solution->sizeMapping, dispatch.globalSplitU);
+            dispatch.accumulation = accumulation == 3   ? "multiple-buffer-single-kernel"
+                                    : accumulation == 2 ? "multiple-buffer"
+                                    : accumulation == 1 ? "single-buffer"
+                                                        : "direct";
+            for(const auto& invocation : invocations)
+            {
+                require(!invocation.kernelName.empty(), "Solution emitted an unnamed invocation");
+                checkHip(p.adapter->initKernel(invocation.kernelName),
+                         "Resolve generated invocation symbol");
+                dispatch.kernelNames.push_back(invocation.kernelName);
+            }
+            p.dispatch    = std::move(dispatch);
+            p.kernels     = std::move(invocations);
+            p.stream      = stream;
+            p.initialized = true;
+            return HIPBLAS_STATUS_SUCCESS;
+        }
+        catch(const std::exception& e)
+        {
+            return p.fail(e.what());
+        }
+    }
+
+    hipblasStatus_t JitGemm::run(hipStream_t stream)
+    {
+        auto& p = *m_impl;
+        p.error.clear();
+        if(!p.initialized || stream != p.stream)
+            return p.fail("run requires initialization on this stream");
+        try
+        {
+            p.checkDevice();
+            hipStreamCaptureStatus capture;
+            checkHip(hipStreamIsCapturing(stream, &capture), "Query stream capture");
+            require(capture == hipStreamCaptureStatusNone,
+                    "JitGemm does not support stream capture");
+            // Mark submission before calling into the adapter: an exception may follow enqueue.
+            p.drainRequired = true;
+            p.submitted     = true;
+            auto status     = hipSuccess;
+            if(p.synchronizerBytes)
+                status = hipMemsetAsync(p.synchronizer, 0, p.synchronizerBytes, stream);
+            if(status == hipSuccess)
+                status = p.adapter->launchKernels(p.kernels, stream, nullptr, nullptr, true);
+            if(status == hipSuccess)
+                status = hipEventRecord(p.completion, stream);
+            if(status != hipSuccess)
+            {
+                // A launch may already have submitted work even when the event failed.
+                const auto drained = hipStreamSynchronize(stream);
+                p.submitted        = drained != hipSuccess;
+                p.drainRequired    = drained != hipSuccess;
+                p.initialized      = false;
+                checkHip(drained, "Drain JIT GEMM after submission failure");
+                checkHip(status, "Submit JIT GEMM / record completion");
+            }
+            p.submitted     = true;
+            p.drainRequired = false;
+            return HIPBLAS_STATUS_SUCCESS;
+        }
+        catch(const std::exception& e)
+        {
+            p.initialized     = false;
+            std::string error = e.what();
+            if(p.drainRequired)
+            {
+                const auto status = hipStreamSynchronize(stream);
+                p.submitted       = status != hipSuccess;
+                p.drainRequired   = status != hipSuccess;
+                if(status != hipSuccess)
+                    error += std::string("; stream drain failed: ") + hipGetErrorString(status);
+            }
+            return p.fail(error, HIPBLAS_STATUS_EXECUTION_FAILED);
+        }
+    }
+
+    const DispatchInfo& JitGemm::dispatchInfo() const
+    {
+        return m_impl->dispatch;
+    }
+
+    const std::string& JitGemm::lastError() const
+    {
+        return m_impl->error;
+    }
+    const std::string& JitGemm::manifestPath() const
+    {
+        return m_impl->manifest;
+    }
+    const std::string& JitGemm::kernelName() const
+    {
+        return m_impl->kernel;
+    }
+    size_t JitGemm::generationCount() const
+    {
+        return m_impl->generations;
+    }
 }

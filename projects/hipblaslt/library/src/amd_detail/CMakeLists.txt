@@ -20,6 +20,7 @@ if(HIPBLASLT_ENABLE_JIT_GEMM)
     target_link_libraries(hipblaslt PRIVATE Boost::headers)
     add_executable(hipblaslt-jit-gemm
         "${PROJECT_SOURCE_DIR}/clients/samples/29_hipblaslt_jit_gemm/sample_hipblaslt_jit_gemm.cpp")
+    target_include_directories(hipblaslt-jit-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(hipblaslt-jit-gemm PRIVATE roc::hipblaslt hip::device)
     target_compile_features(hipblaslt-jit-gemm PRIVATE cxx_std_17)
     set_target_properties(hipblaslt-jit-gemm PROPERTIES
