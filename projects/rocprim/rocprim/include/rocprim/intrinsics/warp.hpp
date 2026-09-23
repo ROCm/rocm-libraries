@@ -103,18 +103,17 @@ int warp_all(int predicate)
 /// of the same group as lane <tt>i</tt>, i.e. lane <tt>i</tt> and <tt>j</tt> called with the
 /// same value for label.
 ROCPRIM_DEVICE ROCPRIM_INLINE
-lane_mask_type match_any(unsigned int label, unsigned int label_bits, bool valid = true)
+lane_mask_type match_any(unsigned int label, unsigned int label_bits, bool valid)
 {
     // Obtain a mask with the threads which are currently active.
-    lane_mask_type peer_mask = ballot(valid);
+    lane_mask_type       peer_mask  = ballot(valid);
+    static constexpr int lane_width = std::numeric_limits<lane_mask_type>::digits;
+    using lane_mask_type_s          = std::make_signed_t<lane_mask_type>;
+    const auto label_signed         = static_cast<lane_mask_type_s>(label);
 
     // Compute the final value iteratively by testing each bit separately.
     for(unsigned int bit = 0; bit < label_bits; ++bit)
     {
-        static constexpr int lane_width = std::numeric_limits<lane_mask_type>::digits;
-        using lane_mask_type_s          = std::make_signed_t<lane_mask_type>;
-        const auto label_signed         = static_cast<lane_mask_type_s>(label);
-
         // Get all zeros or all ones depending on label's i-th bit.
         // Moves the bit into the sign position by left shifting, then shifts it into all the bits
         // by (arithmetic) right shift which does sign-extension.
@@ -133,6 +132,38 @@ lane_mask_type match_any(unsigned int label, unsigned int label_bits, bool valid
     }
 
     return -lane_mask_type{valid} & peer_mask;
+}
+
+ROCPRIM_DEVICE ROCPRIM_INLINE
+lane_mask_type match_any(unsigned int label, unsigned int label_bits)
+{
+    // Obtain a mask with the threads which are currently active.
+    lane_mask_type       peer_mask  = __activemask();
+    static constexpr int lane_width = std::numeric_limits<lane_mask_type>::digits;
+    using lane_mask_type_s          = std::make_signed_t<lane_mask_type>;
+    const auto label_signed         = static_cast<lane_mask_type_s>(label);
+
+    // Compute the final value iteratively by testing each bit separately.
+    for(unsigned int bit = 0; bit < label_bits; ++bit)
+    {
+        // Get all zeros or all ones depending on label's i-th bit.
+        // Moves the bit into the sign position by left shifting, then shifts it into all the bits
+        // by (arithmetic) right shift which does sign-extension.
+        const lane_mask_type_s bit_set
+            = (label_signed << (lane_width - 1 - bit)) >> (lane_width - 1);
+
+        // Remove all lanes from the mask with a bit that differs from ours
+        // - if we have the bit set we keep the lanes that do too so we mask with the result
+        //   of the ballot
+        // - if we don't have it, then we keep the lanes that also don't, so we flip all bits
+        //   in the mask before and-ing.
+        // since bit_set is all ones if we have the bit and all zeros if not, the flipping is
+        // the same as xor-ing with its inverse
+        const lane_mask_type bit_set_mask = ballot(bit_set);
+        peer_mask &= bit_set_mask ^ ~bit_set;
+    }
+
+    return peer_mask;
 }
 
 /// \brief Group active lanes having the same bits of \p label
