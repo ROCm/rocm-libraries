@@ -878,14 +878,25 @@ bwd_result fmha_bwd_run(mode_enum mode,
                             (std::isinf(hi) && hi < AccDataType(0))
                                 ? hi
                                 : hi + ck_tile::log(AccDataType(1) + ck_tile::exp(lo - hi));
-                        AccDataType p_scale = ck_tile::exp(lse_old - lse_new);
+
+                        // lse_new == -inf: every key masked AND the sink disabled. Both
+                        // scalings below would be exp(-inf - -inf) = NaN, which reaches the
+                        // GPU through o_host_ref = P*V, an input to the backward call.
+                        const bool row_is_empty = std::isinf(lse_new) && lse_new < AccDataType(0);
+
+                        // P is already exactly 0 on such a row, so only finiteness matters; 1
+                        // means "denominator unchanged" and does not hide a non-zero P.
+                        AccDataType p_scale =
+                            row_is_empty ? AccDataType(1) : ck_tile::exp(lse_old - lse_new);
 
                         lse_host_ref(i_h, i_q) = lse_new;
 
                         for(int i_k = 0; i_k < real_seqlen_k; ++i_k)
                             p_hp_host_ref(i_h, i_q, i_k) *= p_scale;
 
-                        p_sink_host_ref(i_h, i_q) = ck_tile::exp(sink_val - lse_new);
+                        // Forced, unlike p_scale: a -inf sink must contribute exactly 0.
+                        p_sink_host_ref(i_h, i_q) =
+                            row_is_empty ? AccDataType(0) : ck_tile::exp(sink_val - lse_new);
                     }
                 }
             }
