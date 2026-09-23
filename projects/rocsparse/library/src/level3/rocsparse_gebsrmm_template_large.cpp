@@ -154,30 +154,32 @@ namespace rocsparse
         rocsparse_host_assert(row_block_dim <= 32,
                               "This function is designed for row_block_dim <= 32.");
 
-#define LAUNCH_LARGE_KERNEL(M_, N_)                                                        \
-    dim3 gebsrmm_blocks((mb - 1) / 1 + 1, rocsparse::min((n - 1) / N_ + 1, 65535));        \
-    dim3 gebsrmm_threads(M_, N_);                                                          \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gebsrmm_large_blockdim_kernel<M_, N_>), \
-                                       gebsrmm_blocks,                                     \
-                                       gebsrmm_threads,                                    \
-                                       0,                                                  \
-                                       stream,                                             \
-                                       dir,                                                \
-                                       trans_B,                                            \
-                                       mb,                                                 \
-                                       n,                                                  \
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),   \
-                                       bsr_row_ptr,                                        \
-                                       bsr_col_ind,                                        \
-                                       bsr_val,                                            \
-                                       row_block_dim,                                      \
-                                       col_block_dim,                                      \
-                                       B,                                                  \
-                                       ldb,                                                \
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),    \
-                                       C,                                                  \
-                                       ldc,                                                \
-                                       descr->base,                                        \
+#define LAUNCH_LARGE_KERNEL(M_, N_)                                                           \
+    dim3 gebsrmm_blocks(                                                                      \
+        (mb - 1) / 1 + 1,                                                                     \
+        rocsparse::min(static_cast<int64_t>((n - 1) / N_ + 1), static_cast<int64_t>(65535))); \
+    dim3 gebsrmm_threads(M_, N_);                                                             \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gebsrmm_large_blockdim_kernel<M_, N_>),    \
+                                       gebsrmm_blocks,                                        \
+                                       gebsrmm_threads,                                       \
+                                       0,                                                     \
+                                       stream,                                                \
+                                       dir,                                                   \
+                                       trans_B,                                               \
+                                       mb,                                                    \
+                                       n,                                                     \
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),      \
+                                       bsr_row_ptr,                                           \
+                                       bsr_col_ind,                                           \
+                                       bsr_val,                                               \
+                                       row_block_dim,                                         \
+                                       col_block_dim,                                         \
+                                       B,                                                     \
+                                       ldb,                                                   \
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),       \
+                                       C,                                                     \
+                                       ldc,                                                   \
+                                       descr->base,                                           \
                                        handle->pointer_mode == rocsparse_pointer_mode_host)
 
         //
