@@ -156,6 +156,29 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         wait->addModifier<CommentData>(CommentData{text});
     }
 
+    void annotateDrainedLdsTokens(StinkyInstruction* wait,
+                                  const std::vector<DrainedLdsToken>& drains) {
+        if (drains.empty()) return;
+
+        std::string text = "drains LDS";
+        for (size_t i = 0; i < drains.size(); ++i) {
+            if (i > 0) text += ",LDS";
+            text += std::to_string(drains[i].token);
+            if (drains[i].tripsBack == 0) {
+                text += "[k]";
+            } else {
+                text += "[k-" + std::to_string(drains[i].tripsBack) + "]";
+            }
+            text += " via " + drains[i].predecessor;
+        }
+
+        if (auto* comment = wait->getModifier<CommentData>()) {
+            comment->comment += "; " + text;
+        } else {
+            wait->addModifier<CommentData>(CommentData{text});
+        }
+    }
+
     void emitOneSpec(AsmIRBuilder& builder, GfxArchID arch, StinkyInstruction* anchor,
                      const WaitCountSpec& spec) {
         if (spec.dsCount != WaitCountSpec::kUnused) {
@@ -165,6 +188,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             d.dlcnt = spec.dsCount;
             w->addModifier<SWaitCntData>(d);
             annotateLoopCarriedWar(w, anchor);
+            annotateDrainedLdsTokens(w, spec.dsDrains);
         }
         if (spec.loadCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_loadcnt, arch), anchor);
@@ -193,6 +217,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             if (!spec.tensorTokens.empty()) {
                 w->addModifier<MemTokenData>(MemTokenData{spec.tensorTokens});
             }
+            annotateDrainedLdsTokens(w, spec.tensorDrains);
         }
         if (spec.asyncCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_asynccnt, arch), anchor);

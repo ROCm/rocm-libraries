@@ -27,6 +27,7 @@
 // per-consumer waits) and may then be rewritten by WaitPlanOptimizers
 // (e.g. ShallowPredPromotion) before the emit phase materialises the IR.
 
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -35,6 +36,14 @@ class BasicBlock;
 struct StinkyInstruction;
 
 namespace waitcnt {
+
+/// One logical LDS token drained from a particular loop iteration and direct
+/// CFG predecessor. tripsBack=0 is the current trip, 1 is the previous trip.
+struct DrainedLdsToken {
+    int token = 0;
+    unsigned tripsBack = 0;
+    std::string predecessor;
+};
 
 /// One immediate per hardware counter that the emit phase will turn into an
 /// s_wait_dscnt / s_wait_loadcnt / s_wait_kmcnt / s_wait_tensorcnt before the
@@ -47,6 +56,11 @@ struct WaitCountSpec {
     int kmCount = kUnused;      // kmcnt -> s_wait_kmcnt
     int tensorCount = kUnused;  // tlcnt -> s_wait_tensorcnt
     int asyncCount = kUnused;   // asynccnt -> s_wait_asynccnt
+
+    // Logical LDS token instances drained by the waits, sorted by token then
+    // tripsBack. Used to identify both the buffer and iteration in comments.
+    std::vector<DrainedLdsToken> dsDrains;
+    std::vector<DrainedLdsToken> tensorDrains;
 
     // Memory tokens of the tensor_load ops this tensorcnt wait drains (union,
     // sorted-unique). Attached to the emitted s_wait_tensorcnt as MemTokenData so

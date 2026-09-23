@@ -226,27 +226,46 @@ bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
     return false;
 }
 
-// Sorted-unique union of the memory tokens of the tensor_load ops a tensorcnt wait
-// of value `tensorCount` drains: a wait of W keeps the W newest ops of each per-pred
-// queue in flight and drains the older prefix q.ops[0 .. size-W-1]. Since the emitted
-// W is a min across predecessor queues, at a CFG merge this union is a conservative
-// superset of what any single path drains. Drained ops without MemTokenData
-// contribute nothing (no token to add).
-std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount) {
-    std::vector<int> out;
-    if (tensorCount < 0) return out;
-    for (const auto& q : state.queues[CK_Tensor]) {
+// Sorted-unique logical LDS instances carried by the ops a wait drains. A wait
+// of W keeps the W newest ops of each per-pred queue in flight and drains the
+// older prefix q.ops[0 .. size-W-1]. Keeping tripsBack distinguishes token
+// instances arriving from different loop iterations at a CFG merge.
+std::vector<DrainedLdsToken> drainedTokenInstances(const std::vector<PerPredQueue>& queues,
+                                                   int waitCount) {
+    std::vector<DrainedLdsToken> out;
+    if (waitCount < 0) return out;
+    for (const auto& q : queues) {
         const int qsize = static_cast<int>(q.ops.size());
-        const int drainedEnd = qsize - tensorCount;  // ops [0, drainedEnd) are drained
+        const int drainedEnd = qsize - waitCount;  // ops [0, drainedEnd) are drained
+        const std::string predecessor = q.pred == nullptr ? "local" : q.pred->getLabel();
         for (int idx = 0; idx < drainedEnd; ++idx) {
             StinkyInstruction* op = q.ops[idx].op;
             if (op == nullptr) continue;
             const auto* mt = op->getModifier<MemTokenData>();
             if (mt == nullptr) continue;
-            out.insert(out.end(), mt->tokens.begin(), mt->tokens.end());
+            for (int token : mt->tokens) {
+                out.push_back({token, q.ops[idx].tripsBack, predecessor});
+            }
         }
     }
-    std::sort(out.begin(), out.end());
+    std::sort(out.begin(), out.end(), [](const DrainedLdsToken& a, const DrainedLdsToken& b) {
+        if (a.token != b.token) return a.token < b.token;
+        if (a.tripsBack != b.tripsBack) return a.tripsBack < b.tripsBack;
+        return a.predecessor < b.predecessor;
+    });
+    out.erase(std::unique(out.begin(), out.end(),
+                          [](const DrainedLdsToken& a, const DrainedLdsToken& b) {
+                              return a.token == b.token && a.tripsBack == b.tripsBack &&
+                                     a.predecessor == b.predecessor;
+                          }),
+              out.end());
+    return out;
+}
+
+std::vector<int> tokenUnion(const std::vector<DrainedLdsToken>& instances) {
+    std::vector<int> out;
+    out.reserve(instances.size());
+    for (const auto& instance : instances) out.push_back(instance.token);
     out.erase(std::unique(out.begin(), out.end()), out.end());
     return out;
 }
@@ -1214,12 +1233,16 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 // else the freshly recomputed requirement.
                 WaitCountSpec applySpec = mergePlanAndComputed(optimizerPlan, inst, computed, emit);
 
-                // Capture the drained tensor-token union from the LIVE (pre-trim)
-                // queues, so the emitted s_wait_tensorcnt can carry it. This is the
-                // final anchor set (finalizePlan overwrites plan.anchorWaits below),
-                // and the queues here are exactly those the wait drains.
+                // Capture drained LDS instances from the live, pre-trim queues.
+                // These are the final waits and exactly the operations they drain.
+                if (applySpec.dsCount != WaitCountSpec::kUnused) {
+                    applySpec.dsDrains =
+                        drainedTokenInstances(state.queues[CK_DS], applySpec.dsCount);
+                }
                 if (applySpec.tensorCount != WaitCountSpec::kUnused) {
-                    applySpec.tensorTokens = drainedTensorTokens(state, applySpec.tensorCount);
+                    applySpec.tensorDrains =
+                        drainedTokenInstances(state.queues[CK_Tensor], applySpec.tensorCount);
+                    applySpec.tensorTokens = tokenUnion(applySpec.tensorDrains);
                 }
 
                 for (int c = 0; c < CK_Count; ++c) {
