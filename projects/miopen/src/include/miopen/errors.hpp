@@ -58,14 +58,12 @@ struct Exception : std::exception
     const char* what() const noexcept override { return message.c_str(); }
 };
 
-MIOPEN_EXPORT std::string OpenCLErrorMessage(int error, const std::string& msg = "");
 MIOPEN_EXPORT std::string HIPErrorMessage(int error, const std::string& msg = "");
 
 template <class... Params>
 [[noreturn]] void MIOpenThrow(const std::string& file, int line, Params&&... args)
 {
     auto exe = miopen::Exception(std::forward<Params>(args)...);
-    MIOPEN_LOG_E_FROM(file + ":" + std::to_string(line), exe.message);
     throw exe.SetContext(file, line);
 }
 
@@ -87,8 +85,6 @@ template <class... Params>
         }                                                                              \
     } while(false)
 
-#define MIOPEN_THROW_CL_STATUS(...) \
-    MIOPEN_THROW(miopenStatusUnknownError, miopen::OpenCLErrorMessage(__VA_ARGS__))
 #define MIOPEN_THROW_HIP_STATUS(...) \
     MIOPEN_THROW(miopenStatusUnknownError, miopen::HIPErrorMessage(__VA_ARGS__))
 

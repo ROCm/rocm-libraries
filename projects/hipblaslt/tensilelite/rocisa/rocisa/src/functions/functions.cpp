@@ -47,8 +47,9 @@ namespace rocisa
         int tmpAddr = tmp + 1;
 
         auto module = std::make_shared<Module>("initLds");
+
         module->addT<SWaitCnt>(0, 0, 0, 0, "init lds state");
-        module->addT<SBarrier>("init LDS");
+        module->addT<SBarrier>(false, false, false, "init LDS");
         module->addT<VMovB32>(vgpr(tmp), initValue, std::nullopt, "Init value");
         module->addT<VLShiftLeftB32>(
             vgpr(tmpAddr), 2, vgpr("Serial"), "set per-thread address to init LDS");
@@ -61,7 +62,7 @@ namespace rocisa
         }
 
         module->addT<SWaitCnt>(0, 0, 0, 0, "wait for LDS init to complete");
-        module->addT<SBarrier>("init LDS exit");
+        module->addT<SBarrier>(false, false, false, "init LDS exit");
 
         return module;
     }

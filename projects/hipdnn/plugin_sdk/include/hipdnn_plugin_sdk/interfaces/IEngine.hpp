@@ -7,8 +7,8 @@
 #include <cstdint>
 #include <memory>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
@@ -61,8 +61,9 @@ public:
      *
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    virtual bool isApplicable(THandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    virtual bool isApplicable( // NOLINT(portability-template-virtual-member-function)
+        THandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     /**
@@ -80,7 +81,7 @@ public:
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void getDetails(THandle& handle,
-                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
 
@@ -99,8 +100,8 @@ public:
         // NOLINTNEXTLINE(portability-template-virtual-member-function)
         getMaxWorkspaceSize(
             const THandle& handle,
-            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-            const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
         = 0;
 
     /**
@@ -120,8 +121,8 @@ public:
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void initializeExecutionContext(
         const THandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         TContext& executionContext) const
         = 0;
 };

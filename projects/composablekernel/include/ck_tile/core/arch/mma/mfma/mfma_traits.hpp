@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include "ck_tile/core/config.hpp"
+
+#include <type_traits>
+
 namespace ck_tile::core::arch::mma {
 
 /**
@@ -10,7 +14,11 @@ namespace ck_tile::core::arch::mma {
  * @brief Meta-tag for the MFMA operation. This will be used in the MmaOp policies to
  * identify the operation as an MFMA operation.
  */
-struct MfmaOp;
+struct MfmaOp
+{
+};
+
+CK_TILE_HOST_DEVICE constexpr const char* to_string(MfmaOp) { return "MfmaOp"; }
 
 /**
  * @class is_mma_op_mfma

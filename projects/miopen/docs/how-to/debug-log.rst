@@ -48,11 +48,12 @@ environmental variables to control logging. Both variables are disabled by defau
 
 * ``MIOPEN_WARN_SEARCH``: Elevate log messages for Search to warnings.
 
-* ``MIOPEN_LOG_BUFFER_SIZE``: Message length of the Info2 buffer.
+* ``MIOPEN_LOG_BUFFER_SIZE``: Message length of the Info2 buffer in lines.
   If ``MIOPEN_LOG_LEVEL`` is less than 6, then log messages will be buffered.
   The buffered logs will be dumped to a log file when MIOpen logs an error message,
   or an error is thrown by MIOpen.
   This log can be found in ``/tmp/miopen_error_<pid>``.
+  This feature is disabled by default and can be enabled by setting the value to greater than 0 (e.g., 128).
 
 .. note::
 
@@ -94,7 +95,7 @@ Filtering by algorithm
 --------------------------------------------------------------------------------------------------------------
 
 These variables control the sets (families) of convolution solutions. For example, the direct algorithm
-is implemented in several solutions that use OpenCL and GCN assembly. The corresponding variable
+is implemented in several solutions that use GCN assembly. The corresponding variable
 is used to disable them.
 
 * ``MIOPEN_DEBUG_CONV_FFT``: FFT convolution algorithm.
@@ -111,9 +112,6 @@ Filtering by build method
   normalization.
 * ``MIOPEN_DEBUG_HIP_KERNELS``: Convolution kernels written in HIP. These implement the
   ImplicitGemm algorithm.
-* ``MIOPEN_DEBUG_OPENCL_CONVOLUTIONS``: Convolution kernels written in OpenCL. This only
-  affects convolutions.
-
 Filtering out all but one solution
 --------------------------------------------------------------------------------------------------------------
 
@@ -147,14 +145,9 @@ Some of the solutions have individual controls, which affect both find and immed
   * ``MIOPEN_DEBUG_CONV_DIRECT_ASM_7X7C3H224W224`` -- ``ConvAsm7x7c3h224w224k64u2v2p3q3f1``
   * ``MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW3X3`` -- ``ConvAsmBwdWrW3x3``
   * ``MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1`` -- ``ConvAsmBwdWrW1x1``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD11X11`` -- ``ConvOclDirectFwd11x11``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWDGEN`` -- ``ConvOclDirectFwdGen``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD`` -- ``ConvOclDirectFwd``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD1X1`` -- ``ConvOclDirectFwd1x1``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW2`` -- ``ConvOclBwdWrW2<n>`` (where n =
-    ``{1,2,4,8,16}``) and ``ConvOclBwdWrW2NonTunable``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW53`` -- ``ConvOclBwdWrW53``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW1X1`` -- ``ConvOclBwdWrW1x1``
+  * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD11X11`` -- ``ConvHipDirectFwd11x11``
+  * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD`` -- ``ConvHipDirectFwd``
+  * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53`` -- ``ConvHipBwdWrW53``
 
 * Winograd solutions:
 
@@ -224,7 +217,6 @@ Some of the solutions have individual controls, which affect both find and immed
   * ``MIOPEN_DEBUG_AMD_MP_BD_WINOGRAD_EXPEREMENTAL_FP16_TRANSFORM`` --
     ``ConvMPBidirectWinograd*``, FWD/BWD FP16 experimental mode (use at your own risk). Disabled
     by default.
-  * ``MIOPEN_DEBUG_AMD_FUSED_WINOGRAD`` -- Fused ``FP32`` F(3,3) Winograd, variable filter size.
 
 Implicit GEMM solutions:
 
@@ -253,8 +245,6 @@ Implicit GEMM solutions:
     ``ConvHipImplicitGemmV4R4Fwd``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1`` --
     ``ConvHipImplicitGemmBwdDataV1R1``
-  * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1`` --
-    ``ConvHipImplicitGemmBwdDataV4R1``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R1`` --
     ``ConvHipImplicitGemmV4R1WrW``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R4`` --
@@ -263,8 +253,6 @@ Implicit GEMM solutions:
     ``ConvHipImplicitGemmForwardV4R4Xdlops``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FWD_V4R5_XDLOPS`` --
     ``ConvHipImplicitGemmForwardV4R5Xdlops``
-  * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1_XDLOPS`` --
-    ``ConvHipImplicitGemmBwdDataV1R1Xdlops``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1_XDLOPS`` --
     ``ConvHipImplicitGemmBwdDataV4R1Xdlops``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R4_XDLOPS`` --
@@ -390,14 +378,6 @@ triaging possible problems related to the CO version:
 * ``MIOPEN_DEBUG_AMD_ROCM_METADATA_PREFER_OLDER``: This variable only affects assembly
   kernels and only applies when ROCm supports both v2 and v3 COs. By default, the newer
   format is used (v3 CO). When this variable is enabled, the behavior is reversed.
-* ``MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_VERSION``: Enforces the CO format for OpenCL
-  kernels. This only works with the HIP backend, when ``cmake ... -DMIOPEN_BACKEND=HIP...`` is used.
-
-  * Unset - Automatically detects the required CO version. This is the default.
-  * ``2``: Always build to v2 CO.
-  * ``3``: Always build to v3 CO.
-  * ``4``: Always build to v4 CO.
-
 Winograd multi-pass maximum workspace throttling
 -------------------------------------------------------------------------------------------------------------
 

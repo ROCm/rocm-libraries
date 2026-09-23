@@ -221,6 +221,11 @@ hipblasAtomicsMode_t
 ---------------------
 .. doxygenenum:: hipblasAtomicsMode_t
 
+hipblasLibraryProperty_t
+---------------------
+.. doxygenenum:: hipblasLibraryProperty_t
+
+
 *****************
 hipBLAS functions
 *****************
@@ -1424,6 +1429,12 @@ The ``gemm`` functions support the 64-bit integer interface. See the :ref:`ILP64
 
 The ``gemmBatched`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
 
+.. doxygenfunction:: hipblasSgemmGroupedBatched
+    :outline:
+.. doxygenfunction:: hipblasDgemmGroupedBatched
+
+The ``gemmGroupedBatched`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
+
 .. doxygenfunction:: hipblasHgemmStridedBatched
     :outline:
 .. doxygenfunction:: hipblasSgemmStridedBatched
@@ -1838,9 +1849,10 @@ hipblasGemmEx + Batched, StridedBatched
 ------------------------------------------
 .. doxygenfunction:: hipblasGemmEx
 .. doxygenfunction:: hipblasGemmBatchedEx
+.. doxygenfunction:: hipblasGemmGroupedBatchedEx
 .. doxygenfunction:: hipblasGemmStridedBatchedEx
 
-The ``gemmEx``, ``gemmBatchedEx``, and ``gemmStridedBatchedEx`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
+The ``gemmEx``, ``gemmBatchedEx``, ``gemmGroupedBatchedEx``, and ``gemmStridedBatchedEx`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
 
 .. _hipblas_syrkex:
 
@@ -2158,6 +2170,30 @@ hipblasGetAtomicsMode
 ----------------------
 .. doxygenfunction:: hipblasGetAtomicsMode
 
+hipblasSetBatchAlphaStride
+---------------------------
+.. doxygenfunction:: hipblasSetBatchAlphaStride
+
+hipblasGetBatchAlphaStride
+---------------------------
+.. doxygenfunction:: hipblasGetBatchAlphaStride
+
+hipblasSetBatchBetaStride
+--------------------------
+.. doxygenfunction:: hipblasSetBatchBetaStride
+
+hipblasGetBatchBetaStride
+--------------------------
+.. doxygenfunction:: hipblasGetBatchBetaStride
+
 hipblasStatusToString
 ----------------------
 .. doxygenfunction:: hipblasStatusToString
+
+hipblasGetVersion
+----------------------
+.. doxygenfunction:: hipblasGetVersion
+
+hipblasGetProperty
+----------------------
+.. doxygenfunction:: hipblasGetProperty

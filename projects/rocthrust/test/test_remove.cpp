@@ -793,6 +793,7 @@ TEST(RemoveTests, TestRemoveDevice)
       thrust::remove(h_data.begin(), h_data.end(), remove_value);
       hipLaunchKernelGGL(
         RemoveKernel, dim3(1, 1, 1), dim3(128, 1, 1), 0, 0, size, thrust::raw_pointer_cast(&d_data[0]), remove_value);
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_data, d_data);
     }

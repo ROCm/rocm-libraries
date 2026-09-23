@@ -17,19 +17,18 @@
 #endif
 
 #ifdef ADDRESS_SANITIZER
-#define SKIP_IF_NO_DEVICES()                              \
-    do                                                    \
-    {                                                     \
-        GTEST_SKIP() << "Disable device tests with ASAN"; \
-    } while(0)
-
 #define SKIP_IF_ASAN()                                            \
     do                                                            \
     {                                                             \
         GTEST_SKIP() << "Disable this test when ASAN is Enabled"; \
     } while(0)
-
 #else
+#define SKIP_IF_ASAN() \
+    do                 \
+    {                  \
+    } while(0)
+#endif
+
 #define SKIP_IF_NO_DEVICES()                                        \
     do                                                              \
     {                                                               \
@@ -41,9 +40,15 @@
         }                                                           \
     } while(0)
 
-#define SKIP_IF_ASAN() \
+#ifdef THREAD_SANITIZER
+#define SKIP_IF_TSAN()                                            \
+    do                                                            \
+    {                                                             \
+        GTEST_SKIP() << "Disable this test when TSAN is Enabled"; \
+    } while(0)
+#else
+#define SKIP_IF_TSAN() \
     do                 \
     {                  \
     } while(0)
-
 #endif

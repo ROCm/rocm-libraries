@@ -1,33 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/InstructionValues/RegisterAllocator.hpp>
+#include <rocRoller/InstructionValues/RegisterAllocator_detail.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 // Used for std::iota
@@ -211,7 +190,8 @@ namespace rocRoller
 
         inline void Allocator::allocate(AllocationPtr alloc)
         {
-            auto registers = findFree(alloc->registerCount(), alloc->options());
+            auto const& arch      = alloc->m_context.lock()->targetArchitecture();
+            auto        registers = findFree(alloc->registerCount(), alloc->options(), arch);
             AssertFatal(!registers.empty(),
                         "No more ",
                         m_regType,
@@ -247,7 +227,8 @@ namespace rocRoller
 
         inline bool Allocator::canAllocate(std::shared_ptr<const Allocation> alloc) const
         {
-            auto theRegisters = findFree(alloc->registerCount(), alloc->options());
+            auto const& arch         = alloc->m_context.lock()->targetArchitecture();
+            auto        theRegisters = findFree(alloc->registerCount(), alloc->options(), arch);
             return !theRegisters.empty();
         }
 
@@ -277,23 +258,25 @@ namespace rocRoller
         }
 
         inline std::vector<int> Allocator::findFree(int                      count,
-                                                    AllocationOptions const& options) const
+                                                    AllocationOptions const& options,
+                                                    GPUArchitecture const&   arch) const
         {
             AssertFatal(count > 0, "Invalid register count for findFree", ShowValue(count));
 
             switch(m_scheme)
             {
             case AllocatorScheme::FirstFit:
-                return findFreeFirstFit(count, options);
+                return findFreeFirstFit(count, options, arch);
             case AllocatorScheme::PerfectFit:
-                return findFreePerfectFit(count, options);
+                return findFreePerfectFit(count, options, arch);
             default:
                 Throw<FatalError>("Allocator scheme not implemented.");
             }
         }
 
         inline std::vector<int> Allocator::findFreeFirstFit(int                      count,
-                                                            AllocationOptions const& options) const
+                                                            AllocationOptions const& options,
+                                                            GPUArchitecture const&   arch) const
         {
             AssertFatal(count >= 0, "Negative count");
             AssertFatal(options.alignment <= options.contiguousChunkWidth,
@@ -307,9 +290,16 @@ namespace rocRoller
 
             int idx = 0;
 
+            if(arch.HasCapability(GPUCapability::HasVGPRIndexing)
+               and regType() == Register::Type::Vector)
+            {
+                if(not options.forceReservedRegion)
+                    idx = RegisterAllocatorDetail::ReservedRegionSize();
+            }
+
             while(rv.size() < count)
             {
-                auto [start, blockSize] = findContiguousRange(idx, width, options, rv);
+                auto [start, blockSize] = findContiguousRange(idx, width, options, arch, rv);
                 idx                     = start;
 
                 if(idx >= 0)
@@ -327,9 +317,12 @@ namespace rocRoller
             return rv;
         }
 
-        inline std::vector<int>
-            Allocator::findFreePerfectFit(int count, AllocationOptions const& options) const
+        inline std::vector<int> Allocator::findFreePerfectFit(int                      count,
+                                                              AllocationOptions const& options,
+                                                              GPUArchitecture const&   arch) const
         {
+            using namespace RegisterAllocatorDetail;
+
             AssertFatal(options.alignment <= options.contiguousChunkWidth,
                         "Not yet supported",
                         ShowValue(options));
@@ -341,16 +334,28 @@ namespace rocRoller
 
             auto const chunkWidth = options.contiguousChunkWidth;
 
+            auto const searchStart
+                = (arch.HasCapability(GPUCapability::HasVGPRIndexing)
+                   && regType() == Register::Type::Vector && not(options.forceReservedRegion))
+                      ? ReservedRegionSize()
+                      : 0;
+            auto const searchStop
+                = (arch.HasCapability(GPUCapability::HasVGPRIndexing)
+                   && regType() == Register::Type::Vector && options.forceReservedRegion)
+                      ? ReservedRegionSize()
+                      : static_cast<int>(m_registers.size());
+
             // Gather all candidate blocks
             PerfectFitCandidates candidates(m_registers.size());
-            for(int searchStart = 0; static_cast<size_t>(searchStart) < m_registers.size();)
+            for(int searchPos = searchStart; searchPos < searchStop;)
             {
-                auto [start, blockSize] = findContiguousRange(searchStart, chunkWidth, options, {});
+                auto [start, blockSize]
+                    = findContiguousRange(searchPos, chunkWidth, options, arch, rv);
                 if(start < 0)
                     break;
 
                 candidates.addCandidate(start, blockSize);
-                searchStart = start + blockSize;
+                searchPos = start + blockSize;
             }
 
             if(candidates.empty())
@@ -453,19 +458,28 @@ namespace rocRoller
             Allocator::findContiguousRange(int                      start,
                                            int                      regCount,
                                            AllocationOptions const& options,
+                                           GPUArchitecture const&   arch,
                                            std::vector<int> const&  reservedIndices) const
         {
             AssertFatal(start >= 0 && regCount >= 0, "Negative arguments");
 
             // The start should always be aligned
-            start = align(start, options);
+            start   = align(start, options);
+            int end = m_registers.size();
 
-            while(start < m_registers.size())
+            if(arch.HasCapability(GPUCapability::HasVGPRIndexing)
+               and regType() == Register::Type::Vector)
+            {
+                if(options.forceReservedRegion)
+                    end = RegisterAllocatorDetail::ReservedRegionSize();
+            }
+
+            while(start < end)
             {
                 // Number of free registers in this block
                 int blockSize = 0;
 
-                for(int i = start; i < m_registers.size(); i++)
+                for(int i = start; i < end; i++)
                 {
                     // Check if register is not free, or if it's in our reserved list
                     if(!isFree(i)

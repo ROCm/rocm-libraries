@@ -26,12 +26,14 @@
 
 #pragma once
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
-    class ContractionProblemParameters;
-    class ContractionProblem;
-    class ContractionProblemGemm;
-    class ContractionProblemGroupedGemm;
-    struct ContractionInputs;
-    struct ContractionGroupedInputs;
+    class TENSILELITEHOST_EXPORT ContractionProblemParameters;
+    class TENSILELITEHOST_EXPORT ContractionProblem;
+    class TENSILELITEHOST_EXPORT ContractionProblemGemm;
+    class TENSILELITEHOST_EXPORT ContractionProblemGroupedGemm;
+    struct TENSILELITEHOST_EXPORT ContractionInputs;
+    struct TENSILELITEHOST_EXPORT ContractionGroupedInputs;
 } // namespace TensileLite

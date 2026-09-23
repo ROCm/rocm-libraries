@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -72,10 +73,12 @@ struct RTCCache
     // the source, and updates the cache before returning the compiled
     // kernel.  Tries in-process compile first and falls back to
     // subprocess if necessary.
-    static std::vector<char> cached_compile(const std::string&          kernel_name,
-                                            const std::string&          gpu_arch_with_flags,
-                                            kernel_src_gen_t            generate_src,
-                                            const std::array<char, 32>& generator_sum);
+    static std::vector<char> cached_compile(const std::string&                kernel_name,
+                                            const std::string&                gpu_arch_with_flags,
+                                            kernel_src_gen_t                  generate_src,
+                                            const std::array<char, 32>&       generator_sum,
+                                            const std::optional<std::string>& forced_rtc_helper
+                                            = std::nullopt);
 
     RTCCache();
     ~RTCCache() = default;
@@ -119,22 +122,54 @@ struct RTCCache
     static std::unique_ptr<RTCCache> single;
 
 private:
-    sqlite3_ptr connect_db(const std::filesystem::path& path, bool readonly);
+    // encapsulate a connection to a database file
+    struct db_file
+    {
+        db_file() = default;
+        // Attempt to fetch code object from the cache.  Returns empty
+        // vector if the query was run successfully but no object was
+        // found.
+        std::vector<char> get_code_object(const std::string&          kernel_name,
+                                          const std::string&          gpu_arch,
+                                          const std::array<char, 32>& generator_sum);
 
-    // database handles to system- and user-level caches.  either or
-    // both may be a null pointer, if that particular cache could not
-    // be located.
-    sqlite3_ptr db_sys;
-    sqlite3_ptr db_user;
+        // Store the code object into the cache.
+        void store_code_object(const std::string&          kernel_name,
+                               const std::string&          gpu_arch,
+                               const std::array<char, 32>& generator_sum,
+                               const std::vector<char>&    code);
 
-    // query handles, with mutexes to prevent concurrent queries that
-    // might stomp on one another's bound values
-    sqlite3_stmt_ptr get_stmt_sys;
-    std::mutex       get_mutex_sys;
-    sqlite3_stmt_ptr get_stmt_user;
-    std::mutex       get_mutex_user;
-    sqlite3_stmt_ptr store_stmt_user;
-    std::mutex       store_mutex_user;
+        bool is_connected() const
+        {
+            return db.get() != nullptr;
+        }
+
+        void connect_db(const std::filesystem::path& path, bool readonly);
+
+        // For convenience, allow passing these directly to sqlite APIs
+        operator sqlite3*()
+        {
+            return db.get();
+        }
+
+        sqlite3_ptr db;
+
+        sqlite3_stmt_ptr get_stmt;
+        std::mutex       get_mutex;
+        sqlite3_stmt_ptr store_stmt;
+        std::mutex       store_mutex;
+
+        static const bool cache_read_disabled;
+        static const bool cache_write_disabled;
+    };
+
+    // Database handles to system- and user-level caches.  System
+    // databases are mapped from a GPU arch name, since each arch is
+    // in a separate file.  Any of the db files may return
+    // connected() == false, if that particular cache could not be
+    // opened.
+    std::map<std::string, db_file> db_sys;
+    db_file                        db_user;
 
     // lock around deserialization, since that attaches a fixed-name
     // schema to the db and we don't want a collision

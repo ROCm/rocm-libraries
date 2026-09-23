@@ -25,6 +25,7 @@
 
 #include "rocblas_gemm_64.hpp"
 
+#include "blas3/Tensile/gemm_templates.hpp"
 #include "blas3/rocblas_gemm.hpp" // int32 API called
 #include "blas3/rocblas_gemm_source.hpp"
 
@@ -335,3 +336,82 @@ INST_GEMM_BATCHED_TEMPLATE_64(rocblas_float_complex)
 INST_GEMM_BATCHED_TEMPLATE_64(rocblas_double_complex)
 
 #undef INST_GEMM_BATCHED_TEMPLATE_64
+
+template <typename T>
+ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
+    rocblas_internal_gemm_grouped_batched_template_64(rocblas_handle           handle,
+                                                      const rocblas_operation* transa_array,
+                                                      const rocblas_operation* transb_array,
+                                                      const int64_t*           m_array,
+                                                      const int64_t*           n_array,
+                                                      const int64_t*           k_array,
+                                                      const T*                 alpha_array,
+                                                      const T* const*          Aarray,
+                                                      const int64_t*           lda_array,
+                                                      const T* const*          Barray,
+                                                      const int64_t*           ldb_array,
+                                                      const T*                 beta_array,
+                                                      T* const*                Carray,
+                                                      const int64_t*           ldc_array,
+                                                      int64_t                  group_count,
+                                                      const int64_t*           group_size)
+{
+    int64_t idx = 0;
+    for(rocblas_int g = 0; g < group_count; ++g)
+    {
+        rocblas_status status = (rocblas_internal_gemm_batched_template_64)(handle,
+                                                                            transa_array[g],
+                                                                            transb_array[g],
+                                                                            m_array[g],
+                                                                            n_array[g],
+                                                                            k_array[g],
+                                                                            alpha_array + g,
+                                                                            Aarray + idx,
+                                                                            0,
+                                                                            lda_array[g],
+                                                                            0,
+                                                                            Barray + idx,
+                                                                            0,
+                                                                            ldb_array[g],
+                                                                            0,
+                                                                            beta_array + g,
+                                                                            Carray + idx,
+                                                                            0,
+                                                                            ldc_array[g],
+                                                                            0,
+                                                                            group_size[g]);
+        if(status != rocblas_status_success)
+            return status;
+        idx += group_size[g];
+    }
+    return rocblas_status_success;
+}
+
+#ifdef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64
+#error INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64 already defined
+#endif
+
+#define INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64(T_)       \
+    template ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status   \
+        rocblas_internal_gemm_grouped_batched_template_64<T_>( \
+            rocblas_handle           handle,                   \
+            const rocblas_operation* transa_array,             \
+            const rocblas_operation* transb_array,             \
+            const int64_t*           m_array,                  \
+            const int64_t*           n_array,                  \
+            const int64_t*           k_array,                  \
+            const T_*                alpha_array,              \
+            const T_* const*         Aarray,                   \
+            const int64_t*           lda_array,                \
+            const T_* const*         Barray,                   \
+            const int64_t*           ldb_array,                \
+            const T_*                beta_array,               \
+            T_* const*               Carray,                   \
+            const int64_t*           ldc_array,                \
+            int64_t                  group_count,              \
+            const int64_t*           group_size);
+
+INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64(float)
+INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64(double)
+
+#undef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64

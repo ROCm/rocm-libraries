@@ -41,3 +41,9 @@ void testing_gemm_strided_batched_ex_bad_arg(const Arguments& arg);
 
 template <typename Ti, typename To, typename Tc>
 void testing_gemm_strided_batched_ex(const Arguments& arg);
+
+template <typename Ti, typename To, typename Tc>
+void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg);
+
+template <typename Ti, typename To, typename Tc>
+void testing_gemm_grouped_batched_ex(const Arguments& arg);

@@ -98,6 +98,8 @@ enum class warp_store_method
 /// In the example a store operation is performed on a warp of 8 threads, using type
 /// \p int and 4 items per thread.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_store.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(int * output, ...)
 /// {

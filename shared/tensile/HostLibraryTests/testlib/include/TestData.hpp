@@ -26,7 +26,9 @@
 
 #pragma once
 
-#include <boost/filesystem.hpp>
+#include <filesystem>
+#include <string>
+#include <vector>
 
 #include <Tensile/Singleton.hpp>
 
@@ -39,23 +41,23 @@ struct TestData : public Tensile::LazySingleton<TestData>
     static TestData Invalid();
     static TestData Env(std::string const& varName);
 
-    boost::filesystem::path dataDir() const;
+    std::filesystem::path dataDir() const;
 
-    boost::filesystem::path file(std::string const& filename) const;
-    boost::filesystem::path file(std::string const& filename, std::string const& extension) const;
+    std::filesystem::path file(std::string const& filename) const;
+    std::filesystem::path file(std::string const& filename, std::string const& extension) const;
 
-    std::vector<boost::filesystem::path> glob(std::string const& pattern) const;
+    std::vector<std::filesystem::path> glob(std::string const& pattern) const;
 
 private:
     friend Base;
 
-    boost::filesystem::path m_dataDir;
+    std::filesystem::path m_dataDir;
 
     struct invalid_data
     {
     };
 
-    static boost::filesystem::path ProgramLocation();
+    static std::filesystem::path ProgramLocation();
 
     TestData();
     TestData(std::string const& dataDir);

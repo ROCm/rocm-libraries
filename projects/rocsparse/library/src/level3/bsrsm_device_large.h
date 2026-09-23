@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,12 @@ namespace rocsparse
                                   rocsparse_diag_type  diag_type,
                                   rocsparse_direction  dir)
     {
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % NCOLS == 0, "BLOCKSIZE must be a multiple of NCOLS.");
+        static_assert((BLOCKSIZE / NCOLS) > 0
+                          && ((BLOCKSIZE / NCOLS) & ((BLOCKSIZE / NCOLS) - 1)) == 0,
+                      "BLOCKSIZE / NCOLS must be a power of two.");
+
         static constexpr uint32_t WFSIZE = BLOCKSIZE / NCOLS;
 
         const int lid = threadIdx.x & (WFSIZE - 1);
@@ -192,6 +198,12 @@ namespace rocsparse
                                   rocsparse_diag_type  diag_type,
                                   rocsparse_direction  dir)
     {
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % NCOLS == 0, "BLOCKSIZE must be a multiple of NCOLS.");
+        static_assert((BLOCKSIZE / NCOLS) > 0
+                          && ((BLOCKSIZE / NCOLS) & ((BLOCKSIZE / NCOLS) - 1)) == 0,
+                      "BLOCKSIZE / NCOLS must be a power of two.");
+
         static constexpr uint32_t WFSIZE = BLOCKSIZE / NCOLS;
 
         const int lid = threadIdx.x & (WFSIZE - 1);

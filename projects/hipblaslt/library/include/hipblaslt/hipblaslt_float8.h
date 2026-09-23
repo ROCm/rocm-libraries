@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -78,19 +78,19 @@ struct HIPBLASLT_EXPORT hipblaslt_f8_fnuz: public __hip_fp8_e4m3_fnuz
         return _Float16(float(*this));
     }
 
-    // check for zero
+    // check for zero — FNUZ E4M3: only 0x00; 0x80 is the non-finite sentinel (see is_nan / is_inf).
     inline HIP_HOST_DEVICE bool is_zero() const
     {
         return __x == 0x00;
     }
 
-    // check for nan
+    // FNUZ E4M3: encoding 0x80 is NaN (AMD __hip_fp8_e4m3_fnuz convention; no infinities).
     inline HIP_HOST_DEVICE bool is_nan() const
     {
         return __x == 0x80;
     }
 
-    // check for inf
+    // Legacy / test API: same bit pattern as is_nan; there is no separate Inf code in this format.
     inline HIP_HOST_DEVICE bool is_inf() const
     {
         return __x == 0x80;
@@ -130,22 +130,23 @@ struct HIPBLASLT_EXPORT hipblaslt_f8: public __hip_fp8_e4m3
 #endif
     }
 
-    // check for zero
+    // check for zero — OCP E4M3: signed zero S.0000.000 → +0 = 0x00, -0 = 0x80.
     inline HIP_HOST_DEVICE bool is_zero() const
     {
-        return __x == 0x00;
+        return __x == 0x00 || __x == 0x80;
     }
 
-    // check for nan
+    // OCP E4M3: canonical NaN is exp=1111 and mantissa=111 → 0x7f / 0xff; mask drops sign.
+    // ±0 (0x00/0x80) are not NaN: (0x80 & 0x7f) != 0x7f.
     inline HIP_HOST_DEVICE bool is_nan() const
     {
-        return __x == 0x80;
+        return (__x & 0x7f) == 0x7f;
     }
 
-    // check for inf
+    // OCP E4M3 does not define infinities (unlike E5M2).
     inline HIP_HOST_DEVICE bool is_inf() const
     {
-        return __x == 0x80;
+        return false;
     }
 
     // assignment overloading only from the same F8 types
@@ -179,19 +180,19 @@ struct HIPBLASLT_EXPORT hipblaslt_bf8_fnuz: public __hip_fp8_e5m2_fnuz
         return _Float16(float(*this));
     }
 
-    // check for zero
+    // check for zero — FNUZ E5M2: only 0x00; 0x80 is non-finite (see is_nan).
     inline HIP_HOST_DEVICE bool is_zero() const
     {
-        return (__x == 0x00 || __x == 0x80);
+        return __x == 0x00;
     }
 
-    // check for nan
+    // FNUZ E5M2: encoding 0x80 is NaN (same sentinel as f8_fnuz path; see __hip_fp8_e5m2_fnuz).
     inline HIP_HOST_DEVICE bool is_nan() const
     {
         return __x == 0x80;
     }
 
-    // check for inf: no inf, so checking nan?
+    // Legacy / test API: same as is_nan; no distinct Inf encoding in this wrapper.
     inline HIP_HOST_DEVICE bool is_inf() const
     {
         return __x == 0x80;
@@ -233,20 +234,19 @@ struct HIPBLASLT_EXPORT hipblaslt_bf8: public __hip_fp8_e5m2
 #endif
     }
 
-    // check for zero
+    // check for zero — OCP E5M2: signed zero S.00000.00 → +0 = 0x00, -0 = 0x80.
     inline HIP_HOST_DEVICE bool is_zero() const
     {
         return __x == 0x00 || __x == 0x80;
     }
 
-    // check for nan
+    // OCP E5M2 (S EEEEE MM): NaN iff exp==31 and mantissa!=00; Inf iff exp==31 and mantissa==00 (0x7c / 0xfc).
     inline HIP_HOST_DEVICE bool is_nan() const
     {
         return (__x == 0x7d) || (__x == 0x7e) || (__x == 0x7f) ||
         (__x == 0xfd) || (__x == 0xfe) || (__x == 0xff);
     }
 
-    // check for inf
     inline HIP_HOST_DEVICE bool is_inf() const
     {
         return (__x == 0x7c) || (__x == 0xfc);

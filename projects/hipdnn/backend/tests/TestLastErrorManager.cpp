@@ -15,7 +15,7 @@ TEST(TestLastErrorManager, StaticSetLastError)
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     // Test setting a valid error
-    std::string errorMessage = "An error occurred";
+    const std::string errorMessage = "An error occurred";
     status = LastErrorManager::setLastError(HIPDNN_STATUS_NOT_SUPPORTED, errorMessage.c_str());
     EXPECT_EQ(status, HIPDNN_STATUS_NOT_SUPPORTED);
     EXPECT_STREQ(LastErrorManager::getLastError(), errorMessage.c_str());
@@ -23,8 +23,8 @@ TEST(TestLastErrorManager, StaticSetLastError)
 
 TEST(TestLastErrorManager, ErrorCStringMessagePerThread)
 {
-    std::string mainError = "Main thread error";
-    std::string workerError = "Worker thread error";
+    const std::string mainError = "Main thread error";
+    const std::string workerError = "Worker thread error";
     LastErrorManager::setLastError(HIPDNN_STATUS_BAD_PARAM, mainError.c_str());
 
     std::string threadError;
@@ -40,8 +40,8 @@ TEST(TestLastErrorManager, ErrorCStringMessagePerThread)
 
 TEST(TestLastErrorManager, ErrorSTDStringMessagePerThread)
 {
-    std::string mainError = "Main thread error";
-    std::string workerError = "Worker thread error";
+    const std::string mainError = "Main thread error";
+    const std::string workerError = "Worker thread error";
     LastErrorManager::setLastError(HIPDNN_STATUS_BAD_PARAM, mainError);
 
     std::string threadError;
@@ -57,8 +57,9 @@ TEST(TestLastErrorManager, ErrorSTDStringMessagePerThread)
 
 TEST(TestLastErrorManager, SetSuccessSTDStringDoesNotSetErrorMessage)
 {
-    std::string errorMessage = "This message should not be set";
-    hipdnnStatus_t status = LastErrorManager::setLastError(HIPDNN_STATUS_SUCCESS, errorMessage);
+    const std::string errorMessage = "This message should not be set";
+    const hipdnnStatus_t status
+        = LastErrorManager::setLastError(HIPDNN_STATUS_SUCCESS, errorMessage);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     EXPECT_NE(LastErrorManager::getLastError(), errorMessage);
@@ -66,8 +67,8 @@ TEST(TestLastErrorManager, SetSuccessSTDStringDoesNotSetErrorMessage)
 
 TEST(TestLastErrorManager, SetSuccessCStringDoesNotSetErrorMessage)
 {
-    std::string errorMessage = "This message should not be set";
-    hipdnnStatus_t status
+    const std::string errorMessage = "This message should not be set";
+    const hipdnnStatus_t status
         = LastErrorManager::setLastError(HIPDNN_STATUS_SUCCESS, errorMessage.c_str());
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
@@ -77,7 +78,7 @@ TEST(TestLastErrorManager, SetSuccessCStringDoesNotSetErrorMessage)
 TEST(TestLastErrorManager, ClearLastErrorEmptiesBuffer)
 {
     // Set an error
-    std::string errorMessage = "Test error";
+    const std::string errorMessage = "Test error";
     LastErrorManager::setLastError(HIPDNN_STATUS_BAD_PARAM, errorMessage);
     EXPECT_STREQ(LastErrorManager::getLastError(), errorMessage.c_str());
 
@@ -90,8 +91,8 @@ TEST(TestLastErrorManager, ClearLastErrorEmptiesBuffer)
 
 TEST(TestLastErrorManager, ClearLastErrorIsThreadLocal)
 {
-    std::string mainError = "Main thread error";
-    std::string workerError = "Worker thread error";
+    const std::string mainError = "Main thread error";
+    const std::string workerError = "Worker thread error";
 
     // Set error in main thread
     LastErrorManager::setLastError(HIPDNN_STATUS_BAD_PARAM, mainError);

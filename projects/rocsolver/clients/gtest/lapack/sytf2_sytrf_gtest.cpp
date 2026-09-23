@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,7 +35,7 @@ using namespace std;
 
 typedef std::tuple<vector<int>, printable_char> sytrf_tuple;
 
-// each matrix_size_range vector is a {n, lda, singular}
+// each matrix_size_range vector is a {n, lda, singular, bc}
 // if singular = 1, then the used matrix for the tests is singular
 
 // each uplo_range is a {uplo}
@@ -48,20 +48,26 @@ const vector<printable_char> uplo_range = {'L', 'U'};
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0, 1, 0},
+    {0, 1, 0, 3},
     // invalid
-    {-1, 1, 0},
-    {20, 5, 0},
+    {-1, 1, 0, 3},
+    {20, 5, 0, 3},
     // normal (valid) samples
-    {32, 32, 1},
-    {50, 50, 0},
-    {70, 100, 1}};
+    {32, 32, 1, 3},
+    {50, 50, 0, 3},
+    {70, 100, 1, 3}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
-    {192, 192, 1},
-    {640, 640, 0},
-    {1000, 1024, 1},
+    {192, 192, 1, 3},
+    {640, 640, 0, 3},
+    {1000, 1024, 1, 3},
+    {1000, 1024, 0, 3},
+};
+
+// for weekly_lapack tests
+const vector<vector<int>> very_large_matrix_size_range = {
+    {204, 204, 0, 81},
 };
 
 Arguments sytrf_setup_arguments(sytrf_tuple tup)
@@ -80,6 +86,7 @@ Arguments sytrf_setup_arguments(sytrf_tuple tup)
 
     arg.timing = 0;
     arg.singular = matrix_size[2];
+    arg.batch_count = matrix_size[3];
 
     return arg;
 }
@@ -90,7 +97,7 @@ class SYTF2_SYTRF : public ::TestWithParam<sytrf_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -101,7 +108,8 @@ protected:
         if(arg.peek<char>("uplo") == 'L' && arg.peek<rocblas_int>("n") == 0)
             testing_sytf2_sytrf_bad_arg<BATCHED, STRIDED, BLOCKED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        if constexpr(!(BATCHED || STRIDED))
+            arg.batch_count = 1;
         if(arg.singular == 1)
             testing_sytf2_sytrf<BATCHED, STRIDED, BLOCKED, T>(arg);
 
@@ -244,6 +252,10 @@ TEST_P(SYTRF, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         SYTF2,
+                         Combine(ValuesIn(very_large_matrix_size_range), ValuesIn(uplo_range)));
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYTF2,
                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(uplo_range)));
@@ -251,6 +263,10 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SYTF2,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         SYTRF,
+                         Combine(ValuesIn(very_large_matrix_size_range), ValuesIn(uplo_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYTRF,

@@ -3,10 +3,11 @@
 # Run this script from an Administrator PowerShell prompt
 
 param(
-    [string]$ClangPath = "C:\dist\clang",
-    [string]$TheRockPath = "C:\dist\therock",
-    [string]$ProjectPath = "C:\projects\hipdnn",
-    [string]$GpuTarget = "gfx1103",
+    [string]$InstallRoot = "D:\develop",
+    [string]$VsBuildToolsPath = "",
+    [string]$ClangPath = "",
+    [Alias("GpuTarget")]
+    [string]$Asic = "gfx1151",
     [switch]$SkipPrerequisites = $false,
     [switch]$SkipWindowsConfig = $false,
     [switch]$SkipToolchainDownload = $false,
@@ -17,10 +18,17 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+# Resolve default install paths from InstallRoot unless explicit paths are provided.
+if (-not $ClangPath) {
+    $ClangPath = Join-Path $InstallRoot "dist\clang"
+}
+if (-not $VsBuildToolsPath) {
+    $VsBuildToolsPath = Join-Path $InstallRoot "dist\vs-buildtools"
+}
+
 # Version configuration
 $CLANG_VERSION = "20.1.8"
 $CMAKE_VERSION = "3.31.0"
-$THEROCK_VERSION = "7.10.0"  # Base version, will look for latest nightly
 
 # Colors for output
 function Write-Status { param($Message) Write-Host "[$([datetime]::Now.ToString('HH:mm:ss'))] $Message" -ForegroundColor Cyan }
@@ -45,60 +53,57 @@ Write-Host "`n===================================================" -ForegroundCo
 Write-Host "  hipDNN Windows Build Setup Script" -ForegroundColor Magenta
 Write-Host "===================================================" -ForegroundColor Magenta
 Write-Host "Configuration:" -ForegroundColor Yellow
+Write-Host "  Install Root: $InstallRoot"
+Write-Host "  VS Build Tools Path: $VsBuildToolsPath"
 Write-Host "  Clang Path: $ClangPath"
-Write-Host "  TheRock Path: $TheRockPath"
-Write-Host "  Project Path: $ProjectPath"
-Write-Host "  GPU Target: $GpuTarget"
+Write-Host "  ASIC: $Asic"
 Write-Host "===================================================`n" -ForegroundColor Magenta
 
 # Section 1: Install Prerequisites
 if (-not $SkipPrerequisites) {
     Write-Host "`n=== Section 1: Installing Prerequisites ===" -ForegroundColor Yellow
 
-    # Install Chocolatey if not present
-    if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-        Write-Status "Installing Chocolatey..."
-        Set-ExecutionPolicy Bypass -Scope Process -Force
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        Write-Success "Chocolatey installed"
-    } else {
-        Write-Success "Chocolatey already installed"
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Error "winget is required but not found."
+        Write-Host "Install 'App Installer' from the Microsoft Store or update Windows."
+        exit 1
     }
+    Write-Success "winget found"
 
-    # Refresh environment variables
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $wingetArgs = @("--accept-package-agreements", "--accept-source-agreements")
 
-    # Install Visual Studio Build Tools
-    Write-Status "Installing Visual Studio 2022 Build Tools..."
-    $vsParams = "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 "
-    $vsParams += "--add Microsoft.VisualStudio.Component.VC.CMake.Project "
-    $vsParams += "--add Microsoft.VisualStudio.Component.VC.ATL "
-    $vsParams += "--add Microsoft.VisualStudio.Component.Windows11SDK.22621"
-
-    choco install visualstudio2022buildtools -y --params "`"$vsParams`"" 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 3010) {
+    # Install Visual Studio Build Tools with Windows SDK
+    Write-Status "Installing Visual Studio 2022 Build Tools + Windows 11 SDK..."
+    $vsOverride = "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 "
+    $vsOverride += "--add Microsoft.VisualStudio.Component.VC.CMake.Project "
+    $vsOverride += "--add Microsoft.VisualStudio.Component.VC.ATL "
+    $vsOverride += "--add Microsoft.VisualStudio.Component.Windows11SDK.22621 "
+    $vsOverride += "--installPath `"$VsBuildToolsPath`" --quiet --wait"
+    winget install --id Microsoft.VisualStudio.2022.BuildTools --source winget --override "$vsOverride" @wingetArgs
+    if ($LASTEXITCODE -eq 0) {
         Write-Success "Visual Studio Build Tools installed/updated"
+    } else {
+        Write-Warning "VS Build Tools install exited with code $LASTEXITCODE (may already be installed)"
     }
 
     # Install Git
     Write-Status "Installing Git..."
-    choco install git.install -y --params "'/GitAndUnixToolsOnPath'" 2>&1 | Out-Null
+    winget install --id Git.Git -e --source winget --custom "/o:PathOption=CmdTools" @wingetArgs
     Write-Success "Git installed/updated"
 
     # Install CMake
-    Write-Status "Installing CMake..."
-    choco install cmake --version=$CMAKE_VERSION -y 2>&1 | Out-Null
+    Write-Status "Installing CMake $CMAKE_VERSION..."
+    winget install --id Kitware.CMake -v $CMAKE_VERSION @wingetArgs
     Write-Success "CMake installed/updated"
 
     # Install Ninja
     Write-Status "Installing Ninja..."
-    choco install ninja -y 2>&1 | Out-Null
+    winget install --id ninja-build.ninja @wingetArgs
     Write-Success "Ninja installed/updated"
 
     # Install Python
     Write-Status "Installing Python..."
-    choco install python -y 2>&1 | Out-Null
+    winget install --id Python.Python.3.12 @wingetArgs
     Write-Success "Python installed/updated"
 
     # Refresh PATH
@@ -184,84 +189,9 @@ if (-not $SkipToolchainDownload) {
         Write-Success "Clang already installed at $ClangPath"
     }
 
-    # Verify amdgpu-arch
-    if (Test-Path "$ClangPath\bin\amdgpu-arch.exe") {
-        Write-Status "Detecting GPU architecture..."
-        $detectedGpu = & "$ClangPath\bin\amdgpu-arch.exe" 2>$null
-        if ($detectedGpu) {
-            Write-Success "Detected GPU: $detectedGpu"
-            if ($detectedGpu -ne $GpuTarget) {
-                Write-Warning "Detected GPU ($detectedGpu) differs from specified target ($GpuTarget)"
-                $response = Read-Host 'Use detected GPU? (Y/N)'
-                if ($response -eq 'Y') {
-                    $GpuTarget = $detectedGpu
-                }
-            }
-        }
-    }
-
-    # Download and install TheRock
-    Write-Status "Setting up TheRock ROCm SDK..."
-    if (-not (Test-Path "$TheRockPath\bin\hipconfig.exe")) {
-        Write-Status "Downloading TheRock for $GpuTarget..."
-
-        # Determine GFX family
-        $gfxFamily = switch -Regex ($GpuTarget) {
-            "gfx110[0-9]" { "gfx110X-all" }
-            "gfx103[0-9]" { "gfx103X-all" }
-            "gfx90[0-9]"  { "gfx90X-all" }
-            default {
-                Write-Warning "Unknown GFX family for $GpuTarget, using gfx110X-all"
-                "gfx110X-all"
-            }
-        }
-
-        Write-Status "Using GFX Family: $gfxFamily"
-
-        # Create directory
-        New-Item -ItemType Directory -Path $TheRockPath -Force | Out-Null
-
-        # Find latest nightly build
-        $baseUrl = "https://therock-nightly-tarball.s3.amazonaws.com"
-        $indexUrl = "$baseUrl/index.html"
-
-        try {
-            Write-Status "Checking for latest TheRock build..."
-            $indexContent = Invoke-WebRequest -Uri $indexUrl -UseBasicParsing
-
-            # Parse for Windows builds matching our GFX family
-            $pattern = "therock-dist-windows-$gfxFamily-.*?\.tar\.gz"
-            $matches = [regex]::Matches($indexContent.Content, $pattern)
-
-            if ($matches.Count -gt 0) {
-                # Get the most recent (last in list usually)
-                $latestFile = $matches[$matches.Count - 1].Value
-                $theRockUrl = "$baseUrl/$latestFile"
-
-                Write-Status "Downloading $latestFile..."
-                $theRockArchive = "$env:TEMP\therock.tar.gz"
-
-                Invoke-WebRequest -Uri $theRockUrl -OutFile $theRockArchive -UseBasicParsing
-                Write-Success "TheRock downloaded"
-
-                Write-Status "Extracting TheRock (this may take several minutes)..."
-                tar -xzf $theRockArchive -C $TheRockPath
-
-                Remove-Item -Path $theRockArchive -Force
-                Write-Success "TheRock installed to $TheRockPath"
-            } else {
-                throw "No Windows builds found for $gfxFamily"
-            }
-        } catch {
-            Write-Error "Failed to download/install TheRock: $_"
-            Write-Host "Please manually download from: $indexUrl"
-            Write-Host "Look for: therock-dist-windows-$gfxFamily-*.tar.gz"
-            Write-Host "Extract to: $TheRockPath"
-            exit 1
-        }
-    } else {
-        Write-Success "TheRock already installed at $TheRockPath"
-    }
+    Write-Status "Skipping TheRock nightly tarball download."
+    Write-Host "TheRock nightly tarball download has been retired."
+    Write-Host "Use the wheel-based setup to install the latest ROCm nightly SDK."
 }
 
 # Section 4: Set System Environment Variables
@@ -269,21 +199,6 @@ if (-not $SkipEnvironmentVariables) {
     Write-Host "`n=== Section 4: Setting System Environment Variables ===" -ForegroundColor Yellow
 
     Write-Status "Setting system environment variables..."
-
-    # Add TheRock bin to system PATH if not already present
-    try {
-        $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-        if (-not $currentPath.Contains("$TheRockPath\bin")) {
-            Write-Status "Adding TheRock to system PATH..."
-            $newPath = "$TheRockPath\bin;" + $currentPath
-            [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
-            Write-Success "Added $TheRockPath\bin to system PATH"
-        } else {
-            Write-Success "TheRock already in system PATH"
-        }
-    } catch {
-        Write-Warning "Could not modify system PATH: $_"
-    }
 
     # Set HIP_PLATFORM
     try {
@@ -310,6 +225,9 @@ if (-not $SkipEnvironmentVariables) {
 Write-Host "`n===================================================" -ForegroundColor Magenta
 Write-Host "  Setup Script Complete" -ForegroundColor Magenta
 Write-Host "===================================================" -ForegroundColor Magenta
+Write-Host "`nTo install the latest ROCm nightly SDK, run:" -ForegroundColor Yellow
+Write-Host "  .\scripts\windows\wheel_build_setup.ps1"
+Write-Host "Use -SHA <commit-sha> to install a specific staging build."
 
 # Prompt for system restart if settings were changed
 if (-not $SkipWindowsConfig) {

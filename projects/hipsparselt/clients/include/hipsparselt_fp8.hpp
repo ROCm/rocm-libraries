@@ -29,12 +29,18 @@
 #include <hip/hip_runtime.h>
 
 #undef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+#undef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
 
 #ifdef __HIP_PLATFORM_AMD__
 #ifdef HIP_FP8_TYPE_OCP
 #define HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 #define hipsparselt_fp8_e4m3 __hip_fp8_e4m3
 #define hipsparselt_fp8_e5m2 __hip_fp8_e5m2
+#endif
+#ifdef HIP_FP8_TYPE_FNUZ
+#define HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+#define hipsparselt_fp8_e4m3_fnuz __hip_fp8_e4m3_fnuz
+#define hipsparselt_fp8_e5m2_fnuz __hip_fp8_e5m2_fnuz
 #endif
 #endif
 

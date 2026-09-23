@@ -38,6 +38,7 @@ Tests:
   M: [10, 500, 872, 27463]
   N: [33, 242, 623, 29837]
   alpha: [0.08736, 0.33333]
+  alphai: [0.5, 1.0]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
 
 - name: csr2csr_compress_file
@@ -46,6 +47,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: 1
   alpha: [0.0, 0.05, 0.25, 0.67, 0.8, 1.0]
+  alphai: [0.0, 0.7, 0.9, 1.0]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos1,
              nos2,
@@ -61,6 +63,7 @@ Tests:
   precision: *single_only_precisions
   M: 1
   alpha: [0.0, 0.1, 0.5]
+  alphai: [0.0]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   filename: [rma10,
              shipsec1,

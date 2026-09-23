@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -443,7 +443,7 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
     auto result = hipSuccess;
 
     auto array_type = (type == SetCallbackType::LOAD) ? node->inArrayType : node->outArrayType;
-    auto node_callback_type = node->GetCallbackType(true);
+    auto node_callback_type = node->GetCallbackType();
 
     bool is_complex = array_type_is_complex(array_type);
     // load r2c kernels and store c2r kernels need real-valued callbacks
@@ -525,20 +525,25 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
 
 // Internal plan executor.
 // For in-place transforms, in_buffer == out_buffer.
-void TransformPowX(const ExecPlan&                         execPlan,
-                   void*                                   in_buffer[],
-                   void*                                   out_buffer[],
-                   rocfft_execution_info                   info,
-                   size_t                                  multiPlanIdx,
-                   const std::map<int, device_callback_t>& callbacks)
+void TransformPowX(const rocfft_plan_t&                  plan,
+                   const ExecPlan&                       execPlan,
+                   void*                                 in_buffer[],
+                   void*                                 out_buffer[],
+                   const rocfft_execution_info_internal& info,
+                   size_t                                multiPlanIdx)
 {
     assert(execPlan.execSeq.size() == execPlan.gridParam.size());
+
+    // use user-specified stream if present, and plan's stream otherwise
+    hipStream_t execStream = info.get_user_stream(execPlan.location.device);
+    if(!execStream)
+        execStream = execPlan.get_local_stream();
 
     bool processing_tuning = TuningBenchmarker::GetSingleton().IsProcessingTuning();
     auto tuningPacket      = TuningBenchmarker::GetSingleton().GetPacket();
     // we can log profile information if we're on the null stream,
     // since we will be able to wait for the transform to finish
-    bool emit_profile_log  = (processing_tuning || LOG_PROFILE_ENABLED()) && !info->rocfft_stream;
+    bool emit_profile_log  = (processing_tuning || LOG_PROFILE_ENABLED()) && !execStream;
     bool emit_kernelio_log = LOG_KERNELIO_ENABLED();
 
     rocfft_ostream*    kernelio_stream = nullptr;
@@ -553,25 +558,53 @@ void TransformPowX(const ExecPlan&                         execPlan,
 
     // assign callbacks to the node that are actually doing the
     // loading and storing to/from global memory
-    TreeNode* load_node             = nullptr;
-    TreeNode* store_node            = nullptr;
+    const TreeNode* load_node       = nullptr;
+    const TreeNode* store_node      = nullptr;
     std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
 
-    auto it = callbacks.find(execPlan.location.device);
-    if(it != callbacks.end())
-    {
-        if(execPlan.rootPlan->loadOps)
-        {
-            load_node->callbacks.load_cb_fn        = it->second.load_fn;
-            load_node->callbacks.load_cb_data      = it->second.load_data;
-            load_node->callbacks.load_cb_lds_bytes = info->load_cb_lds_bytes;
-        }
+    UserCallbacks cb_ptrs;
 
-        if(execPlan.rootPlan->storeOps)
+    if(execPlan.rootPlan->loadOps)
+    {
+        // (Ab)use the BufferPtr::get method to get the right funcptr +
+        // cbdata from the user-provided arrays.  BufferPtr::get
+        // already knows the index of the input buffer array, so the
+        // callback funcptr/data would be at the same index
+
+        // funcptr callback
+        if(!plan.desc.loadOps.has_spirv() && info.get_load_cb_fns())
         {
-            store_node->callbacks.store_cb_fn        = it->second.store_fn;
-            store_node->callbacks.store_cb_data      = it->second.store_data;
-            store_node->callbacks.store_cb_lds_bytes = info->store_cb_lds_bytes;
+            cb_ptrs.load_cb_fn = execPlan.inputPtr.get(
+                info.get_load_cb_fns(), nullptr, execPlan.location.comm_rank, info);
+        }
+        if(info.get_load_cb_data())
+        {
+            cb_ptrs.load_cb_data = execPlan.inputPtr.get(
+                info.get_load_cb_data(), nullptr, execPlan.location.comm_rank, info);
+        }
+    }
+
+    if(execPlan.rootPlan->storeOps)
+    {
+        // (Ab)use the BufferPtr::get method to get the right funcptr +
+        // cbdata from the user-provided arrays.  BufferPtr::get
+        // already knows the index of the input buffer array, so the
+        // callback funcptr/data would be at the same index
+
+        // funcptr callback
+        if(!plan.desc.storeOps.has_spirv() && info.get_store_cb_fns())
+        {
+            cb_ptrs.store_cb_fn = execPlan.outputPtr.get(info.get_store_cb_fns(),
+                                                         info.get_store_cb_fns(),
+                                                         execPlan.location.comm_rank,
+                                                         info);
+        }
+        if(info.get_store_cb_data())
+        {
+            cb_ptrs.store_cb_data = execPlan.outputPtr.get(info.get_store_cb_data(),
+                                                           info.get_store_cb_data(),
+                                                           execPlan.location.comm_rank,
+                                                           info);
         }
     }
 
@@ -579,8 +612,11 @@ void TransformPowX(const ExecPlan&                         execPlan,
     {
         DeviceCallIn data;
         data.node          = execPlan.execSeq[i];
-        data.rocfft_stream = (info == nullptr) ? 0 : info->rocfft_stream;
-        data.deviceProp    = execPlan.deviceProp;
+        data.rocfft_stream = execStream;
+        //
+        data.deviceProp = execPlan.deviceProp;
+
+        auto& local_work_buffer = info.get_work_buffer(execPlan.location.device);
 
         // Size of complex type
         const size_t complexTSize = complex_type_size(data.node->precision);
@@ -604,7 +640,7 @@ void TransformPowX(const ExecPlan&                         execPlan,
             }
             break;
         case OB_TEMP:
-            data.bufIn[0] = info->workBuffer;
+            data.bufIn[0] = local_work_buffer.data();
             if(data.node->inArrayType == rocfft_array_type_complex_planar
                || data.node->inArrayType == rocfft_array_type_hermitian_planar)
             {
@@ -612,12 +648,11 @@ void TransformPowX(const ExecPlan&                         execPlan,
                 // interleaved format, and we just need to split it for
                 // planar.
                 data.bufIn[1]
-                    = (void*)((char*)info->workBuffer + execPlan.tmpWorkBufSize * complexTSize / 2);
+                    = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize / 2);
             }
             break;
         case OB_TEMP_CMPLX_FOR_REAL:
-            data.bufIn[0]
-                = (void*)((char*)info->workBuffer + execPlan.tmpWorkBufSize * complexTSize);
+            data.bufIn[0] = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize);
             // TODO: Can we use this in planar as well ??
             // if(data.node->inArrayType == rocfft_array_type_complex_planar
             //    || data.node->inArrayType == rocfft_array_type_hermitian_planar)
@@ -628,9 +663,8 @@ void TransformPowX(const ExecPlan&                         execPlan,
             // }
             break;
         case OB_TEMP_BLUESTEIN:
-            data.bufIn[0]
-                = (void*)((char*)info->workBuffer
-                          + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
+            data.bufIn[0] = local_work_buffer.data_offset(
+                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
             // Bluestein mul-kernels (3 types) work well for CI->CI
             // so we only consider CI->CI now
             break;
@@ -662,7 +696,7 @@ void TransformPowX(const ExecPlan&                         execPlan,
             }
             break;
         case OB_TEMP:
-            data.bufOut[0] = info->workBuffer;
+            data.bufOut[0] = local_work_buffer.data();
             if(data.node->outArrayType == rocfft_array_type_complex_planar
                || data.node->outArrayType == rocfft_array_type_hermitian_planar)
             {
@@ -670,12 +704,11 @@ void TransformPowX(const ExecPlan&                         execPlan,
                 // interleaved format, and we just need to split it for
                 // planar.
                 data.bufOut[1]
-                    = (void*)((char*)info->workBuffer + execPlan.tmpWorkBufSize * complexTSize / 2);
+                    = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize / 2);
             }
             break;
         case OB_TEMP_CMPLX_FOR_REAL:
-            data.bufOut[0]
-                = (void*)((char*)info->workBuffer + execPlan.tmpWorkBufSize * complexTSize);
+            data.bufOut[0] = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize);
             // TODO: Can we use this in planar as well ??
             // if(data.node->outArrayType == rocfft_array_type_complex_planar
             //    || data.node->outArrayType == rocfft_array_type_hermitian_planar)
@@ -686,9 +719,8 @@ void TransformPowX(const ExecPlan&                         execPlan,
             // }
             break;
         case OB_TEMP_BLUESTEIN:
-            data.bufOut[0]
-                = (void*)((char*)info->workBuffer
-                          + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
+            data.bufOut[0] = local_work_buffer.data_offset(
+                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
             // Bluestein mul-kernels (3 types) work well for CI->CI
             // so we only consider CI->CI now
             break;
@@ -727,23 +759,8 @@ void TransformPowX(const ExecPlan&                         execPlan,
         // single-kernel bluestein requires a bluestein temp buffer separate from input and output
         if(data.node->scheme == CS_KERNEL_BLUESTEIN_SINGLE)
         {
-            data.bufTemp = ((char*)info->workBuffer
-                            + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
-        }
-
-        // if callbacks are enabled, make sure load_cb_fn and store_cb_fn are not nullptrs
-        if((data.node->callbacks.load_cb_fn == nullptr
-            && data.node->callbacks.store_cb_fn != nullptr))
-        {
-            // set default load callback
-            SetDefaultCallback(data.node, SetCallbackType::LOAD, &data.node->callbacks.load_cb_fn);
-        }
-        else if((data.node->callbacks.load_cb_fn != nullptr
-                 && data.node->callbacks.store_cb_fn == nullptr))
-        {
-            // set default store callback
-            SetDefaultCallback(
-                data.node, SetCallbackType::STORE, &data.node->callbacks.store_cb_fn);
+            data.bufTemp = local_work_buffer.data_offset(
+                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
         }
 
         data.gridParam = execPlan.gridParam[i];
@@ -825,7 +842,31 @@ void TransformPowX(const ExecPlan&                         execPlan,
                 throw std::runtime_error("hipEventRecord failure");
 
         // give callback parameters to kernel launcher
-        data.callbacks = execPlan.execSeq[i]->callbacks;
+        if(execPlan.execSeq[i] == load_node)
+        {
+            data.callbacks.load_cb_fn        = cb_ptrs.load_cb_fn;
+            data.callbacks.load_cb_data      = cb_ptrs.load_cb_data;
+            data.callbacks.load_cb_lds_bytes = cb_ptrs.load_cb_lds_bytes;
+        }
+        if(execPlan.execSeq[i] == store_node)
+        {
+            data.callbacks.store_cb_fn        = cb_ptrs.store_cb_fn;
+            data.callbacks.store_cb_data      = cb_ptrs.store_cb_data;
+            data.callbacks.store_cb_lds_bytes = cb_ptrs.store_cb_lds_bytes;
+        }
+
+        // Since our kernels either call funcptr callbacks for both
+        // load and store, or don't call funcptr callbacks at all,
+        // fill in the opposite side with a default funcptr if the
+        // node only wants a funcptr callback on one side.
+        if(data.callbacks.load_cb_fn == nullptr && data.callbacks.store_cb_fn != nullptr)
+        {
+            SetDefaultCallback(data.node, SetCallbackType::LOAD, &data.callbacks.load_cb_fn);
+        }
+        else if(data.callbacks.load_cb_fn != nullptr && data.callbacks.store_cb_fn == nullptr)
+        {
+            SetDefaultCallback(data.node, SetCallbackType::STORE, &data.callbacks.store_cb_fn);
+        }
 
         // choose which compiled kernel to run
         RTCKernel* localCompiledKernel = data.get_callback_type() == CallbackType::NONE

@@ -17,6 +17,10 @@
 
 #define DEBUG_LOG 0
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -266,18 +270,27 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
     static constexpr auto BlockSizeNumber = Number<BlockSize>{};
 
     using mfma_selector = MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB>;
+
+    // KPack must satisfy KPack/KGroup = 16/sizeof(B) so that each thread's NkSwizzle slot
+    // matches exactly one 16-byte memory load (= BK1 elements) in the B-preshuffle path.
+    // On gfx1250 the default double-rate instruction (k_per_blk=64) gives KPack=64 while
+    // KGroup remains 2, so KPack/KGroup=32 and no longer matches the 16-byte load layout.
+    // Use the single-rate instruction's k_per_blk only for computing KPack to restore
+    // KPack=32 and KPack/KGroup=16. KLane and KPerXdlops still use the double-rate selector.
+#if defined(__gfx125__)
+    using preshuffle_mfma_selector =
+        MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB, true>;
+    static constexpr index_t KPack = math::max(math::lcm(AK1Number, BK1Number),
+                                               preshuffle_mfma_selector::selected_mfma.k_per_blk);
+#else
     static constexpr index_t KPack =
         math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk);
+#endif
     static constexpr index_t KGroup = []() {
-        if constexpr(is_same_v<remove_cvref_t<BDataType>, f8_t>)
-            // On gfx950, we have a mfma that required 32 f8 elements as input,
-            // splited into 2 groups of 16 f8 elements.
-            // the 2 groups is not contiguous in the B preshuffed layout.
-            // and we do not want it to be contiguous in the B preshuffled layout
-            // because a memory instruction can only read 16 f8 elements at a time.
-            return mfma_selector::selected_mfma.k_per_blk == 32 ? 2 : 1;
-        else
-            return 1;
+        // A memory instruction can only read 16 bytes at a time. If K1PerXdlops *
+        // sizeof(ComputeDataType) > 16, memory read will not conitnues in a wave in B preshuffle
+        // mode. So, we need split K into mutiple groups.
+        return mfma_selector::GetK1PerXdlops() * sizeof(ComputeTypeA) > 16 ? 2 : 1;
     }();
     static constexpr index_t KLane =
         mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops();
@@ -670,6 +683,11 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
         index_t BK0;
         index_t MBlock;
         index_t NBlock;
+        // When true, the caller guarantees p_c_grid is already zeroed before
+        // launch, so the device invoker skips its own hipMemsetAsync for the
+        // KBatch > 1 split-K atomic-accumulation path. Defaults to false, which
+        // preserves the original zero-init behavior.
+        bool skip_zero_init = false;
     };
 
     // Argument
@@ -1550,3 +1568,6 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
 };
 
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

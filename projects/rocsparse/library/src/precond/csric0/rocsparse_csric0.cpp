@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_csric0.hpp"
+#include "rocsparse_assign_async.hpp"
 #include "rocsparse_csric0_kernel_launch.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -38,6 +39,37 @@ rocsparse_status rocsparse::csric0(rocsparse_handle      handle,
         // Quick return
         //
         return rocsparse_status_success;
+    }
+
+    csric0_info->create_singularity_numeric_near(A->batch_count, A->col_type, handle->stream);
+    csric0_info->create_singularity_numeric_exact(A->batch_count, A->col_type, handle->stream);
+    if(A->col_type == rocsparse_indextype_i32)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+            A->batch_count,
+            reinterpret_cast<int32_t*>(csric0_info->get_singularity_numeric_near()->get_position()),
+            reinterpret_cast<const int32_t*>(csric0_info->get_position()),
+            handle->stream));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+            A->batch_count,
+            reinterpret_cast<int32_t*>(
+                csric0_info->get_singularity_numeric_exact()->get_position()),
+            reinterpret_cast<const int32_t*>(csric0_info->get_position()),
+            handle->stream));
+    }
+    else
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+            A->batch_count,
+            reinterpret_cast<int64_t*>(csric0_info->get_singularity_numeric_near()->get_position()),
+            reinterpret_cast<const int64_t*>(csric0_info->get_position()),
+            handle->stream));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+            A->batch_count,
+            reinterpret_cast<int64_t*>(
+                csric0_info->get_singularity_numeric_exact()->get_position()),
+            reinterpret_cast<const int64_t*>(csric0_info->get_position()),
+            handle->stream));
     }
 
     RETURN_IF_ROCSPARSE_ERROR(

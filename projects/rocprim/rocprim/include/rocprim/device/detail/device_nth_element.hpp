@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -121,19 +121,34 @@ struct n_th_element_iteration_data
     bool         equality_bucket;
 };
 
-template<class ArchConfig, class KeysIterator, class BinaryFunction>
+template<class TargetConfig, class KeysIterator, class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     block_sort_kernel_impl(KeysIterator keys, const unsigned int size, BinaryFunction compare_function)
 {
-    constexpr nth_element_config_params params = ArchConfig::params;
+    constexpr nth_element_config_params params = TargetConfig::params;
 
     constexpr unsigned int stop_recursion_size = params.stop_recursion_size;
 
+    constexpr unsigned int block_size       = params.kernel_config.block_size;
+    constexpr unsigned int items_per_thread = ceiling_div(stop_recursion_size, block_size);
+
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
 
-    using block_load_key  = block_load<key_type, stop_recursion_size, 1>;
-    using block_sort_key  = block_sort<key_type, stop_recursion_size>;
-    using block_store_key = block_store<key_type, stop_recursion_size, 1>;
+    using block_load_key  = block_load<key_type,
+                                       stop_recursion_size,
+                                       1,
+                                       block_load_method::block_load_direct,
+                                       1,
+                                       1,
+                                       TargetConfig::wavefront>;
+    using block_sort_key  = block_sort<key_type, stop_recursion_size, items_per_thread>;
+    using block_store_key = block_store<key_type,
+                                        stop_recursion_size,
+                                        1,
+                                        block_store_method::block_store_direct,
+                                        1,
+                                        1,
+                                        TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY union
     {
@@ -142,7 +157,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
         typename block_store_key::storage_type store;
     } storage;
 
-    key_type sample_buffer[1];
+    key_type sample_buffer[items_per_thread];
 
     block_load_key().load(keys, sample_buffer, size, storage.load);
 
@@ -155,7 +170,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     block_store_key().store(keys, sample_buffer, size, storage.store);
 }
 
-template<class ArchConfig, class KeysIterator, class BinaryFunction>
+template<class TargetConfig, class KeysIterator, class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void find_splitters_kernel_impl(
                                KeysIterator                                             keys,
                                typename std::iterator_traits<KeysIterator>::value_type* tree,
@@ -163,7 +178,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void find_splitters_kernel_impl(
                                const unsigned int   size,
                                BinaryFunction compare_function)
 {
-    constexpr nth_element_config_params params        = ArchConfig::params;
+    constexpr nth_element_config_params params        = TargetConfig::params;
     constexpr unsigned int              num_splitters = params.number_of_buckets - 1;
 
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
@@ -197,7 +212,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void find_splitters_kernel_impl(
     equality_buckets[idx] = equality_bucket;
 }
 
-template<class ArchConfig, class KeysIterator, class BinaryFunction>
+template<class TargetConfig, class KeysIterator, class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     count_bucket_sizes_kernel_impl(KeysIterator                                             keys,
                                    typename std::iterator_traits<KeysIterator>::value_type* tree,
@@ -206,7 +221,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                    bool*          equality_buckets,
                                    BinaryFunction compare_function)
 {
-    constexpr nth_element_config_params params = ArchConfig::params;
+    constexpr nth_element_config_params params = TargetConfig::params;
 
     constexpr unsigned int num_buckets           = params.number_of_buckets;
     constexpr unsigned int num_threads_per_block = params.kernel_config.block_size;
@@ -227,7 +242,13 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
 
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
 
-    using block_load_key = block_load<key_type, num_threads_per_block, num_items_per_thread>;
+    using block_load_key = block_load<key_type,
+                                      num_threads_per_block,
+                                      num_items_per_thread,
+                                      block_load_method::block_load_direct,
+                                      1,
+                                      1,
+                                      TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY struct
     {
@@ -301,53 +322,47 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     }
 }
 
-template<class ArchConfig>
+template<class TargetConfig>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-    find_nth_element_bucket_kernel_impl(unsigned int*                      buckets,
+    find_nth_element_bucket_kernel_impl(unsigned int*                buckets,
                                         n_th_element_iteration_data* nth_element_data,
                                         bool*                        equality_buckets,
                                         const unsigned int           rank)
-
 {
-    constexpr nth_element_config_params params = ArchConfig::params;
-
+    constexpr nth_element_config_params params      = TargetConfig::params;
     constexpr unsigned int num_buckets = params.number_of_buckets;
 
-    using block_scan_buckets = block_scan<unsigned int, num_buckets>;
+    using block_scan_buckets = block_scan<unsigned int,
+                                          num_buckets,
+                                          block_scan_algorithm::default_algorithm,
+                                          1,
+                                          1,
+                                          TargetConfig::wavefront>;
 
-    ROCPRIM_SHARED_MEMORY struct
-    {
-        typename block_scan_buckets::storage_type scan;
-        unsigned int                              bucket_offsets[num_buckets];
-    } storage;
+    ROCPRIM_SHARED_MEMORY
+    typename block_scan_buckets::storage_type scan_storage;
 
-    unsigned int bucket_size = buckets[threadIdx.x];
+    const unsigned int bucket_idx  = threadIdx.x;
+    const unsigned int bucket_size = buckets[bucket_idx];
+
     unsigned int bucket_offset;
-    // Calculate the global offset of the buckets based on bucket sizes
-    block_scan_buckets().exclusive_scan(bucket_size, bucket_offset, 0, storage.scan);
 
-    storage.bucket_offsets[threadIdx.x] = bucket_offset;
+    // Compute the starting offset of each bucket from the bucket sizes.
+    block_scan_buckets().exclusive_scan(bucket_size, bucket_offset, 0, scan_storage);
 
-    syncthreads();
+    const unsigned int bucket_end = bucket_offset + bucket_size;
 
-    unsigned int num_buckets_before;
-
-    // Find in which bucket the nth element sits
-    bool in_nth = storage.bucket_offsets[threadIdx.x] <= rank;
-    block_scan_buckets().inclusive_scan(in_nth, num_buckets_before, storage.scan);
-
-    if(threadIdx.x == (num_buckets - 1))
+    // The target bucket is the one containing rank in the range [bucket_offset, bucket_end).
+    if(rank >= bucket_offset && rank < bucket_end)
     {
-        // Store nth_element data
-        unsigned int nth_element          = num_buckets_before - 1;
-        nth_element_data->offset          = storage.bucket_offsets[nth_element];
-        nth_element_data->size            = buckets[nth_element];
-        nth_element_data->equality_bucket = equality_buckets[nth_element];
-        nth_element_data->bucket_idx      = nth_element;
+        nth_element_data->offset          = bucket_offset;
+        nth_element_data->size            = bucket_size;
+        nth_element_data->equality_bucket = equality_buckets[bucket_idx];
+        nth_element_data->bucket_idx      = bucket_idx;
     }
 }
 
-template<class ArchConfig, unsigned int NumPartitions, class KeysIterator, class BinaryFunction, class WrappedBlockId>
+template<class TargetConfig, unsigned int NumPartitions, class KeysIterator, class BinaryFunction, class WrappedBlockId>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     copy_buckets_kernel_impl(KeysIterator                                             keys,
                              typename std::iterator_traits<KeysIterator>::value_type* tree,
@@ -362,7 +377,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
     using state    = nth_element_onesweep_lookback_state;
 
-    constexpr nth_element_config_params params = ArchConfig::params;
+    constexpr nth_element_config_params params = TargetConfig::params;
 
     constexpr unsigned int num_buckets           = params.number_of_buckets;
     constexpr unsigned int num_splitters         = num_buckets - 1;
@@ -373,9 +388,19 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
 
     using block_rank = rocprim::block_radix_rank<num_threads_per_block,
                                                  Log2<static_cast<int>(num_partitions + 1)>::VALUE,
-                                                 params.radix_rank_algorithm>;
+                                                 params.radix_rank_algorithm,
+                                                 1,
+                                                 1,
+                                                 block_padding_hint::avoid_conflicts,
+                                                 TargetConfig::wavefront>;
 
-    using block_load_element = block_load<key_type, num_threads_per_block, num_items_per_thread>;
+    using block_load_element = block_load<key_type,
+                                          num_threads_per_block,
+                                          num_items_per_thread,
+                                          block_load_method::block_load_direct,
+                                          1,
+                                          1,
+                                          TargetConfig::wavefront>;
 
     static_assert(block_rank::digits_per_thread == 1,
                   "The digits_per_thread is assumed to be one.");
@@ -613,13 +638,13 @@ hipError_t
         ROCPRIM_RETURN_ON_ERROR(ordered_bid.reset_from_host(stream));
 
         start_timer();
-        auto find_splitters_kernel = [=](auto arch_config)
+        auto find_splitters_kernel = [=](auto target_config)
         {
-            find_splitters_kernel_impl<decltype(arch_config)>(keys,
-                                                              tree,
-                                                              equality_buckets,
-                                                              size,
-                                                              compare_function);
+            find_splitters_kernel_impl<decltype(target_config)>(keys,
+                                                                tree,
+                                                                equality_buckets,
+                                                                size,
+                                                                compare_function);
         };
         ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                       find_splitters_kernel,
@@ -630,14 +655,14 @@ hipError_t
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_splitters_kernel", size, start);
 
         start_timer();
-        auto count_bucket_sizes_kernel = [=](auto arch_config)
+        auto count_bucket_sizes_kernel = [=](auto target_config)
         {
-            count_bucket_sizes_kernel_impl<decltype(arch_config)>(keys,
-                                                                  tree,
-                                                                  size,
-                                                                  buckets,
-                                                                  equality_buckets,
-                                                                  compare_function);
+            count_bucket_sizes_kernel_impl<decltype(target_config)>(keys,
+                                                                    tree,
+                                                                    size,
+                                                                    buckets,
+                                                                    equality_buckets,
+                                                                    compare_function);
         };
         ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                       count_bucket_sizes_kernel,
@@ -648,12 +673,12 @@ hipError_t
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("count_bucket_sizes_kernel", size, start);
 
         start_timer();
-        auto find_nth_element_bucket_kernel = [=](auto arch_config)
+        auto find_nth_element_bucket_kernel = [=](auto target_config)
         {
-            find_nth_element_bucket_kernel_impl<decltype(arch_config)>(buckets,
-                                                                       nth_element_data,
-                                                                       equality_buckets,
-                                                                       rank);
+            find_nth_element_bucket_kernel_impl<decltype(target_config)>(buckets,
+                                                                         nth_element_data,
+                                                                         equality_buckets,
+                                                                         rank);
         };
         ROCPRIM_RETURN_ON_ERROR(
             execute_launch_plan<Config, Selector>(current_target,
@@ -665,17 +690,17 @@ hipError_t
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_nth_element_bucket_kernel", size, start);
 
         start_timer();
-        auto copy_buckets_kernel = [=](auto arch_config)
+        auto copy_buckets_kernel = [=](auto target_config)
         {
-            copy_buckets_kernel_impl<decltype(arch_config), num_partitions>(keys,
-                                                                            tree,
-                                                                            size,
-                                                                            lookback_states,
-                                                                            nth_element_data,
-                                                                            keys_buffer,
-                                                                            equality_buckets,
-                                                                            compare_function,
-                                                                            ordered_bid);
+            copy_buckets_kernel_impl<decltype(target_config), num_partitions>(keys,
+                                                                              tree,
+                                                                              size,
+                                                                              lookback_states,
+                                                                              nth_element_data,
+                                                                              keys_buffer,
+                                                                              equality_buckets,
+                                                                              compare_function,
+                                                                              ordered_bid);
         };
         ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                       copy_buckets_kernel,
@@ -706,7 +731,7 @@ hipError_t
         unsigned int bucket_size     = h_nth_element_data.size;
         bool         equality_bucket = h_nth_element_data.equality_bucket;
 
-        // If all values are the same it is already sorted
+        // If the selected nth bucket is an equality bucket, the nth-element condition is already satisfied.
         if(equality_bucket)
         {
             return hipSuccess;
@@ -719,8 +744,8 @@ hipError_t
     }
 
     start_timer();
-    auto block_sort_kernel = [=](auto arch_config)
-    { block_sort_kernel_impl<decltype(arch_config)>(keys, size, compare_function); };
+    auto block_sort_kernel = [=](auto target_config)
+    { block_sort_kernel_impl<decltype(target_config)>(keys, size, compare_function); };
 
     ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                   block_sort_kernel,

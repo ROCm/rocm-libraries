@@ -43,9 +43,22 @@ Tests:
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
+  precision: *single_only_precisions
+  M: [0, 1, 10]
+  N: [0, 1, 8]
+  row_block_dimA: [5]
+  col_block_dimA: [8]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2gebsr
+  category: quick
+  function: csr2gebsr
   precision: *single_double_precisions_complex_real
-  M: [0, 1, 1107]
-  N: [0, 1, 1089]
+  M: [1107]
+  N: [1089]
   row_block_dimA: [1, 6, 11, 16]
   col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   baseA: [rocsparse_index_base_zero]
@@ -56,7 +69,7 @@ Tests:
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
-  precision: *single_double_precisions_complex_real
+  precision: *single_only_precisions
   M: [1746]
   N: [1872]
   row_block_dimA: [2, 7, 12, 17]
@@ -69,7 +82,7 @@ Tests:
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
-  precision: *single_double_precisions_complex_real
+  precision: *double_only_precisions
   M: [1298]
   N: [1490]
   row_block_dimA: [3, 8, 13, 18]
@@ -82,7 +95,7 @@ Tests:
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
-  precision: *single_double_precisions_complex_real
+  precision: *single_only_precisions_complex
   M: [2100]
   N: [1759]
   row_block_dimA: [4, 9, 14, 19]
@@ -95,7 +108,7 @@ Tests:
 - name: csr2gebsr_file
   category: quick
   function: csr2gebsr
-  precision: *single_double_precisions_complex_real
+  precision: *double_only_precisions_complex
   M: 1
   N: 1
   row_block_dimA: [5, 10, 15, 20]

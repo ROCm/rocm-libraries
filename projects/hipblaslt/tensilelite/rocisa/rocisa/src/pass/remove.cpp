@@ -21,9 +21,11 @@
  *
  * ************************************************************************ */
 #include "code.hpp"
+#include "instruction/branch.hpp"
 #include "instruction/common.hpp"
 #include "pass.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -73,6 +75,13 @@ namespace rocisa
 
     void _replaceActBranchLabel(std::shared_ptr<Module> module, std::vector<std::string> labels)
     {
+        auto canonicalizeExactDuplicateLabel = [&labels](const std::string& name) {
+            if(labels.size() < 2)
+                return name;
+            return std::find(labels.begin() + 1, labels.end(), name) != labels.end() ? labels[0]
+                                                                                      : name;
+        };
+
         for(auto item : module->items())
         {
             if(auto mod = std::dynamic_pointer_cast<Module>(item))
@@ -134,6 +143,13 @@ namespace rocisa
                 else
                 {
                     _replaceActBranchLabel(mod, labels);
+                }
+            }
+            else if(auto swappc = std::dynamic_pointer_cast<SSwapPCB64>(item))
+            {
+                for(auto& callee : swappc->calleeFuncs)
+                {
+                    callee = canonicalizeExactDuplicateLabel(callee);
                 }
             }
         }

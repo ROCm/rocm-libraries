@@ -26,4 +26,5 @@ set(_CMAKE_CURRENT_SOURCE_DIR
 
 target_sources(
   tensile-tests
-  PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/DataInitialization_test.cpp")
+  PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/DataInitialization_test.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorType_test.cpp")

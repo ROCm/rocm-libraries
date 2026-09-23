@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -49,10 +49,6 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
         # tmpS1 = tmpS0+1
         # wgMT1 = tmpS0+2
 
-        # if writer.prefetchAcrossPersistent:
-        #     wg0="PrevWorkGroup0"
-        #     wg1="PrevWorkGroup1"
-        # else:
         wg0="WorkGroup0"
         wg1="WorkGroup1"
 
@@ -68,11 +64,11 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
             writer.vgprs.cinRowPtr  = writer.vgprPool.checkOut(1, "cinRowPtr")
             writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
 
-        with writer.allocTmpSgpr(3) as tmpSgprInfo:
+        with writer.allocTmpSgpr(3, tag="ComputeStoreVgprsVALU_tmpSgprInfo") as tmpSgprInfo:
             tmpS0 = tmpSgprInfo.idx
             tmpS1 = tmpS0+1
             wgMT1 = tmpS0+2
-            tmpVgpr = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr")
+            tmpVgpr = writer.vgprPool.checkOutAligned(2,2, tag="ComputeStoreVgprsVALU_tmpVgpr")
             tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
             # dot2: consecutive NumWaveSplitK threads compute the same element, divide it first before computing tile indices
             if kernel["NumWaveSplitK"] > 1:
@@ -153,6 +149,8 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
                 writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
             if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
                 writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
+            if writer.states.useGateResidual:
+                writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
         if kernel["LocalSplitU"] > 1:
             writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
             writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
@@ -170,15 +168,16 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
         tmpVgpr1Res = ContinuousRegister(tmpVgpr1, 2)
         dummy    = writer.vgprPool.checkOut(1,"dummy")
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="ComputeStoreVgprsMFMA_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
 
             # constant
             MIBShape0 = kernel["MatrixInstM"] * kernel["MatrixInstBM"]
             MIBShape1 = kernel["MatrixInstN"] * kernel["MatrixInstBN"]
 
-            matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]
-            matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstN"]
+            matrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+            matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else matrixInstT
+            matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else matrixInstT
 
             module = Module("ComputeStoreVgprsMFMA")
 
@@ -187,28 +186,36 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             module.add(vectorStaticDivide(tmpVgpr0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res))
             if kernel["LocalSplitU"] > 1:
                 module.add(vectorStaticRemainder(dummy, tmpVgpr0, tmpVgpr0, kernel["MIWaveGroup"][1], tmpVgpr1Res, tmpSgprInfo))
-            module.add(VMulLOU32(dst=vgpr(tid1), src0=hex(MIBShape1), src1=vgpr(tmpVgpr0), comment="wave coordination offset 1"))
+            # Subtile kernels: each wave owns a contiguous block of MIWaveTile[1]*MIBShape1 cols.
+            waveBlockCols = MIBShape1 * kernel["MIWaveTile"][1] if kernel.get("UseSubtileImpl") else MIBShape1
+            module.add(vectorStaticMultiply(vgpr(tid1), vgpr(tmpVgpr0), waveBlockCols, tmpSgprInfo, "wave coordination offset 1"))
 
             # coord 1 : thread part
             module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstN, tmpVgpr1Res, tmpSgprInfo))
             module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid1), src0=vgpr(tmpVgpr0), src1=vgpr(tid1), shiftHex=log2(kernel["VectorWidthB"]), comment="coordination 1 = vwB *(wave_id1 + tid1)"))
 
             # coord 1 : offset part
-            packedC1 = kernel["PackedC1IndicesX"]
-            strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
-            strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
-            module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
-            module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
-                module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
-            if writer.vgprs.coutRowPtrBias != -1:
-                index = packedC1[0] - 1
-                strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
-                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(lsuTid1), src1=sgpr(strideW1), comment=" offset 1"))
+            if kernel["BufferStore"]:
+                packedC1 = kernel["PackedC1IndicesX"]
+                strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
+                strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
+                module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
+                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
+                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
+                if writer.vgprs.coutRowPtrGate != -1:
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrGate), src=vgpr(lsuTid1), comment=" save offset 1 for Gate"))
+                if writer.vgprs.coutRowPtrBias != -1:
+                    index = packedC1[0] - 1
+                    strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
+                    module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(lsuTid1), src1=sgpr(strideW1), comment=" offset 1"))
 
             # coord 0 : wave part
             module.add(vectorStaticRemainder(dummy, tmpVgpr0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res, tmpSgprInfo))
-            module.add(VMulLOU32(dst=vgpr(tmpVgpr0), src0=hex(MIBShape0), src1=vgpr(tmpVgpr0), comment="wave coordination offset 0"))
+            # Subtile kernels: each wave owns a contiguous block of MIWaveTile[0]*MIBShape0 rows.
+            # wave_id0 * MIWaveTile[0] * MIBShape0 gives the start row of wave's block.
+            waveBlockRows = MIBShape0 * kernel["MIWaveTile"][0] if kernel.get("UseSubtileImpl") else MIBShape0
+            module.add(vectorStaticMultiply(vgpr(tmpVgpr0), vgpr(tmpVgpr0), waveBlockRows, tmpSgprInfo, "wave coordination offset 0"))
 
             # coord 0 : thread part
             module.add(vectorStaticRemainder(dummy, tid0, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
@@ -273,6 +280,8 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
                 writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
             if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
                 writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
+            if writer.states.useGateResidual:
+                writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
         if kernel["LocalSplitU"] > 1:
             writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
             writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
@@ -290,18 +299,18 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
         tmpVgpr1Res = ContinuousRegister(tmpVgpr1, 2)
         dummy    = writer.vgprPool.checkOut(1,"dummy")
 
-        with writer.allocTmpSgpr(1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(1, tag="ComputeStoreVgprsMFMASwap_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
 
             # constant
             MIBShape0 = kernel["MatrixInstM"] * kernel["MatrixInstBM"]
             MIBShape1 = kernel["MatrixInstN"] * kernel["MatrixInstBN"]
 
-            matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]
-            matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstN"]
+            matrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+            matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else matrixInstT
+            matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else matrixInstT
 
             module = Module("ComputeStoreVgprsMFMASwap")
-
 
             # coord 1 : wave part
             module.add(vectorStaticDivide(wave_id, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res))
@@ -317,17 +326,20 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid1), src0=vgpr(tmpVgpr0), src1=vgpr(tid1), shiftHex=log2(kernel["VectorWidthB"]), comment="coordination 1 = vwB *(wave_id1 + tid1)"))
 
             # coord 1 : offset part
-            packedC1 = kernel["PackedC1IndicesX"]
-            strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
-            strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
-            module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
-            module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
-                module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
-            if writer.vgprs.coutRowPtrBias != -1:
-                index = packedC1[0] - 1
-                strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
-                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(lsuTid1), src1=sgpr(strideW1), comment=" offset 1"))
+            if kernel["BufferStore"]:
+                packedC1 = kernel["PackedC1IndicesX"]
+                strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
+                strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
+                module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
+                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
+                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
+                if writer.vgprs.coutRowPtrGate != -1:
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrGate), src=vgpr(lsuTid1), comment=" save offset 1 for Gate"))
+                if writer.vgprs.coutRowPtrBias != -1:
+                    index = packedC1[0] - 1
+                    strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
+                    module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(lsuTid1), src1=sgpr(strideW1), comment=" offset 1"))
 
             # coord 0 : wave part
             module.add(vectorStaticRemainder(dummy, tid0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res, tmpSgprInfo))

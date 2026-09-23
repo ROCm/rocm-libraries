@@ -38,14 +38,14 @@ extern "C" {
 *  over all rows, the \p ell_width, for a given CSR matrix.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -79,7 +79,7 @@ rocsparse_status rocsparse_csr2ell_width(rocsparse_handle          handle,
                                          rocsparse_int*            ell_width);
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse ELL matrix
+*  \brief Convert a sparse CSR matrix into a sparse ELL matrix.
 *
 *  \details
 *  \p rocsparse_csr2ell converts a CSR matrix into an ELL matrix. It is assumed,
@@ -89,14 +89,14 @@ rocsparse_status rocsparse_csr2ell_width(rocsparse_handle          handle,
 *  non-zero elements per row is obtained by rocsparse_csr2ell_width().
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -124,7 +124,7 @@ rocsparse_status rocsparse_csr2ell_width(rocsparse_handle          handle,
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m or \p ell_width is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p csr_descr, \p csr_val,
-*              \p csr_row_ptr, \p csr_col_ind, \p ell_descr, \p ell_val or
+*              \p csr_row_ptr, \p csr_col_ind, \p ell_descr, \p ell_val, or
 *              \p ell_col_ind pointer is invalid.
 *  \retval     rocsparse_status_not_implemented
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.

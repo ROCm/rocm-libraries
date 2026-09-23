@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,17 +39,20 @@ namespace rocsparse
                                                   J                   mb,
                                                   const I* __restrict__ bsr_row_ptr,
                                                   const J* __restrict__ bsr_col_ind,
-                                                  T* __restrict__ bsr_val,
+                                                  T* bsr_val,
                                                   const I* __restrict__ bsr_diag_ind,
                                                   J block_dim,
                                                   int32_t* __restrict__ done_array,
                                                   const J* __restrict__ map,
-                                                  J* __restrict__ zero_pivot,
+                                                  J*                   zero_pivot,
                                                   rocsparse_index_base idx_base,
                                                   int32_t              boost,
                                                   double               boost_tol,
                                                   T                    boost_val)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % BBDIM == 0, "BLOCKSIZE must be a multiple of BBDIM.");
         static constexpr uint32_t DIMX = BBDIM;
         static constexpr uint32_t DIMY = BLOCKSIZE / BBDIM;
 
@@ -246,7 +249,10 @@ namespace rocsparse
                     // Numeric boost
                     if(boost)
                     {
-                        diag = (boost_tol >= rocsparse::abs(diag)) ? boost_val : diag;
+
+                        diag = (boost_tol >= rocsparse::abs(diag))
+                                   ? rocsparse::assign_ilu0_boost_value(diag, boost_val)
+                                   : diag;
 
                         __threadfence_block();
 
@@ -370,27 +376,30 @@ namespace rocsparse
                              J                   mb,
                              const I* __restrict__ bsr_row_ptr,
                              const J* __restrict__ bsr_col_ind,
-                             T* __restrict__ bsr_val,
+                             T*      bsr_val,
                              int64_t bsr_val_stride,
                              const I* __restrict__ bsr_diag_ind,
                              J bsr_dim,
                              int32_t* __restrict__ done_array,
                              int64_t done_array_stride,
                              const J* __restrict__ map,
-                             J* __restrict__ zero_pivot,
+                             J*                   zero_pivot,
                              int64_t              zero_pivot_stride,
                              rocsparse_index_base idx_base,
                              int                  enable_boost,
                              size_t               size_boost_tol,
                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                             bool is_tol_host_mode,
                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
-                             bool is_host_mode)
+                             bool is_val_host_mode)
     {
         const auto batch_index = hipBlockIdx_y;
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            enable_boost && (size_boost_tol == sizeof(float)), is_tol_host_mode, boost_tol_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            enable_boost && (size_boost_tol == sizeof(double)), is_tol_host_mode, boost_tol_64);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_val_host_mode, boost_val);
         const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
         rocsparse::bsrilu0_device_9_32<BLOCKSIZE, WFSIZE, BBDIM>(
@@ -403,7 +412,7 @@ namespace rocsparse
             bsr_dim,
             done_array + batch_index * done_array_stride,
             map,
-            zero_pivot + batch_index,
+            zero_pivot + batch_index * zero_pivot_stride,
             idx_base,
             enable_boost,
             boost_tol,
@@ -416,24 +425,31 @@ namespace rocsparse
               typename T,
               typename I,
               typename J>
-    static rocsparse_status bsrilu0_kernel_9_32_launch(rocsparse_handle       handle,
-                                                       rocsparse_bsrilu0_info bsrilu0_info,
-                                                       rocsparse_spmat_descr  A,
-                                                       size_t                 buffer_size,
-                                                       void*                  buffer)
+    static rocsparse_status bsrilu0_kernel_9_32_launch(rocsparse_handle          handle,
+                                                       rocsparse_bsrilu0_info    bsrilu0_info,
+                                                       rocsparse_spmat_descr     A,
+                                                       rocsparse::numeric_boost* boost,
+                                                       size_t                    buffer_size,
+                                                       void*                     buffer)
     {
-        auto       info           = A->info;
-        const auto boost_enable   = info->boost_enable;
-        const auto boost_tol_size = info->boost_tol_size;
+        const auto boost_enable           = boost->get_enable();
+        const auto boost_tol_size         = rocsparse::datatype_sizeof(boost->get_tol_datatype());
+        const auto boost_tol_pointer_mode = boost->get_tol_pointer_mode();
+        const auto boost_val_pointer_mode = boost->get_val_pointer_mode();
 
-        const float*  boost_tol_32 = reinterpret_cast<const float*>(info->boost_tol);
-        const double* boost_tol_64 = reinterpret_cast<const double*>(info->boost_tol);
-        const T*      boost_val_T  = reinterpret_cast<const T*>(info->boost_val);
+        const float*  boost_tol_32 = (boost_tol_size == sizeof(float))
+                                         ? reinterpret_cast<const float*>(boost->get_tol())
+                                         : nullptr;
+        const double* boost_tol_64 = (boost_tol_size == sizeof(double))
+                                         ? reinterpret_cast<const double*>(boost->get_tol())
+                                         : nullptr;
+        const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
         auto trm_info = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
+        auto          numeric_exact     = bsrilu0_info->get_singularity_numeric_exact();
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_9_32<BLOCKSIZE, WFSIZE, BBDIM>),
@@ -452,15 +468,16 @@ namespace rocsparse
             done_array,
             done_array_stride,
             reinterpret_cast<const J*>(trm_info->get_row_map()),
-            reinterpret_cast<J*>(bsrilu0_info->get_zero_pivot()),
-            bsrilu0_info->get_zero_pivot_stride(),
+            reinterpret_cast<J*>(numeric_exact->get_position()),
+            numeric_exact->get_stride(),
             A->descr->base,
             boost_enable,
             boost_tol_size,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val_T),
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+            ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_tol_pointer_mode, boost_tol_32),
+            ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_tol_pointer_mode, boost_tol_64),
+            boost_tol_pointer_mode == rocsparse_pointer_mode_host,
+            ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_val_pointer_mode, boost_val),
+            boost_val_pointer_mode == rocsparse_pointer_mode_host);
         return rocsparse_status_success;
     }
 
@@ -478,7 +495,7 @@ namespace rocsparse
         {
             return rocsparse::bsrilu0_kernel_9_32_launch<BLOCKSIZE, WF_SIZE, BBDIM, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -504,7 +521,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, BBDIM, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

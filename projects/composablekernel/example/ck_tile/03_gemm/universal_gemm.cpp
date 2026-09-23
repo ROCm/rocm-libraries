@@ -187,6 +187,13 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::half_t>, ck_tile::half_t>(
             a_layout, b_layout, arg_parser);
     }
+#if defined(CK_USE_GFX1250)
+    else if(data_type == "fp32")
+    {
+        return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::fp32_t>, ck_tile::fp32_t>(
+            a_layout, b_layout, arg_parser);
+    }
+#endif
     else if(data_type == "bf16")
     {
         return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::bf16_t>, ck_tile::bf16_t>(
@@ -262,6 +269,23 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
             throw std::runtime_error("Unsupported pipeline for this operation !!!");
         }
     }
+    if(data_type == "fp4")
+    {
+        if constexpr(GemmConfig<ck_tile::pk_fp4_t>::Pipeline ==
+                         ck_tile::GemmPipeline::COMPUTE_ASYNC &&
+                     GemmConfig<ck_tile::pk_fp4_t>::K_Warp_Tile == 128)
+        {
+            return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::pk_fp4_t>,
+                                                        ck_tile::pk_fp4_t,
+                                                        ck_tile::pk_fp4_t,
+                                                        ck_tile::half_t>(
+                a_layout, b_layout, arg_parser);
+        }
+        else
+        {
+            throw std::runtime_error("Unsupported pipeline for this operation !!!");
+        }
+    }
     else
     {
         throw std::runtime_error("Unsupported data type for this operation !!!");
@@ -279,7 +303,11 @@ int main(int argc, char* argv[])
     try
     {
 #if CK_TILE_USE_WMMA
+#ifdef CLUSTER_LAUNCH_ENABLED
+        return !run_gemm_example<GemmConfigComputeV3_WMMA_ClusterLaunch>(arg_parser);
+#else
         return !run_gemm_example<GemmConfigComputeV3_WMMA>(arg_parser);
+#endif
 #else
         return !run_gemm_example<GemmConfigComputeV3_2>(arg_parser);
 #endif

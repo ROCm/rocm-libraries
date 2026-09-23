@@ -1,0 +1,22 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "norm_common.fbs";
+
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+table LayernormBackwardAttributes {
+    dy_tensor_uid:           long (cache_uid);
+    x_tensor_uid:            long (cache_uid);
+    scale_tensor_uid:        long (cache_uid);
+    mean_tensor_uid:         long = null (cache_uid);
+    inv_variance_tensor_uid: long = null (cache_uid);
+    epsilon_tensor_uid:      long = null (cache_uid);
+    dx_tensor_uid:           long (cache_uid);
+    dscale_tensor_uid:       long (cache_uid);
+    dbias_tensor_uid:        long (cache_uid);
+    normalized_dim_count:    long;
+}

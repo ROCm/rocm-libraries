@@ -3,7 +3,7 @@
 
 #pragma once
 
-TYPED_TEST(TestCkTileGroupedGemm, Basic)
+TYPED_TEST(TEST_CKTILE_GGEMM_SUITE_NAME, Basic)
 {
     const int group_count = 8;
     const int kbatch      = 1;
@@ -16,19 +16,19 @@ TYPED_TEST(TestCkTileGroupedGemm, Basic)
 
     for(int i = 0; i < group_count; i++)
     {
-        Ms.push_back(256 + 256 * i);
-        Ns.push_back(256 + 512 * i);
-        Ks.push_back(512 + 128 * i);
+        Ms.push_back(64 + 64 * i);
+        Ns.push_back(128 + 64 * i);
+        Ks.push_back(64 + 32 * i);
 
-        stride_As.push_back(Ks[i]);
-        stride_Bs.push_back(Ks[i]);
-        stride_Cs.push_back(Ns[i]);
+        stride_As.push_back(0);
+        stride_Bs.push_back(0);
+        stride_Cs.push_back(0);
     }
 
     this->Run(Ms, Ns, Ks, stride_As, stride_Bs, stride_Cs, kbatch, group_count);
 }
 
-TYPED_TEST(TestCkTileGroupedGemm, SplitK)
+TYPED_TEST(TEST_CKTILE_GGEMM_SUITE_NAME, SplitK)
 {
     const int group_count = 8;
     const int kbatch      = 2;
@@ -39,16 +39,72 @@ TYPED_TEST(TestCkTileGroupedGemm, SplitK)
     std::vector<int> stride_Bs;
     std::vector<int> stride_Cs;
 
+    // IsSupportedArgument requires ceil(K / K_Warp_Tile) >= k_batch; k_batch * K_Warp_Tile is
+    // a safe conservative floor for that. Read the tile size from the config the kernel is
+    // actually instantiated with, so this stays correct on both the WMMA and MFMA paths.
+    constexpr int k_warp_tile = TestFixture::ActiveKernelParam::K_Warp_Tile;
+    const int k_start         = std::max(64, kbatch * k_warp_tile);
+
     for(int i = 0; i < group_count; i++)
     {
-        Ms.push_back(256 + 256 * i);
-        Ns.push_back(256 + 512 * i);
-        Ks.push_back(512 + 128 * i);
+        Ms.push_back(64 + 64 * i);
+        Ns.push_back(128 + 64 * i);
+        Ks.push_back(k_start + 32 * i);
 
-        stride_As.push_back(Ks[i]);
-        stride_Bs.push_back(Ks[i]);
-        stride_Cs.push_back(Ns[i]);
+        stride_As.push_back(0);
+        stride_Bs.push_back(0);
+        stride_Cs.push_back(0);
     }
+
+    this->Run(Ms, Ns, Ks, stride_As, stride_Bs, stride_Cs, kbatch, group_count);
+}
+
+// Verify that groups with M=0 are silently skipped (primary MoE scenario where some
+// experts receive zero tokens) and that non-zero groups produce correct results.
+TYPED_TEST(TEST_CKTILE_GGEMM_SUITE_NAME, ZeroM)
+{
+    const int group_count = 8;
+    const int kbatch      = 1;
+
+    const std::vector<int> Ms = {256, 0, 256, 0, 256, 256, 0, 256};
+    const std::vector<int> Ns = {256, 256, 256, 256, 256, 256, 256, 256};
+    const std::vector<int> Ks = {512, 512, 512, 512, 512, 512, 512, 512};
+    std::vector<int> stride_As(group_count, 0);
+    std::vector<int> stride_Bs(group_count, 0);
+    std::vector<int> stride_Cs(group_count, 0);
+
+    this->Run(Ms, Ns, Ks, stride_As, stride_Bs, stride_Cs, kbatch, group_count);
+}
+
+// Verify that groups with K=0 produce all-zero output and that surrounding groups
+// with non-zero K are unaffected.
+TYPED_TEST(TEST_CKTILE_GGEMM_SUITE_NAME, ZeroK)
+{
+    const int group_count = 8;
+    const int kbatch      = 1;
+
+    const std::vector<int> Ms = {256, 256, 256, 256, 256, 256, 256, 256};
+    const std::vector<int> Ns = {256, 256, 256, 256, 256, 256, 256, 256};
+    const std::vector<int> Ks = {512, 512, 512, 0, 0, 512, 512, 512};
+    std::vector<int> stride_As(group_count, 0);
+    std::vector<int> stride_Bs(group_count, 0);
+    std::vector<int> stride_Cs(group_count, 0);
+
+    this->Run(Ms, Ns, Ks, stride_As, stride_Bs, stride_Cs, kbatch, group_count);
+}
+
+// Verify that a mix of M=0, N=0, and K=0 groups all behave correctly together.
+TYPED_TEST(TEST_CKTILE_GGEMM_SUITE_NAME, ZeroMixed)
+{
+    const int group_count = 8;
+    const int kbatch      = 1;
+
+    const std::vector<int> Ms = {256, 0, 256, 256, 512, 256, 0, 256};
+    const std::vector<int> Ns = {256, 256, 512, 0, 256, 256, 256, 256};
+    const std::vector<int> Ks = {512, 512, 512, 512, 512, 0, 512, 512};
+    std::vector<int> stride_As(group_count, 0);
+    std::vector<int> stride_Bs(group_count, 0);
+    std::vector<int> stride_Cs(group_count, 0);
 
     this->Run(Ms, Ns, Ks, stride_As, stride_Bs, stride_Cs, kbatch, group_count);
 }

@@ -1,19 +1,60 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file BatchnormBackwardAttributes.hpp
+ * @brief Attributes for batch normalization backward pass operation
+ *
+ * This file defines the BatchnormBackwardAttributes class used to configure
+ * the backward pass (gradient computation) of batch normalization.
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class BatchnormBackwardAttributes
+ * @brief Configuration attributes for batch normalization backward pass
+ *
+ * BatchnormBackwardAttributes configures the backward pass of batch normalization,
+ * computing gradients with respect to the input, scale, and bias.
+ *
+ * **Required inputs:**
+ * - DY: Gradient of the loss with respect to the output (upstream gradient)
+ * - X: Original input tensor from forward pass
+ * - Scale: Per-channel scale (gamma) tensor
+ *
+ * **Optional inputs (from forward pass):**
+ * - Mean: Saved mean from forward pass
+ * - Inv_variance: Saved inverse variance from forward pass
+ *
+ * **Outputs:**
+ * - DX: Gradient with respect to input
+ * - DScale: Gradient with respect to scale (gamma)
+ * - DBias: Gradient with respect to bias (beta)
+ *
+ * @code{.cpp}
+ * BatchnormBackwardAttributes attr;
+ * attr.set_saved_mean_and_inv_variance(savedMean, savedInvVar);
+ *
+ * auto [dx, dscale, dbias] = graph.batchnorm_backward(dy, x, scale, attr);
+ * @endcode
+ *
+ * @see BatchnormAttributes for forward pass
+ */
 class BatchnormBackwardAttributes : public Attributes<BatchnormBackwardAttributes>
 {
 public:
+    BatchnormBackwardAttributes() = default;
+
     enum class InputNames
     {
         DY = 0,
@@ -189,69 +230,57 @@ public:
         return set_mean(std::move(mean)).set_inv_variance(std::move(invVariance));
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
+    /**
+     * @brief Custom hook for matching peer_stats logically
+     */
+    bool logicallyEqualsImpl(const BatchnormBackwardAttributes& other) const
     {
-        auto peerStatsVector = std::vector<int64_t>{};
-        for(const auto& peerStat : peer_stats)
+
+        if(peer_stats.size() != other.peer_stats.size())
         {
-            if(peerStat)
+            return false;
+        }
+
+        for(size_t i = 0; i < peer_stats.size(); ++i)
+        {
+            if(!peer_stats[i] && !other.peer_stats[i])
             {
-                peerStatsVector.emplace_back(peerStat->get_uid());
+                continue;
+            }
+            if(!peer_stats[i] || !other.peer_stats[i]
+               || !peer_stats[i]->logicallyEquals(*other.peer_stats[i]))
+            {
+                return false;
             }
         }
 
-        auto mean = get_mean();
-        auto invVariance = get_inv_variance();
-
-        return hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributesDirect(
-            builder,
-            get_dy()->get_uid(),
-            get_x()->get_uid(),
-            mean ? flatbuffers::Optional<int64_t>(mean->get_uid()) : flatbuffers::nullopt,
-            invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
-                        : flatbuffers::nullopt,
-            get_scale()->get_uid(),
-            &peerStatsVector,
-            get_dx()->get_uid(),
-            get_dscale()->get_uid(),
-            get_dbias()->get_uid());
+        return true;
     }
 
-    static BatchnormBackwardAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    /**
+     * @brief Custom hook for matching peer_stats strictly
+     */
+    bool strictEqualsImpl(const BatchnormBackwardAttributes& other) const
     {
-        BatchnormBackwardAttributes attr;
-
-        attr.set_dy(tensorMap.at(fb->dy_tensor_uid()));
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-
-        if(fb->mean_tensor_uid().has_value())
+        if(!logicallyEqualsImpl(other))
         {
-            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
-        }
-        if(fb->inv_variance_tensor_uid().has_value())
-        {
-            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
+            return false;
         }
 
-        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
-        if(fb->peer_stats_tensor_uid() != nullptr)
+        for(size_t i = 0; i < peer_stats.size(); ++i)
         {
-            for(auto uid : *fb->peer_stats_tensor_uid())
+            if(!peer_stats[i])
             {
-                peerStats.push_back(tensorMap.at(uid));
+                continue; // Both are null (proven by logical checking step)
+            }
+
+            if(!(*peer_stats[i] == *other.peer_stats[i]))
+            {
+                return false;
             }
         }
-        attr.set_peer_stats(peerStats);
 
-        attr.set_dx(tensorMap.at(fb->dx_tensor_uid()));
-        attr.set_dscale(tensorMap.at(fb->dscale_tensor_uid()));
-        attr.set_dbias(tensorMap.at(fb->dbias_tensor_uid()));
-
-        return attr;
+        return true;
     }
 };
 typedef BatchnormBackwardAttributes Batchnorm_backward_attributes;

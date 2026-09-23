@@ -36,6 +36,7 @@
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
+#include <miopen/errors.hpp>
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
 #include <miopen/tensor.hpp>
@@ -354,8 +355,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Pooling Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Pooling Mode");
     }
 
     if((inflags.GetValueStr("pad_mode")) == "same")
@@ -372,8 +372,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Padding Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Padding Mode");
     }
 
     if((inflags.GetValueStr("index_type")) == "miopenIndexUint8")
@@ -394,8 +393,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Index Data Type\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Index Data Type");
     }
 
     in_filename  = inflags.GetValueStr("in_data");
@@ -485,9 +483,6 @@ int PoolDriver_impl<Tgpu, Tref, Index>::AllocateBuffersAndCopy()
         sizeof(Index); // work space is used by mask_dev and mask which are of type Index
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
     in_dev   = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_sz, sizeof(Tgpu)));
     out_dev  = std::unique_ptr<GPUMem>(new GPUMem(ctx, out_sz, sizeof(Tgpu)));
     mask_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, workSpaceNbVal, sizeof(Index)));

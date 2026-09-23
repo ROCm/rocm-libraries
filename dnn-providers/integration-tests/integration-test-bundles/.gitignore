@@ -1,0 +1,7 @@
+# Binary tensor data (*.bin) is ignored one level up in
+# dnn-providers/integration-tests/.gitignore, so the rule applies to every
+# bundle directory name past or future, not just this one.
+
+# Scratch files from the support-claim writer's atomic-rename strategy.
+# A crash between the write and the rename can leave one behind.
+*.tmp

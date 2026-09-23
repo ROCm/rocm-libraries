@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -112,6 +112,8 @@ enum class block_store_method
 /// In the examples store operation is performed on block of 128 threads, using type
 /// \p int and 8 items per thread.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_store.cpp).
+///
 /// \code{.cpp}
 /// __global__ void kernel(int * output)
 /// {
@@ -123,14 +125,13 @@ enum class block_store_method
 /// }
 /// \endcode
 /// \endparblock
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int ItemsPerThread,
-    block_store_method Method = block_store_method::block_store_direct,
-    unsigned int BlockSizeY = 1,
-    unsigned int BlockSizeZ = 1
->
+template<class T,
+         unsigned int            BlockSizeX,
+         unsigned int            ItemsPerThread,
+         block_store_method      Method         = block_store_method::block_store_direct,
+         unsigned int            BlockSizeY     = 1,
+         unsigned int            BlockSizeZ     = 1,
+         arch::wavefront::target TargetWaveSize = arch::wavefront::get_target()>
 class block_store
 {
 private:
@@ -281,14 +282,19 @@ public:
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int ItemsPerThread,
-    unsigned int BlockSizeY,
-    unsigned int BlockSizeZ
-    >
-class block_store<T, BlockSizeX, ItemsPerThread, block_store_method::block_store_striped, BlockSizeY, BlockSizeZ>
+template<class T,
+         unsigned int            BlockSizeX,
+         unsigned int            ItemsPerThread,
+         unsigned int            BlockSizeY,
+         unsigned int            BlockSizeZ,
+         arch::wavefront::target TargetWaveSize>
+class block_store<T,
+                  BlockSizeX,
+                  ItemsPerThread,
+                  block_store_method::block_store_striped,
+                  BlockSizeY,
+                  BlockSizeZ,
+                  TargetWaveSize>
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 private:
@@ -344,14 +350,19 @@ public:
     }
 };
 
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int ItemsPerThread,
-    unsigned int BlockSizeY,
-    unsigned int BlockSizeZ
->
-class block_store<T, BlockSizeX, ItemsPerThread, block_store_method::block_store_vectorize, BlockSizeY, BlockSizeZ>
+template<class T,
+         unsigned int            BlockSizeX,
+         unsigned int            ItemsPerThread,
+         unsigned int            BlockSizeY,
+         unsigned int            BlockSizeZ,
+         arch::wavefront::target TargetWaveSize>
+class block_store<T,
+                  BlockSizeX,
+                  ItemsPerThread,
+                  block_store_method::block_store_vectorize,
+                  BlockSizeY,
+                  BlockSizeZ,
+                  TargetWaveSize>
 {
 private:
     using storage_type_ = typename ::rocprim::detail::empty_storage_type;
@@ -421,18 +432,29 @@ public:
     }
 };
 
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int ItemsPerThread,
-    unsigned int BlockSizeY,
-    unsigned int BlockSizeZ
->
-class block_store<T, BlockSizeX, ItemsPerThread, block_store_method::block_store_transpose, BlockSizeY, BlockSizeZ>
+template<class T,
+         unsigned int            BlockSizeX,
+         unsigned int            ItemsPerThread,
+         unsigned int            BlockSizeY,
+         unsigned int            BlockSizeZ,
+         arch::wavefront::target TargetWaveSize>
+class block_store<T,
+                  BlockSizeX,
+                  ItemsPerThread,
+                  block_store_method::block_store_transpose,
+                  BlockSizeY,
+                  BlockSizeZ,
+                  TargetWaveSize>
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 private:
-    using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
+    using block_exchange_type = block_exchange<T,
+                                               BlockSize,
+                                               ItemsPerThread,
+                                               BlockSizeY,
+                                               BlockSizeZ,
+                                               block_padding_hint::avoid_conflicts,
+                                               TargetWaveSize>;
 
 public:
     using storage_type = typename block_exchange_type::storage_type;
@@ -484,18 +506,29 @@ public:
     }
 };
 
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int ItemsPerThread,
-    unsigned int BlockSizeY,
-    unsigned int BlockSizeZ
->
-class block_store<T, BlockSizeX, ItemsPerThread, block_store_method::block_store_warp_transpose, BlockSizeY, BlockSizeZ>
+template<class T,
+         unsigned int            BlockSizeX,
+         unsigned int            ItemsPerThread,
+         unsigned int            BlockSizeY,
+         unsigned int            BlockSizeZ,
+         arch::wavefront::target TargetWaveSize>
+class block_store<T,
+                  BlockSizeX,
+                  ItemsPerThread,
+                  block_store_method::block_store_warp_transpose,
+                  BlockSizeY,
+                  BlockSizeZ,
+                  TargetWaveSize>
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 private:
-    using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
+    using block_exchange_type = block_exchange<T,
+                                               BlockSize,
+                                               ItemsPerThread,
+                                               BlockSizeY,
+                                               BlockSizeZ,
+                                               block_padding_hint::avoid_conflicts,
+                                               TargetWaveSize>;
 
 public:
     ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(BlockSize % ::rocprim::arch::wavefront::min_size() == 0,

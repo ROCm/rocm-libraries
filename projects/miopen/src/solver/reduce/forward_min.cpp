@@ -129,21 +129,21 @@ ConvSolution MinForward::GetSolution(const ExecutionContext&,
 
     result.invoker_factory = [](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::reduce::ExtremeInvokeParams>();
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::reduce::ExtremeInvokeParams>();
 
-            auto xdims = params.xDesc->GetLengths();
-            auto ydims = params.yDesc->GetLengths();
-            auto dim   = params.dim;
+            auto xdims_ = params.xDesc->GetLengths();
+            auto ydims_ = params.yDesc->GetLengths();
+            auto dim_   = params.dim;
 
-            int32_t reduce_size = static_cast<int32_t>(xdims[dim]);
+            int32_t reduce_size = static_cast<int32_t>(xdims_[dim_]);
             auto output_numel =
-                std::accumulate(ydims.begin(), ydims.end(), 1ULL, std::multiplies<size_t>());
+                std::accumulate(ydims_.begin(), ydims_.end(), 1ULL, std::multiplies<size_t>());
 
             auto inner_size = std::accumulate(
-                xdims.begin() + dim + 1, xdims.end(), 1ULL, std::multiplies<size_t>());
+                xdims_.begin() + dim_ + 1, xdims_.end(), 1ULL, std::multiplies<size_t>());
 
-            kernel(params.x, params.y, params.indice, output_numel, reduce_size, inner_size);
+            kernel_(params.x, params.y, params.indice, output_numel, reduce_size, inner_size);
         };
     };
 

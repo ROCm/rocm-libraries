@@ -31,11 +31,11 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
  *  \details
- *  \p hipsparseXbsrilu02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
+ *  \p hipsparseXbsrilu02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT if either a
  *  structural or numerical zero has been found during \ref hipsparseSbsrilu02_analysis
  *  "hipsparseXbsrilu02_analysis()" or \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()"
  *  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position,
- *  using same index base as the BSR matrix.
+ *  using the same index base as the BSR matrix.
  *
  *  \p position can be in host or device memory. If no zero pivot has been found,
  *  \p position is set to -1 and \ref HIPSPARSE_STATUS_SUCCESS is returned instead.
@@ -45,23 +45,23 @@ extern "C" {
  *  \f$A_{j,j}\f$ is missing (structural zero) or the diagonal block \f$A_{j,j}\f$ is not
  *  invertible (numerical zero).
  *
- *  \note \p hipsparseXbsrilu02_zeroPivot is a blocking function. It might influence
- *  performance negatively.
+ *  \note \p hipsparseXbsrilu02_zeroPivot is a blocking function. It might negatively influence
+ *  performance.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
  *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
  *
  *  @param[in]
- *  handle      handle to the hipsparse library context queue.
+ *  handle      handle to the hipSPARSE library context queue.
  *  @param[in]
  *  info        structure that holds the information collected during the analysis step.
  *  @param[inout]
- *  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
+ *  position    pointer to zero pivot \f$j\f$, which can be in host or device memory.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is nullptr.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, or \p position is nullptr.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
  */
@@ -89,7 +89,7 @@ hipsparseStatus_t
  *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
  *
  *  @param[in]
- *  handle        handle to the hipsparse library context queue.
+ *  handle        handle to the hipSPARSE library context queue.
  *  @param[in]
  *  info          structure that holds the information collected during the analysis step.
  *  @param[in]
@@ -101,7 +101,7 @@ hipsparseStatus_t
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, \p tol or \p boost_val is nullptr.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, \p tol, or \p boost_val is nullptr.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
@@ -145,9 +145,9 @@ hipsparseStatus_t hipsparseZbsrilu02_numericBoost(hipsparseHandle_t handle,
  *  allocated by the user.
  *
  *  @param[in]
- *  handle             handle to the hipsparse library context queue.
+ *  handle             handle to the hipSPARSE library context queue.
  *  @param[in]
- *  dirA               direction that specifies whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW
+ *  dirA               direction that specifies whether to count non-zero elements by \ref HIPSPARSE_DIRECTION_ROW
  *                     or by \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
  *  mb                 number of block rows in the sparse BSR matrix.
@@ -163,19 +163,19 @@ hipsparseStatus_t hipsparseZbsrilu02_numericBoost(hipsparseHandle_t handle,
  *  @param[in]
  *  bsrSortedColIndA   array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
  *  @param[in]
- *  blockDim           the block dimension of the BSR matrix. Between 1 and m where \p m=mb*blockDim.
+ *  blockDim           the block dimension of the BSR matrix, which is between 1 and m where \p m=mb*blockDim.
  *  @param[out]
  *  info               structure that holds the information collected during the analysis step.
  *  @param[out]
  *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
  *                     hipsparseSbsrilu02_analysis(), hipsparseDbsrilu02_analysis(),
  *                     hipsparseCbsrilu02_analysis(), hipsparseZbsrilu02_analysis(),
- *                     hipsparseSbsrilu02(), hipsparseDbsrilu02(), hipsparseCbsrilu02()
+ *                     hipsparseSbsrilu02(), hipsparseDbsrilu02(), hipsparseCbsrilu02(),
  *                     and hipsparseZbsrilu02().
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info or
+ *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
  *              \p pBufferSizeInBytes pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -248,13 +248,13 @@ hipsparseStatus_t hipsparseZbsrilu02_bufferSize(hipsparseHandle_t         handle
  *  If the matrix sparsity pattern changes, the gathered information will become invalid.
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  @param[in]
- *  handle           handle to the hipsparse library context queue.
+ *  handle           handle to the hipSPARSE library context queue.
  *  @param[in]
- *  dirA             direction that specified whether to count nonzero elements by
+ *  dirA             direction that specified whether to count non-zero elements by
  *                   \ref HIPSPARSE_DIRECTION_ROW or by \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
  *  mb               number of block rows in the sparse BSR matrix.
@@ -270,7 +270,7 @@ hipsparseStatus_t hipsparseZbsrilu02_bufferSize(hipsparseHandle_t         handle
  *  @param[in]
  *  bsrSortedColIndA array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
  *  @param[in]
- *  blockDim         the block dimension of the BSR matrix. Between 1 and m where \p m=mb*blockDim.
+ *  blockDim         the block dimension of the BSR matrix, which is between 1 and m where \p m=mb*blockDim.
  *  @param[out]
  *  info             structure that holds the information collected during the analysis step.
  *  @param[in]
@@ -280,7 +280,7 @@ hipsparseStatus_t hipsparseZbsrilu02_bufferSize(hipsparseHandle_t         handle
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info or \p pBuffer pointer
+ *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or \p pBuffer pointer
  *              is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -348,8 +348,8 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
- *  \brief Incomplete LU factorization with 0 fill-ins and no pivoting using BSR storage
- *  format
+ *  \brief Incomplete LU factorization with 0 fill-ins and no pivoting using the BSR storage
+ *  format.
  *
  *  \details
  *  \p hipsparseXbsrilu02 computes the incomplete LU factorization with 0 fill-ins and no
@@ -360,26 +360,26 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
  *
  *  Computing the above incomplete LU factorization requires three steps to complete. First,
  *  the user determines the size of the required temporary storage buffer by calling
- *  \ref hipsparseSbsrilu02_bufferSize "hipsparseXbsrilu02_bufferSize()". Once this buffer size
+ *  \ref hipsparseSbsrilu02_bufferSize "hipsparseXbsrilu02_bufferSize()". After this buffer size
  *  has been determined, the user allocates the buffer and passes it to
  *  \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()". This will perform analysis on
  *  the sparsity pattern of the matrix. Finally, the user calls \p hipsparseXbsrilu02 to perform the
  *  actual factorization. The calculation of the buffer size and the analysis of the sparse matrix
- *  only need to be performed once for a given sparsity pattern while the factorization can be
- *  repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls to
+ *  only need to be performed once for a given sparsity pattern, while the factorization can be
+ *  repeatedly applied to multiple matrices having the same sparsity pattern. After all calls to
  *  \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()" are complete, the temporary buffer can be deallocated.
  *
  *  \p hipsparseXbsrilu02 reports the first zero pivot (either numerical or structural zero).
  *  The zero pivot status can be obtained by calling \ref hipsparseXbsrilu02_zeroPivot().
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  @param[in]
- *  handle             handle to the hipsparse library context queue.
+ *  handle             handle to the hipSPARSE library context queue.
  *  @param[in]
- *  dirA               direction that specified whether to count nonzero elements by
+ *  dirA               direction that specified whether to count non-zero elements by
  *                     \ref HIPSPARSE_DIRECTION_ROW or by \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
  *  mb                 number of block rows in the sparse BSR matrix.
@@ -395,7 +395,7 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
  *  @param[in]
  *  bsrSortedColIndA   array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
  *  @param[in]
- *  blockDim           the block dimension of the BSR matrix. Between 1 and m where \p m=mb*blockDim.
+ *  blockDim           the block dimension of the BSR matrix, which is between 1 and m where \p m=mb*blockDim.
  *  @param[in]
  *  info               structure that holds the information collected during the analysis step.
  *  @param[in]
@@ -405,7 +405,7 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA or \p bsrSortedColIndA pointer is invalid.
+ *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

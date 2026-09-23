@@ -24,6 +24,10 @@
 ---
 include: hipsparse_common.yaml
 
+Known bugs:
+  - function: csrsv2
+    filename: nos7
+
 Tests:
 - name: csrsv2_bad_arg
   category: pre_checkin

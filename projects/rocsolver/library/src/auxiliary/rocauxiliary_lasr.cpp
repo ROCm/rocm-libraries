@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_lasr.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -40,6 +41,7 @@ rocblas_status rocsolver_lasr_impl(rocblas_handle handle,
                                    SS* S,
                                    T* A,
                                    const rocblas_int lda)
+try
 {
     ROCSOLVER_ENTER_TOP("lasr", "--side", side, "--pivot", pivot, "--direct", direct, "-m", m, "-n",
                         n, "--lda", lda);
@@ -68,6 +70,10 @@ rocblas_status rocsolver_lasr_impl(rocblas_handle handle,
     //  execution
     return rocsolver_lasr_template<T>(handle, side, pivot, direct, m, n, C, strideC, S, strideS, A,
                                       shiftA, lda, strideA, batch_count);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

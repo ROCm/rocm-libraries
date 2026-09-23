@@ -29,6 +29,8 @@ string filename;
 
 int nbinmult = 2;
 
+real bounds = infinity; //40000;
+
 usersetting();
 
 if(filename == "") {
@@ -38,7 +40,6 @@ if(filename == "") {
 file fin = input(filename).line();
 real[] b = fin;
 
-real bounds = infinity; //40000;
 
 real[] a;
 for(int i = 0; i < b.length; ++i) {

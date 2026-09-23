@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_gebd2.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -39,6 +40,7 @@ rocblas_status rocsolver_gebd2_impl(rocblas_handle handle,
                                     S* E,
                                     T* tauq,
                                     T* taup)
+try
 {
     ROCSOLVER_ENTER_TOP("gebd2", "-m", m, "-n", n, "--lda", lda);
 
@@ -92,6 +94,10 @@ rocblas_status rocsolver_gebd2_impl(rocblas_handle handle,
     return rocsolver_gebd2_template<T>(handle, m, n, A, shiftA, lda, strideA, D, strideD, E,
                                        strideE, tauq, strideQ, taup, strideP, batch_count,
                                        (T*)scalars, work_workArr, (T*)Abyx_norms);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

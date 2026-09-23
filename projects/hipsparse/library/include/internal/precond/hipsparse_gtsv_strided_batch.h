@@ -35,31 +35,31 @@ extern "C" {
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
-*  m                  size of the tri-diagonal linear system.
+*  m                  size of the tridiagonal linear system.
 *  @param[in]
-*  dl                 lower diagonal of tri-diagonal system where the ith system lower diagonal starts at
+*  dl                 lower diagonal of the tridiagonal system where the ith system lower diagonal starts at
 *                     \p dl+batchStride*i.
 *  @param[in]
-*  d                  main diagonal of tri-diagonal system where the ith system diagonal starts at
+*  d                  main diagonal of the tridiagonal system where the ith system diagonal starts at
 *                     \p d+batchStride*i.
 *  @param[in]
-*  du                 upper diagonal of tri-diagonal system where the ith system upper diagonal starts at
+*  du                 upper diagonal of the tridiagonal system where the ith system upper diagonal starts at
 *                     \p du+batchStride*i.
 *  @param[inout]
-*  x                  Dense array of righthand-sides where the ith righthand-side starts at \p x+batchStride*i.
+*  x                  Dense array of right-hand sides where the ith right-hand side starts at \p x+batchStride*i.
 *  @param[in]
 *  batchCount         The number of systems to solve.
 *  @param[in]
-*  batchStride        The number of elements that separate each system. Must satisfy \p batchStride >= m.
+*  batchStride        The number of elements that separate each system, which must satisfy \p batchStride >= m.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*                     hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
+*                     \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p batchStride, \p dl,
-*              \p d, \p du, \p x or \p pBufferSizeInBytes pointer is invalid.
+*              \p d, \p du, \p x, or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
@@ -109,7 +109,7 @@ hipsparseStatus_t hipsparseZgtsv2StridedBatch_bufferSizeExt(hipsparseHandle_t   
 /**@}*/
 
 /*! \ingroup precond_module
-*  \brief Strided Batch tridiagonal solver (no pivoting)
+*  \brief Strided batch tridiagonal solver (no pivoting).
 *
 *  \details
 *  \p hipsparseXgtsv2StridedBatch solves a batched tridiagonal linear system
@@ -119,12 +119,12 @@ hipsparseStatus_t hipsparseZgtsv2StridedBatch_bufferSizeExt(hipsparseHandle_t   
 *  where for each batch \f$i=0\ldots\f$ \p batchCount, \f$T^{i}\f$ is a sparse tridiagonal matrix and
 *  \f$x^{i}\f$ is a dense right-hand side vector. All of the tridiagonal matrices, \f$T^{i}\f$, are
 *  packed one after the other into three vectors: \p dl for the lower diagonals, \p d for the main
-*  diagonals and \p du for the upper diagonals. See below for a description of what this strided
-*  memory pattern looks like.
+*  diagonals, and \p du for the upper diagonals. See below for a description of the strided
+*  memory pattern.
 *
 *  Solving the batched tridiagonal system involves two steps. First, the user calls
 *  \ref hipsparseSgtsv2StridedBatch_bufferSizeExt "hipsparseXgtsv2StridedBatch_bufferSizeExt()"
-*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  to determine the size of the required temporary storage buffer. After this is determined, the user allocates
 *  this buffer and passes it to \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()"
 *  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
 *  overwritten with the solution after the call to
@@ -159,35 +159,35 @@ hipsparseStatus_t hipsparseZgtsv2StridedBatch_bufferSizeExt(hipsparseHandle_t   
 *    \text{upper} &= \begin{bmatrix} t^{0}_{01} & t^{0}_{12} & 0 & t^{1}_{01} & t^{1}_{12} & 0 & t^{2}_{01} & t^{2}_{12} & 0 \end{bmatrix} \\
 *    \end{align}
 *  \f]
-*  For the lower array, for each batch \p i, the \p i*batchStride entries are zero and for the upper array the
+*  For the lower array, for each batch \p i, the \p i*batchStride entries are zero, and for the upper array, the
 *  \p i*batchStride+batchStride-1 entries are zero.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  m           size of the tri-diagonal linear system (must be >= 2).
+*  m           size of the tridiagonal linear system (must be >= 2).
 *  @param[in]
-*  dl          lower diagonal of tri-diagonal system. First entry must be zero.
+*  dl          lower diagonal of the tridiagonal system. The first entry must be zero.
 *  @param[in]
-*  d           main diagonal of tri-diagonal system.
+*  d           main diagonal of the tridiagonal system.
 *  @param[in]
-*  du          upper diagonal of tri-diagonal system. Last entry must be zero.
+*  du          upper diagonal of the tridiagonal system. The last entry must be zero.
 *  @param[inout]
-*  x           Dense array of righthand-sides where the ith righthand-side starts at \p x+batchStride*i.
+*  x           Dense array of right-hand sides where the ith right-hand side starts at \p x+batchStride*i.
 *  @param[in]
 *  batchCount  The number of systems to solve.
 *  @param[in]
-*  batchStride The number of elements that separate each system. Must satisfy \p batchStride >= m.
+*  batchStride The number of elements that separate each system, which must satisfy \p batchStride >= m.
 *  @param[in]
 *  pBuffer     temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p batchStride, \p dl, \p d,
-*              \p du, \p x or \p pBuffer pointer is invalid.
+*              \p du, \p x, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/

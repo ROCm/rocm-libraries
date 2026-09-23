@@ -1,19 +1,76 @@
 .. meta::
-   :description: Data type support for rocRAND documentation
-   :keywords: rocRAND, ROCm, API, documentation, cuRAND, data types
+   :description: Precision support for rocRAND documentation
+   :keywords: rocRAND, ROCm, API, documentation, cuRAND, precision, data types
 
+.. _rocrand-data-type-support:
 .. _data-type-support:
 
-rocRAND data type support
+rocRAND precision support
 ******************************************
 
 This topic discusses the various data types supported by rocRAND and provides a comparison
 with the data type support in NVIDIA CUDA cuRAND.
 
+This page lists the data types supported by the library itself and does not
+indicate hardware support. A type listed here is only usable if the GPU
+architecture also supports it; otherwise it is unsupported. For data type support
+across the other ROCm libraries and by GPU architecture, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+
+.. _rocrand-input-output-type-support:
+
+Output type support
+===================
+
+As a random number generation library, rocRAND specifies only the output data
+types for the random values it generates; it has no input data types. The
+following table summarizes the output data types supported by rocRAND. For the
+per-generator and per-distribution detail, including the comparison with cuRAND,
+see the sections that follow.
+
+.. datatemplate:yaml:: /data/reference/precision-support.yaml
+
+    .. list-table::
+        :header-rows: 1
+        :widths: 70, 30
+
+        *
+            - Data type
+            - Support
+    {% for data_type in data.data_types %}
+        *
+            - {{ data_type.type }}
+            - {{ data_type.support }}
+    {% endfor %}
+
 Host API
 ========
 
-This section covers the data types supported for the host API.
+This section covers the data types supported for the host API. The icons
+representing different levels of support are explained in the following table.
+
+.. list-table::
+    :header-rows: 1
+
+    *
+      - Icon
+      - Definition
+
+    *
+      - NA
+      - Not applicable
+
+    *
+      - ❌
+      - Not supported
+
+    *
+      - ⚠️
+      - Partial support
+
+    *
+      - ✅
+      - Full support
 
 Generator types
 ---------------

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,91 +48,94 @@
 
 #include <hip/hip_runtime.h>
 
-namespace rocrand_device {
-namespace detail {
+namespace rocrand_device
+{
+namespace detail
+{
 
 constexpr double lambda_threshold_small = 64.0;
 constexpr double lambda_threshold_huge  = 4000.0;
 
 template<class State, typename Result_Type = unsigned int>
-__forceinline__ __device__ __host__ Result_Type poisson_distribution_small(State& state,
-                                                                           double lambda)
+__forceinline__ __device__ __host__
+Result_Type poisson_distribution_small(State& state, double lambda)
+
 {
     // Knuth's method
 
-    const double limit = exp(-lambda);
+    const double limit   = exp(-lambda);
     Result_Type  k       = 0;
-    double product = 1.0;
+    double       product = 1.0;
 
     do
     {
         k++;
         product *= rocrand_uniform_double(state);
     }
-    while (product > limit);
+    while(product > limit);
 
     return k - 1;
 }
 
-__forceinline__ __device__ __host__ double lgamma_approx(const double x)
+__forceinline__ __device__ __host__
+double lgamma_approx(const double x)
 {
     // Lanczos approximation (g = 7, n = 9)
 
     const double z = x - 1.0;
 
-    const int g = 7;
-    const int n = 9;
-    const double coefs[n] = {
-        0.99999999999980993227684700473478,
-        676.520368121885098567009190444019,
-        -1259.13921672240287047156078755283,
-        771.3234287776530788486528258894,
-        -176.61502916214059906584551354,
-        12.507343278686904814458936853,
-        -0.13857109526572011689554707,
-        9.984369578019570859563e-6,
-        1.50563273514931155834e-7
-    };
-    double sum = 0.0;
-    #pragma unroll
-    for (int i = n - 1; i > 0; i--)
+    const int    g        = 7;
+    const int    n        = 9;
+    const double coefs[n] = {0.99999999999980993227684700473478,
+                             676.520368121885098567009190444019,
+                             -1259.13921672240287047156078755283,
+                             771.3234287776530788486528258894,
+                             -176.61502916214059906584551354,
+                             12.507343278686904814458936853,
+                             -0.13857109526572011689554707,
+                             9.984369578019570859563e-6,
+                             1.50563273514931155834e-7};
+    double       sum      = 0.0;
+#pragma unroll
+    for(int i = n - 1; i > 0; i--)
+
     {
         sum += coefs[i] / (z + i);
     }
     sum += coefs[0];
 
     const double log_sqrt_2_pi = 0.9189385332046727418;
-    const double e = 2.718281828459045090796;
+    const double e             = 2.718281828459045090796;
     return (log_sqrt_2_pi + log(sum) - g) + (z + 0.5) * log((z + g + 0.5) / e);
 }
 
 template<class State, typename Result_Type = unsigned int>
-__forceinline__ __device__ __host__ Result_Type poisson_distribution_large(State& state,
-                                                                           double lambda)
+__forceinline__ __device__ __host__
+Result_Type poisson_distribution_large(State& state, double lambda)
 {
     // Rejection method PA, A. C. Atkinson
 
-    const double c = 0.767 - 3.36 / lambda;
-    const double beta = ROCRAND_PI_DOUBLE / sqrt(3.0 * lambda);
-    const double alpha = beta * lambda;
-    const double k = log(c) - lambda - log(beta);
+    const double c          = 0.767 - 3.36 / lambda;
+    const double beta       = ROCRAND_PI_DOUBLE / sqrt(3.0 * lambda);
+    const double alpha      = beta * lambda;
+    const double k          = log(c) - lambda - log(beta);
     const double log_lambda = log(lambda);
 
-    while (true)
+    while(true)
     {
         const double u = rocrand_uniform_double(state);
         const double x = (alpha - log((1.0 - u) / u)) / beta;
         const double n = floor(x + 0.5);
-        if (n < 0)
+        if(n < 0)
         {
             continue;
         }
-        const double v = rocrand_uniform_double(state);
-        const double y = alpha - beta * x;
-        const double t = 1.0 + exp(y);
+        const double v   = rocrand_uniform_double(state);
+        const double y   = alpha - beta * x;
+        const double t   = 1.0 + exp(y);
         const double lhs = y + log(v / (t * t));
         const double rhs = k + n * log_lambda - lgamma_approx(n + 1.0);
-        if (lhs <= rhs)
+        if(lhs <= rhs)
         {
             return static_cast<Result_Type>(n);
         }
@@ -140,8 +143,8 @@ __forceinline__ __device__ __host__ Result_Type poisson_distribution_large(State
 }
 
 template<class State, typename Result_Type = unsigned int>
-__forceinline__ __device__ __host__ Result_Type poisson_distribution_huge(State& state,
-                                                                          double lambda)
+__forceinline__ __device__ __host__
+Result_Type poisson_distribution_huge(State& state, double lambda)
 {
     // Approximate Poisson distribution with normal distribution
 
@@ -150,13 +153,14 @@ __forceinline__ __device__ __host__ Result_Type poisson_distribution_huge(State&
 }
 
 template<class State, typename Result_Type = unsigned int>
-__forceinline__ __device__ __host__ Result_Type poisson_distribution(State& state, double lambda)
+__forceinline__ __device__ __host__
+Result_Type poisson_distribution(State& state, double lambda)
 {
-    if (lambda < lambda_threshold_small)
+    if(lambda < lambda_threshold_small)
     {
         return poisson_distribution_small<State, Result_Type>(state, lambda);
     }
-    else if (lambda <= lambda_threshold_huge)
+    else if(lambda <= lambda_threshold_huge)
     {
         return poisson_distribution_large<State, Result_Type>(state, lambda);
     }
@@ -167,48 +171,52 @@ __forceinline__ __device__ __host__ Result_Type poisson_distribution(State& stat
 }
 
 template<class State, typename Result_Type = unsigned int>
-__forceinline__ __device__ __host__ Result_Type poisson_distribution_itr(State& state,
-                                                                         double lambda)
+__forceinline__ __device__ __host__
+Result_Type poisson_distribution_itr(State& state, double lambda)
 {
     // Algorithm ITR
     // George S. Fishman
     // Discrete-Event Simulation: Modeling, Programming, and Analysis
     // p. 333
-    double L;
-    double x = 1.0;
-    double y = 1.0;
-    Result_Type k   = 0;
-    int pow = 0;
+    Result_Type k = 0;
     // Algorithm ITR uses u from (0, 1) and uniform_double returns (0, 1]
     // Change u to ensure that 1 is never generated,
     // otherwise the inner loop never ends.
-    double u = rocrand_uniform_double(state) - ROCRAND_2POW32_INV_DOUBLE / 2.0;
-    double upow = pow + 500.0;
-    double ex = exp(-500.0);
-    do{
-        if (lambda > upow)
-            L = ex;
-        else
-            L = exp((double)(pow - lambda));
+    const double u = rocrand_uniform_double(state) - ROCRAND_2POW32_INV_DOUBLE / 2.0;
+    const double L = (lambda > 500.0) ? exp(-500.0) : exp(-lambda);
 
+    // First iteration, pow = 0 < lambda
+    double x = L;
+    double y = L;
+    while(u > y)
+    {
+        k++;
+        x *= ((double)lambda / (double)k);
+        y += x;
+    }
+
+    // Second iteration only if lambda > 500.0. No more iterations needed
+    // as we only call this method with lambda < 1000.0
+    if((double)500 < lambda)
+    {
+        // Now we now that necessarily lambda > upow = 500.0, so we already calculated before L = exp(-500)
         x *= L;
         y *= L;
-        pow += 500;
-        while (u > y)
+        while(u > y)
         {
             k++;
-            x *= ((double)lambda / (double) k);
+            x *= ((double)lambda / (double)k);
             y += x;
         }
-    } while((double)pow < lambda);
+    }
     return k;
 }
 
 template<class State, typename Result_Type = unsigned int>
-__forceinline__ __device__ __host__ Result_Type poisson_distribution_inv(State& state,
-                                                                         double lambda)
+__forceinline__ __device__ __host__
+Result_Type poisson_distribution_inv(State& state, double lambda)
 {
-    if (lambda < 1000.0)
+    if(lambda < 1000.0)
     {
         return poisson_distribution_itr<State, Result_Type>(state, lambda);
     }
@@ -233,8 +241,8 @@ __forceinline__ __device__ __host__ Result_Type poisson_distribution_inv(State& 
  * \return Poisson-distributed <tt>unsigned int</tt>
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ unsigned int rocrand_poisson(rocrand_state_philox4x32_10* state,
-                                                                 double lambda)
+__forceinline__ __device__ __host__
+unsigned int rocrand_poisson(rocrand_state_philox4x32_10* state, double lambda)
 {
     return rocrand_device::detail::poisson_distribution<rocrand_state_philox4x32_10*, unsigned int>(
         state,
@@ -283,8 +291,8 @@ uint4 rocrand_poisson4(rocrand_state_philox4x32_10* state, double lambda)
  * \return Poisson-distributed <tt>unsigned int</tt>
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ unsigned int rocrand_poisson(rocrand_state_mrg31k3p* state,
-                                                                 double                  lambda)
+__forceinline__ __device__ __host__
+unsigned int rocrand_poisson(rocrand_state_mrg31k3p* state, double lambda)
 {
     return rocrand_device::detail::poisson_distribution<rocrand_state_mrg31k3p*, unsigned int>(
         state,
@@ -304,8 +312,8 @@ __forceinline__ __device__ __host__ unsigned int rocrand_poisson(rocrand_state_m
  * \return Poisson-distributed <tt>unsigned int</tt>
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ unsigned int rocrand_poisson(rocrand_state_mrg32k3a* state,
-                                                                 double                  lambda)
+__forceinline__ __device__ __host__
+unsigned int rocrand_poisson(rocrand_state_mrg32k3a* state, double lambda)
 {
     return rocrand_device::detail::poisson_distribution<rocrand_state_mrg32k3a*, unsigned int>(
         state,
@@ -325,8 +333,8 @@ __forceinline__ __device__ __host__ unsigned int rocrand_poisson(rocrand_state_m
  * \return Poisson-distributed <tt>unsigned int</tt>
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ unsigned int rocrand_poisson(rocrand_state_xorwow* state,
-                                                                 double                lambda)
+__forceinline__ __device__ __host__
+unsigned int rocrand_poisson(rocrand_state_xorwow* state, double lambda)
 {
     return rocrand_device::detail::poisson_distribution<rocrand_state_xorwow*, unsigned int>(
         state,

@@ -1,0 +1,19 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb8 --InsertVgprMsbPass --print-output
+#
+# InsertVgprMsbPass must treat s_swappc_b64 as clobbering the caller's VGPR MSB
+# hardware state. A high-VGPR instruction after the call therefore needs its own
+# s_set_vgpr_msb even when the pre-call instruction used the same MSB state.
+
+# CHECK-LABEL: @call_resets_vgpr_msb
+# CHECK: s_set_vgpr_msb
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: s_swappc_b64
+# CHECK-NEXT: s_set_vgpr_msb
+# CHECK-NEXT: v_mul_f32
+
+st.func @call_resets_vgpr_msb() {
+^entry:
+  v256 = "st.v_add_f32"(v257, v258) { issueCycles = 1, latencyCycles = 5 }
+  s[26:27] = "st.s_swappc_b64"(s[12:13]) { issueCycles = 1, latencyCycles = 2 }
+  v259 = "st.v_mul_f32"(v260, v261) { issueCycles = 1, latencyCycles = 5 }
+}

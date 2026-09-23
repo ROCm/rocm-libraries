@@ -45,7 +45,7 @@ private:
 #define PLUGIN_THROW_IF_NE(x, y, failureStatus, message)                            \
     do                                                                              \
     {                                                                               \
-        if(x != y)                                                                  \
+        if((x) != (y))                                                              \
         {                                                                           \
             throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
         }                                                                           \
@@ -54,7 +54,7 @@ private:
 #define PLUGIN_THROW_IF_EQ(x, y, failureStatus, message)                            \
     do                                                                              \
     {                                                                               \
-        if(x == y)                                                                  \
+        if((x) == (y))                                                              \
         {                                                                           \
             throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
         }                                                                           \
@@ -81,7 +81,7 @@ private:
 #define PLUGIN_THROW_IF_NULL(x, failureStatus, message)                             \
     do                                                                              \
     {                                                                               \
-        if(x == nullptr)                                                            \
+        if((x) == nullptr)                                                          \
         {                                                                           \
             throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
         }                                                                           \
@@ -90,7 +90,7 @@ private:
 #define PLUGIN_THROW_IF_LT(x, y, failureStatus, message)                            \
     do                                                                              \
     {                                                                               \
-        if(x < y)                                                                   \
+        if((x) < (y))                                                               \
         {                                                                           \
             throw hipdnn_plugin_sdk::HipdnnPluginException(failureStatus, message); \
         }                                                                           \

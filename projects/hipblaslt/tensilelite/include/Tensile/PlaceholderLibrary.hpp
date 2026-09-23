@@ -35,6 +35,8 @@
 #include <algorithm>
 #include <map>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     // Which placeholder libraries should be initialized at start
@@ -69,6 +71,7 @@ namespace TensileLite
         gfx1153,
         gfx1200,
         gfx1201,
+        gfx1250,
         All
     };
 
@@ -133,6 +136,8 @@ namespace TensileLite
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:
             return "TensileLibrary_*_gfx1201";
+        case LazyLoadingInit::gfx1250:
+            return "TensileLibrary_*_gfx1250";
         case LazyLoadingInit::None:
             return "";
         }
@@ -148,6 +153,13 @@ namespace TensileLite
         mutable std::mutex*                                             solutionsGuard;
         mutable std::mutex                                              lazyLoadingGuard;
         std::string                                                     filePrefix;
+
+        // Where to publish an indexed shard's blob cache, keyed by file prefix,
+        // so the owning master can resolve indices this shard has not parsed
+        // yet. Without it the shard loads but its solutions stay unreachable by
+        // index.
+        mutable std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>*
+            solutionSources = nullptr;
         std::string                                                     suffix;
         std::string                                                     libraryDirectory;
         mutable std::atomic<bool>                                       lastFindTopRetAll = false;
@@ -169,11 +181,34 @@ namespace TensileLite
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
                 library = mLibrary->library;
 
+                // Indexed shards publish solutions later; stamp the name on
+                // the cache so it is applied as each one is parsed.
+                if(mLibrary->blobCache)
+                    mLibrary->blobCache->setCodeObjectFilename(getCodeObjectFileName());
+
                 std::lock_guard<std::mutex> lock(*solutionsGuard);
+
+                // Publishes this shard's cache so the owning master can resolve
+                // indices the shard has not parsed yet. Keyed by prefix, so a
+                // shard the master already published is not registered twice --
+                // two caches for one shard would retain two copies of its blob
+                // and hand out two objects for the same solution index.
+                auto publishShardCache = [&]() {
+                    if(mLibrary->blobCache && solutionSources != nullptr)
+                        solutionSources->emplace(filePrefix, mLibrary->blobCache);
+                };
+
                 if(loadedFiles->find(filePrefix) != loadedFiles->end())
                 {
                     if(indexLoadedLibraries->find(filePrefix) == indexLoadedLibraries->end())
+                    {
+                        // Keeping this shard's own tree, so its cache is the one
+                        // the leaves reference.
+                        publishShardCache();
                         return true;
+                    }
+                    // Adopting the tree the master loaded means adopting the
+                    // cache the master already published; ours is dropped.
                     library = (*indexLoadedLibraries)[filePrefix];
                     indexLoadedLibraries->erase(filePrefix);
 
@@ -183,6 +218,8 @@ namespace TensileLite
                                   << " from MasterLibrary cache" << std::endl;
                     return true;
                 }
+
+                publishShardCache();
 
                 using std::begin;
                 using std::end;
@@ -358,3 +395,4 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
+

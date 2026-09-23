@@ -31,15 +31,17 @@ endif()
 
 find_package(hip REQUIRED)
 
-include(FetchContent)
-FetchContent_Declare(
-    nanobind
-    GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-    GIT_TAG        v2.0.0
-)
-FetchContent_MakeAvailable(nanobind)
-
-find_package(nanobind CONFIG REQUIRED)
+find_package(nanobind CONFIG QUIET)
+if(NOT nanobind_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        nanobind
+        GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+        GIT_TAG        v2.0.0
+    )
+    FetchContent_MakeAvailable(nanobind)
+    find_package(nanobind CONFIG REQUIRED)
+endif()
 
 if(SKBUILD)
   # When building a wheel via pip/scikit-build-core
@@ -134,6 +136,67 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
             SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
     )
 
+    # Run core origami binding tests (no torch required)
+    add_test(
+        NAME "Python: test_attention_bindings"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_attention.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_attention_bindings"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run selector tests (requires torch)
+    add_test(
+        NAME "Python: test_attention_selector"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_attention_selector.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_attention_selector"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+            SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
+    )
+
+    # Run hardware tests
+    add_test(
+        NAME "Python: test_hardware"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_hardware.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_hardware"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run ranking regression tests
+    add_test(
+        NAME "Python: test_ranking_regression"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_ranking_regression.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_ranking_regression"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
     # Install Python test files to bin/origami/tests for TheRock CI testing.
     install(
         DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
@@ -141,5 +204,8 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         COMPONENT tests
         FILES_MATCHING
         PATTERN "*.py"
+        PATTERN "*.csv"
+        PATTERN "*.yaml"
+        PATTERN "*.md"
     )
 endif()

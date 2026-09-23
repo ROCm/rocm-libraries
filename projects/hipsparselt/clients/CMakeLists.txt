@@ -13,11 +13,6 @@ elseif(HIPSPARSELT_ENABLE_BLIS)
     # consolidate the vendoring strategy of BLAS/LAPACK, but remains for historical purposes
     find_package(BLIS REQUIRED)
 endif()
-# find_package(LAPACK) and conditionally fetch it if not found (there is an implicit
-# find_package(BLAS) when finding lapack)
-if(NOT HIPSPARSELT_ENABLE_THEROCK)
-    include(fetch_lapack)
-endif()
 
 add_library(hipsparselt-clients-common OBJECT)
 
@@ -26,7 +21,9 @@ target_compile_features(hipsparselt-clients-common PRIVATE cxx_std_17)
 target_compile_definitions(hipsparselt-clients-common PUBLIC HIPSPARSELT_INTERNAL_API)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
+    if(HIPSPARSELT_CXX_HAS_MF16C)
+        target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
+    endif()
 endif()
 
 target_sources(

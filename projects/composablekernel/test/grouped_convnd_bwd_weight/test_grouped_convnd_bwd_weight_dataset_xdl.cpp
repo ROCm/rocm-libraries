@@ -15,8 +15,11 @@
 #include "profiler/profile_grouped_conv_bwd_weight_impl.hpp" // The actual GPU profiler that does convolution work
 #include "../common/csv_test_loader.hpp"                     // Shared CSV test case loader
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
+#endif
 using namespace ck::tensor_layout::convolution;
-
 // Load CSV data for 2D tests
 static std::vector<ck::utils::conv::ConvParam> Get2DTestCases()
 {
@@ -73,6 +76,11 @@ template <ck::index_t NDimSpatial,
           typename OutDataType>
 bool RunConvBwdWeightTest(const ck::utils::conv::ConvParam& param, ck::index_t split_k)
 {
+#if defined(CK_TEST_DISABLE_GPU_VALIDATION)
+    static constexpr int verify_ = 1; // CPU reference
+#else
+    static constexpr int verify_ = 2; // GPU reference
+#endif
     return ck::profiler::profile_grouped_conv_bwd_weight_impl<NDimSpatial,
                                                               InLayout,
                                                               WeiLayout,
@@ -80,7 +88,7 @@ bool RunConvBwdWeightTest(const ck::utils::conv::ConvParam& param, ck::index_t s
                                                               InDataType,
                                                               WeiDataType,
                                                               OutDataType>(
-        2,                       // do_verification
+        verify_,                 // do_verification
         1,                       // init_method
         false,                   // do_log
         false,                   // time_kernel
@@ -256,3 +264,7 @@ TEST_P(TestGroupedConvndBwdWeight3dNDHWGKBFloat16SplitK2, ConvTest)
 INSTANTIATE_TEST_SUITE_P(Dataset,
                          TestGroupedConvndBwdWeight3dNDHWGKBFloat16SplitK2,
                          ::testing::ValuesIn(Get3DTestCases()));
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

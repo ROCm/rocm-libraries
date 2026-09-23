@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include <numeric>
 #include <stddef.h>
+#include <stdexcept>
 #include <tuple>
 
 // arithmetic helper functions
@@ -48,6 +49,22 @@ static inline size_t CeilPo2(size_t n)
     return t;
 }
 
+static size_t max_prime_factor(size_t len)
+{
+    if(len < 2)
+        throw std::invalid_argument("No prime factor for lengths smaller than 2");
+    size_t ret = 1;
+    while(len != 1)
+    {
+        ret++;
+        if(ret * ret > len)
+            ret = len; // len is actually prime
+        while(len % ret == 0)
+            len /= ret;
+    }
+    return ret;
+}
+
 template <typename T>
 static inline T DivRoundingUp(T a, T b)
 {
@@ -70,6 +87,13 @@ template <typename Titer>
 typename Titer::value_type sum(Titer begin, Titer end, typename Titer::value_type start_sum = 0)
 {
     return std::accumulate(begin, end, start_sum, std::plus<typename Titer::value_type>());
+}
+
+template <typename Tcontainer>
+typename Tcontainer::value_type sum(const Tcontainer&               cont,
+                                    typename Tcontainer::value_type start_sum = 0)
+{
+    return sum(cont.cbegin(), cont.cend(), start_sum);
 }
 
 // count the number of total iterations for 1-, 2-, and 3-D dimensions

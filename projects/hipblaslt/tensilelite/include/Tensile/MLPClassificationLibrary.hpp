@@ -26,7 +26,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <functional>
 #include <queue>
 #include <set>
 #include <vector>
@@ -37,6 +39,8 @@
 #include <Tensile/ProblemKey.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Utils.hpp>
+
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -147,15 +151,47 @@ namespace TensileLite
             int numToSort = std::min(numSolutions, int(solution_ranking.size()));
             rv.reserve(numToSort);
             auto it = solution_ranking.begin(), it_end = solution_ranking.end();
-            while(it != it_end && numToSort)
+            // Snapshot the batch end in `batch_end`: `it != it + numToSort`
+            // re-evaluates the bound against the advancing `it`, so it degenerates
+            // to `numToSort != 0` and the loop runs off the vector whenever fewer
+            // than numToSort of the ranked kernels are accepted.
+            while(it != it_end && numToSort > 0)
             {
-                std::partial_sort(it, it + numToSort, it_end, std::greater{});
-                for(; it != it + numToSort; it++)
-                    if((*((*it->second)->problemPredicate))(problem))
+                const int remaining = static_cast<int>(it_end - it);
+                const int batch     = std::min(numToSort, remaining);
+                std::partial_sort(it, it + batch, it_end, std::greater{});
+                const auto batch_end = it + batch;
+                for(; it != batch_end; ++it)
+                {
+                    auto const& solution = *it->second;
+                    Task        task(hardware, problem, *solution);
+                    // The uniform-summation-order arm adds hardwarePredicate plus
+                    // softwarePredicate(DEFAULT), which subsumes problemPredicate and adds
+                    // taskPredicate and the StreamK dynamic-queue check -- both reject
+                    // kernels accepted before the per-tile split mapping was added. With
+                    // that mode off, restore the narrower filter: problemPredicate alone.
+                    bool accept;
+                    if(problem.getParams().uniformSummationOrder())
                     {
-                        rv.emplace_back(*it->second);
-                        numToSort--;
+                        accept = (*solution->hardwarePredicate)(hardware)
+                                 && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                      task,
+                                                      hardware,
+                                                      *solution,
+                                                      problem);
                     }
+                    else
+                    {
+                        accept = (*solution->problemPredicate)(problem);
+                    }
+                    if(accept)
+                    {
+                        rv.emplace_back(solution);
+                        --numToSort;
+                        if(numToSort == 0)
+                            break;
+                    }
+                }
             }
 
             // can't reach the requested number, means findTop already done its best
@@ -192,3 +228,4 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
+

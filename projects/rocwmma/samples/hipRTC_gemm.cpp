@@ -72,6 +72,13 @@ const int T_BLOCK_Y = 4;
 
 std::string source = R"(
 
+// FIXME: Remove once ROCM-864 is resolved.
+typedef signed char int8_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+// FIXME
+
 #include <rocwmma/rocwmma.hpp>
 
 using rocwmma::float16_t;

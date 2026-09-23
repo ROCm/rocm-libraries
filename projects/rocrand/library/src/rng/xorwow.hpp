@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -69,7 +69,12 @@ __host__ __device__
     }
 };
 
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution, bool PossibleMissAlign>
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class Distribution,
+         bool PossibleMissAlign,
+         bool UseLDS = false>
 struct generate_xorwow
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -78,9 +83,9 @@ __host__ __device__ __forceinline__
                          dim3 thread_idx,
                          dim3 grid_dim,
                          dim3 /*block_dim*/,
-                         xorwow_device_engine*               engines,
-                         const unsigned int                  start_engine_id,
-                         T*                                  data,
+                         xorwow_device_engine* engines,
+                         const unsigned int    start_engine_id,
+                         T* __restrict__ data,
                          const size_t                        n,
                          Distribution                        distribution,
                          [[maybe_unused]] const unsigned int head_size,
@@ -108,24 +113,40 @@ __host__ __device__ __forceinline__
         T            output[output_width];
 
         size_t index = thread_id;
+#ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+        {
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
+            __syncthreads();
+        }
+#endif
+#if defined(__gfx942__) || defined(__gfx908__)
+        // On gfx942 and gfx908, the compiler generates faster code with unrolled loops.
+        // The loop is unrolled selectivly with unroll factors of 2 and 4 based on the
+        // size of T to avoid register spilling for bigger types.
+        constexpr int unroll_factor = (sizeof(T) <= 2) ? 4 : 2;
+    #pragma unroll unroll_factor
+#endif
         while(index < vec_n)
         {
             for(unsigned int i = 0; i < input_width; i++)
             {
                 input[i] = engine();
             }
-            distribution(input, output);
-
+#ifdef __HIP_DEVICE_COMPILE__
+            if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                distribution.generate_lds(input, output);
+            else
+#endif
+                distribution(input, output);
 #if defined(__gfx90a__)
-            // Workaround: The compiler hoists s_waitcnt vmcnt(..) out of the loops.
-            // For some reason this optimization decreases performance of uniform distributions
-            // on MI200. MI100 and MI300 are not affected.
+            // Workaround: The compiler hoists s_waitcnt vmcnt(..) out of the loops on MI200.
+            // For some reason this decreases performance of uniform distributions.
             // Here we add s_waitcnt vmcnt(0)
             __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4)
                                        | (/*lgkmcnt*/ 0xf << 8));
 #endif
             vec_data[index] = *reinterpret_cast<vec_type*>(output);
-            // Next position
             index += num_engines;
         }
 
@@ -141,7 +162,12 @@ __host__ __device__ __forceinline__
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {
@@ -158,7 +184,12 @@ __host__ __device__ __forceinline__
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {
@@ -396,36 +427,51 @@ public:
         const auto use_missaligned_variant
             = cpp_utils::constexpr_value_variant<bool, false, true>::create(possible_miss_align);
 
-        status = std::visit(
-            [&](auto possibly_miss_aligned)
-            {
-                return dynamic_dispatch(
-                    m_order,
-                    [&, this](auto is_dynamic)
-                    {
-                        return system_type::template launch<generate_xorwow<ConfigProvider,
-                                                                            is_dynamic,
-                                                                            T,
-                                                                            Distribution,
-                                                                            possibly_miss_aligned>,
-                                                            ConfigProvider,
-                                                            T,
-                                                            is_dynamic>(target_arch,
-                                                                        dim3(config.blocks),
-                                                                        dim3(config.threads),
-                                                                        0,
-                                                                        m_stream,
-                                                                        m_engines,
-                                                                        m_start_engine_id,
-                                                                        data,
-                                                                        data_size,
-                                                                        distribution,
-                                                                        head_size,
-                                                                        tail_size,
-                                                                        misalignment);
-                    });
-            },
-            use_missaligned_variant);
+        auto launch_with_lds = [&](auto possibly_miss_aligned, auto possible_lds_usage)
+        {
+            return dynamic_dispatch(
+                m_order,
+                [&, this](auto is_dynamic)
+                {
+                    return system_type::template launch<generate_xorwow<ConfigProvider,
+                                                                        is_dynamic,
+                                                                        T,
+                                                                        Distribution,
+                                                                        possibly_miss_aligned,
+                                                                        possible_lds_usage>,
+                                                        ConfigProvider,
+                                                        T,
+                                                        is_dynamic>(target_arch,
+                                                                    dim3(config.blocks),
+                                                                    dim3(config.threads),
+                                                                    0,
+                                                                    m_stream,
+                                                                    m_engines,
+                                                                    m_start_engine_id,
+                                                                    data,
+                                                                    data_size,
+                                                                    distribution,
+                                                                    head_size,
+                                                                    tail_size,
+                                                                    misalignment);
+                });
+        };
+
+        if constexpr(is_discrete_distribution_v<Distribution>)
+        {
+            const bool use_lds = distribution.check_lds_size();
+            const auto use_lds_variant
+                = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
+            status = std::visit(launch_with_lds, use_missaligned_variant, use_lds_variant);
+        }
+        else
+        {
+            status
+                = std::visit([&](auto possibly_miss_aligned)
+                             { return launch_with_lds(possibly_miss_aligned, std::false_type{}); },
+                             use_missaligned_variant);
+        }
 
         // Check kernel status
         if(status != ROCRAND_STATUS_SUCCESS)

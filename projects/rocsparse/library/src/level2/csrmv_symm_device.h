@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -95,6 +95,11 @@ namespace rocsparse
                                                           Y*                   y,
                                                           rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WG_SIZE == 0, "BLOCKSIZE must be a multiple of WG_SIZE.");
+
         __shared__ T           partial_sums[BLOCKSIZE];
         extern __shared__ char cols_in_rows[];
 
@@ -161,6 +166,15 @@ namespace rocsparse
             const I col = csr_row_ptr[row] + lid - idx_base;
 
             // Stream all of this row blocks' matrix values into local memory
+            const I max_to_load = csr_row_ptr[stop_row] - csr_row_ptr[row];
+#ifdef ROCSPARSE_WITH_ASAN
+            // Under ASAN, always use bounds-checked path to avoid intentional OOB reads
+            // in the fast path below (which are safe on dGPUs but trigger ASAN errors).
+            for(I i = 0; (lid + i) < max_to_load; i += WG_SIZE)
+            {
+                partial_sums[lid + i] = alpha * rocsparse::conj_val(csr_val[col + i], conj);
+            }
+#else
             // Only do the unrolled loop if it won't overflow the buffer
             if(col + BLOCKSIZE - WG_SIZE < nnz)
             {
@@ -179,12 +193,12 @@ namespace rocsparse
                 // However, this may change in the future (e.g. with shared virtual memory.)
                 // This causes a minor performance loss because this is the last workgroup
                 // to be launched, and this loop can't be unrolled.
-                const I max_to_load = csr_row_ptr[stop_row] - csr_row_ptr[row];
                 for(I i = 0; (lid + i) < max_to_load; i += WG_SIZE)
                 {
                     partial_sums[lid + i] = alpha * rocsparse::conj_val(csr_val[col + i], conj);
                 }
             }
+#endif
 
             // Upper triangular
             // Initialize the scols_in_rows
@@ -201,6 +215,35 @@ namespace rocsparse
             // sure we can offset it. Otherwise, we would blow past the end of
             // the local memory.
             const I stop_cols_idx = (stop_row < max_rows) ? 0 : (stop_row - max_rows);
+#ifdef ROCSPARSE_WITH_ASAN
+            // Under ASAN, always use bounds-checked path to avoid intentional OOB reads
+            // in the fast path below (which are safe on dGPUs but trigger ASAN errors).
+            for(I i = 0; (lid + i) < max_to_load; i += WG_SIZE)
+            {
+                // Need to prep some data for the upper triangular calculation
+                const I myRow = binSearch(csr_row_ptr, row, stop_row, (col + i), idx_base);
+                const J myCol = csr_col_ind[col + i] - idx_base;
+
+                // Coming in, partial_sums contains the matrix data, so this allows
+                // us to reach into the output and calculate this piece of the upper
+                // triangular.
+                if((myCol != myRow) && (col + i) < (csr_row_ptr[stop_row] - idx_base))
+                {
+                    if(myCol >= (stop_cols_idx) && myCol < stop_row)
+                        rocsparse::atomic_add(scols_in_rows,
+                                              myCol - (stop_cols_idx),
+                                              max_rows,
+                                              (partial_sums[lid + i] * x[myRow]));
+                    else
+                        rocsparse::atomic_add(y, myCol, m, (partial_sums[lid + i] * x[myRow]));
+                }
+
+                // For the lower triangular, the matrix value is already in partial_sums.
+                // Calculate the mat*x for the lower triangular and place it into
+                // partial_sums.
+                partial_sums[lid + i] *= x[myCol];
+            }
+#else
             if(col + BLOCKSIZE - WG_SIZE < nnz)
             {
                 for(J i = 0; i < BLOCKSIZE; i += WG_SIZE)
@@ -231,7 +274,13 @@ namespace rocsparse
             }
             else
             {
-                const I max_to_load = csr_row_ptr[stop_row] - csr_row_ptr[row];
+                // This is required so that we stay in bounds for csr_val[] and csr_col_ind[].
+                // Otherwise, if the matrix's endpoints don't line up with BLOCKSIZE,
+                // we will buffer overflow. On today's dGPUs, this doesn't cause problems.
+                // The values are within a dGPU's page, which is zeroed out on allocation.
+                // However, this may change in the future (e.g. with shared virtual memory.)
+                // This causes a minor performance loss because this is the last workgroup
+                // to be launched, and this loop can't be unrolled.
                 for(I i = 0; (lid + i) < max_to_load; i += WG_SIZE)
                 {
                     // Need to prep some data for the upper triangular calculation
@@ -253,11 +302,12 @@ namespace rocsparse
                     }
 
                     // For the lower triangular, the matrix value is already in partial_sums.
-                    // Calculate the mat*x for thie lower triangular and place it into
+                    // Calculate the mat*x for the lower triangular and place it into
                     // partial_sums.
                     partial_sums[lid + i] *= x[myCol];
                 }
             }
+#endif
 
             __syncthreads();
 
@@ -282,16 +332,22 @@ namespace rocsparse
 
                 // {numThreadsForRed} adjacent threads all work on the same row, so their
                 // start and end values are the same.
-                const int st                = lid / numThreadsForRed;
-                const I   local_first_val   = (csr_row_ptr[row + st] - csr_row_ptr[row]);
-                const I   local_last_val    = csr_row_ptr[row + st + 1] - csr_row_ptr[row];
-                const I   workForEachThread = (local_last_val - local_first_val) / numThreadsForRed;
-                const int threadInBlock     = lid & (numThreadsForRed - 1);
+                const int st            = lid / numThreadsForRed;
+                const int threadInBlock = lid & (numThreadsForRed - 1);
 
                 // Not all row blocks are full -- they may have an odd number of rows. As such,
                 // we need to ensure that adjacent-groups only work on real data for this rowBlock.
+                // The csr_row_ptr reads are kept inside the guard: for the last row block
+                // row + st can reach stop_row (== m), so csr_row_ptr[row + st + 1] would read
+                // one past the m+1-length array. Benign on discrete GPUs (padded, zeroed pages)
+                // but faults on unified-memory APUs (e.g. gfx1151).
                 if(st < (stop_row - row))
                 {
+                    const I local_first_val = (csr_row_ptr[row + st] - csr_row_ptr[row]);
+                    const I local_last_val  = csr_row_ptr[row + st + 1] - csr_row_ptr[row];
+                    const I workForEachThread
+                        = (local_last_val - local_first_val) / numThreadsForRed;
+
                     // only works when numThreadsForRed is a power of 2
                     for(I i = 0; i < workForEachThread; i++)
                     {
@@ -463,6 +519,10 @@ namespace rocsparse
                                                                 Y*                   y,
                                                                 rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE == 4 * WG_SIZE, "BLOCKSIZE must be 4 * WG_SIZE.");
+
         __shared__ T partial_sums[BLOCKSIZE];
 
         const int gid = hipBlockIdx_x;

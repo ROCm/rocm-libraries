@@ -36,7 +36,7 @@ extern "C" {
 *  \brief Scatter elements from a sparse vector into a dense vector.
 *
 *  \details
-*  \p rocsparse_scatter scatters the elements from the sparse vector \f$x\f$ in the dense
+*  \p rocsparse_scatter scatters the elements from the sparse vector \f$x\f$ into the dense
 *  vector \f$y\f$.
 *
 *  \code{.c}
@@ -46,8 +46,8 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_scatter supports the following uniform precision data types for the sparse and dense vectors x and
-*  y.
+*  \p rocsparse_scatter supports the following uniform-precision data types for the sparse and dense vectors \p x and
+*  \p y.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -63,8 +63,8 @@ extern "C" {
 *  </table>
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
@@ -73,7 +73,7 @@ extern "C" {
 *  This routine does not support batched computation.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  x            sparse vector \f$x\f$.
 *  @param[out]

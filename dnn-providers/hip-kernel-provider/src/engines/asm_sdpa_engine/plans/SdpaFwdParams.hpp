@@ -1,0 +1,80 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include "SdpaPlanUtils.hpp"
+
+#include <cstdint>
+#include <string>
+
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
+
+namespace asm_sdpa_engine
+{
+
+/**
+ * @brief Parameters for SDPA forward kernel execution.
+ *
+ * Holds tensor UIDs, dimensions, strides, and attention scale
+ * extracted from the operation graph.
+ */
+struct SdpaFwdParams
+{
+    // Tensor UIDs
+    int64_t qUid;
+    int64_t kUid;
+    int64_t vUid;
+    int64_t oUid;
+    int64_t lseUid = -1; // LSE output, -1 = disabled
+
+    // Tensor dimensions
+    unsigned int batchSize; // B
+    unsigned int numHeadsQ; // H_q
+    unsigned int numHeadsKv; // H_kv
+    unsigned int seqLenQ; // S_q
+    unsigned int seqLenKv; // S_kv
+    unsigned int headDimQk; // D_qk (128 for POC)
+    unsigned int headDimV; // D_v
+
+    // Q tensor strides (in elements)
+    unsigned int qStrideSeq;
+    unsigned int qStrideRow;
+    unsigned int qStrideHead;
+    unsigned int qStrideBatch;
+
+    // K tensor strides (in elements)
+    unsigned int kStrideSeq;
+    unsigned int kStrideHead;
+    unsigned int kStrideBatch;
+
+    // V tensor strides (in elements)
+    unsigned int vStrideSeq;
+    unsigned int vStrideHead;
+    unsigned int vStrideBatch;
+
+    // O tensor strides (in elements)
+    unsigned int oStrideSeq;
+    unsigned int oStrideHead;
+    unsigned int oStrideBatch;
+
+    // LSE tensor stride (in elements).  The forward kernel args struct
+    // (fmha_fwd_v3_args) only exposes s_lse_Hs — no batch stride field.
+    unsigned int lseStrideHead = 0;
+
+    // Tile size
+    unsigned int tileSizeQo;
+
+    // Architecture
+    std::string archString;
+
+    // Mask type
+    plan_utils::MaskType maskType;
+
+    // Attention scale — resolved at execute via resolveScalarOperand().
+    // Supports compile-time constant, runtime-with-default, and pure runtime
+    // user-supplied (RFC 0016 pass-by-value) states.
+    hipdnn_plugin_sdk::ScalarOperand attnScale;
+};
+
+} // namespace asm_sdpa_engine

@@ -27,6 +27,7 @@
 #include <ResultFileReporter.hpp>
 
 #include <cstddef>
+#include <sstream>
 
 namespace Tensile
 {
@@ -60,7 +61,9 @@ namespace Tensile
         template <typename T>
         void ResultFileReporter::reportValue(std::string const& key, T const& value)
         {
-            std::string valueStr = boost::lexical_cast<std::string>(value);
+            std::ostringstream ss;
+            ss << value;
+            std::string valueStr = ss.str();
 
             if(key == ResultKey::Validation)
             {

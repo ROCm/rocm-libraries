@@ -1,0 +1,11 @@
+{
+  "kernel": "wmma_gemm (f16 baseline)",
+  "shape": {
+    "M": 128,
+    "N": 128,
+    "K": 128
+  },
+  "tol": 0.01,
+  "max_abs_diff": 1.8119812e-05,
+  "pass": true
+}

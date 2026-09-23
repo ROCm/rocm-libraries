@@ -1,0 +1,106 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # SK5 requires MFMA + gfx94x/950
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  # Back-to-back enqueues reuse the same Synchronizer workspace, exercising the
+  # per-queue auto-reset across launches.
+  NumWarmups: 2
+  EnqueuesPerSync: 4
+  # Variable per-WG delay drains queues unevenly so the next-neighbor steal fires under contention.
+  SleepPercent: 50
+  # SK5 hybrid-mode paths: 0 = static (SK3 sub-path), 1 = dynamic per-queue
+  # (SK4 sub-path, where work stealing applies). Crossed with StreamKWorkStealing below.
+  StreamKHybridMode: [0, 1]
+
+# Shared SK5-hybrid fork entries; StreamKWorkStealing forked over [0, 1] to
+# validate both stealing-off and stealing-on across both hybrid sub-paths.
+.SkHybridCommonFork: &sk_hybrid_common_fork
+  - KernelLanguage: ["Assembly"]
+  - PrefetchLocalRead: [1]
+  - 1LDSBuffer: [1]
+  - ExpandPointerSwap: [False]
+  - GlobalSplitU: [0]
+  - MIArchVgpr: [False]
+  - PrefetchGlobalRead: [2]
+  - ScheduleIterAlg: [3]
+  - SourceSwap: [True]
+  - StoreRemapVectorWidth: [0]
+  - StreamK: [5]
+  - StreamKWorkStealing: [0, 1]
+  - TransposeLDS: [0]
+  - WorkGroupMapping: [1]
+
+.SkHybridBpsg: &sk_hybrid_bpsg
+  InitialSolutionParameters:
+  BenchmarkCommonParameters: *sk_hybrid_common_fork
+  BenchmarkForkParameters:
+  JoinParameters:
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    # Aligned and unaligned sizes plus a batched case exercise the neighbor
+    # steal and per-queue auto-reset across repeated launches.
+    - ProblemSizes:
+      - Exact: [512, 512, 1, 512]
+      - Exact: [640, 640, 1, 512]
+      - Exact: [896, 896, 1, 512]
+      - Exact: [384, 384, 3, 256]
+
+BenchmarkProblems:
+
+  - # SGEMM NT - StreamK=5 hybrid with single-hop work stealing (dynamic sub-path)
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # SK5 hybrid - small MI matrix to keep kernel-object size bounded
+      <<: *sk_hybrid_bpsg
+      ForkParameters:
+        - DepthU: [16]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          - [32, 32, 2, 1, 1, 2,2, 2,2]
+          - [16, 16, 4, 1, 1, 2,2, 2,2]
+        - PrefetchLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+
+  - # HGEMM NT - StreamK=5 hybrid with single-hop work stealing
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # SK5 hybrid - small MI matrix
+      <<: *sk_hybrid_bpsg
+      ForkParameters:
+        - DepthU: [64]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - MatrixInstruction:
+          - [32, 32, 8, 1, 1, 2,2, 2,2]
+          - [16, 16, 16, 1, 1, 2,2, 2,2]
+        - PrefetchLocalRead: [1]

@@ -1,14 +1,26 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <filesystem>
+#include <limits>
 #include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <tuple>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "HipdnnException.hpp"
+#include "PlatformUtils.hpp"
+#include "ScopedBackendWarningCapture.hpp"
+#include "TestPluginConstants.hpp"
 #include "descriptors/BackendDescriptor.hpp"
 #include "descriptors/DescriptorFactory.hpp"
 #include "descriptors/DescriptorTestUtils.hpp"
@@ -18,10 +30,21 @@
 #include "descriptors/TestMacros.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "descriptors/mocks/MockDescriptor.hpp"
+#include "descriptors/mocks/MockEnginePluginResourceManager.hpp"
+#include "logging/Logging.hpp"
+#include "plugin/EnginePluginManager.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
+#include "plugin/SharedLibrary.hpp"
+#include "plugins/codegen_fixture/CodegenFixturePlugin.hpp"
 #include "plugins/mocks/MockEnginePlugin.hpp"
 #include "plugins/mocks/MockEnginePluginManager.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_plugin_sdk/engine_api_version.h>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
@@ -30,10 +53,10 @@ using namespace ::testing;
 
 TEST(TestEnginePluginResourceManager, PluginLoading)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
 
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*mockPlugin, createHandle())
@@ -47,16 +70,131 @@ TEST(TestEnginePluginResourceManager, PluginLoading)
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
     }
+}
+
+TEST(TestEngineDetailsWrapper, DestroysPluginDetailsWhenFlatbufferVerificationFails)
+{
+    auto resourceManager = std::make_shared<MockEnginePluginResourceManager>();
+    std::array<uint8_t, 4> malformedBytes{1, 2, 3, 4};
+    hipdnnPluginConstData_t returnedDetails{malformedBytes.data(), malformedBytes.size()};
+
+    EXPECT_CALL(*resourceManager, getEngineDetails(100, nullptr, _))
+        .WillOnce([&returnedDetails](
+                      int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* engineDetails) {
+            *engineDetails = returnedDetails;
+        });
+    EXPECT_CALL(*resourceManager, destroyEngineDetails(100, _))
+        .WillOnce([](int64_t, hipdnnPluginConstData_t* engineDetails) {
+            EXPECT_NE(engineDetails, nullptr);
+            EXPECT_NE(engineDetails->ptr, nullptr);
+            EXPECT_EQ(engineDetails->size, 4u);
+        });
+
+    ASSERT_THROW_HIPDNN_STATUS(EngineDetailsWrapper(resourceManager, 100, nullptr),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestEngineDetailsWrapper, MoveAssignmentDestroysDestinationDetailsAndTransfersSourceDetails)
+{
+    auto resourceManager = std::make_shared<MockEnginePluginResourceManager>();
+    auto detailsA = createValidEngineDetails(100);
+    auto detailsB = createValidEngineDetails(200);
+    hipdnnPluginConstData_t returnedDetailsA{detailsA.GetBufferPointer(), detailsA.GetSize()};
+    hipdnnPluginConstData_t returnedDetailsB{detailsB.GetBufferPointer(), detailsB.GetSize()};
+
+    EXPECT_CALL(*resourceManager, getEngineDetails(100, nullptr, _))
+        .WillOnce([&returnedDetailsA](
+                      int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* engineDetails) {
+            *engineDetails = returnedDetailsA;
+        });
+    EXPECT_CALL(*resourceManager, getEngineDetails(200, nullptr, _))
+        .WillOnce([&returnedDetailsB](
+                      int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* engineDetails) {
+            *engineDetails = returnedDetailsB;
+        });
+
+    bool destroyedA = false;
+    bool destroyedB = false;
+
+    {
+        EngineDetailsWrapper destination(resourceManager, 100, nullptr);
+        EngineDetailsWrapper source(resourceManager, 200, nullptr);
+
+        EXPECT_CALL(*resourceManager, destroyEngineDetails(100, _))
+            .WillOnce(
+                [&destroyedA, &returnedDetailsA](int64_t, hipdnnPluginConstData_t* engineDetails) {
+                    destroyedA = true;
+                    EXPECT_EQ(engineDetails->ptr, returnedDetailsA.ptr);
+                    EXPECT_EQ(engineDetails->size, returnedDetailsA.size);
+                });
+        EXPECT_CALL(*resourceManager, destroyEngineDetails(200, _)).Times(0);
+
+        destination = std::move(source);
+
+        EXPECT_TRUE(destroyedA);
+        Mock::VerifyAndClearExpectations(resourceManager.get());
+
+        EXPECT_CALL(*resourceManager, destroyEngineDetails(200, _))
+            .WillOnce(
+                [&destroyedB, &returnedDetailsB](int64_t, hipdnnPluginConstData_t* engineDetails) {
+                    destroyedB = true;
+                    EXPECT_EQ(engineDetails->ptr, returnedDetailsB.ptr);
+                    EXPECT_EQ(engineDetails->size, returnedDetailsB.size);
+                });
+    }
+
+    EXPECT_TRUE(destroyedB);
+}
+
+TEST(TestEngineExecutionContextWrapper,
+     MoveAssignmentDestroysDestinationContextAndTransfersSourceContext)
+{
+    auto resourceManager = std::make_shared<MockEnginePluginResourceManager>();
+    auto contextA = hipdnnEnginePluginExecutionContext_t(0xaaaaaaaa);
+    auto contextB = hipdnnEnginePluginExecutionContext_t(0xbbbbbbbb);
+    const hipdnnPluginConstData_t fakeEngineConfig{reinterpret_cast<const void*>("fake_config"),
+                                                   11};
+
+    EXPECT_CALL(*resourceManager, createExecutionContext(100, &fakeEngineConfig, nullptr))
+        .WillOnce(::testing::Return(contextA));
+    EXPECT_CALL(*resourceManager, createExecutionContext(200, &fakeEngineConfig, nullptr))
+        .WillOnce(::testing::Return(contextB));
+
+    bool destroyedA = false;
+    bool destroyedB = false;
+
+    {
+        EngineExecutionContextWrapper destination(resourceManager, 100, &fakeEngineConfig, nullptr);
+        EngineExecutionContextWrapper source(resourceManager, 200, &fakeEngineConfig, nullptr);
+
+        EXPECT_CALL(*resourceManager, destroyExecutionContext(100, contextA))
+            .WillOnce([&destroyedA](int64_t, hipdnnEnginePluginExecutionContext_t) {
+                destroyedA = true;
+            });
+        EXPECT_CALL(*resourceManager, destroyExecutionContext(200, contextB)).Times(0);
+
+        destination = std::move(source);
+
+        EXPECT_TRUE(destroyedA);
+        Mock::VerifyAndClearExpectations(resourceManager.get());
+
+        EXPECT_CALL(*resourceManager, destroyExecutionContext(200, contextB))
+            .WillOnce([&destroyedB](int64_t, hipdnnEnginePluginExecutionContext_t) {
+                destroyedB = true;
+            });
+    }
+
+    EXPECT_TRUE(destroyedB);
 }
 
 TEST(TestEnginePluginResourceManager, SetStream)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
 
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -73,7 +211,7 @@ TEST(TestEnginePluginResourceManager, SetStream)
     EXPECT_CALL(*mockPlugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         resourceManager.setStream(hipStream_t(0x12345678));
     }
@@ -86,7 +224,7 @@ TEST(TestEnginePluginResourceManager, StaticPluginPathManagementSetAndGetSingleP
     EnginePluginResourceManager::setPluginPaths(pluginPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
     auto retrievedPaths = EnginePluginResourceManager::getPluginPaths();
 
-    std::set<std::filesystem::path> expectedPaths(pluginPaths.begin(), pluginPaths.end());
+    const std::set<std::filesystem::path> expectedPaths(pluginPaths.begin(), pluginPaths.end());
     EXPECT_EQ(retrievedPaths, expectedPaths);
 }
 
@@ -98,27 +236,28 @@ TEST(TestEnginePluginResourceManager, StaticPluginPathManagementSetAndGetMultipl
     EnginePluginResourceManager::setPluginPaths(pluginPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
     auto retrievedPaths = EnginePluginResourceManager::getPluginPaths();
 
-    std::set<std::filesystem::path> expectedPaths(pluginPaths.begin(), pluginPaths.end());
+    const std::set<std::filesystem::path> expectedPaths(pluginPaths.begin(), pluginPaths.end());
     EXPECT_EQ(retrievedPaths, expectedPaths);
 }
 
 TEST(TestEnginePluginResourceManager, StaticPluginPathManagementAdditiveLoadingMode)
 {
-    std::vector<std::filesystem::path> initialPaths = {"/test/path1"};
+    const std::vector<std::filesystem::path> initialPaths = {"/test/path1"};
     EnginePluginResourceManager::setPluginPaths(initialPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    std::vector<std::filesystem::path> additionalPaths = {"/test/path2", "/test/path3"};
+    const std::vector<std::filesystem::path> additionalPaths = {"/test/path2", "/test/path3"};
     EnginePluginResourceManager::setPluginPaths(additionalPaths, HIPDNN_PLUGIN_LOADING_ADDITIVE);
 
     auto retrievedPaths = EnginePluginResourceManager::getPluginPaths();
 
-    std::set<std::filesystem::path> expectedPaths = {"/test/path1", "/test/path2", "/test/path3"};
+    const std::set<std::filesystem::path> expectedPaths
+        = {"/test/path1", "/test/path2", "/test/path3"};
     EXPECT_EQ(retrievedPaths, expectedPaths);
 }
 
 TEST(TestEnginePluginResourceManager, StaticPluginPathManagementAbsoluteLoadingModeReplacesExisting)
 {
-    std::vector<std::filesystem::path> initialPaths = {"/test/path1", "/test/path2"};
+    const std::vector<std::filesystem::path> initialPaths = {"/test/path1", "/test/path2"};
     EnginePluginResourceManager::setPluginPaths(initialPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     std::vector<std::filesystem::path> newPaths = {"/test/path3", "/test/path4"};
@@ -126,16 +265,16 @@ TEST(TestEnginePluginResourceManager, StaticPluginPathManagementAbsoluteLoadingM
 
     auto retrievedPaths = EnginePluginResourceManager::getPluginPaths();
 
-    std::set<std::filesystem::path> expectedPaths(newPaths.begin(), newPaths.end());
+    const std::set<std::filesystem::path> expectedPaths(newPaths.begin(), newPaths.end());
     EXPECT_EQ(retrievedPaths, expectedPaths);
 }
 
 TEST(TestEnginePluginResourceManager, StaticPluginPathManagementEmptyPathsClearing)
 {
-    std::vector<std::filesystem::path> pluginPaths = {"/test/path1", "/test/path2"};
+    const std::vector<std::filesystem::path> pluginPaths = {"/test/path1", "/test/path2"};
     EnginePluginResourceManager::setPluginPaths(pluginPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    std::vector<std::filesystem::path> emptyPaths;
+    const std::vector<std::filesystem::path> emptyPaths;
     EnginePluginResourceManager::setPluginPaths(emptyPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     auto retrievedPaths = EnginePluginResourceManager::getPluginPaths();
@@ -144,9 +283,9 @@ TEST(TestEnginePluginResourceManager, StaticPluginPathManagementEmptyPathsCleari
 
 TEST(TestEnginePluginResourceManager, MoveConstructor)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -159,20 +298,20 @@ TEST(TestEnginePluginResourceManager, MoveConstructor)
 
     EnginePluginResourceManager rm1(pluginManager);
 
-    EnginePluginResourceManager rm2 = std::move(rm1);
+    const EnginePluginResourceManager rm2 = std::move(rm1);
 
     EXPECT_NO_THROW(rm2.setStream(nullptr));
 }
 
 TEST(TestEnginePluginResourceManager, MoveAssignment)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin1 = std::make_shared<MockEnginePlugin>();
-    std::shared_ptr<MockEnginePlugin> mockPlugin2 = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin1 = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin2 = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins1{mockPlugin1};
     std::vector<std::shared_ptr<EnginePlugin>> plugins2{mockPlugin2};
-    std::shared_ptr<MockEnginePluginManager> pluginManager1
+    const std::shared_ptr<MockEnginePluginManager> pluginManager1
         = std::make_shared<MockEnginePluginManager>();
-    std::shared_ptr<MockEnginePluginManager> pluginManager2
+    const std::shared_ptr<MockEnginePluginManager> pluginManager2
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager1, getPlugins()).WillOnce(::testing::ReturnRef(plugins1));
@@ -201,13 +340,13 @@ TEST(TestEnginePluginResourceManager, MoveAssignment)
 
 TEST(TestEnginePluginResourceManager, SelfMoveAssignment)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData
+    const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -215,6 +354,8 @@ TEST(TestEnginePluginResourceManager, SelfMoveAssignment)
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
     EXPECT_CALL(*mockPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101}));
+    EXPECT_CALL(*mockPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
 
     EXPECT_CALL(*mockPlugin, setStream(hipdnnEnginePluginHandle_t(0xdeadbeef), nullptr)).Times(2);
 
@@ -272,7 +413,7 @@ TEST(TestEnginePluginResourceManager, RapidCreationDestruction)
                     destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
         {
-            EnginePluginResourceManager rm(pluginManager);
+            const EnginePluginResourceManager rm(pluginManager);
         }
     }
 }
@@ -311,7 +452,7 @@ TEST(TestEnginePluginResourceManager, ConcurrentCreationAndPublicMethods)
             {
                 auto pluginManager = std::make_shared<MockEnginePluginManager>();
                 auto mockPlugin = std::make_shared<MockEnginePlugin>();
-                std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+                const std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
 
                 allPluginManagers[t].push_back(pluginManager);
                 allMockPlugins[t].push_back(mockPlugin);
@@ -350,9 +491,9 @@ TEST(TestEnginePluginResourceManager, ConcurrentCreationAndPublicMethods)
 
 TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsNullGraphDescriptor)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -363,7 +504,7 @@ TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsNullGraphDescriptor)
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         ASSERT_THROW_HIPDNN_STATUS(resourceManager.getApplicableEngineIds(nullptr),
                                    HIPDNN_STATUS_INTERNAL_ERROR);
@@ -372,9 +513,9 @@ TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsNullGraphDescriptor)
 
 TEST(TestEnginePluginResourceManager, SetNullStream)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -386,7 +527,7 @@ TEST(TestEnginePluginResourceManager, SetNullStream)
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         EXPECT_NO_THROW(resourceManager.setStream(nullptr));
     }
@@ -394,13 +535,13 @@ TEST(TestEnginePluginResourceManager, SetNullStream)
 
 TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsWithLoadedPlugin)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData = {
+    const hipdnnPluginConstData_t fakeSerializedData = {
         reinterpret_cast<const void*>("fake_graph_data"),
         15 // length of "fake_graph_data"
     };
@@ -410,6 +551,8 @@ TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsWithLoadedPlugin)
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
     EXPECT_CALL(*mockPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
+    EXPECT_CALL(*mockPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
 
     EXPECT_CALL(mockGraphDesc, getSerializedGraph())
         .WillOnce(::testing::Return(fakeSerializedData));
@@ -425,7 +568,7 @@ TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsWithLoadedPlugin)
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
 
@@ -438,17 +581,17 @@ TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsWithLoadedPlugin)
 
 TEST(TestEnginePluginResourceManager, GetWorkspaceSize)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeEngineConfig = {
+    const hipdnnPluginConstData_t fakeEngineConfig = {
         reinterpret_cast<const void*>("fake_config"),
         11 // length of "fake_config"
     };
-    hipdnnPluginConstData_t fakeSerializedData = {
+    const hipdnnPluginConstData_t fakeSerializedData = {
         reinterpret_cast<const void*>("fake_graph_data"),
         15 // length of "fake_graph_data"
     };
@@ -476,7 +619,7 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSize)
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         auto workspaceSize
             = resourceManager.getWorkspaceSize(100, &fakeEngineConfig, &mockGraphDesc);
@@ -487,9 +630,9 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSize)
 
 TEST(TestEnginePluginResourceManager, GetWorkspaceSizeFromExecutionContext)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -500,7 +643,7 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeFromExecutionContext)
     EXPECT_CALL(*mockPlugin, getWorkspaceSize(_, _)).WillOnce(::testing::Return(size_t(4096)));
     EXPECT_CALL(*mockPlugin, destroyHandle(_));
 
-    EnginePluginResourceManager resourceManager(pluginManager);
+    const EnginePluginResourceManager resourceManager(pluginManager);
 
     auto workspaceSize = resourceManager.getWorkspaceSize(
         100, reinterpret_cast<hipdnnEnginePluginExecutionContext_t>(0x12345678));
@@ -509,13 +652,13 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeFromExecutionContext)
 
 TEST(TestEnginePluginResourceManager, GetEngineDetails)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData = {
+    const hipdnnPluginConstData_t fakeSerializedData = {
         reinterpret_cast<const void*>("fake_graph_data"),
         15 // length of "fake_graph_data"
     };
@@ -572,17 +715,17 @@ TEST(TestEnginePluginResourceManager, GetEngineDetails)
 
 TEST(TestEnginePluginResourceManager, CreateExecutionContext)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeEngineConfig = {
+    const hipdnnPluginConstData_t fakeEngineConfig = {
         reinterpret_cast<const void*>("fake_config"),
         11 // length of "fake_config"
     };
-    hipdnnPluginConstData_t fakeSerializedData = {
+    const hipdnnPluginConstData_t fakeSerializedData = {
         reinterpret_cast<const void*>("fake_graph_data"),
         15 // length of "fake_graph_data"
     };
@@ -629,13 +772,13 @@ TEST(TestEnginePluginResourceManager, CreateExecutionContext)
 
 TEST(TestEnginePluginResourceManager, CreateExecutionContextWithInvalidEngineId)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeEngineConfig = {
+    const hipdnnPluginConstData_t fakeEngineConfig = {
         reinterpret_cast<const void*>("fake_config"),
         11 // length of "fake_config"
     };
@@ -664,9 +807,9 @@ TEST(TestEnginePluginResourceManager, CreateExecutionContextWithInvalidEngineId)
 
 TEST(TestEnginePluginResourceManager, ExecuteOpGraphWithNullParameters)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -677,18 +820,264 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphWithNullParameters)
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         ASSERT_THROW_HIPDNN_STATUS(resourceManager.executeOpGraph(nullptr, nullptr),
                                    HIPDNN_STATUS_INTERNAL_ERROR);
     }
 }
 
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextFailsForUnsupportedPlugin)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          _))
+        .WillOnce(::testing::Throw(
+            HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                            "Engine plugin does not support execution context serialization")));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext),
+            HIPDNN_STATUS_NOT_SUPPORTED);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextRejectsNullPluginPayload)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          _))
+        .WillOnce([](hipdnnEnginePluginHandle_t,
+                     hipdnnEnginePluginExecutionContext_t,
+                     hipdnnPluginConstData_t* serializedContext) {
+            *serializedContext = hipdnnPluginConstData_t{nullptr, 4};
+        });
+    EXPECT_CALL(*mockPlugin,
+                destroySerializedExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef), _));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext),
+            HIPDNN_STATUS_PLUGIN_ERROR);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextRejectsEmptyPluginPayload)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 1> payloadBytes{9};
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          _))
+        .WillOnce([&payloadBytes](hipdnnEnginePluginHandle_t,
+                                  hipdnnEnginePluginExecutionContext_t,
+                                  hipdnnPluginConstData_t* serializedContext) {
+            *serializedContext = hipdnnPluginConstData_t{payloadBytes.data(), 0};
+        });
+    EXPECT_CALL(*mockPlugin,
+                destroySerializedExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef), _));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext),
+            HIPDNN_STATUS_PLUGIN_ERROR);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextCopiesPluginPayload)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 4> payloadBytes{9, 8, 7, 6};
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          _))
+        .WillOnce([&payloadBytes](hipdnnEnginePluginHandle_t,
+                                  hipdnnEnginePluginExecutionContext_t,
+                                  hipdnnPluginConstData_t* serializedContext) {
+            *serializedContext = hipdnnPluginConstData_t{payloadBytes.data(), payloadBytes.size()};
+        });
+    EXPECT_CALL(*mockPlugin,
+                destroySerializedExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef), _));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_NO_THROW(resourceManager.serializeExecutionContext(
+            100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext));
+    }
+
+    ASSERT_EQ(serializedContext, std::vector<uint8_t>(payloadBytes.begin(), payloadBytes.end()));
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextRejectsInvalidInputs)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(100, nullptr, serializedContext),
+            HIPDNN_STATUS_BAD_PARAM);
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                101, hipdnnEnginePluginExecutionContext_t(0xcafebabe), serializedContext),
+            HIPDNN_STATUS_INTERNAL_ERROR);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedFailsForUnsupportedPlugin)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 3> serializedContextBytes{4, 5, 6};
+    const hipdnnPluginConstData_t serializedContext{serializedContextBytes.data(),
+                                                    serializedContextBytes.size()};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                createExecutionContextFromSerialized(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                                     &serializedContext))
+        .WillOnce(::testing::Throw(
+            HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                            "Engine plugin does not support execution context serialization")));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            EnginePluginResourceManager::createExecutionContextFromSerialized(
+                std::make_shared<EnginePluginResourceManager>(std::move(resourceManager)),
+                100,
+                &serializedContext),
+            HIPDNN_STATUS_NOT_SUPPORTED);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedPropagatesPluginFailure)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 3> serializedContextBytes{4, 5, 6};
+    const hipdnnPluginConstData_t serializedContext{serializedContextBytes.data(),
+                                                    serializedContextBytes.size()};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                createExecutionContextFromSerialized(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                                     &serializedContext))
+        .WillOnce(::testing::Throw(HipdnnException(
+            HIPDNN_STATUS_PLUGIN_ERROR, "Plugin rejected serialized execution context")));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            EnginePluginResourceManager::createExecutionContextFromSerialized(
+                std::make_shared<EnginePluginResourceManager>(std::move(resourceManager)),
+                100,
+                &serializedContext),
+            HIPDNN_STATUS_PLUGIN_ERROR);
+    }
+}
+
 TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedPlan)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
@@ -699,10 +1088,10 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedPlan)
     auto mockVariantPack
         = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(variantWrapper.get());
 
-    std::vector<int64_t> tensorIds = {1, 2, 3};
-    std::vector<const void*> dataPtrs = {reinterpret_cast<void*>(0x1000),
-                                         reinterpret_cast<void*>(0x2000),
-                                         reinterpret_cast<void*>(0x3000)};
+    const std::vector<int64_t> tensorIds = {1, 2, 3};
+    const std::vector<const void*> dataPtrs = {reinterpret_cast<void*>(0x1000),
+                                               reinterpret_cast<void*>(0x2000),
+                                               reinterpret_cast<void*>(0x3000)};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
     EXPECT_CALL(*mockPlugin, createHandle())
@@ -714,7 +1103,7 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedPlan)
     EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillOnce(::testing::Return(false));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         ASSERT_THROW_HIPDNN_STATUS(
             resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get()),
@@ -724,9 +1113,9 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedPlan)
 
 TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedVariant)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
@@ -737,10 +1126,10 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedVariant)
     auto mockVariantPack
         = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(variantWrapper.get());
 
-    std::vector<int64_t> tensorIds = {1, 2, 3};
-    std::vector<const void*> dataPtrs = {reinterpret_cast<void*>(0x1000),
-                                         reinterpret_cast<void*>(0x2000),
-                                         reinterpret_cast<void*>(0x3000)};
+    const std::vector<int64_t> tensorIds = {1, 2, 3};
+    const std::vector<const void*> dataPtrs = {reinterpret_cast<void*>(0x1000),
+                                               reinterpret_cast<void*>(0x2000),
+                                               reinterpret_cast<void*>(0x3000)};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
     EXPECT_CALL(*mockPlugin, createHandle())
@@ -753,7 +1142,7 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedVariant)
     EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(false));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         ASSERT_THROW_HIPDNN_STATUS(
             resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get()),
@@ -763,20 +1152,14 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedVariant)
 
 TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailTensorMismatch)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
-    auto engineConfigWrapper = createDescriptor<MockEngineConfigDescriptor>();
-    auto engineWrapper = createDescriptor<MockEngineDescriptor>();
     auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
     auto variantWrapper = createDescriptor<MockVariantDescriptor>();
 
-    auto mockEngineConfig = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
-        engineConfigWrapper.get());
-    auto mockEngine
-        = MockDescriptorUtility::asDescriptorUnsafe<MockEngineDescriptor>(engineWrapper.get());
     auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
         executionPlanWrapper.get());
     auto mockVariantPack
@@ -795,20 +1178,17 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailTensorMismatch)
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
-    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
 
-    EXPECT_CALL(*mockExecutionPlan, getEngineConfig())
-        .WillOnce(::testing::Return(mockEngineConfig));
-    EXPECT_CALL(*mockEngineConfig, getEngine()).WillOnce(::testing::Return(mockEngine));
-    EXPECT_CALL(*mockEngine, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
     EXPECT_CALL(*mockVariantPack, getWorkspace())
         .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
     EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
     EXPECT_CALL(*mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         ASSERT_THROW_HIPDNN_STATUS(
             resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get()),
@@ -816,28 +1196,25 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailTensorMismatch)
     }
 }
 
+namespace
+{
 // NOLINTNEXTLINE(readability-identifier-naming)
 MATCHER_P2(MatchesMemory, data, size, "")
 {
     return memcmp(arg, data, size) == 0;
 }
+} // namespace
 
 TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
-    auto engineConfigWrapper = createDescriptor<MockEngineConfigDescriptor>();
-    auto engineWrapper = createDescriptor<MockEngineDescriptor>();
     auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
     auto variantWrapper = createDescriptor<MockVariantDescriptor>();
 
-    auto mockEngineConfig = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
-        engineConfigWrapper.get());
-    auto mockEngine
-        = MockDescriptorUtility::asDescriptorUnsafe<MockEngineDescriptor>(engineWrapper.get());
     auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
         executionPlanWrapper.get());
     auto mockVariantPack
@@ -855,13 +1232,10 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
-    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
 
-    EXPECT_CALL(*mockExecutionPlan, getEngineConfig())
-        .WillOnce(::testing::Return(mockEngineConfig));
-    EXPECT_CALL(*mockEngineConfig, getEngine()).WillOnce(::testing::Return(mockEngine));
-    EXPECT_CALL(*mockEngine, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
     EXPECT_CALL(*mockVariantPack, getWorkspace())
         .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
     EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
@@ -889,7 +1263,117 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
                                static_cast<uint32_t>(tensorIds.size())));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get());
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ExecuteOpGraphThrowsOnMisalignedTensorPointer)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = createDescriptor<MockVariantDescriptor>();
+
+    auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
+        executionPlanWrapper.get());
+    auto mockVariantPack
+        = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(variantWrapper.get());
+
+    std::vector<int64_t> tensorIds = {1, 2};
+    // Second tensor's pointer (0x1001) violates its 16-byte alignment requirement.
+    std::vector<const void*> dataPtrs
+        = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x1001)};
+    std::vector<int64_t> planUids = {1, 2};
+    std::vector<int64_t> planAlignments = {16, 16};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
+
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockVariantPack, getWorkspace())
+        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
+    EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
+    EXPECT_CALL(*mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+    EXPECT_CALL(*mockExecutionPlan, getTensorUids()).WillRepeatedly(::testing::ReturnRef(planUids));
+    EXPECT_CALL(*mockExecutionPlan, getTensorAlignments())
+        .WillRepeatedly(::testing::ReturnRef(planAlignments));
+
+    // The op graph must never be dispatched when alignment validation fails.
+    EXPECT_CALL(*mockPlugin, executeOpGraph(_, _, _, _, _)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get()),
+            HIPDNN_STATUS_BAD_PARAM);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ExecuteOpGraphSucceedsWhenTensorPointersAreAligned)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = createDescriptor<MockVariantDescriptor>();
+
+    auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
+        executionPlanWrapper.get());
+    auto mockVariantPack
+        = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(variantWrapper.get());
+
+    std::vector<int64_t> tensorIds = {1, 2};
+    // 0x1000 satisfies 256-byte alignment, 0x2000 satisfies 64-byte alignment.
+    std::vector<const void*> dataPtrs
+        = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000)};
+    std::vector<int64_t> planUids = {1, 2};
+    std::vector<int64_t> planAlignments = {256, 64};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
+
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockVariantPack, getWorkspace())
+        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
+    EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
+    EXPECT_CALL(*mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+    EXPECT_CALL(*mockExecutionPlan, getTensorUids()).WillRepeatedly(::testing::ReturnRef(planUids));
+    EXPECT_CALL(*mockExecutionPlan, getTensorAlignments())
+        .WillRepeatedly(::testing::ReturnRef(planAlignments));
+    EXPECT_CALL(*mockExecutionPlan, getExecutionContext())
+        .WillOnce(::testing::Return(hipdnnEnginePluginExecutionContext_t(0xcafebabe)));
+
+    EXPECT_CALL(*mockPlugin,
+                executeOpGraph(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                               hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                               reinterpret_cast<void*>(0x4000),
+                               _,
+                               static_cast<uint32_t>(tensorIds.size())));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get());
     }
@@ -897,9 +1381,9 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
 
 TEST(TestEnginePluginResourceManager, GetLoadedPluginFiles)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     std::set<std::filesystem::path> expectedPluginFiles
@@ -916,7 +1400,7 @@ TEST(TestEnginePluginResourceManager, GetLoadedPluginFiles)
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         size_t numPlugins = 0;
         size_t maxStringLen = 0;
@@ -938,18 +1422,18 @@ TEST(TestEnginePluginResourceManager, GetLoadedPluginFiles)
             resourceManager.getLoadedPluginFiles(&numPlugins, pluginPaths.data(), &maxStringLen));
 
         // Note: std::set ordering may differ, so we check that both paths are present
-        std::set<std::string> returnedPaths
+        const std::set<std::string> returnedPaths
             = {std::string(pluginPaths[0]), std::string(pluginPaths[1])};
-        std::set<std::string> expectedPaths = {"/path/to/plugin1.so", "/path/to/plugin2.so"};
+        const std::set<std::string> expectedPaths = {"/path/to/plugin1.so", "/path/to/plugin2.so"};
         EXPECT_EQ(returnedPaths, expectedPaths);
     }
 }
 
 TEST(TestEnginePluginResourceManager, GetWorkspaceSizeNullEngineConfig)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
@@ -962,7 +1446,7 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeNullEngineConfig)
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         ASSERT_THROW_HIPDNN_STATUS(resourceManager.getWorkspaceSize(100, nullptr, &mockGraphDesc),
                                    HIPDNN_STATUS_INTERNAL_ERROR);
@@ -971,13 +1455,13 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeNullEngineConfig)
 
 TEST(TestEnginePluginResourceManager, GetWorkspaceSizeThrowsExceptionForInvalidEngineId)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeEngineConfig = {
+    const hipdnnPluginConstData_t fakeEngineConfig = {
         reinterpret_cast<const void*>("fake_config"),
         11 // length of "fake_config"
     };
@@ -990,7 +1474,7 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeThrowsExceptionForInvalidE
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         ASSERT_THROW_HIPDNN_STATUS(
             resourceManager.getWorkspaceSize(200, &fakeEngineConfig, &mockGraphDesc),
@@ -1000,9 +1484,9 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeThrowsExceptionForInvalidE
 
 TEST(TestEnginePluginResourceManager, GetWorkspaceSizeFromExecutionContextNullExecutionContext)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -1012,7 +1496,7 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeFromExecutionContextNullEx
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
     EXPECT_CALL(*mockPlugin, destroyHandle(_));
 
-    EnginePluginResourceManager resourceManager(pluginManager);
+    const EnginePluginResourceManager resourceManager(pluginManager);
 
     ASSERT_THROW_HIPDNN_STATUS(resourceManager.getWorkspaceSize(100, nullptr),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -1021,9 +1505,9 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeFromExecutionContextNullEx
 TEST(TestEnginePluginResourceManager,
      GetWorkspaceSizeFromExecutionContextThrowsExceptionForInvalidEngineId)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -1033,7 +1517,7 @@ TEST(TestEnginePluginResourceManager,
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
     EXPECT_CALL(*mockPlugin, destroyHandle(_));
 
-    EnginePluginResourceManager resourceManager(pluginManager);
+    const EnginePluginResourceManager resourceManager(pluginManager);
 
     ASSERT_THROW_HIPDNN_STATUS(
         resourceManager.getWorkspaceSize(
@@ -1043,9 +1527,9 @@ TEST(TestEnginePluginResourceManager,
 
 TEST(TestEnginePluginResourceManager, SetPluginPathsWithActiveResourceManager)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -1056,17 +1540,17 @@ TEST(TestEnginePluginResourceManager, SetPluginPathsWithActiveResourceManager)
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
         std::vector<std::filesystem::path> pluginPaths = {"/test/path"};
 
         EXPECT_NO_THROW(EnginePluginResourceManager::setPluginPaths(
             pluginPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE));
 
         auto retrievedPaths = EnginePluginResourceManager::getPluginPaths();
-        std::set<std::filesystem::path> expectedPaths(pluginPaths.begin(), pluginPaths.end());
+        const std::set<std::filesystem::path> expectedPaths(pluginPaths.begin(), pluginPaths.end());
         EXPECT_EQ(retrievedPaths, expectedPaths);
 
-        std::vector<std::filesystem::path> emptyPaths;
+        const std::vector<std::filesystem::path> emptyPaths;
         EXPECT_NO_THROW(EnginePluginResourceManager::setPluginPaths(
             emptyPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE));
     }
@@ -1074,13 +1558,13 @@ TEST(TestEnginePluginResourceManager, SetPluginPathsWithActiveResourceManager)
 
 TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleThrowsHipdnnException)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData
+    const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -1095,7 +1579,7 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleThro
 
     {
         // Constructor should not throw, but the plugin should be skipped
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         // Verify no engines were registered
         EXPECT_CALL(mockGraphDesc, getSerializedGraph())
@@ -1107,13 +1591,13 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleThro
 
 TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleThrowsStdException)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData
+    const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -1125,7 +1609,7 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleThro
     EXPECT_CALL(*mockPlugin, getApplicableEngineIds(testing::_, testing::_)).Times(0);
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         // Verify no engines were registered
         EXPECT_CALL(mockGraphDesc, getSerializedGraph())
@@ -1137,13 +1621,13 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleThro
 
 TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleReturnsNull)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData
+    const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -1154,7 +1638,7 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleRetu
     EXPECT_CALL(*mockPlugin, getApplicableEngineIds(testing::_, testing::_)).Times(0);
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         // Verify no engines were registered
         EXPECT_CALL(mockGraphDesc, getSerializedGraph())
@@ -1166,14 +1650,14 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenCreateHandleRetu
 
 TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginOnHandleCollision)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin1 = std::make_shared<MockEnginePlugin>();
-    std::shared_ptr<MockEnginePlugin> mockPlugin2 = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin1 = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin2 = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin1, mockPlugin2};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData
+    const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
 
     // Both plugins return the same handle (simulating a collision)
@@ -1185,6 +1669,8 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginOnHandleCollision)
     EXPECT_CALL(*mockPlugin1, createHandle()).WillOnce(::testing::Return(collisionHandle));
     EXPECT_CALL(*mockPlugin1, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin1, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
     EXPECT_CALL(*mockPlugin1, destroyHandle(collisionHandle));
 
     // Second plugin returns same handle - should be skipped
@@ -1196,7 +1682,7 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginOnHandleCollision)
     EXPECT_CALL(*mockPlugin2, getApplicableEngineIds(testing::_, testing::_)).Times(0);
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         // Verify first plugin loaded successfully, second was skipped
         EXPECT_CALL(mockGraphDesc, getSerializedGraph())
@@ -1210,34 +1696,40 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginOnHandleCollision)
     }
 }
 
-TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenGetAllEngineIdsThrows)
+// A plugin whose engine set cannot be read never gets this far -- the plugin manager
+// rejects it whole while validating the load. What can arrive here is a plugin that
+// loaded with none of its engines admitted.
+TEST(TestEnginePluginResourceManager, ConstructorContributesNothingWhenNoEngineWasAccepted)
 {
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData
+    const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
 
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xdeadbeef);
 
+    // Every engine this plugin declares lost admission.
+    pluginManager->setAcceptedEngineIds(*mockPlugin, {});
+
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
-    EXPECT_CALL(*mockPlugin, name()).WillRepeatedly(::testing::Return("EngineIdFailPlugin"));
+    EXPECT_CALL(*mockPlugin, name()).WillRepeatedly(::testing::Return("AllEnginesDroppedPlugin"));
     EXPECT_CALL(*mockPlugin, createHandle()).WillOnce(::testing::Return(handle));
-    EXPECT_CALL(*mockPlugin, getAllEngineIds())
-        .WillOnce(::testing::Throw(
-            HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Failed to get engine IDs")));
+    EXPECT_CALL(*mockPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
     EXPECT_CALL(*mockPlugin, destroyHandle(handle));
 
-    // Plugin should never be queried since getAllEngineIds failed
-    EXPECT_CALL(*mockPlugin, getApplicableEngineIds(testing::_, testing::_)).Times(0);
+    // The plugin was never told its engines were dropped and keeps offering them,
+    // so the filtering has to happen on this side.
+    EXPECT_CALL(*mockPlugin, getApplicableEngineIds(handle, testing::_))
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
-        // Verify plugin was skipped and handle was cleaned up
         EXPECT_CALL(mockGraphDesc, getSerializedGraph())
             .WillOnce(::testing::Return(fakeSerializedData));
         auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
@@ -1247,14 +1739,14 @@ TEST(TestEnginePluginResourceManager, ConstructorSkipsPluginWhenGetAllEngineIdsT
 
 TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGoodPlugin)
 {
-    std::shared_ptr<MockEnginePlugin> badPlugin = std::make_shared<MockEnginePlugin>();
-    std::shared_ptr<MockEnginePlugin> goodPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> badPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> goodPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{badPlugin, goodPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeSerializedData
+    const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -1269,6 +1761,8 @@ TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGood
     EXPECT_CALL(*goodPlugin, createHandle()).WillOnce(::testing::Return(goodHandle));
     EXPECT_CALL(*goodPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{200, 201}));
+    EXPECT_CALL(*goodPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
     EXPECT_CALL(*goodPlugin, destroyHandle(goodHandle));
 
     EXPECT_CALL(mockGraphDesc, getSerializedGraph())
@@ -1277,7 +1771,7 @@ TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGood
         .WillOnce(::testing::Return(std::vector<int64_t>{200, 201}));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
 
         // Verify good plugin's engines are available
         auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
@@ -1287,13 +1781,137 @@ TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGood
     }
 }
 
+TEST(TestEnginePluginResourceManager, GetEngineInfosSinglePlugin)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100, 101}));
+    EXPECT_CALL(*mockPlugin, name()).WillRepeatedly(::testing::Return("test-plugin"));
+    EXPECT_CALL(*mockPlugin, version()).WillRepeatedly(::testing::Return("1.0"));
+    EXPECT_CALL(*mockPlugin, type()).WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_ENGINE));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 2);
+
+        // Results are sorted by engineName. formatEngineIdHex(100) = "0x0000000000000064",
+        // formatEngineIdHex(101) = "0x0000000000000065"
+        EXPECT_EQ(infos[0].engineId, 100);
+        EXPECT_EQ(infos[0].engineName, "0x0000000000000064");
+        EXPECT_EQ(infos[0].pluginName, "test-plugin");
+        EXPECT_EQ(infos[0].version, "1.0");
+        EXPECT_EQ(infos[0].type, "HIPDNN_PLUGIN_TYPE_ENGINE");
+
+        EXPECT_EQ(infos[1].engineId, 101);
+        EXPECT_EQ(infos[1].engineName, "0x0000000000000065");
+        EXPECT_EQ(infos[1].pluginName, "test-plugin");
+        EXPECT_EQ(infos[1].version, "1.0");
+        EXPECT_EQ(infos[1].type, "HIPDNN_PLUGIN_TYPE_ENGINE");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosMultiplePlugins)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin1 = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> mockPlugin2 = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin1, mockPlugin2};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+
+    EXPECT_CALL(*mockPlugin1, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin1, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{200}));
+    EXPECT_CALL(*mockPlugin1, name()).WillRepeatedly(::testing::Return("plugin-alpha"));
+    EXPECT_CALL(*mockPlugin1, version()).WillRepeatedly(::testing::Return("2.0"));
+    EXPECT_CALL(*mockPlugin1, type()).WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_ENGINE));
+    EXPECT_CALL(*mockPlugin1, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    EXPECT_CALL(*mockPlugin2, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xcafebabe)));
+    EXPECT_CALL(*mockPlugin2, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin2, name()).WillRepeatedly(::testing::Return("plugin-beta"));
+    EXPECT_CALL(*mockPlugin2, version()).WillRepeatedly(::testing::Return("3.0"));
+    EXPECT_CALL(*mockPlugin2, type())
+        .WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_UNSPECIFIED));
+    EXPECT_CALL(*mockPlugin2, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xcafebabe))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 2);
+
+        // Sorted by engineName: "0x0000000000000064" (100) < "0x00000000000000C8" (200)
+        EXPECT_EQ(infos[0].engineId, 100);
+        EXPECT_EQ(infos[0].engineName, "0x0000000000000064");
+        EXPECT_EQ(infos[0].pluginName, "plugin-beta");
+        EXPECT_EQ(infos[0].version, "3.0");
+        EXPECT_EQ(infos[0].type, "HIPDNN_PLUGIN_TYPE_UNSPECIFIED");
+
+        EXPECT_EQ(infos[1].engineId, 200);
+        EXPECT_EQ(infos[1].engineName, "0x00000000000000C8");
+        EXPECT_EQ(infos[1].pluginName, "plugin-alpha");
+        EXPECT_EQ(infos[1].version, "2.0");
+        EXPECT_EQ(infos[1].type, "HIPDNN_PLUGIN_TYPE_ENGINE");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosNoPlugins)
+{
+    std::vector<std::shared_ptr<EnginePlugin>> plugins;
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        EXPECT_TRUE(infos.empty());
+    }
+}
+
+// Test subclass to access the protected default constructor
+class TestableEnginePluginResourceManager : public EnginePluginResourceManager
+{
+public:
+    TestableEnginePluginResourceManager() = default;
+};
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosNullPluginManager)
+{
+    const TestableEnginePluginResourceManager resourceManager;
+
+    auto infos = resourceManager.getEngineInfos();
+
+    EXPECT_TRUE(infos.empty());
+}
+
 TEST(TestEnginePluginResourceManager, ConstructorHandlesMultipleBadPlugins)
 {
-    std::shared_ptr<MockEnginePlugin> nullPlugin = std::make_shared<MockEnginePlugin>();
-    std::shared_ptr<MockEnginePlugin> throwingPlugin = std::make_shared<MockEnginePlugin>();
-    std::shared_ptr<MockEnginePlugin> goodPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> nullPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> throwingPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> goodPlugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{nullPlugin, throwingPlugin, goodPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
         = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
@@ -1316,8 +1934,2294 @@ TEST(TestEnginePluginResourceManager, ConstructorHandlesMultipleBadPlugins)
     EXPECT_CALL(*goodPlugin, destroyHandle(goodHandle));
 
     {
-        EnginePluginResourceManager resourceManager(pluginManager);
+        const EnginePluginResourceManager resourceManager(pluginManager);
         // Verify good plugin was loaded by calling setStream
         EXPECT_NO_THROW(resourceManager.setStream(nullptr));
     }
+}
+
+// =============================================================================
+// Override execute applicability and dispatch tests.
+// =============================================================================
+
+namespace
+{
+
+/// Programs `mockGraphDesc.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT, ...)`
+/// to report `flag`. Uses the shared `SetArg4ToBool` action helper from
+/// `MockDescriptor.hpp`. Other attribute lookups remain unhandled (StrictMock
+/// would fail; NaggyMock will warn, which is the existing test convention).
+void programOverrideFlag(MockGraphDescriptor& mockGraphDesc, bool flag)
+{
+    EXPECT_CALL(mockGraphDesc,
+                getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                             HIPDNN_TYPE_BOOLEAN,
+                             1,
+                             ::testing::_,
+                             ::testing::_))
+        .WillRepeatedly(SetArg4ToBool(flag));
+}
+
+enum class OverrideFlagReadMode
+{
+    RETURNS_TRUE,
+    RETURNS_FALSE,
+    THROWS_NOT_SUPPORTED,
+    RETURNS_COUNT_ZERO,
+    THROWS_INTERNAL_ERROR
+};
+
+void programOverrideFlagRead(MockGraphDescriptor& mockGraphDesc, OverrideFlagReadMode mode)
+{
+    switch(mode)
+    {
+    case OverrideFlagReadMode::RETURNS_TRUE:
+        programOverrideFlag(mockGraphDesc, /*flag=*/true);
+        break;
+    case OverrideFlagReadMode::RETURNS_FALSE:
+        programOverrideFlag(mockGraphDesc, /*flag=*/false);
+        break;
+    case OverrideFlagReadMode::THROWS_NOT_SUPPORTED:
+        EXPECT_CALL(mockGraphDesc,
+                    getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                 HIPDNN_TYPE_BOOLEAN,
+                                 1,
+                                 ::testing::_,
+                                 ::testing::_))
+            .WillOnce(::testing::Throw(
+                HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED, "override flag not supported")));
+        break;
+    case OverrideFlagReadMode::RETURNS_COUNT_ZERO:
+        EXPECT_CALL(mockGraphDesc,
+                    getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                 HIPDNN_TYPE_BOOLEAN,
+                                 1,
+                                 ::testing::_,
+                                 ::testing::_))
+            .WillOnce([](hipdnnBackendAttributeName_t,
+                         hipdnnBackendAttributeType_t,
+                         int64_t,
+                         int64_t* elementCount,
+                         void*) { *elementCount = 0; });
+        break;
+    case OverrideFlagReadMode::THROWS_INTERNAL_ERROR:
+        EXPECT_CALL(mockGraphDesc,
+                    getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                 HIPDNN_TYPE_BOOLEAN,
+                                 1,
+                                 ::testing::_,
+                                 ::testing::_))
+            .WillOnce(::testing::Throw(
+                HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "override flag read failed")));
+        break;
+    default:
+        break;
+    }
+}
+
+} // namespace
+
+struct ApplicabilityFilterCase
+{
+    const char* name;
+    std::string_view apiVersion;
+    OverrideFlagReadMode flagReadMode;
+    int hasOverrideExecute = -1; // -1: not queried, 0: queried false, 1: queried true.
+    std::vector<int64_t> expectedEngineIds;
+    hipdnnStatus_t expectedThrow = HIPDNN_STATUS_SUCCESS;
+};
+
+class TestEnginePluginResourceManagerApplicabilityFilter
+    : public ::testing::TestWithParam<ApplicabilityFilterCase>
+{
+};
+
+TEST_P(TestEnginePluginResourceManagerApplicabilityFilter, SinglePluginVersionAndFlagMatrix)
+{
+    const auto& testCase = GetParam();
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("MockPlugin"));
+    EXPECT_CALL(*plugin, apiVersion()).WillRepeatedly(::testing::Return(testCase.apiVersion));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlagRead(mockGraphDesc, testCase.flagReadMode);
+
+    if(testCase.hasOverrideExecute >= 0)
+    {
+        EXPECT_CALL(*plugin, hasOverrideExecute())
+            .WillOnce(::testing::Return(testCase.hasOverrideExecute == 1));
+    }
+    else
+    {
+        EXPECT_CALL(*plugin, hasOverrideExecute()).Times(0);
+    }
+
+    if(testCase.expectedThrow == HIPDNN_STATUS_SUCCESS && !testCase.expectedEngineIds.empty())
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+            .WillOnce(::testing::Return(testCase.expectedEngineIds));
+    }
+    else
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+    }
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    if(testCase.expectedThrow != HIPDNN_STATUS_SUCCESS)
+    {
+        ASSERT_THROW_HIPDNN_STATUS(resourceManager.getApplicableEngineIds(&mockGraphDesc),
+                                   testCase.expectedThrow);
+        return;
+    }
+
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_EQ(engineIds, testCase.expectedEngineIds);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SinglePlugin,
+    TestEnginePluginResourceManagerApplicabilityFilter,
+    ::testing::Values(
+        ApplicabilityFilterCase{"BaselineExcludedForOverrideGraph",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::RETURNS_TRUE,
+                                -1,
+                                {}},
+        ApplicabilityFilterCase{"BaselineIncludedForRegularGraph",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::RETURNS_FALSE,
+                                -1,
+                                {100}},
+        ApplicabilityFilterCase{"BaselineIncludedWhenOverrideFlagUnsupported",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::THROWS_NOT_SUPPORTED,
+                                -1,
+                                {100}},
+        ApplicabilityFilterCase{"BaselineIncludedWhenOverrideFlagCountZero",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::RETURNS_COUNT_ZERO,
+                                -1,
+                                {100}},
+        ApplicabilityFilterCase{"OverrideFlagReadFailurePropagates",
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                OverrideFlagReadMode::THROWS_INTERNAL_ERROR,
+                                -1,
+                                {},
+                                HIPDNN_STATUS_INTERNAL_ERROR},
+        ApplicabilityFilterCase{"OverrideCapableIncludedForOverrideGraph",
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                OverrideFlagReadMode::RETURNS_TRUE,
+                                1,
+                                {100}},
+        ApplicabilityFilterCase{"OverrideVersionWithoutSymbolExcludedForOverrideGraph",
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                OverrideFlagReadMode::RETURNS_TRUE,
+                                0,
+                                {}},
+        ApplicabilityFilterCase{"OverrideCapableIncludedForRegularGraph",
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                OverrideFlagReadMode::RETURNS_FALSE,
+                                -1,
+                                {100}}),
+    [](const auto& info) { return std::string(info.param.name); });
+
+// Two plugins at K_OVERRIDE_EXECUTE_MIN_API_VERSION both contribute engines for
+// an override-flag graph; the filter does not short-circuit.
+TEST(TestEnginePluginResourceManager,
+     ApplicabilityFilterIncludesAllOverrideCapablePluginsForOverrideGraph)
+{
+    auto pluginA = std::make_shared<MockEnginePlugin>();
+    auto pluginB = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{pluginA, pluginB};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*pluginA, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xaaaaaaaa)));
+    EXPECT_CALL(*pluginA, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*pluginA, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
+    EXPECT_CALL(*pluginA, destroyHandle(hipdnnEnginePluginHandle_t(0xaaaaaaaa)));
+
+    EXPECT_CALL(*pluginB, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xbbbbbbbb)));
+    EXPECT_CALL(*pluginB, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{200}));
+    EXPECT_CALL(*pluginB, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
+    EXPECT_CALL(*pluginB, destroyHandle(hipdnnEnginePluginHandle_t(0xbbbbbbbb)));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/true);
+
+    EXPECT_CALL(*pluginA, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xaaaaaaaa), _))
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*pluginB, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xbbbbbbbb), _))
+        .WillOnce(::testing::Return(std::vector<int64_t>{200}));
+    EXPECT_CALL(*pluginA, hasOverrideExecute()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*pluginB, hasOverrideExecute()).WillOnce(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    ASSERT_EQ(engineIds.size(), 2);
+    // Order of plugins iteration is unordered_map-defined; assert as set.
+    const std::set<int64_t> idSet(engineIds.begin(), engineIds.end());
+    EXPECT_EQ(idSet, (std::set<int64_t>{100, 200}));
+}
+
+// With no plugins loaded, an override-flag graph yields an empty applicable
+// engine list; the caller surfaces NOT_SUPPORTED.
+TEST(TestEnginePluginResourceManager, ApplicabilityFilterEmptyWhenNoPluginsLoaded)
+{
+    std::vector<std::shared_ptr<EnginePlugin>> plugins;
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/true);
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_TRUE(engineIds.empty());
+}
+
+namespace
+{
+
+// Common mock setup for executeOpGraph dispatch tests.
+struct DispatchHarness
+{
+    std::shared_ptr<MockEnginePlugin> plugin;
+    std::shared_ptr<MockEnginePluginManager> pluginManager;
+    std::vector<std::shared_ptr<EnginePlugin>> pluginsList;
+    std::unique_ptr<HipdnnBackendDescriptor> executionPlanWrapper;
+    std::unique_ptr<HipdnnBackendDescriptor> variantWrapper;
+    std::shared_ptr<MockExecutionPlanDescriptor> mockExecutionPlan;
+    std::shared_ptr<MockVariantDescriptor> mockVariantPack;
+};
+
+DispatchHarness makeDispatchHarness(int64_t engineId,
+                                    hipdnnEnginePluginHandle_t handle,
+                                    hipdnnEnginePluginExecutionContext_t execCtx)
+{
+    DispatchHarness h;
+    h.plugin = std::make_shared<MockEnginePlugin>();
+    h.pluginsList = {h.plugin};
+    h.pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    h.executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
+    h.variantWrapper = createDescriptor<MockVariantDescriptor>();
+
+    h.mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
+        h.executionPlanWrapper.get());
+    h.mockVariantPack
+        = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(h.variantWrapper.get());
+
+    EXPECT_CALL(*h.pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(h.pluginsList));
+    EXPECT_CALL(*h.plugin, createHandle()).WillOnce(::testing::Return(handle));
+    EXPECT_CALL(*h.plugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{engineId}));
+    EXPECT_CALL(*h.plugin, destroyHandle(handle));
+
+    EXPECT_CALL(*h.mockExecutionPlan, isFinalized()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*h.mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
+
+    EXPECT_CALL(*h.mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(engineId));
+    // getExecutionContext() is called only on the successful dispatch path (not when dispatch
+    // throws before reaching it, e.g. safety-net or bad-param tests).
+    EXPECT_CALL(*h.mockExecutionPlan, getExecutionContext())
+        .WillRepeatedly(::testing::Return(execCtx));
+    return h;
+}
+
+enum class DispatchExpectedPath
+{
+    LEGACY_EXECUTE,
+    THROW_BEFORE_EXECUTE
+};
+
+struct DispatchCase
+{
+    const char* name;
+    int hasOverrideExecute; // -1: not queried, 0: queried false, 1: queried true.
+    bool planOverrideShapeEnabled = true;
+    std::vector<int64_t> overrideUniqueIds;
+    std::vector<int64_t> overrideShapes;
+    std::vector<int64_t> overrideStrides;
+    std::vector<int64_t> overrideLengths;
+    DispatchExpectedPath expectedPath;
+    hipdnnStatus_t expectedThrow = HIPDNN_STATUS_SUCCESS;
+    std::string_view apiVersion = hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION;
+};
+
+} // namespace
+
+class TestEnginePluginResourceManagerDispatchMatrix : public ::testing::TestWithParam<DispatchCase>
+{
+};
+
+TEST_P(TestEnginePluginResourceManagerDispatchMatrix, RoutesOrRejectsOverrideDispatch)
+{
+    const auto& testCase = GetParam();
+    auto h = makeDispatchHarness(/*engineId=*/100,
+                                 hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                 hipdnnEnginePluginExecutionContext_t(0xcafebabe));
+
+    std::vector<int64_t> tensorIds{1, 2, 3};
+    std::vector<const void*> dataPtrs{reinterpret_cast<void*>(0x1000),
+                                      reinterpret_cast<void*>(0x2000),
+                                      reinterpret_cast<void*>(0x3000)};
+    std::vector<int64_t> overrideUniqueIds = testCase.overrideUniqueIds;
+    std::vector<int64_t> overrideShapes = testCase.overrideShapes;
+    std::vector<int64_t> overrideStrides = testCase.overrideStrides;
+    std::vector<int64_t> overrideLengths = testCase.overrideLengths;
+
+    EXPECT_CALL(*h.mockVariantPack, getWorkspace())
+        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
+    EXPECT_CALL(*h.mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
+    EXPECT_CALL(*h.mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+    EXPECT_CALL(*h.mockVariantPack, getOverrideUniqueIds())
+        .WillOnce(::testing::ReturnRef(overrideUniqueIds));
+    EXPECT_CALL(*h.mockVariantPack, getOverrideShapes())
+        .WillOnce(::testing::ReturnRef(overrideShapes));
+    EXPECT_CALL(*h.mockVariantPack, getOverrideStrides())
+        .WillOnce(::testing::ReturnRef(overrideStrides));
+    EXPECT_CALL(*h.mockVariantPack, getOverrideLengths())
+        .WillOnce(::testing::ReturnRef(overrideLengths));
+
+    const bool hasOverrides = !overrideUniqueIds.empty() || !overrideShapes.empty()
+                              || !overrideStrides.empty() || !overrideLengths.empty();
+    if(hasOverrides)
+    {
+        EXPECT_CALL(*h.mockExecutionPlan, isOverrideShapeEnabled())
+            .WillOnce(::testing::Return(testCase.planOverrideShapeEnabled));
+    }
+
+    if(hasOverrides && testCase.planOverrideShapeEnabled && testCase.hasOverrideExecute >= 0)
+    {
+        EXPECT_CALL(*h.plugin, hasOverrideExecute())
+            .WillOnce(::testing::Return(testCase.hasOverrideExecute == 1));
+    }
+    else
+    {
+        EXPECT_CALL(*h.plugin, hasOverrideExecute()).Times(0);
+    }
+
+    if(hasOverrides && testCase.planOverrideShapeEnabled && testCase.hasOverrideExecute == 1)
+    {
+        EXPECT_CALL(*h.plugin, apiVersion()).WillOnce(::testing::Return(testCase.apiVersion));
+    }
+    else
+    {
+        EXPECT_CALL(*h.plugin, apiVersion()).Times(0);
+    }
+
+    EXPECT_CALL(*h.plugin, executeOpGraphWithOverrides(_, _, _, _, _, _, _, _, _, _)).Times(0);
+
+    if(testCase.expectedPath == DispatchExpectedPath::LEGACY_EXECUTE)
+    {
+        EXPECT_CALL(*h.plugin,
+                    executeOpGraph(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                   hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                   reinterpret_cast<void*>(0x4000),
+                                   ::testing::NotNull(),
+                                   static_cast<uint32_t>(3)));
+    }
+    else
+    {
+        EXPECT_CALL(*h.plugin, executeOpGraph(_, _, _, _, _)).Times(0);
+    }
+
+    const EnginePluginResourceManager resourceManager(h.pluginManager);
+    if(testCase.expectedThrow != HIPDNN_STATUS_SUCCESS)
+    {
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get()),
+            testCase.expectedThrow);
+        return;
+    }
+
+    resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    OverrideDispatch,
+    TestEnginePluginResourceManagerDispatchMatrix,
+    ::testing::Values(DispatchCase{"VersionLiarPluginRejected",
+                                   /*hasOverrideExecute=*/0,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {1},
+                                   {2, 3, 4},
+                                   {12, 4, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_NOT_SUPPORTED},
+                      DispatchCase{"NoOverridesRoutesToLegacyEntry",
+                                   /*hasOverrideExecute=*/-1,
+                                   /*planOverrideShapeEnabled=*/false,
+                                   {},
+                                   {},
+                                   {},
+                                   {},
+                                   DispatchExpectedPath::LEGACY_EXECUTE},
+                      DispatchCase{"NoOverridesRoutesToLegacyEntryWhenPlanOverrideEnabled",
+                                   /*hasOverrideExecute=*/-1,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {},
+                                   {},
+                                   {},
+                                   {},
+                                   DispatchExpectedPath::LEGACY_EXECUTE},
+                      DispatchCase{"MismatchedOverrideLengthsRejected",
+                                   /*hasOverrideExecute=*/-1,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {1, 2},
+                                   {2, 3, 4, 5},
+                                   {12, 4, 1, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM},
+                      DispatchCase{"OverrideShapesFlatCountMismatchRejected",
+                                   /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {1},
+                                   {2, 3},
+                                   {12, 4, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM},
+                      DispatchCase{"OverrideStridesFlatCountMismatchRejected",
+                                   /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {1},
+                                   {2, 3, 4},
+                                   {12, 4, 1, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM},
+                      DispatchCase{"ZeroOverrideLengthRejected",
+                                   /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {1},
+                                   {},
+                                   {},
+                                   {0},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND},
+                      DispatchCase{"OverrideLengthExceedsUint32Rejected",
+                                   /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {1},
+                                   {},
+                                   {},
+                                   {static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) + 1},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND},
+                      DispatchCase{"OverrideMetadataRejectedWhenPlanNotOverrideEnabled",
+                                   /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/false,
+                                   {1},
+                                   {2, 3, 4},
+                                   {12, 4, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_NOT_SUPPORTED},
+                      DispatchCase{"OldApiVersionWithOverrideSymbolRejected",
+                                   /*hasOverrideExecute=*/1,
+                                   /*planOverrideShapeEnabled=*/true,
+                                   {1},
+                                   {2, 3, 4},
+                                   {12, 4, 1},
+                                   {3},
+                                   DispatchExpectedPath::THROW_BEFORE_EXECUTE,
+                                   HIPDNN_STATUS_NOT_SUPPORTED,
+                                   hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE}),
+    [](const auto& info) { return std::string(info.param.name); });
+
+// When the variant pack carries override tensors and the plugin exports the
+// override symbol, dispatch must:
+//   - call `executeOpGraphWithOverrides` (NOT `executeOpGraph`),
+//   - reconstruct per-UID shape/stride pointer arrays from the flat buffers
+//     (3 tensors of ranks 3, 4, 4 over an 11-element buffer),
+//   - narrow lengths from int64 to uint32,
+//   - read each variant-pack accessor exactly once (lifetime / mutation safety).
+TEST(TestEnginePluginResourceManager, DispatchRoutesToOverrideEntryWithReconstructedPtrArrays)
+{
+    auto h = makeDispatchHarness(/*engineId=*/100,
+                                 hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                 hipdnnEnginePluginExecutionContext_t(0xcafebabe));
+
+    std::vector<int64_t> tensorIds{1, 2, 3};
+    std::vector<const void*> dataPtrs{reinterpret_cast<void*>(0x1000),
+                                      reinterpret_cast<void*>(0x2000),
+                                      reinterpret_cast<void*>(0x3000)};
+
+    // Three tensors of ranks {3, 4, 4}: flat-buffer offsets are {0, 3, 7}.
+    std::vector<int64_t> overrideUniqueIds{1, 2, 3};
+    std::vector<int64_t> overrideLengths{3, 4, 4};
+    std::vector<int64_t> overrideShapes{// tensor 1 (rank 3)
+                                        2,
+                                        3,
+                                        4,
+                                        // tensor 2 (rank 4)
+                                        1,
+                                        2,
+                                        3,
+                                        4,
+                                        // tensor 3 (rank 4)
+                                        5,
+                                        6,
+                                        7,
+                                        8};
+    std::vector<int64_t> overrideStrides{// tensor 1
+                                         12,
+                                         4,
+                                         1,
+                                         // tensor 2
+                                         24,
+                                         12,
+                                         4,
+                                         1,
+                                         // tensor 3
+                                         336,
+                                         56,
+                                         8,
+                                         1};
+
+    EXPECT_CALL(*h.mockVariantPack, getWorkspace())
+        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
+    EXPECT_CALL(*h.mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
+    EXPECT_CALL(*h.mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+
+    // Each accessor is read exactly once by the dispatch wrapper. WillOnce
+    // here doubles as a strict-arity check.
+    EXPECT_CALL(*h.mockVariantPack, getOverrideUniqueIds())
+        .WillOnce(::testing::ReturnRef(overrideUniqueIds));
+    EXPECT_CALL(*h.mockVariantPack, getOverrideShapes())
+        .WillOnce(::testing::ReturnRef(overrideShapes));
+    EXPECT_CALL(*h.mockVariantPack, getOverrideStrides())
+        .WillOnce(::testing::ReturnRef(overrideStrides));
+    EXPECT_CALL(*h.mockVariantPack, getOverrideLengths())
+        .WillOnce(::testing::ReturnRef(overrideLengths));
+
+    EXPECT_CALL(*h.plugin, hasOverrideExecute()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(*h.plugin, apiVersion())
+        .WillOnce(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
+    EXPECT_CALL(*h.mockExecutionPlan, isOverrideShapeEnabled()).WillOnce(::testing::Return(true));
+
+    // Capture the call to verify length narrowing and pointer reconstruction.
+    EXPECT_CALL(*h.plugin,
+                executeOpGraphWithOverrides(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                            hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                            reinterpret_cast<void*>(0x4000),
+                                            ::testing::NotNull(), // deviceBuffers
+                                            static_cast<uint32_t>(3), // numDeviceBuffers
+                                            static_cast<uint32_t>(3), // numOverrides
+                                            ::testing::_, // overrideUniqueIds
+                                            ::testing::_, // overrideLengths (uint32)
+                                            ::testing::_, // overrideShapes (ptr-array)
+                                            ::testing::_)) // overrideStrides (ptr-array)
+        .WillOnce(::testing::Invoke([&overrideUniqueIds, &overrideShapes, &overrideStrides](
+                                        hipdnnEnginePluginHandle_t,
+                                        hipdnnEnginePluginExecutionContext_t,
+                                        void*,
+                                        const hipdnnPluginDeviceBuffer_t*,
+                                        uint32_t,
+                                        uint32_t numOverrides,
+                                        const int64_t* uniqueIds,
+                                        const uint32_t* lengths,
+                                        const int64_t* const* shapesPerUid,
+                                        const int64_t* const* stridesPerUid) {
+            ASSERT_EQ(numOverrides, 3u);
+            // Lengths are narrowed to uint32 with values matching the int64 source.
+            EXPECT_EQ(lengths[0], 3u);
+            EXPECT_EQ(lengths[1], 4u);
+            EXPECT_EQ(lengths[2], 4u);
+            // unique ids forwarded by-pointer; values match.
+            EXPECT_EQ(uniqueIds[0], overrideUniqueIds[0]);
+            EXPECT_EQ(uniqueIds[1], overrideUniqueIds[1]);
+            EXPECT_EQ(uniqueIds[2], overrideUniqueIds[2]);
+            // Per-UID shape pointers reference offsets {0, 3, 7} into the flat
+            // shape buffer owned by the variant pack.
+            EXPECT_EQ(shapesPerUid[0], overrideShapes.data() + 0);
+            EXPECT_EQ(shapesPerUid[1], overrideShapes.data() + 3);
+            EXPECT_EQ(shapesPerUid[2], overrideShapes.data() + 7);
+            // Stride pointers use the same offsets.
+            EXPECT_EQ(stridesPerUid[0], overrideStrides.data() + 0);
+            EXPECT_EQ(stridesPerUid[1], overrideStrides.data() + 3);
+            EXPECT_EQ(stridesPerUid[2], overrideStrides.data() + 7);
+            // Spot-check a value through each pointer to confirm the slice
+            // really sees the per-tensor data (lifetime safety: the data
+            // is still live at dispatch time).
+            EXPECT_EQ(shapesPerUid[1][0], 1);
+            EXPECT_EQ(shapesPerUid[2][3], 8);
+            EXPECT_EQ(stridesPerUid[1][3], 1);
+        }));
+
+    // Legacy entry must NOT be reached.
+    EXPECT_CALL(*h.plugin, executeOpGraph(_, _, _, _, _)).Times(0);
+
+    const EnginePluginResourceManager resourceManager(h.pluginManager);
+    resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get());
+}
+
+// =============================================================================
+// `PluginBase` metadata.
+// =============================================================================
+TEST(TestPluginBase, MockPluginCachedNameUsesDeterministicFallback)
+{
+    const MockEnginePlugin plugin;
+
+    EXPECT_EQ(plugin.cachedName(), "mock_plugin");
+}
+
+TEST(TestPluginBase, ParsedApiVersionReturnsNulloptForMalformedString)
+{
+    const MockEnginePlugin plugin;
+
+    EXPECT_CALL(plugin, apiVersion())
+        .Times(1)
+        .WillOnce(::testing::Return(std::string_view{"not.a.version"}));
+
+    const auto parsed = plugin.parsedApiVersion();
+    EXPECT_FALSE(parsed.has_value()) << "Malformed version string must yield nullopt.";
+}
+
+TEST(TestPluginBase, ParsedApiVersionReturnsParsedValueForWellFormedString)
+{
+    const MockEnginePlugin plugin;
+
+    EXPECT_CALL(plugin, apiVersion())
+        .Times(1)
+        .WillOnce(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
+
+    const auto parsed = plugin.parsedApiVersion();
+    ASSERT_TRUE(parsed.has_value()) << "Well-formed version string must parse successfully.";
+    EXPECT_EQ(parsed->major, 1);
+    EXPECT_EQ(parsed->minor, 1);
+    EXPECT_EQ(parsed->patch, 0);
+}
+
+// Ragged tensor version gating: a plugin at the baseline version is excluded
+// when the graph reports ragged tensors, and a plugin at
+// K_RAGGED_TENSOR_MIN_API_VERSION is included.
+TEST(TestEnginePluginResourceManager, RaggedTensorGraphExcludesBaselinePlugin)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("BaselinePlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors()).WillRepeatedly(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_TRUE(engineIds.empty());
+}
+
+TEST(TestEnginePluginResourceManager, RaggedTensorGraphIncludesRaggedCapablePlugin)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("RaggedPlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors()).WillRepeatedly(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    ASSERT_EQ(engineIds.size(), 1u);
+    EXPECT_EQ(engineIds[0], 100);
+}
+
+TEST(TestEnginePluginResourceManager, NonRaggedGraphUnaffectedByRaggedVersionConstant)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("BaselinePlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+
+    // Non-ragged graph: hasRaggedTensors() defaults to the real base-class
+    // accessor, which reports false for a descriptor with no ragged tensors.
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    ASSERT_EQ(engineIds.size(), 1u);
+    EXPECT_EQ(engineIds[0], 100);
+}
+
+// =============================================================================
+// Ragged-tensor applicability filter (mock-based matrix).
+//
+// Mirrors the override-dispatch matrix (RoutesOrRejectsOverrideDispatch): drives
+// the version-gating logic in getApplicableEngineIds() in isolation by mocking
+// GraphDescriptor::hasRaggedTensors() directly, rather than building a descriptor
+// containing an actual ragged tensor (covered by the standalone tests above and
+// by TestGraphDescriptor). A graph reporting ragged tensors requires a plugin
+// advertising at least K_RAGGED_TENSOR_MIN_API_VERSION; otherwise the baseline
+// applies.
+// =============================================================================
+namespace
+{
+
+// Whether the plugin's hasOverrideExecute() capability is expected to be queried,
+// and with what result. It is only queried when the graph enables override-shape
+// and the plugin has already cleared the version gate.
+enum class OverrideExecuteQuery
+{
+    NOT_QUERIED,
+    RETURNS_FALSE,
+    RETURNS_TRUE,
+};
+
+struct RaggedApplicabilityCase
+{
+    const char* name;
+    bool raggedEnabled;
+    std::string_view apiVersion;
+    std::vector<int64_t> expectedEngineIds; // empty => plugin excluded
+    bool overrideEnabled = false;
+    OverrideExecuteQuery overrideExecuteQuery = OverrideExecuteQuery::NOT_QUERIED;
+};
+
+} // namespace
+
+class TestEnginePluginResourceManagerRaggedApplicabilityMatrix
+    : public ::testing::TestWithParam<RaggedApplicabilityCase>
+{
+};
+
+TEST_P(TestEnginePluginResourceManagerRaggedApplicabilityMatrix, RoutesOrRejectsRaggedApplicability)
+{
+    const auto& testCase = GetParam();
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("MockPlugin"));
+    EXPECT_CALL(*plugin, apiVersion()).WillRepeatedly(::testing::Return(testCase.apiVersion));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    // The override-shape flag is read first (via getAttribute). Most cases keep it
+    // off so only the ragged-tensor gate decides applicability; the combined
+    // override+ragged cases turn it on to exercise the version-max composition.
+    programOverrideFlag(mockGraphDesc, testCase.overrideEnabled);
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors())
+        .WillRepeatedly(::testing::Return(testCase.raggedEnabled));
+
+    switch(testCase.overrideExecuteQuery)
+    {
+    case OverrideExecuteQuery::NOT_QUERIED:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).Times(0);
+        break;
+    case OverrideExecuteQuery::RETURNS_FALSE:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).WillOnce(::testing::Return(false));
+        break;
+    case OverrideExecuteQuery::RETURNS_TRUE:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).WillOnce(::testing::Return(true));
+        break;
+    default:
+        FAIL();
+    }
+
+    if(!testCase.expectedEngineIds.empty())
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+            .WillOnce(::testing::Return(testCase.expectedEngineIds));
+    }
+    else
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+    }
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_EQ(engineIds, testCase.expectedEngineIds);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RaggedApplicability,
+    TestEnginePluginResourceManagerRaggedApplicabilityMatrix,
+    ::testing::Values(
+        RaggedApplicabilityCase{"BaselineExcludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                {}},
+        RaggedApplicabilityCase{"OverrideMinExcludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                {}},
+        RaggedApplicabilityCase{"RaggedMinIncludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION,
+                                {100}},
+        RaggedApplicabilityCase{"AboveRaggedMinIncludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                std::string_view{"1.3.0"},
+                                {100}},
+        RaggedApplicabilityCase{"BaselineIncludedForNonRaggedGraph",
+                                /*raggedEnabled=*/false,
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                {100}},
+        // Combined override + ragged: the required version is the MAX of both
+        // features' minimums (ragged, 1.2.0), not whichever an if-chain checks
+        // first. An override-min (1.1.0) plugin is rejected by the version gate
+        // before its override capability is even queried.
+        RaggedApplicabilityCase{"OverrideMinExcludedForOverrideAndRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                {},
+                                /*overrideEnabled=*/true,
+                                OverrideExecuteQuery::NOT_QUERIED},
+        // A ragged-min (1.2.0) plugin clears the version gate; with override also
+        // enabled its override capability is then queried and, being present,
+        // the plugin is included.
+        RaggedApplicabilityCase{"RaggedMinIncludedForOverrideAndRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION,
+                                {100},
+                                /*overrideEnabled=*/true,
+                                OverrideExecuteQuery::RETURNS_TRUE}),
+    [](const auto& info) { return std::string(info.param.name); });
+
+// ---------------------------------------------------------------------------
+// Engine name resolution, driven through getEngineInfos() (no graph, so no
+// EngineDetails candidate).
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+const auto K_HARNESS_HANDLE = hipdnnEnginePluginHandle_t(0xdeadbeef);
+const auto K_HARNESS_SECOND_HANDLE = hipdnnEnginePluginHandle_t(0xcafebabe);
+
+/// One mock engine plugin behind a mock plugin manager. The plugin vector is a
+/// member because getPlugins() hands back a reference to it.
+struct SingleEnginePluginHarness
+{
+    explicit SingleEnginePluginHarness(int64_t engineId)
+        : SingleEnginePluginHarness(std::vector<int64_t>{engineId})
+    {
+    }
+
+    explicit SingleEnginePluginHarness(std::vector<int64_t> engineIds)
+    {
+        EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+        EXPECT_CALL(*plugin, createHandle()).WillOnce(::testing::Return(K_HARNESS_HANDLE));
+        EXPECT_CALL(*plugin, getAllEngineIds())
+            .WillRepeatedly(::testing::Return(std::move(engineIds)));
+        EXPECT_CALL(*plugin, destroyHandle(::testing::Eq(K_HARNESS_HANDLE)));
+    }
+
+    /// Stubs the plugin identity that getEngineInfos() copies into every row. The
+    /// resolveEngineName() cases read none of those fields and leave the plugin
+    /// nameless, so cachedName() reports its "mock_plugin" fallback there.
+    void stubIdentity(const char* pluginName, const char* pluginVersion) const
+    {
+        EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return(pluginName));
+        EXPECT_CALL(*plugin, version()).WillRepeatedly(::testing::Return(pluginVersion));
+        EXPECT_CALL(*plugin, type()).WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_ENGINE));
+    }
+
+    std::shared_ptr<MockEnginePlugin> plugin = std::make_shared<MockEnginePlugin>();
+    std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+};
+
+/// Two-plugin counterpart. The handles differ because the resource manager drops
+/// a plugin whose handle collides with one already registered.
+struct DualEnginePluginHarness
+{
+    DualEnginePluginHarness(int64_t firstEngineId, int64_t secondEngineId)
+    {
+        EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+        stubPlugin(firstPlugin, firstEngineId, K_HARNESS_HANDLE);
+        stubPlugin(secondPlugin, secondEngineId, K_HARNESS_SECOND_HANDLE);
+    }
+
+    static void stubPlugin(const std::shared_ptr<MockEnginePlugin>& plugin,
+                           int64_t engineId,
+                           hipdnnEnginePluginHandle_t handle)
+    {
+        EXPECT_CALL(*plugin, createHandle()).WillOnce(::testing::Return(handle));
+        EXPECT_CALL(*plugin, getAllEngineIds())
+            .WillRepeatedly(::testing::Return(std::vector<int64_t>{engineId}));
+        EXPECT_CALL(*plugin, type()).WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_ENGINE));
+        EXPECT_CALL(*plugin, destroyHandle(::testing::Eq(handle)));
+    }
+
+    std::shared_ptr<MockEnginePlugin> firstPlugin = std::make_shared<MockEnginePlugin>();
+    std::shared_ptr<MockEnginePlugin> secondPlugin = std::make_shared<MockEnginePlugin>();
+    std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{firstPlugin, secondPlugin};
+};
+
+} // namespace
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosUsesPluginSuppliedEngineName)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(HIPDNN_ENGINE_API_VERSION));
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("PLUGIN_SUPPLIED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineId, 100);
+        EXPECT_EQ(infos[0].engineName, "PLUGIN_SUPPLIED_ENGINE");
+        EXPECT_EQ(infos[0].pluginName, "test-plugin");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosFallsBackToHexWhenPluginExportsNoEngineName)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    // A plugin that never exported the symbol reaches the hexadecimal fallback
+    // with the entry point untouched. apiVersion() is never consulted, because
+    // naming turns on symbol presence alone.
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*harness.plugin, apiVersion()).Times(0);
+    EXPECT_CALL(*harness.plugin, getEngineName(::testing::_)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineId, 100);
+        EXPECT_EQ(infos[0].engineName, "0x0000000000000064");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosNamesAnEngineWhosePluginHasNoHandle)
+{
+    // A plugin whose createHandle() fails is absent from the routing maps, but
+    // enumeration walks the accepted set, so its engines are still listed. Names
+    // come from load-time ownership, which no handle is involved in, so the
+    // engine is listed under its own name rather than the hexadecimal fallback.
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+    const std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(nullptr)));
+    EXPECT_CALL(*plugin, destroyHandle(::testing::_)).Times(0);
+    EXPECT_CALL(*plugin, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("handleless-plugin"));
+    EXPECT_CALL(*plugin, version()).WillRepeatedly(::testing::Return("1.0"));
+    EXPECT_CALL(*plugin, type()).WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_ENGINE));
+    EXPECT_CALL(*plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("HANDLELESS_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineId, 100);
+        EXPECT_EQ(infos[0].engineName, "HANDLELESS_ENGINE");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosUsesEngineNameRegardlessOfReportedApiVersion)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    // A plugin reporting the 1.0.0 baseline, which is what every plugin that omits
+    // HIPDNN_PLUGIN_API_VERSION reports. Tier 1 is still taken: the predicate is
+    // symbol presence, not API version.
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("BASELINE_NAMED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineName, "BASELINE_NAMED_ENGINE");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosOmitsEnginesDroppedAtLoad)
+{
+    // Engine 100 lost admission. Enumeration follows the accepted set rather than
+    // what the plugin declares, so only engine 300 is reported.
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{300, 100});
+    harness.stubIdentity("test-plugin", "1.0");
+    harness.pluginManager->setAcceptedEngineIds(*harness.plugin, {300});
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineId, 300);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameDoesNotResolveADroppedEngine)
+{
+    // A dropped engine is missing from the reverse index too, so its hexadecimal
+    // name no longer resolves.
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{300, 100});
+    harness.stubIdentity("test-plugin", "1.0");
+    harness.pluginManager->setAcceptedEngineIds(*harness.plugin, {300});
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_FALSE(resourceManager.findEngineIdByName("0x0000000000000064").has_value());
+        EXPECT_TRUE(resourceManager.findEngineIdByName("0x000000000000012C").has_value());
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosAcceptsPluginNameWhoseHashMatchesId)
+{
+    // A plugin that derived its engine ID from the name, as production plugins
+    // do: the hash matches, so no mismatch diagnostic applies.
+    const int64_t matchingId = hipdnn_data_sdk::utilities::engineNameToId("HASH_MATCHED_ENGINE");
+
+    const SingleEnginePluginHarness harness(matchingId);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(HIPDNN_ENGINE_API_VERSION));
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(matchingId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("HASH_MATCHED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineId, matchingId);
+        EXPECT_EQ(infos[0].engineName, "HASH_MATCHED_ENGINE");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosFallsBackToHexWhenPluginDeclinesToName)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(HIPDNN_ENGINE_API_VERSION));
+
+    // The entry point exists but has no name for this particular engine. That is
+    // an ordinary answer, and resolution continues to the next tier.
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>()));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineName, "0x0000000000000064");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosSortsByResolvedNameNotEngineId)
+{
+    // Engine 200 is named "AAA_ENGINE" and engine 100 "ZZZ_ENGINE", so the name
+    // order is the exact reverse of both the ID order and the hexadecimal order
+    // ("0x0000000000000064" < "0x00000000000000C8"). Nothing but the resolved name
+    // can produce the expected sequence.
+    const DualEnginePluginHarness harness(200, 100);
+
+    EXPECT_CALL(*harness.firstPlugin, name()).WillRepeatedly(::testing::Return("plugin-alpha"));
+    EXPECT_CALL(*harness.firstPlugin, version()).WillRepeatedly(::testing::Return("2.0"));
+    EXPECT_CALL(*harness.firstPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(HIPDNN_ENGINE_API_VERSION));
+    EXPECT_CALL(*harness.firstPlugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.firstPlugin, getEngineName(200))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("AAA_ENGINE")));
+
+    EXPECT_CALL(*harness.secondPlugin, name()).WillRepeatedly(::testing::Return("plugin-beta"));
+    EXPECT_CALL(*harness.secondPlugin, version()).WillRepeatedly(::testing::Return("3.0"));
+    EXPECT_CALL(*harness.secondPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(HIPDNN_ENGINE_API_VERSION));
+    EXPECT_CALL(*harness.secondPlugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.secondPlugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("ZZZ_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 2);
+
+        EXPECT_EQ(infos[0].engineId, 200);
+        EXPECT_EQ(infos[0].engineName, "AAA_ENGINE");
+        EXPECT_EQ(infos[0].pluginName, "plugin-alpha");
+
+        EXPECT_EQ(infos[1].engineId, 100);
+        EXPECT_EQ(infos[1].engineName, "ZZZ_ENGINE");
+        EXPECT_EQ(infos[1].pluginName, "plugin-beta");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, GetEngineInfosOrdersHexFallbackAgainstNamedEngines)
+{
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{300, 100});
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(HIPDNN_ENGINE_API_VERSION));
+
+    // One plugin, one engine named and one not: a declared name and a hexadecimal
+    // fallback coexist in a single result set and sort together as plain strings.
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(300))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("NAMED_ENGINE")));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>()));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 2);
+
+        // '0' (0x30) precedes 'N' (0x4E), so the hexadecimal fallback sorts ahead
+        // of the name even though its engine was reported second.
+        EXPECT_EQ(infos[0].engineId, 100);
+        EXPECT_EQ(infos[0].engineName, "0x0000000000000064");
+
+        EXPECT_EQ(infos[1].engineId, 300);
+        EXPECT_EQ(infos[1].engineName, "NAMED_ENGINE");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Name -> ID resolution. findEngineIdByName() inverts getEngineInfos() exactly:
+// a plugin declares names through one channel only, so the enumeration cannot
+// hold a name the index has never seen.
+// ---------------------------------------------------------------------------
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameResolvesPluginSuppliedEngineName)
+{
+    // Admission requires the ID to be the hash of the name, so the fixture derives
+    // it that way.
+    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId("PLUGIN_SUPPLIED_ENGINE");
+
+    const SingleEnginePluginHarness harness(engineId);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(engineId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("PLUGIN_SUPPLIED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        const auto resolved = resourceManager.findEngineIdByName("PLUGIN_SUPPLIED_ENGINE");
+
+        ASSERT_TRUE(resolved.has_value());
+        EXPECT_EQ(*resolved, engineId);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameResolvesHexFallbackName)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    // An unnamed engine is enumerated under its hexadecimal ID, so that string has
+    // to resolve too or the index would not be a true inverse of getEngineInfos().
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        const auto resolved = resourceManager.findEngineIdByName("0x0000000000000064");
+
+        ASSERT_TRUE(resolved.has_value());
+        EXPECT_EQ(*resolved, 100);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameInvertsEveryEnumeratedName)
+{
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{300, 100});
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(300))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("NAMED_ENGINE")));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>()));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        // The invariant that makes the API usable: whatever a caller reads out of
+        // the enumeration can be fed straight back in. Both a declared name and a
+        // hexadecimal fallback are present here.
+        for(const auto& info : resourceManager.getEngineInfos())
+        {
+            const auto resolved = resourceManager.findEngineIdByName(info.engineName);
+
+            ASSERT_TRUE(resolved.has_value()) << "unresolved name: " << info.engineName;
+            EXPECT_EQ(*resolved, info.engineId);
+        }
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameRejectsUnknownAndEmptyNames)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("PLUGIN_SUPPLIED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_FALSE(resourceManager.findEngineIdByName("NO_SUCH_ENGINE").has_value());
+        EXPECT_FALSE(resourceManager.findEngineIdByName("").has_value());
+
+        // Names are matched exactly; no case folding and no partial matches.
+        EXPECT_FALSE(resourceManager.findEngineIdByName("plugin_supplied_engine").has_value());
+        EXPECT_FALSE(resourceManager.findEngineIdByName("PLUGIN_SUPPLIED").has_value());
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineNameByIdResolvesPluginSuppliedEngineName)
+{
+    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId("PLUGIN_SUPPLIED_ENGINE");
+
+    const SingleEnginePluginHarness harness(engineId);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(engineId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("PLUGIN_SUPPLIED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        const auto resolved = resourceManager.findEngineNameById(engineId);
+
+        ASSERT_TRUE(resolved.has_value());
+        EXPECT_EQ(*resolved, "PLUGIN_SUPPLIED_ENGINE");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineNameByIdResolvesHexFallbackName)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    // An unnamed engine still has a name on this API: the same hexadecimal
+    // spelling the enumeration reports.
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        const auto resolved = resourceManager.findEngineNameById(100);
+
+        ASSERT_TRUE(resolved.has_value());
+        EXPECT_EQ(*resolved, "0x0000000000000064");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineNameByIdRoundTripsWithFindEngineIdByName)
+{
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{300, 100});
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(300))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("NAMED_ENGINE")));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>()));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        // Either direction, from either end, lands back where it began. Covers a
+        // declared name and a hexadecimal fallback in one sweep.
+        for(const auto& info : resourceManager.getEngineInfos())
+        {
+            const auto name = resourceManager.findEngineNameById(info.engineId);
+            ASSERT_TRUE(name.has_value()) << "unnamed engine ID: " << info.engineId;
+            EXPECT_EQ(*name, info.engineName);
+
+            const auto id = resourceManager.findEngineIdByName(*name);
+            ASSERT_TRUE(id.has_value()) << "unresolved name: " << *name;
+            EXPECT_EQ(*id, info.engineId);
+        }
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineNameByIdRejectsUnknownAndDroppedEngines)
+{
+    // The impostor's ID is not the hash of the name it reports, so admission
+    // leaves it out of the accepted set. The plugin still answers the entry
+    // point for it, so resolveEngineName() would name it; the lookup must not.
+    const int64_t liveId = hipdnn_data_sdk::utilities::engineNameToId("LIVE_ENGINE");
+    const int64_t droppedId = liveId + 1;
+
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{liveId, droppedId});
+    harness.stubIdentity("test-plugin", "1.0");
+    harness.pluginManager->setAcceptedEngineIds(*harness.plugin, {liveId});
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(liveId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("LIVE_ENGINE")));
+    EXPECT_CALL(*harness.plugin, getEngineName(droppedId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("LIVE_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_TRUE(resourceManager.findEngineNameById(liveId).has_value());
+        EXPECT_FALSE(resourceManager.findEngineNameById(droppedId).has_value());
+
+        // An ID no plugin ever declared.
+        EXPECT_FALSE(resourceManager.findEngineNameById(999999).has_value());
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameIsUnambiguousAcrossPlugins)
+{
+    // A name hashes to the ID its engine was admitted under, so the index cannot
+    // hold one name twice: each name resolves to its own plugin's engine.
+    const int64_t alphaId = hipdnn_data_sdk::utilities::engineNameToId("ALPHA_ENGINE");
+    const int64_t betaId = hipdnn_data_sdk::utilities::engineNameToId("BETA_ENGINE");
+
+    const DualEnginePluginHarness harness(alphaId, betaId);
+
+    EXPECT_CALL(*harness.firstPlugin, name()).WillRepeatedly(::testing::Return("plugin-alpha"));
+    EXPECT_CALL(*harness.firstPlugin, version()).WillRepeatedly(::testing::Return("2.0"));
+    EXPECT_CALL(*harness.firstPlugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.firstPlugin, getEngineName(alphaId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("ALPHA_ENGINE")));
+
+    EXPECT_CALL(*harness.secondPlugin, name()).WillRepeatedly(::testing::Return("plugin-beta"));
+    EXPECT_CALL(*harness.secondPlugin, version()).WillRepeatedly(::testing::Return("3.0"));
+    EXPECT_CALL(*harness.secondPlugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.secondPlugin, getEngineName(betaId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("BETA_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_EQ(resourceManager.findEngineIdByName("ALPHA_ENGINE"), alphaId);
+        EXPECT_EQ(resourceManager.findEngineIdByName("BETA_ENGINE"), betaId);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameReturnsNulloptWhenNoEnginesAreLoaded)
+{
+    const std::vector<std::shared_ptr<EnginePlugin>> plugins;
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    EXPECT_TRUE(resourceManager.getEngineInfos().empty());
+    EXPECT_FALSE(resourceManager.findEngineIdByName("ANY_ENGINE").has_value());
+}
+
+// ---------------------------------------------------------------------------
+// The EngineDetails.name candidate, which records a name but never confers one.
+// Reached by calling resolveEngineName() directly, since getEngineInfos() always
+// passes nullopt.
+// ---------------------------------------------------------------------------
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameRefusesUndeclaredEngineDetailsName)
+{
+    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId("DETAILS_NAMED_ENGINE");
+    const SingleEnginePluginHarness harness(engineId);
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*harness.plugin, getEngineName(::testing::_)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        // The candidate is well formed and hashes to the engine it describes, and
+        // is still refused: the plugin never declared it through the entry point,
+        // the only channel load-time admission can inspect.
+        EXPECT_EQ(
+            resourceManager.resolveEngineName(engineId, std::string_view("DETAILS_NAMED_ENGINE")),
+            hipdnn_data_sdk::utilities::formatEngineIdHex(engineId));
+
+        // An engine ID no loaded plugin claims cannot have declared anything
+        // either, so the same refusal covers it without a separate branch.
+        const int64_t unclaimedId
+            = hipdnn_data_sdk::utilities::engineNameToId("UNCLAIMED_DETAILS_ENGINE");
+        EXPECT_EQ(resourceManager.resolveEngineName(unclaimedId,
+                                                    std::string_view("UNCLAIMED_DETAILS_ENGINE")),
+                  hipdnn_data_sdk::utilities::formatEngineIdHex(unclaimedId));
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNamePrefersEntryPointOverEngineDetailsName)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+    EXPECT_CALL(*mockPlugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockPlugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("ENTRY_POINT_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        // The entry point is authoritative and EngineDetails.name is a graph-scoped
+        // echo of it, so a disagreement is reported and then ignored.
+        EXPECT_EQ(resourceManager.resolveEngineName(100, std::string_view("DETAILS_ENGINE")),
+                  "ENTRY_POINT_ENGINE");
+
+        // Agreement is the ordinary case and takes the same branch without the
+        // diagnostic.
+        EXPECT_EQ(resourceManager.resolveEngineName(100, std::string_view("ENTRY_POINT_ENGINE")),
+                  "ENTRY_POINT_ENGINE");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameTreatsEmptyEngineDetailsNameAsAbsent)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+    EXPECT_CALL(*mockPlugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        // An EngineDetails record with an unset name field yields an empty string,
+        // not an absent optional. Returning it would hand the caller a blank
+        // display name, so it falls through exactly as std::nullopt does.
+        EXPECT_EQ(resourceManager.resolveEngineName(100, std::string_view("")),
+                  "0x0000000000000064");
+        EXPECT_EQ(resourceManager.resolveEngineName(100, std::nullopt), "0x0000000000000064");
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameLetsTheRegistryOutrankEngineDetailsName)
+{
+    // Registry entry, so a refused candidate is visibly overtaken by a named
+    // source rather than merely reaching the hexadecimal last resort.
+    const int64_t engineId = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+    const SingleEnginePluginHarness harness(engineId);
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*harness.plugin, getEngineName(::testing::_)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        // The static registry is a name the host itself declares, so it carries the
+        // guarantee the EngineDetails candidate lacks and outranks it.
+        EXPECT_EQ(resourceManager.resolveEngineName(engineId, std::string_view("DETAILS_ENGINE")),
+                  hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Full precedence: an engine ID the in-tree registry names, so the entry point,
+// the EngineDetails record and the registry all offer a different string.
+// ---------------------------------------------------------------------------
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameFallsBackToStaticRegistryName)
+{
+    const int64_t engineId = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+    const SingleEnginePluginHarness harness(engineId);
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*harness.plugin, getEngineName(::testing::_)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        // The registry is the only source that can answer: the plugin exports no
+        // entry point and there is no EngineDetails candidate, but the ID is one of
+        // the in-tree registrations, so the hexadecimal last resort is not reached.
+        EXPECT_EQ(resourceManager.resolveEngineName(engineId, std::nullopt),
+                  hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNamePrefersEntryPointOverRegistryAndDetailsName)
+{
+    const int64_t engineId = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+    const SingleEnginePluginHarness harness(engineId);
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(engineId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("PACK_SUPPLIED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        const std::string resolved
+            = resourceManager.resolveEngineName(engineId, std::string_view("DETAILS_ENGINE"));
+
+        // A drop-in pack that rebinds an ID the host already knows still gets the
+        // name it reports: the entry point outranks the graph-scoped record and the
+        // in-tree registry alike.
+        EXPECT_EQ(resolved, "PACK_SUPPLIED_ENGINE");
+        EXPECT_NE(resolved, "DETAILS_ENGINE");
+        EXPECT_NE(resolved, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameReportsEntryPointAndDetailsNameDisagreement)
+{
+    // The recorder restores the level in force before the case; the capture nests
+    // inside it and is destroyed first, so the two restorations unwind in the
+    // order they were applied.
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const int64_t engineId = 100;
+    const SingleEnginePluginHarness harness(engineId);
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(engineId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("ENTRY_POINT_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_EQ(resourceManager.resolveEngineName(engineId, std::string_view("DETAILS_ENGINE")),
+                  "ENTRY_POINT_ENGINE");
+    }
+
+    // Taking tier 1 silently would hide a plugin describing one engine differently
+    // through its two name channels, so the report names the plugin, the engine
+    // and both strings.
+    const std::string recordedLogs = recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "EngineDetails.name")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("ENTRY_POINT_ENGINE")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("DETAILS_ENGINE")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("0x0000000000000064")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("mock_plugin")) << recordedLogs;
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameStaysSilentWhenEntryPointAndDetailsNameAgree)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    // Admission only lets an engine reach this resolver when its ID is the hash of
+    // the name it reports.
+    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId("HASH_MATCHED_ENGINE");
+    const SingleEnginePluginHarness harness(engineId);
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(engineId))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("HASH_MATCHED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_EQ(
+            resourceManager.resolveEngineName(engineId, std::string_view("HASH_MATCHED_ENGINE")),
+            "HASH_MATCHED_ENGINE");
+    }
+
+    EXPECT_FALSE(recorder.hasLogContaining("EngineDetails.name"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameReportsUndeclaredEngineDetailsName)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const int64_t engineId = 100;
+    const SingleEnginePluginHarness harness(engineId);
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*harness.plugin, getEngineName(::testing::_)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_EQ(resourceManager.resolveEngineName(engineId, std::string_view("DETAILS_ENGINE")),
+                  "0x0000000000000064");
+    }
+
+    // Refusing the only name on offer without a word would leave the caller staring
+    // at a hexadecimal ID. The report names the plugin, the engine, the refused
+    // string, and the channel that was left empty, since filling it is the fix.
+    const std::string recordedLogs = recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "EngineDetails.name")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("hipdnnEnginePluginGetEngineName")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("DETAILS_ENGINE")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("0x0000000000000064")) << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining("mock_plugin")) << recordedLogs;
+}
+
+TEST(TestEnginePluginResourceManager, ResolveEngineNameStaysSilentOnAnEmptyEngineDetailsName)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const SingleEnginePluginHarness harness(100);
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*harness.plugin, getEngineName(::testing::_)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_EQ(resourceManager.resolveEngineName(100, std::string_view("")),
+                  "0x0000000000000064");
+    }
+
+    // An unset EngineDetails name field is a plugin declining to record one, not
+    // one declaring through the wrong channel. Warning here would fire for every
+    // unnamed engine on every graph.
+    EXPECT_FALSE(recorder.hasLogContaining("EngineDetails.name"))
+        << recorder.getRecordedLogsAsString();
+}
+
+// ---------------------------------------------------------------------------
+// Admission diagnostics. A name that does not hash to its engine ID is dropped
+// either way; these cases pin down that the error says which engine the name
+// actually belongs to.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Drives the real admission hook. Loading a plugin from disk is the only other
+/// way to reach it, and a fixture binary cannot present the engine shapes these
+/// cases need.
+class AdmittingEnginePluginManager : public EnginePluginManager
+{
+public:
+    using EnginePluginManager::actionAfterAdding;
+    using EnginePluginManager::validateBeforeAdding;
+};
+
+/// A plugin that answers the name entry point from a fixed table.
+std::shared_ptr<MockEnginePlugin>
+    makeNamingPlugin(const std::vector<int64_t>& engineIds,
+                     const std::vector<std::pair<int64_t, std::string>>& names)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillRepeatedly(::testing::Return(engineIds));
+    EXPECT_CALL(*plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*plugin, getEngineName(::testing::_))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>()));
+    for(const auto& [id, name] : names)
+    {
+        EXPECT_CALL(*plugin, getEngineName(id))
+            .WillRepeatedly(::testing::Return(std::optional<std::string>(name)));
+    }
+
+    return plugin;
+}
+
+} // namespace
+
+// This hook throws before the loader emplaces the plugin, so the resource
+// manager never sees one whose engine set cannot be read. Only observable here.
+TEST(TestEnginePluginAdmission, ValidateRejectsPluginWhoseEngineIdsCannotBeRead)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("EngineIdFailPlugin"));
+    EXPECT_CALL(*plugin, getAllEngineIds())
+        .WillRepeatedly(::testing::Throw(
+            HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Failed to get engine IDs")));
+
+    AdmittingEnginePluginManager pluginManager;
+
+    // Rejection is by exception: PluginCore's load path catches it and never
+    // reaches the emplace_back, so the plugin contributes nothing.
+    EXPECT_THROW(pluginManager.validateBeforeAdding(*plugin), HipdnnException);
+
+    // Nothing was admitted on the way out, so no engine can route to it.
+    EXPECT_TRUE(pluginManager.liveEngines().empty());
+    EXPECT_TRUE(pluginManager.acceptedEngineIds(*plugin).empty());
+}
+
+TEST(TestEnginePluginAdmission, DroppedEngineErrorNamesTheSiblingEngineHoldingTheName)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const int64_t ownerId = hipdnn_data_sdk::utilities::engineNameToId("SHARED_NAME_ENGINE");
+    const int64_t impostorId = ownerId + 1;
+
+    // The impostor is admitted first, so the engine that owns the name is not yet
+    // in the owner index when the error is composed. Only the plugin's own
+    // declared list can identify it at that point.
+    auto plugin
+        = makeNamingPlugin({impostorId, ownerId},
+                           {{impostorId, "SHARED_NAME_ENGINE"}, {ownerId, "SHARED_NAME_ENGINE"}});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*plugin);
+
+    // Two engines cannot share a name: at most one ID can be its hash, and that
+    // one is kept no matter where it falls in the declaration order.
+    EXPECT_EQ(pluginManager.engineOwner(ownerId), plugin.get());
+    EXPECT_EQ(pluginManager.engineOwner(impostorId), nullptr);
+
+    const std::string recordedLogs = recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "this plugin also declares that engine"))
+        << recordedLogs;
+    EXPECT_TRUE(
+        recorder.hasLogContaining(hipdnn_data_sdk::utilities::formatEngineIdHex(impostorId)))
+        << recordedLogs;
+    EXPECT_TRUE(recorder.hasLogContaining(hipdnn_data_sdk::utilities::formatEngineIdHex(ownerId)))
+        << recordedLogs;
+}
+
+TEST(TestEnginePluginAdmission, DroppedEngineErrorNamesTheOtherPluginHoldingTheName)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const int64_t ownerId = hipdnn_data_sdk::utilities::engineNameToId("CROSS_PLUGIN_ENGINE");
+    const int64_t impostorId = ownerId + 1;
+
+    auto owner = makeNamingPlugin({ownerId}, {{ownerId, "CROSS_PLUGIN_ENGINE"}});
+    auto impostor = makeNamingPlugin({impostorId}, {{impostorId, "CROSS_PLUGIN_ENGINE"}});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*owner);
+    pluginManager.actionAfterAdding(*impostor);
+
+    EXPECT_EQ(pluginManager.engineOwner(ownerId), owner.get());
+    EXPECT_EQ(pluginManager.engineOwner(impostorId), nullptr);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "provides that engine"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginAdmission, DroppedEngineErrorSaysSoWhenNoEngineHoldsTheName)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    // Nothing declares the hash of this name, which is the hand-maintained
+    // definitions table having paired a name with the wrong ID.
+    const int64_t mispairedId
+        = hipdnn_data_sdk::utilities::engineNameToId("UNCLAIMED_NAME_ENGINE") + 1;
+
+    auto plugin = makeNamingPlugin({mispairedId}, {{mispairedId, "UNCLAIMED_NAME_ENGINE"}});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*plugin);
+
+    EXPECT_TRUE(pluginManager.liveEngines().empty());
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "no loaded engine claims that ID"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginAdmission, EngineReportingNoNameStaysSubjectToIdUniqueness)
+{
+    const int64_t sharedId = 0x5150;
+
+    auto first = makeNamingPlugin({sharedId}, {});
+    auto second = makeNamingPlugin({sharedId}, {});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*first);
+    pluginManager.actionAfterAdding(*second);
+
+    // The hash exemption covers the name check only. Standing the engine's own ID
+    // in for the absent name must not also excuse it from the duplicate check.
+    EXPECT_EQ(pluginManager.engineOwner(sharedId), first.get());
+    EXPECT_EQ(pluginManager.liveEngines().size(), 1U);
+}
+
+TEST(TestEnginePluginAdmission, DuplicateEngineDropsItselfAndNoneOfItsSiblings)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const int64_t sharedId = hipdnn_data_sdk::utilities::engineNameToId("OVERLAPPING_ENGINE");
+    const int64_t soleId = hipdnn_data_sdk::utilities::engineNameToId("SURVIVING_ENGINE");
+
+    // Overlapping on one engine and not the other is the shape that separates
+    // dropping an engine from dropping a plugin.
+    auto first = makeNamingPlugin({sharedId}, {{sharedId, "OVERLAPPING_ENGINE"}});
+    auto second = makeNamingPlugin(
+        {sharedId, soleId}, {{sharedId, "OVERLAPPING_ENGINE"}, {soleId, "SURVIVING_ENGINE"}});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*first);
+    pluginManager.actionAfterAdding(*second);
+
+    // The overlap costs the second plugin that engine and nothing else.
+    EXPECT_EQ(pluginManager.engineOwner(sharedId), first.get());
+    EXPECT_EQ(pluginManager.engineOwner(soleId), second.get());
+    EXPECT_EQ(pluginManager.acceptedEngineIds(*second), std::vector<int64_t>{soleId});
+    EXPECT_EQ(pluginManager.liveEngines().size(), 2U);
+
+    const auto survivingName = pluginManager.engineEntryPointName(soleId);
+    ASSERT_TRUE(survivingName.has_value());
+    EXPECT_EQ(*survivingName, "SURVIVING_ENGINE");
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "dropping the duplicate"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginAdmission, PluginWithoutTheNameEntryPointIsWarnedAboutOnce)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    EXPECT_CALL(*plugin, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{0x5150, 0x5151}));
+    EXPECT_CALL(*plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+
+    // The hoisted guard is what keeps EnginePlugin's own warning unreachable.
+    EXPECT_CALL(*plugin, getEngineName(::testing::_)).Times(0);
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*plugin);
+
+    // The warning is about how the engines are addressed, not whether they load.
+    EXPECT_EQ(pluginManager.liveEngines().size(), 2U);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "identified by their IDs"))
+        << recorder.getRecordedLogsAsString();
+
+    // The two causes take different fixes, so the warning has to say which one.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "does not export hipdnnEnginePluginGetEngineName"))
+        << recorder.getRecordedLogsAsString();
+
+    // Per plugin, not per engine.
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1U) << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginAdmission, PluginDecliningEveryEngineNameIsWarnedAboutOnce)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    // Symbol present, every engine declined: what an SDK plugin whose container
+    // defines no getEngineName looks like. A symbol check alone misses it.
+    auto plugin = makeNamingPlugin({0x5150, 0x5151}, {});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*plugin);
+
+    EXPECT_EQ(pluginManager.liveEngines().size(), 2U);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "identified by their IDs"))
+        << recorder.getRecordedLogsAsString();
+
+    // Points at the container rather than the symbol, which is exported here.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "give it a static getEngineName"))
+        << recorder.getRecordedLogsAsString();
+
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1U) << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestEnginePluginAdmission, PluginNamingItsEnginesIsNotWarnedAbout)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+
+    const int64_t namedId = hipdnn_data_sdk::utilities::engineNameToId("FULLY_NAMED_ENGINE");
+    auto plugin = makeNamingPlugin({namedId}, {{namedId, "FULLY_NAMED_ENGINE"}});
+
+    AdmittingEnginePluginManager pluginManager;
+    pluginManager.actionAfterAdding(*plugin);
+
+    // Pins the trigger from the other side; a count-based condition is easy to
+    // leave firing always.
+    EXPECT_EQ(pluginManager.liveEngines().size(), 1U);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
+}
+
+// ---------------------------------------------------------------------------
+// The generated entry point, against the real fixture binary. See
+// plugins/codegen_fixture/CodegenFixturePlugin.hpp.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// NOLINTBEGIN(bugprone-throwing-static-initialization) test constants
+const auto CODEGEN_FIXTURE_DIR
+    = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
+      / plugin_constants::getTestPluginDefaultDir() / "codegen_fixture";
+
+const auto CODEGEN_FIXTURE_PATH
+    = CODEGEN_FIXTURE_DIR / hipdnn_data_sdk::utilities::getLibraryName(TEST_ENGINE_PLUGIN1_NAME);
+// NOLINTEND(bugprone-throwing-static-initialization)
+
+using GetEngineNameFn = hipdnnPluginStatus_t (*)(int64_t, const char**);
+
+} // namespace
+
+TEST(TestEnginePluginResourceManager, CodegenFixtureExportsGeneratedEngineNameEntryPoint)
+{
+    const plugin::SharedLibrary library(CODEGEN_FIXTURE_PATH);
+
+    auto* getEngineName = library.getSymbol<GetEngineNameFn>("hipdnnEnginePluginGetEngineName");
+    ASSERT_NE(getEngineName, nullptr);
+
+    // The container supplies no getEngineName, so the generated entry point takes
+    // its fallback branch: a well-formed call with nothing to report.
+    const char* name = nullptr;
+    EXPECT_EQ(getEngineName(codegen_fixture::K_FIXTURE_ENGINE_ID, &name),
+              HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+
+    // Parameter validation still runs ahead of the container dispatch.
+    EXPECT_EQ(getEngineName(codegen_fixture::K_FIXTURE_ENGINE_ID, nullptr),
+              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+}
+
+TEST(TestEnginePluginResourceManager, CodegenFixtureResolvesToHexThroughResourceManager)
+{
+    auto pluginManager = std::make_shared<EnginePluginManager>();
+    pluginManager->loadPlugins({CODEGEN_FIXTURE_DIR}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    const auto& plugins = pluginManager->getPlugins();
+    ASSERT_EQ(plugins.size(), 1);
+
+    const auto& fixturePlugin = plugins.front();
+
+    // The fixture defines no HIPDNN_PLUGIN_API_VERSION, so it reports the baseline
+    // like most plugins in tree. Naming must work for it anyway.
+    EXPECT_EQ(fixturePlugin->apiVersion(), hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE);
+
+    // The SDK generates the symbol unconditionally, so its presence is no promise
+    // of a name.
+    EXPECT_TRUE(fixturePlugin->hasEngineName());
+    EXPECT_FALSE(fixturePlugin->getEngineName(codegen_fixture::K_FIXTURE_ENGINE_ID).has_value());
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineId, codegen_fixture::K_FIXTURE_ENGINE_ID);
+        EXPECT_EQ(infos[0].engineName, "0x000000000000C0DE");
+        EXPECT_EQ(infos[0].pluginName, "codegen_fixture_plugin");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Malformed plugin answers. The lying fixture supplies one malformed answer per
+// engine id; see tests/test_plugins/TestLyingEngineNamePlugin.cpp.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// NOLINTBEGIN(bugprone-throwing-static-initialization) test constants
+const auto LYING_ENGINE_NAME_PLUGIN_PATH
+    = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
+      / plugin_constants::getTestPluginDefaultDir() / "custom"
+      / hipdnn_data_sdk::utilities::getLibraryName(TEST_LYING_ENGINE_NAME_PLUGIN_NAME);
+
+const auto MISMATCHED_NAME_PLUGIN_PATH
+    = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
+      / plugin_constants::getTestPluginDefaultDir() / "custom"
+      / hipdnn_data_sdk::utilities::getLibraryName(TEST_MISMATCHED_NAME_PLUGIN_NAME);
+// NOLINTEND(bugprone-throwing-static-initialization)
+
+constexpr int64_t K_MISMATCHED_NAME_ENGINE_ID = -29;
+constexpr const char* K_MISMATCHED_NAME = "TEST_MISMATCHED_NAME_ENGINE";
+
+// Mirrors TestPluginEngineIdMap.hpp. That header is not included because
+// tests/test_plugins/ carries its own TestPluginConstants.hpp, which would
+// shadow the one beside this file.
+constexpr int64_t K_LYING_NULL_NAME_ENGINE_ID = -26;
+constexpr int64_t K_LYING_EMPTY_NAME_ENGINE_ID = -27;
+constexpr int64_t K_LYING_ERROR_STATUS_ENGINE_ID = -28;
+constexpr const char* K_LYING_UNUSABLE_NAME = "TEST_LYING_ENGINE_NAME_MUST_BE_IGNORED";
+
+} // namespace
+
+// Guards the three tests below from passing vacuously: if the fixture ever
+// stopped misbehaving, they would still see "no name" and report success.
+TEST(TestEnginePluginResourceManager, LyingEngineNameFixtureAnswersWithMalformedNames)
+{
+    ASSERT_TRUE(std::filesystem::exists(LYING_ENGINE_NAME_PLUGIN_PATH))
+        << "Test precondition: lying-engine-name plugin missing at "
+        << LYING_ENGINE_NAME_PLUGIN_PATH;
+
+    const plugin::SharedLibrary library(LYING_ENGINE_NAME_PLUGIN_PATH);
+
+    auto* getEngineName = library.getSymbol<GetEngineNameFn>("hipdnnEnginePluginGetEngineName");
+    ASSERT_NE(getEngineName, nullptr);
+
+    // Success with nothing written through the out parameter.
+    const char* nullName = nullptr;
+    EXPECT_EQ(getEngineName(K_LYING_NULL_NAME_ENGINE_ID, &nullName), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(nullName, nullptr);
+
+    // Success with a name that carries no information.
+    const char* emptyName = nullptr;
+    EXPECT_EQ(getEngineName(K_LYING_EMPTY_NAME_ENGINE_ID, &emptyName),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    ASSERT_NE(emptyName, nullptr);
+    EXPECT_STREQ(emptyName, "");
+
+    // A usable name handed out alongside a failure status.
+    const char* unusableName = nullptr;
+    EXPECT_EQ(getEngineName(K_LYING_ERROR_STATUS_ENGINE_ID, &unusableName),
+              HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    ASSERT_NE(unusableName, nullptr);
+    EXPECT_STREQ(unusableName, K_LYING_UNUSABLE_NAME);
+}
+
+TEST(TestEnginePluginResourceManager, EnginePluginRejectsEveryMalformedPluginEngineName)
+{
+    ASSERT_TRUE(std::filesystem::exists(LYING_ENGINE_NAME_PLUGIN_PATH))
+        << "Test precondition: lying-engine-name plugin missing at "
+        << LYING_ENGINE_NAME_PLUGIN_PATH;
+
+    auto pluginManager = std::make_shared<EnginePluginManager>();
+    pluginManager->loadPlugins({LYING_ENGINE_NAME_PLUGIN_PATH}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    const auto& plugins = pluginManager->getPlugins();
+    ASSERT_EQ(plugins.size(), 1);
+
+    const auto& lyingPlugin = plugins.front();
+
+    // The symbol is exported, so the host does reach the plugin for every one of
+    // these; each answer is then thrown away on its own merits.
+    EXPECT_TRUE(lyingPlugin->hasEngineName());
+
+    EXPECT_FALSE(lyingPlugin->getEngineName(K_LYING_NULL_NAME_ENGINE_ID).has_value())
+        << "SUCCESS with a null name must not produce a name";
+    EXPECT_FALSE(lyingPlugin->getEngineName(K_LYING_EMPTY_NAME_ENGINE_ID).has_value())
+        << "SUCCESS with an empty name must not produce a name";
+
+    // Only NOT_APPLICABLE declines. A failure status is a defect, so the name
+    // written alongside it is never reachable to be suppressed.
+    EXPECT_THROW(std::ignore = lyingPlugin->getEngineName(K_LYING_ERROR_STATUS_ENGINE_ID),
+                 HipdnnException);
+}
+
+TEST(TestEnginePluginResourceManager, LyingEngineNameResolvesToHexThroughResourceManager)
+{
+    ASSERT_TRUE(std::filesystem::exists(LYING_ENGINE_NAME_PLUGIN_PATH))
+        << "Test precondition: lying-engine-name plugin missing at "
+        << LYING_ENGINE_NAME_PLUGIN_PATH;
+
+    auto pluginManager = std::make_shared<EnginePluginManager>();
+    pluginManager->loadPlugins({LYING_ENGINE_NAME_PLUGIN_PATH}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    auto infos = resourceManager.getEngineInfos();
+
+    // The two engines whose entry point declines survive admission, ascending by id.
+    // Neither id is in the static registry either, so resolution has to land on the
+    // hex fallback.
+    ASSERT_EQ(infos.size(), 2);
+    EXPECT_EQ(infos[0].engineId, K_LYING_EMPTY_NAME_ENGINE_ID);
+    EXPECT_EQ(infos[0].engineName, "0xFFFFFFFFFFFFFFE5");
+    EXPECT_EQ(infos[1].engineId, K_LYING_NULL_NAME_ENGINE_ID);
+    EXPECT_EQ(infos[1].engineName, "0xFFFFFFFFFFFFFFE6");
+}
+
+// A status other than NOT_APPLICABLE is a defect, not a way to decline: it costs that
+// engine its place while the rest of the plugin still loads.
+TEST(TestEnginePluginResourceManager, EngineWhoseNameQueryFailsIsDroppedAtLoad)
+{
+    ASSERT_TRUE(std::filesystem::exists(LYING_ENGINE_NAME_PLUGIN_PATH))
+        << "Test precondition: lying-engine-name plugin missing at "
+        << LYING_ENGINE_NAME_PLUGIN_PATH;
+
+    auto pluginManager = std::make_shared<EnginePluginManager>();
+    pluginManager->loadPlugins({LYING_ENGINE_NAME_PLUGIN_PATH}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    ASSERT_EQ(pluginManager->getPlugins().size(), 1);
+
+    const auto declared = pluginManager->getPlugins().front()->getAllEngineIds();
+    ASSERT_NE(std::find(declared.begin(), declared.end(), K_LYING_ERROR_STATUS_ENGINE_ID),
+              declared.end())
+        << "This test only proves anything while the fixture publishes the failing engine.";
+
+    const auto& live = pluginManager->liveEngines();
+    EXPECT_EQ(live.count(K_LYING_ERROR_STATUS_ENGINE_ID), 0)
+        << "An engine whose name query fails must not reach routing or dispatch";
+    EXPECT_EQ(live.count(K_LYING_NULL_NAME_ENGINE_ID), 1);
+    EXPECT_EQ(live.count(K_LYING_EMPTY_NAME_ENGINE_ID), 1);
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    EXPECT_FALSE(resourceManager.findEngineNameById(K_LYING_ERROR_STATUS_ENGINE_ID).has_value());
+    EXPECT_FALSE(resourceManager.findEngineIdByName(K_LYING_UNUSABLE_NAME).has_value())
+        << "The name handed out alongside the failure status must not be indexed";
+}
+
+// The load-time gate, through the real manager rather than a mock: a well-formed
+// name that does not hash to its engine id costs the engine its place. The lying
+// fixture above is the counterpart -- it reports no usable name, so it is exempt.
+TEST(TestEnginePluginResourceManager, MismatchedEngineNameIsDroppedAtLoad)
+{
+    ASSERT_TRUE(std::filesystem::exists(MISMATCHED_NAME_PLUGIN_PATH))
+        << "Test precondition: mismatched-name plugin missing at " << MISMATCHED_NAME_PLUGIN_PATH;
+
+    ASSERT_NE(hipdnn_data_sdk::utilities::engineNameToId(K_MISMATCHED_NAME),
+              K_MISMATCHED_NAME_ENGINE_ID)
+        << "This test only proves anything while the fixture violates the hash requirement.";
+
+    auto pluginManager = std::make_shared<EnginePluginManager>();
+    pluginManager->loadPlugins({MISMATCHED_NAME_PLUGIN_PATH}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    // The plugin itself still loads; only its engine is refused.
+    ASSERT_EQ(pluginManager->getPlugins().size(), 1);
+    EXPECT_TRUE(pluginManager->liveEngines().empty());
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    EXPECT_TRUE(resourceManager.getEngineInfos().empty());
+    EXPECT_FALSE(resourceManager.findEngineIdByName(K_MISMATCHED_NAME).has_value());
 }

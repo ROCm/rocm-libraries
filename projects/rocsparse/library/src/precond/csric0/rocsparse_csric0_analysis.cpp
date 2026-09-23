@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,14 +102,6 @@ rocsparse_status rocsparse::csric0_analysis(rocsparse_handle          handle,
                                                     A->col_type,
                                                     A->const_col_data,
                                                     temp_buffer));
-
-    csric0_info->create_singular_pivot_async(A->batch_count, A->col_type, handle->stream);
-
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(csric0_info->get_singular_pivot(),
-                                       csric0_info->get_zero_pivot(),
-                                       rocsparse::indextype_sizeof(A->col_type) * A->batch_count,
-                                       hipMemcpyDeviceToDevice,
-                                       handle->stream));
 
     return rocsparse_status_success;
 }

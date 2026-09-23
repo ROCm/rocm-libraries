@@ -50,7 +50,7 @@ TEST(TestShallowHostOnlyMigratableMemory, MarkDeviceModifiedThrows)
 TEST(TestShallowHostOnlyMigratableMemory, LocationIsHost)
 {
     std::array<int, 1> backing = {0};
-    ShallowHostOnlyMigratableMemory<int> mem(backing.data(), backing.size());
+    const ShallowHostOnlyMigratableMemory<int> mem(backing.data(), backing.size());
     EXPECT_EQ(mem.location(), MemoryLocation::HOST);
 }
 
@@ -65,16 +65,16 @@ TEST(TestShallowHostOnlyMigratableMemory, SizeAndMutationOperationsThrow)
 TEST(TestShallowHostOnlyMigratableMemory, CountReturnsCorrectValue)
 {
     std::array<int, 5> backing = {10, 20, 30, 40, 50};
-    ShallowHostOnlyMigratableMemory<int> mem(backing.data(), backing.size());
+    const ShallowHostOnlyMigratableMemory<int> mem(backing.data(), backing.size());
     EXPECT_EQ(mem.count(), backing.size());
 }
 
 TEST(TestShallowHostOnlyMigratableMemory, EmptyReturnsCorrectValue)
 {
     std::array<int, 5> backing = {10, 20, 30, 40, 50};
-    ShallowHostOnlyMigratableMemory<int> mem(backing.data(), backing.size());
+    const ShallowHostOnlyMigratableMemory<int> mem(backing.data(), backing.size());
     EXPECT_FALSE(mem.empty());
 
-    ShallowHostOnlyMigratableMemory<int> emptyMem(nullptr, 0);
+    const ShallowHostOnlyMigratableMemory<int> emptyMem(nullptr, 0);
     EXPECT_TRUE(emptyMem.empty());
 }

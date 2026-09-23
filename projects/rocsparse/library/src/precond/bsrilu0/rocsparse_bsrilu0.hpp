@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 #include "rocsparse_bsrilu0_info.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_mat_descr.hpp"
-#include "rocsparse_mat_info.hpp"
+#include "rocsparse_numeric_boost.hpp"
 
 namespace rocsparse
 {
@@ -45,10 +45,11 @@ namespace rocsparse
                                       rocsparse_bsrilu0_info*   p_bsrilu0_info,
                                       void*                     temp_buffer);
 
-    rocsparse_status bsrilu0(rocsparse_handle       handle,
-                             rocsparse_bsrilu0_info bsrilu0_info,
-                             rocsparse_spmat_descr  A,
-                             size_t                 buffer_size,
-                             void*                  buffer);
+    rocsparse_status bsrilu0(rocsparse_handle          handle,
+                             rocsparse_bsrilu0_info    bsrilu0_info,
+                             rocsparse_spmat_descr     A,
+                             rocsparse::numeric_boost* boost,
+                             size_t                    buffer_size,
+                             void*                     buffer);
 
 }

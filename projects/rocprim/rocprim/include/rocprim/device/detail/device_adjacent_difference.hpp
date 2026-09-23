@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -165,7 +165,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto select_previous_values_iterator(T* /*previous
     return input;
 }
 
-template <typename ArchConfig,
+template <typename TargetConfig,
           bool InPlace,
           bool Right,
           typename InputIt,
@@ -182,16 +182,26 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void adjacent_difference_kernel_impl(
     using input_type  = typename std::iterator_traits<InputIt>::value_type;
     using output_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
-    static constexpr adjacent_difference_config_params params = ArchConfig::params;
+    static constexpr adjacent_difference_config_params params = TargetConfig::params;
 
     static constexpr unsigned int block_size       = params.kernel_config.block_size;
     static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
     static constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
-    using block_load_type
-        = ::rocprim::block_load<input_type, block_size, items_per_thread, params.block_load_method>;
-    using block_store_type = ::rocprim::
-        block_store<output_type, block_size, items_per_thread, params.block_store_method>;
+    using block_load_type  = ::rocprim::block_load<input_type,
+                                                   block_size,
+                                                   items_per_thread,
+                                                   params.block_load_method,
+                                                   1,
+                                                   1,
+                                                   TargetConfig::wavefront>;
+    using block_store_type = ::rocprim::block_store<output_type,
+                                                    block_size,
+                                                    items_per_thread,
+                                                    params.block_store_method,
+                                                    1,
+                                                    1,
+                                                    TargetConfig::wavefront>;
 
     using adjacent_helper = adjacent_diff_helper<input_type, block_size>;
 

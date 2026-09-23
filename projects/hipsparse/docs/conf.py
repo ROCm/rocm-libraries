@@ -9,8 +9,8 @@ import re
 from rocm_docs import ROCmDocs
 
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'\bproject\s*\(\s*hipsparse\s+VERSION\s+([0-9.]+)', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(r"\bproject\s*\(\s*hipsparse\s+VERSION\s+([0-9.]+)", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
@@ -35,13 +35,15 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
 # Extend the extensions list with additional extensions
-if 'extensions' not in globals():
+if "extensions" not in globals():
     extensions = []
-extensions.extend([
-    'breathe',
-    'sphinx_tabs.tabs',  # Add the tabs extension
-    'sphinx_design',     # Add the design extension for grid directive
-])
+extensions.extend(
+    [
+        "breathe",
+        "sphinx_tabs.tabs",  # Add the tabs extension
+        "sphinx_design",  # Add the design extension for grid directive
+    ]
+)
 
 # Configure Breathe (Doxygen integration)
 breathe_projects = {"hipsparse": "doxygen/xml"}
@@ -51,11 +53,13 @@ breathe_default_project = "hipsparse"
 sphinx_tabs_disable_tab_closing = True
 
 # Add custom static files
-if 'html_static_path' not in globals():
+if "html_static_path" not in globals():
     html_static_path = []
-if '_static' not in html_static_path:
-    html_static_path.append('_static')
+if "_static" not in html_static_path:
+    html_static_path.append("_static")
 
-if 'html_js_files' not in globals():
+if "html_js_files" not in globals():
     html_js_files = []
-html_js_files.append('custom_tabs.js')
+html_js_files.append("custom_tabs.js")
+
+extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

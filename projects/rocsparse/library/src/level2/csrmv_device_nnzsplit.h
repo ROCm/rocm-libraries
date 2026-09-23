@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@ namespace rocsparse
     template <typename I, typename J>
     ROCSPARSE_DEVICE_ILF J csrmv_nnzsplit_get_row_index(J              left,
                                                         J              right,
-                                                        const J        offset,
+                                                        const I        offset,
                                                         const uint32_t local_nnz_index,
                                                         const I        nnz,
                                                         const I* __restrict__ csr_row_ptr_begin,
@@ -121,8 +121,9 @@ namespace rocsparse
         load_values(T1 (&values)[NNZ_PER_THREAD], const T2* __restrict__ csr_val, I nnz, bool conj)
     {
 
-        const uint64_t offset_block  = blockIdx.x * (BLOCKSIZE * NNZ_PER_THREAD);
-        const uint64_t offset_thread = threadIdx.x * NNZ_PER_THREAD;
+        const uint64_t offset_block
+            = static_cast<uint64_t>(blockIdx.x) * (BLOCKSIZE * NNZ_PER_THREAD);
+        const uint64_t offset_thread = static_cast<uint64_t>(threadIdx.x) * NNZ_PER_THREAD;
         const uint64_t offset        = offset_block + offset_thread;
 
         if(offset < nnz)
@@ -148,8 +149,9 @@ namespace rocsparse
                                            rocsparse_index_base idx_base)
     {
 
-        const uint64_t offset_block  = blockIdx.x * (BLOCKSIZE * NNZ_PER_THREAD);
-        const uint64_t offset_thread = threadIdx.x * NNZ_PER_THREAD;
+        const uint64_t offset_block
+            = static_cast<uint64_t>(blockIdx.x) * (BLOCKSIZE * NNZ_PER_THREAD);
+        const uint64_t offset_thread = static_cast<uint64_t>(threadIdx.x) * NNZ_PER_THREAD;
         const uint64_t offset        = offset_block + offset_thread;
 
         if(offset < nnz)
@@ -173,7 +175,7 @@ namespace rocsparse
                                                      I                    nnz,
                                                      rocsparse_index_base idx_base)
     {
-        const uint64_t offset = static_cast<uint64_t>(blockIdx.x * (BLOCKSIZE * NNZ_PER_THREAD));
+        const uint64_t offset = static_cast<uint64_t>(blockIdx.x) * (BLOCKSIZE * NNZ_PER_THREAD);
         uint64_t       idx    = offset + threadIdx.x;
 
         if(offset < nnz)
@@ -196,7 +198,7 @@ namespace rocsparse
         csrmv_nnzsplit_get_row_indices(J*      row_indices,
                                        J       left,
                                        J       right,
-                                       const J offset,
+                                       const I offset,
                                        const I nnz,
                                        const I* __restrict__ csr_row_ptr_begin,
                                        rocsparse_index_base idx_base)
@@ -214,16 +216,20 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void get_coalesced_row_indices(J* row_indices,
                                                         J  left_init,
                                                         J  right_init,
-                                                        J  offset,
+                                                        I  offset,
                                                         I  nnz,
                                                         const I* __restrict__ csr_row_ptr_begin,
                                                         rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         J left = left_init;
 
         const uint32_t wid      = rocsparse::read_first_lane(threadIdx.x / WFSIZE);
         const uint32_t lid      = threadIdx.x & (WFSIZE - 1);
-        const J        w_offset = offset + wid * (WFSIZE * NNZ_PER_THREAD);
+        const I        w_offset = offset + static_cast<I>(wid) * (WFSIZE * NNZ_PER_THREAD);
 
         J local_idx = lid;
 
@@ -274,11 +280,15 @@ namespace rocsparse
                                                     const J* __restrict__ starting_block_ids,
                                                     rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         static constexpr uint32_t NNZ_PER_BLOCK = NNZ_PER_THREAD * BLOCKSIZE;
 
         if(USE_STARTING_BLOCK_IDS)
         {
-            if(starting_block_ids[blockIdx.x] * NNZ_PER_BLOCK > nnz)
+            if(static_cast<I>(starting_block_ids[blockIdx.x]) * NNZ_PER_BLOCK > nnz)
                 return;
             if(starting_block_ids[blockIdx.x] == starting_block_ids[blockIdx.x + 1])
                 return;
@@ -292,7 +302,7 @@ namespace rocsparse
                                   ? rocsparse::read_first_lane(starting_block_ids[blockIdx.x + 1])
                                   : rocsparse::read_first_lane(blockIdx.x + 1);
 
-        I start_nnz_index = rocsparse::read_first_lane(I(startingId0 * NNZ_PER_BLOCK));
+        I start_nnz_index = rocsparse::read_first_lane(static_cast<I>(startingId0) * NNZ_PER_BLOCK);
 
         const J bStart = rocsparse::read_first_lane(startingIds[startingId0]);
         const J bNum   = rocsparse::read_first_lane(startingIds[startingId1] - bStart + 1);
@@ -364,7 +374,7 @@ namespace rocsparse
         // compute row ids
         J row_indices[NNZ_PER_THREAD];
 
-        const J offset = start_nnz_index;
+        const I offset = start_nnz_index;
 
         get_coalesced_row_indices<BLOCKSIZE, WFSIZE, NNZ_PER_THREAD>(
             row_indices, bStart, bStart + bNum, offset, nnz, csr_row_ptr_begin, idx_base);
@@ -500,13 +510,13 @@ namespace rocsparse
             if(mul == static_cast<T>(0))
                 return;
 
-            const uint32_t startOffset = blockIdx.x * NNZ_PER_BLOCK + threadIdx.x;
+            const I startOffset = static_cast<I>(blockIdx.x) * NNZ_PER_BLOCK + threadIdx.x;
 
             if(skip_diag)
             {
                 for(uint32_t i = 0; i < NNZ_PER_THREAD; ++i)
                 {
-                    const uint32_t toffset = i * BLOCKSIZE + startOffset;
+                    const I toffset = static_cast<I>(i) * BLOCKSIZE + startOffset;
                     if(toffset < nnz)
                     {
                         const J col_index = csr_col_ind[toffset] - idx_base;
@@ -522,7 +532,7 @@ namespace rocsparse
             {
                 for(uint32_t i = 0; i < NNZ_PER_THREAD; ++i)
                 {
-                    const uint32_t toffset = i * BLOCKSIZE + startOffset;
+                    const I toffset = static_cast<I>(i) * BLOCKSIZE + startOffset;
                     if(toffset < nnz)
                     {
                         const J col_index = csr_col_ind[toffset] - idx_base;
@@ -543,7 +553,8 @@ namespace rocsparse
         // compute row ids
         J row_indices[NNZ_PER_THREAD];
 
-        const J offset = blockIdx.x * NNZ_PER_BLOCK + threadIdx.x * NNZ_PER_THREAD;
+        const I offset = static_cast<I>(blockIdx.x) * NNZ_PER_BLOCK
+                         + static_cast<I>(threadIdx.x) * NNZ_PER_THREAD;
 
         csrmv_nnzsplit_get_row_indices<BLOCKSIZE, NNZ_PER_THREAD>(
             row_indices, bStart, bStart + bNum, offset, nnz, csr_row_ptr_begin, idx_base);

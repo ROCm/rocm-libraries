@@ -42,7 +42,7 @@ private:
 #define THROW_IF_NE(x, y, failureStatus, message)                          \
     do                                                                     \
     {                                                                      \
-        if(x != y)                                                         \
+        if((x) != (y))                                                     \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
         }                                                                  \
@@ -51,7 +51,7 @@ private:
 #define THROW_IF_EQ(x, y, failureStatus, message)                          \
     do                                                                     \
     {                                                                      \
-        if(x == y)                                                         \
+        if((x) == (y))                                                     \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
         }                                                                  \
@@ -78,7 +78,7 @@ private:
 #define THROW_IF_NULL(x, failureStatus, message)                           \
     do                                                                     \
     {                                                                      \
-        if(x == nullptr)                                                   \
+        if((x) == nullptr)                                                 \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
         }                                                                  \
@@ -87,7 +87,7 @@ private:
 #define THROW_IF_LT(x, y, failureStatus, message)                          \
     do                                                                     \
     {                                                                      \
-        if(x < y)                                                          \
+        if((x) < (y))                                                      \
         {                                                                  \
             throw hipdnn_backend::HipdnnException(failureStatus, message); \
         }                                                                  \

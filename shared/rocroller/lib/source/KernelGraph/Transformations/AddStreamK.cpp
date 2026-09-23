@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /**
  * AddStreamK -- stream accumulation tiles.
@@ -482,7 +459,8 @@ namespace rocRoller
                 graph.coordinates.addElement(
                     PassThrough(), {graph.mapper.get<ForLoop>(forY)}, {jammedY});
 
-            auto sendTileTag = graph.control.addElement(ConditionalOp{sendTileExpr, "Send Tile"});
+            auto sendTileTag = graph.control.addElement(
+                ConditionalOp{sendTileExpr, ConditionalMode::Branch, "Send Tile"});
             auto barrierTag  = graph.control.addElement(Barrier());
             auto waitZeroTag = graph.control.addElement(WaitZero());
 
@@ -504,9 +482,9 @@ namespace rocRoller
             auto workitemTag = graph.coordinates.addElement(Workitem(0));
             auto workitemDF  = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{workitemTag, Register::Type::Vector, DataType::UInt32});
-            auto isWave0Expr = (workitemDF == Expression::literal(0u));
-            auto wave0FlagStoreTag
-                = graph.control.addElement(ConditionalOp{isWave0Expr, "Wave0 Store Flag"});
+            auto isWave0Expr       = (workitemDF == Expression::literal(0u));
+            auto wave0FlagStoreTag = graph.control.addElement(
+                ConditionalOp{isWave0Expr, ConditionalMode::Branch, "Wave0 Store Flag"});
 
             // Add to control
             auto preWaitZeroTag = graph.control.addElement(WaitZero());
@@ -572,8 +550,8 @@ namespace rocRoller
             auto workgroup = graph.coordinates.addElement(Workgroup(0));
 
             // Read tile
-            auto receiveTileTag
-                = graph.control.addElement(ConditionalOp{receiveTileExpr, "Receive Tile"});
+            auto receiveTileTag = graph.control.addElement(
+                ConditionalOp{receiveTileExpr, ConditionalMode::Branch, "Receive Tile"});
 
             // Read flag
             auto plusOneTag    = graph.coordinates.addElement(Linear(one, one));
@@ -661,9 +639,9 @@ namespace rocRoller
             auto workitemTag = graph.coordinates.addElement(Workitem(0));
             auto workitemDF  = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{workitemTag, Register::Type::Vector, DataType::UInt32});
-            auto isWave0Expr = (workitemDF == Expression::literal(0u));
-            auto wave0ResetFlagTag
-                = graph.control.addElement(ConditionalOp{isWave0Expr, "Wave0 Reset Flag"});
+            auto isWave0Expr       = (workitemDF == Expression::literal(0u));
+            auto wave0ResetFlagTag = graph.control.addElement(
+                ConditionalOp{isWave0Expr, ConditionalMode::Branch, "Wave0 Reset Flag"});
 
             auto barrierBeforeResetTag = graph.control.addElement(Barrier());
 
@@ -1084,7 +1062,6 @@ namespace rocRoller
             for(auto d : loopInfo.dimensionIndices)
                 numTotalTiles = numTotalTiles * argInfo.numTiles.at(d);
             numTotalTiles = simplify(numTotalTiles);
-            enableDivideBy(numTotalTiles, context);
 
             auto numTilesVarType = resultType(numTotalTiles).varType;
             auto one             = Expression::literal(1, numTilesVarType);
@@ -1421,8 +1398,8 @@ namespace rocRoller
                                           params,
                                           context);
 
-                postAccumulationCond = graph.control.addElement(
-                    ConditionalOp{hasFirstAccumTile, "Post-accumulation Condition"});
+                postAccumulationCond = graph.control.addElement(ConditionalOp{
+                    hasFirstAccumTile, ConditionalMode::Branch, "Post-accumulation Condition"});
             }
             else
             {
@@ -1552,7 +1529,7 @@ namespace rocRoller
             }
             else
             {
-                // Standard mode — no selector, no DP dims
+                // Standard mode -- no selector, no DP dims
                 auto standardInit = initializeCoordinates(graph,
                                                           scope,
                                                           {{{skForwardForTileIdx,
@@ -1675,8 +1652,6 @@ namespace rocRoller
                                                            numTilesDT,
                                                            DataDirection::ReadOnly,
                                                            argInfo.numTileArgExprs[d]}));
-                if(d > 0)
-                    enableDivideBy(argInfo.numTiles.back(), context);
             }
 
             argInfo.numTiles.push_back(k->addArgument({"numTilesAcc",

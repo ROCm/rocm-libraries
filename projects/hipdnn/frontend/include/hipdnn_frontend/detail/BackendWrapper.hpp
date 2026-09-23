@@ -3,122 +3,120 @@
 
 #pragma once
 
+#include <optional>
+
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
+#include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
+#include <hipdnn_frontend/version.h>
+
+#ifndef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+#include <hipdnn_frontend/detail/HipdnnDirectBackendWrapper.hpp>
+#else
+#include <atomic>
+
+#include <hipdnn_frontend/detail/DynamicBackendLibrary.hpp>
+#include <hipdnn_frontend/detail/HipdnnDynamicBackendWrapper.hpp>
+#endif
 
 namespace hipdnn_frontend::detail
 {
 
-class HipdnnBackendWrapper : public IHipdnnBackend
+// Parses the backend version string and checks it against the frontend's major
+// version. Returns the parsed version on success, or std::nullopt (after
+// logging) if the version is missing, malformed, or incompatible. Shared by the
+// direct-link and runtime-load factories.
+inline std::optional<hipdnn_data_sdk::utilities::Version> checkBackendVersion(const char* version)
 {
-public:
-    hipdnnStatus_t create(hipdnnHandle_t* handle) override
+    using namespace hipdnn_data_sdk::utilities;
+
+    if(version == nullptr)
     {
-        return hipdnnCreate(handle);
+        HIPDNN_FE_LOG_ERROR("Error parsing backend version: version is nullptr");
+        return std::nullopt;
     }
 
-    hipdnnStatus_t destroy(hipdnnHandle_t handle) override
+    Version backendVersion;
+    try
     {
-        return hipdnnDestroy(handle);
+        backendVersion = Version{std::string{version}};
+    }
+    catch(const std::invalid_argument& error)
+    {
+        HIPDNN_FE_LOG_ERROR("Error parsing backend version: " + std::string{error.what()});
+        return std::nullopt;
     }
 
-    hipdnnStatus_t setStream(hipdnnHandle_t handle, hipStream_t streamId) override
+    if(HIPDNN_FRONTEND_VERSION_MAJOR != backendVersion.major)
     {
-        return hipdnnSetStream(handle, streamId);
+        HIPDNN_FE_LOG_ERROR("Backend major version (" + std::to_string(backendVersion.major)
+                            + ") does not match frontend major version ("
+                            + std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR) + ")");
+        return std::nullopt;
     }
 
-    hipdnnStatus_t getStream(hipdnnHandle_t handle, hipStream_t* streamId) override
+    return backendVersion;
+}
+
+#ifndef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+
+// Attempts to create a direct-link backend interface, falling back to
+// IncompatibleBackend if it fails to satisfy requirements. version is taken as
+// an argument to facilitate easier testing.
+inline std::shared_ptr<IHipdnnBackend> tryToUseBackendInterface(const char* version)
+{
+    auto backendVersion = checkBackendVersion(version);
+    if(!backendVersion)
     {
-        return hipdnnGetStream(handle, streamId);
+        return std::make_shared<IncompatibleBackendWrapper>();
     }
 
-    hipdnnStatus_t backendCreateDescriptor(hipdnnBackendDescriptorType_t descriptorType,
-                                           hipdnnBackendDescriptor_t* descriptor) override
+    return std::make_shared<HipdnnDirectBackendWrapper>(*backendVersion);
+}
+
+#else
+
+// Attempts to create a runtime-load backend interface. Loads the backend
+// library, resolves the version string via dlsym, validates it, and falls back
+// to IncompatibleBackend on any failure.
+inline std::shared_ptr<IHipdnnBackend> tryToUseDynamicBackendInterface()
+{
+    if(backendLibraryHandle() == nullptr)
     {
-        return hipdnnBackendCreateDescriptor(descriptorType, descriptor);
+        HIPDNN_FE_LOG_ERROR("Failed to load hipDNN backend library for runtime backend loading");
+        return std::make_shared<IncompatibleBackendWrapper>();
     }
 
-    hipdnnStatus_t backendDestroyDescriptor(hipdnnBackendDescriptor_t descriptor) override
+    // Resolve the version string without an instance so the version can be
+    // validated before the wrapper is constructed. decltype is unevaluated and
+    // does not create a link-time reference to the symbol.
+    static std::atomic<void*> s_versionCache{nullptr};
+    auto versionFn = resolveBackendSymbol<decltype(&hipdnnVersionString_ext)>(
+        s_versionCache, "hipdnnVersionString_ext");
+    const char* version = versionFn != nullptr ? versionFn() : nullptr;
+
+    auto backendVersion = checkBackendVersion(version);
+    if(!backendVersion)
     {
-        return hipdnnBackendDestroyDescriptor(descriptor);
+        return std::make_shared<IncompatibleBackendWrapper>();
     }
 
-    hipdnnStatus_t backendExecute(hipdnnHandle_t handle,
-                                  hipdnnBackendDescriptor_t executionPlan,
-                                  hipdnnBackendDescriptor_t variantPack) override
-    {
-        return hipdnnBackendExecute(handle, executionPlan, variantPack);
-    }
+    return std::make_shared<HipdnnDynamicBackendWrapper>(*backendVersion);
+}
 
-    hipdnnStatus_t backendFinalize(hipdnnBackendDescriptor_t descriptor) override
-    {
-        return hipdnnBackendFinalize(descriptor);
-    }
-
-    hipdnnStatus_t backendGetAttribute(hipdnnBackendDescriptor_t descriptor,
-                                       hipdnnBackendAttributeName_t attributeName,
-                                       hipdnnBackendAttributeType_t attributeType,
-                                       int64_t requestedElementCount,
-                                       int64_t* elementCount,
-                                       void* arrayOfElements) override
-    {
-        return hipdnnBackendGetAttribute(descriptor,
-                                         attributeName,
-                                         attributeType,
-                                         requestedElementCount,
-                                         elementCount,
-                                         arrayOfElements);
-    }
-
-    hipdnnStatus_t backendSetAttribute(hipdnnBackendDescriptor_t descriptor,
-                                       hipdnnBackendAttributeName_t attributeName,
-                                       hipdnnBackendAttributeType_t attributeType,
-                                       int64_t elementCount,
-                                       const void* arrayOfElements) override
-    {
-        return hipdnnBackendSetAttribute(
-            descriptor, attributeName, attributeType, elementCount, arrayOfElements);
-    }
-
-    const char* getErrorString(hipdnnStatus_t status) override
-    {
-        return hipdnnGetErrorString(status);
-    }
-
-    void getLastErrorString(char* message, size_t maxSize) override
-    {
-        hipdnnGetLastErrorString(message, maxSize);
-    }
-
-    hipdnnStatus_t backendCreateAndDeserializeGraphExt(hipdnnBackendDescriptor_t* descriptor,
-                                                       const uint8_t* serializedGraph,
-                                                       size_t graphByteSize) override
-    {
-        return hipdnnBackendCreateAndDeserializeGraph_ext(
-            descriptor, serializedGraph, graphByteSize);
-    }
-
-    void loggingCallbackExt(hipdnnSeverity_t severity, const char* msg) override
-    {
-        hipdnnLoggingCallback_ext(severity, msg);
-    }
-
-    hipdnnStatus_t setEnginePluginPathsExt(size_t numPaths,
-                                           const char* const* pluginPaths,
-                                           hipdnnPluginLoadingMode_ext_t mode) override
-    {
-        return hipdnnSetEnginePluginPaths_ext(numPaths, pluginPaths, mode);
-    }
-};
+#endif // HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
 
 // Allow overriding the backend implementation by setting a custom backend instance.
 inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
 {
-    if(!IHipdnnBackend::getInstance())
-    {
-        IHipdnnBackend::setInstance(std::make_shared<HipdnnBackendWrapper>());
-    }
-
-    return IHipdnnBackend::getInstance();
+    return IHipdnnBackend::getOrCreateInstance([] {
+#ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+        return tryToUseDynamicBackendInterface();
+#else
+        return tryToUseBackendInterface(hipdnnVersionString_ext());
+#endif
+    });
 }
 
 } // namespace hipdnn_frontend::detail

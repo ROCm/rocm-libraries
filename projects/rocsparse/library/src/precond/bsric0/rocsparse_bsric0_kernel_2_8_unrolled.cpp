@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,11 +36,11 @@ namespace rocsparse
                                                          J                   block_dim,
                                                          const I* __restrict__ bsr_row_ptr,
                                                          const J* __restrict__ bsr_col_ind,
-                                                         T* __restrict__ bsr_val,
+                                                         T* bsr_val,
                                                          const I* __restrict__ bsr_diag_ind,
                                                          int32_t* __restrict__ block_done,
                                                          const J* __restrict__ block_map,
-                                                         J* __restrict__ zero_pivot,
+                                                         J*                   zero_pivot,
                                                          rocsparse_index_base idx_base)
     {
         static constexpr uint32_t MAX_NNZB = 32;
@@ -189,49 +189,49 @@ namespace rocsparse
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * tidx + 0];
                         T v2      = bsr_val[idx + BSRDIM * tidy + 0];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 2)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * tidx + 1];
                         T v2      = bsr_val[idx + BSRDIM * tidy + 1];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 3)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * tidx + 2];
                         T v2      = bsr_val[idx + BSRDIM * tidy + 2];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 4)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * tidx + 3];
                         T v2      = bsr_val[idx + BSRDIM * tidy + 3];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 5)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * tidx + 4];
                         T v2      = bsr_val[idx + BSRDIM * tidy + 4];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 6)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * tidx + 5];
                         T v2      = bsr_val[idx + BSRDIM * tidy + 5];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 7)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * tidx + 6];
                         T v2      = bsr_val[idx + BSRDIM * tidy + 6];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 8)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * tidx + 7];
                         T v2      = bsr_val[idx + BSRDIM * tidy + 7];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                 }
                 else
@@ -240,49 +240,49 @@ namespace rocsparse
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * 0 + tidx];
                         T v2      = bsr_val[idx + BSRDIM * 0 + tidy];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 2)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * 1 + tidx];
                         T v2      = bsr_val[idx + BSRDIM * 1 + tidy];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 3)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * 2 + tidx];
                         T v2      = bsr_val[idx + BSRDIM * 2 + tidy];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 4)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * 3 + tidx];
                         T v2      = bsr_val[idx + BSRDIM * 3 + tidy];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 5)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * 4 + tidx];
                         T v2      = bsr_val[idx + BSRDIM * 4 + tidy];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 6)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * 5 + tidx];
                         T v2      = bsr_val[idx + BSRDIM * 5 + tidy];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 7)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * 6 + tidx];
                         T v2      = bsr_val[idx + BSRDIM * 6 + tidy];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 8)
                     {
                         T v1      = bsr_val[idx2 + BSRDIM * 7 + tidx];
                         T v2      = bsr_val[idx + BSRDIM * 7 + tidy];
-                        local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                 }
             }
@@ -317,7 +317,7 @@ namespace rocsparse
                 {
                     T v1      = local_values[k][p];
                     T v2      = values[tidy][p];
-                    local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                    local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                 }
 
                 // Compute the Cholesky factor and writes it to shared memory
@@ -426,14 +426,14 @@ namespace rocsparse
                                     J                   mb,
                                     const I* __restrict__ bsr_row_ptr,
                                     const J* __restrict__ bsr_col_ind,
-                                    T* __restrict__ bsr_val,
+                                    T*      bsr_val,
                                     int64_t bsr_val_stride,
                                     const I* __restrict__ bsr_diag_ind,
                                     J bsr_dim,
                                     int32_t* __restrict__ done_array,
                                     int64_t done_array_stride,
                                     const J* __restrict__ map,
-                                    J* __restrict__ zero_pivot,
+                                    J*                   zero_pivot,
                                     int64_t              zero_pivot_stride,
                                     rocsparse_index_base idx_base)
     {
@@ -463,7 +463,7 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
-
+        auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsric0_kernel_2_8_unrolled<BSRDIM>),
                                            dim3(A->rows, A->batch_count),
                                            dim3(BSRDIM, BSRDIM),
@@ -480,8 +480,8 @@ namespace rocsparse
                                            done_array,
                                            done_array_stride,
                                            reinterpret_cast<const J*>(trm_info->get_row_map()),
-                                           reinterpret_cast<J*>(bsric0_info->get_zero_pivot()),
-                                           bsric0_info->get_zero_pivot_stride(),
+                                           reinterpret_cast<J*>(numeric_exact->get_position()),
+                                           numeric_exact->get_stride(),
                                            A->descr->base);
         return rocsparse_status_success;
     }
@@ -499,7 +499,7 @@ namespace rocsparse
         {
             return rocsparse::bsric0_kernel_2_8_unrolled_launch<BSR_DIM, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -522,7 +522,7 @@ namespace rocsparse
         {
             return rocsparse::transform_j_type<BSR_DIM, T, int64_t>(p...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

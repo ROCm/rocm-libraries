@@ -90,31 +90,31 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
     int beta_offset  = alpha_offset + max_time_step * batch_size * max_S_len;
     int batch_bytes  = 4 * batch_size; // batch size multiples sizeof(int)
 
-    hipMemcpyWithStream(static_cast<int*>(workSpace),
-                        inputLengths,
-                        batch_bytes,
-                        hipMemcpyHostToDevice,
-                        handle.GetStream());
-    hipMemcpyWithStream(static_cast<int*>(workSpace) + batch_size,
-                        labelLengths,
-                        batch_bytes,
-                        hipMemcpyHostToDevice,
-                        handle.GetStream());
-    hipMemcpyWithStream(static_cast<int*>(workSpace) + 2 * static_cast<ptrdiff_t>(batch_size),
-                        labels_offset.data(),
-                        batch_bytes,
-                        hipMemcpyHostToDevice,
-                        handle.GetStream());
-    hipMemcpyWithStream(static_cast<int*>(workSpace) + 3 * static_cast<ptrdiff_t>(batch_size),
-                        repeat.data(),
-                        batch_bytes,
-                        hipMemcpyHostToDevice,
-                        handle.GetStream());
-    hipMemcpyWithStream(static_cast<int*>(workSpace) + 4 * static_cast<ptrdiff_t>(batch_size),
-                        labels,
-                        total_label_len * sizeof(int),
-                        hipMemcpyHostToDevice,
-                        handle.GetStream());
+    (void)hipMemcpyWithStream(static_cast<int*>(workSpace),
+                              inputLengths,
+                              batch_bytes,
+                              hipMemcpyHostToDevice,
+                              handle.GetStream());
+    (void)hipMemcpyWithStream(static_cast<int*>(workSpace) + batch_size,
+                              labelLengths,
+                              batch_bytes,
+                              hipMemcpyHostToDevice,
+                              handle.GetStream());
+    (void)hipMemcpyWithStream(static_cast<int*>(workSpace) + 2 * static_cast<ptrdiff_t>(batch_size),
+                              labels_offset.data(),
+                              batch_bytes,
+                              hipMemcpyHostToDevice,
+                              handle.GetStream());
+    (void)hipMemcpyWithStream(static_cast<int*>(workSpace) + 3 * static_cast<ptrdiff_t>(batch_size),
+                              repeat.data(),
+                              batch_bytes,
+                              hipMemcpyHostToDevice,
+                              handle.GetStream());
+    (void)hipMemcpyWithStream(static_cast<int*>(workSpace) + 4 * static_cast<ptrdiff_t>(batch_size),
+                              labels,
+                              total_label_len * sizeof(int),
+                              hipMemcpyHostToDevice,
+                              handle.GetStream());
 
     std::string network_config =
         "t" + std::to_string(max_time_step) + "n" + std::to_string(batch_size) + "a" +

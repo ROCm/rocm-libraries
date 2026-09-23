@@ -28,7 +28,6 @@ HIP_CHECK(hipMalloc(&data_0, sizeof(*data_0) * size));
 HIP_CHECK(hipMalloc(&data_1, sizeof(*data_1) * size));
 
 hipGraph_t graph;
-HIP_CHECK(hipGraphCreate(&graph, 0));
 
 hipStream_t stream;
 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));

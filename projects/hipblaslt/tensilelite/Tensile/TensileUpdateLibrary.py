@@ -25,8 +25,11 @@
 from . import LibraryIO
 from .Tensile import addCommonArguments, argUpdatedGlobalParameters
 
-from .Common import assignGlobalParameters, print1, restoreDefaultGlobalParameters, HR, \
-                    globalParameters, architectureMap, ensurePath, ParallelMap, __version__
+from .Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters, globalParameters, __version__
+from .Common.Utilities import print1, ensurePath
+from .Common.Constants import HR
+from .Common.Architectures import architectureMap
+from .Common.Parallel import ParallelMap
 
 import argparse
 import copy
@@ -37,13 +40,16 @@ import sys
 
 def UpdateLogic(filename, logicPath, outputPath):
     libYaml = LibraryIO.readYAML(filename)
+    isDictFormat = isinstance(libYaml, dict)
     # parseLibraryLogicData mutates the original data, so make a copy
     fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), filename)
     (_, _, problemType, solutions, _, _, _) = fields
 
     # problem type object to state
-    problemTypeState = problemType.state
+    problemTypeState = copy.deepcopy(problemType.state)
     problemTypeState["DataType"] = problemTypeState["DataType"].value
+    problemTypeState["MacDataTypeA"] = problemTypeState["MacDataTypeA"].value
+    problemTypeState["MacDataTypeB"] = problemTypeState["MacDataTypeB"].value
     problemTypeState["DataTypeA"] = problemTypeState["DataTypeA"].value
     problemTypeState["DataTypeB"] = problemTypeState["DataTypeB"].value
     problemTypeState["DataTypeE"] = problemTypeState["DataTypeE"].value
@@ -61,9 +67,15 @@ def UpdateLogic(filename, logicPath, outputPath):
     solutionList = []
     for solution in solutions:
         solutionState = solution.getAttributes()
+        if "ProblemType" not in solutionState:
+            solutionState["ProblemType"] = problemType
         solutionState["ProblemType"] = solutionState["ProblemType"].state
         solutionState["ProblemType"]["DataType"] = \
                 solutionState["ProblemType"]["DataType"].value
+        solutionState["ProblemType"]["MacDataTypeA"] = \
+                solutionState["ProblemType"]["MacDataTypeA"].value
+        solutionState["ProblemType"]["MacDataTypeB"] = \
+                solutionState["ProblemType"]["MacDataTypeB"].value
         solutionState["ProblemType"]["DataTypeA"] = \
                 solutionState["ProblemType"]["DataTypeA"].value
         solutionState["ProblemType"]["DataTypeB"] = \
@@ -88,13 +100,21 @@ def UpdateLogic(filename, logicPath, outputPath):
             solutionState["ProblemType"]["DataTypeMetadata"] = \
                 solutionState["ProblemType"]["DataTypeMetadata"].value
 
+        if isDictFormat:
+            del solutionState["ProblemType"]
+
         solutionState["ISA"] = list(solutionState["ISA"])
         solutionList.append(solutionState)
 
-    # update yaml
-    libYaml[0] = {"MinimumRequiredVersion":__version__}
-    libYaml[4] = problemTypeState
-    libYaml[5] = solutionList
+    # update yaml (dict- or legacy list-format)
+    if isinstance(libYaml, dict):
+        libYaml["MinimumRequiredVersion"] = __version__
+        libYaml["ProblemType"] = problemTypeState
+        libYaml["Solutions"] = solutionList
+    else:
+        libYaml[0] = {"MinimumRequiredVersion":__version__}
+        libYaml[4] = problemTypeState
+        libYaml[5] = solutionList
 
     if outputPath != "":
         filename = filename.replace(logicPath, outputPath)

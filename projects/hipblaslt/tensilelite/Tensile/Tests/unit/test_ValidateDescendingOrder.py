@@ -25,7 +25,9 @@ from Tensile.Components.CMSValidator import verify_ascending_order
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateDescendingOrder(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
+    needs_timeline = False
+
+    def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
         return verify_ascending_order(sched, kernel_dict, codePathIdx)
 
     def test_non_descending_order_failure(self):

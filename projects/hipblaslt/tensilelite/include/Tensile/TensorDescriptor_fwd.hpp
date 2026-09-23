@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     enum class DataType : int;
@@ -33,3 +35,4 @@ namespace TensileLite
     class TensorDescriptor;
 
 } // namespace TensileLite
+

@@ -71,68 +71,9 @@ TEST(TestConvolutionWgradAttributes, CreateConvolutionWgradAttributes)
               hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 }
 
-TEST(TestConvolutionWgradAttributes, PackAttributes)
-{
-    hipdnn_frontend::graph::ConvWgradAttributes convAttributes;
-
-    // Set tensors
-    auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    xTensor->set_uid(1);
-    convAttributes.set_x(xTensor);
-
-    auto dyTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    dyTensor->set_uid(2);
-    convAttributes.set_dy(dyTensor);
-
-    auto dwTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    dwTensor->set_uid(3);
-    convAttributes.set_dw(dwTensor);
-
-    // Set convolution parameters
-    convAttributes.set_pre_padding({2, 2});
-    convAttributes.set_post_padding({2, 2});
-    convAttributes.set_stride({2, 2});
-    convAttributes.set_dilation({1, 1});
-    convAttributes.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
-
-    // Pack attributes
-    flatbuffers::FlatBufferBuilder builder;
-    auto packedAttributes = convAttributes.pack_attributes(builder);
-    builder.Finish(packedAttributes);
-
-    auto buffer = builder.GetBufferPointer();
-    auto convAttributesFb
-        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>(buffer);
-
-    // Verify packed tensor UIDs
-    EXPECT_EQ(convAttributesFb->x_tensor_uid(), 1);
-    EXPECT_EQ(convAttributesFb->dy_tensor_uid(), 2);
-    EXPECT_EQ(convAttributesFb->dw_tensor_uid(), 3);
-
-    // Verify packed convolution parameters
-    ASSERT_EQ(convAttributesFb->pre_padding()->size(), 2);
-    EXPECT_EQ(convAttributesFb->pre_padding()->Get(0), 2);
-    EXPECT_EQ(convAttributesFb->pre_padding()->Get(1), 2);
-
-    ASSERT_EQ(convAttributesFb->post_padding()->size(), 2);
-    EXPECT_EQ(convAttributesFb->post_padding()->Get(0), 2);
-    EXPECT_EQ(convAttributesFb->post_padding()->Get(1), 2);
-
-    ASSERT_EQ(convAttributesFb->stride()->size(), 2);
-    EXPECT_EQ(convAttributesFb->stride()->Get(0), 2);
-    EXPECT_EQ(convAttributesFb->stride()->Get(1), 2);
-
-    ASSERT_EQ(convAttributesFb->dilation()->size(), 2);
-    EXPECT_EQ(convAttributesFb->dilation()->Get(0), 1);
-    EXPECT_EQ(convAttributesFb->dilation()->Get(1), 1);
-
-    EXPECT_EQ(convAttributesFb->conv_mode(),
-              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
-}
-
 TEST(TestConvolutionWgradAttributes, DefaultValues)
 {
-    hipdnn_frontend::graph::ConvWgradAttributes convAttributes;
+    const hipdnn_frontend::graph::ConvWgradAttributes convAttributes;
 
     // Check default convolution mode
     EXPECT_EQ(convAttributes.get_convolution_mode(),
@@ -194,7 +135,7 @@ TEST(TestConvolutionWgradAttributes, SetPaddingBothPreAndPost)
 {
     hipdnn_frontend::graph::ConvWgradAttributes convAttributes;
 
-    std::vector<int64_t> padding = {5, 5};
+    const std::vector<int64_t> padding = {5, 5};
     convAttributes.set_padding(padding);
 
     // set_padding should set both pre and post padding to the same value
@@ -297,4 +238,96 @@ TEST(TestConvolutionWgradAttributes, SetTensorsConstRef)
     EXPECT_NE(xTensor, nullptr);
     EXPECT_NE(dyTensor, nullptr);
     EXPECT_NE(dwTensor, nullptr);
+}
+
+TEST(TestConvWgradAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::ConvWgradAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_padding({1, 1});
+    attr1.set_stride({1, 1});
+    attr1.set_dilation({1, 1});
+    attr1.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
+
+    auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dy1->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dy(dy1);
+
+    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x1->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_x(x1);
+
+    auto dw1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dw1->set_uid(3).set_name("DW").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dw(dw1);
+
+    hipdnn_frontend::graph::ConvWgradAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_padding({1, 1});
+    attr2.set_stride({1, 1});
+    attr2.set_dilation({1, 1});
+    attr2.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
+
+    auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dy2->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dy(dy2);
+
+    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x2->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_x(x2);
+
+    auto dw2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dw2->set_uid(3).set_name("DW").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dw(dw2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    structuralMismatchDy->set_uid(99).set_name("MismatchedDY");
+    attr2.set_dy(structuralMismatchDy);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_dy(dy2); // Revert
+
+    // Convolution-mode mismatch: semantic, must fail both checks
+    attr2.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CONVOLUTION);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION); // Revert
+
+    // Stride mismatch: semantic, must fail both checks
+    attr2.set_stride({2, 2});
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_stride({1, 1}); // Revert
+
+    // Padding mismatch: semantic, must fail both checks
+    attr2.set_padding({0, 0});
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_padding({1, 1}); // Revert
+
+    // Dilation mismatch: semantic, must fail both checks
+    attr2.set_dilation({2, 2});
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_dilation({1, 1}); // Revert
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchDy
+        ->set_uid(555) // Diverges from attr1's dy1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's dy1 ("DY")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_dy(logicalMatchDy);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
 }

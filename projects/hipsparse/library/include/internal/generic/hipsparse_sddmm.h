@@ -30,7 +30,7 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSDDMM_bufferSize returns the size of the required buffer needed when computing the sampled
+*  \p hipsparseSDDMM_bufferSize returns the size of the buffer required when computing the sampled
 *  dense-dense matrix multiplication:
 *  \f[
 *    C := \alpha (op(A) \cdot op(B)) \circ spy(C) + \beta \cdot C,
@@ -42,7 +42,7 @@ extern "C" {
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle              handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA                 dense matrix \f$A\f$ operation type.
 *  @param[in]
@@ -113,7 +113,7 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t           handle,
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle       handle to the hipsparse library context queue.
+*  handle       handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA          dense matrix \f$A\f$ operation type.
 *  @param[in]
@@ -172,12 +172,12 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Sampled Dense-Dense Matrix Multiplication.
+*  \brief Sampled dense-dense matrix multiplication.
 *
 *  \details
 *  \p hipsparseSDDMM multiplies the scalar \f$\alpha\f$ with the dense
 *  \f$m \times k\f$ matrix \f$op(A)\f$, the dense \f$k \times n\f$ matrix \f$op(B)\f$, filtered by the sparsity pattern
-*  of the \f$m \times n\f$ sparse matrix \f$C\f$ and adds the result to \f$C\f$ scaled by
+*  of the \f$m \times n\f$ sparse matrix \f$C\f$, and adds the result to \f$C\f$ scaled by
 *  \f$\beta\f$. The final result is stored in the sparse \f$m \times n\f$ matrix \f$C\f$,
 *  such that
 *  \f[
@@ -212,11 +212,11 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *
 *  Computing the above sampled dense-dense multiplication requires three steps to complete. First, the user calls
 *  \ref hipsparseSDDMM_bufferSize to determine the size of the required temporary storage buffer. Next, the user
-*  allocates this buffer and calls \ref hipsparseSDDMM_preprocess which performs any analysis of the input matrices
-*  that may be required. Finally, the user calls \p hipsparseSDDMM to complete the computation. Once all calls to
+*  allocates this buffer and calls \ref hipsparseSDDMM_preprocess, which performs any analysis of the input matrices
+*  that might be required. Finally, the user calls \p hipsparseSDDMM to complete the computation. After all calls to
 *  \p hipsparseSDDMM are complete, the temporary buffer can be deallocated.
 *
-*  \p hipsparseSDDMM supports different algorithms which can provide better performance for different matrices.
+*  \p hipsparseSDDMM supports different algorithms, which can provide better performance for different matrices.
 *
 *  <table>
 *  <caption id="sddmm_algorithms">Algorithms</caption>
@@ -238,16 +238,18 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="sddmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B     <th>C         <th>compute_type
 *  <tr><td>HIP_R_16F <td>HIP_R_32F <td>HIP_R_32F
 *  <tr><td>HIP_R_16F <td>HIP_R_16F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  @param[in]
-*  handle       handle to the hipsparse library context queue.
+*  handle       handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA          dense matrix \f$A\f$ operation type.
 *  @param[in]

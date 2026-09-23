@@ -1,7 +1,7 @@
 /*! \file */
 
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,16 +28,6 @@
 #include "rocsparse_enum_utils.hpp"
 #include "rocsparse_envariables.hpp"
 #include <map>
-
-void rocsparse::message(const char* msg_, const char* function_, const char* file_, int line_)
-{
-    if(rocsparse_debug_variables.get_debug_verbose())
-    {
-        std::cout << "// rocSPARSE.log:     { \"function\": \"" << function_ << "\"," << std::endl
-                  << "//                      \"line\"    : \"" << line_ << "\"," << std::endl
-                  << "//                      \"msg\"     : \"" << msg_ << "\" }" << std::endl;
-    }
-}
 
 void rocsparse::warning_message(const char* msg_,
                                 const char* function_,

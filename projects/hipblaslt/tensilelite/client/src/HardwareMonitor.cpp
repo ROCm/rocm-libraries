@@ -55,6 +55,15 @@ namespace TensileLite
 {
     namespace Client
     {
+        uint64_t getValidatedFrequency(const amdsmi_frequencies_t& freq)
+        {
+            if(freq.current >= AMDSMI_MAX_NUM_FREQUENCIES || freq.current >= freq.num_supported)
+            {
+                return std::numeric_limits<uint64_t>::max();
+            }
+            return freq.frequency[freq.current];
+        }
+
         uint32_t HardwareMonitor::GetAMDSMIIndex(int hipDeviceIndex)
         {
             InitAMDSMI();
@@ -387,7 +396,7 @@ namespace TensileLite
                     continue;
                 }
 
-                amdsmi_frequencies_t freq;
+                amdsmi_frequencies_t freq{};
 
                 if(m_clockMetrics[i] == AMDSMI_CLK_TYPE_SYS)
                 {
@@ -412,13 +421,15 @@ namespace TensileLite
                     // XCD0
                     auto status = amdsmi_get_clk_freq(
                         m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
-                    if(status != AMDSMI_STATUS_SUCCESS)
+                    uint64_t clockFreq = getValidatedFrequency(freq);
+                    if(status != AMDSMI_STATUS_SUCCESS
+                      || clockFreq == std::numeric_limits<uint64_t>::max())
                     {
                         m_clockValues[i] = std::numeric_limits<uint64_t>::max();
                     }
                     else
                     {
-                        m_clockValues[i] += freq.frequency[freq.current];
+                        m_clockValues[i] += clockFreq;
                     }
 #endif
                 }
@@ -426,14 +437,16 @@ namespace TensileLite
                 {
                     auto status = amdsmi_get_clk_freq(
                         m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
+                    uint64_t clockFreq = getValidatedFrequency(freq);
 
-                    if(status != AMDSMI_STATUS_SUCCESS)
+                    if(status != AMDSMI_STATUS_SUCCESS
+                      || clockFreq == std::numeric_limits<uint64_t>::max())
                     {
                         m_clockValues[i] = std::numeric_limits<uint64_t>::max();
                     }
                     else
                     {
-                        m_clockValues[i] += freq.frequency[freq.current];
+                        m_clockValues[i] += clockFreq;
                     }
                 }
             }

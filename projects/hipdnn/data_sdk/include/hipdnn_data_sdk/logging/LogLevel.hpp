@@ -42,7 +42,7 @@ HIPDNN_HIDDEN inline std::atomic<bool>& getLogLevelInitialized()
 inline std::optional<hipdnnSeverity_t> stringToSeverity(const std::string& level)
 {
     // Normalize input: trim whitespace and convert to lowercase
-    std::string normalized = utilities::toLower(utilities::trim(level));
+    const std::string normalized = utilities::toLower(utilities::trim(level));
 
     if(normalized == "off")
     {
@@ -89,14 +89,21 @@ inline hipdnnSeverity_t stringToSeverityOrOff(const std::string& level)
  */
 inline void initializeLogLevel()
 {
-    if(detail::getLogLevelInitialized().exchange(true))
+    // Multiple threads may execute this concurrently. The initialized flag is set after
+    // the cache has been initialized. Consequently, depending on timing, multiple threads
+    // may see initialzied=false and proceed to read the value from getEnv() (which is reentrant)
+    // and set the cache value (to the same value) before initialized is set to true. This
+    // is considered an acceptable trade-off to avoid the overhead of having a mutex to guard
+    // the log level cache initialization.
+    if(detail::getLogLevelInitialized().load(std::memory_order_acquire))
     {
         return; // Already initialized
     }
 
-    std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+    const std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
     detail::getLogLevelCache().store(detail::stringToSeverityOrOff(logLevel),
-                                     std::memory_order_relaxed);
+                                     std::memory_order_release);
+    detail::getLogLevelInitialized().store(true, std::memory_order_release);
 }
 
 /**
@@ -106,8 +113,8 @@ inline void initializeLogLevel()
  */
 inline void setLogLevel(hipdnnSeverity_t level)
 {
-    detail::getLogLevelCache().store(level, std::memory_order_relaxed);
-    detail::getLogLevelInitialized().store(true, std::memory_order_relaxed);
+    detail::getLogLevelCache().store(level, std::memory_order_release);
+    detail::getLogLevelInitialized().store(true, std::memory_order_release);
 }
 
 /**
@@ -117,11 +124,11 @@ inline void setLogLevel(hipdnnSeverity_t level)
  */
 inline hipdnnSeverity_t getLogLevel()
 {
-    if(!detail::getLogLevelInitialized().load(std::memory_order_relaxed))
+    if(!detail::getLogLevelInitialized().load(std::memory_order_acquire))
     {
         initializeLogLevel();
     }
-    return detail::getLogLevelCache().load(std::memory_order_relaxed);
+    return detail::getLogLevelCache().load(std::memory_order_acquire);
 }
 
 /**
@@ -132,7 +139,7 @@ inline hipdnnSeverity_t getLogLevel()
  */
 inline bool isLogLevelEnabled(hipdnnSeverity_t severity)
 {
-    hipdnnSeverity_t currentLevel = getLogLevel();
+    const hipdnnSeverity_t currentLevel = getLogLevel();
     if(currentLevel == HIPDNN_SEV_OFF)
     {
         return false;
@@ -143,22 +150,19 @@ inline bool isLogLevelEnabled(hipdnnSeverity_t severity)
 }
 
 /**
- * @brief Enable or disable logging globally
+ * @brief Reset logging state
  *
- * @param enabled If true, sets log level to INFO; if false, sets to OFF
+ * This resets the log level initialization flag, causing the next getLogLevel()
+ * call to re-read from the environment variable.
+ *
+ * @note This will effectively erase any log level that may have been set
+ * using setLogLevel() since the log level was first initialized, and the system will
+ * revert to the value set in the environment unless another call to setLogLevel()
+ * is made after calling this function.
  */
-inline void setLoggingEnabled(bool enabled)
+inline void resetLogLevelCache()
 {
-    setLogLevel(enabled ? HIPDNN_SEV_INFO : HIPDNN_SEV_OFF);
-}
-
-/**
- * @brief Reset logging state (for testing purposes)
- */
-inline void resetLogging()
-{
-    detail::getLogLevelInitialized().store(false, std::memory_order_relaxed);
-    detail::getLogLevelCache().store(HIPDNN_SEV_OFF, std::memory_order_relaxed);
+    detail::getLogLevelInitialized().store(false, std::memory_order_release);
 }
 
 } // namespace hipdnn_data_sdk::logging

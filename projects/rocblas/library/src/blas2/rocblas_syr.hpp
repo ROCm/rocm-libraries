@@ -57,6 +57,10 @@ inline rocblas_status rocblas_syr_arg_check(rocblas_handle handle,
 
     if(handle->pointer_mode == rocblas_pointer_mode_host)
     {
+        // per-batch alpha stride is only supported in device pointer mode
+        if(stride_alpha)
+            return rocblas_status_not_implemented;
+
         if(*alpha == 0)
             return rocblas_status_success;
 

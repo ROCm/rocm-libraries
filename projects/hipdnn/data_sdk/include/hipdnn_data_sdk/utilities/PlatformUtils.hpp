@@ -19,6 +19,11 @@
 
 #endif
 
+// expandUser() is declared and implemented per-platform, in PlatformUtils.linux.hpp and
+// PlatformUtils.windows.hpp (included above per platform) -- see those headers for the
+// platform-specific contract. It follows the same per-platform split as
+// getEnv()/setEnv()/unsetEnv().
+
 namespace hipdnn_data_sdk::utilities
 {
 

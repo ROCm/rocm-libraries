@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 #pragma once
 
 #include "../auxiliary/rocauxiliary_larfg.hpp"
+#include "asan_helpers.hpp"
 #include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
@@ -82,13 +83,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) larfg_kernel_small(const I n,
     }
 
     // reduce squared entries to find squared norm of x
-    norm2 += shift_left(norm2, 1);
-    norm2 += shift_left(norm2, 2);
-    norm2 += shift_left(norm2, 4);
-    norm2 += shift_left(norm2, 8);
-    norm2 += shift_left(norm2, 16);
-    if(warpSize > 32)
-        norm2 += shift_left(norm2, 32);
+    reduce_wave_sum(norm2);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = norm2;
     __syncthreads();
@@ -154,17 +149,20 @@ rocblas_status larfg_run_small(rocblas_handle handle,
                                 stream, n, alpha, shiftA, strideA, beta, shiftB, strideB, x, shiftX,
                                 incX, strideX, tau, strideP);
     }
-    else if(n <= 512)
-    {
-        ROCSOLVER_LAUNCH_KERNEL((larfg_kernel_small<512, T>), dim3(1, 1, batch_count), dim3(512), 0,
-                                stream, n, alpha, shiftA, strideA, beta, shiftB, strideB, x, shiftX,
-                                incX, strideX, tau, strideP);
-    }
     else
     {
-        ROCSOLVER_LAUNCH_KERNEL((larfg_kernel_small<1024, T>), dim3(1, 1, batch_count), dim3(1024),
-                                0, stream, n, alpha, shiftA, strideA, beta, shiftB, strideB, x,
-                                shiftX, incX, strideX, tau, strideP);
+        if constexpr(rocsolver_enable_asan)
+            ROCSOLVER_LAUNCH_KERNEL((larfg_kernel_small<256, T>), dim3(1, 1, batch_count),
+                                    dim3(256), 0, stream, n, alpha, shiftA, strideA, beta, shiftB,
+                                    strideB, x, shiftX, incX, strideX, tau, strideP);
+        else if(n <= 512)
+            ROCSOLVER_LAUNCH_KERNEL((larfg_kernel_small<512, T>), dim3(1, 1, batch_count),
+                                    dim3(512), 0, stream, n, alpha, shiftA, strideA, beta, shiftB,
+                                    strideB, x, shiftX, incX, strideX, tau, strideP);
+        else
+            ROCSOLVER_LAUNCH_KERNEL((larfg_kernel_small<1024, T>), dim3(1, 1, batch_count),
+                                    dim3(1024), 0, stream, n, alpha, shiftA, strideA, beta, shiftB,
+                                    strideB, x, shiftX, incX, strideX, tau, strideP);
     }
 
     return rocblas_status_success;

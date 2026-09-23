@@ -1,0 +1,32 @@
+name: "CI Environment"
+description: "Single source of truth for shared CI constants (TheRock ref, Docker image, runners)"
+
+outputs:
+  therock-ref:
+    description: "TheRock commit hash to use"
+    value: "90d12f3a151c4b3ae22e30417676ab7fe84a1d14" # 2026-09-21
+  kpack-ref:
+    description: "rocm-systems commit whose shared/kpack provides the rocm_kpack packing tooling"
+    # Copied into dnn-providers/hip-kernel-provider/cmake/KpackPython.cmake and
+    # projects/hipdnn/dockerfiles/Dockerfile.ubuntu24, neither of which can read
+    # this action. The kpack-pin-sync pre-commit hook holds them equal.
+    value: "a022846cf553c2b135410a5168f97705f1b9c6ac" # 2026-08-22
+  baseline-run-id:
+    description: "TheRock workflow run ID for prebuilt stage artifacts"
+    value: "35562115075" # Updated by assistant-librarian[bot] on submodule bumps
+  docker-image:
+    description: "Docker container image for Linux builds"
+    value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb"
+  linux-runner:
+    description: "GitHub Actions runner label for Linux jobs"
+    value: "aws-linux-scale-rocm-prod"
+  windows-runner:
+    description: "GitHub Actions runner label for Windows jobs"
+    value: "azure-windows-scale-rocm"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Export CI environment
+      shell: bash
+      run: echo "CI environment loaded"

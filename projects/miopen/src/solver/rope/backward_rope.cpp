@@ -103,15 +103,15 @@ ConvSolution RoPEBackward::GetSolution(const ExecutionContext&,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::rope::BwdInvokeParams>();
 
-            auto dxdims  = params.dxDesc->GetLengths();
+            auto dxdims_ = params.dxDesc->GetLengths();
             auto cosdims = params.cosDesc->GetLengths();
 
-            auto output_numel =
-                std::accumulate(dxdims.begin(), dxdims.end(), 1ULL, std::multiplies<size_t>());
+            auto output_numel_ =
+                std::accumulate(dxdims_.begin(), dxdims_.end(), 1ULL, std::multiplies<size_t>());
             auto rotary_numel =
                 std::accumulate(cosdims.begin(), cosdims.end(), 1ULL, std::multiplies<size_t>());
 
-            kernel(params.dy, params.cos, params.sin, params.dx, output_numel, rotary_numel);
+            kernel(params.dy, params.cos, params.sin, params.dx, output_numel_, rotary_numel);
         };
     };
 

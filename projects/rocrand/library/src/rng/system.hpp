@@ -126,6 +126,10 @@ struct host_system
         std::tuple<UserArgs...> user_args;
     };
 
+    // At the call site, the loops use a variable number of iterations,
+    // so Clang isn't able to unroll them and will (wrongfully) complain about it.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpass-failed"
     template<host::target_arch Arch, typename Kernel, size_t... Is, typename... Args>
     static void invoke_kernel(dim3 block,
                               dim3 thread,
@@ -136,6 +140,7 @@ struct host_system
     {
         Kernel::template generate<Arch>(block, thread, grid_dim, block_dim, std::get<Is>(args)...);
     }
+#pragma clang diagnostic pop
 
     template<typename Kernel,
              typename ConfigProvider

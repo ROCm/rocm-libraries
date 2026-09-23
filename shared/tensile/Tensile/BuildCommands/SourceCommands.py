@@ -29,7 +29,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
 from ..Common import (
     IsaVersion,
@@ -186,10 +186,13 @@ def _buildSourceCodeObjectFile(
     outputPath: Union[Path, str],
     kernelPath: Union[Path, str],
     removeTemporaries: bool,
+    libraryPath: Optional[Union[Path, str]] = None,
 ) -> List[str]:
 
     buildPath = Path(ensurePath(os.path.join(globalParameters["WorkingPath"], "code_object_tmp")))
-    destPath = Path(ensurePath(os.path.join(outputPath, "library")))
+    destPath = Path(
+        ensurePath(str(libraryPath) if libraryPath else os.path.join(outputPath, "library"))
+    )
     kernelPath = Path(kernelPath)
 
     objectFilename = kernelPath.stem + ".o"
@@ -239,7 +242,11 @@ def _buildSourceCodeObjectFile(
 
 
 def buildSourceCodeObjectFiles(
-    cxxCompiler: str, kernelFiles: List[Path], outputPath: Path, removeTemporaries: bool
+    cxxCompiler: str,
+    kernelFiles: List[Path],
+    outputPath: Path,
+    removeTemporaries: bool,
+    libraryPath: Optional[Union[Path, str]] = None,
 ) -> List[str]:
     """Compiles HIP source code files into code object files.
 
@@ -248,6 +255,7 @@ def buildSourceCodeObjectFiles(
         kernelFiles: List of paths to the kernel source files.
         outputPath: The output directory path where code objects will be placed.
         removeTemporaries: Whether to clean up temporary files.
+        libraryPath: Optional explicit destination for code objects. Defaults to outputPath/library.
 
     Returns:
         List of paths to the created code objects.
@@ -258,6 +266,7 @@ def buildSourceCodeObjectFiles(
         itertools.repeat(outputPath),
         kernelFiles,
         itertools.repeat(removeTemporaries),
+        itertools.repeat(libraryPath),
     )
     coFiles = ParallelMap(_buildSourceCodeObjectFile, args, "Compiling source kernels")
 

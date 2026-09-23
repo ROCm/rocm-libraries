@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """
 Run Omniperf against a RocRoller kernel or a Tensile guidepost.
@@ -35,7 +13,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List
 
 import rrperf
 from rrperf.problems import GEMMRun
@@ -47,11 +24,11 @@ def has_omniperf() -> bool:
 
 def run_omniperf(
     working_dir: Path,
-    executable: List[str],
+    executable: list[str],
     output: Path,
     omniperf_workload_dir: Path = "profiling",
     cwd: Path = ".",
-    env: Dict[str, str] = None,
+    env: dict[str, str] = None,
 ):
     cmd = [
         "omniperf",
@@ -107,7 +84,7 @@ def profile_tensile(config: Path, output_dir: Path, tensile_repo: Path):
 
 
 def profile_rr(
-    problem: GEMMRun, name: str, output_dir: Path, build_dir: Path, env: Dict[str, str]
+    problem: GEMMRun, name: str, output_dir: Path, build_dir: Path, env: dict[str, str]
 ):
     i = 0
     output = output_dir / f"results_{name}.txt"

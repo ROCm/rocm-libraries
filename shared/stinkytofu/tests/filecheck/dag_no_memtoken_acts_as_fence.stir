@@ -1,0 +1,47 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyDAGSchedulerPass --print-output
+#
+# Conservative side-effect behavior: barrier / tensor_load / ds_load / ds_store
+# without a `mod.memtoken` (i.e. without LDS pseudo-reg deps after the implicit
+# dependency pass) must be treated as non-movable side effects and act as hard
+# region boundaries in the DAG scheduler.
+#
+# This pipeline runs *only* StinkyDAGSchedulerPass (no BuildImplicitDependency),
+# so no LDS pseudo-registers are attached to the memory ops below.  Each of the
+# four kinds (barrier, tensor_load, ds_load, ds_store) should therefore be a
+# fence: instructions in later regions must not migrate above them, even when
+# they have no register dependencies on anything in the prior region.
+#
+# Input order:
+#   v_add_f32      (independent)
+#   s_barrier_signal -1   (no memtoken → fence)
+#   v_add_f32      (independent, post-barrier)
+#   tensor_load    (no memtoken → fence)
+#   v_add_f32      (independent, post-tensor_load)
+#   ds_load        (no memtoken → fence)
+#   v_add_f32      (independent, post-ds_load)
+#   ds_store       (no memtoken → fence)
+#   v_wmma         (no register deps on anything earlier)
+#
+# If the four memory ops were *not* treated as fences, the WMMA — which has no
+# register dependencies on any of the earlier instructions — would be hoisted
+# to the very top of the block.  Each fence forces the WMMA to remain in the
+# final region, after every fence.
+#
+# CHECK: s_barrier_signal
+# CHECK: tensor_load_to_lds
+# CHECK: ds_load_b128
+# CHECK: ds_store_b128
+# CHECK: v_wmma_f32_16x16x16_bf16
+
+st.func @test() {
+^entry:
+  v0 = "st.v_add_f32"(v1, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1 }
+  v5 = "st.v_add_f32"(v4, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v[20:23] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } }
+  v7 = "st.v_add_f32"(v6, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.ds_store_b128"(v101, v[24:27]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false } }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], acc[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

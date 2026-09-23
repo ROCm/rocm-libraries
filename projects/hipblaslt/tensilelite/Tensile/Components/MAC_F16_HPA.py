@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,8 @@ from ..Component import Component, MAC
 class FMA_F16_HPA_DOT2(MAC):
     asmCaps = lambda caps: caps['v_dot2_f32_f16'] or caps['v_dot2c_f32_f16']
     #archCaps = {}
-    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
+    kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Half),
+                              "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": True},
               "UseDotInstruction": True,
              }
@@ -89,7 +90,8 @@ class FMA_F16_HPA_DOT2(MAC):
 class FMA_F16_HPA_MAD_MIX(MAC):
     asmCaps = lambda caps: caps['v_mad_mix_f32'] or caps['v_fma_mix_f32']
     #archCaps = {}
-    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
+    kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Half),
+                              "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": True},
               "UseDotInstruction": False,
              }

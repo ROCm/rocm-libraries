@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -175,13 +175,13 @@ namespace rocsparse
                 {
                 case rocsparse_direction_row:
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(nnz_per_row_columns, 0, sizeof(I) * m, handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        nnz_per_row_columns, 0, sizeof(I) * m, handle->stream));
                 }
                 case rocsparse_direction_column:
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(nnz_per_row_columns, 0, sizeof(I) * n, handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        nnz_per_row_columns, 0, sizeof(I) * n, handle->stream));
                 }
                 }
             }
@@ -192,8 +192,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(handle, &mode));
                 if(rocsparse_pointer_mode_device == mode)
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(nnz_total_dev_host_ptr, 0, sizeof(I), handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                        nnz_total_dev_host_ptr, 0, sizeof(I), handle->stream));
                 }
                 else
                 {
@@ -305,14 +305,14 @@ rocsparse_status rocsparse::nnz_impl(rocsparse_handle          handle,
         //
         if(handle->pointer_mode == rocsparse_pointer_mode_device)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 nnz_total_dev_host_ptr, d_nnz, sizeof(I), hipMemcpyDeviceToDevice, handle->stream));
         }
         else
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 nnz_total_dev_host_ptr, d_nnz, sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
         }
 
         //

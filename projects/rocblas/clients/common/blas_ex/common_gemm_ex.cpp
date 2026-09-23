@@ -23,12 +23,14 @@
 #include "../common_helpers.hpp"
 #include "testing_gemm_batched_ex.hpp"
 #include "testing_gemm_ex.hpp"
+#include "testing_gemm_grouped_batched_ex.hpp"
 #include "testing_gemm_strided_batched_ex.hpp"
 
-#define INSTANTIATE_MIX(Ti_, To_, Tc_)                \
-    INSTANTIATE_TESTS(gemm_ex, Ti_, To_, Tc_)         \
-    INSTANTIATE_TESTS(gemm_batched_ex, Ti_, To_, Tc_) \
-    INSTANTIATE_TESTS(gemm_strided_batched_ex, Ti_, To_, Tc_)
+#define INSTANTIATE_MIX(Ti_, To_, Tc_)                        \
+    INSTANTIATE_TESTS(gemm_ex, Ti_, To_, Tc_)                 \
+    INSTANTIATE_TESTS(gemm_batched_ex, Ti_, To_, Tc_)         \
+    INSTANTIATE_TESTS(gemm_strided_batched_ex, Ti_, To_, Tc_) \
+    INSTANTIATE_TESTS(gemm_grouped_batched_ex, Ti_, To_, Tc_)
 
 INSTANTIATE_MIX(signed char, int, int)
 INSTANTIATE_MIX(rocblas_bfloat16, rocblas_bfloat16, float)
@@ -36,10 +38,11 @@ INSTANTIATE_MIX(rocblas_half, rocblas_half, float)
 INSTANTIATE_MIX(rocblas_bfloat16, float, float)
 INSTANTIATE_MIX(rocblas_half, float, float)
 
-#define INSTANTIATE(T_)                            \
-    INSTANTIATE_TESTS(gemm_ex, T_, T_, T_)         \
-    INSTANTIATE_TESTS(gemm_batched_ex, T_, T_, T_) \
-    INSTANTIATE_TESTS(gemm_strided_batched_ex, T_, T_, T_)
+#define INSTANTIATE(T_)                                    \
+    INSTANTIATE_TESTS(gemm_ex, T_, T_, T_)                 \
+    INSTANTIATE_TESTS(gemm_batched_ex, T_, T_, T_)         \
+    INSTANTIATE_TESTS(gemm_strided_batched_ex, T_, T_, T_) \
+    INSTANTIATE_TESTS(gemm_grouped_batched_ex, T_, T_, T_)
 
 INSTANTIATE(rocblas_half)
 INSTANTIATE(float)

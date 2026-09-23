@@ -242,16 +242,27 @@ struct GenericAttentionMask
         index_t x_start = -y + i_y + 1;
         index_t x_end   = min(i_y + x, x_total);
 
+        // Sink un-mask predicate, clause by clause:
+        //   i_x < sink       : the column lives inside the StreamLLM sink prefix.
+        //   i_x < i_y + x    : the column is not in the masked-out future of the
+        //                      window (= < x_end modulo the min with x_total);
+        //                      without this, queries <= sink-1 would be allowed
+        //                      to look at later sink columns/positions than they
+        //                      should under causality / right-window.
+        //   y < y_total      : the local window doesn't already span everything
+        //                      (otherwise sink un-mask is meaningless).
+        //   i_y < x_total    : the query row is in-range vs. the key sequence
+        //                      (handles seqlen_q > seqlen_k padding).
         if constexpr(IsLocal)
         {
-            if((i_x < sink) && (y < y_total) && ((i_y + x) > 1) && i_y < x_total)
+            if((i_x < sink) && (i_x < i_y + x) && (y < y_total) && i_y < x_total)
                 return false;
             else
                 return i_x < x_start || i_x >= x_end;
         }
         else
         {
-            if((i_x < sink) && (y < y_total) && ((i_y + x) > 1) && i_y < x_total)
+            if((i_x < sink) && (i_x < i_y + x) && (y < y_total) && i_y < x_total)
                 return false;
             else
                 return i_x >= x_end || i_y >= y_total;
@@ -298,6 +309,9 @@ struct GenericAttentionMask
             }
         }
     }
+
+    // the key sequence length, i.e. one past the last valid X index
+    CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
 
     private:
     index_t y, x, sink;
@@ -498,7 +512,9 @@ struct SimplifiedGenericAttentionMask
             return i_x >= x_total;
         index_t x_start = -y + i_y + 1;          // this could be negative, but it's fine
         index_t x_end   = min(i_y + x, x_total); // need min in case x is padded
-        if((i_x < sink) && (y < y_total) && ((i_y + x) > 1) && i_y < x_total)
+        // See note in the local-mask IsOutOfSinkBound: the sink column i_x is
+        // only valid up to the right-window boundary i_y + x.
+        if((i_x < sink) && (i_x < i_y + x) && (y < y_total) && i_y < x_total)
             return false;
         else
             return i_x < x_start || i_x >= x_end || i_y >= y_total;
@@ -535,6 +551,9 @@ struct SimplifiedGenericAttentionMask
             return top_right_edge || bottom_left_edge;
         }
     }
+
+    // the key sequence length, i.e. one past the last valid X index
+    CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
 
     private:
     index_t y, x, sink;

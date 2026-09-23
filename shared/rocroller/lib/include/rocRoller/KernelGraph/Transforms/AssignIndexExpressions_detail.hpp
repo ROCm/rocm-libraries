@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -178,7 +155,7 @@ namespace rocRoller::KernelGraph
          *
          * @param graph The kernel graph to modify
          * @param params Index computation parameters
-         * @param target Target coordinate (must have a User coordinate)
+         * @param target Target coordinate (must have a User coordinate with size set)
          * @param buffer Buffer coordinate to connect the Assign to
          * @param context GPU context
          * @param command Command containing argument info
@@ -191,5 +168,15 @@ namespace rocRoller::KernelGraph
                        ContextPtr                context,
                        CommandPtr                command);
 
+        /**
+         * @brief Detect if a LoadLDSTile candidate's index path contains
+         * a non-affine LDS swizzle edge and extract the unroll coordinate
+         * and its compile-time value from the upstream SetCoordinate.
+         *
+         * @param kgraph The kernel graph
+         * @param candidate Control graph tag of the candidate operation
+         * @return (unrollCoord, unrollValue) or (-1, -1) if not applicable
+         */
+        std::pair<int, int> GetInlineUnrollInfo(KernelGraph const& kgraph, int candidate);
     } // namespace AssignIndexExpressionsDetail
 } // namespace rocRoller::KernelGraph

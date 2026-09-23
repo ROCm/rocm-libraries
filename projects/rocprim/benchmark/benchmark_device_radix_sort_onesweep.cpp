@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,37 +20,37 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-#include "benchmark_device_radix_sort_onesweep.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_radix_sort_onesweep.hpp"
+#include "primbench.hpp"
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
-#define CREATE_BENCHMARK(...) \
-    executor.queue_instance(device_radix_sort_onesweep_benchmark<__VA_ARGS__>());
+#define CREATE_BENCHMARK(...) executor.queue<device_radix_sort_onesweep_benchmark<__VA_ARGS__>>();
 
 #define CREATE_BENCHMARK_TYPE_TUNING(KeyType)      \
     CREATE_BENCHMARK(KeyType, rocprim::empty_type) \
     CREATE_BENCHMARK(KeyType, rocprim::int128_t)   \
-    CREATE_BENCHMARK(KeyType, long long)           \
-    CREATE_BENCHMARK(KeyType, int)                 \
-    CREATE_BENCHMARK(KeyType, short)               \
+    CREATE_BENCHMARK(KeyType, int64_t)             \
+    CREATE_BENCHMARK(KeyType, int32_t)             \
+    CREATE_BENCHMARK(KeyType, int16_t)             \
     CREATE_BENCHMARK(KeyType, int8_t)
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::settings settings;
+    settings.size = 128 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
     CREATE_BENCHMARK_TYPE_TUNING(rocprim::int128_t)
-    CREATE_BENCHMARK_TYPE_TUNING(long long)
-    CREATE_BENCHMARK_TYPE_TUNING(int)
-    CREATE_BENCHMARK_TYPE_TUNING(short)
+    CREATE_BENCHMARK_TYPE_TUNING(int64_t)
+    CREATE_BENCHMARK_TYPE_TUNING(int32_t)
+    CREATE_BENCHMARK_TYPE_TUNING(int16_t)
     CREATE_BENCHMARK_TYPE_TUNING(int8_t)
     CREATE_BENCHMARK_TYPE_TUNING(double)
     CREATE_BENCHMARK_TYPE_TUNING(float)
@@ -61,28 +61,25 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(uint8_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
-    CREATE_BENCHMARK(int, float)
-    CREATE_BENCHMARK(int, double)
-    CREATE_BENCHMARK(int, float2)
-    CREATE_BENCHMARK(int, double2)
+    CREATE_BENCHMARK(int32_t, float)
+    CREATE_BENCHMARK(int32_t, double)
+    CREATE_BENCHMARK(int32_t, float2)
+    CREATE_BENCHMARK(int32_t, double2)
 
-    CREATE_BENCHMARK(long long, float)
-    CREATE_BENCHMARK(long long, double)
-    CREATE_BENCHMARK(long long, float2)
-    CREATE_BENCHMARK(long long, double2)
+    CREATE_BENCHMARK(int64_t, float)
+    CREATE_BENCHMARK(int64_t, double)
+    CREATE_BENCHMARK(int64_t, float2)
+    CREATE_BENCHMARK(int64_t, double2)
 
     CREATE_BENCHMARK(uint8_t, uint8_t)
     CREATE_BENCHMARK(rocprim::half, rocprim::half)
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-
-    CREATE_BENCHMARK(int, custom_float2)
-    CREATE_BENCHMARK(int, custom_double2)
-    CREATE_BENCHMARK(long long, custom_float2)
-    CREATE_BENCHMARK(long long, custom_double2)
+    CREATE_BENCHMARK(int32_t, custom_f32_f32)
+    CREATE_BENCHMARK(int32_t, custom_f64_f64)
+    CREATE_BENCHMARK(int64_t, custom_f32_f32)
+    CREATE_BENCHMARK(int64_t, custom_f64_f64)
     #endif
 #endif
 

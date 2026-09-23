@@ -5,9 +5,10 @@
 
 #include "ck/wrapper/utils/layout_utils.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 // Disable from doxygen docs generation
 /// @cond INTERNAL
 namespace ck {
@@ -25,6 +26,12 @@ namespace wrapper {
 template <typename Shape, typename UnrolledDescriptorType>
 struct Layout
 {
+    // Both are stored as members below, so a reference type would silently turn
+    // the Layout into a non-owning alias of whatever it was built from.
+    static_assert(!std::is_reference_v<Shape> && !std::is_reference_v<UnrolledDescriptorType>,
+                  "Layout must own its shape and descriptor; strip references with "
+                  "remove_cvref_t before instantiating it.");
+
     // Disable from doxygen docs generation
     /// @cond INTERNAL
     private:
@@ -245,8 +252,7 @@ struct Layout
         const auto lower_dims =
             generate_tuple([&](auto i) { return GenerateLowerDim<Number<i>>(shape); },
                            Number<Tuple<ShapeDims...>::Size()>{});
-        const auto upper_dims = generate_tuple([&](auto i) { return Sequence<i.value>{}; },
-                                               Number<Tuple<ShapeDims...>::Size()>{});
+        const auto upper_dims = generate_identity_sequences<Tuple<ShapeDims...>::Size()>();
 
         return transform_tensor_descriptor(desc, transforms, lower_dims, upper_dims);
     }
@@ -485,4 +491,6 @@ struct Layout
 
 } // namespace wrapper
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

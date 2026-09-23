@@ -9,5 +9,3 @@
 #include "rocblaslt.h"
 
 void preloadCustomKernels(SolutionCache& cache);
-
-rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob);

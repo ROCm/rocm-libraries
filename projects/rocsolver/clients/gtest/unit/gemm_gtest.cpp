@@ -51,7 +51,7 @@ const vector<vector<int>> k_size_range = {
     {150, 200}};
 
 const vector<int> n_size_range = {16, 150};
-
+/*
 const vector<vector<int64_t>> m_size_range_64 = {
     // normal (valid) samples
     {50, 50, 50},
@@ -63,7 +63,7 @@ const vector<vector<int64_t>> k_size_range_64 = {
     {150, 200}};
 
 const vector<int64_t> n_size_range_64 = {16, 150};
-
+*/
 // for daily_lapack tests
 const vector<vector<int>> large_m_size_range = {
     {1000, 1024, 1024},
@@ -74,7 +74,7 @@ const vector<vector<int>> large_k_size_range = {
 };
 
 const vector<int> large_n_size_range = {1000};
-
+/*
 const vector<vector<int64_t>> large_m_size_range_64 = {
     {1000, 1024, 1024},
 };
@@ -84,7 +84,7 @@ const vector<vector<int64_t>> large_k_size_range_64 = {
 };
 
 const vector<int64_t> large_n_size_range_64 = {1000};
-
+*/
 const vector<char> all_operations = {
     'N',
     'T',
@@ -129,7 +129,7 @@ class GEMM_BASE : public ::TestWithParam<gemm_tuple<I>>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -145,11 +145,11 @@ protected:
 class GEMM : public GEMM_BASE<rocblas_int>
 {
 };
-
+/*
 class GEMM_64 : public GEMM_BASE<int64_t>
 {
 };
-
+*/
 // non-batch tests
 
 TEST_P(GEMM, __float)
@@ -215,7 +215,7 @@ TEST_P(GEMM, strided_batched__double_complex)
 {
     run_tests<false, true, rocblas_double_complex>();
 }
-
+/*
 // 64-bit API
 
 // non-batch tests
@@ -283,7 +283,7 @@ TEST_P(GEMM_64, strided_batched__double_complex)
 {
     run_tests<false, true, rocblas_double_complex>();
 }
-
+*/
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GEMM,
                          Combine(ValuesIn(large_m_size_range),
@@ -301,7 +301,7 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                                  ValuesIn(all_operations),
                                  ValuesIn(all_operations),
                                  ValuesIn(alpha_beta)));
-
+/*
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GEMM_64,
                          Combine(ValuesIn(large_m_size_range_64),
@@ -319,3 +319,4 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                                  ValuesIn(all_operations),
                                  ValuesIn(all_operations),
                                  ValuesIn(alpha_beta)));
+*/

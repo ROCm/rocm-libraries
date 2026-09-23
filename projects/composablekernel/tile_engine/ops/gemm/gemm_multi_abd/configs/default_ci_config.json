@@ -1,0 +1,100 @@
+{
+    "tile_config": {
+        "tile_m": {
+            "max": 256,
+            "min": 64,
+            "step": 256
+        },
+        "tile_n": {
+            "max": 256,
+            "min": 64,
+            "step": 256
+        },
+        "tile_k": {
+            "max": 256,
+            "min": 64,
+            "step": 256
+        },
+        "warp_m": {
+            "values": [
+                2
+            ]
+        },
+        "warp_n": {
+            "values": [
+                2
+            ]
+        },
+        "warp_k": {
+            "values": [
+                1
+            ]
+        },
+        "warp_tile_m": {
+            "values": [
+                32
+            ]
+        },
+        "warp_tile_n": {
+            "values": [
+                32
+            ]
+        },
+        "warp_tile_k": {
+            "values": [
+                16
+            ]
+        }
+    },
+    "trait_config": {
+        "pipeline": {
+            "values": [
+                "compv3",
+                "compv4",
+                "mem"
+            ]
+        },
+        "scheduler": {
+            "values": [
+                "intrawave",
+                "interwave"
+            ]
+        },
+        "epilogue": {
+            "values": [
+                "cshuffle",
+                "default"
+            ]
+        },
+        "pad_m": {
+            "values": [
+                false
+            ]
+        },
+        "pad_n": {
+            "values": [
+                false
+            ]
+        },
+        "pad_k": {
+            "values": [
+                false
+            ]
+        },
+        "persistent": {
+            "values": [
+                false,
+                true
+            ]
+        }
+    },
+    "multi_abd_config": {
+        "num_a_tensors": 2,
+        "num_b_tensors": 2,
+        "num_d_tensors": 2,
+        "a_elementwise_op": "MultiDAdd",
+        "b_elementwise_op": "MultiDAdd",
+        "cde_elementwise_op": "MultiDAdd"
+    },
+    "k_block_per_cu": 1
+}

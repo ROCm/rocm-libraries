@@ -33,7 +33,7 @@ for file in $files; do
     echo "Processing copyright dates in $file"
     if [[ -e $file ]]; then
         /usr/bin/perl -pi -e 'INIT { exit 1 if !-f $ARGV[0] || -B $ARGV[0]; $year = (localtime)[5] + 1900 }
-            s/^([*\/#\/"*[:space:]]*)Copyright\s+(?:\(C\)\s*)?(\d+)(?:\s*-\s*\d+)?\s(Advanced\s*Micro\s*Devices)/qq($1Copyright (C) $2@{[$year != $2 ? "-$year" : ""]} $3)/ie
+            s/^([*\/#\/"*[:space:]]*)Copyright\s+(?:\(C\)\s*)?(\d+)(?:\s*-\s*\d+)?\s(Advanced\s*Micro\s*Devices)/qq($1Copyright (C) $year $3)/ie
             if $. < 10' "$file" && git add -u "$file"
     fi
 done

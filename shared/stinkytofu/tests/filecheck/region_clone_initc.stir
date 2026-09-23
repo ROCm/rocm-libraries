@@ -1,0 +1,72 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RegionClonePass --print-output
+#
+# RegionClonePass: in-pass clone of unrolled-loop iter0 into an initC stage
+# with src C = 0 on each chain-head MFMA.
+#
+# Input shape (mirrors Tensile's gfx1250 unrolled loop):
+#   ^pre_loop : preamble (no clone trigger)
+#   ^label_LoopBeginL: the well-known unrolled-loop entry label emitted by
+#               Tensile's openLoop. In production CFGBuilder splits at LABEL
+#               instructions so the BB header equals the label name; the test
+#               authors that state directly. Contains a v[0:7] chain head, a
+#               second v[0:7] write (accumulates), then a v[8:15] chain head.
+#
+# The pass computes the region end in-pass: the boundary is the last chain
+# head, i.e. the last MFMA whose src C (acc) first appears scanning forward
+# from ^label_LoopBeginL (here the v[8:15] write). The scan is bounded by the
+# loop back-edge (s_branch label_LoopBeginL), so the v[16:23] write in
+# ^post_loop (after the back-edge) is NOT part of the region and is left alone.
+#
+# Expected after the pass:
+#   - A new cloned BB inserted physically before ^label_LoopBeginL, labeled
+#     ^label_InitCIterWmma_<origLabel>_<jobIdx>:.
+#   - The cloned BB's chain-head wmmas have src C rewritten to literal 0
+#     (one per unique src C acc); the second write to v[0:7] keeps its
+#     accumulator (it's no longer a chain head).
+#   - A new ^label_InitCIterWmma_target_0: BB created by splitBBAt; cloned
+#     tail ends with s_branch to it so first entry skips origin iter0.
+#   - The origin ^label_LoopBeginL's wmma chain is untouched (still accumulates).
+#
+# CHECKs use CHECK-LABEL to bind each scan window to a single BB. A cross-BB
+# regression (e.g. pass accidentally rewriting origin's src C) fails on the
+# right CHECK rather than being silently swallowed by an unbounded forward scan.
+
+# CHECK-LABEL: @initc_iter0_clone
+
+# === Pre-loop region: untouched preamble ===
+# CHECK-LABEL: ^pre_loop:
+# CHECK: s_mov_b32
+
+# === Cloned region (granular): chain heads zeroed; 2nd v[0:7] keeps acc ===
+# Anchor to the cloned BB and walk its body in order.
+# CHECK-LABEL: ^label_InitCIterWmma_label_LoopBeginL_0:
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}, 0)
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[0:7])
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}, 0)
+# CHECK: s_branch{{.*}}label_InitCIterWmma_target_0
+
+# === Origin region: all 3 wmmas keep accumulators ==========================
+# CHECK-LABEL: ^label_LoopBeginL:
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[0:7])
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[0:7])
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[8:15])
+
+# === Target region: created by splitBBAt after the boundary; holds back-edge ===
+# CHECK-LABEL: ^label_InitCIterWmma_target_0:
+# CHECK: s_branch{{.*}}label_LoopBeginL
+
+# === Post-loop region: after the back-edge, its new acc is left untouched ===
+# CHECK-LABEL: ^post_loop:
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[16:23])
+
+st.func @initc_iter0_clone() {
+^pre_loop:
+  v0 = "st.s_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[24:31], v[32:39], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_branch"(label_LoopBeginL) { issueCycles = 1, latencyCycles = 1 }
+^post_loop:
+  v[16:23] = "st.v_wmma_f32_16x16x16_bf16"(v[24:31], v[32:39], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

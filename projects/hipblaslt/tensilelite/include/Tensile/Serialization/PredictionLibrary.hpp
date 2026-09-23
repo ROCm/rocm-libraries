@@ -30,6 +30,10 @@
 
 #include <Tensile/PredictionLibrary.hpp>
 
+#include <Tensile/Debug.hpp>
+#include <tensilelitehost/export.h>
+#include <iostream>
+
 namespace TensileLite
 {
     namespace Serialization
@@ -53,9 +57,9 @@ namespace TensileLite
                 std::vector<int> mappingIndices;
                 if(iot::outputting(io))
                 {
-                    mappingIndices.reserve(lib.solutionmap.size());
+                    mappingIndices.reserve(lib.solution_list.size());
 
-                    for(auto const& pair : lib.solutionmap)
+                    for(auto const& pair : lib.solution_list)
                         mappingIndices.push_back(pair.first);
 
                     iot::mapRequired(io, "table", mappingIndices);
@@ -68,10 +72,11 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    for(int index : mappingIndices)
+                    for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
                     {
-                        auto slnIter = ctx->solutions->find(index);
-                        if(slnIter == ctx->solutions->end())
+                        int  index    = mappingIndices[local_index];
+                        auto solution = resolveContextSolution(ctx, index);
+                        if(!solution)
                         {
                             iot::setError(
                                 io,
@@ -80,8 +85,11 @@ namespace TensileLite
                         }
                         else
                         {
-                            auto solution = slnIter->second;
-                            lib.solutionmap.insert(std::make_pair(index, solution));
+                            // origami_config_list below is built from this
+                            // solution's sizeMapping and must stay index-aligned
+                            // with solution_list, so both are filled here rather
+                            // than deferred.
+                            lib.solution_list.emplace_back(index, solution);
 
                             origami::dim3_t origami_mi;
                             if(solution->sizeMapping.matrixInstruction[0] == 0
@@ -100,6 +108,14 @@ namespace TensileLite
                                         solution->sizeMapping.matrixInstruction[2])};
                             }
 
+                            if(Debug::Instance().printPropertyEvaluation()
+                               && solution->sizeMapping.CUOccupancy <= 0)
+                            {
+                                std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                                          << solution->sizeMapping.CUOccupancy
+                                          << " (<=0) for solution '" << solution->kernelName
+                                          << "'; clamping to 1 in origami config.\n";
+                            }
                             origami::config_t origami_config = {
                                 .mt = {solution->sizeMapping.macroTile.x,
                                        solution->sizeMapping.macroTile.y,
@@ -108,17 +124,19 @@ namespace TensileLite
                                 .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
+                                .subtile                   = solution->sizeMapping.useSubtileImpl,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
-                                .cache_hints_a             = solution->sizeMapping.nonTemporalA,
-                                .cache_hints_b             = solution->sizeMapping.nonTemporalB,
+                                .cache_hints_a             = solution->sizeMapping.cacheHintA(),
+                                .cache_hints_b             = solution->sizeMapping.cacheHintB(),
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+                                .stream_k                  = solution->sizeMapping.streamK,
+                                .index                     = local_index,
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
-                            lib.origami_config_map.insert(std::make_pair(origami_config, index));
                         }
                     }
                 }
@@ -127,3 +145,4 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
+

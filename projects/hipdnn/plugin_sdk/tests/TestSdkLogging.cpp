@@ -9,106 +9,128 @@
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 // Test SDK logging works in plugin_sdk context using a custom callback
 
-namespace
+TEST(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
 {
-std::vector<std::pair<hipdnnSeverity_t, std::string>> s_capturedLogs; // NOLINT
-std::mutex s_logMutex; // NOLINT
+    // Create RAII log recorder - captures all logs for this test
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
-void testLoggingCallback(hipdnnSeverity_t severity, const char* msg)
-{
-    std::lock_guard<std::mutex> lock(s_logMutex);
-    if(msg != nullptr)
-    {
-        s_capturedLogs.emplace_back(severity, msg);
-    }
-}
-
-} // namespace
-
-class TestSdkLogging : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        std::lock_guard<std::mutex> lock(s_logMutex);
-        s_capturedLogs.clear();
-
-        hipdnn_data_sdk::logging::resetLogging();
-        hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
-        hipdnn_data_sdk::logging::registerLoggingCallback(testLoggingCallback);
-    }
-
-    void TearDown() override
-    {
-        hipdnn_data_sdk::logging::unregisterLoggingCallback();
-        hipdnn_data_sdk::logging::resetLogging();
-    }
-
-    static std::vector<std::pair<hipdnnSeverity_t, std::string>> getCapturedLogs()
-    {
-        std::lock_guard<std::mutex> lock(s_logMutex);
-        return s_capturedLogs;
-    }
-};
-
-TEST_F(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
-{
     HIPDNN_SDK_LOG_INFO("Plugin SDK info test message");
 
-    auto logs = getCapturedLogs();
-    ASSERT_EQ(logs.size(), 1);
-    EXPECT_EQ(logs[0].first, HIPDNN_SEV_INFO);
-    EXPECT_NE(logs[0].second.find("Plugin SDK info test message"), std::string::npos);
+    // Verify we got exactly one log
+    ASSERT_EQ(recorder.getRecordedLogCount(), 1) << "Expected 1 log, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
+
+    // Build expected message
+    const std::string expectedLogSuffix = "Plugin SDK info test message";
+    // Verify log contains expected message at INFO level
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedLogSuffix))
+        << "Expected log containing: \"" << expectedLogSuffix << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(TestSdkLogging, SdkLogContainsComponentName)
+TEST(TestSdkLogging, SdkLogContainsComponentName)
 {
+    // Create RAII log recorder - captures all logs for this test
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
     HIPDNN_SDK_LOG_INFO("Component name check");
 
-    auto logs = getCapturedLogs();
-    ASSERT_EQ(logs.size(), 1);
+    // Verify we got exactly one log
+    ASSERT_EQ(recorder.getRecordedLogCount(), 1) << "Expected 1 log, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
 
-    // SDK uses fixed "hipdnn_sdk" component name
-    EXPECT_NE(logs[0].second.find("hipdnn_sdk"), std::string::npos)
-        << "Log message did not contain expected component name.\n"
-        << "Actual log: " << logs[0].second;
+    // Build expected message
+    const std::string expectedComponentName = "[hipdnn_sdk]";
+    // Verify log contains expected message at INFO level
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedComponentName))
+        << "Expected log containing: \"" << expectedComponentName << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(TestSdkLogging, SdkLogAllSeverityLevels)
+TEST(TestSdkLogging, SdkLogAllSeverityLevels)
 {
+    // Create RAII log recorder - captures all logs for this test
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
     HIPDNN_SDK_LOG_INFO("SDK info message");
     HIPDNN_SDK_LOG_WARN("SDK warn message");
     HIPDNN_SDK_LOG_ERROR("SDK error message");
     HIPDNN_SDK_LOG_FATAL("SDK fatal message");
 
-    auto logs = getCapturedLogs();
-    ASSERT_EQ(logs.size(), 4);
+    // Verify we got exactly four logs
+    ASSERT_EQ(recorder.getRecordedLogCount(), 4) << "Expected 4 logs, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
 
-    EXPECT_EQ(logs[0].first, HIPDNN_SEV_INFO);
-    EXPECT_EQ(logs[1].first, HIPDNN_SEV_WARN);
-    EXPECT_EQ(logs[2].first, HIPDNN_SEV_ERROR);
-    EXPECT_EQ(logs[3].first, HIPDNN_SEV_FATAL);
+    // Build expected message
+    const std::string expectedInfoMessage = "SDK info message";
+    const std::string expectedWarnMessage = "SDK warn message";
+    const std::string expectedErrorMessage = "SDK error message";
+    const std::string expectedFatalMessage = "SDK fatal message";
 
-    EXPECT_NE(logs[0].second.find("SDK info message"), std::string::npos);
-    EXPECT_NE(logs[1].second.find("SDK warn message"), std::string::npos);
-    EXPECT_NE(logs[2].second.find("SDK error message"), std::string::npos);
-    EXPECT_NE(logs[3].second.find("SDK fatal message"), std::string::npos);
+    // Verify log contains expected messages
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedInfoMessage))
+        << "Expected info log containing: \"" << expectedInfoMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, expectedWarnMessage))
+        << "Expected warning log containing: \"" << expectedWarnMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expectedErrorMessage))
+        << "Expected error log containing: \"" << expectedErrorMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_FATAL, expectedFatalMessage))
+        << "Expected fatal log containing: \"" << expectedFatalMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(TestSdkLogging, SdkLogRespectsLogLevel)
+TEST(TestSdkLogging, SdkLogRespectsLogLevel)
 {
-    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_ERROR);
+    // Create RAII log recorder - captures all logs for this test
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
-    HIPDNN_SDK_LOG_INFO("Should not appear");
-    HIPDNN_SDK_LOG_WARN("Should not appear");
-    HIPDNN_SDK_LOG_ERROR("Error should appear");
-    HIPDNN_SDK_LOG_FATAL("Fatal should appear");
+    HIPDNN_SDK_LOG_INFO("SDK info message");
+    HIPDNN_SDK_LOG_WARN("SDK warn message");
+    HIPDNN_SDK_LOG_ERROR("SDK error message");
+    HIPDNN_SDK_LOG_FATAL("SDK fatal message");
 
-    auto logs = getCapturedLogs();
-    ASSERT_EQ(logs.size(), 2);
-    EXPECT_NE(logs[0].second.find("Error should appear"), std::string::npos);
-    EXPECT_NE(logs[1].second.find("Fatal should appear"), std::string::npos);
+    // Verify we got exactly two logs
+    ASSERT_EQ(recorder.getRecordedLogCount(), 2) << "Expected 2 logs, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
+
+    // Build expected message
+    const std::string expectedInfoMessage = "SDK info message";
+    const std::string expectedWarnMessage = "SDK warn message";
+    const std::string expectedErrorMessage = "SDK error message";
+    const std::string expectedFatalMessage = "SDK fatal message";
+
+    // Verify log contains expected messages
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedInfoMessage))
+        << "Did NOT expect info log containing: \"" << expectedInfoMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, expectedWarnMessage))
+        << "Did NOT expect warning log containing: \"" << expectedWarnMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expectedErrorMessage))
+        << "Expected error log containing: \"" << expectedErrorMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_FATAL, expectedFatalMessage))
+        << "Expected fatal log containing: \"" << expectedFatalMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }

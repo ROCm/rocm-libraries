@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -697,8 +697,8 @@ void testing_csrgeam(Arguments argus)
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  M          = argus.M;
     int                  N          = argus.N;
-    T                    h_alpha    = make_DataType<T>(argus.alpha);
-    T                    h_beta     = make_DataType<T>(argus.beta);
+    T                    h_alpha    = argus.get_alpha<T>();
+    T                    h_beta     = argus.get_beta<T>();
     hipsparseIndexBase_t idx_base_A = argus.baseA;
     hipsparseIndexBase_t idx_base_B = argus.baseB;
     hipsparseIndexBase_t idx_base_C = argus.baseC;

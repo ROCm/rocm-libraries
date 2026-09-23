@@ -32,7 +32,7 @@
 #include <cstddef>
 #include <future>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include "HardwareMonitor_fwd.hpp"
 
@@ -40,8 +40,6 @@ namespace Tensile
 {
     namespace Client
     {
-        namespace po = boost::program_options;
-
         class HardwareMonitorListener : public RunListener
         {
         public:

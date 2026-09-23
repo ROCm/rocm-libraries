@@ -1,0 +1,6 @@
+joblib>=1.4.0
+pyyaml
+pandas
+numpy
+tqdm
+pytest>=7.0.0

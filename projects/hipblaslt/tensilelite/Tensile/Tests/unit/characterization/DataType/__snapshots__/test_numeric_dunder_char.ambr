@@ -1,0 +1,353 @@
+# serializer version: 1
+# name: test_eq
+  dict({
+    'different_value': False,
+    'same_value': True,
+    'vs_int_eq': False,
+    'vs_none_ne': True,
+    'vs_str_eq': False,
+  })
+# ---
+# name: test_flops_per_mac
+  dict({
+    'BFloat16': 2,
+    'BFloat6': 2,
+    'BFloat8': 2,
+    'BFloat8Float8': 2,
+    'BFloat8Float8_fnuz': 2,
+    'BFloat8_fnuz': 2,
+    'ComplexDouble': 8,
+    'ComplexFloat': 8,
+    'Double': 2,
+    'E5M3': 2,
+    'E8': 2,
+    'Float': 2,
+    'Float4': 2,
+    'Float6': 2,
+    'Float8': 2,
+    'Float8BFloat8': 2,
+    'Float8BFloat8_fnuz': 2,
+    'Float8_fnuz': 2,
+    'Half': 2,
+    'Int32': 2,
+    'Int64': 2,
+    'Int8': 2,
+    'Int8x4': 2,
+    'XFloat32': 2,
+  })
+# ---
+# name: test_get_attributes
+  dict({
+    'BFloat16': tuple(
+      7,
+    ),
+    'BFloat6': tuple(
+      20,
+    ),
+    'BFloat8': tuple(
+      16,
+    ),
+    'BFloat8Float8': tuple(
+      18,
+    ),
+    'BFloat8Float8_fnuz': tuple(
+      14,
+    ),
+    'BFloat8_fnuz': tuple(
+      12,
+    ),
+    'ComplexDouble': tuple(
+      3,
+    ),
+    'ComplexFloat': tuple(
+      2,
+    ),
+    'Double': tuple(
+      1,
+    ),
+    'E5M3': tuple(
+      23,
+    ),
+    'E8': tuple(
+      22,
+    ),
+    'Float': tuple(
+      0,
+    ),
+    'Float4': tuple(
+      21,
+    ),
+    'Float6': tuple(
+      19,
+    ),
+    'Float8': tuple(
+      15,
+    ),
+    'Float8BFloat8': tuple(
+      17,
+    ),
+    'Float8BFloat8_fnuz': tuple(
+      13,
+    ),
+    'Float8_fnuz': tuple(
+      11,
+    ),
+    'Half': tuple(
+      4,
+    ),
+    'Int32': tuple(
+      6,
+    ),
+    'Int64': tuple(
+      9,
+    ),
+    'Int8': tuple(
+      8,
+    ),
+    'Int8x4': tuple(
+      5,
+    ),
+    'XFloat32': tuple(
+      10,
+    ),
+  })
+# ---
+# name: test_hash_consistency
+  dict({
+    'distinct_values_distinct_hash': True,
+    'equal_objects_equal_hash': True,
+    'hash_matches_attributes': True,
+  })
+# ---
+# name: test_lt_ordering
+  dict({
+    'hi_gt_lo': True,
+    'hi_lt_lo': False,
+    'lo_le_lo': True,
+    'lo_lt_hi': True,
+  })
+# ---
+# name: test_mi_output_type_name_abbrev
+  dict({
+    'BFloat16': 'f32',
+    'BFloat6': 'f32',
+    'BFloat8': 'f32',
+    'BFloat8Float8': 'f32',
+    'BFloat8Float8_fnuz': 'f32',
+    'BFloat8_fnuz': 'f32',
+    'ComplexDouble': 'f64',
+    'ComplexFloat': 'f32',
+    'Double': 'f64',
+    'E5M3': 'f32',
+    'E8': 'f32',
+    'Float': 'f32',
+    'Float4': 'f32',
+    'Float6': 'f32',
+    'Float8': 'f32',
+    'Float8BFloat8': 'f32',
+    'Float8BFloat8_fnuz': 'f32',
+    'Float8_fnuz': 'f32',
+    'Half': 'f32',
+    'Int32': 'NONE',
+    'Int64': 'NONE',
+    'Int8': 'i32',
+    'Int8x4': 'i32',
+    'XFloat32': 'f32',
+  })
+# ---
+# name: test_num_bytes
+  dict({
+    'BFloat16': 2.0,
+    'BFloat6': 0.75,
+    'BFloat8': 1.0,
+    'BFloat8Float8': 1.0,
+    'BFloat8Float8_fnuz': 1.0,
+    'BFloat8_fnuz': 1.0,
+    'ComplexDouble': 16,
+    'ComplexFloat': 8,
+    'Double': 8,
+    'E5M3': 1.0,
+    'E8': 1.0,
+    'Float': 4,
+    'Float4': 0.5,
+    'Float6': 0.75,
+    'Float8': 1.0,
+    'Float8BFloat8': 1.0,
+    'Float8BFloat8_fnuz': 1.0,
+    'Float8_fnuz': 1.0,
+    'Half': 2.0,
+    'Int32': 4,
+    'Int64': 4,
+    'Int8': 1.0,
+    'Int8x4': 4,
+    'XFloat32': 4,
+  })
+# ---
+# name: test_num_registers
+  dict({
+    'BFloat16': 0.5,
+    'BFloat6': 0.1875,
+    'BFloat8': 0.25,
+    'BFloat8Float8': 0.25,
+    'BFloat8Float8_fnuz': 0.25,
+    'BFloat8_fnuz': 0.25,
+    'ComplexDouble': 4,
+    'ComplexFloat': 2,
+    'Double': 2,
+    'E5M3': 0.25,
+    'E8': 0.25,
+    'Float': 1,
+    'Float4': 0.125,
+    'Float6': 0.1875,
+    'Float8': 0.25,
+    'Float8BFloat8': 0.25,
+    'Float8BFloat8_fnuz': 0.25,
+    'Float8_fnuz': 0.25,
+    'Half': 0.5,
+    'Int32': 1,
+    'Int64': 1,
+    'Int8': 0.25,
+    'Int8x4': 1,
+    'XFloat32': 1,
+  })
+# ---
+# name: test_populate_lookup_table_duplicate_key_raises
+  "Duplicate key s in property 'char'"
+# ---
+# name: test_populate_lookup_table_index_mismatch_raises
+  'Enum value does not match index in properties list'
+# ---
+# name: test_populate_lookup_table_rebuild
+  dict({
+    '4xi8': 5,
+    'b': 7,
+    'b6': 20,
+    'b8': 16,
+    'b8f8': 18,
+    'b8f8n': 14,
+    'b8n': 12,
+    'bfloat16': 7,
+    'bfloat6': 20,
+    'bfloat8': 16,
+    'bfloat8_fnuz': 12,
+    'bfloat8float8': 18,
+    'bfloat8float8_fnuz': 14,
+    'c': 2,
+    'complexdouble': 3,
+    'complexfloat': 2,
+    'd': 1,
+    'double': 1,
+    'e5m3': 23,
+    'e8': 22,
+    'f4': 21,
+    'f6': 19,
+    'f8': 15,
+    'f8b8': 17,
+    'f8b8n': 13,
+    'f8n': 11,
+    'float': 0,
+    'float4': 21,
+    'float6': 19,
+    'float8': 15,
+    'float8_fnuz': 11,
+    'float8bfloat8': 17,
+    'float8bfloat8_fnuz': 13,
+    'h': 4,
+    'half': 4,
+    'i': 6,
+    'i64': 9,
+    'i8': 8,
+    'int32': 6,
+    'int64': 9,
+    'int8': 8,
+    'int8x4': 5,
+    's': 0,
+    'x': 10,
+    'xfloat32': 10,
+    'z': 3,
+  })
+# ---
+# name: test_repr
+  dict({
+    'BFloat16': 'B',
+    'BFloat6': 'B6',
+    'BFloat8': 'B8',
+    'BFloat8Float8': 'B8F8',
+    'BFloat8Float8_fnuz': 'B8F8N',
+    'BFloat8_fnuz': 'B8N',
+    'ComplexDouble': 'Z',
+    'ComplexFloat': 'C',
+    'Double': 'D',
+    'E5M3': 'E5M3',
+    'E8': 'E8',
+    'Float': 'S',
+    'Float4': 'F4',
+    'Float6': 'F6',
+    'Float8': 'F8',
+    'Float8BFloat8': 'F8B8',
+    'Float8BFloat8_fnuz': 'F8B8N',
+    'Float8_fnuz': 'F8N',
+    'Half': 'H',
+    'Int32': 'I',
+    'Int64': 'I64',
+    'Int8': 'I8',
+    'Int8x4': '4xi8',
+    'XFloat32': 'X',
+  })
+# ---
+# name: test_state
+  dict({
+    'BFloat16': 'BFloat16',
+    'BFloat6': 'BFloat6',
+    'BFloat8': 'BFloat8',
+    'BFloat8Float8': 'BFloat8Float8',
+    'BFloat8Float8_fnuz': 'BFloat8Float8_fnuz',
+    'BFloat8_fnuz': 'BFloat8_fnuz',
+    'ComplexDouble': 'ComplexDouble',
+    'ComplexFloat': 'ComplexFloat',
+    'Double': 'Double',
+    'E5M3': 'E5M3',
+    'E8': 'E8',
+    'Float': 'Float',
+    'Float4': 'Float4',
+    'Float6': 'Float6',
+    'Float8': 'Float8',
+    'Float8BFloat8': 'Float8BFloat8',
+    'Float8BFloat8_fnuz': 'Float8BFloat8_fnuz',
+    'Float8_fnuz': 'Float8_fnuz',
+    'Half': 'Half',
+    'Int32': 'Int32',
+    'Int64': 'Int64',
+    'Int8': 'Int8',
+    'Int8x4': 'Int8x4',
+    'XFloat32': 'XFloat32',
+  })
+# ---
+# name: test_str
+  dict({
+    'BFloat16': 'B',
+    'BFloat6': 'B6',
+    'BFloat8': 'B8',
+    'BFloat8Float8': 'B8F8',
+    'BFloat8Float8_fnuz': 'B8F8N',
+    'BFloat8_fnuz': 'B8N',
+    'ComplexDouble': 'Z',
+    'ComplexFloat': 'C',
+    'Double': 'D',
+    'E5M3': 'E5M3',
+    'E8': 'E8',
+    'Float': 'S',
+    'Float4': 'F4',
+    'Float6': 'F6',
+    'Float8': 'F8',
+    'Float8BFloat8': 'F8B8',
+    'Float8BFloat8_fnuz': 'F8B8N',
+    'Float8_fnuz': 'F8N',
+    'Half': 'H',
+    'Int32': 'I',
+    'Int64': 'I64',
+    'Int8': 'I8',
+    'Int8x4': '4xi8',
+    'XFloat32': 'X',
+  })
+# ---

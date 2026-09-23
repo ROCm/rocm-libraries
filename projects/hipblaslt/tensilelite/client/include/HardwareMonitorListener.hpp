@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 #include <cstddef>
 #include <future>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include "HardwareMonitor_fwd.hpp"
 
@@ -40,7 +40,6 @@ namespace TensileLite
 {
     namespace Client
     {
-        namespace po = boost::program_options;
 
         class HardwareMonitorListener : public RunListener
         {

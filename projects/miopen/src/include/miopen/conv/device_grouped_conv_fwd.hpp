@@ -7,6 +7,29 @@
 #include <array>
 
 namespace ck {
+
+// CK provides an inner_product specialization for half2_t but not bhalf2_t. The depthwise
+// conv kernel uses a 2-wide vectorized inner_product, so bf16 needs this. Convert each
+// bhalf lane to float and multiply-accumulate (matches CK's half2_t implementation).
+template <>
+__device__ inline void
+inner_product<bhalf2_t, bhalf2_t, float>(const bhalf2_t& a, const bhalf2_t& b, float& c)
+{
+#if defined(__gfx950__)
+    // gfx950 has a hardware bf16 dot; matches CK's half2_t path (v_dot2_f32_f16).
+    typedef __bf16 bf16x2_t __attribute__((ext_vector_type(2)));
+    c = __builtin_amdgcn_fdot2_f32_bf16(
+        __builtin_bit_cast(bf16x2_t, a), __builtin_bit_cast(bf16x2_t, b), c, false);
+#else
+    const vector_type<bhalf_t, 2> a_vector{a};
+    const vector_type<bhalf_t, 2> b_vector{b};
+    static_for<0, 2, 1>{}([&](auto i) {
+        c += type_convert<float>(a_vector.AsType<bhalf_t>()[i]) *
+             type_convert<float>(b_vector.AsType<bhalf_t>()[i]);
+    });
+#endif
+}
+
 template <typename GridwiseConvFwd, index_t BlockSize>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
@@ -50,7 +73,8 @@ template <index_t BlockSize, // Same as wave size, i.e 64
           index_t SubTileW,
           index_t InVectorWidth,  // SIMD vector width to use when processing input data
           index_t OutVectorWidth, // SIMD vector width to use when processing output data
-          bool RequirePadding = false>
+          bool RequirePadding = false,
+          bool FlipFilter     = false> // read the filter 180-degree rotated (for bwd-data reuse)
 struct GridwiseGroupedConv2DFwd
 {
     static constexpr index_t
@@ -77,11 +101,13 @@ struct GridwiseGroupedConv2DFwd
     }
     static constexpr index_t NDimSpatial = 2;
 
-    static constexpr auto I0          = Number<0>{};
-    static constexpr auto I1          = Number<1>{};
-    static constexpr auto I2          = Number<2>{};
-    static constexpr auto I3          = Number<3>{};
-    static constexpr index_t WaveSize = 64;
+    static constexpr auto I0 = Number<0>{};
+    static constexpr auto I1 = Number<1>{};
+    static constexpr auto I2 = Number<2>{};
+    static constexpr auto I3 = Number<3>{};
+    // WaveSize tracks the launch BlockSize (64 on CDNA, 32 on RDNA) so the
+    // lane-partitioning math is correct for both wavefront widths.
+    static constexpr index_t WaveSize = BlockSize;
     static constexpr index_t Tile_H   = BlockTileSize{}.At(I0);
     static constexpr index_t Tile_W   = BlockTileSize{}.At(I1);
 
@@ -353,7 +379,10 @@ struct GridwiseGroupedConv2DFwd
         const index_t X_Stride     = arg.wei_g_k_c_xs_strides_[4];
         static_for<0, Filter_Y, 1>{}([&](auto y) {
             static_for<0, Filter_X, 1>{}([&](auto x) {
-                auto p_wei = arg.p_wei_grid_ + Wei_G_Stride * g + y * Y_Stride + x * X_Stride;
+                // For bwd-data reuse, read the filter 180-degree rotated: w[Fy-1-y][Fx-1-x].
+                const index_t fy = FlipFilter ? (Filter_Y - 1 - y) : static_cast<index_t>(y);
+                const index_t fx = FlipFilter ? (Filter_X - 1 - x) : static_cast<index_t>(x);
+                auto p_wei = arg.p_wei_grid_ + Wei_G_Stride * g + fy * Y_Stride + fx * X_Stride;
                 constexpr auto stride = math::integer_divide_ceil(Filter_X, WeiScalarPerVector);
                 weight[y * stride + x / WeiScalarPerVector][x % WeiScalarPerVector] = *p_wei;
                 weight_odd[y * stride + (x + 1) / WeiScalarPerVector]
@@ -560,7 +589,8 @@ template <index_t NDimSpatial,
           index_t SubTileW,
           index_t InVectorWidth,
           index_t OutVectorWidth,
-          bool RequirePadding>
+          bool RequirePadding,
+          bool FlipFilter = false>
 struct DeviceGroupedConvFwd : public DeviceGroupedConvFwdMultipleABD<NDimSpatial,
                                                                      void,
                                                                      void,
@@ -598,7 +628,8 @@ struct DeviceGroupedConvFwd : public DeviceGroupedConvFwdMultipleABD<NDimSpatial
                                                      SubTileW,
                                                      InVectorWidth,
                                                      OutVectorWidth,
-                                                     RequirePadding>;
+                                                     RequirePadding,
+                                                     FlipFilter>;
 
     struct Argument : public BaseArgument
     {
@@ -1019,7 +1050,9 @@ struct DeviceGroupedConvFwd : public DeviceGroupedConvFwdMultipleABD<NDimSpatial
             << "SubTileW: " << SubTileW << ", "
             << "InVectorWidth: " << InVectorWidth<< ", "
             << "OutVectorWidth: " << OutVectorWidth<< ", "
-            << "RequirePadding: " << RequirePadding << ">"
+            << "RequirePadding: " << RequirePadding << ", "
+            << "FlipFilter: " << FlipFilter << ", "
+            << "DataType: " << (std::is_same<InDataType, ck::bhalf_t>::value ? "bf16" : "fp16") << ">"
             << std::endl;
         // clang-format on
 

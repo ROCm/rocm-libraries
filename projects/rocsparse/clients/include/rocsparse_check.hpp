@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -118,6 +118,9 @@ inline void near_check_segments(int64_t            n,
 {
     near_check_general(1, n, a, 1, b, 1, tol);
 }
+
+template <typename T>
+void check_integer(const T* a);
 
 void unit_check_garray(rocsparse_datatype val_type,
                        int64_t            size,

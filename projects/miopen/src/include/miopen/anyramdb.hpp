@@ -40,7 +40,7 @@ namespace miopen {
 
 class LockFile;
 
-struct MIOPEN_INTERNALS_EXPORT AnyRamDb
+struct AnyRamDb
 {
     using TRecord = std::vector<std::any>;
 

@@ -39,14 +39,14 @@ extern "C" {
  *  buffer must be allocated by the user.
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  This routine supports execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
  *  trans       matrix operation type.
  *  @param[in]
@@ -56,15 +56,14 @@ extern "C" {
  *  @param[in]
  *  nnz         number of non-zero entries in the sparse vector.
  *  @param[out]
- *  buffer_size temporary storage buffer size.
+ *  buffer_size temporary storage buffer size. Can return zero if no buffer is required 
+ *              for the supplied input parameters.
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p buffer_size pointer is invalid.
- *  \retval     rocsparse_status_not_implemented
- *              \p trans != \ref rocsparse_operation_none or
- *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
+ *  \retval     rocsparse_status_not_implemented \p trans != \ref rocsparse_operation_none.
  */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -101,7 +100,7 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
 /**@}*/
 
 /*! \ingroup level2_module
- *  \brief Dense matrix sparse vector multiplication
+ *  \brief Dense matrix sparse vector multiplication.
  *
  *  \details
  *  \p rocsparse_gemvi multiplies the scalar \f$\alpha\f$ with a dense \f$m \times n\f$
@@ -119,15 +118,15 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *    \right.
  *  \f]
  *
- *  Performing the above operation involves two steps. First, the user calls
- *  \ref rocsparse_sgemvi_buffer_size "rocsparse_Xgemvi_buffer_size()" in order to determine the size of
- *  the temporary storage buffer. Next, the user allocates this temporary buffer and passes it to
- *  \p rocsparse_gemvi to complete the computation. Once all calls to \p rocsparse_gemvi are complete the
+ *  Performing the above operation involves two steps. First, call
+ *  \ref rocsparse_sgemvi_buffer_size "rocsparse_Xgemvi_buffer_size()" to determine the size of
+ *  the temporary storage buffer. Next, allocate this temporary buffer and pass it to
+ *  \p rocsparse_gemvi to complete the computation. After all calls to \p rocsparse_gemvi are complete, the
  *  temporary storage buffer can be freed.
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  Currently, only \p trans == \ref rocsparse_operation_none is supported.
@@ -136,7 +135,7 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *  This routine supports execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
  *  trans       matrix operation type.
  *  @param[in]
@@ -148,13 +147,13 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *  @param[in]
  *  A           pointer to the dense matrix.
  *  @param[in]
- *  lda         leading dimension of the dense matrix
+ *  lda         leading dimension of the dense matrix.
  *  @param[in]
- *  nnz         number of non-zero entries in the sparse vector
+ *  nnz         number of non-zero entries in the sparse vector.
  *  @param[in]
- *  x_val       array of \p nnz elements containing the values of the sparse vector
+ *  x_val       array of \p nnz elements containing the values of the sparse vector.
  *  @param[in]
- *  x_ind       array of \p nnz elements containing the indices of the sparse vector
+ *  x_ind       array of \p nnz elements containing the indices of the sparse vector.
  *  @param[in]
  *  beta        scalar \f$\beta\f$.
  *  @param[inout]
@@ -163,16 +162,16 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *  @param[in]
  *  idx_base    rocsparse_index_base_zero or rocsparse_index_base_one.
  *  @param[in]
- *  temp_buffer temporary storage buffer
+ *  temp_buffer temporary storage buffer of at least the size returned by
+ *              \ref rocsparse_sgemvi_buffer_size "rocsparse_Xgemvi_buffer_size()".
+ *              Might be a \p nullptr when the returned size is zero.
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
- *  \retval     rocsparse_status_invalid_size \p m, \p n, \p lda or \p nnz is invalid.
+ *  \retval     rocsparse_status_invalid_size \p m, \p n, \p lda, or \p nnz is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p alpha, \p A, \p x_val, \p x_ind,
- *              \p beta, \p y or \p temp_buffer pointer is invalid.
- *  \retval     rocsparse_status_not_implemented
- *              \p trans != \ref rocsparse_operation_none or
- *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
+ *              \p beta, \p y, or \p temp_buffer pointer is invalid.
+ *  \retval     rocsparse_status_not_implemented \p trans != \ref rocsparse_operation_none.
  *
  *  \par Example
  *  \snippet example_rocsparse_gemvi.cpp doc example

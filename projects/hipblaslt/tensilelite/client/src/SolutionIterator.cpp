@@ -27,6 +27,7 @@
 #include "SolutionIterator.hpp"
 
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 #include <Tensile/Debug.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/UtilsOrigami.hpp>
@@ -103,6 +104,20 @@ namespace TensileLite
                 return false;
             }
 
+            // The all-solutions benchmark path selects kernels by index instead
+            // of going through a SolutionLibrary search. Apply the dynamic
+            // StreamK topology predicate explicitly so this path has the same
+            // support boundary as normal library selection. In particular, a
+            // gfx942 MI300A reports six XCDs while these kernels bake eight
+            // per-XCD queues; launching one is invalid, but static StreamK and
+            // non-StreamK solutions in the same config remain runnable.
+            if(!solution.streamKDynamicQueueSupported(problem, *m_hardware))
+            {
+                if(isReportValid)
+                    m_reporter->report(ResultKey::Validation, "UNSUPPORTED_XCD_TOPOLOGY");
+                return false;
+            }
+
             // Test if the persistent kernel is eligible for the current hw and solution
             problem.checkPersistentKernelEligibility(solution, *m_hardware);
             Task task(*m_hardware, problem, solution);
@@ -159,6 +174,66 @@ namespace TensileLite
             return true;
         }
 
+        static std::string formatFormocastInfo(ContractionSolution* const solution,
+                                               std::unordered_map<int,origami::Formocast::PredictedPerformance> predPerfs,
+                                               int currentSolutionIdx, double currentPrediction, int currentIdx, int lastSolutionIdx)
+        {
+            auto predPerf = predPerfs[currentSolutionIdx];
+            auto hitrate = predPerf.hitRate;
+            auto predPerfStr = concatenate<true>(
+                                "perf: ",predPerf.perf," us,",
+                                "MT0: ",predPerf.MT0,",",
+                                "MT1: ",predPerf.MT1,",",
+                                "depthU: ",predPerf.depthU,",",
+                                "NumCUs: ",predPerf.NumCUs,",",
+                                "WorkGroupMapping: ",predPerf.WorkGroupMapping,",",
+                                "CUOccupancy: ",predPerf.CUOccupancy,",",
+                                "GlobalSplitU: ",predPerf.GlobalSplitU,",",
+                                "LocalSplitU: ",predPerf.LocalSplitU,",",
+                                "loopCnt: ",predPerf.loopCnt,",",
+                                "init: ",predPerf.init," us,",
+                                "preloop: ",predPerf.preloop," us,",
+                                "Loop: ",predPerf.loop," us,",
+                                "lsu: ",predPerf.lsu," us,",
+                                "tail: ",predPerf.tail," us,",
+                                "math_overall: ",predPerf.math_overall,",",
+                                "mem_overall: ",predPerf.mem_overall,",",
+                                "A_loop_hitrate_l1: ",predPerf.memCosts.cache_hits.L1_hit.tile0HitRate,",",
+                                "B_loop_hitrate_l1: ",predPerf.memCosts.cache_hits.L1_hit.tile1HitRate,",",
+                                "A_loop_hitrate_l2: ",predPerf.memCosts.cache_hits.L2_hit.tile0HitRate,",",
+                                "B_loop_hitrate_l2: ",predPerf.memCosts.cache_hits.L2_hit.tile1HitRate,",",
+                                "A_loop_hitrate_l3: ",predPerf.memCosts.cache_hits.L3_hit.tile0HitRate,",",
+                                "B_loop_hitrate_l3: ",predPerf.memCosts.cache_hits.L3_hit.tile1HitRate,",",
+                                "A_request_l1: ",predPerf.memCosts.A_mem_l1_req,",",
+                                "B_request_l1: ",predPerf.memCosts.B_mem_l1_req,",",
+                                "tcc_ea0_coalscedA: ",predPerf.memCosts.tcc_ea0_coalscedA,",",
+                                "tcc_ea0_coalscedB: ",predPerf.memCosts.tcc_ea0_coalscedB,",",
+                                "request_l1: ",predPerf.memCosts.mem_l1_req,",",
+                                "request_l2: ",predPerf.memCosts.mem_l2_req,",",
+                                "request_l3: ",predPerf.memCosts.mem_l3_req,",",
+                                "request_hbm: ",predPerf.memCosts.mem_hbm_req,",",
+                                "loop_request_l1: ",predPerf.memCosts.mem_loop_l1_req,",",
+                                "loop_request_l2: ",predPerf.memCosts.mem_loop_l2_req,",",
+                                "loop_request_l3: ",predPerf.memCosts.mem_loop_l3_req,",",
+                                "loop_request_hbm: ",predPerf.memCosts.mem_loop_hbm_req,",",
+                                "A_MT_request_l1: ",predPerf.memCosts.MT_A_L1_req,",",
+                                "B_MT_request_l1: ",predPerf.memCosts.MT_B_L1_req,",",
+                                "A_MT_request_l2: ",predPerf.memCosts.MT_A_L2_req,",",
+                                "B_MT_request_l2: ",predPerf.memCosts.MT_B_L2_req,",",
+                                "A_MT_request_l3: ",predPerf.memCosts.MT_A_L3_req,",",
+                                "B_MT_request_l3: ",predPerf.memCosts.MT_B_L3_req,",",
+                                "A_MT_request_hbm: ",predPerf.memCosts.MT_A_hbm_req,",",
+                                "B_MT_request_hbm: ",predPerf.memCosts.MT_B_hbm_req,",",
+                                "store: ",predPerf.store," us,",
+                                "gsu: ",predPerf.gsu," us,",
+                                "num_tiles: ",predPerf.num_tiles,","
+                                "hitrate,", hitrate, ",",
+                                currentSolutionIdx,"->", currentPrediction, " us, ", currentIdx, ", ",
+                                currentSolutionIdx, "/", lastSolutionIdx
+            );
+            return predPerfStr;
+        }
+
         static origami::Formocast::ProblemInfo getProblemInfo(ContractionSolution&    solution,
                                                            ContractionProblemGemm& problem)
         {
@@ -178,17 +253,23 @@ namespace TensileLite
             problemInfo.swizzleTensorA = problem.swizzleTensorA();
             problemInfo.swizzleTensorB = problem.swizzleTensorB();
 
-            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
             return problemInfo;
+        }
+
+        static bool isPredictionAvailable(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            return hipAMDGPU && hipAMDGPU->analyticalHardware;
         }
 
         static origami::hardware_t::architecture_t getHardware(Hardware const& hardware)
         {
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            auto origamiHardware = hipAMDGPU->analyticalHardware;
-
-            // Return origami architecture directly
-            return origamiHardware->arch;
+            if(!hipAMDGPU || !hipAMDGPU->analyticalHardware)
+                throw std::runtime_error(
+                    "[SolutionIterator] analyticalHardware is not available for this GPU");
+            return hipAMDGPU->analyticalHardware->arch;
         }
 
         static origami::Formocast::SizeMapping getSizeMapping(ContractionSolution&    solution,
@@ -278,6 +359,21 @@ namespace TensileLite
         {
             m_firstSolutionIdx = firstSolutionIdx;
 
+            // Indexes library->solutions. For an indexed library that map is
+            // empty until caches are parsed and published; materializeAllSolutions()
+            // does both. The cache's own materializeAll() only parses, and
+            // leaves the reads below on an empty map.
+            //
+            // Best/Top iterators must not call this: they measure selection
+            // latency and should stay lazy.
+            library->materializeAllSolutions();
+
+            if(library->solutions.empty())
+            {
+                throw std::runtime_error(
+                    "[AllSolutionsIterator] library contains no solutions to enumerate");
+            }
+
             if(m_firstSolutionIdx < 0)
                 m_firstSolutionIdx = library->solutions.begin()->first;
 
@@ -297,7 +393,7 @@ namespace TensileLite
         void AllSolutionsIterator::preProblem(ContractionProblem* const problem)
         {
             SolutionIterator::preProblem(problem);
-            if (m_predictionThreshold > 1.0)
+            if (m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
             {
                 m_currentSolutionIdx = m_firstSolutionIdx;
             }
@@ -325,6 +421,7 @@ namespace TensileLite
                             predPerf = formocast.predictedPerformance();
                             performance.push_back(std::pair(i,predPerf.microSeconds));
                             m_hitrate[i] = predPerf.hitRate;
+                            m_predPerf[i] = predPerf;
                         }
                     }
                 }
@@ -378,17 +475,18 @@ namespace TensileLite
             {
                 m_reporter->report(ResultKey::SolutionProgress,
                      concatenate(m_currentSolutionIdx, "/", m_lastSolutionIdx));
-                
             }
             else
             {
                 m_reporter->report(ResultKey::SolutionProgress,
-                    concatenate("hitrate,",m_hitrate[m_currentSolutionIdx],",",m_currentSolutionIdx,"->",m_currentPrediction," us, ",m_currentIdx,", ",m_currentSolutionIdx,"/",m_lastSolutionIdx));
+                                   formatFormocastInfo(solution, m_predPerf,
+                                                       m_currentSolutionIdx, m_currentPrediction, m_currentIdx, m_lastSolutionIdx));
             }
         }
 
         void AllSolutionsIterator::postSolution()
         {
+            ScopedTimer timer("post_solution_sol_advance");
             if (m_predictionThreshold > 1.0)
             {
                 m_currentSolutionIdx++;
@@ -477,7 +575,10 @@ namespace TensileLite
             }
             if(m_currentSolution == nullptr)
             {
-                m_currentSolution = m_library->solutions.find(0)->second;
+                // Goes through the resolver rather than solutions.find(0):
+                // indexed libraries have not materialized index 0 yet, and the
+                // old form dereferenced end() when it was missing.
+                m_currentSolution = m_library->resolveSolutionByIndex(0);
             }
             m_usedCurrentSolution = false;
         }
@@ -493,6 +594,7 @@ namespace TensileLite
 
         void BestSolutionIterator::postSolution()
         {
+            ScopedTimer timer("post_solution_sol_advance");
             m_usedCurrentSolution = true;
         }
 
@@ -549,10 +651,12 @@ namespace TensileLite
             }
             if(m_solutions.size() == 0)
             {
-                m_solutions.push_back(m_library->solutions.find(0)->second);
+                // See the note in BestSolutionIterator::preProblem.
+                if(auto fallback = m_library->resolveSolutionByIndex(0))
+                    m_solutions.push_back(fallback);
             }
 
-            if(m_predictionThreshold > 1.0)
+            if(m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
             {
                 m_currentSolutionIdx = 0;
             }
@@ -612,13 +716,15 @@ namespace TensileLite
             if(m_predictionThreshold > 1.0)
                 m_reporter->report(ResultKey::SolutionProgress,
                                concatenate(m_currentSolutionIdx, "/", m_solutions.size()));
-            else    
+            else
                 m_reporter->report(ResultKey::SolutionProgress,
-                               concatenate("hitrate,",m_hitrate[m_currentSolutionIdx],",",m_currentSolutionIdx,"->",m_currentPrediction," us, ",m_currentSolutionIdx,"/",m_solutions.size()));               
+                                   formatFormocastInfo(solution, m_predPerf,
+                                                       m_currentSolutionIdx, m_currentPrediction, m_currentSolutionIdx, m_solutions.size()));
         }
 
         void TopSolutionIterator::postSolution()
         {
+            ScopedTimer timer("post_solution_sol_advance");
             if(m_predictionThreshold > 1.0)
             {
                 m_currentSolutionIdx++;

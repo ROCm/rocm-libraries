@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -93,7 +93,7 @@ try
         ("iters,i",
          value<rocblas_int>(&argus.iters)->default_value(10),
             "Iterations to run inside the GPU timing loop.\n"
-            "                           Reported time will be the average.\n"
+            "                           Reported time will be the median.\n"
             "                           ")
 
         ("mem_query",
@@ -189,6 +189,18 @@ try
          value<rocblas_int>(),
             "Matrix size parameter.\n"
             "                           Leading dimension of matrices V.\n"
+            "                           ")
+
+        ("ldvl",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices VL.\n"
+            "                           ")
+
+        ("ldvr",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices VR.\n"
             "                           ")
 
         // ("ldw",
@@ -296,6 +308,19 @@ try
         //     "                           Only applicable to laswp.\n"
         //     "                           ")
 
+        // geev options
+        ("jobvl",
+         value<char>()->default_value('N'),
+            "N = none, V = compute eigenvectors/singular vectors of the matrix,\n"
+            "                           Indicates how the eigenvectors/singular vectors are to be calculated and stored.\n"
+            "                           ")
+
+        ("jobvr",
+         value<char>()->default_value('N'),
+            "N = none, V = compute eigenvectors/singular vectors of the matrix,\n"
+            "                           Indicates how the eigenvectors/singular vectors are to be calculated and stored.\n"
+            "                           ")
+
         // gesvd options
         ("jobu",
          value<char>()->default_value('N'),
@@ -398,11 +423,11 @@ try
             "                           ")
 
         // other options
-        // ("direct",
-        //  value<char>()->default_value('F'),
-        //     "F = forward, B = backward.\n"
-        //     "                           The order in which a series of transformations are applied.\n"
-        //     "                           ")
+        ("direct",
+         value<char>()->default_value('F'),
+            "F = forward, B = backward.\n"
+            "                           The order in which a series of transformations are applied.\n"
+            "                           ")
 
         // ("fast_alg",
         //  value<char>()->default_value('O'),
@@ -433,11 +458,11 @@ try
             "                           The side from which a matrix should be multiplied.\n"
             "                           ")
 
-        // ("storev",
-        //  value<char>(),
-        //     "C = column-wise, R = row-wise.\n"
-        //     "                           Indicates whether data is stored column-wise or row-wise.\n"
-        //     "                           ")
+        ("storev",
+         value<char>(),
+            "C = column-wise, R = row-wise.\n"
+            "                           Indicates whether data is stored column-wise or row-wise.\n"
+            "                           ")
 
         ("trans",
          value<char>()->default_value('N'),
@@ -479,13 +504,15 @@ try
     argus.validate_operation("trans");
     argus.validate_side("side");
     argus.validate_fill("uplo");
-    // argus.validate_direct("direct");
-    // argus.validate_storev("storev");
+    argus.validate_direct("direct");
+    argus.validate_storev("storev");
     argus.validate_svect("jobu");
     argus.validate_svect("jobv");
     // argus.validate_workmode("fast_alg");
     argus.validate_itype("itype");
     argus.validate_evect("jobz");
+    argus.validate_evect("jobvl");
+    argus.validate_evect("jobvr");
     argus.validate_erange("range");
 
     // select and dispatch function test/benchmark

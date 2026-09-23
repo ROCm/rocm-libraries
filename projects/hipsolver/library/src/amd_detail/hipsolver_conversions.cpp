@@ -236,6 +236,32 @@ rocblas_storev_ hip2rocblas_side2storev(hipsolverSideMode_t side)
     }
 }
 
+rocblas_direct hip2rocblas_direct(hipsolverDirectMode_t direct)
+{
+    switch(direct)
+    {
+    case HIPSOLVER_DIRECT_FORWARD:
+        return rocblas_forward_direction;
+    case HIPSOLVER_DIRECT_BACKWARD:
+        return rocblas_backward_direction;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
+rocblas_storev hip2rocblas_storev(hipsolverStorevMode_t storev)
+{
+    switch(storev)
+    {
+    case HIPSOLVER_STOREV_COLUMNWISE:
+        return rocblas_column_wise;
+    case HIPSOLVER_STOREV_ROWWISE:
+        return rocblas_row_wise;
+    default:
+        throw HIPSOLVER_STATUS_INVALID_ENUM;
+    }
+}
+
 rocblas_svect_ hip2rocblas_evect2svect(hipsolverEigMode_t eig, int econ)
 {
     switch(eig)

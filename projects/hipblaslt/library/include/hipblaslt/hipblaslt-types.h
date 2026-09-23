@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,9 +38,22 @@
 #endif
 
 #include "hipblaslt_float8.h"
+#if defined(__HIP__)
+#include "hipblaslt_bfloat6.h"
+#include "hipblaslt_float6.h"
+#include "hipblaslt_float4.h"
+#endif
+#include "hipblaslt_e8.h"
+#include "hipblaslt_e5m3.h"
 #include <float.h>
+#include <complex>
 
 // Generic API
+
+#ifdef __cplusplus
+typedef std::complex<float>  hipblaslt_complex_float;
+typedef std::complex<double> hipblaslt_complex_double;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -71,5 +84,5 @@ typedef int32_t hipblasLtInt32;
 int const HIP_R_6F_E2M3_EXT = 31;
 int const HIP_R_6F_E3M2_EXT = 32;
 int const HIP_R_4F_E2M1_EXT = 33;
-
+int const HIP_R_8F_E5M3_EXT = 34;
 #endif /* _HIPBLASLT_TYPES_H_ */

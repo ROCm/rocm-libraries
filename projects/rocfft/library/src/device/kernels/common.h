@@ -28,7 +28,7 @@ typedef signed int   int32_t;
 typedef unsigned int uint32_t;
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 #define ROCFFT_DEVICE_EXPORT __declspec(dllexport)
 #else
 #define ROCFFT_DEVICE_EXPORT

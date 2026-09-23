@@ -1,0 +1,17 @@
+# Integration test configuration for HIP_FLASH2_ENGINE
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Tolerance Overrides --
+# FP16 Flash-Attention 2 V7 on gfx942.
+# Default SDPA forward tolerances (from sdpa::getToleranceFwd<half>) apply.
+# No overrides needed currently -- kernel matches PyTorch SDPBackend.MATH
+# reference to within standard FP16 accumulation error.
+
+# -- Test Skips --
+# Decode shapes (seq_q == 1) are not supported by this engine
+# (useFlash2ForShape returns false). The integration tests use prefill shapes
+# so no skips are needed here.

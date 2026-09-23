@@ -72,6 +72,7 @@ TEST(RegressionIssue_Example, BasicDeviceOperation)
     dim3 blockDim(256);
     dim3 gridDim(1);
     hipLaunchKernelGGL(example_kernel, gridDim, blockDim, 0, 0, d_output, size);
+    CHECK_HIP_ERROR(hipGetLastError());
     CHECK_HIP_ERROR(hipDeviceSynchronize());
 
     // Copy results back

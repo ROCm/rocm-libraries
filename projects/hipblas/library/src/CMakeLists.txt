@@ -58,6 +58,11 @@ add_library( hipblas
 )
 add_library( roc::hipblas ALIAS hipblas )
 
+# Add Windows version resource to library
+if(WIN32 AND BUILD_SHARED_LIBS)
+  target_sources(hipblas PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
+
 set(static_depends)
 
 find_package( hipblas-common REQUIRED CONFIG PATHS ${ROCM_PATH})

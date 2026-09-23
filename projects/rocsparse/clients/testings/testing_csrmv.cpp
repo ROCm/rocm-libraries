@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -163,8 +163,11 @@ void testing_csrmv(const Arguments& arg)
     host_csr_matrix<T> hA;
     matrix_factory.init_csr(hA, M, N);
 
-    // normalize
-    rocsparse_vector_utils<T>::normalize(hA.val);
+    if(!to_int)
+    {
+        // normalize
+        rocsparse_vector_utils<T>::normalize(hA.val);
+    }
 
     if((matrix_type == rocsparse_matrix_type_symmetric && M != N)
        || (matrix_type == rocsparse_matrix_type_triangular && M != N))

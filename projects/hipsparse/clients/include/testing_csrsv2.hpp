@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -330,7 +330,7 @@ void testing_csrsv2(Arguments argus)
     hipsparseDiagType_t    diag_type = argus.diag_type;
     hipsparseFillMode_t    fill_mode = argus.fill_mode;
     hipsparseSolvePolicy_t policy    = argus.solve_policy;
-    T                      h_alpha   = make_DataType<T>(argus.alpha);
+    T                      h_alpha   = argus.get_alpha<T>();
     std::string            filename  = argus.filename;
 
     hipsparseLocalHandle_t handle(argus);
@@ -464,7 +464,7 @@ void testing_csrsv2(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
 
         // Host csrsv2
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
         CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
 
         int position_gold;

@@ -971,6 +971,10 @@ struct tuple_sum
 
 TEST(AsyncReduceTests, test_async_reduce_bug1886)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+	GTEST_SKIP() << "This test is disabled in ASAN builds due to its memory usage.";
+#endif
+	
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   // Initialize input data

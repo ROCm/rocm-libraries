@@ -1,0 +1,35 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file {{ df.enum_def.backend_header }}
+ * @brief {{ df.enum_short_type }} enumeration for hipDNN backend operations
+ *
+ * Defines the {{ df.enum_short_type }} used when setting the
+ * {{ df.attr_name }} attribute on {{ op.name }} descriptors.
+ */
+
+#pragma once
+
+/**
+ * @enum {{ df.test_c_type }}
+ * @brief {{ df.enum_short_type }} for backend {{ op.name }} operations
+ */
+typedef enum
+{
+{% for v in df.enum_def.non_sentinel_values %}
+{% if v.description %}
+{% if not loop.last %}
+    {{ df.enum_def.backend_prefix }}{{ v.name }} = {{ v.value }}, ///< {{ v.description }}
+{% else %}
+    {{ df.enum_def.backend_prefix }}{{ v.name }} = {{ v.value }} ///< {{ v.description }}
+{% endif %}
+{% else %}
+{% if not loop.last %}
+    {{ df.enum_def.backend_prefix }}{{ v.name }} = {{ v.value }},
+{% else %}
+    {{ df.enum_def.backend_prefix }}{{ v.name }} = {{ v.value }}
+{% endif %}
+{% endif %}
+{% endfor %}
+} {{ df.test_c_type }};

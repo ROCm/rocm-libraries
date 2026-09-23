@@ -11,6 +11,34 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
+enum struct GemmPipelineType
+{
+    Mem,
+    CompV3,
+    CompV4
+};
+
+template <GemmPipelineType PT, typename Problem>
+struct GemmPipelineTypeSelector;
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::Mem, Problem>
+{
+    using pipeline = ck_tile::GemmPipelineAgBgCrMem<Problem>;
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompV3, Problem>
+{
+    using pipeline = ck_tile::GemmPipelineAgBgCrCompV3<Problem>;
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompV4, Problem>
+{
+    using pipeline = ck_tile::GemmPipelineAgBgCrCompV4<Problem>;
+};
+
 template <typename ADataType, typename BDataType, typename AccDataType, typename CDataType>
 auto calculate_rtol_atol(const ck_tile::index_t K,
                          const ck_tile::index_t kbatch,
@@ -43,22 +71,27 @@ template <typename Tuple>
 class TestCkTileStreamK : public ::testing::Test
 {
     protected:
-    using ALayout                            = std::tuple_element_t<0, Tuple>;
-    using BLayout                            = std::tuple_element_t<1, Tuple>;
-    using CLayout                            = std::tuple_element_t<2, Tuple>;
-    using ADataType                          = std::tuple_element_t<3, Tuple>;
-    using BDataType                          = std::tuple_element_t<4, Tuple>;
-    using AccDataType                        = std::tuple_element_t<5, Tuple>;
-    using CDataType                          = std::tuple_element_t<6, Tuple>;
-    using DsLayout                           = ck_tile::tuple<>;
-    using DsDataType                         = ck_tile::tuple<>;
-    static constexpr ck_tile::index_t M_Tile = std::tuple_element_t<7, Tuple>::value;
-    static constexpr ck_tile::index_t N_Tile = std::tuple_element_t<8, Tuple>::value;
-    static constexpr ck_tile::index_t K_Tile = std::tuple_element_t<9, Tuple>::value;
-    static constexpr bool Persistent         = std::tuple_element_t<10, Tuple>::value;
+    using ALayout                                 = std::tuple_element_t<0, Tuple>;
+    using BLayout                                 = std::tuple_element_t<1, Tuple>;
+    using CLayout                                 = std::tuple_element_t<2, Tuple>;
+    using ADataType                               = std::tuple_element_t<3, Tuple>;
+    using BDataType                               = std::tuple_element_t<4, Tuple>;
+    using AccDataType                             = std::tuple_element_t<5, Tuple>;
+    using CDataType                               = std::tuple_element_t<6, Tuple>;
+    using DsLayout                                = ck_tile::tuple<>;
+    using DsDataType                              = ck_tile::tuple<>;
+    static constexpr ck_tile::index_t M_Tile      = std::tuple_element_t<7, Tuple>::value;
+    static constexpr ck_tile::index_t N_Tile      = std::tuple_element_t<8, Tuple>::value;
+    static constexpr ck_tile::index_t K_Tile      = std::tuple_element_t<9, Tuple>::value;
+    static constexpr ck_tile::index_t M_Warp_Tile = std::tuple_element_t<10, Tuple>::value;
+    static constexpr ck_tile::index_t N_Warp_Tile = std::tuple_element_t<11, Tuple>::value;
+    static constexpr ck_tile::index_t K_Warp_Tile = std::tuple_element_t<12, Tuple>::value;
 
-    template <ck_tile::StreamKReductionStrategy ReductionStrategy,
-              bool PadM       = true,
+    static constexpr bool Persistent        = std::tuple_element_t<13, Tuple>::value;
+    static constexpr auto PipelineType      = std::tuple_element_t<14, Tuple>::value;
+    static constexpr auto ReductionStrategy = std::tuple_element_t<15, Tuple>::value;
+
+    template <bool PadM       = true,
               bool PadN       = true,
               bool PadK       = true,
               bool Preshuffle = false,
@@ -70,17 +103,13 @@ class TestCkTileStreamK : public ::testing::Test
         constexpr ck_tile::index_t N_Warp = 2;
         constexpr ck_tile::index_t K_Warp = 1;
 
-        constexpr ck_tile::index_t M_Warp_Tile = 32;
-        constexpr ck_tile::index_t N_Warp_Tile = 32;
-        constexpr ck_tile::index_t K_Warp_Tile = 16;
-
         constexpr bool kPadM      = PadM;
         constexpr bool kPadN      = PadN;
         constexpr bool kPadK      = PadK;
         constexpr bool preshuffle = Preshuffle;
 
-        constexpr bool DoubleSmemBuffer   = false;
-        constexpr int kBlockPerCu         = 1;
+        constexpr bool DoubleSmemBuffer = (PipelineType == GemmPipelineType::CompV4) ? true : false;
+        constexpr int kBlockPerCu       = 1;
         constexpr bool StructuredSparsity = false;
         constexpr bool NumWaveGroup       = 1;
 
@@ -117,9 +146,8 @@ class TestCkTileStreamK : public ::testing::Test
                                                                            GemmShape,
                                                                            GemmUniversalTraits,
                                                                            scheduler>;
-        // For initial testing, we will just test with one pipeline.
-        // More extensive testing is coming later and will test other pipelines.
-        using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<UniversalGemmProblem>;
+
+        using GemmPipeline = GemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
 
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
             ck_tile::CShuffleEpilogueProblem<ADataType,
@@ -149,7 +177,9 @@ class TestCkTileStreamK : public ::testing::Test
 
         if(!Kernel::IsSupportedArgument(kargs))
         {
-            EXPECT_TRUE(false);
+            // Since IsSupportedArgument only logs with an enviroment variable set, it's best to
+            // throw when we hit an unsupported case.
+            throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\n");
         }
 
         dim3 grid_dims  = Kernel::GridSize(kargs.tile_partitioner);
@@ -165,8 +195,6 @@ class TestCkTileStreamK : public ::testing::Test
     void Run(ck_tile::index_t M,
              ck_tile::index_t N,
              ck_tile::index_t K,
-             ck_tile::StreamKReductionStrategy reduction_strategy =
-                 ck_tile::StreamKReductionStrategy::Atomic,
              ck_tile::index_t stride_A = 0,
              ck_tile::index_t stride_B = 0,
              ck_tile::index_t stride_C = 0)
@@ -240,25 +268,8 @@ class TestCkTileStreamK : public ::testing::Test
                                       stride_B,
                                       stride_C};
 
-        ck_tile::index_t num_accumulations_per_tile;
-
-        if(reduction_strategy == ck_tile::StreamKReductionStrategy::Atomic)
-        {
-            num_accumulations_per_tile = invoke_streamk<ck_tile::StreamKReductionStrategy::Atomic>(
-                args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
-        }
-        else if(reduction_strategy == ck_tile::StreamKReductionStrategy::Reduction)
-        {
-            num_accumulations_per_tile =
-                invoke_streamk<ck_tile::StreamKReductionStrategy::Reduction>(
-                    args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
-        }
-        else
-        {
-            num_accumulations_per_tile =
-                invoke_streamk<ck_tile::StreamKReductionStrategy::TreeReduction>(
-                    args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
-        }
+        ck_tile::index_t num_accumulations_per_tile =
+            invoke_streamk<>(args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
 
         c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 

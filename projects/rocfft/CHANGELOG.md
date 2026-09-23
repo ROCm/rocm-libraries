@@ -3,29 +3,155 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## (Unreleased) rocFFT 1.0.37
+## (Unreleased) rocFFT 1.0.41
+
+### Resolved issues
+
+* Fixed possible failures of `rocfft_plan_create` for multi-device plans.
+* Fixed out-of-bounds memory access when executing a multi-device complex-to-complex plan whose
+  bricks used non-contiguous data layouts.
+
+## rocFFT 1.0.40 for ROCm 10.1
+
+### Added
+
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+
+* Implemented `rocfft_plan_description_set_load_callback` and `rocfft_plan_description_set_store_callback` APIs, to 
+  allow for user-defined device functions to be called when loading input or storing output of a transform.  These 
+  callback functions are specified during plan creation and allow rocFFT to Just-In-Time (JIT) compile the code into 
+  rocFFT's own kernels.
+
+  Also implemented `rocfft_execution_info_set_load_callback_data` and
+  `rocfft_execution_info_set_store_callback_data` APIs to allow
+  specifying the data pointers for these callbacks, which may differ
+  on each execution.
+
+  These APIs are not currently compatible with transforms that have
+  fields or bricks also specified on the same plan description.  This
+  support will be added in a future release of rocFFT.
+
+* Added support for very large FFTs on gfx1250.
+
+### Deprecations
+
+* The `rocfft_execution_info_set_load_callback` and `rocfft_execution_info_set_store_callback` APIs are now
+  deprecated and will be removed in a future release.  They allow for specifying callbacks as device function
+  pointers at plan execution time, but rocFFT cannot optimize the combined code.  Instead, users should specify JIT
+  callbacks on plan descriptions.
+
+### Resolved issues
+
+* Addressed a cache-reuse issue with RCCL communicators by giving each communicator its own set of streams.
+* Fixed multi-dimensional real transforms returning wrong results when a complex
+  transform that shares the same internal 2D kernel had been planned earlier in the
+  process and its plan was still alive.  A real transform's kernel needs extra
+  twiddle values for its fused real pre/post-processing step, but the 2D twiddle
+  table cache key did not distinguish the two, so the real transform could be handed
+  the complex transform's shorter table.
+* Fixed `rocfft_plan_create` hanging when given a zero FFT length, zero batch, or zero dimensions; these
+  now return `rocfft_status_invalid_dimensions` or `rocfft_status_invalid_arg_value`.
+* Fixed `rocfft_execution_info_set_stream` to derive the device from the stream itself instead of assuming the current device.
+
+* Fixed a potential issue where rocFFT could terminate the calling process if a HIP module failed to load during plan
+  creation.
+
+### Known issues
+
+* Function pointer callbacks specified via `rocfft_execution_info_set_load_callback` or 
+  `rocfft_execution_info_set_store_callback` are not functional on gfx1250 and `rocfft_execute` will fail in this case.
+
+## rocFFT 1.0.39 for ROCm 10.0
 
 ### Optimized
 
-* Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when 
+* Improved performance of unit-strided, interleaved, real-to-complex FFTs on gfx1201, gfx90a, gfx942, and gfx950 for the following lengths:
+  * (100,100,100)
+  * (192,96,96)
+  * (200,96,96)
+  * (128,128,256)
+  * (160,168,168)
+  * (160,168,192)
+  * (168,168,192)
+  * (168,192,192)
+  * (192,192,192)
+  * (192,192,200)
+  * (192,200,200)
+  * (200,200,200)
+  * (216,216,216)
+  * (216,104,100)
+  * (216,104,104)
+  * (224,104,104)
+  * (224,108,104)
+  * (224,108,108)
+
+### Added
+
+* Added optional RCCL (ROCm Collective Communications Library) backend for single-node multi-GPU communication, enabled via `-DROCFFT_RCCL_ENABLE=ON`.
+
+### Changed
+
+* Relaxed the usage requirements for `rocfft_setup` and `rocfft_cleanup`.
+* Removed the ROCFFT_RTC_PROCESS_HELPER debug environment variable.
+
+### Resolved issues
+
+* Addressed internal issues causing multi-device plans to fall back to the least-performant code path for certain 3D real transforms (e.g., multi-device single-precision real out-of-place 3D of size 320x320x320 using slab decomposition).
+* Fixed a thread-safety issue that could cause `rocfft_plan_create` to crash when called concurrently from many threads.
+
+## rocFFT 1.0.38 for ROCm 7.14
+
+### Added
+
+* Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
+* Support for the gfx1250 architecture.
+
+### Optimized
+
+* Improved performance of even-length real transforms with real lengths between 512 and 8192, extending to larger lengths (up to around 32768) on devices with more LDS.
+
+### Changed
+
+* Modified the `rocfft_plan_get_work_buffer_size` and `rocfft_execution_info_set_work_buffer` functions to get and set work memory for the current HIP device.
+  * Multi-device transforms can require work memory on any of the devices used for input or output bricks, and the current device set at plan creation.  Users should loop over the set of devices used by the input/output of the transform and check the work memory requirements for each device.
+
+### Resolved issues
+
+* Fixed possible incorrect results for multi-dimensional real transforms with small lengths (e.g., smaller than 128) along the two fastest-varying dimensions.
+
+## rocFFT 1.0.37 for ROCm 7.13
+
+### Added
+
+* Support for the gfx90c compilation target.
+
+### Optimized
+
+* Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when
   creating plans that exist concurrently.
-* Improved performance of unit-strided, complex-interleaved, forward/inverse FFTs on gfx1201, gfx90a, gfx942, and gfx950.
+* Improved performance of unit-strided, interleaved, complex-to-complex and real-to-complex FFTs on gfx1201, gfx90a, gfx942, and gfx950.
   Single-precision lengths:
-  - (160,72,72)
-  - (160,80,72)
-  - (160,80,80)
-  - (72,72,72)
-  - (80,80,80)
-  - (84,84,72)
-  - (96,96,96)
-  - (108,108,80)
-  Double-precision length:
-  - (72,72,52)
+  * (160,72,72)
+  * (160,80,72)
+  * (160,80,80)
+  * (72,72,72)
+  * (80,80,80)
+  * (84,84,72)
+  * (96,96,96)
+  * (108,108,80)
+  Double-precision lengths:
+  * (72,72,52)
+  * (60,60,60)
+  * (64,64,52)
+  * (64,64,64)
 
 ### Changed
 
 * Moved library to C++20 standard.
 * Removed Boost as a dependency for clients and samples.
+* Split the precompiled kernel cache file (`rocfft_kernel_cache.db`) into per-architecture files (`rocfft_kernel_cache_gfx950.db`, `rocfft_kernel_cache_gfx1201.db`, etc).
+* `rocfft_plan_create` returns `rocfft_status_invalid_offset` for any usage of non-zero offsets in plan descriptions. The feature is not supported yet.
+* Callback functions specified as function pointers on execution info handles will be deprecated in a future release.
 
 ### Resolved issues
 
@@ -38,6 +164,10 @@ Documentation for rocFFT is available at
 * Fixed incorrect results on some even-length real FFTs that have odd-length strides on higher dimensions.
 * Fixed callbacks on MPI transforms, when not all ranks have the same number of data bricks.
 * Fixed functional issues for multi-device, in-place real transforms.
+* Fixed functional issues for multi-dimensional, multi-device transforms involving some unit length(s).
+* Fixed functional issues for multi-device transforms involving data divisions along the slowest-varying axis (only) for some bricks but not all.
+* Fixed functional issues for multi-device transforms setting no field on input or output.
+* Fixed automatic allocation of work memory at plan execution time, when work memory is required on multiple devices.
 
 ## rocFFT 1.0.36 for ROCm 7.2.0
 
@@ -64,12 +194,12 @@ Documentation for rocFFT is available at
 
 * Implemented single-kernel plans for some 2D problem sizes, on devices with at least 160KiB of LDS.
 * Improved performance of unit-strided, complex-interleaved, forward/inverse FFTs for lengths:
-  - (64,64,128)
-  - (64,64,52)
-  - (60,60,60)
-  - (32,32,128)
-  - (32,32,64)
-  - (64,32,128)
+  * (64,64,128)
+  * (64,64,52)
+  * (60,60,60)
+  * (32,32,128)
+  * (32,32,64)
+  * (64,32,128)
 * Improved performance of 3D MPI pencil decompositions by using sub-communicators for global transpose operations.
 
 ## rocFFT 1.0.34 for ROCm 7.0.0
@@ -87,16 +217,16 @@ Documentation for rocFFT is available at
 
 * Removed unnecessary HIP event/stream allocation and synchronization during MPI transforms.
 * Implemented single-precision 1D kernels for lengths:
-  - 4704
-  - 5488
-  - 6144
-  - 6561
-  - 8192
+  * 4704
+  * 5488
+  * 6144
+  * 6561
+  * 8192
 * Implemented single-kernel plans for some large 1D problem sizes, on devices with at least 160KiB of LDS.
 
 ### Resolved issues
 
-* Fixed kernel faults on multi-device transforms that gather to a single device, when the input/output bricks are not 
+* Fixed kernel faults on multi-device transforms that gather to a single device, when the input/output bricks are not
   contiguous.
 
 ## rocFFT 1.0.32 for ROCm 6.4.0

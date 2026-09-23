@@ -13,6 +13,7 @@ import os
 import re
 from pathlib import Path
 
+
 def inline_includes(filepath, root_dir, processed=None, depth=0, max_depth=100):
     """Recursively inline #include directives."""
     if processed is None:
@@ -31,7 +32,7 @@ def inline_includes(filepath, root_dir, processed=None, depth=0, max_depth=100):
 
     result = []
     try:
-        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 # Check for #include directives
                 match = re.match(r'^\s*#include\s+[<"]([^>"]+)[>"]', line)
@@ -39,7 +40,7 @@ def inline_includes(filepath, root_dir, processed=None, depth=0, max_depth=100):
                     include_file = match.group(1)
 
                     # Skip HIP headers entirely - do not include them at all
-                    if include_file.startswith('hip/'):
+                    if include_file.startswith("hip/"):
                         continue
 
                     # Try to find the included file relative to root
@@ -47,11 +48,13 @@ def inline_includes(filepath, root_dir, processed=None, depth=0, max_depth=100):
 
                     if os.path.exists(include_path):
                         # Add comment showing what's being inlined
-                        result.append(f'// BEGIN INLINED: {include_file}')
+                        result.append(f"// BEGIN INLINED: {include_file}")
                         # Recursively inline
-                        inlined_content = inline_includes(include_path, root_dir, processed, depth + 1, max_depth)
+                        inlined_content = inline_includes(
+                            include_path, root_dir, processed, depth + 1, max_depth
+                        )
                         result.extend(inlined_content)
-                        result.append(f'// END INLINED: {include_file}')
+                        result.append(f"// END INLINED: {include_file}")
                     else:
                         # Keep the include if file not found (might be a system header)
                         result.append(line.rstrip())
@@ -59,14 +62,18 @@ def inline_includes(filepath, root_dir, processed=None, depth=0, max_depth=100):
                     # Keep non-include lines as-is
                     result.append(line.rstrip())
     except Exception as e:
-        print(f'Error processing {filepath}: {e}', file=sys.stderr)
+        print(f"Error processing {filepath}: {e}", file=sys.stderr)
         raise
 
     return result
 
+
 def main():
     if len(sys.argv) != 4:
-        print("Usage: InlineHeader.py <source_header> <root_include_dir> <output_file>", file=sys.stderr)
+        print(
+            "Usage: InlineHeader.py <source_header> <root_include_dir> <output_file>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     source_file = sys.argv[1]
@@ -82,23 +89,24 @@ def main():
         sys.exit(1)
 
     # Generate guard name from output filename
-    guard_name = Path(output_file).stem.upper().replace('.', '_') + '_H'
+    guard_name = Path(output_file).stem.upper().replace(".", "_") + "_H"
 
     try:
         content_lines = inline_includes(source_file, root_dir)
 
         # Write output with header guards
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(f'#ifndef {guard_name}\n')
-            f.write(f'#define {guard_name}\n\n')
-            f.write('\n'.join(content_lines))
-            f.write(f'\n\n#endif // {guard_name}\n')
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(f"#ifndef {guard_name}\n")
+            f.write(f"#define {guard_name}\n\n")
+            f.write("\n".join(content_lines))
+            f.write(f"\n\n#endif // {guard_name}\n")
 
-        print(f'Successfully created {output_file}')
+        print(f"Successfully created {output_file}")
 
     except Exception as e:
-        print(f'Error: {e}', file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

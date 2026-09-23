@@ -175,7 +175,7 @@ public:
             return;
         }
 
-        hipEventRecord(startEvent[launchCount].get(), stream);
+        (void)hipEventRecord(startEvent[launchCount].get(), stream);
         st = std::chrono::steady_clock::now();
     }
     void StopAndPush()
@@ -193,14 +193,14 @@ public:
             printf("Executed more iterations than planned\n");
             return;
         }
-        hipEventRecord(endEvent[launchCount].get(), stream);
+        (void)hipEventRecord(endEvent[launchCount].get(), stream);
 
         if(clockMode == ClockMode::OldWallClock)
         {
             std::chrono::time_point<std::chrono::steady_clock> st2 =
                 std::chrono::steady_clock::now();
 
-            hipEventSynchronize(endEvent[launchCount].get());
+            (void)hipEventSynchronize(endEvent[launchCount].get());
 
             std::chrono::time_point<std::chrono::steady_clock> end2 =
                 std::chrono::steady_clock::now();
@@ -214,7 +214,7 @@ public:
         else
         {
             if(clockMode == ClockMode::SeparateClocksSynced)
-                hipEventSynchronize(endEvent[launchCount].get());
+                (void)hipEventSynchronize(endEvent[launchCount].get());
 
             hostTimePerLaunch.push_back(
                 std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(end - st)
@@ -235,11 +235,11 @@ public:
         float gpu_time = 0.0f;
 
         if(clockMode == ClockMode::SeparateClocksNotSynced)
-            hipEventSynchronize(endEvent[n_iter - 1].get());
+            (void)hipEventSynchronize(endEvent[n_iter - 1].get());
 
         for(auto i = 0ull; i < n_iter; ++i)
         {
-            hipEventElapsedTime(&gpu_time, startEvent[i].get(), endEvent[i].get());
+            (void)hipEventElapsedTime(&gpu_time, startEvent[i].get(), endEvent[i].get());
 
             if(clockMode == ClockMode::SeparateClocksNotSynced ||
                clockMode == ClockMode::SeparateClocksSynced)
@@ -258,7 +258,7 @@ public:
         }
 
         if(n_iter == 1)
-            hipEventElapsedTime(&gpu_time, startEvent[0].get(), endEvent[0].get());
+            (void)hipEventElapsedTime(&gpu_time, startEvent[0].get(), endEvent[0].get());
 
         printf("GPU Kernel Time Elapsed: %f ms\n", n_iter > 1 ? gpu_avg / (n_iter - 1) : gpu_time);
         printf("Wall-clock Time Elapsed: %f ms\n",

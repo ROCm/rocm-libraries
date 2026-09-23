@@ -11,36 +11,131 @@ endif()
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-# TODO Do not enable HIP language globally, use HIP RTC instead. The library does not contain any
-# HIP code (or any other device code). It is required only for hipdnn_test_engine_plugin1.
-enable_language(HIP)
-# Verify that we're using AMD/ROCm HIP compiler.
-verifyamdrocmcompiler(${CMAKE_HIP_COMPILER} "HIP")
-
-set(TEST_PLUGIN1_NAME "hipdnn_test_plugin1")
-set(TEST_PLUGIN2_NAME "hipdnn_test_plugin2")
-set(TEST_ENGINE_PLUGIN1_NAME "hipdnn_test_engine_plugin1")
+# Test plugin target names come from cmake/TestPluginNames.cmake (included by
+# the root CMakeLists.txt before any subdirectory). The targets themselves are
+# created later by tests/test_plugins/, but the names are needed here for
+# compile definitions and add_dependencies forward references.
 
 add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
+    descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
+    descriptors/TestBlockScaleDequantizeOperationFromNode.cpp
+    descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
+    descriptors/TestBlockScaleQuantizeOperationFromNode.cpp
     descriptors/TestDescriptorFactory.cpp
     descriptors/TestEngineConfigDescriptor.cpp
     descriptors/TestEngineDescriptor.cpp
     descriptors/TestEngineHeuristicDescriptor.cpp
     descriptors/TestExecutionPlanDescriptor.cpp
     descriptors/TestGraphDescriptor.cpp
+    descriptors/TestTensorDescriptor.cpp
+    descriptors/TestCustomOpOperationDescriptor.cpp
+    descriptors/TestCustomOpOperationFromNode.cpp
+    descriptors/TestGraphDescriptorCustomOp.cpp
+    descriptors/TestConvolutionFwdOperationDescriptor.cpp
+    descriptors/TestConvolutionWrwOperationDescriptor.cpp
+    descriptors/TestConvolutionWrwOperationFromNode.cpp
+    descriptors/TestGraphDescriptorConvolutionWrw.cpp
+    descriptors/TestBatchnormInferenceOperationDescriptor.cpp
+    descriptors/TestBatchnormInferenceOperationFromNode.cpp
+    descriptors/TestBatchnormOperationDescriptor.cpp
+    descriptors/TestBatchnormOperationFromNode.cpp
+    descriptors/TestGraphDescriptorBatchnorm.cpp
+    descriptors/TestGraphDescriptorBatchnormInference.cpp
+    descriptors/TestGraphDescriptorBlockScaleDequantize.cpp
+    descriptors/TestKnobDescriptor.cpp
+    descriptors/TestKnobSettingDescriptor.cpp
+    descriptors/TestProfilingControlDescriptor.cpp
+    descriptors/TestBatchnormBackwardOperationDescriptor.cpp
+    descriptors/TestBatchnormBackwardOperationFromNode.cpp
+    descriptors/TestConvolutionBwdOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBlockScaleQuantize.cpp
+    descriptors/TestMatmulOperationDescriptor.cpp
+    descriptors/TestMatmulOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMatmul.cpp
+    descriptors/TestMoeGroupedMatmulOperationDescriptor.cpp
+    descriptors/TestMoeGroupedMatmulOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMoeGroupedMatmul.cpp
+    descriptors/TestMoeGroupedMatmulBwdOperationDescriptor.cpp
+    descriptors/TestMoeGroupedMatmulBwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMoeGroupedMatmulBwd.cpp
+    descriptors/TestGraphDescriptorBatchnormBackward.cpp
+    descriptors/TestGraphDescriptorConvolutionBwd.cpp
+    descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
+    descriptors/TestBatchnormInferenceVarianceExtOperationFromNode.cpp
+    descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
+    descriptors/TestGraphDescriptorLayernorm.cpp
+    descriptors/TestGraphDescriptorLayernormBackward.cpp
+    descriptors/TestGraphDescriptorOps.cpp
+    descriptors/TestGraphDescriptorLifting.cpp
+    descriptors/TestGraphDescriptorPointwise.cpp
+    descriptors/TestGraphDescriptorRMSNorm.cpp
+    descriptors/TestGraphDescriptorSdpaFwd.cpp
+    descriptors/TestConvolutionBwdOperationFromNode.cpp
+    descriptors/TestLayernormOperationDescriptor.cpp
+    descriptors/TestLayernormOperationFromNode.cpp
+    descriptors/TestLayernormBackwardOperationDescriptor.cpp
+    descriptors/TestLayernormBackwardOperationFromNode.cpp
+    descriptors/TestPointwiseOperationDescriptor.cpp
+    descriptors/TestPointwiseOperationFromNode.cpp
+    descriptors/TestReductionOperationDescriptor.cpp
+    descriptors/TestReductionOperationFromNode.cpp
+    descriptors/TestGraphDescriptorReduction.cpp
+    descriptors/TestRMSNormOperationDescriptor.cpp
+    descriptors/TestRMSNormOperationFromNode.cpp
+    descriptors/TestRMSNormBackwardOperationDescriptor.cpp
+    descriptors/TestRMSNormBackwardOperationFromNode.cpp
+    descriptors/TestGraphDescriptorRMSNormBackward.cpp
+    descriptors/TestSdpaBwdOperationDescriptor.cpp
+    descriptors/TestSdpaBwdOperationFromNode.cpp
+    descriptors/TestSdpaFwdOperationDescriptor.cpp
+    descriptors/TestSdpaFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorSdpaBwd.cpp
+    descriptors/TestResampleFwdOperationDescriptor.cpp
+    descriptors/TestResampleFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorResampleFwd.cpp
+    descriptors/TestResampleBwdOperationDescriptor.cpp
+    descriptors/TestResampleBwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorResampleBwd.cpp
+    descriptors/TestDescriptorAttributeUtils.cpp
+    descriptors/TestDataTypeConversion.cpp
+    descriptors/TestDescriptorFromFlatBuffer.cpp
+    descriptors/TestNodeFactory.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp
+    TestExecutionPlanSerializationApi.cpp
+    TestGraphAndPlanSerializationApi.cpp
+    TestHipdnnBackendWriteRanking.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
     TestFlatbufferUtilities.cpp
     TestHandle.cpp
     TestHelpers.cpp
+    IntegrationHeuristicPlugin.cpp
+    TestHeuristicPolicyFramework.cpp
+    IntegrationHeuristicPolicyPlugins.cpp
     TestBackendLogger.cpp
+    TestGraphLogger.cpp
+    TestHeuristicPlugin.cpp
+    TestHeuristicPluginManager.cpp
+    TestHeuristicPluginManagerValidationPaths.cpp
+    TestSelectionHeuristic.cpp
+    TestHeuristicPluginResourceManager.cpp
+    heuristics/TestAutotuneCacheEnv.cpp
+    heuristics/TestAutotuneCacheKey.cpp
+    heuristics/TestAutotuneRankingStore.cpp
+    heuristics/TestConfigBuiltIn.cpp
+    heuristics/TestDeviceProperties.cpp
+    heuristics/TestEngineOverrideConfig.cpp
+    heuristics/TestStaticOrderingBuiltIn.cpp
+    TestUserLoggingApis.cpp
+    TestPlatformUtils.cpp
+    TestEnginePluginOverride.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
+    TestVersion.cpp
     utilities/TestEngineOrdering.cpp
 )
 
@@ -54,13 +149,55 @@ target_link_libraries(
     ${CMAKE_DL_LIBS}
 )
 
+# Standalone helper process for TestAutotuneRankingStore's cross-process cache cases.
+# Not a gtest binary and not registered via add_hipdnn_test(); hipdnn_backend_tests
+# spawns it and resolves it next to its own executable at runtime.
+#
+# The name ends in `_test` on purpose. TheRock packages hipDNN's test artifact by the
+# glob `bin/*hipdnn_*_test*` (ml-libs/artifact-hipdnn.toml), which requires `_test`
+# AFTER the `hipdnn_` prefix; a name that misses the glob is built but never staged, and
+# the test then fails at runtime because the helper is absent beside the test binary.
+# For the same reason the install stays uncomponented: restricting it to the development
+# component would drop it from the test artifact again.
+#
+# Only the helper's FILENAME is baked in, not $<TARGET_FILE:...>: an absolute path would
+# name the build tree, which does not exist once CI installs the test binaries and runs
+# ctest from the install prefix. This mirrors hipdnn_line_store_lock_helper_test in
+# data_sdk/tests/CMakeLists.txt, which solves the identical problem.
+add_executable(hipdnn_autotune_cross_process_helper_test heuristics/AutotuneCrossProcessHelper.cpp)
+target_link_libraries(hipdnn_autotune_cross_process_helper_test Threads::Threads hipdnn_backend_private)
+target_compile_definitions(hipdnn_autotune_cross_process_helper_test PRIVATE HIPDNN_BACKEND_COMPILATION)
+target_compile_options(hipdnn_autotune_cross_process_helper_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(
+    hipdnn_autotune_cross_process_helper_test
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+
+# The test spawns the helper, so it must exist before the test runs and ship alongside it.
+add_dependencies(hipdnn_backend_tests hipdnn_autotune_cross_process_helper_test)
+install(TARGETS hipdnn_autotune_cross_process_helper_test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+target_compile_definitions(
+    hipdnn_backend_tests PRIVATE
+    HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_NAME="$<TARGET_FILE_NAME:hipdnn_autotune_cross_process_helper_test>"
+)
+
 target_compile_definitions(
     hipdnn_backend_tests
     PRIVATE HIPDNN_BACKEND_COMPILATION TEST_PLUGIN1_NAME="${TEST_PLUGIN1_NAME}"
             TEST_PLUGIN2_NAME="${TEST_PLUGIN2_NAME}"
+            TEST_NO_API_VERSION_PLUGIN_NAME="${TEST_NO_API_VERSION_PLUGIN_NAME}"
             TEST_ENGINE_PLUGIN1_NAME="${TEST_ENGINE_PLUGIN1_NAME}"
+            TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
+            TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME="${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}"
+            TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME="${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}"
+            TEST_BAD_API_VERSION_HEURISTIC_PLUGIN_NAME="${TEST_BAD_API_VERSION_HEURISTIC_PLUGIN_NAME}"
+            TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME="${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}"
+            TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}"
+            TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
+            TEST_LYING_ENGINE_NAME_PLUGIN_NAME="${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}"
+            TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
 )
-target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
 
 # libhipdnn_test_plugin1.so or hipdnn_test_plugin1.dll (used by TestPlugin.cpp and
@@ -108,4 +245,77 @@ install(TARGETS ${TEST_PLUGIN2_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_IN
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 
-add_unit_test_target(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
+# libhipdnn_test_no_api_version_plugin.so or libhipdnn_test_no_api_version_plugin.dll (used by TestPlugin.cpp)
+add_library(${TEST_NO_API_VERSION_PLUGIN_NAME} SHARED plugins/PluginApiImpl.cpp plugins/NoApiVersionPlugin.cpp)
+target_link_libraries(${TEST_NO_API_VERSION_PLUGIN_NAME} PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk)
+set_target_properties(${TEST_NO_API_VERSION_PLUGIN_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_compile_options(${TEST_NO_API_VERSION_PLUGIN_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_definitions(${TEST_NO_API_VERSION_PLUGIN_NAME} PRIVATE HIPDNN_COMPONENT_NAME="noApiVersionPlugin" HIPDNN_API_VERSION_UNDEFINED)
+clang_tidy_check(${TEST_NO_API_VERSION_PLUGIN_NAME})
+add_dependencies(hipdnn_backend_tests ${TEST_NO_API_VERSION_PLUGIN_NAME})
+
+set_target_properties(
+    ${TEST_NO_API_VERSION_PLUGIN_NAME}
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        THEROCK_INSTALL_RPATH_ORIGIN "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+)
+
+install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+        RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+)
+
+# A real, loadable engine plugin used by TestEnginePluginResourceManager.cpp, and
+# the only consumer of EnginePluginImpl.inl inside the main build; see
+# plugins/codegen_fixture/CodegenFixturePlugin.hpp for what it pins.
+#
+# It gets its own codegen_fixture/ subdirectory because ${HIPDNN_TEST_PLUGIN_DIR}
+# holds a plugin that deliberately fails to load. Output directory, install
+# destination and rpath origin all take the suffix together, otherwise the
+# isolation holds in the build tree but not in the installed tree.
+set(CODEGEN_FIXTURE_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/codegen_fixture")
+set(CODEGEN_FIXTURE_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/codegen_fixture")
+
+add_library(${TEST_ENGINE_PLUGIN1_NAME} SHARED plugins/codegen_fixture/CodegenFixturePlugin.cpp
+                                               plugins/codegen_fixture/CodegenFixturePluginPublic.cpp
+)
+target_link_libraries(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk
+                                                          hipdnn_plugin_sdk hip::host
+)
+set_target_properties(${TEST_ENGINE_PLUGIN1_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_compile_options(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_definitions(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE HIPDNN_COMPONENT_NAME="codegenFixture")
+clang_tidy_check(${TEST_ENGINE_PLUGIN1_NAME})
+add_dependencies(hipdnn_backend_tests ${TEST_ENGINE_PLUGIN1_NAME})
+
+set_target_properties(
+    ${TEST_ENGINE_PLUGIN1_NAME}
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        THEROCK_INSTALL_RPATH_ORIGIN "${CODEGEN_FIXTURE_INSTALL_DIR}"
+)
+
+install(TARGETS ${TEST_ENGINE_PLUGIN1_NAME} LIBRARY DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
+        RUNTIME DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
+)
+
+# Add dependencies on test plugins built in tests/test_plugins/
+# Note: These targets are forward references - they will be created when tests/test_plugins/
+# is processed later. CMake resolves these dependencies at build time.
+add_dependencies(hipdnn_backend_tests
+    ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
+    ${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}
+    ${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}
+    ${TEST_BAD_API_VERSION_HEURISTIC_PLUGIN_NAME}
+    ${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}
+    ${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}
+    ${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}
+    ${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}
+    ${TEST_MISMATCHED_NAME_PLUGIN_NAME}
+)
+
+add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

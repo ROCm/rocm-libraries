@@ -44,7 +44,7 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle        handle to the rocsparse library context queue.
+*  handle        handle to the rocSPARSE library context queue.
 *
 *  @param[in]
 *  m             number of rows of the sparse CSR matrix.
@@ -62,17 +62,17 @@ extern "C" {
 *                the final compressed CSR matrix.
 *  @param[out]
 *  nnz_C         number of elements in the column indices and values arrays of the compressed
-*                sparse CSR matrix. Can be either host or device pointer.
+*                sparse CSR matrix. It can be either a host or device pointer.
 *  @param[in]
-*  tol           the non-negative tolerance used for compression. If \p tol is complex then only the magnitude
+*  tol           the non-negative tolerance used for compression. If \p tol is complex, then only the magnitude
 *                of the real part is used. Entries in the input uncompressed CSR array that are below the tolerance
-*                are removed in output compressed CSR matrix.
+*                are removed in the output compressed CSR matrix.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m or \p n is invalid.
 *  \retval     rocsparse_status_invalid_value \p tol is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p csr_val_A or \p csr_row_ptr_A or \p nnz_per_row or \p nnz_C
+*  \retval     rocsparse_status_invalid_pointer \p csr_val_A, \p csr_row_ptr_A, \p nnz_per_row, or \p nnz_C
 *              pointer is invalid.
 *
 *  \par Example

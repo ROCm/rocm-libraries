@@ -1,0 +1,14 @@
+{
+  "name": "elementwise_add_hip",
+  "module": "rocke.examples.common.elementwise_verify_hip",
+  "argv": [
+    "--arch",
+    "gfx950",
+    "--n",
+    "4096"
+  ],
+  "digest": "98f4d504a8fda43bbbbc517ad1cab86246162188975ecdc733551f68368fb7b2",
+  "lines": [
+    "[gfx950] HIP-path elementwise-add N=4096: max_abs_diff=0.000e+00 bad=0/4096 tol=0e+00 -> PASS"
+  ]
+}

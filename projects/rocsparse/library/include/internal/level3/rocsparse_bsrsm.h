@@ -34,27 +34,27 @@ extern "C" {
 
 /*! \ingroup level3_module
 *  \details
-*  \p rocsparse_bsrsm_zero_pivot returns \ref rocsparse_status_zero_pivot, if either a
+*  \p rocsparse_bsrsm_zero_pivot returns \ref rocsparse_status_zero_pivot if either a
 *  structural or numerical zero has been found during
 *  \ref rocsparse_sbsrsm_solve "rocsparse_Xbsrsm_solve()" computation. The first zero
-*  pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same index base as
+*  pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using the same index base as
 *  the BSR matrix.
 *
-*  \p position can be in host or device memory. If no zero pivot has been found,
+*  \p position can be in the host or device memory. If no zero pivot has been found,
 *  \p position is set to -1 and \ref rocsparse_status_success is returned instead.
 *
-*  \note \p rocsparse_bsrsm_zero_pivot is a blocking function. It might influence
-*  performance negatively.
+*  \note \p rocsparse_bsrsm_zero_pivot is a blocking function. It might negatively influence
+*  performance.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  info        structure that holds the information collected during the analysis step.
 *  @param[inout]
-*  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
+*  position    pointer to zero pivot \f$j\f$, which can be in host or device memory.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -76,14 +76,14 @@ rocsparse_status rocsparse_bsrsm_zero_pivot(rocsparse_handle   handle,
 *  must be allocated by the user.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  dir         matrix storage of BSR blocks.
 *  @param[in]
@@ -117,14 +117,14 @@ rocsparse_status rocsparse_bsrsm_zero_pivot(rocsparse_handle   handle,
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb, \p nrhs, \p nnzb or \p block_dim is invalid.
+*  \retval     rocsparse_status_invalid_size \p mb, \p nrhs, \p nnzb, or \p block_dim is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p bsr_val,
-*              \p bsr_row_ptr, \p bsr_col_ind, \p info or \p buffer_size pointer
+*              \p bsr_row_ptr, \p bsr_col_ind, \p info, or \p buffer_size pointer
 *              is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
 *              \p trans_A == \ref rocsparse_operation_conjugate_transpose,
-*              \p trans_X == \ref rocsparse_operation_conjugate_transpose or
+*              \p trans_X == \ref rocsparse_operation_conjugate_transpose, or
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
 */
 /**@{*/
@@ -202,10 +202,10 @@ rocsparse_status rocsparse_zbsrsm_buffer_size(rocsparse_handle                ha
 *
 *  \p rocsparse_bsrsm_analysis can share its meta data with
 *  \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()",
-*  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()",
+*  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()", and
 *  \ref rocsparse_sbsrsv_analysis "rocsparse_Xbsrsv_analysis()". Selecting
-*  \ref rocsparse_analysis_policy_reuse policy can greatly improve computation
-*  performance of meta data. However, the user needs to make sure that the sparsity
+*  \ref rocsparse_analysis_policy_reuse policy can greatly improve the computation
+*  performance of the metadata. However, the user needs to ensure that the sparsity
 *  pattern remains unchanged. If this cannot be assured,
 *  \ref rocsparse_analysis_policy_force has to be used.
 *
@@ -219,7 +219,7 @@ rocsparse_status rocsparse_zbsrsm_buffer_size(rocsparse_handle                ha
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  dir         matrix storage of BSR blocks.
 *  @param[in]
@@ -256,13 +256,13 @@ rocsparse_status rocsparse_zbsrsm_buffer_size(rocsparse_handle                ha
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb, \p nrhs, \p nnzb or \p block_dim is invalid.
+*  \retval     rocsparse_status_invalid_size \p mb, \p nrhs, \p nnzb, or \p block_dim is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p bsr_val, \p bsr_row_ptr,
-*              \p bsr_col_ind, \p info or \p temp_buffer pointer is invalid.
+*              \p bsr_col_ind, \p info, or \p temp_buffer pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
 *              \p trans_A == \ref rocsparse_operation_conjugate_transpose,
-*              \p trans_X == \ref rocsparse_operation_conjugate_transpose or
+*              \p trans_X == \ref rocsparse_operation_conjugate_transpose, or
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
 */
 /**@{*/
@@ -342,8 +342,8 @@ rocsparse_status rocsparse_zbsrsm_analysis(rocsparse_handle                handl
 /*! \ingroup level3_module
 *  \details
 *  \p rocsparse_bsrsm_clear deallocates all memory that was allocated by
-*  \ref rocsparse_sbsrsm_analysis "rocsparse_Xbsrsm_analysis()". This is especially useful,
-*  if memory is an issue and the analysis data is not required for further computation, e.g.
+*  \ref rocsparse_sbsrsm_analysis "rocsparse_Xbsrsm_analysis()". This is especially useful
+*  if memory is an issue and the analysis data is not required for further computation, for example,
 *  when switching to another sparse matrix format. Calling \p rocsparse_bsrsm_clear is optional.
 *  All allocated resources will be cleared when the opaque \ref rocsparse_mat_info struct
 *  is destroyed using \ref rocsparse_destroy_mat_info().
@@ -352,14 +352,14 @@ rocsparse_status rocsparse_zbsrsm_analysis(rocsparse_handle                handl
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[inout]
 *  info        structure that holds the information collected during the analysis step.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_pointer \p info pointer is invalid.
-*  \retval     rocsparse_status_memory_error the buffer holding the meta data could not
+*  \retval     rocsparse_status_memory_error the buffer holding the metadata could not
 *              be deallocated.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 */
@@ -367,12 +367,12 @@ ROCSPARSE_EXPORT
 rocsparse_status rocsparse_bsrsm_clear(rocsparse_handle handle, rocsparse_mat_info info);
 
 /*! \ingroup level3_module
-*  \brief Sparse triangular system solve using BSR storage format
+*  \brief Sparse triangular system solve using the BSR storage format.
 *
 *  \details
 *  \p rocsparse_bsrsm_solve solves a sparse triangular linear system of a sparse
 *  \f$m \times m\f$ matrix, defined in BSR storage format, a column-oriented dense solution matrix
-*  \f$X\f$ and the column-oriented dense right-hand side matrix \f$B\f$ that is multiplied by \f$\alpha\f$,
+*  \f$X\f$, and the column-oriented dense right-hand side matrix \f$B\f$ that is multiplied by \f$\alpha\f$,
 *  such that
 *  \f[
 *    op(A) \cdot op(X) = \alpha \cdot op(B),
@@ -409,13 +409,13 @@ rocsparse_status rocsparse_bsrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *  \f]
 *  and where \f$m = block\_dim \times mb\f$.
 *
-*  Note that as indicated above, the operation type of both \f$op(B)\f$ and \f$op(X)\f$ is specified by the
-*  \p trans_X parameter and that the operation type of B and X must match. For example, if \f$op(B)=B\f$ then
-*  \f$op(X)=X\f$. Likewise, if \f$op(B)=B^T\f$ then \f$op(X)=X^T\f$.
+*  Note that, as indicated above, the operation type of both \f$op(B)\f$ and \f$op(X)\f$ is specified by the
+*  \p trans_X parameter and that the operation type of B and X must match. For example, if \f$op(B)=B\f$, then
+*  \f$op(X)=X\f$. Likewise, if \f$op(B)=B^T\f$, then \f$op(X)=X^T\f$.
 *
 *  Given that the sparse matrix A is a square matrix, its size is \f$m \times m\f$ regardless of
 *  whether A is transposed or not. The size of the column-oriented dense matrices B and X have
-*  size that depends on the value of \p trans_X:
+*  a size that depends on the value of \p trans_X :
 *
 *  \f[
 *    op(B) = \left\{
@@ -437,7 +437,7 @@ rocsparse_status rocsparse_bsrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *    \right.
 *  \f]
 *
-*  \p rocsparse_bsrsm_solve requires a user allocated temporary buffer. Its size is returned by
+*  \p rocsparse_bsrsm_solve requires a user-allocated temporary buffer. Its size is returned by
 *  \ref rocsparse_sbsrsm_buffer_size "rocsparse_Xbsrsm_buffer_size()". The size of the required buffer is larger
 *  when  \p trans_A equals \ref rocsparse_operation_transpose or \ref rocsparse_operation_conjugate_transpose and
 *  when \p trans_X is \ref rocsparse_operation_none. The subsequent solve will also be faster when \f$A\f$ is
@@ -517,13 +517,13 @@ rocsparse_status rocsparse_bsrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *    \end{bmatrix}^{T}
 *  \f]
 *
-*  Once the temporary storage buffer has been allocated, analysis meta data is required. It can be obtained
-*  by rocsparse_sbsrsm_analysis "rocsparse_Xbsrsm_analysis()".
+*  After the temporary storage buffer has been allocated, analysis metadata is required. It can be obtained
+*  by \ref rocsparse_sbsrsm_analysis "rocsparse_Xbsrsm_analysis()".
 *
 *  Solving a triangular system involves inverting the diagonal blocks. This means that if the sparse matrix is
 *  missing the diagonal block (referred to as a structural zero) or the diagonal block is not invertible (referred
 *  to as a numerical zero) then a solution is not possible. \p rocsparse_bsrsm_solve tracks the location of the first
-*  zero pivot (either numerical or structural zero). The zero pivot status can be checked calling \ref rocsparse_bsrsm_zero_pivot().
+*  zero pivot (either numerical or structural zero). The zero pivot status can be checked by calling \ref rocsparse_bsrsm_zero_pivot().
 *  If \ref rocsparse_bsrsm_zero_pivot() returns \ref rocsparse_status_success, then no zero pivot was found and therefore
 *  the matrix does not have a structural or numerical zero.
 *
@@ -532,20 +532,20 @@ rocsparse_status rocsparse_bsrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be reported, even if the diagonal block \f$A_{j,j}\f$
 *  for some \f$j\f$ is not invertible.
 *
-*  The sparse CSR matrix passed to \p rocsparse_bsrsm_solve does not actually have to be a triangular matrix. Instead the
+*  The sparse CSR matrix passed to \p rocsparse_bsrsm_solve does not actually have to be a triangular matrix. Instead, the
 *  triangular upper or lower part of the sparse matrix is solved based on \ref rocsparse_fill_mode set on the descriptor
 *  \p descr. If the fill mode is set to \ref rocsparse_fill_mode_lower, then the lower triangular matrix is solved. If the
-*  fill mode is set to \ref rocsparse_fill_mode_upper then the upper triangular matrix is solved.
+*  fill mode is set to \ref rocsparse_fill_mode_upper, then the upper triangular matrix is solved.
 *
 *  \note
 *  The sparse BSR matrix has to be sorted.
 *
 *  \note
-*  Operation type of B and X must match, for example if \f$op(B)=B\f$ then \f$op(X)=X\f$.
+*  Operation type of B and X must match, , if \f$op(B)=B\f$ then \f$op(X)=X\f$.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  Currently, only \p trans_A != \ref rocsparse_operation_conjugate_transpose and
@@ -555,7 +555,7 @@ rocsparse_status rocsparse_bsrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  dir         matrix storage of BSR blocks.
 *  @param[in]
@@ -599,14 +599,14 @@ rocsparse_status rocsparse_bsrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb, \p nrhs, \p nnzb or \p block_dim is invalid.
+*  \retval     rocsparse_status_invalid_size \p mb, \p nrhs, \p nnzb, or \p block_dim is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p alpha, \p descr, \p bsr_val,
-*              \p bsr_row_ptr, \p bsr_col_ind, \p B, \p X \p info or \p temp_buffer pointer
+*              \p bsr_row_ptr, \p bsr_col_ind, \p B, \p X \p info, or \p temp_buffer pointer
 *              is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
 *              \p trans_A == \ref rocsparse_operation_conjugate_transpose,
-*              \p trans_X == \ref rocsparse_operation_conjugate_transpose or
+*              \p trans_X == \ref rocsparse_operation_conjugate_transpose, or
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
 *
 *  \par Example

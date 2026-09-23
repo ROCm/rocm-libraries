@@ -29,12 +29,12 @@ import yaml
 
 from Tensile import Tensile
 from Tensile import DataType
-from Tensile.Utilities.ConditionalImports import yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader
 
 
 ################################################################################
 # Locate Executables
-# rocm-smi, hip-clang, rocm_agent_enumerator
+# amd-smi, hip-clang, rocm_agent_enumerator
 ################################################################################
 def isExe( filePath ):
   return os.path.isfile(filePath) and os.access(filePath, os.X_OK)
@@ -102,7 +102,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     try:
         with open(filepath) as f:
-            doc = yaml.load(f, yamlLoader)
+            doc = yaml.load(f, SafeLoader)
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks

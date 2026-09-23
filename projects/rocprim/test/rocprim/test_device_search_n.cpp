@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -908,12 +908,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_1block)
             size_t      temp_storage_size;
             hipStream_t stream = 0; // default
 
-            rocprim::detail::target_arch target_arch;
-            HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            rocprim::detail::gpu target_gpu;
-            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
-
-            const rocprim::detail::target current_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(stream);
 
             const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
@@ -1039,7 +1034,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_2block)
             rocprim::detail::gpu target_gpu;
             HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
 
-            const rocprim::detail::target current_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(stream);
 
             const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
@@ -1160,12 +1155,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_3block)
             size_t      temp_storage_size;
             hipStream_t stream = 0; // default
 
-            rocprim::detail::target_arch target_arch;
-            HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            rocprim::detail::gpu target_gpu;
-            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
-
-            const rocprim::detail::target current_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(stream);
 
             const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
@@ -1286,12 +1276,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult1)
             size_t      temp_storage_size;
             hipStream_t stream = 0; // default
 
-            rocprim::detail::target_arch target_arch;
-            HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            rocprim::detail::gpu target_gpu;
-            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
-
-            const rocprim::detail::target current_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(stream);
 
             const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
@@ -1413,12 +1398,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult2)
             size_t      temp_storage_size;
             hipStream_t stream = 0; // default
 
-            rocprim::detail::target_arch target_arch;
-            HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            rocprim::detail::gpu target_gpu;
-            HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
-
-            const rocprim::detail::target current_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(stream);
 
             const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;

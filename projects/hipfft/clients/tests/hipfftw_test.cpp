@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #include "../../shared/gpubuf.h"
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
+#include "../../shared/reference_fft_data.h"
 #include "../../shared/test_params.h"
 
 #include <cstdint>
@@ -57,24 +58,18 @@ namespace
     size_t max_byte_size_for_hipfftw_tests()
     {
         auto get_io_byte_size_limit = []() {
-            size_t tmp = vramgb * ONE_GiB;
-            if(tmp == 0)
+            size_t tmp = system_memory::singleton().get_limit_bytes();
+            for(size_t dev_id = 0; dev_id < device_memory_accountant::singleton().num_devices();
+                dev_id++)
             {
-                size_t free = 0, total = 0;
-                if(hipMemGetInfo(&free, &total) == hipSuccess)
-                    tmp = total / 8;
+                tmp = std::min(
+                    tmp, device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id));
             }
-            tmp = std::min(tmp, ramgb * ONE_GiB);
             tmp = std::min(tmp, max_io_gb_for_hipfftw_test * ONE_GiB);
             if(verbose > 0)
             {
-                std::cout << "Limit for the size of I/O data used in hipfftw tests: ";
-                if(tmp >= ONE_GiB)
-                    std::cout << float(tmp) / ONE_GiB << " GiB." << std ::endl;
-                else if(tmp >= ONE_MiB)
-                    std::cout << float(tmp) / ONE_MiB << " MiB." << std ::endl;
-                else
-                    std::cout << float(tmp) / ONE_KiB << " KiB." << std ::endl;
+                std::cout << "Limit for the size of I/O data used in hipfftw tests: "
+                          << byte_size_to_str(tmp) << std ::endl;
             }
             return tmp;
         };
@@ -266,9 +261,12 @@ namespace
                 throw std::runtime_error("failed to create random valid flags");
             return tmp;
         }
-        while(flags_are_valid_for_hipfftw(tmp))
-            tmp = flags_rng(get_pseudo_rng());
-        return tmp;
+        else
+        {
+            while(flags_are_valid_for_hipfftw(tmp))
+                tmp = flags_rng(get_pseudo_rng());
+            return tmp;
+        }
     }
 
     size_t get_random_idx(size_t upper_bound)
@@ -518,18 +516,6 @@ namespace
         return X_down;
     }
 
-    // exception for hip runtime error(s) specifically
-    struct hip_runtime_error : public std::runtime_error
-    {
-        const hipError_t hip_error;
-        hip_runtime_error(const std::string& info, hipError_t hip_status)
-            : std::runtime_error::runtime_error(info)
-            , hip_error(hip_status)
-
-        {
-            ++n_hip_failures;
-        }
-    };
     int get_current_device_id()
     {
         int        ret        = hipInvalidDeviceId;
@@ -734,6 +720,19 @@ namespace
                     to_add.alloc_arg  = arg;
                     to_add.alloc_func = func;
                     to_add.alloc_kind = kind;
+
+                    const double roll = hash_prob(random_seed, to_add.to_string());
+                    // not distinguishing between real/complex for this list generation
+                    if(roll > test_prob)
+                    {
+                        if(verbose > 4)
+                        {
+                            std::cout << "Test skipped: (roll=" << roll << " > " << test_prob
+                                      << ")\n";
+                        }
+                        continue;
+                    }
+
                     insert_into_unique_sorted_params(ret, to_add);
                 }
             }
@@ -1819,6 +1818,8 @@ namespace
     template <fft_precision prec>
     std::vector<hipfftw_input_validation_params<prec>> params_for_testing_input_validation_params()
     {
+        if(test_prob == 0)
+            return {};
         // create a full-scope map containing all the generated test parameters; the map keys
         // capture the hipfftw's function name that the test targets
         // --> ease for guaranteeing coverage even with low test probability in the end
@@ -1983,14 +1984,7 @@ namespace
                         plan_execution_output.alloc(output_data_size);
                 }
             }
-            catch(const HOSTBUF_MEM_USAGE& e)
-            {
-                GTEST_SKIP() << e.what();
-            }
-            catch(const std::bad_alloc&)
-            {
-                GTEST_SKIP() << "host memory allocation failure";
-            }
+            ROCFFT_CATCH_TEST_EXCEPTIONS;
         }
         void TearDown() override
         {
@@ -2170,7 +2164,7 @@ namespace
     {
         pageable_host,
         pinned_host,
-#ifndef WIN32
+#ifndef _WIN32
         // linux-only
         managed,
 #endif
@@ -2184,7 +2178,7 @@ namespace
             std::vector<hipfftw_data_memory_type> ret = {hipfftw_data_memory_type::pageable_host,
                                                          hipfftw_data_memory_type::pinned_host,
                                                          hipfftw_data_memory_type::device};
-#ifndef WIN32
+#ifndef _WIN32
             // "managed" may or may not be supported
             hipDeviceProp_t props;
             if(hipGetDeviceProperties(&props, get_current_device_id()) == hipSuccess)
@@ -2210,7 +2204,7 @@ namespace
         case hipfftw_data_memory_type::pinned_host:
             return "pinned_host";
             break;
-#ifndef WIN32
+#ifndef _WIN32
         case hipfftw_data_memory_type::managed:
             return "managed";
             break;
@@ -2643,6 +2637,9 @@ namespace
             {
                 const hipfftw_functional_validation_params<prec>& params = this->GetParam();
 
+                if(!fftw_compare)
+                    GTEST_SKIP() << "skipped due to disabled fftw comparison";
+
                 if(!params.can_be_tested())
                     GTEST_FAIL() << "invalid parameters, cannot be tested";
 #ifdef __HIP_PLATFORM_AMD__
@@ -2650,13 +2647,6 @@ namespace
                     GTEST_SKIP()
                         << "skipped automatically-generated test due to known rocFFT defect";
 #endif
-                if(reference_plan)
-                    GTEST_FAIL()
-                        << "Starting from an unclean slate (reference plan is not nullptr)";
-
-                execution_results_on_host.resize(1);
-                execution_results_on_host[0].alloc(
-                    params.plan_helper.get_data_byte_size(fft_io::fft_io_out));
 
                 std::vector<fft_io> io_range = {fft_io::fft_io_in};
                 if(params.get_placement() == fft_placement_notinplace)
@@ -2667,10 +2657,6 @@ namespace
                 for(auto io : io_range)
                 {
                     const size_t data_size = params.plan_helper.get_data_byte_size(io);
-                    auto&        io_verification_vec
-                        = io == fft_io::fft_io_in ? verification_input : verification_output;
-                    io_verification_vec.resize(1);
-                    io_verification_vec[0].alloc(data_size);
                     for(auto step : step_range)
                     {
                         const std::pair<hipfftw_step, fft_io> map_key = {step, io};
@@ -2683,7 +2669,7 @@ namespace
                         }
                         else
                         {
-#ifndef WIN32
+#ifndef _WIN32
                             const auto hip_status = gpu_io_buffer[map_key].alloc(
                                 data_size, mem_type == hipfftw_data_memory_type::managed);
 #else
@@ -2701,88 +2687,79 @@ namespace
                         }
                     }
                 }
-                if(verification_input.size() != 1
-                   || (params.get_placement() != fft_placement_inplace
-                       && verification_output.size() != 1))
-                    GTEST_FAIL() << "Verification IO buffer incorrectly initialized";
-                // generate input data
-                const std::vector<size_t> field_lower(params.get_rank(), 0);
-                set_input<hostbuf, hipfftw_real_t<prec>>(verification_input,
-                                                         fft_input_random_generator_host,
-                                                         params.get_array_type(fft_io::fft_io_in),
-                                                         params.get_lengths(),
-                                                         params.get_ilengths(),
-                                                         params.get_istride(),
-                                                         params.get_idist(),
-                                                         params.get_nbatch(),
-                                                         get_curr_device_prop(),
-                                                         field_lower,
-                                                         0 /* field_lower_batch */,
-                                                         params.get_contiguous_istrides(),
-                                                         params.get_contiguous_idist());
-                // create the reference plan (systematically using the most general guru64 creation)
-                reference_plan = params.plan_helper.get_reference_plan(
-                    verification_input[0].data(),
-                    params.get_placement() == fft_placement_inplace
-                        ? verification_input[0].data()
-                        : verification_output[0].data());
 
-                if(!reference_plan)
+                execution_results_on_host.resize(1);
+                const std::pair<hipfftw_step, fft_io> output_key
+                    = {params.use_creation_io_at_execution() ? hipfftw_step::plan_creation
+                                                             : hipfftw_step::plan_execution,
+                       params.get_placement() == fft_placement_inplace ? fft_io::fft_io_in
+                                                                       : fft_io::fft_io_out};
+                switch(params.mem_type.at(output_key))
                 {
-                    GTEST_FAIL() << "could not create a reference plan";
+                case hipfftw_data_memory_type::device:
+                    // a clean allocation is needed
+                    execution_results_on_host[0].alloc(
+                        params.plan_helper.get_data_byte_size(fft_io::fft_io_out));
+                    break;
+#ifndef _WIN32
+                case hipfftw_data_memory_type::managed:
+                {
+                    // Actually verify that there is no need to copy data explicitly with
+                    // managed memory.
+                    // NOTE: the raw pointer to a *managed* allocation is encapsulated in
+                    // a non-owned hostbuffer in this case...
+                    execution_results_on_host[0] = hostbuf::make_nonowned(
+                        gpu_io_buffer.at(output_key).data(), gpu_io_buffer.at(output_key).size());
                 }
+                break;
+#endif
+                case hipfftw_data_memory_type::pinned_host:
+                    [[fallthrough]];
+                case hipfftw_data_memory_type::pageable_host:
+                    // no copy needed at all
+                    execution_results_on_host[0] = hostbuf::make_nonowned(
+                        host_io_buffer.at(output_key).data(), host_io_buffer.at(output_key).size());
+                    break;
+                default:
+                    throw std::runtime_error("Unexpected output memory type");
+                    break;
+                }
+
+                verification_data = std::make_unique<reference_fft_data_t>(
+                    params.plan_helper.make_params_for_reference_cpu());
+                // Unnecessary to initialize input data and/or launch async computing
+                // if the reference data is already available (cached from a previous
+                // test)
+                if(verification_data->needs_input_initialization())
+                    verification_data->initialize_input(fft_input_random_generator_host);
+                if(verification_data->needs_computing())
+                    verification_data->launch_async_compute();
             }
-            catch(const hip_runtime_error& e)
-            {
-                if(skip_runtime_fails)
-                    GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
-                else
-                    GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
-            }
-            catch(const HOSTBUF_MEM_USAGE& e)
-            {
-                GTEST_SKIP() << e.what();
-            }
-            catch(const std::bad_alloc&)
-            {
-                GTEST_SKIP() << "host memory allocation failure";
-            }
+            ROCFFT_CATCH_TEST_EXCEPTIONS;
         }
         void TearDown() override
         {
-            verification_input.clear();
-            verification_output.clear();
+            verification_data.reset();
             execution_results_on_host.clear();
             host_io_buffer.clear();
             gpu_io_buffer.clear();
-            if constexpr(prec == fft_precision_single)
-                fftwf_destroy_plan(reference_plan);
-            else
-                fftw_destroy_plan(reference_plan);
             this->GetParam().plan_helper.release_plan();
         }
-        // verification buffers (set_input and other common routines require std::vector's of size 1 for these)
-        std::vector<hostbuf> verification_input;
-        std::vector<hostbuf> verification_output;
-        std::vector<hostbuf> execution_results_on_host;
+        std::unique_ptr<reference_fft_data_t> verification_data;
+        std::vector<hostbuf>                  execution_results_on_host;
         // possible host buffers (pageable or pinned host allocation)
         std::map<std::pair<hipfftw_step, fft_io>, hostbuf> host_io_buffer;
         // possible nonhost buffers (may be current/other device or runtime-managed)
         std::map<std::pair<hipfftw_step, fft_io>, gpubuf> gpu_io_buffer;
-        // reference plan
-        hipfftw_plan_t<prec> reference_plan = nullptr;
 
-        void functional_test() const
+        void functional_test()
         {
             const hipfftw_functional_validation_params<prec>& params = this->GetParam();
             try
             {
                 std::ostringstream gtest_info;
-                if(verification_input.size() != 1
-                   || (params.get_placement() != fft_placement_inplace
-                       && verification_output.size() != 1))
-                    GTEST_FAIL() << "The verification I/O buffer(s) were not initialized as "
-                                    "needed; host buffer(s) are required";
+                if(!verification_data || verification_data->needs_computing())
+                    GTEST_FAIL() << "The verification data was not initialized as needed";
                 if(execution_results_on_host.size() != 1)
                     GTEST_FAIL() << "Improper test initialization: no host buffer to copy the "
                                     "execution results";
@@ -2859,28 +2836,35 @@ namespace
                     = {hipfftw_step::plan_execution, fft_io::fft_io_in};
                 if(test_io_type.at(exec_in_key) == hipfftw_data_memory_type::device)
                 {
-                    // an explicit host-to-device copy is needed
-                    const auto hip_status
-                        = hipMemcpyAsync(test_io_ptr.at(exec_in_key),
-                                         verification_input[0].data(),
-                                         params.plan_helper.get_data_byte_size(fft_io::fft_io_in),
-                                         hipMemcpyHostToDevice);
-                    if(hip_status != hipSuccess)
-                        throw hip_runtime_error("hipMemcpyAsync failed.", hip_status);
+                    std::vector<gpubuf> tmp_gpu_buf_vec;
+                    tmp_gpu_buf_vec.emplace_back(gpubuf::make_nonowned(
+                        test_io_ptr.at(exec_in_key),
+                        params.plan_helper.get_data_byte_size(fft_io::fft_io_in)));
+                    verification_data->copy_input_data_in_device_buffers(tmp_gpu_buf_vec,
+                                                                         params.plan_helper);
                 }
                 else
                 {
-                    std::memcpy(test_io_ptr.at(exec_in_key),
-                                verification_input[0].data(),
-                                params.plan_helper.get_data_byte_size(fft_io::fft_io_in));
-                }
+                    std::vector<hostbuf> tmp_host_buf_vec;
+                    tmp_host_buf_vec.emplace_back(hostbuf::make_nonowned(
+                        test_io_ptr.at(exec_in_key),
+                        params.plan_helper.get_data_byte_size(fft_io::fft_io_in)));
 
-                std::shared_future<void> reference_cpu_dft = std::async(std::launch::async, [&]() {
-                    if constexpr(prec == fft_precision_single)
-                        fftwf_execute(reference_plan);
-                    else
-                        fftw_execute(reference_plan);
-                });
+                    copy_buffers(verification_data->get_buffers<fft_io::fft_io_in>(),
+                                 tmp_host_buf_vec,
+                                 verification_data->get_params().ilength(),
+                                 params.get_nbatch(),
+                                 verification_data->get_params().precision,
+                                 verification_data->get_params().itype,
+                                 verification_data->get_params().istride,
+                                 verification_data->get_params().idist,
+                                 /* destination array type is same as source array type*/
+                                 verification_data->get_params().itype,
+                                 params.get_istride(),
+                                 params.get_idist(),
+                                 verification_data->get_params().ioffset,
+                                 {0} /* destination offset */);
+                }
                 hipfftw_exception_logger exception_logger;
 
                 params.plan_helper.create_plan(
@@ -2913,13 +2897,15 @@ namespace
                     }
                 }
 
-                // copy hipfftw results back into the execution_results_on_host[0] buffer
-                // for verification purposes
                 const std::pair<hipfftw_step, fft_io> exec_out_key
                     = {hipfftw_step::plan_execution, fft_io::fft_io_out};
-                if(test_io_type.at(exec_out_key) == hipfftw_data_memory_type::device)
+                switch(test_io_type.at(exec_out_key))
                 {
-                    // making this copy synchronous as the next step is verifying the results
+                case hipfftw_data_memory_type::device:
+                {
+                    // copy hipfftw results back into the execution_results_on_host[0] buffer
+                    // for verification purposes. Making this copy synchronous as the next step
+                    // is verifying the results
                     const auto hip_status
                         = hipMemcpy(execution_results_on_host[0].data(),
                                     test_io_ptr.at(exec_out_key),
@@ -2929,47 +2915,51 @@ namespace
                         throw hip_runtime_error("hipMemcpy failed (copying output results).",
                                                 hip_status);
                 }
-                else
+                break;
+#ifndef _WIN32
+                case hipfftw_data_memory_type::managed:
+                    [[fallthrough]];
+#endif
+                case hipfftw_data_memory_type::pageable_host:
+                    [[fallthrough]];
+                case hipfftw_data_memory_type::pinned_host:
                 {
-                    std::memcpy(execution_results_on_host[0].data(),
-                                test_io_ptr.at(exec_out_key),
-                                params.plan_helper.get_data_byte_size(fft_io::fft_io_out));
+                    // no need to actually copy at all, check that execution_results_on_host
+                    // was correctly set in SetUp
+                    if(execution_results_on_host[0].data() != test_io_ptr.at(exec_out_key))
+                        throw std::logic_error("Logic error detected (definition of "
+                                               "execution_results_on_host with "
+                                               "host-accessible output data)");
+                }
+                break;
+                default:
+                    throw std::runtime_error("Unexpected output memory type");
+                    break;
                 }
                 // compare results
-                if(reference_cpu_dft.valid())
-                    reference_cpu_dft.get();
-                const auto  test_lengths     = params.get_lengths();
-                const auto  total_length     = product(test_lengths.begin(), test_lengths.end());
-                const auto& reference_output = params.get_placement() == fft_placement_inplace
-                                                   ? verification_input
-                                                   : verification_output;
+                const auto test_lengths = params.get_lengths();
+                const auto total_length = product(test_lengths.begin(), test_lengths.end());
 
-                const auto   ref_norm = norm(reference_output,
-                                           params.get_olengths(),
-                                           params.get_nbatch(),
-                                           prec,
-                                           params.get_array_type(fft_io::fft_io_out),
-                                           params.get_ostride(),
-                                           params.get_odist(),
-                                           {0} /* offset */);
+                const auto ref_norm
+                    = verification_data->get_norm<fft_io::fft_io_out>(params.get_nbatch()).get();
                 const double test_epsilon
                     = prec == fft_precision_single ? single_epsilon : double_epsilon;
                 const double linf_cutoff = test_epsilon * ref_norm.l_inf * log(total_length);
                 // compare results
-                const auto diff = distance(reference_output,
+                const auto diff = distance(verification_data->get_buffers<fft_io::fft_io_out>(),
                                            execution_results_on_host,
                                            params.get_olengths(),
                                            params.get_nbatch(),
                                            prec,
-                                           params.get_array_type(fft_io::fft_io_out),
-                                           params.get_ostride(),
-                                           params.get_odist(),
+                                           verification_data->get_params().otype,
+                                           verification_data->get_params().ostride,
+                                           verification_data->get_params().odist,
                                            params.get_array_type(fft_io::fft_io_out),
                                            params.get_ostride(),
                                            params.get_odist(),
                                            nullptr,
                                            linf_cutoff,
-                                           {0} /* offset */,
+                                           verification_data->get_params().ooffset,
                                            {0} /* offset */);
                 EXPECT_LE(diff.l_inf, linf_cutoff);
                 EXPECT_LE(diff.l_2 / ref_norm.l_2, sqrt(log2(total_length)) * test_epsilon);
@@ -2992,25 +2982,7 @@ namespace
             {
                 GTEST_FAIL() << "undefined function pointers detected. Error info: " << e.what();
             }
-            catch(const hip_runtime_error& e)
-            {
-                if(skip_runtime_fails)
-                    GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
-                else
-                    GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
-            }
-            catch(const std::runtime_error& e)
-            {
-                GTEST_FAIL() << e.what();
-            }
-            catch(const std::bad_alloc&)
-            {
-                GTEST_SKIP() << "host memory allocation failure";
-            }
-            catch(...)
-            {
-                GTEST_FAIL() << "unidentified exception caught during test.";
-            }
+            ROCFFT_CATCH_TEST_EXCEPTIONS;
         }
 
     public:
@@ -3456,6 +3428,11 @@ namespace
 
 TEST(hipfftw_test, utility_functions)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
     test_existence_of_utility_functions<fft_precision_single>();
     test_existence_of_utility_functions<fft_precision_double>();
 }
@@ -3479,6 +3456,9 @@ INSTANTIATE_TEST_SUITE_P(
     allocation_dp,
     ::testing::ValuesIn(params_for_testing_hipfftw_malloc<fft_precision_double>()),
     allocation_dp::TestName);
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(allocation_sp);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(allocation_dp);
 
 using argument_validation_sp = hipfftw_argument_validation<fft_precision_single>;
 TEST_P(argument_validation_sp, creation_and_execution)
@@ -3510,6 +3490,9 @@ INSTANTIATE_TEST_SUITE_P(
     argument_validation_dp,
     ::testing::ValuesIn(params_for_testing_input_validation_params<fft_precision_double>()),
     argument_validation_dp::TestName);
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(argument_validation_sp);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(argument_validation_dp);
 
 using hipfftw_functional_validation_sp = hipfftw_functional_validation<fft_precision_single>;
 TEST_P(hipfftw_functional_validation_sp, accuracy_vs_fftw)

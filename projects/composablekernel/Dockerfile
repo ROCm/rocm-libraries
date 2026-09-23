@@ -1,66 +1,84 @@
 
 FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
-ARG ROCMVERSION=7.1.1
+ARG ROCMVERSION=10.0
+
+# TheRock nightly tarball configuration.
+# By default, discovers the latest tarball from the nightlies index.
+# Manual overrides:
+#   Pin a specific tarball:
+#     --build-arg TARBALL_URL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-multiarch-7.13.0a20260430.tar.gz
+#   Change the arch variant (default: multiarch):
+#     --build-arg TARBALL_PATTERN=therock-dist-linux-gfx90a
+#     --build-arg TARBALL_PATTERN=therock-dist-linux-gfx94X-dcgpu
+ARG TARBALL_URL=""
+ARG TARBALL_BASE=https://rocm.nightlies.amd.com/tarball-multi-arch
+ARG TARBALL_PATTERN=therock-dist-linux-multiarch
+
 ARG compiler_version=""
 ARG compiler_commit=""
-ARG CK_SCCACHE=""
-ARG DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/.apt_$ROCMVERSION/
 ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=$PATH:/opt/rocm/bin
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib
+ENV HIP_PLATFORM=amd
 
 # Add rocm repository
 RUN set -xe && \
-    apt-get update && apt-get install -y --allow-unauthenticated apt-utils wget gnupg2 curl
+    apt-get update && apt-get install -y apt-utils wget gnupg2 curl cmake git vim nano zip
 
-RUN wget https://repo.radeon.com/amdgpu-install/7.1.1/ubuntu/noble/amdgpu-install_7.1.1.70101-1_all.deb && \
-    apt install ./amdgpu-install_7.1.1.70101-1_all.deb -y && \
-    apt update && \
-    apt install python3-setuptools python3-wheel -y && \
-    apt install rocm-dev -y
-
-## Sccache binary built from source for ROCm, only install if CK_SCCACHE is defined
-ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
+RUN if [ "$compiler_version" = "therock" ]; then \
+        rm -rf /opt/rocm && mkdir /opt/rocm && \
+        if [ -n "$TARBALL_URL" ]; then \
+            echo "Using provided TARBALL_URL: $TARBALL_URL" ; \
+        else \
+            echo "Discovering latest tarball from $TARBALL_BASE..." && \
+            TARBALL_URL="${TARBALL_BASE}/$(curl -sL "${TARBALL_BASE}/" \
+                | grep -oP '"name":\s*"\K'"${TARBALL_PATTERN}"'-[^"]+\.tar\.gz' \
+                | sort -V | tail -1)" && \
+            echo "Found: $TARBALL_URL" ; \
+        fi && \
+        wget -q -O /tmp/rocm.tar.gz "$TARBALL_URL" && \
+        tar -xzf /tmp/rocm.tar.gz -C /opt/rocm --strip-components=1 && \
+        rm /tmp/rocm.tar.gz ; \
+    else echo "using the release compiler" && \
+        wget -O therock-dist-linux.tar.gz https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.0.0.tar.gz && \
+        rm -rf /opt/rocm && mkdir /opt/rocm && \
+        tar -xzf therock-dist-linux.tar.gz -C /opt/rocm --strip-components=1 && \
+        rm therock-dist-linux.tar.gz && \
+        wget https://repo.radeon.com/amdgpu-install/31.40/ubuntu/noble/amdgpu-install_31.40.314000-1_all.deb && \
+        apt install ./amdgpu-install_31.40.314000-1_all.deb -y; \
+    fi
+    
+# Install SCCACHE
+ENV SCCACHE_VERSION="0.14.0"
 ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
 ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
-ENV CK_SCCACHE=$CK_SCCACHE
-RUN if [ "$CK_SCCACHE" != "" ]; then \
-        mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-        curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
-        chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
-    fi
-
+RUN set -x && \
+    mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
+    wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/download/v$SCCACHE_VERSION/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
+    tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
+    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache && \
 # Install dependencies
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
     build-essential \
-    cmake \
-    git \
-    hip-rocclr \
-    iputils-ping \
     jq \
     libelf-dev \
     libnuma-dev \
     libpthread-stubs0-dev \
-    mpich \
     net-tools \
     pkg-config \
     python3-full \
+    python3-pip \
     redis \
-    rocm-llvm-dev \
     sshpass \
     stunnel \
     software-properties-common \
-    vim \
-    nano \
     zlib1g-dev \
-    zip \
     libzstd-dev \
     openssh-server \
     clang-format-18 \
     kmod && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf amdgpu-install* && \
 #Install latest ccache
     git clone https://github.com/ccache/ccache.git && \
     cd ccache && mkdir build && cd build && cmake .. && make install && \
@@ -82,33 +100,18 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-
     wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
     dpkg -i dumb-init_*.deb && rm dumb-init_*.deb && \
 # Install packages for processing the performance results
-    pip3 install --break-system-packages --upgrade pytest pymysql pandas==2.2.3 sqlalchemy==2.0.3 setuptools-rust setuptools sshtunnel==0.4.0 && \
+# ml_dtypes is pinned like its neighbours, and for a sharper reason than most:
+# it supplies both float8_e4m3fn/float8_e5m2 (OCP) and float8_e4m3fnuz/
+# float8_e5m2fnuz (FNUZ), and the dispatcher tests pick between those pairs per
+# arch. An unpinned upgrade would silently move fp8 encoding semantics -- and
+# the reference values every parity/correctness test compares against -- from
+# under CI on an image rebuild. 0.6.0 is what this image already resolved on
+# Ubuntu 24.04 / Python 3.12, so this records current behaviour rather than
+# bumping it.
+    pip3 install --break-system-packages --upgrade pytest pymysql pandas==2.2.3 sqlalchemy==2.0.3 setuptools-rust setuptools sshtunnel==0.4.0 ml_dtypes==0.6.0 && \
 # Add render group
     groupadd -f render && \
 # Install the new rocm-cmake version
     git clone -b master https://github.com/ROCm/rocm-cmake.git  && \
     cd rocm-cmake && mkdir build && cd build && \
     cmake  .. && cmake --build . && cmake --build . --target install
-
-WORKDIR /
-# Add alternative compilers, if necessary
-ENV compiler_version=$compiler_version
-ENV compiler_commit=$compiler_commit
-RUN sh -c "echo compiler version = '$compiler_version'" && \
-    sh -c "echo compiler commit = '$compiler_commit'"
-
-RUN if ( [ "$compiler_version" = "amd-staging" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" = "" ]; then \
-        git clone -b "$compiler_version" https://github.com/ROCm/llvm-project.git && \
-        cd llvm-project && mkdir build && cd build && \
-        cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=1 -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_RUNTIMES="compiler-rt" ../llvm && \
-        make -j 8 ; \
-    else echo "using the release compiler"; \
-    fi
-
-RUN if ( [ "$compiler_version" = "amd-staging" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" != "" ]; then \
-        git clone -b "$compiler_version" https://github.com/ROCm/llvm-project.git && \
-        cd llvm-project && git checkout "$compiler_commit" && echo "checking out commit $compiler_commit" && mkdir build && cd build && \
-        cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=1 -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_RUNTIMES="compiler-rt" ../llvm && \
-        make -j 8 ; \
-    else echo "using the release compiler"; \
-    fi

@@ -1,0 +1,105 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 3
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 3
+  DataInitTypeBeta: 3
+  PrintWinnersOnly: False
+  ForceGenerateKernel: True
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  -
+    -
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+        - DepthU: [256]
+        - HalfPLR: [2]
+        - TDMInst: [3]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - PrefetchAcrossPersistent: [1]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - DirectToVgprSparseMetadata: [False]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertSummationElementMultiple: [1,256]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K < DepthU.
+          - Exact: [1024, 1024, 1, 128]
+          # One, two, and three complete DepthU iterations.
+          - Exact: [1024, 1024, 1, 256]
+          - Exact: [1024, 1024, 1, 512]
+          - Exact: [1024, 1024, 1, 768]
+          # Three complete iterations plus a 32-element tail.
+          - Exact: [1024, 1024, 1, 800]
+          # Four complete DepthU iterations (tests the third loop-copy residue class).
+          - Exact: [1024, 1024, 1, 1024]
+          # Six complete DepthU iterations: same loop-copy residue as K=768 (both hit
+          # copy 2/3) but opposite TDM-descriptor bank-toggle parity (N-1 odd vs even).
+          # Distinguishes "loop-copy entry point is broken" from "bank-toggle parity
+          # at PAP-fire time is broken".
+          - Exact: [1024, 1024, 1, 1536]
+        - ActivationArgs:
+          - [Enum: none]

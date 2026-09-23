@@ -280,7 +280,13 @@ public:
         std::cerr << "Finished testing solution functions." << std::endl;
     }
 
-    void Finalize() { EXPECT_EQUAL(miopenDestroyProblem(problem), miopenStatusSuccess); }
+    void Finalize(std::vector<miopenSolution_t>& solutions)
+    {
+        for(auto& solution : solutions)
+            EXPECT_EQUAL(miopenDestroySolution(solution), miopenStatusSuccess);
+
+        EXPECT_EQUAL(miopenDestroyProblem(problem), miopenStatusSuccess);
+    }
 
 private:
     void Initialize()
@@ -364,7 +370,8 @@ TEST(GPU_SoftmaxFind20_FP32, softmaxForward)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsForward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }
 
 TEST(GPU_SoftmaxFind20_FP32, softmaxBackward_fp32)
@@ -377,7 +384,8 @@ TEST(GPU_SoftmaxFind20_FP32, softmaxBackward_fp32)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsBackward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }
 
 TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_instance_mode_fp16)
@@ -390,7 +398,8 @@ TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_instance_mode_fp16)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsBackward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }
 
 TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_channel_mode_fp16)
@@ -403,7 +412,8 @@ TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_channel_mode_fp16)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsBackward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }
 
 TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_instance_mode_bfp16)
@@ -416,7 +426,8 @@ TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_instance_mode_bfp16)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsBackward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }
 
 TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_channel_mode_bfp16)
@@ -429,5 +440,6 @@ TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_channel_mode_bfp16)
     test.TestSolutionAttributes(solutions);
 
     test.TestRunSolutionsBackward(handle, solutions);
-    test.Finalize();
+
+    test.Finalize(solutions);
 }

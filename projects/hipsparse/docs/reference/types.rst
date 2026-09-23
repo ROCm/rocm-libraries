@@ -112,6 +112,11 @@ hipsparseSpGEMMDescr_t
 
 .. doxygentypedef:: hipsparseSpGEMMDescr_t
 
+hipsparseSpGEAMDescr_t
+======================
+
+.. doxygentypedef:: hipsparseSpGEAMDescr_t
+
 hipsparseSpSVDescr_t
 ====================
 
@@ -253,3 +258,8 @@ hipsparseSpGEMMAlg_t
 ====================
 
 .. doxygenenum:: hipsparseSpGEMMAlg_t
+
+hipsparseSpGEAMAlg_t
+====================
+
+.. doxygenenum:: hipsparseSpGEAMAlg_t

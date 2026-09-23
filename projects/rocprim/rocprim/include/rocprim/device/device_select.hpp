@@ -31,10 +31,10 @@
 
 #include "device_partition.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Parallel select primitive for device level using range of flags.
 ///
@@ -82,6 +82,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \parblock
 /// In this example a device-level select operation is performed on an array of
 /// integer values with array of <tt>char</tt>s used as flags.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_select.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
@@ -674,9 +676,9 @@ inline hipError_t unique_by_key(void*                           temporary_storag
                                                no_predicate);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SELECT_HPP_

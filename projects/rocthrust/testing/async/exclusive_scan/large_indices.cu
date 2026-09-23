@@ -30,6 +30,7 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 
 #  include <cinttypes>
 #  include <cstdint>
+#  include <iostream>
 
 #  include <async/exclusive_scan/mixin.h>
 #  include <async/test_policy_overloads.h>
@@ -204,6 +205,8 @@ struct default_bin_op_invoker
 
 void test_large_indices_default_scan_op()
 {
+  CHECK_ASAN_ENABLEMENT();
+	
   // Test problem sizes around signed/unsigned int max:
   testing::async::test_policy_overloads<default_bin_op_invoker>::run(1ll << 30);
   testing::async::test_policy_overloads<default_bin_op_invoker>::run(1ll << 31);
@@ -248,6 +251,8 @@ struct custom_bin_op_invoker
 
 void test_large_indices_custom_scan_op()
 {
+  CHECK_ASAN_ENABLEMENT();
+
   // Test problem sizes around signed/unsigned int max:
   testing::async::test_policy_overloads<custom_bin_op_invoker>::run(1ll << 30);
   testing::async::test_policy_overloads<custom_bin_op_invoker>::run(1ll << 31);

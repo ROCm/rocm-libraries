@@ -604,6 +604,96 @@ void zgeqrf_(int*                    m,
              int*                    lwork,
              int*                    info);
 
+void sgeqlf_(int* m, int* n, float* A, int* lda, float* ipiv, float* work, int* lwork, int* info);
+void dgeqlf_(
+    int* m, int* n, double* A, int* lda, double* ipiv, double* work, int* lwork, int* info);
+void cgeqlf_(int*              m,
+             int*              n,
+             hipsolverComplex* A,
+             int*              lda,
+             hipsolverComplex* ipiv,
+             hipsolverComplex* work,
+             int*              lwork,
+             int*              info);
+void zgeqlf_(int*                    m,
+             int*                    n,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             hipsolverDoubleComplex* ipiv,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             int*                    info);
+
+void sgelqf_(int* m, int* n, float* A, int* lda, float* ipiv, float* work, int* lwork, int* info);
+void dgelqf_(
+    int* m, int* n, double* A, int* lda, double* ipiv, double* work, int* lwork, int* info);
+void cgelqf_(int*              m,
+             int*              n,
+             hipsolverComplex* A,
+             int*              lda,
+             hipsolverComplex* ipiv,
+             hipsolverComplex* work,
+             int*              lwork,
+             int*              info);
+void zgelqf_(int*                    m,
+             int*                    n,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             hipsolverDoubleComplex* ipiv,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             int*                    info);
+
+void sgerqf_(int* m, int* n, float* A, int* lda, float* ipiv, float* work, int* lwork, int* info);
+void dgerqf_(
+    int* m, int* n, double* A, int* lda, double* ipiv, double* work, int* lwork, int* info);
+void cgerqf_(int*              m,
+             int*              n,
+             hipsolverComplex* A,
+             int*              lda,
+             hipsolverComplex* ipiv,
+             hipsolverComplex* work,
+             int*              lwork,
+             int*              info);
+void zgerqf_(int*                    m,
+             int*                    n,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             hipsolverDoubleComplex* ipiv,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             int*                    info);
+
+void slarft_(
+    char* direct, char* storev, int* n, int* k, float* V, int* ldv, float* tau, float* T, int* ldt);
+void dlarft_(char*   direct,
+             char*   storev,
+             int*    n,
+             int*    k,
+             double* V,
+             int*    ldv,
+             double* tau,
+             double* T,
+             int*    ldt);
+void clarft_(char*             direct,
+             char*             storev,
+             int*              n,
+             int*              k,
+             hipsolverComplex* V,
+             int*              ldv,
+             hipsolverComplex* tau,
+             hipsolverComplex* T,
+             int*              ldt);
+void zlarft_(char*                   direct,
+             char*                   storev,
+             int*                    n,
+             int*                    k,
+             hipsolverDoubleComplex* V,
+             int*                    ldv,
+             hipsolverDoubleComplex* tau,
+             hipsolverDoubleComplex* T,
+             int*                    ldt);
+
 void sgesv_(int* n, int* nrhs, float* A, int* lda, int* ipiv, float* B, int* ldb, int* info);
 void dgesv_(int* n, int* nrhs, double* A, int* lda, int* ipiv, double* B, int* ldb, int* info);
 void cgesv_(int*              n,
@@ -826,10 +916,44 @@ void zpotrs_(char*                   uplo,
              int*                    ldb,
              int*                    info);
 
-void strtri_(char* uplo, char* diag, int* n, float* A, int* lda, int* info);
-void dtrtri_(char* uplo, char* diag, int* n, double* A, int* lda, int* info);
-void ctrtri_(char* uplo, char* diag, int* n, hipsolverComplex* A, int* lda, int* info);
-void ztrtri_(char* uplo, char* diag, int* n, hipsolverDoubleComplex* A, int* lda, int* info);
+void ssyev_(char*  evect,
+            char*  uplo,
+            int*   n,
+            float* A,
+            int*   lda,
+            float* W,
+            float* work,
+            int*   lwork,
+            int*   info);
+void dsyev_(char*   evect,
+            char*   uplo,
+            int*    n,
+            double* A,
+            int*    lda,
+            double* W,
+            double* work,
+            int*    lwork,
+            int*    info);
+void cheev_(char*             evect,
+            char*             uplo,
+            int*              n,
+            hipsolverComplex* A,
+            int*              lda,
+            float*            W,
+            hipsolverComplex* work,
+            int*              lwork,
+            float*            rwork,
+            int*              info);
+void zheev_(char*                   evect,
+            char*                   uplo,
+            int*                    n,
+            hipsolverDoubleComplex* A,
+            int*                    lda,
+            double*                 W,
+            hipsolverDoubleComplex* work,
+            int*                    lwork,
+            double*                 rwork,
+            int*                    info);
 
 void ssyevd_(char*  evect,
              char*  uplo,
@@ -1179,6 +1303,34 @@ void zsytrf_(char*                   uplo,
              hipsolverDoubleComplex* work,
              int*                    lwork,
              int*                    info);
+
+void ssytrs_(
+    char* uplo, int* n, int* nrhs, float* A, int* lda, int* ipiv, float* B, int* ldb, int* info);
+void dsytrs_(
+    char* uplo, int* n, int* nrhs, double* A, int* lda, int* ipiv, double* B, int* ldb, int* info);
+void csytrs_(char*             uplo,
+             int*              n,
+             int*              nrhs,
+             hipsolverComplex* A,
+             int*              lda,
+             int*              ipiv,
+             hipsolverComplex* B,
+             int*              ldb,
+             int*              info);
+void zsytrs_(char*                   uplo,
+             int*                    n,
+             int*                    nrhs,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             int*                    ipiv,
+             hipsolverDoubleComplex* B,
+             int*                    ldb,
+             int*                    info);
+
+void strtri_(char* uplo, char* diag, int* n, float* A, int* lda, int* info);
+void dtrtri_(char* uplo, char* diag, int* n, double* A, int* lda, int* info);
+void ctrtri_(char* uplo, char* diag, int* n, hipsolverComplex* A, int* lda, int* info);
+void ztrtri_(char* uplo, char* diag, int* n, hipsolverDoubleComplex* A, int* lda, int* info);
 
 #ifdef __cplusplus
 }
@@ -2172,6 +2324,194 @@ void cpu_geqrf<hipsolverDoubleComplex>(int                     m,
     zgeqrf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
 }
 
+// geqlf
+template <>
+void cpu_geqlf<float>(
+    int m, int n, float* A, int lda, float* ipiv, float* work, int lwork, int* info)
+{
+    sgeqlf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_geqlf<double>(
+    int m, int n, double* A, int lda, double* ipiv, double* work, int lwork, int* info)
+{
+    dgeqlf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_geqlf<hipsolverComplex>(int               m,
+                                 int               n,
+                                 hipsolverComplex* A,
+                                 int               lda,
+                                 hipsolverComplex* ipiv,
+                                 hipsolverComplex* work,
+                                 int               lwork,
+                                 int*              info)
+{
+    cgeqlf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_geqlf<hipsolverDoubleComplex>(int                     m,
+                                       int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       hipsolverDoubleComplex* ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
+{
+    zgeqlf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// gelqf
+template <>
+void cpu_gelqf<float>(
+    int m, int n, float* A, int lda, float* ipiv, float* work, int lwork, int* info)
+{
+    sgelqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gelqf<double>(
+    int m, int n, double* A, int lda, double* ipiv, double* work, int lwork, int* info)
+{
+    dgelqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gelqf<hipsolverComplex>(int               m,
+                                 int               n,
+                                 hipsolverComplex* A,
+                                 int               lda,
+                                 hipsolverComplex* ipiv,
+                                 hipsolverComplex* work,
+                                 int               lwork,
+                                 int*              info)
+{
+    cgelqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gelqf<hipsolverDoubleComplex>(int                     m,
+                                       int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       hipsolverDoubleComplex* ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
+{
+    zgelqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// gerqf
+template <>
+void cpu_gerqf<float>(
+    int m, int n, float* A, int lda, float* ipiv, float* work, int lwork, int* info)
+{
+    sgerqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gerqf<double>(
+    int m, int n, double* A, int lda, double* ipiv, double* work, int lwork, int* info)
+{
+    dgerqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gerqf<hipsolverComplex>(int               m,
+                                 int               n,
+                                 hipsolverComplex* A,
+                                 int               lda,
+                                 hipsolverComplex* ipiv,
+                                 hipsolverComplex* work,
+                                 int               lwork,
+                                 int*              info)
+{
+    cgerqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gerqf<hipsolverDoubleComplex>(int                     m,
+                                       int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       hipsolverDoubleComplex* ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
+{
+    zgerqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// larft
+template <>
+void cpu_larft<float>(hipsolverDirectMode_t directR,
+                      hipsolverStorevMode_t storevR,
+                      int                   n,
+                      int                   k,
+                      float*                V,
+                      int                   ldv,
+                      float*                tau,
+                      float*                T,
+                      int                   ldt)
+{
+    char direct = hipsolver2char_direct(directR);
+    char storev = hipsolver2char_storev(storevR);
+    slarft_(&direct, &storev, &n, &k, V, &ldv, tau, T, &ldt);
+}
+
+template <>
+void cpu_larft<double>(hipsolverDirectMode_t directR,
+                       hipsolverStorevMode_t storevR,
+                       int                   n,
+                       int                   k,
+                       double*               V,
+                       int                   ldv,
+                       double*               tau,
+                       double*               T,
+                       int                   ldt)
+{
+    char direct = hipsolver2char_direct(directR);
+    char storev = hipsolver2char_storev(storevR);
+    dlarft_(&direct, &storev, &n, &k, V, &ldv, tau, T, &ldt);
+}
+
+template <>
+void cpu_larft<hipsolverComplex>(hipsolverDirectMode_t directR,
+                                 hipsolverStorevMode_t storevR,
+                                 int                   n,
+                                 int                   k,
+                                 hipsolverComplex*     V,
+                                 int                   ldv,
+                                 hipsolverComplex*     tau,
+                                 hipsolverComplex*     T,
+                                 int                   ldt)
+{
+    char direct = hipsolver2char_direct(directR);
+    char storev = hipsolver2char_storev(storevR);
+    clarft_(&direct, &storev, &n, &k, V, &ldv, tau, T, &ldt);
+}
+
+template <>
+void cpu_larft<hipsolverDoubleComplex>(hipsolverDirectMode_t   directR,
+                                       hipsolverStorevMode_t   storevR,
+                                       int                     n,
+                                       int                     k,
+                                       hipsolverDoubleComplex* V,
+                                       int                     ldv,
+                                       hipsolverDoubleComplex* tau,
+                                       hipsolverDoubleComplex* T,
+                                       int                     ldt)
+{
+    char direct = hipsolver2char_direct(directR);
+    char storev = hipsolver2char_storev(storevR);
+    zlarft_(&direct, &storev, &n, &k, V, &ldv, tau, T, &ldt);
+}
+
 // gesv
 template <>
 void cpu_gesv<float>(int n, int nrhs, float* A, int lda, int* ipiv, float* B, int ldb, int* info)
@@ -2683,49 +3023,73 @@ void cpu_potrs(hipsolverFillMode_t     uplo,
     zpotrs_(&uploC, &n, &nrhs, A, &lda, B, &ldb, info);
 }
 
-// trtri
+// syev & heev
 template <>
-void cpu_trtri(
-    hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, float* A, int lda, int* info)
+void cpu_syev_heev<float, float>(hipsolverEigMode_t  evect,
+                                 hipsolverFillMode_t uplo,
+                                 int                 n,
+                                 float*              A,
+                                 int                 lda,
+                                 float*              W,
+                                 float*              work,
+                                 int                 lwork,
+                                 float*              rwork,
+                                 int*                info)
 {
-    char uploC = hipsolver2char_fill(uplo);
-    char diagC = hipsolver2char_diag(diag);
-    strtri_(&uploC, &diagC, &n, A, &lda, info);
+    char evectC = hipsolver2char_evect(evect);
+    char uploC  = hipsolver2char_fill(uplo);
+    ssyev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, info);
 }
 
 template <>
-void cpu_trtri(
-    hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, double* A, int lda, int* info)
+void cpu_syev_heev<double, double>(hipsolverEigMode_t  evect,
+                                   hipsolverFillMode_t uplo,
+                                   int                 n,
+                                   double*             A,
+                                   int                 lda,
+                                   double*             W,
+                                   double*             work,
+                                   int                 lwork,
+                                   double*             rwork,
+                                   int*                info)
 {
-    char uploC = hipsolver2char_fill(uplo);
-    char diagC = hipsolver2char_diag(diag);
-    dtrtri_(&uploC, &diagC, &n, A, &lda, info);
+    char evectC = hipsolver2char_evect(evect);
+    char uploC  = hipsolver2char_fill(uplo);
+    dsyev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, info);
 }
 
 template <>
-void cpu_trtri(hipsolverFillMode_t uplo,
-               hipsolverDiagType_t diag,
-               int                 n,
-               hipsolverComplex*   A,
-               int                 lda,
-               int*                info)
+void cpu_syev_heev<hipsolverComplex, float>(hipsolverEigMode_t  evect,
+                                            hipsolverFillMode_t uplo,
+                                            int                 n,
+                                            hipsolverComplex*   A,
+                                            int                 lda,
+                                            float*              W,
+                                            hipsolverComplex*   work,
+                                            int                 lwork,
+                                            float*              rwork,
+                                            int*                info)
 {
-    char uploC = hipsolver2char_fill(uplo);
-    char diagC = hipsolver2char_diag(diag);
-    ctrtri_(&uploC, &diagC, &n, A, &lda, info);
+    char evectC = hipsolver2char_evect(evect);
+    char uploC  = hipsolver2char_fill(uplo);
+    cheev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, rwork, info);
 }
 
 template <>
-void cpu_trtri(hipsolverFillMode_t     uplo,
-               hipsolverDiagType_t     diag,
-               int                     n,
-               hipsolverDoubleComplex* A,
-               int                     lda,
-               int*                    info)
+void cpu_syev_heev<hipsolverDoubleComplex, double>(hipsolverEigMode_t      evect,
+                                                   hipsolverFillMode_t     uplo,
+                                                   int                     n,
+                                                   hipsolverDoubleComplex* A,
+                                                   int                     lda,
+                                                   double*                 W,
+                                                   hipsolverDoubleComplex* work,
+                                                   int                     lwork,
+                                                   double*                 rwork,
+                                                   int*                    info)
 {
-    char uploC = hipsolver2char_fill(uplo);
-    char diagC = hipsolver2char_diag(diag);
-    ztrtri_(&uploC, &diagC, &n, A, &lda, info);
+    char evectC = hipsolver2char_evect(evect);
+    char uploC  = hipsolver2char_fill(uplo);
+    zheev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, rwork, info);
 }
 
 // syevd & heevd
@@ -3476,4 +3840,110 @@ void cpu_sytrf<hipsolverDoubleComplex>(hipsolverFillMode_t     uplo,
 {
     char uploC = hipsolver2char_fill(uplo);
     zsytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// sytrs
+template <>
+void cpu_sytrs<float>(hipsolverFillMode_t uplo,
+                      int                 n,
+                      int                 nrhs,
+                      float*              A,
+                      int                 lda,
+                      int*                ipiv,
+                      float*              B,
+                      int                 ldb,
+                      int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    ssytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+template <>
+void cpu_sytrs<double>(hipsolverFillMode_t uplo,
+                       int                 n,
+                       int                 nrhs,
+                       double*             A,
+                       int                 lda,
+                       int*                ipiv,
+                       double*             B,
+                       int                 ldb,
+                       int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    dsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+template <>
+void cpu_sytrs<hipsolverComplex>(hipsolverFillMode_t uplo,
+                                 int                 n,
+                                 int                 nrhs,
+                                 hipsolverComplex*   A,
+                                 int                 lda,
+                                 int*                ipiv,
+                                 hipsolverComplex*   B,
+                                 int                 ldb,
+                                 int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    csytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+template <>
+void cpu_sytrs<hipsolverDoubleComplex>(hipsolverFillMode_t     uplo,
+                                       int                     n,
+                                       int                     nrhs,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       int*                    ipiv,
+                                       hipsolverDoubleComplex* B,
+                                       int                     ldb,
+                                       int*                    info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    zsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+// trtri
+template <>
+void cpu_trtri(
+    hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, float* A, int lda, int* info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    strtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(
+    hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, double* A, int lda, int* info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    dtrtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(hipsolverFillMode_t uplo,
+               hipsolverDiagType_t diag,
+               int                 n,
+               hipsolverComplex*   A,
+               int                 lda,
+               int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    ctrtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(hipsolverFillMode_t     uplo,
+               hipsolverDiagType_t     diag,
+               int                     n,
+               hipsolverDoubleComplex* A,
+               int                     lda,
+               int*                    info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    ztrtri_(&uploC, &diagC, &n, A, &lda, info);
 }

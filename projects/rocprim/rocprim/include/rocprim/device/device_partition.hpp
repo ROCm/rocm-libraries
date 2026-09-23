@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,10 +43,12 @@
 #include "rocprim/device/detail/lookback_scan_state.hpp"
 #include "rocprim/device/detail/ordered_block_id.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -72,8 +74,8 @@ inline size_t get_partition_vsmem_size_per_block(detail::target t)
         {
             if(target{candidate} == most_common_config<targets>(t))
             {
-                using ArchConfig = target_config<Config, Selector, decltype(candidate)>;
-                using partition_kernel_impl_t = partition_kernel_impl_<ArchConfig,
+                using TargetConfig = target_config<Config, Selector, decltype(candidate)>;
+                using partition_kernel_impl_t = partition_kernel_impl_<TargetConfig,
                                                                        SelectMethod,
                                                                        OnlySelected,
                                                                        Key,
@@ -164,12 +166,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                           bool>::type;
             using selector = partition_config_selector<SubAlgo, key_type, value_type, flag_type>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-            detail::gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+            const target current_target(stream);
 
-            const target       current_target(target_arch, target_gpu);
             const auto         params           = get_config<selector>(Config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -303,9 +301,10 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                auto partition_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto arch_config) mutable
+                auto partition_kernel
+                    = [=, vsm = detail::vsmem_t{vsmem}](auto target_config) mutable
                 {
-                    using partition_kernel_impl_t = partition_kernel_impl_<decltype(arch_config),
+                    using partition_kernel_impl_t = partition_kernel_impl_<decltype(target_config),
                                                                            method,
                                                                            write_only_selected,
                                                                            key_type,
@@ -366,6 +365,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Two-way parallel select primitive for device level using selection predicate.
 ///
 /// Performs a device-wide partition using selection predicate. Partition copies the values from
@@ -417,6 +418,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 /// In this example a device-level two-way partition operation is performed on an array of integer
 /// values, even values are copied into the selected output and odd values are copied into rejected
 /// output.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_partition.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>///
@@ -1105,9 +1108,9 @@ inline hipError_t partition_three_way(void*                       temporary_stor
                                                select_second_part_op);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_PARTITION_HPP_

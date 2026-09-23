@@ -8,8 +8,8 @@ import re
 
 from rocm_docs import ROCmDocs
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'set\(VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(r"set\(VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
@@ -34,6 +34,19 @@ external_projects_current_project = "hipcub"
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/hipcub/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+
 # Suppresses "WARNING: toctree directive not expected with external-toc"
 # Ideally suppression wouldn't be needed; see sphinx-external-toc#36
 suppress_warnings = ["etoc.toctree"]
+
+extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

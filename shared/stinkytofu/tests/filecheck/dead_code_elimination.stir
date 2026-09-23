@@ -1,0 +1,146 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --DeadCodeEliminationPass --print-output
+#
+# Dead Code Elimination: remove instructions whose results are overwritten
+# before being used.
+# Converted from DeadCodeEliminationPassTest.
+
+#--- Simple dead code: v0 overwritten before use → first def removed
+# CHECK-LABEL: @remove_simple_dead_code
+# CHECK-NOT: v_mul_f32
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK: v_sub_f32
+# CHECK: buffer_store_b32
+
+st.func @remove_simple_dead_code() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_mov_b32"(v7) { issueCycles = 1, latencyCycles = 1 }
+  v6 = "st.v_sub_f32"(v0, v3) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v6) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Chain of dead stores: three overwrites, only last kept
+# CHECK-LABEL: @chain_of_dead_code
+# CHECK-NOT: v_mul_f32
+# CHECK-NOT: v_add_f32
+# CHECK-NOT: v_fma_f32
+# CHECK: v_sub_f32
+# CHECK: buffer_store_b32
+
+st.func @chain_of_dead_code() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_fma_f32"(v5, v6, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_sub_f32"(v10, v11) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v0) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Don't remove live code: all defs used
+# CHECK-LABEL: @dont_remove_live_code
+# CHECK: v_mul_f32
+# CHECK: v_add_f32
+# CHECK: v_fma_f32
+# CHECK: buffer_store_b32
+
+st.func @dont_remove_live_code() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_fma_f32"(v3, v0, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v5) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Multiple uses keep alive: first v3 def overwritten, but v0 def is live
+# CHECK-LABEL: @multiple_uses_keep_alive
+# CHECK: v_mul_f32
+# CHECK-NOT: v_add_f32
+# CHECK: v_sub_f32
+# CHECK: v_fma_f32
+# CHECK: buffer_store_b32
+
+st.func @multiple_uses_keep_alive() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_sub_f32"(v5, v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_fma_f32"(v3, v1, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v7) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Preserve memory operations
+# CHECK-LABEL: @preserve_memory_ops
+# CHECK: buffer_load_b32
+# CHECK: v_mul_f32
+# CHECK: buffer_store_b32
+
+st.func @preserve_memory_ops() {
+^entry:
+  v0 = "st.buffer_load_b32"(v40) { issueCycles = 1, latencyCycles = 100 }
+  v4 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v41, v4) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- All dead stores to same register: first two removed, last kept
+# CHECK-LABEL: @all_dead_code
+# CHECK-NOT: v_mul_f32
+# CHECK-NOT: v_add_f32
+# CHECK: v_sub_f32
+
+st.func @all_dead_code() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_sub_f32"(v7, v8) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Interleaved live and dead: all instructions live in chain
+# CHECK-LABEL: @interleaved_live_and_dead
+# CHECK: v_mul_f32
+# CHECK: v_add_f32
+# CHECK: v_sub_f32
+# CHECK: v_fma_f32
+# CHECK: v_add_f32
+# CHECK: buffer_store_b32
+
+st.func @interleaved_live_and_dead() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v6 = "st.v_sub_f32"(v3, v0) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_fma_f32"(v8, v9, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.v_add_f32"(v6, v7) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v10) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Constant operands: all live
+# CHECK-LABEL: @constant_operands
+# CHECK: v_mul_f32
+# CHECK: v_add_f32
+# CHECK: v_fma_f32
+# CHECK: buffer_store_b32
+
+st.func @constant_operands() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, 2.0) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v6 = "st.v_fma_f32"(v0, v3, 3.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v6) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- In-place operations: v0 redefined using itself, all live
+# CHECK-LABEL: @in_place_operations
+# CHECK: v_mul_f32
+# CHECK: v_add_f32
+# CHECK: v_sub_f32
+# CHECK: buffer_store_b32
+
+st.func @in_place_operations() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(v0, v3) { issueCycles = 1, latencyCycles = 5 }
+  v4 = "st.v_sub_f32"(v0, v5) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v4) { issueCycles = 1, latencyCycles = 1 }
+}

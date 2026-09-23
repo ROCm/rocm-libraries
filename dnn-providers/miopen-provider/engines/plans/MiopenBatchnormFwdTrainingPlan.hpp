@@ -19,14 +19,16 @@ class BatchnormFwdTrainingParams
 {
 public:
     BatchnormFwdTrainingParams(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdTrainingParams(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdTrainingParams(const BatchnormFwdTrainingParams&) = delete;
@@ -39,7 +41,8 @@ public:
     const MiopenTensor& y() const;
     const MiopenTensor& scale() const;
     const MiopenTensor& bias() const;
-    double epsilonValue() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
 
     bool hasSaveMeanVariance() const;
     const MiopenTensor& mean() const;
@@ -48,7 +51,8 @@ public:
     bool hasRunningStats() const;
     const MiopenTensor& prevRunningMean() const;
     const MiopenTensor& prevRunningVariance() const;
-    double momentumValue() const;
+    double momentumValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                         uint32_t numDeviceBuffers) const;
     const MiopenTensor& nextRunningMean() const;
     const MiopenTensor& nextRunningVariance() const;
 
@@ -60,7 +64,7 @@ private:
     MiopenTensor _y;
     MiopenTensor _scale;
     MiopenTensor _bias;
-    double _epsilonValue;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     // Optional save mean/variance
     std::optional<MiopenTensor> _mean;
@@ -69,7 +73,7 @@ private:
     // Optional running statistics
     std::optional<MiopenTensor> _prevRunningMean;
     std::optional<MiopenTensor> _prevRunningVariance;
-    std::optional<double> _momentumValue;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _momentum;
     std::optional<MiopenTensor> _nextRunningMean;
     std::optional<MiopenTensor> _nextRunningVariance;
     bool _hasRunningStats{false};

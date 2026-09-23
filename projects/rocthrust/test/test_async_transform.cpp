@@ -233,6 +233,10 @@ THRUST_HOST void test_async_transform_unary()
 
 TYPED_TEST(AsyncTransformTests, test_async_transform_unary_divide_by_2)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
   test_async_transform_unary<T, transform_unary_async_invoker, transform_unary_sync_invoker, divide_by_2>();

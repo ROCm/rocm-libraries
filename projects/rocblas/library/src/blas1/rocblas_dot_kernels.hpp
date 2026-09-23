@@ -70,13 +70,14 @@ rocblas_dot_kernel_inc1(rocblas_int n,
                         V* __restrict__ workspace,
                         T* __restrict__ out)
 {
-    int      i     = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
-    uint32_t batch = blockIdx.z;
+    // Where this thread starts, restated on every pass of the sweep below: a
+    // batch_count past the grid z cap takes that sweep more than once, and each pass
+    // has to walk from here rather than from wherever the previous one left off.
+    const int i0    = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
+    uint32_t  batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
         const auto* y = load_ptr_batch(ya, batch, shifty, stridey);
 
@@ -84,6 +85,7 @@ rocblas_dot_kernel_inc1(rocblas_int n,
 
         // sum WIN elements per thread
         int inc = !ONE_BLOCK ? NB * gridDim.x : NB;
+        int i   = i0;
         for(int j = 0; j < WIN && i < n; j++, i += inc)
         {
             sum += V(y[i]) * V(CONJ ? conj(x[i]) : x[i]);
@@ -95,10 +97,7 @@ rocblas_dot_kernel_inc1(rocblas_int n,
             sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool ONE_BLOCK, int NB, int WIN, bool CONJ, typename T, typename U, typename V>
@@ -114,13 +113,13 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
                            V* __restrict__ workspace,
                            T* __restrict__ out)
 {
-    int      i     = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
-    uint32_t batch = blockIdx.z;
+    // Restated per batch sweep; see rocblas_dot_kernel_inc1. This one compounded
+    // the same fault, the pairing below doubling i and inc again on every sweep.
+    const int i0    = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
+    uint32_t  batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
         const auto* y = load_ptr_batch(ya, batch, shifty, stridey);
@@ -129,6 +128,7 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
 
         // sum WIN elements per thread
         int inc = !ONE_BLOCK ? NB * gridDim.x : NB;
+        int i   = i0;
 
         if constexpr(
             std::is_same_v<
@@ -165,10 +165,7 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
             sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT,
@@ -193,13 +190,12 @@ rocblas_dot_kernel(rocblas_int n,
                    V* __restrict__ workspace,
                    T* __restrict__ out)
 {
-    int      i     = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
-    uint32_t batch = blockIdx.z;
+    // Restated per batch sweep; see rocblas_dot_kernel_inc1.
+    const int i0    = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
+    uint32_t  batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
         const auto* y = load_ptr_batch(ya, batch, shifty, stridey);
@@ -208,6 +204,7 @@ rocblas_dot_kernel(rocblas_int n,
 
         // sum WIN elements per thread
         int inc = NB * gridDim.x;
+        int i   = i0;
         for(int j = 0; j < WIN && i < n; j++, i += inc)
         {
             sum += V(y[i * int64_t(incy)])
@@ -219,10 +216,7 @@ rocblas_dot_kernel(rocblas_int n,
             sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT, int NB, typename T, typename U, typename V = T>
@@ -240,7 +234,7 @@ rocblas_dot_kernel_gfx942_float_double(rocblas_int n,
                                        T* __restrict__ out)
 {
 // gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx942__)
     int         i = blockIdx.x * NB + threadIdx.x;
     const auto* x = load_ptr_batch(xa, blockIdx.z, shiftx, stridex);
     const auto* y = load_ptr_batch(ya, blockIdx.z, shifty, stridey);
@@ -291,13 +285,12 @@ rocblas_dot_kernel_magsq(rocblas_int n,
                          V* __restrict__ workspace,
                          T* __restrict__ out)
 {
-    int      i     = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
-    uint32_t batch = blockIdx.z;
+    // Restated per batch sweep; see rocblas_dot_kernel_inc1.
+    const int i0    = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
+    uint32_t  batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
 
@@ -305,6 +298,7 @@ rocblas_dot_kernel_magsq(rocblas_int n,
 
         // sum WIN elements per thread
         int inc = NB * gridDim.x;
+        int i   = i0;
         for(int j = 0; j < WIN && i < n; j++, i += inc)
         {
             int64_t idx = i * int64_t(incx);
@@ -316,10 +310,7 @@ rocblas_dot_kernel_magsq(rocblas_int n,
             sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT, int WARP, int NB_Y, bool CONJ, typename V, typename T, typename U>

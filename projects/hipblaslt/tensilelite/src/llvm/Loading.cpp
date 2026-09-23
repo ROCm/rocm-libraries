@@ -31,6 +31,7 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/llvm/YAML.hpp>
+#include <llvm/Support/MemoryBuffer.h>
 
 namespace TensileLite
 {
@@ -45,6 +46,13 @@ namespace TensileLite
         try
         {
             auto inputFile = llvm::MemoryBuffer::getFileAsStream(filename);
+            if(!inputFile)
+            {
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Error loading " << filename
+                              << ": " << inputFile.getError().message() << std::endl;
+                return nullptr;
+            }
 
             LibraryIOContext<MySolution> context{filename, preloaded, nullptr};
             llvm::yaml::Input            yin((*inputFile)->getMemBufferRef(), &context);

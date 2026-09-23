@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +62,10 @@ function(add_relative_test test_name test_target resource_group)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
     # Set the resource group for the test. This must correspond to a gfxID present in resources.json.
     file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties([=[${test_name}]=] PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
+    # Track every hipCUB (test_target, resource_group) pair so the shared CTest
+    # categorization can attach --gtest_filter category suites to each one
+    # while inheriting the same RESOURCE_GROUPS pinning.
+    set_property(GLOBAL APPEND PROPERTY HIPCUB_TEST_TARGET_RESOURCE_PAIRS "${test_target}|${resource_group}")
 endfunction()
 
 # We'll use this small program to detect available GPUs and build the resource JSON file.
@@ -69,6 +73,9 @@ set(GEN_RES_SPEC_PATH ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
 add_executable(generate_resource_spec ${GEN_RES_SPEC_PATH})
 set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(generate_resource_spec PRIVATE hip::host)
+# This test may still get the offload-compress flag passed. Since it does not include any kernel
+# code it will give an unused-command-line-argument warning.
+target_compile_options(generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
 
 # hipCUB tests
 add_subdirectory(hipcub)
@@ -100,14 +107,72 @@ if(BUILD_CODE_COVERAGE)
 
   get_property(LLVM_COV_OBJECT_ARGS GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS)
   add_custom_target(
-    coverage
-    DEPENDS coverage_analysis
+    coverage_summary
     COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hipcub-coverage_*.profraw -o ${PROFILE_DIR}/hipcub.profdata
     COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata
     COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata -format=html -output-dir=${PROFILE_DIR}
     COMMAND ${LLVM_COV} export ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/hipcub.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
+
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    DEPENDS coverage_summary
+  )
+endif()
+
+
+# ****************************************************************************
+# Test Filter Standardization
+# ****************************************************************************
+#
+# Wires every hipCUB test binary into the shared rocm-libraries CTest
+# categorization (see ${ROCM_LIBRARIES_ROOT}/shared/ctest/). For each tracked
+# test target we register one extra CTest entry per category defined in
+# test_categories.yaml. Each entry invokes the binary with a
+# `--gtest_filter=...` derived from the YAML, and is tagged with the category
+# labels and timeout. This lets users select tiers via standard ctest labels:
+#
+#   ctest -L quick       # fast sanity checks (mirrors TheRock test_hipcub.py)
+#   ctest -L standard    # full gtest run
+#
+# The original per-binary tests added by add_relative_test() above are kept
+# untouched, so existing workflows are not affected.
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+
+    set(HIPCUB_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+    if(EXISTS "${HIPCUB_TEST_CATEGORIES_YAML}")
+        message(STATUS "Applying test categories for hipCUB")
+        get_property(_hc_pairs GLOBAL PROPERTY HIPCUB_TEST_TARGET_RESOURCE_PAIRS)
+        list(REMOVE_DUPLICATES _hc_pairs)
+        foreach(_hc_pair IN LISTS _hc_pairs)
+            string(REPLACE "|" ";" _hc_parts "${_hc_pair}")
+            list(GET _hc_parts 0 _hc_t)
+            list(GET _hc_parts 1 _hc_rg)
+            get_target_property(_hc_dir ${_hc_t} RUNTIME_OUTPUT_DIRECTORY)
+            if(NOT _hc_dir OR _hc_dir STREQUAL "_hc_dir-NOTFOUND")
+                set(_hc_dir "${CMAKE_BINARY_DIR}/test/hipcub")
+            endif()
+            apply_test_category_labels(
+                ${_hc_t}
+                "${HIPCUB_TEST_CATEGORIES_YAML}"
+                "${_hc_dir}"
+                "${INSTALL_TEST_FILE}"
+                "${_hc_rg}"
+            )
+        endforeach()
+    else()
+        message(STATUS
+            "hipCUB test_categories.yaml not found at "
+            "${HIPCUB_TEST_CATEGORIES_YAML} - skipping test category labels")
+    endif()
+else()
+    message(STATUS
+        "Shared CTest categories not found at "
+        "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake - "
+        "skipping hipCUB test category labels")
 endif()
 
 
@@ -118,10 +183,12 @@ rocm_install(
     RENAME "CTestTestfile.cmake"
 )
 
-# Install the executable as PROGRAMS (rather than TARGETS)
-# since we want to put it in the correct DESTINATION.
-rocm_install(
-    PROGRAMS $<TARGET_FILE:generate_resource_spec>
+# Install the executable using the standard install command instead of rocm_install
+# since we want to put it in a custom DESTINATION (rocm_install does not support
+# the DESTINATION option for TARGETS).
+set_property(TARGET generate_resource_spec APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
+install(
+    TARGETS generate_resource_spec
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
 )

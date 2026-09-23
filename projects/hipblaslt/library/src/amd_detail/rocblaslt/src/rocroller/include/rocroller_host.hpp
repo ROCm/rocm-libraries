@@ -15,6 +15,11 @@
 
 #include "rocblaslt.h"
 
+#include <string>
+
+/** rr_… label from packed rocRoller solution index (negative int); uses shortRocRollerKernelNameFromSolutionIndex. */
+std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolutionIndex);
+
 void rocroller_destroy_handle(void* handle);
 
 void rocroller_create_handle(void** handle);

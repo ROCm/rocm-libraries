@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,8 +24,8 @@
 #include "testing.hpp"
 
 template <typename T, typename I = rocsparse_int, typename J = rocsparse_int>
-rocsparse_status rocsparse_csr_set_pointers(rocsparse_spmat_descr       descr,
-                                            device_csr_matrix<T, I, J>& csr_matrix)
+rocsparse_status test_csr_set_pointers(rocsparse_spmat_descr       descr,
+                                       device_csr_matrix<T, I, J>& csr_matrix)
 {
     return rocsparse_csr_set_pointers(descr, csr_matrix.ptr, csr_matrix.ind, csr_matrix.val);
 }
@@ -445,7 +445,7 @@ void testing_spgemm_csr(const Arguments& arg)
                     int64_t C_m, C_n, C_nnz;
                     CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_size(C, &C_m, &C_n, &C_nnz));
                     dC.define(dC.m, dC.n, C_nnz, dC.base);
-                    CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(C, dC));
+                    CHECK_ROCSPARSE_ERROR(test_csr_set_pointers(C, dC));
                 }
 
                 //
@@ -510,7 +510,7 @@ void testing_spgemm_csr(const Arguments& arg)
                         int64_t C_m, C_n, C_nnz;
                         CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_size(C, &C_m, &C_n, &C_nnz));
                         dC.define(dC.m, dC.n, C_nnz, dC.base);
-                        CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(C, dC));
+                        CHECK_ROCSPARSE_ERROR(test_csr_set_pointers(C, dC));
                     }
 
                     //
@@ -577,7 +577,7 @@ void testing_spgemm_csr(const Arguments& arg)
                     int64_t C_m, C_n, C_nnz;
                     CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_size(C, &C_m, &C_n, &C_nnz));
                     dC.define(dC.m, dC.n, C_nnz, dC.base);
-                    CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(C, dC));
+                    CHECK_ROCSPARSE_ERROR(test_csr_set_pointers(C, dC));
                 }
                 //
                 CHECK_ROCSPARSE_ERROR(
@@ -618,7 +618,7 @@ void testing_spgemm_csr(const Arguments& arg)
                 int64_t C_m, C_n;
                 CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_size(C, &C_m, &C_n, &C_nnz));
                 dC.define(dC.m, dC.n, C_nnz, dC.base);
-                CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(C, dC));
+                CHECK_ROCSPARSE_ERROR(test_csr_set_pointers(C, dC));
             }
 
             gpu_solve_time_used = get_time_us();

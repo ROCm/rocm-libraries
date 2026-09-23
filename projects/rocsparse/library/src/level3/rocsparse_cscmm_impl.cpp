@@ -87,13 +87,15 @@ rocsparse_status rocsparse::cscmm_buffer_size_template(rocsparse_handle         
 }
 
 template <typename I, typename J, typename A>
-rocsparse_status rocsparse::cscmm_analysis_template(rocsparse_handle          handle,
-                                                    rocsparse_operation       trans_A,
-                                                    rocsparse_csrmm_alg       alg,
-                                                    int64_t                   m,
-                                                    int64_t                   n,
-                                                    int64_t                   k,
-                                                    int64_t                   nnz,
+rocsparse_status rocsparse::cscmm_analysis_template(rocsparse_handle    handle,
+                                                    rocsparse_operation trans_A,
+                                                    rocsparse_csrmm_alg alg,
+                                                    int64_t             m,
+                                                    int64_t             n,
+                                                    int64_t             k,
+                                                    int64_t             nnz,
+                                                    int64_t             batch_count,
+                                                    int64_t             offsets_batch_stride_A,
                                                     const rocsparse_mat_descr descr,
                                                     const void*               csc_val,
                                                     const void*               csc_col_ptr,
@@ -114,6 +116,8 @@ rocsparse_status rocsparse::cscmm_analysis_template(rocsparse_handle          ha
                                                          n,
                                                          m,
                                                          nnz,
+                                                         batch_count,
+                                                         offsets_batch_stride_A,
                                                          descr,
                                                          csc_val,
                                                          csc_col_ptr,
@@ -132,6 +136,8 @@ rocsparse_status rocsparse::cscmm_analysis_template(rocsparse_handle          ha
                                                          n,
                                                          m,
                                                          nnz,
+                                                         batch_count,
+                                                         offsets_batch_stride_A,
                                                          descr,
                                                          csc_val,
                                                          csc_col_ptr,
@@ -338,6 +344,8 @@ INSTANTIATE_BUFFER_SIZE(float, int64_t, int64_t, int8_t);
         int64_t                   n,                                       \
         int64_t                   k,                                       \
         int64_t                   nnz,                                     \
+        int64_t                   batch_count,                             \
+        int64_t                   offsets_batch_stride_A,                  \
         const rocsparse_mat_descr descr,                                   \
         const void*               csc_val,                                 \
         const void*               csc_col_ptr,                             \

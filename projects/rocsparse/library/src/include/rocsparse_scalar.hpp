@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -77,3 +77,17 @@ namespace rocsparse
 #define ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(COND_, NAME_)                                        \
     const auto NAME_ = (COND_) ? ((is_host_mode) ? NAME_##_union.value : *NAME_##_union.pointer) \
                                : NAME_##_union.zero()
+
+#define ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(POINTER_MODE_, S_) \
+    rocsparse::to_const_host_device_scalar(POINTER_MODE_, S_)
+
+#define ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(POINTER_MODE_, S_) \
+    rocsparse::to_permissive_const_host_device_scalar(POINTER_MODE_, S_)
+
+#define ROCSPARSE_SCALAR_HOST_DEVICE_GET(IS_POINTER_MODE_HOST_, NAME_) \
+    const auto NAME_ = (IS_POINTER_MODE_HOST_) ? NAME_##_union.value : *NAME_##_union.pointer
+
+#define ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(COND_, IS_POINTER_MODE_HOST_, NAME_)             \
+    const auto NAME_                                                                         \
+        = (COND_) ? ((IS_POINTER_MODE_HOST_) ? NAME_##_union.value : *NAME_##_union.pointer) \
+                  : NAME_##_union.zero()

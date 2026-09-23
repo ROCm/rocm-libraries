@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_getrs.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -39,6 +40,7 @@ rocblas_status rocsolver_getrs_impl(rocblas_handle handle,
                                     const I* ipiv,
                                     T* B,
                                     const I ldb)
+try
 {
     ROCSOLVER_ENTER_TOP("getrs", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb",
                         ldb);
@@ -91,6 +93,10 @@ rocblas_status rocsolver_getrs_impl(rocblas_handle handle,
     return rocsolver_getrs_template<false, false, T>(
         handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, ipiv, strideP, B, shiftB, incb, ldb,
         strideB, batch_count, work1, work2, work3, work4, optim_mem, true);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

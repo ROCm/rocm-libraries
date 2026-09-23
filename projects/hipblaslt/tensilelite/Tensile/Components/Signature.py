@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,93 @@ from ..Activation import ActivationType
 
 from dataclasses import dataclass, field
 
+# Fused GEMM.A2A kernarg segment layout.
+#
+# When kernel["ProblemType"]["FusedGemmA2A"] is set, Signature appends a fixed-size segment at
+# the tail of the kernarg buffer. These args are kernarg metadata ONLY -- no
+# defineSgpr, not counted in numSgprToLoad. The fusion logic runs solely in the
+# D-store epilogue, which reads each arg on demand by absolute byte offset into
+# a scratch SGPR freed right after use. A WG maps to a single dst_rank, so it
+# reads exactly one peer group.
+#
+# The slot count is a COMPILE-TIME constant, independent of the runtime W.
+FUSED_A2A_MAX_RANKS = 8
+
+# The bound below is the wave32 arm's 31, not the wave64 arm's 63: neither this
+# constant nor its C++ twin (client/include/FusedA2AKernArg.hpp) knows the wave
+# width of the kernel that will consume it, so the only sound bound is the one
+# that holds for both arms. 31 is the mask's CEILING, not a recommendation --
+# the shipped 8 is the world size this ABI is built for, not a placeholder.
+# `raise`, not `assert`: `python -O` strips asserts.
+if FUSED_A2A_MAX_RANKS > 31:
+    raise ValueError(
+        "FUSED_A2A_MAX_RANKS=%d exceeds the %d the DRAIN EXEC mask can encode: the "
+        "S_BFM width operand is 5 bits on the wave32 arm and 6 on the wave64 arm, so "
+        "a world size of 32 (resp. 64) wraps the width to 0, EXEC becomes empty, the "
+        "DRAIN poll never issues, and the barrier is silently skipped -- the epilogue "
+        "then reads peer tiles that have not arrived. Re-derive the mask before "
+        "raising this, and raise FUSED_A2A_MAX_RANKS in "
+        "client/include/FusedA2AKernArg.hpp to match."
+        % (FUSED_A2A_MAX_RANKS, 31))
+
+from .SdmaRingEmitter import CURSOR_PAIR_BYTES, FUSED_A2A_PEER_FIELDS, PEER_GROUP_BYTES
+
+FUSED_A2A_LINE_BYTES = 64
+
+
+def _fusedA2AAlignLine(nbytes):
+    return -(-nbytes // FUSED_A2A_LINE_BYTES) * FUSED_A2A_LINE_BYTES
+
+
+# Counter-block region offsets, twinned with FUSED_A2A_COUNTER*_OFFSET in
+# client/include/FusedA2ACounterSentinel.hpp; the flag-block offset and the
+# FusedDrain bits with their namesakes in client/include/FusedA2AKernArg.hpp.
+# The three leading counter regions are sized by FUSED_A2A_MAX_RANKS rather than
+# the runtime W. Each region starts on a 64-byte line; the trailing
+# variable-size region gets no tail padding.
+FUSED_A2A_COUNTER2_OFFSET = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * CURSOR_PAIR_BYTES)
+FUSED_A2A_COUNTER3_OFFSET = _fusedA2AAlignLine(
+    FUSED_A2A_COUNTER2_OFFSET + FUSED_A2A_MAX_RANKS * 4)
+FUSED_A2A_COUNTER1_OFFSET = _fusedA2AAlignLine(FUSED_A2A_COUNTER3_OFFSET + 4)
+FUSED_A2A_OUTBOUND_OFFSET = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * 4)
+FUSED_A2A_DRAIN_RECV = 1
+FUSED_A2A_DRAIN_SEND = 2
+
+# (argName, byteSize) in addArg() order. Both the offset map and the segment
+# size derive from this one list, so an arg added to the segment cannot reach
+# only one of them:
+#   peer_<j>_<f>     peer j's pointers, incl. self; field order and group stride
+#                    come from SdmaRingEmitter
+#   counter_ptr      this device's counter base
+#   FusedDrain       runtime drain flag (NOT a compile-time gate)
+#   FusedAM          A2A feature-row count (first AM rows PUSH, rest local)
+#
+# One group per peer, so a work-group computes one base and reaches every
+# pointer it needs for that peer by immediate offset.
+_FUSED_A2A_SEGMENT_ARGS = (
+    [("peer_%u_%s" % (j, f), 8)
+     for j in range(FUSED_A2A_MAX_RANKS) for f in FUSED_A2A_PEER_FIELDS]
+    + [("counter_ptr", 8),
+       ("FusedMyRank", 4), ("FusedW", 4), ("FusedDrain", 4), ("FusedAM", 4)])
+
+def fusedA2AKernArgLayout():
+    """Return {argName: intra-segment byte offset} for the fused-A2A segment.
+
+    The offsets are relative to the segment base (peer_0_flagPtr == 0). Order and
+    sizes MUST match the addArg() sequence in SignatureDefault.__call__.
+    """
+    layout = {}
+    off = 0
+    for name, size in _FUSED_A2A_SEGMENT_ARGS:
+        layout[name] = off
+        off += size
+    return layout
+
+FUSED_A2A_SEGMENT_BYTES = sum(size for _, size in _FUSED_A2A_SEGMENT_ARGS)
+
+assert all(fusedA2AKernArgLayout()["peer_%u_%s" % (j, FUSED_A2A_PEER_FIELDS[0])] == j * PEER_GROUP_BYTES
+           for j in range(FUSED_A2A_MAX_RANKS)), "peer groups must be contiguous from the segment base"
+
 @dataclass
 class UserArgumentsInfo:
     # Common args
@@ -52,6 +139,7 @@ class UserArgumentsInfo:
     scaleAlphaVecSize: int = 0
     biasSize: int = 0
     eSize: int = 0
+    gateSize: int = 0
     activationSize: int = 0
     factorDimSize: int = 0
     # Total argument size
@@ -64,34 +152,17 @@ class UserArgumentsInfo:
 
 def getSrcValueType(kernel, isTypeA):
     # special cases for F8 datatypes
-    if kernel["ProblemType"]["DataType"].isAnyFloat8():
+    tc='A' if isTypeA else 'B'
+    if kernel["ProblemType"]["MacDataType%s"%tc].isAnyFloat8():
         srcValueType = "FP8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8():
+    elif kernel["ProblemType"]["MacDataType%s"%tc].isAnyBFloat8():
         srcValueType = "BF8"
-    elif kernel["ProblemType"]["DataType"].isAnyFloat8BFloat8():
-        srcValueType = "FP8" if isTypeA else "BF8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8Float8():
-        srcValueType = "BF8" if isTypeA else "FP8"
     else:
-        if isTypeA:
-            srcValueType = kernel["ProblemType"]["DataTypeA"].toNameAbbrev().upper()
-        else:
-            srcValueType = kernel["ProblemType"]["DataTypeB"].toNameAbbrev().upper()
+        srcValueType = kernel["ProblemType"]["DataType%s"%tc].toNameAbbrev().upper()
 
     srcValueType = srcValueType.lower()
     return srcValueType
 
-def getDstValueType(kernel):
-    # special cases for F8 datatypes
-    if kernel["ProblemType"]["DataType"].isAnyFloat8():
-        dstValueType = "FP8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8():
-        dstValueType = "BF8"
-    else:
-        dstValueType = kernel["ProblemType"]["DataType"].toNameAbbrev().upper()
-
-    dstValueType = dstValueType.lower()
-    return dstValueType
 
 # Creates kernel header, compatible with code object version 4 and up. V2 and V3 no longer supported.
 class SignatureDefault(Signature):
@@ -104,9 +175,13 @@ class SignatureDefault(Signature):
         # kern arg size
         kernArgReg = 0
         kernArgReg += 3*writer.states.rpga
-        kernArgReg += max(1,int(writer.states.bpeAB/4)) # alpha
+        # TODO: Check correctness of the following
+        kernArgReg += max(1,int(writer.states.bpeA/4)) # alpha
+        # TODO: alpha and beta should be computeType
         if kernel["ProblemType"]["UseBeta"]:
             kernArgReg += max(1,int(writer.states.bpeCexternal/4)) # beta
+        else:
+            kernArgReg += max(1,int(writer.states.bpeCexternal/4)) # reserved even if unused
         kernArgReg += kernel["ProblemType"]["NumIndicesC"] # strides
         kernArgReg += kernel["ProblemType"]["NumIndicesC"] # strides
         kernArgReg += len(kernel["ProblemType"]["IndexAssignmentsA"]) # strides
@@ -123,7 +198,13 @@ class SignatureDefault(Signature):
 
         group_segment_size = kernel["LdsNumBytes"]
 
+        # When modify the size, please also update TENSILE_COMMON_KERNEL_ARGS_SIZE in ContractionSolution.hpp
+        userArgumentsInfo.commonArgsNum += 4
+        userArgumentsInfo.commonArgsSize = userArgumentsInfo.commonArgsNum * writer.states.bpr
+
         sgprWgZ = 1 if kernel["ProblemType"]["NumIndicesC"] > 2 else 0
+        numSgprToLoad = writer.states.numSgprToLoad + userArgumentsInfo.commonArgsNum
+        writer.states.numSgprPreload = min(numSgprToLoad, writer.states.numSgprPreload)
         signature = SignatureBase(kernelName=writer.states.kernelName,
                                     kernArgsVersion=kernel["InternalSupportParams"]["KernArgsVersion"],
                                     codeObjectVersion=kernel["CodeObjectVersion"],
@@ -131,16 +212,13 @@ class SignatureDefault(Signature):
                                     sgprWorkGroup=(1, 1, sgprWgZ),
                                     vgprWorkItem=0,
                                     flatWorkGroupSize=(kernel["NumThreads"]),
-                                    preloadKernArgs=bool(kernel["PreloadKernArgs"]))
+                                    numSgprPreload=writer.states.numSgprPreload)
 
        # General Argument info
         signature.addArg(   "Gemm info", SVK.SIG_VALUE, "u32")
         signature.addArg("kernel info0", SVK.SIG_VALUE, "u32")
         signature.addArg("kernel info1", SVK.SIG_VALUE, "u32")
         signature.addArg("numWG",        SVK.SIG_VALUE, "u32")
-        # When modify the size, please also update TENSILE_COMMON_KERNEL_ARGS_SIZE in ContractionSolution.hpp
-        userArgumentsInfo.commonArgsNum += 4
-        userArgumentsInfo.commonArgsSize = userArgumentsInfo.commonArgsNum * writer.states.bpr
 
         srcValueTypeA = getSrcValueType(kernel, True)
         srcValueTypeB = getSrcValueType(kernel, False)
@@ -159,19 +237,114 @@ class SignatureDefault(Signature):
 
         if writer.debugConfig.debugKernel:
             signature.addArg("AddressDbg", SVK.SIG_GLOBALBUFFER, "struct", "generic")
-        signature.addArg(    "D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
-        signature.addArg(    "C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
-        signature.addArg(    "A", SVK.SIG_GLOBALBUFFER, srcValueTypeA, "generic")
-        signature.addArg(    "B", SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
-        userArgumentsInfo.gemmArgumentSize += (8 + 8 + 8 + 8)  # A, B, C, D buffer
 
+        # A/B input buffers
+        signature.addArg("A", SVK.SIG_GLOBALBUFFER, srcValueTypeA, "generic")
+        if kernel["ProblemType"]["MXBlockA"]:
+            signature.addArg("MXSA", SVK.SIG_GLOBALBUFFER, "void", "generic")
+        signature.addArg("B", SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+        if kernel["ProblemType"]["MXBlockB"]:
+            signature.addArg("MXSB", SVK.SIG_GLOBALBUFFER, "void", "generic")
+        userArgumentsInfo.gemmArgumentSize += (8 + 8 + 8 + 8)  # A, B, C, D buffer
+        if kernel["ProblemType"]["MXBlockA"]:
+            userArgumentsInfo.gemmArgumentSize += 8
+        if kernel["ProblemType"]["MXBlockB"]:
+            userArgumentsInfo.gemmArgumentSize += 8
+
+        # A/B strides
+        for i in range(0, writer.states.a.numSgprStrides):
+            signature.addArg(              "strideA%u"%i, SVK.SIG_VALUE,               "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
+
+        if kernel["ProblemType"]["MXBlockA"]:
+            for i in range(0, writer.states.mxsa.numSgprStrides):
+                signature.addArg(          "strideMXSA%u"%i, SVK.SIG_VALUE,            "u32")
+                userArgumentsInfo.gemmArgumentSize += 4
+
+        for i in range(0, writer.states.b.numSgprStrides):
+            signature.addArg(              "strideB%u"%i, SVK.SIG_VALUE,               "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
+
+        if kernel["ProblemType"]["MXBlockB"]:
+            for i in range(0, writer.states.mxsb.numSgprStrides):
+                signature.addArg(          "strideMXSB%u"%i, SVK.SIG_VALUE,            "u32")
+                userArgumentsInfo.gemmArgumentSize += 4
+
+        if kernel["ProblemType"]["Sparse"]:
+            for i in range(0, writer.states.m.numSgprStrides):
+                signature.addArg(   "strideMetadata%u"%i, SVK.SIG_VALUE,               "u32")
+
+        # metadata buffer
         if kernel["ProblemType"]["Sparse"]:
             signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
-        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
-            signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
+        # StreamKForceDPOnly (SK3 DP-first, gfx1250) never touches the workspace
+        # partials/fixup path, so AddressWS/AddressFlags are dead: they are dropped
+        # from the SGPR define (KernelWriter.py) and here from the .kd metadata. The
+        # host (ContractionSolution.cpp singleCallArgs) matches by not appending
+        # ws/Flags under streamKForceDPOnly, so the positional kernarg layout stays
+        # consistent host<->device.
+        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
+            if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
+                signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
 
+        if kernel["StreamK"] == 4:
+            signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("TotalItems",                         SVK.SIG_VALUE, "u32")
+            signature.addArg("SKTiles",                            SVK.SIG_VALUE, "u32")
+            signature.addArg("SKSplit",                            SVK.SIG_VALUE, "u32")
+            signature.addArg("SKItersPerWI",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("SKGrid",                             SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 24
+        elif kernel["StreamK"] == 5:
+            # Hybrid SK3+SK4. The host pushes only the 6 args matching the
+            # mode it selected for this launch; the SK4 reader names
+            # (TotalItems, SKTiles, SKSplit, SKItersPerWI, SKGrid) are emitted
+            # as RegSet aliases (see the SK5 block in KernelWriterAssembly.py)
+            # onto the same physical SGPRs as the SK3 primary names
+            # (MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG,
+            # skGrid, skTiles) respectively.
+            #
+            # The mode bit (bit 30 of slot 2) selects the active path. The
+            # signature metadata uses SK3 names as the primary kernarg labels
+            # because they are what defineSgpr() declares; SK4 names exist
+            # only as register aliases.
+            signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
+            signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
+            signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 24
+        elif kernel["StreamK"] == 3:  # SK3 two-tile ABI
+            # StreamK args
+            signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
+            signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 16
+            signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
+            signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 8
+
+        # Note: We use packed f16 if alpha and beta are f16
+        pack_cptValueType = 'pkf16' if kernel["ProblemType"]["ComputeDataType"].isHalf() else cptValueType
+        signature.addArg(   "alpha",        SVK.SIG_VALUE, pack_cptValueType)
+        # The beta slot is always present, so the layout does not depend on UseBeta.
+        signature.addArg("beta" if kernel["ProblemType"]["UseBeta"] else "betapad",
+                                        SVK.SIG_VALUE, pack_cptValueType)
+
+        # ver3 places AddressWS after alpha/beta, see the StreamK block above.
+        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"] \
+           and kernel["InternalSupportParams"]["KernArgsVersion"] >= 3:
+            signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
+
+        # D/C output buffers
+        signature.addArg("D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+        signature.addArg("C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+
+        # C/D strides
         for i in range(0, writer.states.d.numSgprStrides):
             signature.addArg(              "strideD%u"%i, SVK.SIG_VALUE,               "u32")
             userArgumentsInfo.gemmArgumentSize += 4
@@ -180,43 +353,17 @@ class SignatureDefault(Signature):
             signature.addArg(              "strideC%u"%i, SVK.SIG_VALUE,               "u32")
             userArgumentsInfo.gemmArgumentSize += 4
 
-        for i in range(0, writer.states.a.numSgprStrides):
-            signature.addArg(              "strideA%u"%i, SVK.SIG_VALUE,               "u32")
-            userArgumentsInfo.gemmArgumentSize += 4
-
-        for i in range(0, writer.states.b.numSgprStrides):
-            signature.addArg(              "strideB%u"%i, SVK.SIG_VALUE,               "u32")
-            userArgumentsInfo.gemmArgumentSize += 4
-
-        if kernel["ProblemType"]["Sparse"]:
-            for i in range(0, writer.states.m.numSgprStrides):
-                signature.addArg(   "strideMetadata%u"%i, SVK.SIG_VALUE,               "u32")
-
         for idxChar in kernel["PackedC0IdxChars"][:-1]:
             signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
             signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
 
-        # Note: We use packed f16 if alpha and beta are f16
-        pack_cptValueType = 'pkf16' if kernel["ProblemType"]["ComputeDataType"].isHalf() else cptValueType
-        signature.addArg(   "alpha",        SVK.SIG_VALUE, pack_cptValueType)
-        if kernel["ProblemType"]["UseBeta"]:
-            signature.addArg("beta",        SVK.SIG_VALUE, pack_cptValueType)
         # These are fixed sizes
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.betaMaxSize
 
-        if kernel["StreamK"]:
-            # StreamK args
-            signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
-            signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
-            signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
-            signature.addArg("TotalIters",                         SVK.SIG_VALUE, "u32")
-            signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
-            userArgumentsInfo.gemmArgumentSize += 20
-            if kernel["StreamK"] >= 2: # Two-tile SK
-                signature.addArg("skGrid",                         SVK.SIG_VALUE, "u32")
-                signature.addArg("skTiles",                        SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.gemmArgumentSize += 8
+        if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
+            signature.addArg( "ESMRuntimeSupported", SVK.SIG_VALUE,               "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
 
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
@@ -245,6 +392,14 @@ class SignatureDefault(Signature):
                     userArgumentsInfo.factorDimSize = 4
         userArgumentsInfo.biasSize += (8 + 4 + 4)
 
+        if writer.states.useGateResidual:
+            signature.addArg("gate",     SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+            signature.addArg("gateType", SVK.SIG_VALUE,        "u32")
+            for i in range(0, writer.states.gate.numSgprStrides):
+                signature.addArg("strideG%u"%i, SVK.SIG_VALUE, "u32")
+        # Gate is not part of the grouped-gemm UserArgs struct (totalSize); it is
+        # delivered via the normal kernarg above, so gate adds nothing to totalSize.
+
         if userArgumentsInfo.factorDimSize == 4:
             signature.addArg("factorDim", SVK.SIG_VALUE, "u32")
 
@@ -270,10 +425,53 @@ class SignatureDefault(Signature):
             signature.addArg(    "AmaxWS",      SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(    "AmaxSync",    SVK.SIG_GLOBALBUFFER, "u32",        "generic")
 
-        if (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel'):
+        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
             signature.addArg(    "dstD", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
             signature.addArg(               "Synchronizer", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(               "GSUSync", SVK.SIG_VALUE,              "u32")
+
+        # Batch offset support for general batched mode (pointer array).
+        # Placed at the tail of the kernarg buffer (after the dstD/Synchronizer block)
+        # so no later arg is shifted; the host appends them in the same position,
+        # after the dstD/Synchronizer/seed block. Record each arg's kernarg byte
+        # offset so the assembly loads them from the accurate position rather
+        # than re-deriving it.
+        #
+        # signature.offset counts from the very first arg including the common header.
+        # The assembly loads these args with KernArgAddress already advanced past
+        # that header by commonArgsSize, so subtract it.
+        if not kernel["ProblemType"]["GroupedGemm"]:
+            commonArgsSize = userArgumentsInfo.commonArgsSize
+            writer.states.batchOffsetDKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetD", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetCKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetC", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetAKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetA", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetBKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
+            userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
+
+        # Fused GEMM.A2A kernarg metadata; registered LAST so it lands at the
+        # tail. See fusedA2AKernArgLayout() for the offset contract.
+        if kernel["ProblemType"]["FusedGemmA2A"]:
+            fusedBase = signature.offset
+            for j in range(FUSED_A2A_MAX_RANKS):
+                for f in FUSED_A2A_PEER_FIELDS:
+                    signature.addArg("peer_%u_%s" % (j, f),
+                                     SVK.SIG_GLOBALBUFFER, "void", "generic")
+            signature.addArg("counter_ptr",     SVK.SIG_GLOBALBUFFER, "void", "generic")
+            signature.addArg("FusedMyRank",       SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedW",            SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedDrain",        SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedAM",           SVK.SIG_VALUE, "u32")
+            # Publish the segment base. The prologue has already advanced
+            # sgprKernArgAddress past the common-args header by commonArgsSize
+            # ("Shift common args" in KernelWriterAssembly.py), while these
+            # metadata offsets INCLUDE that header -- subtract it once to rebase
+            # onto the shifted address. Absolute offset of arg X, relative to
+            # that base = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
+            writer.states.fusedA2AKernArgBase = fusedBase - userArgumentsInfo.commonArgsSize
 
         activationType = ActivationType("all")
         for name in activationType.getAdditionalArgStringList():
@@ -290,7 +488,8 @@ class SignatureDefault(Signature):
                                       userArgumentsInfo.biasSize + \
                                       userArgumentsInfo.factorDimSize + \
                                       userArgumentsInfo.eSize + \
-                                      userArgumentsInfo.activationSize
+                                      userArgumentsInfo.activationSize + \
+                                      userArgumentsInfo.gateSize
 
         writer.states.userArgsInfo = userArgumentsInfo
 
@@ -316,4 +515,4 @@ class SignatureDefault(Signature):
         signature.addDescriptionBlock("GlobalReadVectorWidthA=%u, GlobalReadVectorWidthB=%u" % (glvwA, glvwB) )
         signature.addDescriptionBlock("DirectToLdsA=%s" % d2lA )
         signature.addDescriptionBlock("DirectToLdsB=%s" % d2lB )
-        signature.addDescriptionBlock("UseSgprForGRO=%s" % useSgprForGRO )
+        signature.addDescriptionBlock("UseSgprForGRO=%s" % ("True" if useSgprForGRO else "False") )

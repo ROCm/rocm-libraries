@@ -293,8 +293,7 @@ make_local_partition(TensorType& tensor,
         },
         Number<remove_reference_t<decltype(tensor_shape)>::Size()>{});
     const auto lower_upper_dims =
-        generate_tuple([&](auto i) { return Sequence<i.value>{}; },
-                       Number<remove_reference_t<decltype(tensor_shape)>::Size()>{});
+        generate_identity_sequences<remove_reference_t<decltype(tensor_shape)>::Size()>();
     auto sliced_desc =
         transform_tensor_descriptor(unrolled_desc, transforms, lower_upper_dims, lower_upper_dims);
     // Create layout
@@ -359,7 +358,11 @@ __host__ __device__ constexpr auto make_local_tile(const TensorType& tensor,
     constexpr auto I1 = Number<1>{};
     constexpr auto I2 = Number<2>{};
 
-    auto& aligned_desc = layout(tensor).GetMergedNestingDescriptor();
+    const auto& aligned_desc = layout(tensor).GetMergedNestingDescriptor();
+    // Layout keeps its descriptor as a member, so instantiating it with a
+    // reference type would make the returned tile tensor alias `tensor` and
+    // dangle whenever the caller passes a temporary.
+    using AlignedDescType = remove_cvref_t<decltype(aligned_desc)>;
 
     constexpr auto projected_tile_shape =
         detail::ApplyProjection(BlockShapeTuple{}, ProjectionTuple{});
@@ -412,7 +415,7 @@ __host__ __device__ constexpr auto make_local_tile(const TensorType& tensor,
             detail::ApplyProjection(offset_multi_idxs, projection);
         // Create new layout and tensor
         const auto tile_layout =
-            Layout<remove_reference_t<decltype(projected_tile_shape)>, decltype(aligned_desc)>(
+            Layout<remove_reference_t<decltype(projected_tile_shape)>, AlignedDescType>(
                 projected_tile_shape, aligned_desc);
         auto tile_tensor =
             make_tensor<TensorType::TensorBufferAddressSpace>(tensor.GetPointer(), tile_layout);
@@ -435,7 +438,7 @@ __host__ __device__ constexpr auto make_local_tile(const TensorType& tensor,
             projected_block_idxs, projected_tile_shape_seq, tensor.GetMultiIdxOffsets());
         // Create new layout and tensor
         const auto tile_layout =
-            Layout<remove_reference_t<ProjectedTileShapeTuple>, decltype(aligned_desc)>(
+            Layout<remove_reference_t<ProjectedTileShapeTuple>, AlignedDescType>(
                 projected_tile_shape, aligned_desc);
         auto tile_tensor =
             make_tensor<TensorType::TensorBufferAddressSpace>(tensor.GetPointer(), tile_layout);

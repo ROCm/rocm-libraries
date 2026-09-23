@@ -1,0 +1,65 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --WaitAwareScheduleRepairPass --print-output
+#
+# Simplified from dump.stir. Each final s_wait_dscnt is attached to the
+# immediately following WMMA. The repair leaves all waited DS producers before
+# their anchor while moving one eligible scalar instruction past each anchor.
+#
+# First window: six non-WMMA instructions become five before WMMA1; cselect is
+# carried into the next window. The carried cselect consumes one of WMMA1's six
+# available pre-anchor slots, so mov/cselect move past WMMA2.
+#
+# With kPreferMemProducerFirst the carried cselect is selected after that
+# window's own DS loads, so the loads issue as early as the window allows.
+#
+# CHECK-LABEL: @wait_aware_schedule_repair
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 56
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 128
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 160
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 192
+# CHECK-NEXT: s_cmp_lt_u32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 55
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 224
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 128
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 160
+# CHECK-NEXT: s_cselect_b32
+# CHECK-NEXT: s_add_i32
+# CHECK-NEXT: s_cmp_lt_u32
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 54
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_cselect_b32
+
+st.func @wait_aware_schedule_repair() {
+^entry:
+  "st.s_wait_dscnt"(56) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 56, dscnt = -1, kmcnt = -1 } }
+  v[22:29] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[540:555], v[798:813], v[22:29], v0, v10) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[926:929] = "st.ds_load_b128"(v538, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 128, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[930:933] = "st.ds_load_b128"(v538, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 160, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[934:937] = "st.ds_load_b128"(v538, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 192, gds = false }, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_lt_u32"(s21, 137216) { issueCycles = 1, latencyCycles = 2 }
+  s6 = "st.s_mov_b32"(-137216) { issueCycles = 1, latencyCycles = 2 }
+  s6 = "st.s_cselect_b32"(137216, s6, SCC0) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(55) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 55, dscnt = -1, kmcnt = -1 } }
+  v[30:37] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[556:571], v[798:813], v[30:37], v1, v10) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[938:941] = "st.ds_load_b128"(v538, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 224, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[668:671] = "st.ds_load_b128"(v536, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 128, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[672:675] = "st.ds_load_b128"(v536, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 160, gds = false }, mod.memtoken = { tokens = [0] } }
+  s21, SCC0 = "st.s_add_i32"(s21, s6) { issueCycles = 1, latencyCycles = 2 }
+  SCC0 = "st.s_cmp_lt_u32"(s65, 137216) { issueCycles = 1, latencyCycles = 2 }
+  s6 = "st.s_mov_b32"(-137216) { issueCycles = 1, latencyCycles = 2 }
+  s6 = "st.s_cselect_b32"(137216, s6, SCC0) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(54) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 54, dscnt = -1, kmcnt = -1 } }
+  v[38:45] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[572:587], v[798:813], v[38:45], v2, v10) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+}

@@ -31,7 +31,7 @@
 #include <chrono>
 #include <cstddef>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
@@ -40,8 +40,6 @@ namespace Tensile
 {
     namespace Client
     {
-        namespace po = boost::program_options;
-
         class BenchmarkTimer : public RunListener
         {
         public:

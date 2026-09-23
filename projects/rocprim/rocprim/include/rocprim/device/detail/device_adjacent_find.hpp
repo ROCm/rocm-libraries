@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 #include "device_config_helper.hpp"
 #include "ordered_block_id.hpp"
 
-#include "../../block/block_load.hpp"
 #include "../../block/block_reduce.hpp"
 #include "../../intrinsics/thread.hpp"
 
@@ -51,7 +50,7 @@ struct adjacent_find_impl_kernels
         ordered_tile_id.reset();
     }
 
-    template<typename ArchConfig>
+    template<typename TargetConfig>
     static ROCPRIM_DEVICE
     void block_reduce_kernel(TransformedInputIterator transformed_input,
                              ReduceIndexIterator      reduce_output,
@@ -59,22 +58,24 @@ struct adjacent_find_impl_kernels
                              BinaryPred               op,
                              OrderedTileIdType        ordered_tile_id)
     {
-        static constexpr adjacent_find_config_params params     = ArchConfig::params;
+        static constexpr adjacent_find_config_params params     = TargetConfig::params;
         static constexpr unsigned int                block_size = params.kernel_config.block_size;
         static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
         static constexpr unsigned int items_per_tile   = block_size * items_per_thread;
 
         using transformed_input_type =
             typename std::iterator_traits<TransformedInputIterator>::value_type;
-        using block_reduce_type
-            = ::rocprim::block_reduce<transformed_input_type,
-                                      block_size,
-                                      block_reduce_algorithm::raking_reduce,
-                                      1,
-                                      1,
-                                      ArchConfig::wavefront>; // TODO?: params.block_reduce_method>;
+        using block_reduce_type = ::rocprim::block_reduce<
+            transformed_input_type,
+            block_size,
+            block_reduce_algorithm::raking_reduce,
+            1,
+            1,
+            TargetConfig::wavefront>; // TODO?: params.block_reduce_method>;
 
-        ROCPRIM_SHARED_MEMORY union
+        // 'tile_id' and 'global_reduce_output' are both pretty small, so we can get
+        // away by storing it in a struct instead of a union.
+        ROCPRIM_SHARED_MEMORY struct
         {
             typename decltype(ordered_tile_id)::storage_type tile_id;
             std::size_t                                      global_reduce_output;
@@ -82,22 +83,29 @@ struct adjacent_find_impl_kernels
 
         // Get initial tile id
         const unsigned int thread_id = threadIdx.x;
-        std::size_t        tile_offset
-            = ordered_tile_id.get(threadIdx.x, storage.tile_id) * items_per_tile;
-
-        while(tile_offset < size)
+        while(true)
         {
+            // Get the block id as a reference to shared memory
+            const auto& til_id_ref = ordered_tile_id.get_async(threadIdx.x, storage.tile_id);
+
             // First thread of each block loads the latest global adjacent index found
             if(thread_id == 0)
             {
                 storage.global_reduce_output = atomic_load(reduce_output);
             }
+
+            // Ensure LDS storage contains 'tile_id' and 'global_reduce_output'
             syncthreads();
 
-            // Early exit if a previous block or tile found an adjacent pair
-            if(storage.global_reduce_output < tile_offset)
+            // Load the tile offset from reference
+            const auto tile_offset            = til_id_ref * items_per_tile;
+            const bool is_tile_out_of_bounds  = tile_offset >= size;
+            const bool is_result_in_prev_tile = storage.global_reduce_output < tile_offset;
+
+            // Apply loop exit conditions
+            if(is_tile_out_of_bounds || is_result_in_prev_tile)
             {
-                return;
+                break;
             }
 
             // Do block reduction
@@ -117,7 +125,7 @@ struct adjacent_find_impl_kernels
                 ROCPRIM_UNROLL
                 for(unsigned int i = 1; i < items_per_thread; i++)
                 {
-                    if(thread_id + i * block_size < valid_in_last_iteration)
+                    if((i * block_size) + thread_id < valid_in_last_iteration)
                     {
                         output_value = op(output_value, transformed_input_values[i]);
                     }
@@ -145,9 +153,6 @@ struct adjacent_find_impl_kernels
                 // Store global minimum
                 atomic_min(reduce_output, output_value);
             }
-
-            // Get next tile's id
-            tile_offset = ordered_tile_id.get(threadIdx.x, storage.tile_id) * items_per_tile;
         }
     }
 };

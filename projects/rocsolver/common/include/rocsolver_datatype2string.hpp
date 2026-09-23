@@ -265,6 +265,16 @@ constexpr auto rocsolver2char_norm_type(rocsolver_norm_type value)
     return '\0';
 }
 
+constexpr auto rocsolver2char_cholqr_shift(rocsolver_cholqr_shift value)
+{
+    switch(value)
+    {
+    case rocsolver_cholqr_shift_none: return 'N';
+    case rocsolver_cholqr_shift_computed: return 'C';
+    case rocsolver_cholqr_shift_provided: return 'P';
+    }
+    return '\0';
+}
 /* ============================================================================================
  */
 /*  Convert lapack char constants to rocblas type. */
@@ -291,6 +301,8 @@ constexpr rocblas_fill char2rocblas_fill(char value)
     case 'u': return rocblas_fill_upper;
     case 'L':
     case 'l': return rocblas_fill_lower;
+    case 'F':
+    case 'f': return rocblas_fill_full;
     default: return static_cast<rocblas_fill>(0);
     }
 }
@@ -488,6 +500,16 @@ constexpr rocsolver_norm_type char2rocsolver_norm_type(char value)
     }
 }
 
+constexpr rocsolver_cholqr_shift char2rocsolver_cholqr_shift(char value)
+{
+    switch(std::toupper(value))
+    {
+    case 'N': return rocsolver_cholqr_shift_none;
+    case 'C': return rocsolver_cholqr_shift_computed;
+    case 'P': return rocsolver_cholqr_shift_provided;
+    default: return static_cast<rocsolver_cholqr_shift>(0);
+    }
+}
 #undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES
 
 #ifdef ROCSOLVER_LIBRARY

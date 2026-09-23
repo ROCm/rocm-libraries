@@ -1,0 +1,78 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "rocblas_ms": 0.011,
+  "results": [
+    {
+      "label": "t16x16x256_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x256_compv4",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x384_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x384_compv4",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x512_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x512_compv4",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x768_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x768_compv4",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x1024_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x1024_compv4",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x1536_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x1536_compv4",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x2048_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x2048_compv4",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x32x256_w1x2_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x32x512_w1x2_mem",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x32x1024_w1x2_mem",
+      "error": "no samples"
+    }
+  ]
+}

@@ -275,7 +275,7 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
 
             if(temp_alloc)
             {
-                RETURN_IF_HIP_ERROR(hipFreeAsync(temp_storage_ptr, handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(temp_storage_ptr, handle->stream));
             }
         }
 

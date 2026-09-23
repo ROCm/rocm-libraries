@@ -68,7 +68,7 @@ Implementation
 -  Ensure that each ``.cpp`` file includes the ``.hpp`` file(s) that defines its interface.
 -  Avoid placing global ``using`` directives in header files.
 -  Use ``#include`` guards for all ``.hpp`` files.
--  Avoid using unnamed (anonymous) ``namespace``s in header files.
+-  Avoid using unnamed (anonymous) ``namespace``\ s in header files.
 -  Use ``std::array`` or ``std::vector`` instead of C arrays.
 -  Minimize the exposure of class members.
 -  Keep functions short and simple.

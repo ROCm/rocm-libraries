@@ -23,7 +23,7 @@
 ################################################################################
 
 from .Common import globalParameters
-from Tensile.Utilities.ConditionalImports import yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader
 
 import yaml
 
@@ -61,7 +61,7 @@ def getCustomKernelConfigAndAssembly(name, directory=globalParameters["CustomKer
 def getCustomKernelConfig(name, directory=globalParameters["CustomKernelDirectory"]):
     rawConfig, _ = getCustomKernelConfigAndAssembly(name, directory)
     try:
-        config = yaml.load(rawConfig, yamlLoader)["custom.config"]
+        config = yaml.load(rawConfig, SafeLoader)["custom.config"]
         if "ISA" not in config:
             raise RuntimeError(f"ISA not found in custom kernel config {name}")
         config["ISA"] = tuple(config["ISA"])

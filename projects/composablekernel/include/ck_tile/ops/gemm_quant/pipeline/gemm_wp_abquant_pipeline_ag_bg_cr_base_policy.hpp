@@ -8,7 +8,28 @@
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_aquant_pipeline_ag_bg_cr_policy.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_bquant_pipeline_ag_bg_cr_policy.hpp"
 
+#include <type_traits>
+
 namespace ck_tile {
+
+/**
+ * @brief The type whose storage layout a preshuffled B tensor follows.
+ *
+ * pk_int4_t B is converted to A's type for compute, so its DRAM granularity follows A;
+ * every other B type follows itself. The host preshuffle and the device tile distribution
+ * must resolve this identically -- deriving it separately on each side is how the two end
+ * up walking the same elements in a different order.
+ *
+ * Distinct from mixed_prec_compute_type_from_input_t, which answers the different question
+ * of which type the arithmetic runs in.
+ *
+ * @tparam ADataType A operand type
+ * @tparam BDataType B operand type
+ */
+template <typename ADataType, typename BDataType>
+using b_shuffle_type_t = std::conditional_t<std::is_same_v<remove_cvref_t<BDataType>, pk_int4_t>,
+                                            remove_cvref_t<ADataType>,
+                                            remove_cvref_t<BDataType>>;
 
 struct GemmWPABQuantPipelineAgBgCrPolicy : public UniversalWeightPreshufflePipelineAgBgCrPolicy
 {
@@ -52,13 +73,17 @@ struct GemmWPABQuantPipelineAgBgCrPolicy : public UniversalWeightPreshufflePipel
     CK_TILE_DEVICE static constexpr auto MakeBFlatDramTileDistribution()
     {
         using TileShape = typename Problem::BlockGemmShape;
-        using BDataType = typename Problem::BDataType;
+        using BTypeToUse =
+            b_shuffle_type_t<typename Problem::ADataType, typename Problem::BDataType>;
 
         constexpr index_t BlockSize = Problem::kBlockSize;
         constexpr index_t WaveSize  = get_warp_size();
         constexpr index_t WaveNum   = BlockSize / WaveSize;
+        // This must equal the host preshuffle granularity on the non-gfx11 host path: if the
+        // two interleave K differently, half of every dot product pairs mismatched elements.
+        // shuffle_b_v0's gfx11 branch uses a different, granularity-independent layout.
         constexpr index_t KBPerLoad =
-            min(GetKBPerLoad<Problem>(), 16 / static_cast<index_t>(sizeof(BDataType)));
+            min(GetKBPerLoad<Problem>(), static_cast<index_t>(items_per_128b_access<BTypeToUse>()));
 #if defined(__gfx11__)
         constexpr index_t KRepeatInWave = 2;
 #else
@@ -95,18 +120,22 @@ struct GemmWPABQuantPipelineAgBgCrPolicy : public UniversalWeightPreshufflePipel
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 
+#if defined(__gfx11__) || defined(__gfx12__)
+        constexpr auto NumAccess = WGAttrNumAccessEnum::Default;
+#else
         constexpr index_t WaveSize = get_warp_size();
         constexpr index_t KLane    = WarpTile::at(I2) * WarpTile::at(I0) / WaveSize;
 
         // When BDataType is pk_int4_t, it is internally converted to fp8 for computation.
         using BTypeToUse = mixed_prec_compute_type_from_input_t<typename Problem::BDataType,
                                                                 typename Problem::ADataType,
-                                                                typename Problem::ComputeDataType>;
+                                                                typename Problem::BComputeDataType>;
         constexpr index_t KLaneBytes = KLane * sizeof(BTypeToUse);
         constexpr auto NumAccess     = static_cast<WGAttrNumAccessEnum>(max(1, KLaneBytes / 16));
+#endif
 
-        using WarpGemm = WarpGemmDispatcher<typename Problem::ComputeDataType,
-                                            typename Problem::ComputeDataType,
+        using WarpGemm = WarpGemmDispatcher<typename Problem::AComputeDataType,
+                                            typename Problem::BComputeDataType,
                                             typename Problem::CDataType,
                                             WarpTile::at(I0),
                                             WarpTile::at(I1),

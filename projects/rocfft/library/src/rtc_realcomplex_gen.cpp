@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,8 +48,9 @@ std::string realcomplex_rtc_kernel_name(const RealComplexSpecs& specs)
         throw std::runtime_error("invalid realcomplex rtc scheme");
     }
 
-    kernel_name += "_dim" + std::to_string(specs.dim);
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -65,36 +66,36 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     std::string src;
     // includes and declarations
 
-    src += rocfft_complex_h;
-    src += common_h;
-    src += device_enum_h;
-    src += callback_h;
-
-    src += rtc_precision_type_decl(specs.precision);
-
-    src += rtc_const_cbtype_decl(specs.cbtype);
-
-    src += "static const unsigned int dim = " + std::to_string(specs.dim) + ";\n";
-
     const char* input_type
         = specs.scheme == CS_KERNEL_COPY_R_TO_CMPLX ? "real_type_t<scalar_type>" : "scalar_type";
     const char* output_type
         = specs.scheme == CS_KERNEL_COPY_CMPLX_TO_R ? "real_type_t<scalar_type>" : "scalar_type";
 
+    src += rocfft_complex_h;
+    src += common_h;
+    src += device_enum_h;
+    src += rtc_kint_type_decl(specs.itype);
+    src += rtc_precision_type_decl(specs.precision);
+    src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype, input_type, output_type);
+    src += callback_h;
+
+    src += "static const " + std::string(rtc_kint_type(KIntType::U32))
+           + " dim = " + std::to_string(specs.dim) + ";\n";
+
     // function arguments
-    Variable hermitian_size{"hermitian_size", "const unsigned int"};
-    Variable lengths0{"lengths0", "unsigned int"};
-    Variable lengths1{"lengths1", "unsigned int"};
-    Variable lengths2{"lengths2", "unsigned int"};
-    Variable nbatch{"nbatch", "unsigned int"};
-    Variable stride_in0{"stride_in0", "unsigned int"};
-    Variable stride_in1{"stride_in1", "unsigned int"};
-    Variable stride_in2{"stride_in2", "unsigned int"};
-    Variable stride_in3{"stride_in3", "unsigned int"};
-    Variable stride_out0{"stride_out0", "unsigned int"};
-    Variable stride_out1{"stride_out1", "unsigned int"};
-    Variable stride_out2{"stride_out2", "unsigned int"};
-    Variable stride_out3{"stride_out3", "unsigned int"};
+    Variable hermitian_size{"hermitian_size", "const integer_type"};
+    Variable lengths0{"lengths0", "const integer_type"};
+    Variable lengths1{"lengths1", "const integer_type"};
+    Variable lengths2{"lengths2", "const integer_type"};
+    Variable nbatch{"nbatch", "const integer_type"};
+    Variable stride_in0{"stride_in0", "const integer_type"};
+    Variable stride_in1{"stride_in1", "const integer_type"};
+    Variable stride_in2{"stride_in2", "const integer_type"};
+    Variable stride_in3{"stride_in3", "const integer_type"};
+    Variable stride_out0{"stride_out0", "const integer_type"};
+    Variable stride_out1{"stride_out1", "const integer_type"};
+    Variable stride_out2{"stride_out2", "const integer_type"};
+    Variable stride_out3{"stride_out3", "const integer_type"};
     Variable input{"input", input_type, true, true};
     Variable output{"output", output_type, true, true};
 
@@ -122,15 +123,15 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     for(const auto& arg : get_callback_args().arguments)
         func.arguments.append(arg);
 
-    Variable dim_var{"dim", "const unsigned int"};
+    Variable dim_var{"dim", "const " + std::string(rtc_kint_type(KIntType::U32))};
 
-    Variable global_idx{"global_idx", "unsigned int"};
+    Variable global_idx{"global_idx", "integer_type"};
     func.body += Declaration{global_idx, "blockIdx.x * blockDim.x + threadIdx.x"};
 
-    Variable idx_0{"idx_0", "const unsigned int"};
-    Variable idx_1{"idx_1", "const unsigned int"};
-    Variable idx_2{"idx_2", "const unsigned int"};
-    Variable idx_batch{"idx_batch", "const unsigned int"};
+    Variable idx_0{"idx_0", "const integer_type"};
+    Variable idx_1{"idx_1", "const integer_type"};
+    Variable idx_2{"idx_2", "const integer_type"};
+    Variable idx_batch{"idx_batch", "const integer_type"};
 
     // variable to divide by when counting lengths0 - herm2c
     // allocates threads along hermitian length, but other kernels
@@ -141,7 +142,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     func.body += CommentLines{"per-dimension indexes"};
     func.body += Declaration{idx_0, global_idx % lengths0_divide};
     func.body += Assign{global_idx, global_idx / lengths0_divide};
-    if(specs.dim > 1)
+    if(specs.lensz > 1)
     {
         func.body += Declaration{idx_1, global_idx % lengths1};
         func.body += Assign{global_idx, global_idx / lengths1};
@@ -150,7 +151,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     {
         func.body += Declaration{idx_1, 0};
     }
-    if(specs.dim > 2)
+    if(specs.lensz > 2)
     {
         func.body += Declaration{idx_2, global_idx % lengths2};
         func.body += Assign{global_idx, global_idx / lengths2};
@@ -169,7 +170,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable input_offset{"input_offset", "auto"};
         func.body += Declaration{input_offset,
                                  idx_0 * stride_in0 + idx_1 * stride_in1 + idx_2 * stride_in2
-                                     + idx_batch * ("stride_in" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_in" + std::to_string(specs.lensz))};
 
         Variable outputs_offset{"outputs_offset", "auto"};
         Variable outputc_offset{"outputc_offset", "auto"};
@@ -187,18 +188,25 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable ic1{"ic1", "auto"};
         Variable ic2{"ic2", "auto"};
         func.body += Declaration{ic0, Ternary{is0 == 0, 0, lengths0 - is0}};
-        func.body += Declaration{ic1, Ternary{is1 == 0, 0, lengths1 - is1}};
-        func.body += Declaration{ic2, Ternary{is2 == 0, 0, lengths2 - is2}};
+        // length axes beyond specs.dim are actually batch axes
+        if(specs.dim > 1)
+            func.body += Declaration{ic1, Ternary{is1 == 0, 0, lengths1 - is1}};
+        else
+            func.body += Declaration{ic1, is1};
+        if(specs.dim > 2)
+            func.body += Declaration{ic2, Ternary{is2 == 0, 0, lengths2 - is2}};
+        else
+            func.body += Declaration{ic2, is2};
 
         func.body += Declaration{outputs_offset,
                                  is0 * stride_out0 + is1 * stride_out1 + is2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
         func.body += Declaration{outputc_offset,
                                  ic0 * stride_out0 + ic1 * stride_out1 + ic2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
 
-        func.body += CallbackLoadDeclaration("scalar_type", "cbtype");
-        func.body += CallbackStoreDeclaration("scalar_type", "cbtype");
+        func.body += CallbackLoadDeclaration{};
+        func.body += CallbackStoreDeclaration{};
 
         func.body += CommentLines{"we would do hermitian2complex at the start of a C2R transform,",
                                   "so it would never be the last kernel to write to global",
@@ -232,10 +240,10 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable outputIdx{"outputIdx", "auto"};
         func.body += Declaration{inputIdx,
                                  idx_0 * stride_in0 + idx_1 * stride_in1 + idx_2 * stride_in2
-                                     + idx_batch * ("stride_in" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_in" + std::to_string(specs.lensz))};
         func.body += Declaration{outputIdx,
                                  idx_0 * stride_out0 + idx_1 * stride_out1 + idx_2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
 
         if(specs.scheme == CS_KERNEL_COPY_R_TO_CMPLX)
         {
@@ -244,8 +252,11 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
                                        "transform, so it would never be the last kernel to write",
                                        "to global memory.  don't bother going through the store cb",
                                        "to write global memory."};
-            guard.body += CallbackLoadDeclaration("real_type_t<scalar_type>", "cbtype");
-            guard.body += CallbackStoreDeclaration("real_type_t<scalar_type>", "cbtype");
+            // R to complex always loads real data
+            CallbackLoadDeclaration load;
+            load.set_scalar_type(input_type);
+            guard.body += load;
+            guard.body += CallbackStoreDeclaration{};
 
             ComplexLiteral elem{LoadGlobal{input, inputIdx}, "0.0"};
             guard.body += Assign{output[outputIdx], elem};
@@ -263,8 +274,8 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
                                        "from global memory.  don't bother going through the load",
                                        "callback to read global memory."};
 
-            guard.body += CallbackLoadDeclaration("scalar_type", "cbtype");
-            guard.body += CallbackStoreDeclaration("scalar_type", "cbtype");
+            guard.body += CallbackLoadDeclaration{};
+            guard.body += CallbackStoreDeclaration{};
 
             Variable elem{"elem", "scalar_type"};
             guard.body += Declaration{elem, input[inputIdx]};
@@ -277,8 +288,11 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
                                       "transform, so it would never be the first kernel to read",
                                       "from global memory.  don't bother going through the load cb",
                                       "to read global memory."};
-            func.body += CallbackLoadDeclaration("real_type_t<scalar_type>", "cbtype");
-            func.body += CallbackStoreDeclaration("real_type_t<scalar_type>", "cbtype");
+            func.body += CallbackLoadDeclaration{};
+            // complex to R always stores real data
+            CallbackStoreDeclaration store;
+            store.set_scalar_type(output_type);
+            func.body += store;
 
             Variable elem{"elem", "auto"};
             func.body += Declaration{elem, input[inputIdx].x()};
@@ -292,6 +306,8 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         func = make_planar(func, "input");
     if(array_type_is_planar(specs.outArrayType))
         func = make_planar(func, "output");
+
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     src += func.render();
     write_standalone_test_harness(func, src);
@@ -334,8 +350,9 @@ std::string realcomplex_even_rtc_kernel_name(const RealComplexEvenSpecs& specs)
         kernel_name += "_Ndiv4";
     }
 
-    kernel_name += "_dim" + std::to_string(specs.dim);
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -354,13 +371,13 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
+    src += rtc_kint_type_decl(specs.itype);
+    src += rtc_precision_type_decl(specs.precision);
+    src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
-    src += rtc_precision_type_decl(specs.precision);
-
-    src += rtc_const_cbtype_decl(specs.cbtype);
-
-    src += "static const unsigned int dim = " + std::to_string(specs.dim) + ";\n";
+    src += "static const " + std::string(rtc_kint_type(KIntType::U32))
+           + " dim = " + std::to_string(specs.dim) + ";\n";
 
     if(specs.Ndiv4)
         src += "static const bool Ndiv4 = true;\n";
@@ -371,16 +388,16 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     src += "// When N is divisible by 4, one value is handled separately; this is controlled by "
            "Ndiv4.\n";
 
-    Variable              half_N{"half_N", "const unsigned int"};
+    Variable              half_N{"half_N", "const integer_type"};
     std::vector<Variable> stride_in;
     std::vector<Variable> stride_out;
     std::vector<Variable> length;
     std::vector<Variable> idx_length;
-    Variable              nbatch{"nbatch", "unsigned int"};
+    Variable              nbatch{"nbatch", "const integer_type"};
     Variable              input{"input", "scalar_type", true, true};
-    Variable              idist{"idist", "const unsigned int"};
+    Variable              idist{"idist", "const integer_type"};
     Variable              output{"output", "scalar_type", true, true};
-    Variable              odist{"odist", "const unsigned int"};
+    Variable              odist{"odist", "const integer_type"};
     Variable              twiddles{"twiddles", "const scalar_type", true, true};
 
     Function func{kernel_name};
@@ -388,12 +405,12 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     func.qualifier     = "extern \"C\" __global__";
     func.arguments.append(half_N);
     // add arguments for each length+stride
-    for(unsigned int i = 1; i < specs.dim; ++i)
+    for(unsigned int i = 1; i < specs.lensz; ++i)
     {
         std::string i_str = std::to_string(i);
-        stride_in.emplace_back("stride_in" + i_str, "const unsigned int");
-        stride_out.emplace_back("stride_out" + i_str, "const unsigned int");
-        length.emplace_back("length" + i_str, "const unsigned int");
+        stride_in.emplace_back("stride_in" + i_str, "const integer_type");
+        stride_out.emplace_back("stride_out" + i_str, "const integer_type");
+        length.emplace_back("length" + i_str, "const integer_type");
 
         func.arguments.append(stride_in.back());
         func.arguments.append(stride_out.back());
@@ -408,14 +425,14 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     for(const auto& arg : get_callback_args().arguments)
         func.arguments.append(arg);
 
-    Variable global_idx{"global_idx", "unsigned int"};
+    Variable global_idx{"global_idx", "integer_type"};
     func.body += Declaration{global_idx, "blockIdx.x * blockDim.x + threadIdx.x"};
 
     Variable idx_p{"idx_p", "const auto"};
     Variable idx_q{"idx_q", "const auto"};
-    Variable idx_batch{"idx_batch", "const unsigned int"};
-    Variable remaining{"remaining", "unsigned int"};
-    Variable index_along_d{"index_along_d", "unsigned int"};
+    Variable idx_batch{"idx_batch", "const integer_type"};
+    Variable remaining{"remaining", "integer_type"};
+    Variable index_along_d{"index_along_d", "integer_type"};
 
     func.body += Declaration{idx_p, global_idx % half_N};
     func.body += Declaration{idx_q, half_N - idx_p};
@@ -429,11 +446,11 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     If guard{idx_p < quarter_N, {}};
 
     func.body += CommentLines{"unrolled loop to compute index for higher dimensions"};
-    Variable input_offset{"input_offset", "unsigned int"};
-    Variable output_offset{"output_offset", "unsigned int"};
+    Variable input_offset{"input_offset", "integer_type"};
+    Variable output_offset{"output_offset", "integer_type"};
     func.body += Declaration{input_offset, "0"};
     func.body += Declaration{output_offset, "0"};
-    for(unsigned int i = 1; i < specs.dim; ++i)
+    for(unsigned int i = 1; i < specs.lensz; ++i)
     {
         func.body += Assign{index_along_d, remaining % length[i - 1]};
         func.body += Assign{remaining, remaining / length[i - 1]};
@@ -461,8 +478,8 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
                                    "to global memory.  don't bother going through store",
                                    "callback to write global memory."};
     }
-    guard.body += CallbackLoadDeclaration("scalar_type", "cbtype");
-    guard.body += CallbackStoreDeclaration("scalar_type", "cbtype");
+    guard.body += CallbackLoadDeclaration{};
+    guard.body += CallbackStoreDeclaration{};
 
     Variable outval{"outval", "scalar_type"};
     guard.body += Declaration{outval};
@@ -579,6 +596,8 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     if(array_type_is_planar(specs.outArrayType))
         func = make_planar(func, "output");
 
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
+
     src += func.render();
     write_standalone_test_harness(func, src);
     return src;
@@ -600,8 +619,10 @@ std::string realcomplex_even_transpose_rtc_kernel_name(const RealComplexEvenTran
         throw std::runtime_error("invalid realcomplex even transpose rtc scheme");
     }
 
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
     kernel_name += "_tile" + std::to_string(specs.TileX()) + "x" + std::to_string(specs.TileY());
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -628,24 +649,23 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
+    src += rtc_precision_type_decl(specs.precision);
+    src += rtc_kint_type_decl(specs.itype);
+    src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
-    src += rtc_precision_type_decl(specs.precision);
-
-    src += rtc_const_cbtype_decl(specs.cbtype);
-
     // function arguments
-    Variable dim{"dim", "size_t"};
+    Variable dim{"dim", rtc_kint_type(KIntType::U32)};
     Variable input{"input", "scalar_type", true, true};
-    Variable idist{"idist", "size_t"};
+    Variable idist{"idist", "integer_type"};
     Variable output{"output", "scalar_type", true, true};
-    Variable odist{"odist", "size_t"};
+    Variable odist{"odist", "integer_type"};
     Variable twiddles{"twiddles", "scalar_type", true, true};
-    Variable lengths{"lengths", "size_t", true, true};
-    Variable inStride{"inStride", "size_t", true, true};
-    Variable outStride{"outStride", "size_t", true, true};
-    Variable gridY{"gridY", "const unsigned int"};
-    Variable gridZ{"gridZ", "const unsigned int"};
+    Variable lengths{"lengths", "integer_type", true, true};
+    Variable inStride{"inStride", "integer_type", true, true};
+    Variable outStride{"outStride", "integer_type", true, true};
+    Variable gridY{"gridY", "const " + std::string(rtc_kint_type(KIntType::U32))};
+    Variable gridZ{"gridZ", "const " + std::string(rtc_kint_type(KIntType::U32))};
 
     // r2c uses a device function helper to work out which dimension
     // we're transposing to
@@ -654,10 +674,10 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         // this helper doesn't need to have its AST transformed or
         // anything, so just add it to source as a string
         src += R"(
-	    __device__ size_t output_row_base(size_t        dim,
-	                                      size_t        output_batch_start,
-	                                      const size_t* outStride,
-	                                      const size_t  col)
+	    __device__ integer_type output_row_base(integer_type            dim,
+	                                      integer_type            output_batch_start,
+	                                      const integer_type* outStride,
+	                                      const integer_type      col)
 	    {
 	        if(dim == 2)
 	            return output_batch_start + outStride[1] * col;
@@ -688,17 +708,16 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     func.arguments.append(gridY);
     func.arguments.append(gridZ);
 
-    func.body += CommentLines{"since gridDim is passed as {gridX, 1, 1}, use the",
-                              "following variables to recover block indices in a 3-D fashion:"};
-
-    Variable old_blockIdx_x{"old_blockIdx_x", "unsigned int"};
-    Variable old_blockIdx_y{"old_blockIdx_y", "unsigned int"};
-    Variable old_blockIdx_z{"old_blockIdx_z", "unsigned int"};
-    Variable remaining{"remaining", "unsigned int"};
+    Variable old_blockIdx_x{"old_blockIdx_x", "integer_type"};
+    Variable old_blockIdx_y{"old_blockIdx_y", "integer_type"};
+    Variable old_blockIdx_z{"old_blockIdx_z", "integer_type"};
+    Variable remaining{"remaining", "integer_type"};
 
     // if a 1-D grid was provided because creating a natural 3-D grid exceeded allowed limits, then remap it to a 3-D grid.
     if(!specs.grid3D)
     {
+        func.body += CommentLines{"since gridDim is passed as {gridX, 1, 1}, use the",
+                                  "following variables to recover block indices in a 3-D fashion:"};
         func.body += Declaration{old_blockIdx_x, Literal{"blockIdx.x"} / (gridY * gridZ)};
         func.body += Declaration{remaining, Literal{"blockIdx.x"} % (gridY * gridZ)};
         func.body += Declaration{old_blockIdx_y, (remaining / gridZ)};
@@ -707,18 +726,35 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
 
     func.body += LineBreak{};
 
-    Variable input_batch_start{"input_batch_start", "size_t"};
-    Variable output_batch_start{"output_batch_start", "size_t"};
+    Variable input_batch_start{"input_batch_start", "integer_type"};
+    Variable output_batch_start{"output_batch_start", "integer_type"};
 
-    if(specs.grid3D)
+    const auto kernel_bidx_z = specs.grid3D ? "blockIdx.z" : "old_blockIdx_z";
+    if(specs.lensz > specs.dim)
     {
-        func.body += Declaration{input_batch_start, idist * Literal{"blockIdx.z"}};
-        func.body += Declaration{output_batch_start, odist * Literal{"blockIdx.z"}};
+        Variable dim_batch_idx{"dim_batch_idx", "integer_type"};
+        func.body += Declaration{dim_batch_idx, kernel_bidx_z};
+        func.body += Declaration{input_batch_start, 0};
+        func.body += Declaration{output_batch_start, 0};
+        Variable len_dim{"len_dim", "integer_type"};
+        func.body += For{len_dim,
+                         Literal{specs.dim},
+                         len_dim < Literal{specs.lensz},
+                         1,
+                         {If{lengths[len_dim] > 1,
+                             {AddAssign(input_batch_start,
+                                        inStride[len_dim] * (dim_batch_idx % lengths[len_dim])),
+                              AddAssign(output_batch_start,
+                                        outStride[len_dim] * (dim_batch_idx % lengths[len_dim])),
+                              DivideAssign(dim_batch_idx, lengths[len_dim])}}}};
+
+        func.body += AddAssign(input_batch_start, idist * dim_batch_idx);
+        func.body += AddAssign(output_batch_start, odist * dim_batch_idx);
     }
     else
     {
-        func.body += Declaration{input_batch_start, idist * Literal{"old_blockIdx_z"}};
-        func.body += Declaration{output_batch_start, odist * Literal{"old_blockIdx_z"}};
+        func.body += Declaration{input_batch_start, idist * Literal{kernel_bidx_z}};
+        func.body += Declaration{output_batch_start, odist * Literal{kernel_bidx_z}};
     }
 
     Variable leftTile{"leftTile", "__shared__ scalar_type", false, false, tileX};
@@ -740,14 +776,14 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     //
     // generator code has r2c names for shared variables.  names in
     // generated source are adjusted to suit both r2c and c2r.
-    Variable len_row{isR2C ? "len_row" : "len_col", "const size_t"};
-    Variable tile_size{"tile_size", "const size_t"};
-    Variable left_col_start{isR2C ? "left_col_start" : "left_row_start", "const size_t"};
-    Variable middle{"middle", "const size_t"};
-    Variable cols_to_read{isR2C ? "cols_to_read" : "rows_to_read", "size_t"};
-    Variable row_limit{isR2C ? "row_limit" : "col_limit", "const size_t"};
-    Variable row_start{isR2C ? "row_start" : "col_start", "const size_t"};
-    Variable row_end{isR2C ? "row_end" : "col_end", "size_t"};
+    Variable len_row{isR2C ? "len_row" : "len_col", "const integer_type"};
+    Variable tile_size{"tile_size", "const integer_type"};
+    Variable left_col_start{isR2C ? "left_col_start" : "left_row_start", "const integer_type"};
+    Variable middle{"middle", "const integer_type"};
+    Variable cols_to_read{isR2C ? "cols_to_read" : "rows_to_read", "integer_type"};
+    Variable row_limit{isR2C ? "row_limit" : "col_limit", "const integer_type"};
+    Variable row_start{isR2C ? "row_start" : "col_start", "const integer_type"};
+    Variable row_end{isR2C ? "row_end" : "col_end", "integer_type"};
 
     // initial values for tile accounting variables.  initialize them
     // to Literals, since the variant needs to be something
@@ -759,8 +795,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Expression row_end_init{""};
     if(isR2C)
     {
-        func.body += CommentLines{
-            "take fastest dimension and partition it into lengths that will go into each tile"};
+        func.body += CommentLines{"take fastest dimension and partition it into lengths "
+                                  "that will go into each tile"};
         len_row_init   = lengths[0];
         tile_size_init = Ternary{(len_row - 1) / 2 < tileX, (len_row - 1) / 2, tileX};
         row_limit_init = Ternary{dim == 2, lengths[1], lengths[1] * lengths[2]};
@@ -780,9 +816,9 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     }
     else
     {
-        func.body += CommentLines{
-            "take middle dimension and partition it into lengths that will go into each tile",
-            "note that last row effectively gets thrown away"};
+        func.body += CommentLines{"take middle dimension and partition it into lengths "
+                                  "that will go into each tile",
+                                  "note that last row effectively gets thrown away"};
         len_row_init   = Ternary{dim == 2, lengths[1] - 1, lengths[2] - 1};
         tile_size_init = Ternary{(len_row - 1) / 2 < tileY, (len_row - 1) / 2, tileY};
         row_limit_init = Ternary{dim == 2, lengths[0], lengths[0] * lengths[1]};
@@ -826,8 +862,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     func.body += If{left_col_start + tile_size >= middle,
                     {Assign{cols_to_read, middle - left_col_start}}};
 
-    Variable lds_row{"lds_row", "const size_t"};
-    Variable lds_col{"lds_col", "const size_t"};
+    Variable lds_row{"lds_row", "const integer_type"};
+    Variable lds_col{"lds_col", "const integer_type"};
     Variable val{"val", "scalar_type"};
     Variable first_elem{"first_elem", "scalar_type"};
     Variable middle_elem{"middle_elem", "scalar_type"};
@@ -850,14 +886,14 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Expression    write_last_idx{""};
 
     // r2c-specific variables
-    Variable input_row_idx{"input_row_idx", "const size_t"};
-    Variable input_row_base{"input_row_base", "size_t"};
+    Variable input_row_idx{"input_row_idx", "const integer_type"};
+    Variable input_row_base{"input_row_base", "integer_type"};
 
     // c2r-specific variables
-    Variable input_col_base{"input_col_base", "const size_t"};
-    Variable input_col_stride{"input_col_stride", "const size_t"};
-    Variable output_row_base{"output_row_base", "const size_t"};
-    Variable output_row_stride{"output_row_stride", "const size_t"};
+    Variable input_col_base{"input_col_base", "const integer_type"};
+    Variable input_col_stride{"input_col_stride", "const integer_type"};
+    Variable output_row_base{"output_row_base", "const integer_type"};
+    Variable output_row_stride{"output_row_stride", "const integer_type"};
 
     func.body += Declaration{lds_row, "threadIdx.y"};
     func.body += Declaration{lds_col, "threadIdx.x"};
@@ -967,8 +1003,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         write_middle_idx = output_batch_start + output_row_base + middle * output_row_stride;
     }
 
-    func.body += CallbackLoadDeclaration("scalar_type", "cbtype");
-    func.body += CallbackStoreDeclaration("scalar_type", "cbtype");
+    func.body += CallbackLoadDeclaration{};
+    func.body += CallbackStoreDeclaration{};
 
     func.body += Declaration{val};
 
@@ -1025,7 +1061,7 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable twd_p{"twd_p", "const auto"};
     if(isR2C)
     {
-        Variable col{"col", "size_t"};
+        Variable col{"col", "integer_type"};
 
         If butterfly{row_start + lds_row < row_end && lds_col < cols_to_read, {}};
 
@@ -1099,7 +1135,7 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         func.body += butterfly;
     }
 
-    make_load_store_ops(func, specs.loadOps, specs.storeOps);
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     if(array_type_is_planar(specs.inArrayType))
         func = make_planar(func, "input");

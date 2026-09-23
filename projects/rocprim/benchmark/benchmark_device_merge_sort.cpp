@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,10 @@
 // SOFTWARE.
 
 #include "benchmark_device_merge_sort.hpp"
-#include "benchmark_utils.hpp"
+#include "primbench.hpp"
 
 #include "../common/utils_custom_type.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
 #include <rocprim/types.hpp>
@@ -35,51 +34,39 @@
 #include <string>
 #include <vector>
 
-#define CREATE_BENCHMARK(...) executor.queue_instance(device_merge_sort_benchmark<__VA_ARGS__>());
+#define CREATE_BENCHMARK(...) executor.queue<device_merge_sort_benchmark<__VA_ARGS__>>();
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::settings settings;
+    settings.size = 128 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
-    CREATE_BENCHMARK(int)
-    CREATE_BENCHMARK(long long)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int64_t)
     CREATE_BENCHMARK(int8_t)
     CREATE_BENCHMARK(uint8_t)
     CREATE_BENCHMARK(rocprim::half)
-    CREATE_BENCHMARK(short)
+    CREATE_BENCHMARK(int16_t)
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-    using custom_double2_copy
-        = common::custom_type_copyable<double,
-                                       double>; // specific benchmark for specialization workaround
-    using custom_int2        = common::custom_type<int, int>;
-    using custom_char_double = common::custom_type<char, double>; // used by ssbk
-    using custom_char_double_copy
-        = common::custom_type_copyable<char,
-                                       double>; // specific benchmark for specialization workaround
-    using custom_longlong_double = common::custom_type<long long, double>;
-    using huge_float2_1024       = common::custom_huge_type<1024, float, float>;
-    using huge_float2_2048       = common::custom_huge_type<2048, float, float>;
-
-    CREATE_BENCHMARK(int, float)
-    CREATE_BENCHMARK(long long, double)
+    CREATE_BENCHMARK(int32_t, float)
+    CREATE_BENCHMARK(int64_t, double)
     CREATE_BENCHMARK(int8_t, int8_t)
     CREATE_BENCHMARK(uint8_t, uint8_t)
     CREATE_BENCHMARK(rocprim::half, rocprim::half)
-    CREATE_BENCHMARK(short, short)
-    CREATE_BENCHMARK(custom_float2)
-    CREATE_BENCHMARK(huge_float2_1024)
-    CREATE_BENCHMARK(huge_float2_2048)
-    CREATE_BENCHMARK(long long, custom_double2)
-    CREATE_BENCHMARK(custom_double2, custom_double2)
-    CREATE_BENCHMARK(custom_double2, custom_double2_copy)
-    CREATE_BENCHMARK(custom_int2, custom_double2)
-    CREATE_BENCHMARK(custom_int2, custom_char_double)
-    CREATE_BENCHMARK(custom_int2, custom_char_double_copy)
-    CREATE_BENCHMARK(custom_int2, custom_longlong_double)
+    CREATE_BENCHMARK(int16_t, int16_t)
+    CREATE_BENCHMARK(custom_f32_f32)
+    CREATE_BENCHMARK(huge_1024_f32_f32)
+    CREATE_BENCHMARK(huge_2048_f32_f32)
+    CREATE_BENCHMARK(int64_t, custom_f64_f64)
+    CREATE_BENCHMARK(custom_f64_f64, custom_f64_f64)
+    CREATE_BENCHMARK(custom_f64_f64, copyable_f64_f64)
+    CREATE_BENCHMARK(custom_i32_i32, custom_f64_f64)
+    CREATE_BENCHMARK(custom_i32_i32, custom_i8_f64)
+    CREATE_BENCHMARK(custom_i32_i32, copyable_i8_f64)
+    CREATE_BENCHMARK(custom_i32_i32, custom_i64_f64)
     CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
 

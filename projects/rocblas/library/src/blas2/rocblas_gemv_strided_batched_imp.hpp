@@ -144,7 +144,11 @@ namespace
                                      "--stride_y",
                                      stridey,
                                      "--batch_count",
-                                     batch_count);
+                                     batch_count,
+                                     "--alpha_stride",
+                                     handle->get_stride_alpha(),
+                                     "--beta_stride",
+                                     handle->get_stride_beta());
                 }
                 else
                 {
@@ -172,7 +176,11 @@ namespace
                                      "--stride_y",
                                      stridey,
                                      "--batch_count",
-                                     batch_count);
+                                     batch_count,
+                                     "--alpha_stride",
+                                     handle->get_stride_alpha(),
+                                     "--beta_stride",
+                                     handle->get_stride_beta());
                 }
             }
 
@@ -198,7 +206,11 @@ namespace
                                    "stride_y",
                                    stridey,
                                    "batch_count",
-                                   batch_count);
+                                   batch_count,
+                                   "stride_alpha",
+                                   handle->get_stride_alpha(),
+                                   "stride_beta",
+                                   handle->get_stride_beta());
         }
 
         rocblas_status arg_status = rocblas_internal_gemv_arg_check(handle,
@@ -259,28 +271,29 @@ namespace
         }
 
         // we don't instantiate _template for mixed types so directly calling launcher
-        rocblas_status status = ROCBLAS_API(rocblas_internal_gemv_launcher)(handle,
-                                                                            transA,
-                                                                            m,
-                                                                            n,
-                                                                            alpha,
-                                                                            0,
-                                                                            A,
-                                                                            0,
-                                                                            lda,
-                                                                            strideA,
-                                                                            x,
-                                                                            0,
-                                                                            incx,
-                                                                            stridex,
-                                                                            beta,
-                                                                            0,
-                                                                            y,
-                                                                            0,
-                                                                            incy,
-                                                                            stridey,
-                                                                            batch_count,
-                                                                            (Tex*)w_mem);
+        rocblas_status status
+            = ROCBLAS_API(rocblas_internal_gemv_launcher)(handle,
+                                                          transA,
+                                                          m,
+                                                          n,
+                                                          alpha,
+                                                          handle->get_stride_alpha(),
+                                                          A,
+                                                          0,
+                                                          lda,
+                                                          strideA,
+                                                          x,
+                                                          0,
+                                                          incx,
+                                                          stridex,
+                                                          beta,
+                                                          handle->get_stride_beta(),
+                                                          y,
+                                                          0,
+                                                          incy,
+                                                          stridey,
+                                                          batch_count,
+                                                          (Tex*)w_mem);
 
         status = (status != rocblas_status_success) ? status : perf_status;
         if(status != rocblas_status_success)

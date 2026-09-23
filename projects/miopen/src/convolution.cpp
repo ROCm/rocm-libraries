@@ -17,6 +17,7 @@
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
 #include <miopen/algorithm.hpp>
+#include <miopen/conv/solver_finders.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -24,10 +25,10 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <ostream>
 #include <ranges>
-
-#include <boost/range/combine.hpp>
+#include <tuple>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
@@ -257,9 +258,14 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
             MIOPEN_THROW(miopenStatusBadParm, "Channels do not match for the filter");
         }
 
-        if(miopen::any_of(boost::combine(GetTransposeConvPads(), GetConvStrides()), [](auto v) {
-               auto trans_conv_pad = boost::get<0>(v);
-               auto stride         = boost::get<1>(v);
+        const auto& pads_    = GetTransposeConvPads();
+        const auto& strides_ = GetConvStrides();
+        auto zip_            = std::views::iota(std::size_t(0), pads_.size()) |
+                    std::views::transform(
+                        [&](std::size_t i) { return std::make_tuple(pads_[i], strides_[i]); });
+
+        if(std::ranges::any_of(zip_, [](auto v) {
+               auto [trans_conv_pad, stride] = v;
                return trans_conv_pad >= stride;
            }))
         {
@@ -376,7 +382,8 @@ bool ConvolutionDescriptor::IsWinograd3x3SupportedAndFast(
     if(!(problem.GetOutChannels() >= 16 && problem.GetOutChannels() % 2 == 0))
         return false;
 
-    return solver::conv::ConvBinWinograd3x3U{}.IsApplicable(ctx, problem);
+    return solver::conv::ConvBinWinograd3x3U{}.IsApplicable(ctx, problem) ||
+           solver::conv::TransposedConvBinWinograd3x3U{}.IsApplicable(ctx, problem);
 }
 
 std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
@@ -444,6 +451,43 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
 
     MIOPEN_LOG_I(workspace_size);
     return workspace_size;
+}
+
+void ConvolutionDescriptor::GetWorkSpaceSizeRange(ExecutionContext ctx,
+                                                  const conv::ProblemDescription& problem,
+                                                  std::size_t* minWorkspaceSize,
+                                                  std::size_t* maxWorkspaceSize) const
+{
+    MIOPEN_LOG_I2("");
+
+    ctx.do_search             = false;
+    ctx.disable_perfdb_access = true;
+
+    auto minWs = std::numeric_limits<std::size_t>::max();
+    auto maxWs = std::size_t{0};
+    auto found = false;
+
+    for(const auto& solver_id : solver::GetSolversByPrimitive(solver::Primitive::Convolution))
+    {
+        const auto algo = solver_id.GetAlgo();
+        if(conv::IsAlgorithmDisabled(algo, problem))
+            continue;
+        const auto& s = solver_id.GetSolver();
+        if(s.IsEmpty() || !s.IsApplicable(ctx, problem))
+            continue;
+
+        const auto ws = s.GetWorkspaceSize(ctx, problem);
+        minWs         = std::min(minWs, ws);
+        maxWs         = std::max(maxWs, ws);
+        found         = true;
+    }
+
+    if(!found)
+        MIOPEN_THROW(miopenStatusNotImplemented, "No applicable solver found");
+
+    MIOPEN_LOG_I("min=" << minWs << " max=" << maxWs);
+    *minWorkspaceSize = minWs;
+    *maxWorkspaceSize = maxWs;
 }
 
 bool ConvolutionDescriptor::EnableTF32() const

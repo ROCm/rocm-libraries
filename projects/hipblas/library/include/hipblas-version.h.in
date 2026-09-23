@@ -32,6 +32,7 @@
 #define hipblasVersionMinor @hipblas_VERSION_MINOR@
 #define hipblasVersionPatch @hipblas_VERSION_PATCH@
 #define hipblasVersionTweak @hipblas_VERSION_TWEAK@
+#define hipblasVersionK 100
 // clang-format on
 
 #endif /* HIPBLAS_VERSION_H */

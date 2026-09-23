@@ -4,13 +4,22 @@
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+# SDK dependencies - use targets directly in superbuild, find_package otherwise
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
+
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 add_executable(
     hipblaslt_plugin_tests
     engines/plans/TestHipblasltMatmulPlan.cpp
     engines/plans/TestHipblasltMatmulPlanBuilder.cpp
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlan.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlanBuilder.cpp>
     engines/TestHipblasltEngine.cpp
     main.cpp
     TestHipblasltEngineManager.cpp
@@ -20,6 +29,7 @@ add_executable(
     TestHipblasltHipdnnPluginExecutionContext.cpp
     TestHipblasltMatmulDesc.cpp
     TestHipblasltMatrixLayout.cpp
+    TestHipblasltMatrixTransformDesc.cpp
     TestHipblasltPluginApi.cpp
     TestHipblasltUtils.cpp
 )
@@ -33,5 +43,7 @@ target_link_libraries(
 
 # make it so tests inside folders can find the mocks folder without having to use a relative path.
 target_include_directories(hipblaslt_plugin_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+clang_tidy_check(hipblaslt_plugin_tests)
 
 add_unit_test_target(hipblaslt_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,9 +33,16 @@
 #include "rocsparse_logging.hpp"
 #include "rocsparse_memstat.hpp"
 #include "rocsparse_scalar.hpp"
-
+#include "rocsparse_singularity.hpp"
 namespace rocsparse
 {
+    // Round sizeof(T) * size up to 256 bytes, the alignment used for arrays
+    // carved out of a user-provided buffer (see e.g. rocsparse_csrsort).
+    template <typename T>
+    inline size_t align_size(size_t size)
+    {
+        return ((sizeof(T) * size + 255) / 256) * 256;
+    }
 
 // Return the leftmost significant bit position
 #if defined(rocsparse_ILP64)

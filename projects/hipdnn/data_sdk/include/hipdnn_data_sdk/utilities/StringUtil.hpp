@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace hipdnn_data_sdk::utilities
@@ -24,22 +27,21 @@ namespace hipdnn_data_sdk::utilities
  * @param str The string to hash
  * @return uint64_t The hash value
  */
-inline uint64_t fnv1aHash(const char* str)
+inline uint64_t fnv1aHash(const uint8_t* data, size_t size) noexcept
 {
-    if(str == nullptr || str[0] == '\0')
+    if(data == nullptr || size == 0)
     {
         return 0;
     }
 
-    // FNV-1a hash algorithm constants for 64-bit
     constexpr uint64_t FNV_OFFSET_BASIS = 0xcbf29ce484222325ULL;
     constexpr uint64_t FNV_PRIME = 0x100000001b3ULL;
 
     uint64_t hash = FNV_OFFSET_BASIS;
 
-    for(const char* p = str; *p != '\0'; ++p)
+    for(size_t i = 0; i < size; ++i)
     {
-        hash ^= static_cast<uint64_t>(static_cast<unsigned char>(*p));
+        hash ^= static_cast<uint64_t>(data[i]);
         hash *= FNV_PRIME;
     }
 
@@ -47,9 +49,24 @@ inline uint64_t fnv1aHash(const char* str)
 }
 
 /**
+ * @brief Computes a FNV-1a hash of a null-terminated string
+ *
+ * @param str The string to hash
+ * @return uint64_t The hash value, or 0 for null/empty input
+ */
+inline uint64_t fnv1aHash(const char* str) noexcept
+{
+    if(str == nullptr)
+    {
+        return 0;
+    }
+    return fnv1aHash(reinterpret_cast<const uint8_t*>(str), std::strlen(str));
+}
+
+/**
  * @brief Overload for std::string
  */
-inline uint64_t fnv1aHash(const std::string& str)
+inline uint64_t fnv1aHash(const std::string& str) noexcept
 {
     return fnv1aHash(str.c_str());
 }
@@ -57,9 +74,20 @@ inline uint64_t fnv1aHash(const std::string& str)
 /**
  * @brief Overload for std::string_view
  */
-inline uint64_t fnv1aHash(std::string_view str)
+inline uint64_t fnv1aHash(std::string_view str) noexcept
 {
-    return fnv1aHash(std::string(str).c_str());
+    return fnv1aHash(reinterpret_cast<const uint8_t*>(str.data()), str.size());
+}
+
+// Builds a std::string from a length-delimited char buffer, stripping a
+// trailing NUL if the producer included it in the reported length.
+inline std::string bufferToString(const std::vector<char>& buf, size_t len)
+{
+    if(len > 0 && buf[len - 1] == '\0')
+    {
+        --len;
+    }
+    return {buf.data(), len};
 }
 
 inline void copyMaxSizeWithNullTerminator(char* destination, const char* source, size_t maxSize)
@@ -79,7 +107,7 @@ inline void copyMaxSizeWithNullTerminator(char* destination, const char* source,
 
 inline std::string toLower(const std::string& str)
 {
-    std::string lowerStr = str;
+    std::string lowerStr = str; // NOLINT(misc-const-correctness)
     std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
     return lowerStr;
 }
@@ -97,7 +125,7 @@ inline std::string trim(const std::string& str)
 
 inline std::string removeNewlines(const std::string& str)
 {
-    std::string result = str;
+    std::string result = str; // NOLINT(misc-const-correctness)
     result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
     result.erase(std::remove(result.begin(), result.end(), '\n'), result.end());
     return result;
@@ -160,5 +188,43 @@ std::enable_if_t<!std::is_arithmetic_v<T>, std::string> vecToString(const std::v
     vecToStream(stream, vec);
     return stream.str();
 }
+
+namespace detail
+{
+
+/// UTF-8 text of @p path for a diagnostic message, never for comparison or loading.
+///
+/// A downstream consumer may compile these headers as C++20, where
+/// std::filesystem::path::u8string() returns std::u8string; the char8_t bytes are
+/// bridged explicitly rather than converted through the lossy active code page.
+///
+/// A path that cannot be expressed as UTF-8 -- an unpaired UTF-16 surrogate on
+/// Windows, for instance -- yields a fixed ASCII marker instead of propagating the
+/// conversion error out of the caller's diagnostic, which would abandon candidates
+/// that are still worth trying. Only conversion errors are absorbed: this function
+/// allocates, so it is not noexcept and an allocation failure still propagates.
+inline std::string pathForDiagnostic(const std::filesystem::path& path)
+{
+    try
+    {
+#ifdef __cpp_lib_char8_t
+        const std::u8string utf8 = path.u8string();
+        return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
+#else
+        // Already a std::string; returning it directly moves rather than copies.
+        return path.u8string();
+#endif
+    }
+    catch(const std::system_error&)
+    {
+        return "<unprintable>";
+    }
+    catch(const std::range_error&)
+    {
+        return "<unprintable>";
+    }
+}
+
+} // namespace detail
 
 } // namespace hipdnn_data_sdk::utilities

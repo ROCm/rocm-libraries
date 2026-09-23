@@ -1,11 +1,12 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   Device: 0
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   SleepPercent: 50
 BenchmarkProblems:
   ########################################
@@ -18,8 +19,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -39,7 +40,7 @@ BenchmarkProblems:
           - [8, 8, 8]
           - [2, 2, 32]
           - [2, 2, 64]
-        - WaveSplitK: [1]
+        - WaveSplitK: [true]
         - InnerUnroll: [1,2,4]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
@@ -83,8 +84,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -104,7 +105,7 @@ BenchmarkProblems:
           - [8, 8, 8]
           - [2, 2, 32]
           - [2, 2, 64]
-        - WaveSplitK: [1]
+        - WaveSplitK: [true]
         - InnerUnroll: [1,2,4]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]

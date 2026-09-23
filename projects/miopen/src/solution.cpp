@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2022 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/solution.hpp>
 
@@ -30,7 +7,9 @@
 #include <miopen/check_numerics.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
+#include <miopen/hof_match.hpp>
 #include <miopen/kernel.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 
 #include <miopen/mha/invoke_params.hpp>
 #include <miopen/mha/problem_description.hpp>
@@ -41,7 +20,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include <boost/hof/match.hpp>
+#include "miopen/conv/db_getter.hpp"
 #include "miopen/fusion/problem_description.hpp"
 #include "miopen/fusion/context.hpp"
 
@@ -70,10 +49,10 @@ void Solution::Run(const Handle& handle,
                          std::to_string(workspace_size) + " was provided");
     }
 
-    std::visit(boost::hof::match(
+    std::visit(miopen::hof_match(
                    [&](const Problem& problem_) {
                        std::visit(
-                           boost::hof::match(
+                           miopen::hof_match(
                                [&](const ConvolutionDescriptor& op_desc) {
                                    RunImpl(handle, inputs, workspace, workspace_size, op_desc);
                                },
@@ -134,7 +113,7 @@ void Solution::LogDriverCommand(const BatchnormDescriptor& desc) const
 
 void Solution::LogDriverCommand(const Problem& problem_) const
 {
-    std::visit(boost::hof::match(
+    std::visit(miopen::hof_match(
                    [&](const BiasDescriptor&) { /* \todo: think on how to log bias */ },
                    [&](const MhaDescriptor&) { /* \todo: think on how to log mha */ },
                    [&](const SoftmaxDescriptor&) { /* \todo: think on how to log softmax */ },
@@ -166,7 +145,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     auto x       = get_input_checked(miopenTensorConvolutionX, "miopenTensorConvolutionX");
@@ -218,8 +197,12 @@ void Solution::RunImpl(const Handle& handle,
         }
     };
 
+    const auto solver_name = GetSolver().ToString();
+    const auto solver_id   = GetSolver().Value();
+
     if(invoker)
     {
+        LogSolutionName(solver_name, solver_id, workspace_size);
         (*invoker)(handle, invoke_ctx);
         checkNumericsOutput_();
         return;
@@ -237,17 +220,19 @@ void Solution::RunImpl(const Handle& handle,
         auto kernel_handles = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
 
         invoker = invoker_factory(kernel_handles);
+        LogSolutionName(solver_name, solver_id, workspace_size);
         (*invoker)(handle, invoke_ctx);
         checkNumericsOutput_();
         return;
     }
 
-    const auto net_cfg       = conv_problem.BuildConfKey();
+    const auto net_cfg       = conv_problem.MakeNetworkConfig();
     const auto found_invoker = handle.GetInvoker(net_cfg, GetSolver());
 
     if(found_invoker)
     {
         invoker = *found_invoker;
+        LogSolutionName(solver_name, solver_id, workspace_size);
         (*found_invoker)(handle, invoke_ctx);
         checkNumericsOutput_();
         return;
@@ -266,6 +251,7 @@ void Solution::RunImpl(const Handle& handle,
         invoker = handle.PrepareInvoker(*conv_solution.invoker_factory,
                                         conv_solution.construction_params);
         handle.RegisterInvoker(*invoker, net_cfg, GetSolver().ToString());
+        LogSolutionName(solver_name, solver_id, workspace_size);
         (*invoker)(handle, invoke_ctx);
         checkNumericsOutput_();
     }
@@ -281,6 +267,9 @@ void Solution::RunImpl(const Handle& handle,
                        std::size_t workspace_size,
                        [[maybe_unused]] const MhaDescriptor& mha_desc)
 {
+    const auto solver_name = GetSolver().ToString();
+    const auto solver_id   = GetSolver().Value();
+
     const Problem& problem_casted = std::get<Problem>(problem.item);
 
     const auto get_input_checked = [&](auto name, const std::string& name_str) {
@@ -293,7 +282,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     const mha::ProblemDescription problem_description = problem_casted.AsMha();
@@ -408,7 +397,11 @@ void Solution::RunImpl(const Handle& handle,
             return mha::InvokeParams(dataBackward, workspace, workspace_size);
         }
 
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
+        case miopenProblemDirectionBackwardWeights:
+#ifdef MIOPEN_BETA_API
+        case miopenProblemDirectionInference:
+#endif
+            MIOPEN_THROW(miopenStatusNotImplemented);
         }
     }();
 
@@ -432,6 +425,7 @@ void Solution::RunImpl(const Handle& handle,
         if(mha_solution.invoker_factory.has_value())
         {
             invoker = (*mha_solution.invoker_factory)(kernel_handles);
+            LogSolutionName(solver_name, solver_id, workspace_size);
             (*invoker)(handle, invoke_ctx);
         }
         else
@@ -447,6 +441,7 @@ void Solution::RunImpl(const Handle& handle,
 
     if(invoker)
     {
+        LogSolutionName(solver_name, solver_id, workspace_size);
         (*invoker)(handle, invoke_ctx);
         return;
     }
@@ -462,6 +457,7 @@ void Solution::RunImpl(const Handle& handle,
         invoker =
             handle.PrepareInvoker(*mha_solution.invoker_factory, mha_solution.construction_params);
         handle.RegisterInvoker(*invoker, net_cfg, GetSolver().ToString());
+        LogSolutionName(solver_name, solver_id, workspace_size);
         (*invoker)(handle, invoke_ctx);
     }
     else
@@ -476,6 +472,8 @@ void Solution::RunImpl(const Handle& handle,
                        std::size_t /*workspace_size*/,
                        const SoftmaxDescriptor& softmax_desc)
 {
+    const auto solver_name = GetSolver().ToString();
+    const auto solver_id   = GetSolver().Value();
 
     const auto& problem_casted = std::get<Problem>(problem.item);
 
@@ -489,15 +487,13 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     const softmax::ProblemDescription problem_description = problem_casted.AsSoftmax();
 
-    float alpha                        = softmax_desc.GetAlpha();
-    float beta                         = softmax_desc.GetBeta();
-    miopenSoftmaxAlgorithm_t algorithm = softmax_desc.GetAlgorithm();
-    miopenSoftmaxMode_t mode           = softmax_desc.GetMode();
+    float alpha = softmax_desc.GetAlpha();
+    float beta  = softmax_desc.GetBeta();
 
     const auto invoke_ctx = [&]() -> AnyInvokeParams {
         switch(problem_casted.GetDirection())
@@ -507,7 +503,7 @@ void Solution::RunImpl(const Handle& handle,
             auto y = get_input_checked(miopenTensorSoftmaxY, "miopenTensorSoftmaxY");
 
             return softmax::InvokeParams(
-                &alpha, &beta, *x.descriptor, x.buffer, *y.descriptor, y.buffer, algorithm, mode);
+                &alpha, &beta, *x.descriptor, x.buffer, *y.descriptor, y.buffer);
         }
         case miopenProblemDirectionBackward: {
             auto y  = get_input_checked(miopenTensorSoftmaxY, "miopenTensorSoftmaxY");
@@ -521,12 +517,14 @@ void Solution::RunImpl(const Handle& handle,
                                          *dy.descriptor,
                                          dy.buffer,
                                          *dx.descriptor,
-                                         dx.buffer,
-                                         algorithm,
-                                         mode);
+                                         dx.buffer);
         }
 
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
+        case miopenProblemDirectionBackwardWeights:
+#ifdef MIOPEN_BETA_API
+        case miopenProblemDirectionInference:
+#endif
+            MIOPEN_THROW(miopenStatusNotImplemented);
         }
     }();
 
@@ -538,18 +536,36 @@ void Solution::RunImpl(const Handle& handle,
 
     solver::softmax::Softmax regularSoftmax;
     solver::softmax::AttnSoftmax attnSoftmax;
+    solver::softmax::SoftmaxNoncontiguous noncontiguousSoftmax;
 
     if(!kernels.empty())
     {
         const auto ctx              = ExecutionContext{&handle};
-        const auto softmax_solution = GetSolver() == regularSoftmax.SolverDbId()
-                                          ? regularSoftmax.GetSolution(ctx, problem_description)
-                                          : attnSoftmax.GetSolution(ctx, problem_description);
-        auto kernel_handles         = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
+        auto db_getter              = MakeConvDbGetter(ctx);
+        const auto softmax_solution = [&]() {
+            const auto solverId = GetSolver();
+            if(solverId == regularSoftmax.SolverDbId())
+            {
+                return solver::FindSolution(
+                    regularSoftmax, ctx, problem_description, db_getter, invoke_ctx);
+            }
+            else if(solverId == attnSoftmax.SolverDbId())
+            {
+                return attnSoftmax.GetSolution(ctx, problem_description);
+            }
+            else if(solverId == noncontiguousSoftmax.SolverDbId())
+            {
+                return noncontiguousSoftmax.GetSolution(ctx, problem_description);
+            }
+            MIOPEN_THROW(miopenStatusInvalidValue,
+                         "Invalid softmax solver ID: " + solverId.ToString());
+        }();
+        auto kernel_handles = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
 
         if(softmax_solution.invoker_factory.has_value())
         {
             invoker = (*softmax_solution.invoker_factory)(kernel_handles);
+            LogSolutionName(solver_name, solver_id, 0);
             (*invoker)(handle, invoke_ctx);
         }
         else
@@ -565,21 +581,37 @@ void Solution::RunImpl(const Handle& handle,
 
     if(invoker)
     {
+        LogSolutionName(solver_name, solver_id, 0);
         (*invoker)(handle, invoke_ctx);
         return;
     }
 
-    auto ctx = ExecutionContext{&handle};
-
-    const auto softmax_solution = GetSolver() == regularSoftmax.SolverDbId()
-                                      ? regularSoftmax.GetSolution(ctx, problem_description)
-                                      : attnSoftmax.GetSolution(ctx, problem_description);
+    auto ctx                    = ExecutionContext{&handle};
+    auto db_getter              = MakeConvDbGetter(ctx);
+    const auto softmax_solution = [&]() {
+        const auto solverId = GetSolver();
+        if(solverId == regularSoftmax.SolverDbId())
+        {
+            return solver::FindSolution(
+                regularSoftmax, ctx, problem_description, db_getter, invoke_ctx);
+        }
+        else if(solverId == attnSoftmax.SolverDbId())
+        {
+            return attnSoftmax.GetSolution(ctx, problem_description);
+        }
+        else if(solverId == noncontiguousSoftmax.SolverDbId())
+        {
+            return noncontiguousSoftmax.GetSolution(ctx, problem_description);
+        }
+        MIOPEN_THROW(miopenStatusInvalidValue, "Invalid softmax solver ID: " + solverId.ToString());
+    }();
 
     if(softmax_solution.invoker_factory.has_value())
     {
         invoker = handle.PrepareInvoker(*softmax_solution.invoker_factory,
                                         softmax_solution.construction_params);
         handle.RegisterInvoker(*invoker, net_cfg, GetSolver().ToString());
+        LogSolutionName(solver_name, solver_id, 0);
         (*invoker)(handle, invoke_ctx);
     }
     else
@@ -594,6 +626,9 @@ void Solution::RunImpl(const Handle& handle,
                        std::size_t workspace_size,
                        const FusedProblem& problem_)
 {
+    const auto solver_name = GetSolver().ToString();
+    const auto solver_id   = GetSolver().Value();
+
     const auto buffer_getter = [&](auto id, auto&& descriptor) {
         const auto found = inputs.find(id);
         if(found == inputs.end())
@@ -631,6 +666,7 @@ void Solution::RunImpl(const Handle& handle,
         if(solution.invoker_factory.has_value())
         {
             invoker = (*solution.invoker_factory)(kernel_handles);
+            LogSolutionName(solver_name, solver_id, workspace_size);
             (*invoker)(handle, invoke_params);
         }
         else
@@ -646,6 +682,7 @@ void Solution::RunImpl(const Handle& handle,
     invoker = handle.GetInvoker(net_cfg, GetSolver());
     if(invoker)
     {
+        LogSolutionName(solver_name, solver_id, workspace_size);
         (*invoker)(handle, invoke_params);
         return;
     }
@@ -657,6 +694,7 @@ void Solution::RunImpl(const Handle& handle,
     {
         invoker = handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
         handle.RegisterInvoker(*invoker, net_cfg, GetSolver().ToString());
+        LogSolutionName(solver_name, solver_id, workspace_size);
         (*invoker)(handle, invoke_params);
     }
     else
@@ -700,8 +738,12 @@ AnyInvokeParams Solution::MakeInvokeParams(const Problem& problem_,
                                      workspace,
                                      workspace_size,
                                      conv_desc.attribute.gfx90aFp16alt.GetWrW()};
-    default: MIOPEN_THROW(miopenStatusNotImplemented);
+#ifdef MIOPEN_BETA_API
+    case miopenProblemDirectionInference: break;
+#endif
     }
+
+    MIOPEN_THROW(miopenStatusNotImplemented);
 }
 
 Problem Solution::Transpose(const Problem& problem, RunInput* x, const RunInput& w, RunInput* y)
@@ -741,6 +783,17 @@ inline constexpr const char* LocalWorkDims  = "local_work_dims";
 inline constexpr const char* GlobalWorkDims = "global_work_dims";
 } // namespace kernels
 } // namespace fields
+
+void ValidateSerializedWorkDims(const std::vector<size_t>& work_dims, const char* name)
+{
+    constexpr std::size_t max_work_dims = 3;
+    if(work_dims.empty() || work_dims.size() > max_work_dims)
+        MIOPEN_THROW(miopenStatusInvalidValue,
+                     std::string{"Invalid "} + name +
+                         " work dimensions in serialized solution: size " +
+                         std::to_string(work_dims.size()) + " (expected 1.." +
+                         std::to_string(max_work_dims) + ").");
+}
 
 void to_json(nlohmann::json& json, const Solution::SerializationMetadata& metadata)
 {
@@ -785,6 +838,11 @@ struct SerializedSolutionKernelInfo
         kernel_info.program_name = json.at(fields::kernels::File).get<std::string>();
         json.at(fields::kernels::LocalWorkDims).get_to(kernel_info.local_work_dims);
         json.at(fields::kernels::GlobalWorkDims).get_to(kernel_info.global_work_dims);
+
+        // Reject a malicious or corrupt blob at load time, before any kernel
+        // object is constructed with these attacker-controlled dimensions.
+        ValidateSerializedWorkDims(kernel_info.local_work_dims, "local");
+        ValidateSerializedWorkDims(kernel_info.global_work_dims, "global");
 
         MIOPEN_LOG_I2("Deserialized solution kernel info <"
                       << kernel_info.program_name << ":" << kernel_info.kernel_name << ", binary "

@@ -8,6 +8,7 @@ using namespace hipdnn_backend::plugin;
 
 hipdnnHandle::hipdnnHandle()
     : _pluginResourceManager(EnginePluginResourceManager::create())
+    , _heuristicPluginResourceManager(HeuristicPluginResourceManager::create())
 {
 }
 
@@ -27,6 +28,32 @@ std::shared_ptr<EnginePluginResourceManager> hipdnnHandle::getPluginResourceMana
     return _pluginResourceManager;
 }
 
+std::shared_ptr<HeuristicPluginResourceManager>
+    hipdnnHandle::getHeuristicPluginResourceManager() const
+{
+    return _heuristicPluginResourceManager;
+}
+
+size_t hipdnnHandle::getEngineCount() const
+{
+    return _pluginResourceManager->getEngineCount();
+}
+
+std::vector<EngineInfo> hipdnnHandle::getEngineInfos() const
+{
+    return _pluginResourceManager->getEngineInfos();
+}
+
+std::optional<int64_t> hipdnnHandle::findEngineIdByName(std::string_view engineName) const
+{
+    return _pluginResourceManager->findEngineIdByName(engineName);
+}
+
+std::optional<std::string> hipdnnHandle::findEngineNameById(int64_t engineId) const
+{
+    return _pluginResourceManager->findEngineNameById(engineId);
+}
+
 std::string hipdnnHandle::toString() const
 {
     std::string str = "hipdnnHandle: {";
@@ -35,6 +62,6 @@ std::string hipdnnHandle::toString() const
     str += ", "
            + (_pluginResourceManager != nullptr ? _pluginResourceManager->toString()
                                                 : "pluginResourceManager=null");
-    str += "}";
+    str += '}';
     return str;
 }

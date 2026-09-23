@@ -1,0 +1,266 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# TheRock CI builds and tests MIOpen in a single configuration (HIP backend,
+# optional CK, against TheRock's full ROCm stack). This workflow covers the
+# additional build configurations that MIOpen must support but TheRock CI does
+# not exercise: the HIPNOGPU backend (used for offline kernel tuning without
+# GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
+# no-CK UBSan debug build, and gtest binary naming convention validation. It
+# also runs clang-tidy static analysis, migrated in from the shared
+# .github/workflows/clang-tidy.yml so it can be made a required check.
+#
+# The HIP package job additionally carries the two gates on the public/private
+# split: a source-only cross-check of its five hand-maintained files, and the
+# public-ABI gate requiring libMIOpen.so's exported public C API to stay
+# identical to the committed baseline.
+
+name: "Component CI: MIOpen"
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  LLVM_PATH: /opt/rocm/llvm
+
+jobs:
+  miopen-build:
+    name: ${{ matrix.name }}
+    container:
+      image: rocm/miopen-dev:multiarch_dev_20260910
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: MIOpen Hip Debug NOCK Build-Only
+            job_id: no-ck-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=debug
+              -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
+              -DBUILD_DEV=OFF
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
+              -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target install
+
+          # Builds the HIP package and runs miopen_gtest_check via rocjitsu KMD interposer
+          # to validate the gtest binary and test naming conventions without a physical GPU.
+          # Also hosts the public-ABI gate: this is the release, HIP-backend build, so it
+          # is the closest thing here to the artifact consumers actually link against.
+          - name: MIOpen Build Hip Package
+            job_id: hip-package-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_TEST_DISCRETE=OFF
+              -DMIOPEN_USE_MLIR=ON
+              -DMIOPEN_GPU_SYNC=OFF
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target miopen_gtest --target package
+
+          - name: MIOpen HipNoGPU Debug Build-Only
+            job_id: no-gpu-debug-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=debug
+              -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
+              -DBUILD_DEV=ON
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_BACKEND=HIPNOGPU
+              -DMIOPEN_INSTALL_CXX_HEADERS=ON
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+            build_target: ""
+
+          - name: MIOpen Tuna Fin Build-Only
+            job_id: tuna-fin-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_INSTALL_CXX_HEADERS=ON
+              -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
+              -DMIOPEN_USE_MLIR=ON
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_BACKEND=HIPNOGPU
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target install --target all
+          # clang-tidy's custom "analyze" target (defined in
+          # projects/miopen/cmake/ClangTidy.cmake) is only wired up for the
+          # Ninja generator, and "ninja -k 0" (keep going past failures) below
+          # depends on it -- hence -G Ninja here, unlike the other entries in
+          # this matrix which build with the container's default generator.
+          # TODO: remove -DMIOPEN_USE_MLIR=OFF once rocMLIR is removed from MIOpen.
+          - name: MIOpen clang-tidy
+            job_id: clang-tidy
+            cmake_extra_flags: >-
+              -G Ninja
+              -DBUILD_DEV=ON
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_BACKEND=HIP
+              -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-23
+              -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps"
+              -DROCM_PATH=/opt/rocm
+            build_target: ""
+
+    runs-on: azure-linux-scale-rocm
+    steps:
+      - name: Runner health status
+        run: |
+          echo "=== OS ==="
+          head -2 /etc/os-release
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "=== Memory ==="
+          free -h | grep Mem
+          echo "=== Disk ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            dnn-providers/miopen-provider
+            projects/miopen
+            shared/ctest
+
+      # The public/private split keeps five files in lockstep by hand: the
+      # public header, the private _impl declarations, the compile-time rename,
+      # the forwarding stubs, and the hipDNN provider's mirror of the rename.
+      # The fifth lives outside projects/miopen, which is why the sparse
+      # checkout above includes the provider directory: the check can only
+      # compare files it can read. This cross-checks them from source alone, so
+      # unlike the ABI gate below it needs no build and runs in seconds -- hence
+      # its placement before the configure step, where it fails fast. It is the
+      # only check that can see signature drift; the symbol-set gate cannot,
+      # because a drifted signature leaves the exported names unchanged. It
+      # rides the same job as that gate to keep both split checks in one place.
+      - name: Public/private header consistency check
+        if: matrix.job_id == 'hip-package-build'
+        run: |
+          python3 projects/miopen/script/check_public_abi.py check-headers \
+            --require-provider
+
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Checkout rocjitsu
+        if: matrix.job_id == 'hip-package-build'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: b2099a6b8703c089134ad526253752d26bbbf43a # 2026-09-10
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+
+      - name: Build rocjitsu
+        if: matrix.job_id == 'hip-package-build'
+        run: |
+          apt-get update && apt-get install -y libdrm-dev
+          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
+      - name: Install clang-tidy deps
+        if: matrix.job_id == 'clang-tidy'
+        run: |
+          # Install clang-tidy-23 and ninja-build (analyze target requires the
+          # Ninja generator; this container is not guaranteed to ship ninja).
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm23.list
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-23 ninja-build
+          # Prepare MIOpen deps for clang-tidy in a venv
+          python3 -m venv .venv
+          VENV_BIN="$(pwd)/.venv/bin"
+          . $VENV_BIN/activate
+          pip install 'cmake<4' https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
+          cp projects/miopen/requirements.txt /tmp/requirements.txt
+          cp projects/miopen/rbuild.ini /tmp/rbuild.ini
+          cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
+          sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
+          cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/rbuild prepare -s develop -d /tmp/miopen-deps
+
+      - name: Configure build
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          # -Werror is skipped for clang-tidy: that job's job is to surface lint
+          # findings, not to fail the configure/analyze step on unrelated
+          # compiler warnings-as-errors.
+          if [[ "${{ matrix.job_id }}" != "clang-tidy" ]]; then
+            export CXXFLAGS=-Werror
+          fi
+          rm -rf projects/miopen/install
+          mkdir projects/miopen/install
+          cmake -S projects/miopen -B build \
+          -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+          ${{ matrix.cmake_extra_flags }}
+
+      - name: Build
+        if: matrix.job_id != 'clang-tidy'
+        run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
+      - name: Run clang-tidy
+        if: matrix.job_id == 'clang-tidy'
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          # CMake already configured with CLANG_TIDY_EXE via cmake_extra_flags.
+          # -j$(nproc): ninja's default job count can undercount CPUs visible
+          # to a container on a shared runner; pin it explicitly since this
+          # target is almost entirely parallel per-file analysis.
+          ninja -C build -k 0 -j$(nproc) analyze
+
+      # Asserts libMIOpen.so's public ABI against the committed baseline: SONAME,
+      # exported public C API symbol set, and no _impl symbol leakage. This is a
+      # symbol-level check -- signatures, struct layout and behaviour are outside
+      # its reach. Globbing the output directory rather than searching all of
+      # build/ keeps --target package's staging copy under build/_CPack_Packages/
+      # from being picked instead; lib* covers distros where CMAKE_INSTALL_LIBDIR
+      # resolves to lib64.
+      - name: Public ABI check
+        if: matrix.job_id == 'hip-package-build'
+        run: |
+          lib=$(ls build/lib*/libMIOpen.so.1.0 2>/dev/null | head -1)
+          test -n "$lib" || { echo "libMIOpen.so.1.0 not found under build/lib*/"; exit 1; }
+          echo "Checking $lib against committed baseline"
+          python3 projects/miopen/script/check_public_abi.py check \
+            "$lib" \
+            --baseline projects/miopen/test/public_abi/public_symbols.baseline
+
+      - name: Configure Tuna Fin
+        if: matrix.job_id == 'tuna-fin-build'
+        run: |
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -S projects/miopen/fin -B build-fin \
+            -DCMAKE_PREFIX_PATH=$(pwd)/projects/miopen/install \
+            -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install \
+            -DCMAKE_BUILD_TYPE=release
+
+      - name: Build Tuna Fin
+        if: matrix.job_id == 'tuna-fin-build'
+        run: cmake --build build-fin --target install -j$(nproc)
+
+      - name: Run miopen_gtest_check (rocjitsu)
+        if: matrix.job_id == 'hip-package-build'
+        run: |
+          rocjitsu-build/tools/rocjitsu/rocjitsu \
+            --config rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json \
+            -- ./build/bin/miopen_gtest --gtest_list_tests > test_list
+          python3 projects/miopen/test/gtest/check_names.py --list test_list

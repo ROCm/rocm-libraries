@@ -72,6 +72,11 @@ namespace
                 if(is_batched || is_strided)
                 {
                     name << "_" << arg.batch_count;
+
+                    if(arg.alpha_beta_stride)
+                    {
+                        name << '_' << arg.stride_c;
+                    }
                 }
             }
 

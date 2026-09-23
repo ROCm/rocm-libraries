@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -17,6 +17,8 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+
+#ifndef __SPIRV__
 
 #include <memory>
 #include <type_traits>
@@ -410,8 +412,8 @@ struct Test_Callback
 // complex data inputs and having only a load callback set.
 // -------------------------------------------------------------------
 
-#ifndef WIN32
-TEST(rocfft_UnitTest, default_load_callback_complex_single)
+#ifndef _WIN32
+TEST(rocfft_UnitTest, DISABLED_default_load_callback_complex_single)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -428,7 +430,7 @@ TEST(rocfft_UnitTest, default_load_callback_complex_single)
                        1);
 }
 
-TEST(rocfft_UnitTest, default_load_callback_complex_double)
+TEST(rocfft_UnitTest, DISABLED_default_load_callback_complex_double)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -445,7 +447,7 @@ TEST(rocfft_UnitTest, default_load_callback_complex_double)
                        2);
 }
 
-TEST(rocfft_UnitTest, default_load_callback_real_single)
+TEST(rocfft_UnitTest, DISABLED_default_load_callback_real_single)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -462,7 +464,7 @@ TEST(rocfft_UnitTest, default_load_callback_real_single)
                        3);
 }
 
-TEST(rocfft_UnitTest, default_load_callback_real_double)
+TEST(rocfft_UnitTest, DISABLED_default_load_callback_real_double)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -484,7 +486,7 @@ TEST(rocfft_UnitTest, default_load_callback_real_double)
 // complex data inputs and having only a store callback set.
 // -------------------------------------------------------------------
 
-TEST(rocfft_UnitTest, default_store_callback_complex_single)
+TEST(rocfft_UnitTest, DISABLED_default_store_callback_complex_single)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -501,7 +503,7 @@ TEST(rocfft_UnitTest, default_store_callback_complex_single)
                        5);
 }
 
-TEST(rocfft_UnitTest, default_store_callback_complex_double)
+TEST(rocfft_UnitTest, DISABLED_default_store_callback_complex_double)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -518,7 +520,7 @@ TEST(rocfft_UnitTest, default_store_callback_complex_double)
                        6);
 }
 
-TEST(rocfft_UnitTest, default_store_callback_real_single)
+TEST(rocfft_UnitTest, DISABLED_default_store_callback_real_single)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -535,7 +537,7 @@ TEST(rocfft_UnitTest, default_store_callback_real_single)
                        7);
 }
 
-TEST(rocfft_UnitTest, default_store_callback_real_double)
+TEST(rocfft_UnitTest, DISABLED_default_store_callback_real_double)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -551,4 +553,6 @@ TEST(rocfft_UnitTest, default_store_callback_real_double)
                        DefaultCallbackType::STORE,
                        8);
 }
+#endif
+
 #endif

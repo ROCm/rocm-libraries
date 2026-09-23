@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,20 +51,45 @@
 #include "ResultFileReporter.hpp"
 #include "ResultReporter.hpp"
 
+#include "ProgramOptions.hpp"
 #include "Utility.hpp"
 
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
-#include <boost/program_options.hpp>
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
+#endif
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#include "Profiler.hpp"
+#endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
+#if defined(__linux__)
+// Used by getMinKernelSizeToGwEnd() to parse .co ELF symbol tables. <elf.h>
+// is glibc-only, so the whole ELF code path is Linux-gated.
+#include <cstring> // std::memcmp / std::strcmp
+#include <elf.h>
+#include <limits> // std::numeric_limits<> sentinel
+#endif
+#include <fstream>
+#include <iostream>
+#include <map>
 #include <memory>
+#include <sstream>
 
 namespace TensileLite
 {
     namespace Client
     {
+        // Single-process multi-GPU fused GEMM.A2A entry point.
+        // Defined in FusedA2AClient.cpp. Dispatched per problem when the
+        // fused-gemm-a2a option is set; returns a process exit code.
+        int runFusedA2A(po::variables_map const&                                       args,
+                        std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
+                        std::shared_ptr<Hardware>                                      hardware,
+                        ContractionProblem*                                            problem,
+                        int                                                            runIdx);
+
         __global__ void flush_icache()
         {
             asm __volatile__("s_icache_inv \n\t"
@@ -202,14 +227,22 @@ namespace TensileLite
                 ("amaxD-type",               po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "amaxD data type")
                 ("alpha-type",               po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "alpha data type")
                 ("beta-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "beta data type")
-                ("compute-input-type",       po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "compute input data type")
+                ("compute-input-type-A",     po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "compute input data type A")
+                ("compute-input-type-B",     po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "compute input data type B")
                 ("f32-xdl-math-op",          po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Use xf32 compute for float input and output matrices.")
+                ("mx-a-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix A")
+                ("mx-b-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix B")
+                ("mx-a-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix A")
+                ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
+                ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
+                ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
                 ("sparse",                   po::value<int>()->default_value(0), "A or B matrix is sparse matrix.")
                 ("strided-batched",          po::value<bool>()->default_value(true), "Use strided-batched or general batched")
+                ("batch-mode",               po::value<int>()->default_value(0), "Runtime batch ABI: 0=strided, 1=pointer array")
                 ("grouped-gemm",             po::value<bool>()->default_value(false), "Use grouped gemm")
                 ("kernel-language",          po::value<KernelLanguage>()->default_value(KernelLanguage::Any), "Select kernel language.")
                 ("deterministic-mode",       po::value<bool>()->default_value(false), "Enforce deterministic summation patterns"
@@ -221,6 +254,7 @@ namespace TensileLite
                 ("init-c",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for C")
                 ("init-d",                   po::value<InitMode>()->default_value(InitMode::Zero), "Initialization for D")
                 ("init-e",                   po::value<InitMode>()->default_value(InitMode::Zero), "Initialization for E")
+                ("init-gate",                po::value<InitMode>()->default_value(InitMode::Random),  "Initialization for gate residual")
                 ("init-alpha",               po::value<InitMode>()->default_value(InitMode::Two), "Initialization for alpha")
                 ("init-beta",                po::value<InitMode>()->default_value(InitMode::Two), "Initialization for beta")
                 ("init-bias",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for bias")
@@ -229,13 +263,10 @@ namespace TensileLite
                 ("init-scaleC",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleC")
                 ("init-scaleD",              po::value<InitMode>()->default_value(InitMode::Two), "Initialization for scaleD")
                 ("init-scaleAlphaVec",       po::value<InitMode>()->default_value(InitMode::One), "Initialization for scaleAlphaVec")
+                ("init-mx-a",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for A")
+                ("init-mx-b",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for B")
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
-                ("offset-a",                 po::value<size_t>()->default_value(0), "buffer a start offset")
-                ("offset-b",                 po::value<size_t>()->default_value(0), "buffer b start offset")
-                ("offset-c",                 po::value<size_t>()->default_value(0), "buffer c start offset")
-                ("offset-d",                 po::value<size_t>()->default_value(0), "buffer d start offset")
-                ("offset-e",                 po::value<size_t>()->default_value(0), "buffer e start offset")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
@@ -252,14 +283,18 @@ namespace TensileLite
                 ("print-tensor-d",                  po::value<bool>()->default_value(false), "Print tensor D.")
                 ("print-tensor-ref",                po::value<bool>()->default_value(false), "Print reference tensor D.")
                 ("print-tensor-bias",               po::value<bool>()->default_value(false), "Print tensor Bias.")
+                ("print-tensor-gate",               po::value<bool>()->default_value(false), "Print tensor GateResidual.")
                 ("print-tensor-scale-alpha-vec",    po::value<bool>()->default_value(false), "Print tensor ScaleAlphaVec.")
                 ("print-tensor-amaxd",              po::value<bool>()->default_value(false), "Print tensor AmaxD value from both CPU and GPU.")
 
                 ("dump-tensors",             po::value<bool>()->default_value(false), "Binary dump tensors instead of printing.")
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
+                ("fused-a2a-world",          po::value<int>()->default_value(0), "World size (number of GPUs) for the fused GEMM.A2A run. 0 takes the visible device count.")
+                ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
+                ("fused-a2a-drain-send",     po::value<int>()->default_value(0), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
+                ("fused-a2a-am",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "A2A column count along FEATURE (M, index-0) for the fused GEMM.A2A run (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Defaults to M, so every feature column goes all-to-all. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). AM is a per-problem dimension: pass it once to apply to every problem, or comma-separated, one value per problem selected by --problem-start-idx/--num-problems, in that order (e.g. 2048 for the medium shape, 10240 for the full shape).")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
-                ("platform-idx",             po::value<int>()->default_value(0), "OpenCL Platform Index")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
                 ("sync-after-warmups",       po::value<bool>()->default_value(true), "Synchronize GPU after warmup kernel runs")
@@ -277,7 +312,6 @@ namespace TensileLite
                 ("perf-l2-write-hits",       po::value<double>()->default_value(0.5), "L2 write hits")
                 ("perf-l2-read-bw-mul",      po::value<double>()->default_value(2.0), "L2 read bandwidth multiplier")
                 ("perf-read-efficiency",     po::value<double>()->default_value(0.85), "Read efficiency")
-                ("perf-ops-per-cycle",       po::value<int>()->default_value(64), "Ops per cycle")
                 ("csv-export-extra-cols",    po::value<bool>()->default_value(false), "CSV exports winner information")
                 ("csv-merge-same-problems",  po::value<bool>()->default_value(false), "CSV merge rows of same problem id")
                 ("PrintWinnersOnly",         po::value<bool>()->default_value(false), "PrintWinnersOnly")
@@ -315,6 +349,10 @@ namespace TensileLite
                                                                                   "(prev_dim_stride*prev_dim_size)"
                                                                                   "specifying once applies to all problem sizes, "
                                                                                   "otherwise specify once per problem size.")
+                ("gate-strides",             vector_default_empty<std::string>(), "Unspecified means default stride "
+                                                                                  "(prev_dim_stride*prev_dim_size)"
+                                                                                  "specifying once applies to all problem sizes, "
+                                                                                  "otherwise specify once per problem size.")
                 ("problem-start-idx",        po::value<int>()->default_value(0),  "First problem to run")
                 ("num-problems",             po::value<int>()->default_value(-1), "Number of problems to run")
 
@@ -346,18 +384,35 @@ namespace TensileLite
                 ("prediction-threshold",     po::value<double>()->default_value(2.0), "Don't run a solution if predicted performance is low")
 
                 ("activation-type",           po::value<ActivationType>()->default_value(ActivationType::None), "An activation type")
-                ("activation-hpa",            po::value<bool>()->default_value(false), "Use the same data type as high precision accumulate.")
                 ("activation-no-guard",          po::value<bool>()->default_value(false), "Use activation guard to deall with nan outputs.")
                 ("activation-additional-args",vector_default_empty<std::string>(), "Activation additional floating-point number arguments.")
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
+                ("streamk-hybrid-mode",       po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[0]"), "StreamK=5 hybrid-mode toggle values. Each element runs the problem once with setParams().setStreamKTileSchedulingMode(value); accepts {0=OFF (static), 1=ON (dynamic per-XCD work-queue), 2=AUTO (heuristic)}. Use [0, 1] in sweep YAMLs to deterministically exercise both SK5 sub-paths in one run. Use [2] (or `--streamk-hybrid-mode 2` to override a YAML default of [0]) to run the AUTO heuristic end-to-end on a real problem.")
                 ("use-bias",                  po::value<int>()->default_value(0), "Use bias.")
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
                 ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
+                ("use-gate-residual",         po::value<bool>()->default_value(false), "Use gate residual.")
+                ("gate-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Gate residual data type args.")
                 ("factor-dim-args",           po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[]"), "factor dimensions args.")
                 ("icache-flush-args",         po::value<std::vector<bool>>()->default_value(std::vector<bool>(1, false), "[]"), "ICache flush args.")
+                ("icache-rotate-copies",      po::value<int>()->default_value(0),
+                    "Number of EXTRA hipModule_t copies of each --code-object file to load and "
+                    "rotate per launch (I-cache cold-miss test). "
+                    "0 = disabled, no extra copies (default). "
+                    "N (>0) = load N extra copies (total = N+1 modules including the original). "
+                    "-1 = auto: extras = max(inputArr.size()-1, cache-overflow term). "
+                    "First term aligns with DataInit's rotating buffer cycle; "
+                    "second term targets overflowing L1 I-cache: "
+                    "Linux uses --icache-rotate-size*2*1024 / min(kernel_start->label_GW_End "
+                    "across all --code-object); non-Linux uses --icache-rotate-size directly.")
+                ("icache-rotate-size",        po::value<int>()->default_value(64),
+                    "Cache budget (in KB) for the cache-overflow term of --icache-rotate-copies=-1. "
+                    "Linux: effective bytes = N * 2 * 1024 (default 64 -> 128KB, ~2x typical L1 "
+                    "I-cache); larger -> more copies loaded for the same per-kernel hot-path size. "
+                    "Non-Linux: used directly as the extras count (no ELF parsing).")
                 ("use-e",                     po::value<bool>()->default_value(false), "Use E.")
                 ("use-gradient",              po::value<bool>()->default_value(false), "Use gradient.")
                 ("use-user-args",             po::value<bool>()->default_value(false), "Use user argument structure as kernel input.")
@@ -365,10 +420,260 @@ namespace TensileLite
                 ("rotating-buffer-mode",      po::value<int32_t>()->default_value(0), "Rotating mode.")
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
                 ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
+                ("rocprof-counter",           vector_default_empty<std::string>(), "Rocprof counters.")
+                ("metadata-layout",           po::value<int32_t>()->default_value(0), "Sparse Metadata Layout")
                 ;
             // clang-format on
 
             return options;
+        }
+
+        /** Dump parsed program options to a text file for comparison (Boost vs replacement).
+         *  Set env TENSILE_DUMP_OPTIONS=1 to enable. Writes to /tmp/tensilelite_program_options_dump.txt */
+        void DumpProgramOptionsToFile(po::variables_map const& args, char const* path)
+        {
+            std::ofstream out(path);
+            if(!out)
+            {
+                std::cerr << "TENSILE_DUMP_OPTIONS: failed to open " << path << " for write\n";
+                return;
+            }
+            out << "# program_options dump (one key=value per line; vectors as size then "
+                   "elements)\n";
+#define DUMP_OPT(K, T)                                          \
+    do                                                          \
+    {                                                           \
+        if(args.count(K))                                       \
+        {                                                       \
+            try                                                 \
+            {                                                   \
+                out << (K) << "=" << args[(K)].as<T>() << "\n"; \
+            }                                                   \
+            catch(...)                                          \
+            {                                                   \
+                out << (K) << "=(as<" #T "> failed)\n";         \
+            }                                                   \
+        }                                                       \
+    } while(0)
+#define DUMP_VEC(K, T)                                          \
+    do                                                          \
+    {                                                           \
+        if(args.count(K))                                       \
+        {                                                       \
+            try                                                 \
+            {                                                   \
+                auto const& v = args[(K)].as<std::vector<T>>(); \
+                out << (K) << ".size=" << v.size();             \
+                for(size_t i = 0; i < v.size(); ++i)            \
+                    out << " " << v[i];                         \
+                out << "\n";                                    \
+            }                                                   \
+            catch(...)                                          \
+            {                                                   \
+                out << (K) << "=(vector as failed)\n";          \
+            }                                                   \
+        }                                                       \
+    } while(0)
+#define DUMP_VECVEC(K)                                                            \
+    do                                                                            \
+    {                                                                             \
+        if(args.count(K))                                                         \
+        {                                                                         \
+            try                                                                   \
+            {                                                                     \
+                auto const& v = args[(K)].as<std::vector<std::vector<size_t>>>(); \
+                out << (K) << ".size=" << v.size() << "\n";                       \
+                for(size_t i = 0; i < v.size(); ++i)                              \
+                {                                                                 \
+                    out << (K) << "[" << i << "]=";                               \
+                    for(size_t j = 0; j < v[i].size(); ++j)                       \
+                        out << (j ? " " : "") << v[i][j];                         \
+                    out << "\n";                                                  \
+                }                                                                 \
+            }                                                                     \
+            catch(...)                                                            \
+            {                                                                     \
+                out << (K) << "=(vecvec failed)\n";                               \
+            }                                                                     \
+        }                                                                         \
+    } while(0)
+            if(args.count("config-file"))
+            {
+                try
+                {
+                    auto const& v = args["config-file"].as<std::vector<std::string>>();
+                    out << "config-file.size=" << v.size() << "\n";
+                    for(size_t i = 0; i < v.size(); ++i)
+                        out << "config-file[" << i << "]=" << v[i] << "\n";
+                }
+                catch(...)
+                {
+                    out << "config-file=(failed)\n";
+                }
+            }
+            DUMP_OPT("library-file", std::string);
+            if(args.count("code-object"))
+            {
+                try
+                {
+                    auto const& v = args["code-object"].as<std::vector<std::string>>();
+                    out << "code-object.size=" << v.size() << "\n";
+                    for(size_t i = 0; i < v.size(); ++i)
+                        out << "code-object[" << i << "]=" << v[i] << "\n";
+                }
+                catch(...)
+                {
+                    out << "code-object=(failed)\n";
+                }
+            }
+            DUMP_OPT("performance-metric", PerformanceMetric);
+            DUMP_OPT("problem-identifier", std::string);
+            DUMP_OPT("type", rocisa::DataType);
+            DUMP_OPT("a-type", rocisa::DataType);
+            DUMP_OPT("b-type", rocisa::DataType);
+            DUMP_OPT("c-type", rocisa::DataType);
+            DUMP_OPT("d-type", rocisa::DataType);
+            DUMP_OPT("e-type", rocisa::DataType);
+            DUMP_OPT("amaxD-type", rocisa::DataType);
+            DUMP_OPT("alpha-type", rocisa::DataType);
+            DUMP_OPT("beta-type", rocisa::DataType);
+            DUMP_OPT("compute-input-type", rocisa::DataType);
+            DUMP_OPT("f32-xdl-math-op", rocisa::DataType);
+            DUMP_OPT("swizzle-tensor-a", bool);
+            DUMP_OPT("swizzle-tensor-b", bool);
+            DUMP_OPT("fused-gemm-a2a", bool);
+            DUMP_OPT("activation-compute-type", rocisa::DataType);
+            DUMP_OPT("high-precision-accumulate", bool);
+            DUMP_OPT("sparse", int);
+            DUMP_OPT("strided-batched", bool);
+            DUMP_OPT("batch-mode", int);
+            DUMP_OPT("grouped-gemm", bool);
+            DUMP_OPT("kernel-language", KernelLanguage);
+            DUMP_OPT("deterministic-mode", bool);
+            DUMP_OPT("init-seed", unsigned int);
+            DUMP_OPT("init-a", InitMode);
+            DUMP_OPT("init-b", InitMode);
+            DUMP_OPT("init-c", InitMode);
+            DUMP_OPT("init-d", InitMode);
+            DUMP_OPT("init-e", InitMode);
+            DUMP_OPT("init-gate", InitMode);
+            DUMP_OPT("init-alpha", InitMode);
+            DUMP_OPT("init-beta", InitMode);
+            DUMP_OPT("init-bias", InitMode);
+            DUMP_OPT("init-scaleA", InitMode);
+            DUMP_OPT("init-scaleB", InitMode);
+            DUMP_OPT("init-scaleC", InitMode);
+            DUMP_OPT("init-scaleD", InitMode);
+            DUMP_OPT("init-scaleAlphaVec", InitMode);
+            DUMP_OPT("pristine-on-gpu", bool);
+            DUMP_OPT("c-equal-d", bool);
+            DUMP_OPT("num-elements-to-validate", int);
+            DUMP_OPT("bounds-check", BoundsCheckMode);
+            DUMP_OPT("prune-mode", PruneSparseMode);
+            DUMP_OPT("device-idx", int);
+            DUMP_OPT("use-default-stream", bool);
+            DUMP_OPT("num-warmups", int);
+            DUMP_OPT("sync-after-warmups", bool);
+            DUMP_OPT("num-benchmarks", int);
+            DUMP_OPT("num-enqueues-per-sync", int);
+            DUMP_OPT("max-enqueues-per-sync", int);
+            DUMP_OPT("num-syncs-per-benchmark", int);
+            DUMP_OPT("skip-slow-solution-ratio", float);
+            DUMP_OPT("min-flops-per-sync", size_t);
+            DUMP_OPT("use-gpu-timer", bool);
+            DUMP_OPT("sleep-percent", int);
+            DUMP_OPT("hardware-monitor", bool);
+            DUMP_OPT("perf-l2-read-hits", double);
+            DUMP_OPT("perf-l2-write-hits", double);
+            DUMP_OPT("perf-l2-read-bw-mul", double);
+            DUMP_OPT("perf-read-efficiency", double);
+            DUMP_OPT("csv-export-extra-cols", bool);
+            DUMP_OPT("csv-merge-same-problems", bool);
+            DUMP_OPT("PrintWinnersOnly", bool);
+            DUMP_VECVEC("problem-size");
+            if(args.count("prob-sol-map"))
+            {
+                try
+                {
+                    auto const& m = args["prob-sol-map"].as<std::map<int, int>>();
+                    out << "prob-sol-map.size=" << m.size() << "\n";
+                    for(auto const& p : m)
+                        out << "prob-sol-map " << p.first << "=" << p.second << "\n";
+                }
+                catch(...)
+                {
+                    out << "prob-sol-map=(failed)\n";
+                }
+            }
+            DUMP_VECVEC("a-strides");
+            DUMP_VECVEC("b-strides");
+            DUMP_VECVEC("c-strides");
+            DUMP_VECVEC("d-strides");
+            DUMP_VECVEC("e-strides");
+            DUMP_VECVEC("bias-strides");
+            DUMP_VECVEC("gate-strides");
+            DUMP_OPT("problem-start-idx", int);
+            DUMP_OPT("num-problems", int);
+            DUMP_OPT("solution-start-idx", int);
+            DUMP_OPT("num-solutions", int);
+            DUMP_OPT("best-solution", bool);
+            DUMP_OPT("results-file", std::string);
+            DUMP_OPT("log-file", std::string);
+            DUMP_OPT("log-file-append", bool);
+            DUMP_OPT("log-level", LogLevel);
+            DUMP_OPT("library-update-file", std::string);
+            DUMP_OPT("library-update-comment", bool);
+            DUMP_OPT("exit-on-error", bool);
+            DUMP_OPT("selection-only", bool);
+            DUMP_OPT("max-workspace-size", size_t);
+            DUMP_OPT("granularity-threshold", double);
+            DUMP_OPT("activation-type", ActivationType);
+            DUMP_OPT("activation-no-guard", bool);
+            if(args.count("activation-additional-args"))
+            {
+                try
+                {
+                    auto const& v
+                        = args["activation-additional-args"].as<std::vector<std::vector<double>>>();
+                    out << "activation-additional-args.size=" << v.size() << "\n";
+                    for(size_t i = 0; i < v.size(); ++i)
+                    {
+                        out << "activation-additional-args[" << i << "]=";
+                        for(size_t j = 0; j < v[i].size(); ++j)
+                            out << (j ? "," : "") << v[i][j];
+                        out << "\n";
+                    }
+                }
+                catch(...)
+                {
+                    out << "activation-additional-args=(failed)\n";
+                }
+            }
+            DUMP_VEC("activation-enum-args", ActivationType);
+            DUMP_VEC("streamk-hybrid-mode", int);
+            DUMP_OPT("use-bias", int);
+            DUMP_OPT("bias-source", int);
+            DUMP_OPT("use-scaleAB", std::string);
+            DUMP_OPT("use-scaleCD", bool);
+            DUMP_OPT("use-scaleAlphaVec", int);
+            DUMP_VEC("bias-type-args", rocisa::DataType);
+            DUMP_OPT("use-gate-residual", bool);
+            DUMP_VEC("gate-type-args", rocisa::DataType);
+            DUMP_VEC("factor-dim-args", int);
+            DUMP_VEC("icache-flush-args", bool);
+            DUMP_OPT("use-e", bool);
+            DUMP_OPT("use-gradient", bool);
+            DUMP_OPT("use-user-args", bool);
+            DUMP_OPT("rotating-buffer-size", int32_t);
+            DUMP_OPT("rotating-buffer-mode", int32_t);
+            DUMP_OPT("icache-rotate-copies", int);
+            DUMP_OPT("icache-rotate-size", int);
+            DUMP_OPT("output-amaxD", bool);
+            DUMP_OPT("timing-instrumentation", bool);
+#undef DUMP_OPT
+#undef DUMP_VEC
+#undef DUMP_VECVEC
+            std::cerr << "TENSILE_DUMP_OPTIONS: wrote " << path << "\n";
         }
 
         std::shared_ptr<Hardware> GetHardware(po::variables_map const& args)
@@ -453,18 +758,25 @@ namespace TensileLite
         }
 
         template <typename T>
+        T parse_num(std::string const& s)
+        {
+            T                  t{};
+            std::istringstream ss(s);
+            ss >> t;
+            if(!ss && !ss.eof())
+                throw std::runtime_error("Failed to parse number: " + s);
+            return t;
+        }
+
+        template <typename T>
         std::vector<T> split_nums(std::string const& value)
         {
-            std::vector<std::string> parts;
-            boost::split(parts, value, boost::algorithm::is_any_of(",;"));
-
-            std::vector<T> rv;
+            std::vector<std::string> parts = po::split_string(value);
+            std::vector<T>           rv;
             rv.reserve(parts.size());
-
             for(auto const& part : parts)
-                if(part != "")
-                    rv.push_back(boost::lexical_cast<T>(part));
-
+                if(!part.empty())
+                    rv.push_back(parse_num<T>(part));
             return rv;
         }
 
@@ -478,15 +790,13 @@ namespace TensileLite
             for(auto const& str : inValue)
                 outValue.push_back(split_nums<T>(str));
 
-            boost::any v(outValue);
-
-            args.at(name).value() = v;
+            args.at(name).value() = std::any(outValue);
         }
 
         void parse_arg_bools(po::variables_map& args, std::string const& name)
         {
             auto opts             = args[name].as<std::vector<bool>>();
-            args.at(name).value() = boost::any(opts);
+            args.at(name).value() = std::any(opts);
         }
 
         void parse_arg_ints(po::variables_map& args, std::string const& name)
@@ -502,20 +812,19 @@ namespace TensileLite
         void parse_bias_type_args(po::variables_map& args, std::string const& name)
         {
             auto type             = args[name].as<std::vector<rocisa::DataType>>();
-            args.at(name).value() = boost::any(type);
+            args.at(name).value() = std::any(type);
         }
 
         void parse_activation_enum_args(po::variables_map& args, std::string const& name)
         {
             auto type             = args[name].as<std::vector<ActivationType>>();
-            args.at(name).value() = boost::any(type);
+            args.at(name).value() = std::any(type);
         }
 
         void parse_activation_int(po::variables_map& args, std::string const& name)
         {
-            auto type = args[name].as<ActivationType>();
-
-            args.at(name).value() = boost::any(type);
+            auto type             = args[name].as<ActivationType>();
+            args.at(name).value() = std::any(type);
         }
 
         template <typename T>
@@ -530,9 +839,7 @@ namespace TensileLite
                 outValue[vec[0]] = vec[1];
             }
 
-            boost::any v(outValue);
-
-            args.at(name).value() = v;
+            args.at(name).value() = std::any(outValue);
         }
 
         void parse_arg_ints_map(po::variables_map& args, std::string const& name)
@@ -550,12 +857,12 @@ namespace TensileLite
                || type == rocisa::DataType::ComplexFloat || type == rocisa::DataType::ComplexDouble
                || type == rocisa::DataType::Int32)
             {
-                args.at("a-type").value()     = boost::any(type);
-                args.at("b-type").value()     = boost::any(type);
-                args.at("c-type").value()     = boost::any(type);
-                args.at("d-type").value()     = boost::any(type);
-                args.at("alpha-type").value() = boost::any(type);
-                args.at("beta-type").value()  = boost::any(type);
+                args.at("a-type").value()     = std::any(type);
+                args.at("b-type").value()     = std::any(type);
+                args.at("c-type").value()     = std::any(type);
+                args.at("d-type").value()     = std::any(type);
+                args.at("alpha-type").value() = std::any(type);
+                args.at("beta-type").value()  = std::any(type);
             }
         }
 
@@ -586,6 +893,12 @@ namespace TensileLite
                 }
             }
 
+#if !(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
+            if(args["rocprof-counter"].as<std::vector<std::string>>().size())
+            {
+                throw std::runtime_error("rocprof-counter is provided but client is not built with -DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK.");
+            }
+#endif
             fix_data_types(args);
 
             parse_arg_ints(args, "problem-size");
@@ -596,6 +909,8 @@ namespace TensileLite
             parse_arg_ints(args, "e-strides");
             parse_arg_ints(args, "bias-strides");
             parse_bias_type_args(args, "bias-type-args");
+            parse_arg_ints(args, "gate-strides");
+            parse_bias_type_args(args, "gate-type-args");
             parse_activation_int(args, "activation-type");
             parse_activation_enum_args(args, "activation-enum-args");
             parse_arg_double(args, "activation-additional-args");
@@ -604,6 +919,119 @@ namespace TensileLite
             parse_arg_ints_map(args, "prob-sol-map");
             return args;
         }
+
+#if defined(__linux__)
+        // Parse the AMDGPU ELF code object at `coPath` and return the smallest
+        // distance (in bytes) from any FUNC/GLOBAL kernel-entry symbol to its
+        // corresponding `label_GW_End` LOCAL symbol. This is a Tensile-specific
+        // proxy for "I-cache hot-path size of the smallest kernel": label_GW_End
+        // marks the first global-write-epilogue exit, which roughly bounds the
+        // code that a launch executes through during the main compute path.
+        //
+        // Returns 0 when the file can't be opened, isn't ELF64, parsing fails,
+        // or no FUNC+GLOBAL / label_GW_End symbol pairing is found.
+        //
+        // Linux-only (uses <elf.h>). Non-Linux build paths use the raw
+        // --icache-rotate-size value instead.
+        std::uintmax_t getMinKernelSizeToGwEnd(std::string const& coPath)
+        {
+            std::ifstream f(coPath, std::ios::binary);
+            if(!f)
+                return 0;
+
+            Elf64_Ehdr eh{};
+            f.read(reinterpret_cast<char*>(&eh), sizeof(eh));
+            if(!f
+               || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
+               || eh.e_ident[EI_CLASS] != ELFCLASS64)
+                return 0;
+
+            // Read all section headers.
+            std::vector<Elf64_Shdr> shdrs(eh.e_shnum);
+            f.seekg(eh.e_shoff);
+            f.read(reinterpret_cast<char*>(shdrs.data()),
+                   static_cast<std::streamsize>(eh.e_shnum * sizeof(Elf64_Shdr)));
+            if(!f)
+                return 0;
+
+            // Find .symtab and its linked string table (sh_link).
+            Elf64_Shdr const* symSh = nullptr;
+            for(auto const& sh : shdrs)
+                if(sh.sh_type == SHT_SYMTAB)
+                {
+                    symSh = &sh;
+                    break;
+                }
+            if(!symSh
+               || symSh->sh_link >= shdrs.size()
+               || symSh->sh_size == 0
+               || symSh->sh_size % sizeof(Elf64_Sym) != 0)
+                return 0;
+
+            auto const& strSh = shdrs[symSh->sh_link];
+
+            // Read string table.
+            std::vector<char> strs(strSh.sh_size);
+            f.seekg(strSh.sh_offset);
+            f.read(strs.data(), static_cast<std::streamsize>(strSh.sh_size));
+            if(!f)
+                return 0;
+
+            // Read symbol table.
+            auto const             symCount = symSh->sh_size / sizeof(Elf64_Sym);
+            std::vector<Elf64_Sym> syms(symCount);
+            f.seekg(symSh->sh_offset);
+            f.read(reinterpret_cast<char*>(syms.data()),
+                   static_cast<std::streamsize>(symSh->sh_size));
+            if(!f)
+                return 0;
+
+            // Collect kernel entry addresses (FUNC + GLOBAL) and label_GW_End
+            // addresses (we match by name; some toolchains emit different binds).
+            std::vector<std::uint64_t> kernelStarts;
+            std::vector<std::uint64_t> gwEndAddrs;
+            for(auto const& s : syms)
+            {
+                if(s.st_name >= strs.size())
+                    continue;
+                char const*   name = &strs[s.st_name];
+                unsigned char type = ELF64_ST_TYPE(s.st_info);
+                unsigned char bind = ELF64_ST_BIND(s.st_info);
+
+                if(type == STT_FUNC && bind == STB_GLOBAL)
+                    kernelStarts.push_back(s.st_value);
+                else if(std::strcmp(name, "label_GW_End") == 0)
+                    gwEndAddrs.push_back(s.st_value);
+            }
+
+            if(kernelStarts.empty() || gwEndAddrs.empty())
+                return 0;
+
+            std::sort(kernelStarts.begin(), kernelStarts.end());
+
+            // For each label_GW_End, the owning kernel is the one with the
+            // largest start address <= this end address.
+            std::uintmax_t minSize = std::numeric_limits<std::uintmax_t>::max();
+            for(auto end : gwEndAddrs)
+            {
+                auto it = std::upper_bound(kernelStarts.begin(),
+                                           kernelStarts.end(),
+                                           end);
+                if(it == kernelStarts.begin())
+                    continue;
+                std::uint64_t start = *(it - 1);
+                if(end <= start)
+                    continue;
+                auto sz = static_cast<std::uintmax_t>(end - start);
+                if(sz < minSize)
+                    minSize = sz;
+            }
+
+            return (minSize == std::numeric_limits<std::uintmax_t>::max())
+                       ? std::uintmax_t{0}
+                       : minSize;
+        }
+#endif // defined(__linux__)
 
     } // namespace Client
 } // namespace TensileLite
@@ -629,8 +1057,16 @@ int main(int argc, const char* argv[])
 
     ClientProblemFactory problemFactory(args);
 
-    auto        hardware = GetHardware(args);
-    hipStream_t stream   = GetStream(args);
+    initTimingBuffer();
+    calibrateTimingOverhead();
+
+    std::shared_ptr<Hardware> hardware;
+    hipStream_t              stream;
+    {
+        ScopedTimer timer("hip_initialization");
+        hardware = GetHardware(args);
+        stream   = GetStream(args);
+    }
 
     std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library;
     {
@@ -641,10 +1077,36 @@ int main(int argc, const char* argv[])
     }
 
     TensileLite::hip::SolutionAdapter adapter;
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+    RocProfiler::getInstance().start();
+#endif
     {
         ScopedTimer timer("code_object_loading");
         LoadCodeObjects(args, adapter);
     }
+
+    // I-cache rotation: load N extra independent hipModule_t copies of every
+    // --code-object so each launch can use a different copy (different device PC).
+    // --icache-rotate-copies=0 (default) = no extra copies, no rotation.
+    // --icache-rotate-copies=N (N>0)     = load N extras (total = N+1 modules).
+    {
+        int icacheRotateCopies = args["icache-rotate-copies"].as<int>();
+        if(icacheRotateCopies > 0)
+        {
+            ScopedTimer timer("icache_rotate_extra_copies_loading");
+            auto const& filenames = args["code-object"].as<std::vector<std::string>>();
+            for(auto const& filename : filenames)
+                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(filename,
+                                                                    icacheRotateCopies));
+            std::cout << "Loaded " << icacheRotateCopies
+                      << " extra rotation copies of each --code-object for I-cache test"
+                      << " (total = " << (icacheRotateCopies + 1) << " modules)"
+                      << std::endl;
+        }
+    }
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+    RocProfiler::getInstance().stop();
+#endif
 
     auto filename = args["library-file"].as<std::string>();
 
@@ -672,8 +1134,6 @@ int main(int argc, const char* argv[])
         numProblems = problems.size();
     int lastProblemIdx = firstProblemIdx + numProblems - 1;
 
-    int         firstSolutionIdx = args["solution-start-idx"].as<int>();
-    int         numSolutions     = args["num-solutions"].as<int>();
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
@@ -688,22 +1148,19 @@ int main(int argc, const char* argv[])
         exit(1);
     }
 
-    if(firstSolutionIdx < 0)
-        firstSolutionIdx = library->solutions.begin()->first;
-
-    if(numSolutions < 0)
-    {
-        auto iter = library->solutions.end();
-        iter--;
-    }
-
     std::shared_ptr<DataInitialization> dataInit;
     {
+        // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
+        srand(seed);
         ScopedTimer timer("data_init_setup");
         dataInit = std::make_shared<DataInitialization>(args, problemFactory);
     }
 
-    auto solutionIterator = SolutionIterator::Default(library, hardware, args);
+    std::shared_ptr<SolutionIterator> solutionIterator;
+    {
+        ScopedTimer timer("solution_iterator_setup");
+        solutionIterator = SolutionIterator::Default(library, hardware, args);
+    }
 
     MetaRunListener listeners;
     std::shared_ptr<BenchmarkTimer> benchmarkTimer;
@@ -724,6 +1181,10 @@ int main(int argc, const char* argv[])
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);
             listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+            if (!args["rocprof-counter"].as<std::vector<std::string>>().empty())
+                listeners.addListener(Profiler::Default(args));
+#endif
         }
     }
 
@@ -775,6 +1236,10 @@ int main(int argc, const char* argv[])
         {
             benchmarkTimer->setIFlushTimeUs(icacheFlush ? flushTimeMs * 1000 : 0.f);
 
+            // I-cache rotation counter: rotationLaunchIdx
+            // for scope across all problem / iterations, accumulate continuously
+            // to avoid starting from copy 0 for each problem
+            size_t rotationLaunchIdx = 0;
             for(int problemIdx = firstProblemIdx; problemIdx <= lastProblemIdx; problemIdx++)
             {
                 auto problem = problems[problemIdx].get();
@@ -782,6 +1247,20 @@ int main(int argc, const char* argv[])
                 reporters->report(ResultKey::ProblemIndex, problemIdx);
                 reporters->report(ResultKey::ProblemProgress,
                                   concatenate(problemIdx, "/", lastProblemIdx));
+
+                // Self-contained setup+launch across W devices; skips the
+                // single-GPU path below.
+                if(args["fused-gemm-a2a"].as<bool>())
+                {
+                    int rc = runFusedA2A(
+                        args, library, hardware, problem, problemIdx - firstProblemIdx);
+                    if(rc != 0)
+                    {
+                        flushTimingBuffer();
+                        return rc;
+                    }
+                    continue;
+                }
 
                 {
                     ScopedTimer timer("pre_problem");
@@ -796,7 +1275,7 @@ int main(int argc, const char* argv[])
                 size_t warmupInvocations    = listeners.numWarmupRuns();
                 size_t syncs                = listeners.numSyncs();
                 size_t enq                  = listeners.numEnqueuesPerSync();
-                size_t maxRotatingBufferNum = max(warmupInvocations, syncs * enq);
+                size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
 
                 std::vector<std::shared_ptr<ProblemInputs>> inputArr;
                 {
@@ -805,7 +1284,101 @@ int main(int argc, const char* argv[])
                         maxRotatingBufferNum, problem, inputs, stream);
                     static_cast<void>(hipDeviceSynchronize());
                 }
-                bool resetInput = false;
+
+                // I-cache rotation auto-load: when --icache-rotate-copies=-1,
+                // pick the larger of two extra-copy counts:
+                //   1) inputArr.size() - 1
+                //      Aligns the code rotation cycle with DataInit's actual
+                //      data buffer rotation cycle (inputArr.size() = 1 original
+                //      + rotatingNum extras).
+                //   2) Cache-overflow term targeting ~128KB of L1 I-cache.
+                //      On Linux: parse each .co's ELF symbol table to find the
+                //      smallest kernel hot-path size K (kernel_start ->
+                //      label_GW_End), then load (128KB / K) - 1 extras so the
+                //      total rotated code (~128KB) overflows typical L1 I-cache.
+                //      On non-Linux: <elf.h> is unavailable; fall back to
+                //      args["icache-rotate-size"] as the raw extras count.
+                // Use adapter.numRotationModules()==1 as the "not yet loaded"
+                // guard so the load only fires on the first problem; subsequent
+                // problems reuse the same N.
+                {
+                    int icacheArg = args["icache-rotate-copies"].as<int>();
+                    if(icacheArg == -1 && adapter.numRotationModules() == 1)
+                    {
+                        auto const& filenames
+                            = args["code-object"].as<std::vector<std::string>>();
+
+                        // Term 1: align with data rotation cycle.
+                        int extrasFromDataInit = static_cast<int>(inputArr.size()) - 1;
+
+                        // Term 2: cache-overflow term.
+#if defined(__linux__)
+                        // K = min(kernel_start -> label_GW_End) across all .co.
+                        std::uintmax_t K = 0;
+                        for(auto const& filename : filenames)
+                        {
+                            std::uintmax_t sz = getMinKernelSizeToGwEnd(filename);
+                            if(sz > 0 && (K == 0 || sz < K))
+                                K = sz;
+                        }
+                        // kCacheBudgetBytes = icache-rotate-size * 2 * 1024.
+                        // Default icache-rotate-size=64 -> 128 KB
+                        // Loosely targets ~2x typical L1 I-cache.
+                        int rotateSizeKB = args["icache-rotate-size"].as<int>();
+                        if(rotateSizeKB < 0)
+                            rotateSizeKB = 0;
+                        std::uintmax_t kCacheBudgetBytes = std::uintmax_t(rotateSizeKB) * 2 * 1024;
+                        int extrasFromCache = 0;
+                        if(K == 0)
+                        {
+                            std::cerr << "[icache-rotate] warning: no label_GW_End "
+                                    << "found in any --code-object; cache-based "
+                                    << "term contributes 0" << std::endl;
+                        }
+                        else if(kCacheBudgetBytes > K)
+                        {
+                            extrasFromCache = static_cast<int>(kCacheBudgetBytes / K - 1);
+                        }
+#else
+                        // <elf.h> unavailable on this platform; use the raw
+                        // --icache-rotate-size value as the extras count.
+                        int extrasFromCache
+                            = static_cast<int>(args["icache-rotate-size"].as<int>());
+#endif
+
+                        int extras = std::max(extrasFromDataInit, extrasFromCache);
+                        if(extras > 0)
+                        {
+                            ScopedTimer timer("icache_rotate_extra_copies_loading");
+                            for(auto const& filename : filenames)
+                                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(
+                                    filename, extras));
+                        }
+#if defined(__linux__)
+                        std::cout << "[icache-rotate] auto extras = max("
+                                  << extrasFromDataInit << " from inputArr.size()-1, "
+                                  << extrasFromCache << " from "
+                                  << kCacheBudgetBytes << "/" << K << ") = "
+                                  << extras
+                                  << " (total = " << (extras + 1) << " modules)"
+                                  << std::endl;
+#else
+                        std::cout << "[icache-rotate] auto extras = max("
+                                  << extrasFromDataInit << " from inputArr.size()-1, "
+                                  << extrasFromCache << " from --icache-rotate-size) = "
+                                  << extras
+                                  << " (total = " << (extras + 1) << " modules)"
+                                  << std::endl;
+#endif
+                    }
+                }
+
+                // The first per-solution iteration must re-upload inputs so that
+                // the upload happens after preSolution() and can read the picked
+                // solution's problemType.mxScaleFormat to pick the correct host
+                // upload layout for MX scale tensors. The extra upload is a no-op
+                // cost on non-MX problems.
+                bool resetInput = true;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
                     std::shared_ptr<ContractionSolution> solution;
@@ -828,6 +1401,7 @@ int main(int argc, const char* argv[])
                             {
                                 if(resetInput)
                                 {
+                                    ScopedTimer timer("gpu_input_reset");
                                     auto inputs = dataInit->prepareGPUInputs(problem);
                                     inputArr[0] = inputs;
                                 }
@@ -862,23 +1436,58 @@ int main(int argc, const char* argv[])
                                 TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
 
+                                // I-cache rotation counter: increments per launchKernels call
+                                // and selects which hipModule_t copy services the next launch.
+                                // numRotationModules()==1 → no rotation (always copy 0).
+                                int  nRotationModules = adapter.numRotationModules();
+                                auto rotateAndSelect  = [&]() {
+                                    adapter.selectRotationCopy(
+                                        (int)(rotationLaunchIdx++ % (size_t)nRotationModules));
+                                };
+
+                                if(warmupInvocations > 0)
                                 {
-                                    ScopedTimer timer("warmup_runs");
-                                    listeners.preWarmup();
-                                    for(int i = 0; i < warmupInvocations; i++)
                                     {
-                                        size_t kIdx = i % kernels.size();
-                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
+                                        ScopedTimer timer("warmup_runs");
+                                        listeners.preWarmup();
+                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[0],
                                                                             stream,
-                                                                            warmupStartEvents[i],
-                                                                            warmupStopEvents[i]));
-                                        // Do validation after first warmup
-                                        if(i == 0)
-                                            listeners.validateWarmups(
-                                                inputs, warmupStartEvents, warmupStopEvents);
+                                                                            warmupStartEvents[0],
+                                                                            warmupStopEvents[0]));
                                     }
-                                    listeners.postWarmup(warmupStartEvents, warmupStopEvents, stream);
+
+                                    {
+                                        ScopedTimer timer("validate_warmups");
+                                        listeners.validateWarmups(
+                                            inputs, warmupStartEvents, warmupStopEvents);
+                                    }
+
+                                    {
+                                        ScopedTimer timer("warmup_runs");
+                                        for(int i = 1; i < warmupInvocations; i++)
+                                        {
+                                            size_t kIdx = i % kernels.size();
+                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
+                                                                                stream,
+                                                                                warmupStartEvents[i],
+                                                                                warmupStopEvents[i]));
+                                        }
+                                        listeners.postWarmup(
+                                            warmupStartEvents, warmupStopEvents, stream);
+                                    }
                                 }
+
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+                                TimingEvents ProfilerStartEvents(1, warmupEventCount);
+                                TimingEvents ProfilerStopEvents(1, warmupEventCount);
+                                listeners.preProfiler();
+                                rotateAndSelect();
+                                HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
+                                                                    stream,
+                                                                    ProfilerStartEvents[0],
+                                                                    ProfilerStopEvents[0]));
+                                listeners.postProfiler();
+#endif
 
                                 size_t syncs      = listeners.numSyncs();
                                 size_t enq        = listeners.numEnqueuesPerSync();
@@ -893,22 +1502,26 @@ int main(int argc, const char* argv[])
                                             TimingEvents startEvents(enq, eventCount);
                                             TimingEvents stopEvents(enq, eventCount);
 
-                                            listeners.preEnqueues(stream);
-
-                                            for(int j = 0; j < enq; j++)
                                             {
-                                                size_t kIdx = ((i * enq) + j) % kernels.size();
-                                                HIP_CHECK_EXC(adapter.launchKernels(
-                                                    kernels[kIdx], stream, nullptr, nullptr));
+                                                ScopedTimer kernelTimer("gpu_kernel_execution");
+                                                listeners.preEnqueues(stream);
 
-                                                if(icacheFlush)
+                                                for(int j = 0; j < enq; j++)
                                                 {
-                                                    hipLaunchKernelGGL(
-                                                        flush_icache, flushGridSize, 64, 0, stream);
-                                                }
-                                            }
+                                                    size_t kIdx = ((i * enq) + j) % kernels.size();
+                                                    rotateAndSelect();
+                                                    HIP_CHECK_EXC(adapter.launchKernels(
+                                                        kernels[kIdx], stream, nullptr, nullptr));
 
-                                            listeners.postEnqueues(startEvents, stopEvents, stream);
+                                                    if(icacheFlush)
+                                                    {
+                                                        hipLaunchKernelGGL(
+                                                            flush_icache, flushGridSize, 64, 0, stream);
+                                                    }
+                                                }
+
+                                                listeners.postEnqueues(startEvents, stopEvents, stream);
+                                            }
                                             listeners.validateEnqueues(inputs, startEvents, stopEvents);
                                         }
 
@@ -936,6 +1549,7 @@ int main(int argc, const char* argv[])
 
                     if(exitOnError && listeners.error() > 0)
                     {
+                        flushTimingBuffer();
                         // error range in shell is [0-255]
                         return std::min(listeners.error(), 255);
                     }
@@ -954,6 +1568,18 @@ int main(int argc, const char* argv[])
     {
         ScopedTimer timer("finalize_report");
         listeners.finalizeReport();
+    }
+
+    // Flush all buffered timing records to stderr.
+    // Timed with raw chrono instead of ScopedTimer because ScopedTimer pushes
+    // its record into the buffer on destruction — after flushTimingBuffer()
+    // has already drained and cleared it, so the record would be lost.
+    {
+        auto flushStart = TimingClock::now();
+        flushTimingBuffer();
+        auto flushMs = std::chrono::duration<double, std::milli>(
+            TimingClock::now() - flushStart).count();
+        std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
     }
 
     // error range in shell is [0-255]

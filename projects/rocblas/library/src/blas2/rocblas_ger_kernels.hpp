@@ -69,19 +69,13 @@ rocblas_ger_kernel(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const T* __restrict__ x = load_ptr_batch(xa, batch, shiftx, stridex);
@@ -114,9 +108,7 @@ rocblas_ger_kernel(rocblas_int    m,
                         += x_value * (CONJ ? conj(ydata[tyi + i]) : ydata[tyi + i]);
             }
         }
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //optimized kernel for SGER for gfx942
@@ -140,7 +132,7 @@ rocblas_sger_gfx942_kernel(rocblas_int    m,
                            rocblas_stride strideA)
 {
 // gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx942__)
 
     rocblas_int tx  = (blockIdx.x * DIM_X + threadIdx.x) * 2;
     rocblas_int col = blockIdx.y;
@@ -210,20 +202,14 @@ rocblas_sger_kernel(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const T* __restrict__ x = load_ptr_batch(xa, batch, shiftx, stridex);
@@ -246,9 +232,7 @@ rocblas_sger_kernel(rocblas_int    m,
         {
             A[i] += res_y * x[(tx + i) * int64_t(incx)];
         }
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //optimized double buffered load kernel for GER
@@ -291,10 +275,8 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha              = host_ptr_mode ? alpha_device_host.value
                                                 : load_scalar(alpha_device_host.ptr, batch, stride_alpha);
@@ -305,11 +287,7 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
 
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         T x_reg_upper                     = 0.0;
@@ -365,10 +343,7 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
 #pragma unroll
         for(int k = 0; k < elements_per_thread; k++)
             A[(DIM_X / 2) + j + k * size_t(lda)] = areg_lower[k];
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool CONJ, typename T, typename U, typename V, typename W>

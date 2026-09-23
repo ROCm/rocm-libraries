@@ -181,6 +181,22 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 // Function which matches Arguments with a category, accounting for arg.known_bug_platforms
 bool match_test_category(const Arguments& arg, const char* category);
 
+// Skip the current TEST_P body when the parameter has been flagged as a known bug
+// for this GPU platform. Used as the first statement in TEST_P bodies. The category
+// field is set to "known_bug" either at gentest time (unconditional matches in
+// known_bugs.yaml) or at registration time by match_test_category() when the current
+// GPU arch matches an entry's known_bug_platforms list.
+#define SKIP_IF_KNOWN_BUG_FOR_PLATFORM()                                            \
+    do                                                                              \
+    {                                                                               \
+        const auto& _kb_arg = GetParam();                                           \
+        if(!strcmp(_kb_arg.category, "known_bug"))                                  \
+        {                                                                           \
+            GTEST_SKIP() << KNOWN_BUG_STRING                                        \
+                         << " (platforms=" << _kb_arg.known_bug_platforms << ")";   \
+        }                                                                           \
+    } while(0)
+
 // The tests are instantiated by filtering through the RocBlasLt_Data stream
 // The filter is by category and by the type_filter() and function_filter()
 // functions in the testclass
@@ -264,7 +280,7 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
             {                                                                                \
                 int flag = 0;                                                                \
                 CHECK_HIP_ERROR(hipDeviceGetAttribute(                                       \
-                    &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), devices)); \
+                    &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), i)); \
                 if(!flag)                                                                    \
                 {                                                                            \
                     SUCCEED() << HMM_NOT_SUPPORTED;                                          \

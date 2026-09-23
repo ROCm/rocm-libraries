@@ -12,7 +12,7 @@ The hipBLASLt source code resides in the following two directories:
 
 *  The ``library`` directory contains all source code for the library.
 *  The ``clients`` directory contains all test code and the code to build the clients.
-
+  
 The library directory
 -----------------------
 
@@ -30,6 +30,11 @@ Here are the subdirectories within the ``library`` directory:
 *  ``library/src/include``
 
    Contains internal include files for converting C++ exceptions to hipBLAS statuses.
+   
+.. note::
+   
+   For important information about handle management, see the API reference information for the
+   :ref:`hipblaslthandle_t structure <hipblaslthandle_t_desc>`.
 
 The clients directory
 -----------------------

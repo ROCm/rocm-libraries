@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ rocsparse_status rocsparse::csr2ell_width_quickreturn(rocsparse_handle          
     {
         if(handle->pointer_mode == rocsparse_pointer_mode_device)
         {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(ell_width, 0, sizeof(J), stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(ell_width, 0, sizeof(J), stream));
         }
         else
         {
@@ -151,13 +151,13 @@ rocsparse_status rocsparse::csr2ell_width_core(rocsparse_handle          handle,
     // Copy ELL width back to host, if handle says so
     if(handle->pointer_mode == rocsparse_pointer_mode_device)
     {
-        RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(ell_width, workspace, sizeof(J), hipMemcpyDeviceToDevice, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            ell_width, workspace, sizeof(J), hipMemcpyDeviceToDevice, stream));
     }
     else
     {
-        RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(ell_width, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            ell_width, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
     }
 
     return rocsparse_status_success;

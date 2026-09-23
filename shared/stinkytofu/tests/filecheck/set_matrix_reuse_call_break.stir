@@ -1,0 +1,19 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --SetMatrixReusePass --print-output
+#
+# SetMatrixReusePass may keep reuse across ordinary non-matrix instructions, but
+# a function call runs arbitrary callee code and must break the reuse chain. The
+# first WMMA below would otherwise claim reuse from the matching post-call WMMA.
+
+# CHECK-LABEL: @call_breaks_matrix_reuse
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = false }
+# CHECK: s_swappc_b64
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: mod.mfma = { reuseA = false, reuseB = false }
+
+st.func @call_breaks_matrix_reuse() {
+^entry:
+  a[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = true, reuseB = true } }
+  s[26:27] = "st.s_swappc_b64"(s[12:13]) { issueCycles = 1, latencyCycles = 2 }
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[32:39]) { mod.mfma = { reuseA = true, reuseB = true } }
+}

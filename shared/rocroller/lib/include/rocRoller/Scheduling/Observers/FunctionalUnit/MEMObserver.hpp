@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -31,6 +8,7 @@
 #include <vector>
 
 #include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>
+#include <rocRoller/Scheduling/LDSModel.hpp>
 #include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
@@ -52,11 +30,6 @@ namespace rocRoller
             void modify(Instruction& inst) const;
 
             void observe(Instruction const& inst);
-
-            constexpr static bool required(GPUArchitectureTarget const& target)
-            {
-                return true;
-            }
 
             static Scheduling::Weights getWeights(ContextPtr ctx);
 
@@ -94,6 +67,11 @@ namespace rocRoller
 
             bool isMEMInstruction(Instruction const& inst) const override;
             int  getWait(Instruction const& inst) const override;
+
+            constexpr static bool required(GPUArchitectureTarget const& target)
+            {
+                return true;
+            }
         };
 
         class DSMEMObserver : public MEMObserver<DSMEMObserver>
@@ -103,6 +81,8 @@ namespace rocRoller
 
             bool isMEMInstruction(Instruction const& inst) const override;
             int  getWait(Instruction const& inst) const override;
+
+            static bool runtimeRequired(ContextPtr const& ctx);
         };
 
         template <typename Derived>
@@ -110,8 +90,26 @@ namespace rocRoller
         {
         }
 
+        struct WeightlessDSMemObserver
+        {
+            WeightlessDSMemObserver(ContextPtr ctx);
+
+            InstructionStatus peek(Instruction const& inst) const;
+
+            void modify(Instruction& inst) const;
+
+            void observe(Instruction const& inst);
+
+            static bool runtimeRequired(ContextPtr const& ctx);
+
+        private:
+            std::weak_ptr<Context>                     m_context;
+            mutable std::optional<LDSModel::LDSModule> m_scheduler;
+        };
+
         static_assert(CObserverConst<VMEMObserver>);
-        static_assert(CObserverConst<DSMEMObserver>);
+        static_assert(CObserverRuntimeWithContext<DSMEMObserver>);
+        static_assert(CObserverRuntimeWithContext<WeightlessDSMemObserver>);
     }
 }
 

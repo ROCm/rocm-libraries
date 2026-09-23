@@ -111,29 +111,131 @@ cmake -B build -S .                                  \
 cmake --build build --parallel
 ```
 
-#### Using the installation script
+#### Using invoke
 
-Refer to the available build options using `./install.sh --help`:
+hipBLASLt provides an [invoke](https://www.pyinvoke.org/) task runner as an alternative to the
+installation script.
+
+**1. Create a virtual environment and install Python dependencies**
 
 ```bash
-# Command line options:
-#   -h|--help         - prints help message
-#   -i|--install      - install after build
-#   -d|--dependencies - install build dependencies
-#   -c|--clients      - build library clients too (combines with -i & -d)
-#   -g|--debug        - build with debug flag
-./install.sh -idc
-# build for gfx950 only without installation
-./install.sh -c -a gfx950
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**2. Build with invoke**
+
+```bash
+# basic release build
+inv build --architecture gfx950
+
+# build with clients
+inv build --architecture gfx950 --clients
+
+# clients with an explicit Fortran compiler (default: ROCm flang if present, else detected gfortran)
+inv build --architecture gfx950 --clients --fortran-compiler gfortran
+
+# install system dependencies, build with clients, and install the package
+inv build --install-deps --clients --install-pkg --architecture gfx950
+
+# debug build
+inv build --debug --architecture gfx950
+
+# incremental rebuild (reuses CMake and FetchContent cache)
+inv build --architecture gfx950
+
+# full clean rebuild
+inv build --architecture gfx950 --clean
+
+# see all options
+inv --help build
 ```
 
 > [!NOTE]
-> To build hipBLASLt for ROCm <= 6.2, pass the `--legacy_hipblas_direct` flag to `install.sh`.
+> `inv build --clients` requires a Fortran compiler (LAPACK). Selection order:
+> `--fortran-compiler` (path or name), then `FC`, then `CMAKE_Fortran_COMPILER`,
+> then ROCm flang from `--rocm-path` / `ROCM_PATH` / `/opt/rocm`
+> (`llvm/bin/flang`, `bin/amdflang`, `bin/flang`, then `flang` on `PATH`),
+> then `gfortran` on `PATH`. Invoke exits if none of those are found.
+> Without `--clients`, Fortran is not enabled.
+
+> [!NOTE]
+> To build hipBLASLt for ROCm <= 6.2, pass `--legacy-hipblas-direct` to `inv build`.
+
+#### Building on Windows
+
+The invoke task runner supports Windows. The following prerequisites and configuration steps are required before running `inv build`.
+
+**Prerequisites**
+
+1. **Enable long path support** (required — deep source trees exceed the default 260-character limit):
+
+   ```bat
+   reg add HKLM\SYSTEM\CurrentControlSet\Control\FileSystem /v LongPathsEnabled /t REG_DWORD /d 1 /f
+   ```
+
+   This requires administrator privileges. Alternatively, enable it via Group Policy:
+   *Local Computer Policy → Computer Configuration → Administrative Templates → System → Filesystem → Enable Win32 long paths*.
+
+2. **Install Git for Windows** and configure it for long paths and symlinks:
+
+   ```bat
+   git config --global core.longpaths true
+   git config --global core.symlinks true
+   ```
+
+   > [!NOTE]
+   > Symlink creation on Windows requires either Developer Mode (Settings → Developer Mode) or running as administrator.
+
+3. **Install Visual Studio 2022 Build Tools** with the C++ and Windows SDK components:
+
+   ```bat
+   winget install --id Microsoft.VisualStudio.2022.BuildTools --source winget --override "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
+   ```
+
+4. **Install Python 3.8+** from [python.org](https://www.python.org/downloads/windows/) or the Microsoft Store.
+
+   > [!NOTE]
+   > `inv build` uses NMake as the CMake generator. If you want to use Ninja instead, you **must not** install Python from the Microsoft Store — its install path contains spaces, which breaks Ninja's response file quoting for `clang -isystem` includes. Install Python from [python.org](https://www.python.org/downloads/windows/) if Ninja is required.
+
+5. **Set the console locale to UTF-8** before starting (recommended, to avoid encoding errors in tool output):
+
+   ```bat
+   chcp 65001
+   ```
+
+   > [!NOTE]
+   > `inv build` does not modify the console code page. Set it in your shell before invoking the build.
+
+6. **Install the ROCm Windows SDK** via pip:
+
+   ```bat
+   pip install rocm-sdk
+   rocm-sdk init
+   ```
+
+**Build**
+
+```bat
+# Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Build (incremental — reuses CMake/FetchContent cache on subsequent runs)
+inv build --architecture gfx1100
+
+# Full clean rebuild
+inv build --architecture gfx1100 --clean
+```
 
 ### Options
 
 > [!NOTE]
-> When using the install script these variables are either hardcoded or set via its command line options.
+> When using invoke these variables are either hardcoded or set via its command line options.
 
 *CMake options*:
 * `CMAKE_BUILD_TYPE`: Any of Release, Debug, RelWithDebInfo, MinSizeRel
@@ -144,8 +246,7 @@ Refer to the available build options using `./install.sh --help`:
 
 * `HIPBLASLT_ENABLE_BLIS`: Enable BLIS support (default `ON`)
 * `HIPBLASLT_ENABLE_HIP`: Use the HIP runtime (default `ON`)
-* `HIPBLASLT_ENABLE_LLVM`: Use msgpack for parsing configuration files (default `OFF`)
-* `HIPBLASLT_ENABLE_MSGPACK` Use msgpack for parsing configuration files (default `ON`)
+* `HIPBLASLT_ENABLE_YAML`: Use YAML for serializing and parsing configuration files; if `OFF` msgpack will be used (default `OFF`)
 * `HIPBLASLT_ENABLE_OPENMP`: "Use OpenMP to improve performance (default `ON`)
 * `HIPBLASLT_ENABLE_ROCROLLER:` Use RocRoller library (default `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
@@ -170,13 +271,13 @@ Refer to the available build options using `./install.sh --help`:
 
 * `TENSILELITE_BUILD_PARALLEL_LEVEL` Number of CPU cores to use for building device libraries (will use nproc if unset)
 * `TENSILELITE_KEEP_BUILD_TMP` OFF CACHE STRING Keep temporary build directory for device libraries (default: see below)
-* `TENSILELITE_LIBRARY_FORMAT` Format of master solution library files (msgpack or yaml) (default: see below)
 * `TENSILELITE_ASM_DEBUG` Keep debug information for built code objects (default: see below)
 * `TENSILELITE_LOGIC_FILTER` Cutomsized logic filter, default is *, i.e. all logics (default: see below)
 * `TENSILELITE_NO_COMPRESS` Do not compress device code object files (default: see below)
 * `TENSILELITE_EXPERIMENTAL` Process experimental logic files (default: see below)
 * `HIPBLASLT_LIBLOGIC_PATH` Path to library logic files (will use 'library' if unset) (default: `Off`)
 * `HIPBLASLT_TENSILE_LIBPATH` Path to output the device gemm libraries (default: `build/Tensile`)
+* `HIPBLASLT_ASIC_REVISION` gfx1250 ASIC revision to build for, `v0` or `v1`; `invoke build` probes the local GPU and sets it when unset (default: empty, treated as `v1`)
 
 > [!NOTE]
 > To determine defaults for the `TensileCreateLibrary` command generated when building the device
@@ -194,6 +295,10 @@ You can find more information at the following links:
 
 * [hipblaslt-test](clients/gtest/README.md)
 * [hipblaslt-bench](clients/benchmarks/README.md)
+
+For the full testing strategy (what gates a pull request, what does not, and why), see
+[TESTING.md](TESTING.md); TensileLite's own testing strategy is documented separately in
+[tensilelite/TESTING.md](tensilelite/TESTING.md).
 
 ## Documentation
 

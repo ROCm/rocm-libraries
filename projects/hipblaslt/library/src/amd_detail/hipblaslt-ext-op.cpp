@@ -39,6 +39,7 @@
 #include <memory>
 #include <optional>
 #include <rocblaslt-auxiliary.h>
+#include <rocblaslt_secure_env.hpp>
 #include <sstream>
 #include <string>
 #include <tensile_host.hpp>
@@ -113,8 +114,6 @@ hipblasStatus_t hipblasltExtAMax(const hipDataType datatype,
 
 namespace
 {
-    constexpr char DEFAULT_EXT_OP_LIBRARY_PATH[]
-        = "/opt/rocm/lib/hipblaslt/library/hipblasltExtOpLibrary.dat";
     constexpr uint32_t SUPPORTED_MAX_N = 256;
     constexpr uint32_t WORKGROUP_SIZE  = 256;
 
@@ -130,19 +129,67 @@ namespace
         return archName;
     }
 
+    // Strict per-base layout: every ExtOp .dat lives at
+    //   <library_root>/<base-arch>/hipblasltExtOpLibrary_<base-arch>.dat
+    // The HIPBLASLT_EXT_OP_LIBRARY_PATH env override is still honored verbatim
+    // for explicit user-supplied paths. There is no flat fallback and no
+    // hard-coded /opt/rocm path — a missing file logs an error and yields an
+    // empty path, which surfaces as a clean ExtOpMasterLibrary load failure.
     std::string getExtOpLibraryPath()
     {
-        if(auto libPath = std::getenv("HIPBLASLT_EXT_OP_LIBRARY_PATH"))
+        // ROCM-26729 / SEC-00896: honor the override only for a non-privileged
+        // process so a process in a secure execution context cannot be
+        // redirected to an attacker-controlled ExtOp library via inherited
+        // environment. Probe the privilege state once and reuse it for both the
+        // lookup and the suppression diagnostic.
+        const bool is_privileged = rocblaslt_process_is_privileged();
+
+        if(auto libPath
+           = rocblaslt_secure_getenv_impl("HIPBLASLT_EXT_OP_LIBRARY_PATH", is_privileged))
         {
             return libPath;
         }
 
-        auto path = rocblaslt_find_library_relative_path(
-            std::filesystem::path("hipblasltExtOpLibrary.dat"));
-        if(path)
-            return path->string();
+        if(rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_EXT_OP_LIBRARY_PATH",
+                                                      is_privileged))
+        {
+            rocblaslt_log_error("getExtOpLibraryPath",
+                                "HIPBLASLT_EXT_OP_LIBRARY_PATH",
+                                "ignoring env override because the process is running in a "
+                                "secure execution context (set-uid/set-gid or another "
+                                "credential-changing exec, such as file capabilities); using "
+                                "the default per-arch library location");
+        }
 
-        return DEFAULT_EXT_OP_LIBRARY_PATH;
+        int              deviceId{};
+        hipDeviceProp_t  props{};
+        if(hipGetDevice(&deviceId) != hipSuccess
+           || hipGetDeviceProperties(&props, deviceId) != hipSuccess)
+        {
+            rocblaslt_log_error("getExtOpLibraryPath",
+                                "hipGetDevice/hipGetDeviceProperties",
+                                "failed to query device for ExtOp arch lookup");
+            return {};
+        }
+
+        const std::string archName = trimArchName(props.gcnArchName);
+        auto              basename = "hipblasltExtOpLibrary_" + archName;
+        auto              relpath  = std::filesystem::path(archName) / (basename + ".dat");
+        if(auto perArchPath = rocblaslt_find_library_relative_path(relpath))
+            return perArchPath->string();
+
+        auto relpath_gz = std::filesystem::path(archName) / (basename + ".dat.zlib");
+        if(auto perArchPath = rocblaslt_find_library_relative_path(relpath_gz))
+        {
+            // Return the base .dat path; fileToMsgObject() probes for .zlib internally
+            auto gz_path = perArchPath->string();
+            return gz_path.substr(0, gz_path.size() - 5);
+        }
+
+        rocblaslt_log_error("getExtOpLibraryPath",
+                            "rocblaslt_find_library_relative_path",
+                            relpath.string().c_str());
+        return {};
     }
 
     std::string hipDataTypeo_char(hipDataType type)
@@ -278,6 +325,7 @@ hipblasStatus_t hipblasltSoftmaxRun(hipDataType datatype,
     TensileLite::KernelInvocation invocation{kernelName,
                                              sol->getCodeObjectPath(),
                                              false,
+                                             {1, 1, 1},
                                              {WORKGROUP_SIZE, 1, 1},
                                              {numWorkgroups, 1, 1},
                                              {numWorkgroups * WORKGROUP_SIZE, 1, 1},
@@ -405,6 +453,9 @@ hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
     TensileLite::KernelInvocation invocation;
     invocation.kernelName      = kernelName;
     invocation.codeObjectFile  = sol->getCodeObjectPath();
+    invocation.clusterDim.x    = 1;
+    invocation.clusterDim.y    = 1;
+    invocation.clusterDim.z    = 1;
     invocation.workGroupSize.x = sol->getNumWorkitems();
     invocation.workGroupSize.y = 1;
     invocation.workGroupSize.z = 1;

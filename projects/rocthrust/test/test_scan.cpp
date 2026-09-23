@@ -566,6 +566,10 @@ void _TestScanWithLargeTypes()
 
 TEST(ScanTests, TestScanWithLargeTypes)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   _TestScanWithLargeTypes<int, 1>();
@@ -646,6 +650,7 @@ TEST(ScanTests, TestInclusiveScanDevice)
         size,
         thrust::raw_pointer_cast(&d_data[0]),
         thrust::raw_pointer_cast(&d_output[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_output, d_output);
     }
@@ -690,6 +695,7 @@ TEST(ScanTests, TestExclusiveScanDevice)
         size,
         thrust::raw_pointer_cast(&d_data[0]),
         thrust::raw_pointer_cast(&d_output[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_output, d_output);
     }
@@ -800,6 +806,10 @@ void TestInclusiveScanWithBigIndexesHelper(int magnitude)
 
 TEST(ScanTests, TestInclusiveScanWithBigIndexes)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   TestInclusiveScanWithBigIndexesHelper(30);
@@ -831,6 +841,10 @@ void TestExclusiveScanWithBigIndexesHelper(int magnitude)
 
 TEST(ScanTests, TestExclusiveScanWithBigIndexes)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   TestExclusiveScanWithBigIndexesHelper(30);

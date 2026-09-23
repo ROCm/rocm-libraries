@@ -297,10 +297,10 @@ struct tensor_reorder_test : public testing::TestWithParam<TestCase>
         std::vector<OpKernelArg> opArgs = reorder_sol->GetKernelArg();
         std::optional<miopen::InvokerFactory> invoker_factory(
             [=](const std::vector<miopen::Kernel>& kernels) mutable {
-                return [=](const miopen::Handle& handle,
+                return [=](const miopen::Handle& handle_,
                            const miopen::AnyInvokeParams& primitive_param) mutable {
                     decltype(auto) invoke_params = primitive_param.CastTo<reorder_invoke_param>();
-                    const auto k                 = handle.Run(kernels[0]);
+                    const auto k                 = handle_.Run(kernels[0]);
                     opArgs[0]                    = OpKernelArg(invoke_params.dst);
                     opArgs[1]                    = OpKernelArg(invoke_params.src);
                     k(opArgs);
@@ -350,9 +350,9 @@ private:
         const bool valid_result = idx >= miopen::range_distance(t_cpu);
 
         std::cout << "[" << reorder_str::get(order[0], order[1], order[2], order[3]) << ", b"
-                  << (sizeof(T) * 8) << " ] "
-                  << "dim0:" << dim0 << ", dim1:" << dim1 << ", dim2:" << dim2 << ", dim3:" << dim3
-                  << ", valid:" << valid_result << std::endl;
+                  << (sizeof(T) * 8) << " ] " << "dim0:" << dim0 << ", dim1:" << dim1
+                  << ", dim2:" << dim2 << ", dim3:" << dim3 << ", valid:" << valid_result
+                  << std::endl;
 
         EXPECT_TRUE(valid_result) << "diff at:" << idx << ", gpu:" << t_gpu[idx]
                                   << ", cpu:" << t_cpu[idx] << std::endl;

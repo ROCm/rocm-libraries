@@ -62,7 +62,7 @@ namespace rocsparse
 #define LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
         (rocsparse::coommnn_segmented_main_kernel<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB>), \
-        dim3(nblocks, (main - 1) / WF_SIZE + 1, batch_count_C),                          \
+        dim3(nblocks, (main - 1) / WF_SIZE + 1, get_batch_grid_size<I>(batch_count_C)),  \
         dim3(COOMMNN_DIM),                                                               \
         0,                                                                               \
         stream,                                                                          \
@@ -72,6 +72,7 @@ namespace rocsparse
         n,                                                                               \
         k,                                                                               \
         nnz,                                                                             \
+        batch_count_C,                                                                   \
         batch_stride_A,                                                                  \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                    \
         row_block_red,                                                                   \
@@ -92,7 +93,7 @@ namespace rocsparse
 #define LAUNCH_COOMMNN_SEGMENTED_REMAINDER_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                       \
         (rocsparse::coommnn_segmented_remainder_kernel<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB>), \
-        dim3(nblocks, 1, batch_count_C),                                                      \
+        dim3(nblocks, 1, get_batch_grid_size<I>(batch_count_C)),                              \
         dim3(COOMMNN_DIM),                                                                    \
         0,                                                                                    \
         stream,                                                                               \
@@ -103,6 +104,7 @@ namespace rocsparse
         n,                                                                                    \
         k,                                                                                    \
         nnz,                                                                                  \
+        batch_count_C,                                                                        \
         batch_stride_A,                                                                       \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                         \
         row_block_red,                                                                        \
@@ -171,7 +173,7 @@ namespace rocsparse
             T* val_block_red = reinterpret_cast<T*>(reinterpret_cast<void*>(ptr));
             // ptr += ((sizeof(T) * nblocks * n * batch_count_C - 1) / COOMMN_DIM + 1) * COOMMN_DIM;
 
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                 row_block_red,
                 0XFF,
                 ((sizeof(I) * nblocks * batch_count_C - 1) / COOMMN_DIM + 1) * COOMMN_DIM,
@@ -295,7 +297,7 @@ namespace rocsparse
 #undef LOOPS
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coommnn_general_block_reduce<1024>),
-                                               dim3(n, 1, batch_count_C),
+                                               dim3(n, 1, get_batch_grid_size<I>(batch_count_C)),
                                                1024,
                                                0,
                                                stream,
@@ -306,7 +308,8 @@ namespace rocsparse
                                                dense_C,
                                                ldc,
                                                batch_stride_C,
-                                               order_C);
+                                               order_C,
+                                               batch_count_C);
         }
         else
         {

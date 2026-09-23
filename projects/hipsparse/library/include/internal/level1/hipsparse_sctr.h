@@ -45,8 +45,8 @@ extern "C" {
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  If \p nnz is zero, the function returns successfully without modifying \p y.
@@ -57,7 +57,7 @@ extern "C" {
 *  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  nnz         number of non-zero entries of \f$x\f$. Must be non-negative.
 *  @param[in]
@@ -75,7 +75,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p nnz is negative,
-*          \p xVal, \p xInd or \p y is nullptr when \p nnz is greater than zero, or \p idxBase 
+*          \p xVal, \p xInd, or \p y is nullptr when \p nnz is greater than zero, or \p idxBase 
 *          is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
 */
 /**@{*/

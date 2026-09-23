@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -49,8 +26,8 @@ namespace rocRollerTest
         const size_t numFP4PerElement = 8;
 
         /*
-         * buffer_load into FP4x8 to GPU, buffer_store to CPU
-         */
+          * buffer_load into FP4x8 to GPU, buffer_store to CPU
+          */
         void genFP4x8BufferLoadAndStore(int num_fp4)
         {
             AssertFatal(num_fp4 % numFP4PerElement == 0,
@@ -90,8 +67,10 @@ namespace rocRollerTest
 
                 Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
                 bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
-                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
-                bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
+                bufferExpr
+                    = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression(), m_context);
+                bufferExpr
+                    = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N), m_context);
                 bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
                                                           Expression::literal(131072)); //0x00020000
 
@@ -104,7 +83,8 @@ namespace rocRollerTest
 
                 co_yield m_context->mem()->loadBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
-                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, s_result->expression(), m_context);
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
                 co_yield m_context->mem()->storeBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
@@ -116,8 +96,8 @@ namespace rocRollerTest
         }
 
         /*
-         * global_load into FP4x8 to GPU, global_store to CPU
-         */
+          * global_load into FP4x8 to GPU, global_store to CPU
+          */
         void genFP4x8GlobalLoadAndStore(int num_fp4)
         {
             AssertFatal(num_fp4 % numFP4PerElement == 0,
@@ -264,14 +244,12 @@ namespace rocRollerTest
             auto commandArgs = command->createArguments();
 
             commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)(ny));
             commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)(1));
 
             commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
             commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)(ny));

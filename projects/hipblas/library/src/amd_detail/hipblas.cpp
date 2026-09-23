@@ -33,6 +33,13 @@
 #include <hip/library_types.h>
 #include <math.h>
 
+// Grouped batched GEMM was added in rocBLAS 5.7 (matches hipblas package rocblas_minimum).
+#if(ROCBLAS_VERSION_MAJOR > 5) || (ROCBLAS_VERSION_MAJOR == 5 && ROCBLAS_VERSION_MINOR >= 7)
+#define HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE 1
+#else
+#define HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE 0
+#endif
+
 extern "C" hipblasStatus_t hipblasConvertStatus(rocblas_status_ error);
 
 // Attempt a rocBLAS call; if it gets an allocation error, query the
@@ -57,7 +64,11 @@ static hipblasStatus_t hipblasDemandAlloc(rocblas_handle                   handl
                     status = hipblasConvertStatus(blas_status);
                 else
                 {
-                    status = func();
+                    blas_status = rocblas_set_device_memory_size(handle, size);
+                    if(blas_status != rocblas_status_success)
+                        status = hipblasConvertStatus(blas_status);
+                    else
+                        status = func();
                 }
             }
         }
@@ -325,6 +336,47 @@ catch(...)
     return hipblas_exception_to_status();
 }
 
+hipblasStatus_t hipblasGetVersion(hipblasHandle_t handle, int* version)
+try
+{
+    if(!version)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    *version = (hipblasVersionMajor * hipblasVersionK + hipblasVersionMinor) * hipblasVersionK
+               + hipblasVersionPatch;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetProperty(hipblasLibraryProperty_t type, int* value)
+try
+{
+    if(!value)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    switch(type)
+    {
+    case HIPBLAS_MAJOR_VERSION:
+        *value = hipblasVersionMajor;
+        return HIPBLAS_STATUS_SUCCESS;
+    case HIPBLAS_MINOR_VERSION:
+        *value = hipblasVersionMinor;
+        return HIPBLAS_STATUS_SUCCESS;
+    case HIPBLAS_PATCH_LEVEL:
+        *value = hipblasVersionPatch;
+        return HIPBLAS_STATUS_SUCCESS;
+    default:
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
 hipblasStatus_t hipblasSetStream(hipblasHandle_t handle, hipStream_t streamId)
 try
 {
@@ -518,6 +570,49 @@ try
 {
     return hipblasConvertStatus(
         rocblas_get_atomics_mode((rocblas_handle)handle, (rocblas_atomics_mode*)atomics_mode));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+// batch alpha/beta stride
+hipblasStatus_t hipblasSetBatchAlphaStride(hipblasHandle_t handle, hipblasStride alpha_stride)
+try
+{
+    return hipblasConvertStatus(
+        rocblas_set_batch_alpha_stride((rocblas_handle)handle, alpha_stride));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetBatchAlphaStride(hipblasHandle_t handle, hipblasStride* alpha_stride)
+try
+{
+    return hipblasConvertStatus(
+        rocblas_get_batch_alpha_stride((rocblas_handle)handle, alpha_stride));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasSetBatchBetaStride(hipblasHandle_t handle, hipblasStride beta_stride)
+try
+{
+    return hipblasConvertStatus(rocblas_set_batch_beta_stride((rocblas_handle)handle, beta_stride));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle, hipblasStride* beta_stride)
+try
+{
+    return hipblasConvertStatus(rocblas_get_batch_beta_stride((rocblas_handle)handle, beta_stride));
 }
 catch(...)
 {
@@ -32488,6 +32583,187 @@ catch(...)
     return hipblas_exception_to_status();
 }
 
+// gemm_grouped_batched
+hipblasStatus_t hipblasSgemmGroupedBatched(hipblasHandle_t           handle,
+                                           const hipblasOperation_t* transA_array,
+                                           const hipblasOperation_t* transB_array,
+                                           const int*                m_array,
+                                           const int*                n_array,
+                                           const int*                k_array,
+                                           const float*              alpha_array,
+                                           const float* const        Aarray[],
+                                           const int*                lda_array,
+                                           const float* const        Barray[],
+                                           const int*                ldb_array,
+                                           const float*              beta_array,
+                                           float* const              Carray[],
+                                           const int*                ldc_array,
+                                           int                       group_count,
+                                           const int*                group_size)
+try
+{
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
+    return hipblasConvertStatus(
+        rocblas_sgemm_grouped_batched((rocblas_handle)handle,
+                                      (const rocblas_operation*)transA_array,
+                                      (const rocblas_operation*)transB_array,
+                                      m_array,
+                                      n_array,
+                                      k_array,
+                                      alpha_array,
+                                      Aarray,
+                                      lda_array,
+                                      Barray,
+                                      ldb_array,
+                                      beta_array,
+                                      Carray,
+                                      ldc_array,
+                                      group_count,
+                                      group_size));
+#endif
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasDgemmGroupedBatched(hipblasHandle_t           handle,
+                                           const hipblasOperation_t* transA_array,
+                                           const hipblasOperation_t* transB_array,
+                                           const int*                m_array,
+                                           const int*                n_array,
+                                           const int*                k_array,
+                                           const double*             alpha_array,
+                                           const double* const       Aarray[],
+                                           const int*                lda_array,
+                                           const double* const       Barray[],
+                                           const int*                ldb_array,
+                                           const double*             beta_array,
+                                           double* const             Carray[],
+                                           const int*                ldc_array,
+                                           int                       group_count,
+                                           const int*                group_size)
+try
+{
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
+    return hipblasConvertStatus(
+        rocblas_dgemm_grouped_batched((rocblas_handle)handle,
+                                      (const rocblas_operation*)transA_array,
+                                      (const rocblas_operation*)transB_array,
+                                      m_array,
+                                      n_array,
+                                      k_array,
+                                      alpha_array,
+                                      Aarray,
+                                      lda_array,
+                                      Barray,
+                                      ldb_array,
+                                      beta_array,
+                                      Carray,
+                                      ldc_array,
+                                      group_count,
+                                      group_size));
+#endif
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasSgemmGroupedBatched_64(hipblasHandle_t           handle,
+                                              const hipblasOperation_t* transA_array,
+                                              const hipblasOperation_t* transB_array,
+                                              const int64_t*            m_array,
+                                              const int64_t*            n_array,
+                                              const int64_t*            k_array,
+                                              const float*              alpha_array,
+                                              const float* const        Aarray[],
+                                              const int64_t*            lda_array,
+                                              const float* const        Barray[],
+                                              const int64_t*            ldb_array,
+                                              const float*              beta_array,
+                                              float* const              Carray[],
+                                              const int64_t*            ldc_array,
+                                              int64_t                   group_count,
+                                              const int64_t*            group_size)
+try
+{
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
+    return hipblasConvertStatus(
+        rocblas_sgemm_grouped_batched_64((rocblas_handle)handle,
+                                         (const rocblas_operation*)transA_array,
+                                         (const rocblas_operation*)transB_array,
+                                         m_array,
+                                         n_array,
+                                         k_array,
+                                         alpha_array,
+                                         Aarray,
+                                         lda_array,
+                                         Barray,
+                                         ldb_array,
+                                         beta_array,
+                                         Carray,
+                                         ldc_array,
+                                         group_count,
+                                         group_size));
+#endif
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasDgemmGroupedBatched_64(hipblasHandle_t           handle,
+                                              const hipblasOperation_t* transA_array,
+                                              const hipblasOperation_t* transB_array,
+                                              const int64_t*            m_array,
+                                              const int64_t*            n_array,
+                                              const int64_t*            k_array,
+                                              const double*             alpha_array,
+                                              const double* const       Aarray[],
+                                              const int64_t*            lda_array,
+                                              const double* const       Barray[],
+                                              const int64_t*            ldb_array,
+                                              const double*             beta_array,
+                                              double* const             Carray[],
+                                              const int64_t*            ldc_array,
+                                              int64_t                   group_count,
+                                              const int64_t*            group_size)
+try
+{
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
+    return hipblasConvertStatus(
+        rocblas_dgemm_grouped_batched_64((rocblas_handle)handle,
+                                         (const rocblas_operation*)transA_array,
+                                         (const rocblas_operation*)transB_array,
+                                         m_array,
+                                         n_array,
+                                         k_array,
+                                         alpha_array,
+                                         Aarray,
+                                         lda_array,
+                                         Barray,
+                                         ldb_array,
+                                         beta_array,
+                                         Carray,
+                                         ldc_array,
+                                         group_count,
+                                         group_size));
+#endif
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
 // gemm_strided_batched
 hipblasStatus_t hipblasHgemmStridedBatched(hipblasHandle_t    handle,
                                            hipblasOperation_t transa,
@@ -33765,6 +34041,284 @@ try
                                                            hipblasConvertGemmAlgo(algo),
                                                            solution_index,
                                                            hipblasConvertGemmFlags(flags)));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGemmGroupedBatchedEx(hipblasHandle_t           handle,
+                                            const hipblasOperation_t* transA_array,
+                                            const hipblasOperation_t* transB_array,
+                                            const int*                m_array,
+                                            const int*                n_array,
+                                            const int*                k_array,
+                                            const void*               alpha_array,
+                                            const void* const         Aarray[],
+                                            hipDataType               a_type,
+                                            const int*                lda_array,
+                                            const void* const         Barray[],
+                                            hipDataType               b_type,
+                                            const int*                ldb_array,
+                                            const void*               beta_array,
+                                            const void* const         Carray[],
+                                            hipDataType               c_type,
+                                            const int*                ldc_array,
+                                            void* const               Darray[],
+                                            hipDataType               d_type,
+                                            const int*                ldd_array,
+                                            int                       group_count,
+                                            const int*                group_size,
+                                            hipblasComputeType_t      compute_type,
+                                            hipblasGemmAlgo_t         algo)
+try
+{
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
+    rocblas_datatype a_type_roc, b_type_roc, c_type_roc, compute_type_roc;
+    hipblasStatus_t  status = hipblasInternalGemmExTypes(
+        a_type, b_type, c_type, compute_type, a_type_roc, b_type_roc, c_type_roc, compute_type_roc);
+
+    if(status != HIPBLAS_STATUS_SUCCESS)
+        return status;
+
+    return hipblasConvertStatus(
+        rocblas_gemm_grouped_batched_ex((rocblas_handle)handle,
+                                        (const rocblas_operation*)transA_array,
+                                        (const rocblas_operation*)transB_array,
+                                        m_array,
+                                        n_array,
+                                        k_array,
+                                        alpha_array,
+                                        Aarray,
+                                        a_type_roc,
+                                        lda_array,
+                                        Barray,
+                                        b_type_roc,
+                                        ldb_array,
+                                        beta_array,
+                                        Carray,
+                                        c_type_roc,
+                                        ldc_array,
+                                        Darray,
+                                        hipblasConvertDatatype(d_type),
+                                        ldd_array,
+                                        group_count,
+                                        group_size,
+                                        compute_type_roc,
+                                        hipblasConvertGemmAlgo(algo),
+                                        static_cast<uint32_t>(rocblas_gemm_flags_none)));
+#endif
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGemmGroupedBatchedExWithFlags(hipblasHandle_t           handle,
+                                                     const hipblasOperation_t* transA_array,
+                                                     const hipblasOperation_t* transB_array,
+                                                     const int*                m_array,
+                                                     const int*                n_array,
+                                                     const int*                k_array,
+                                                     const void*               alpha_array,
+                                                     const void* const         Aarray[],
+                                                     hipDataType               a_type,
+                                                     const int*                lda_array,
+                                                     const void* const         Barray[],
+                                                     hipDataType               b_type,
+                                                     const int*                ldb_array,
+                                                     const void*               beta_array,
+                                                     const void* const         Carray[],
+                                                     hipDataType               c_type,
+                                                     const int*                ldc_array,
+                                                     void* const               Darray[],
+                                                     hipDataType               d_type,
+                                                     const int*                ldd_array,
+                                                     int                       group_count,
+                                                     const int*                group_size,
+                                                     hipblasComputeType_t      compute_type,
+                                                     hipblasGemmAlgo_t         algo,
+                                                     hipblasGemmFlags_t        flags)
+try
+{
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
+    rocblas_datatype a_type_roc, b_type_roc, c_type_roc, compute_type_roc;
+    hipblasStatus_t  status = hipblasInternalGemmExTypes(
+        a_type, b_type, c_type, compute_type, a_type_roc, b_type_roc, c_type_roc, compute_type_roc);
+
+    if(status != HIPBLAS_STATUS_SUCCESS)
+        return status;
+
+    return hipblasConvertStatus(
+        rocblas_gemm_grouped_batched_ex((rocblas_handle)handle,
+                                        (const rocblas_operation*)transA_array,
+                                        (const rocblas_operation*)transB_array,
+                                        m_array,
+                                        n_array,
+                                        k_array,
+                                        alpha_array,
+                                        Aarray,
+                                        a_type_roc,
+                                        lda_array,
+                                        Barray,
+                                        b_type_roc,
+                                        ldb_array,
+                                        beta_array,
+                                        Carray,
+                                        c_type_roc,
+                                        ldc_array,
+                                        Darray,
+                                        hipblasConvertDatatype(d_type),
+                                        ldd_array,
+                                        group_count,
+                                        group_size,
+                                        compute_type_roc,
+                                        hipblasConvertGemmAlgo(algo),
+                                        static_cast<uint32_t>(hipblasConvertGemmFlags(flags))));
+#endif
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGemmGroupedBatchedEx_64(hipblasHandle_t           handle,
+                                               const hipblasOperation_t* transA_array,
+                                               const hipblasOperation_t* transB_array,
+                                               const int64_t*            m_array,
+                                               const int64_t*            n_array,
+                                               const int64_t*            k_array,
+                                               const void*               alpha_array,
+                                               const void* const         Aarray[],
+                                               hipDataType               a_type,
+                                               const int64_t*            lda_array,
+                                               const void* const         Barray[],
+                                               hipDataType               b_type,
+                                               const int64_t*            ldb_array,
+                                               const void*               beta_array,
+                                               const void* const         Carray[],
+                                               hipDataType               c_type,
+                                               const int64_t*            ldc_array,
+                                               void* const               Darray[],
+                                               hipDataType               d_type,
+                                               const int64_t*            ldd_array,
+                                               int64_t                   group_count,
+                                               const int64_t*            group_size,
+                                               hipblasComputeType_t      compute_type,
+                                               hipblasGemmAlgo_t         algo)
+try
+{
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
+    rocblas_datatype a_type_roc, b_type_roc, c_type_roc, compute_type_roc;
+    hipblasStatus_t  status = hipblasInternalGemmExTypes(
+        a_type, b_type, c_type, compute_type, a_type_roc, b_type_roc, c_type_roc, compute_type_roc);
+
+    if(status != HIPBLAS_STATUS_SUCCESS)
+        return status;
+
+    return hipblasConvertStatus(
+        rocblas_gemm_grouped_batched_ex_64((rocblas_handle)handle,
+                                           (const rocblas_operation*)transA_array,
+                                           (const rocblas_operation*)transB_array,
+                                           m_array,
+                                           n_array,
+                                           k_array,
+                                           alpha_array,
+                                           Aarray,
+                                           a_type_roc,
+                                           lda_array,
+                                           Barray,
+                                           b_type_roc,
+                                           ldb_array,
+                                           beta_array,
+                                           Carray,
+                                           c_type_roc,
+                                           ldc_array,
+                                           Darray,
+                                           hipblasConvertDatatype(d_type),
+                                           ldd_array,
+                                           group_count,
+                                           group_size,
+                                           compute_type_roc,
+                                           hipblasConvertGemmAlgo(algo),
+                                           static_cast<uint32_t>(rocblas_gemm_flags_none)));
+#endif
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGemmGroupedBatchedExWithFlags_64(hipblasHandle_t           handle,
+                                                        const hipblasOperation_t* transA_array,
+                                                        const hipblasOperation_t* transB_array,
+                                                        const int64_t*            m_array,
+                                                        const int64_t*            n_array,
+                                                        const int64_t*            k_array,
+                                                        const void*               alpha_array,
+                                                        const void* const         Aarray[],
+                                                        hipDataType               a_type,
+                                                        const int64_t*            lda_array,
+                                                        const void* const         Barray[],
+                                                        hipDataType               b_type,
+                                                        const int64_t*            ldb_array,
+                                                        const void*               beta_array,
+                                                        const void* const         Carray[],
+                                                        hipDataType               c_type,
+                                                        const int64_t*            ldc_array,
+                                                        void* const               Darray[],
+                                                        hipDataType               d_type,
+                                                        const int64_t*            ldd_array,
+                                                        int64_t                   group_count,
+                                                        const int64_t*            group_size,
+                                                        hipblasComputeType_t      compute_type,
+                                                        hipblasGemmAlgo_t         algo,
+                                                        hipblasGemmFlags_t        flags)
+try
+{
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
+    rocblas_datatype a_type_roc, b_type_roc, c_type_roc, compute_type_roc;
+    hipblasStatus_t  status = hipblasInternalGemmExTypes(
+        a_type, b_type, c_type, compute_type, a_type_roc, b_type_roc, c_type_roc, compute_type_roc);
+
+    if(status != HIPBLAS_STATUS_SUCCESS)
+        return status;
+
+    return hipblasConvertStatus(
+        rocblas_gemm_grouped_batched_ex_64((rocblas_handle)handle,
+                                           (const rocblas_operation*)transA_array,
+                                           (const rocblas_operation*)transB_array,
+                                           m_array,
+                                           n_array,
+                                           k_array,
+                                           alpha_array,
+                                           Aarray,
+                                           a_type_roc,
+                                           lda_array,
+                                           Barray,
+                                           b_type_roc,
+                                           ldb_array,
+                                           beta_array,
+                                           Carray,
+                                           c_type_roc,
+                                           ldc_array,
+                                           Darray,
+                                           hipblasConvertDatatype(d_type),
+                                           ldd_array,
+                                           group_count,
+                                           group_size,
+                                           compute_type_roc,
+                                           hipblasConvertGemmAlgo(algo),
+                                           static_cast<uint32_t>(hipblasConvertGemmFlags(flags))));
+#endif
 }
 catch(...)
 {

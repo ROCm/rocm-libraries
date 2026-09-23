@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -102,6 +102,12 @@ Definitions:
   <<: *level2_shared
   indextype: *i32i32_i64i32_i64i64
 
+# gemvi multiplies a dense matrix by a sparse vector; percentage controls the
+# vector density (nnz = N * percentage / 100), so it must be non-zero.
+- &level2_gemvi_shared
+  <<: *level2_shared
+  percentage: [10, 33, 50]
+
 ###########
 # Level 3 #
 ###########
@@ -151,7 +157,7 @@ Definitions:
   <<: *common
   <<: *dims
   precision: *single_double_precisions_complex_real
-  percentage: [0.5]
+  percentage: [50]
 
 ##############
 # Conversion #
@@ -213,7 +219,7 @@ Tests:
     - csrsv: *level2_shared
     - ellmv: *level2_shared
     - gebsrmv: *level2_shared
-    - gemvi: *level2_shared
+    - gemvi: *level2_gemvi_shared
     - hybmv: *level2_shared
     - spitsv_csr: *level2_shared_mixed_index
     - spmv_bsr: *level2_shared_mixed_index
@@ -224,6 +230,7 @@ Tests:
     - spmv_ell: *level2_shared
     - spmv_sell: *level2_shared
     - spsv_csr: *level2_shared_mixed_index
+    - spsv_csc: *level2_shared_mixed_index
     - spsv_coo: *level2_shared
 
 ###########
@@ -239,8 +246,14 @@ Tests:
     - csrsm: *level3_shared
     - gebsrmm: *level3_shared
     - sddmm: *level3_shared_mixed_index
+    - sddmm_batched_ell: *level3_shared_mixed_index
+    - sddmm_batched_coo: *level3_shared_mixed_index
+    - sddmm_batched_coo_aos: *level3_shared_mixed_index
+    - sddmm_batched_csr: *level3_shared_mixed_index
+    - sddmm_batched_csc: *level3_shared_mixed_index
     - spsm_coo: *level3_shared_mixed_index
     - spsm_csr: *level3_shared_mixed_index
+    - spsm_csc: *level3_shared_mixed_index
     - spmm_bell: *level3_shared
     - spmm_coo: *level3_shared
     - spmm_csc: *level3_shared_mixed_index
@@ -316,6 +329,7 @@ Tests:
     - gebsr2gebsc: *conversion_shared
     - gebsr2gebsr: *conversion_shared
     - hyb2csr: *conversion_shared
+    - dense_to_sparse_bell: *conversion_shared
     - dense_to_sparse_coo: *conversion_shared
     - dense_to_sparse_csc: *conversion_shared_mixed_index
     - dense_to_sparse_csr: *conversion_shared_mixed_index

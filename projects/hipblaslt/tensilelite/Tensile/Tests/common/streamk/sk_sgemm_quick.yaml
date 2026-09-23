@@ -1,9 +1,10 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -36,7 +37,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 16 ]
@@ -66,7 +67,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 1,4, 2,2]
           - [16, 16, 4, 1, 1, 1,2, 2,2]
           - [16, 16, 4, 1, 1, 1,1, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -95,7 +96,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 8, 16, 32 ]
@@ -107,7 +108,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -137,7 +138,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [0, 1]
         - DepthU: [16]
@@ -149,7 +150,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]
@@ -230,7 +231,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 16 ]
@@ -260,7 +261,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 1,4, 2,2]
           - [16, 16, 4, 1, 1, 1,2, 2,2]
           - [16, 16, 4, 1, 1, 1,1, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -483,7 +484,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 8, 16, 32, 48 ]
@@ -495,7 +496,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -719,7 +720,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [0, 1]
         - DepthU: [16]
@@ -731,7 +732,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]
@@ -804,7 +805,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [0, 1]
         - DepthU: [16]
@@ -816,7 +817,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]
@@ -846,7 +847,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [0, 1]
         - DepthU: [16]
@@ -858,7 +859,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]
@@ -888,7 +889,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [0, 1]
         - DepthU: [16]
@@ -900,7 +901,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]

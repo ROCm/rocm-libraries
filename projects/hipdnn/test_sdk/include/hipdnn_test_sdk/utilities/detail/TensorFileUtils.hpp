@@ -34,6 +34,16 @@ inline void fillTensorFromFile(hipdnn_data_sdk::utilities::ITensor& tensor,
     auto vec = std::vector<unsigned char>(std::istreambuf_iterator<char>(fileInputStream),
                                           std::istreambuf_iterator<char>{});
 
+    const size_t expectedBytes = tensor.elementSpace() * tensor.elementSize();
+    if(vec.size() != expectedBytes)
+    {
+        throw std::runtime_error("Tensor size mismatch for " + path.string() + ": file has "
+                                 + std::to_string(vec.size()) + " bytes but tensor declares "
+                                 + std::to_string(expectedBytes)
+                                 + " bytes (elementSpace=" + std::to_string(tensor.elementSpace())
+                                 + ", elementSize=" + std::to_string(tensor.elementSize()) + ")");
+    }
+
     tensor.fillWithData(vec.data(), vec.size());
 }
 

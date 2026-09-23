@@ -1,0 +1,11 @@
+name: "rocSPARSE"
+tag: "rocsparse"
+data_types:
+  - type: "float32"
+    support: "✅"
+  - type: "float64"
+    support: "✅"
+  - type: "cfloat32"
+    support: "✅"
+  - type: "cfloat64"
+    support: "✅"

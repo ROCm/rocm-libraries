@@ -2,18 +2,24 @@ import re
 
 from rocm_docs import ROCmDocs
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'.*\bset \( VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+',
-                      f.read())
-    if not match:
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    content = f.read()
+    major = re.search(r'set\s*\(\s*ROCFFT_VERSION_MAJOR\s+"(\d+)"\s*\)', content)
+    minor = re.search(r'set\s*\(\s*ROCFFT_VERSION_MINOR\s+"(\d+)"\s*\)', content)
+    patch = re.search(r'set\s*\(\s*ROCFFT_VERSION_PATCH\s+"(\d+)"\s*\)', content)
+
+    if not (major and minor and patch):
         raise ValueError("VERSION not found!")
-    version_number = match[1]
+
+    version_number = f"{major[1]}.{minor[1]}.{patch[1]}"
+
 left_nav_title = f"rocFFT {version_number} Documentation"
+
 
 # for PDF output on Read the Docs
 project = "rocFFT Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
@@ -27,3 +33,18 @@ external_projects_current_project = "rocfft"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/rocfft/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
+
+extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

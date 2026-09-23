@@ -30,8 +30,9 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
 
   .. grid-item-card:: Install
 
-    * :doc:`Linux installation guide <./install/Linux_Install_Guide>`
-    * :doc:`Windows installation guide <./install/Windows_Install_Guide>`
+    * :doc:`Install rocSPARSE <./install/install>`
+    * :doc:`Build from source on Linux <./install/Linux_Install_Guide>`
+    * :doc:`Build from source on Windows <./install/Windows_Install_Guide>`
 
 .. grid:: 2
   :gutter: 3

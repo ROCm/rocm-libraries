@@ -232,11 +232,8 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::AddCmdLineArgs()
 template <typename Tgpu, typename Tref, typename Tgrad>
 std::vector<int> TransformersAdamWDriver<Tgpu, Tref, Tgrad>::GetInputTensorLengthsFromCmdLine()
 {
-    std::vector<int> ret;
     auto tensor = inflags.GetValueTensor("dims");
-    if(!tensor.lengths.empty())
-        return tensor.lengths;
-    return ret;
+    return tensor.lengths;
 }
 
 template <typename Tgpu, typename Tref, typename Tgrad>

@@ -4,8 +4,11 @@
 #pragma once
 
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+
+#include <cmath>
 #include <limits>
-#include <stdint.h>
+#include <type_traits>
 
 namespace ck_tile {
 
@@ -19,7 +22,7 @@ struct numeric
     // minimum finite value, or minimum positive normalized value for float
     CK_TILE_HOST_DEVICE static constexpr T min() { return std::numeric_limits<T>::min(); }
 
-    // minumum finite value
+    // minimum finite value
     CK_TILE_HOST_DEVICE static constexpr T lowest() { return std::numeric_limits<T>::lowest(); }
 
     // maximum finite value
@@ -101,6 +104,45 @@ struct numeric_traits<float>
     using bitwise_type                  = uint32_t;
 };
 
+template <>
+struct numeric_traits<double>
+{
+    // IEEE 754
+    static constexpr int exp            = 11;
+    static constexpr int mant           = 52;
+    static constexpr int bias           = 1023;
+    static constexpr uint64_t nan_mask  = 0x7FF0000000000000;
+    static constexpr uint64_t head_mask = 0xFFF0000000000000;
+    static constexpr uint64_t mant_mask = 0xFFFFFFFFFFFFF;
+    static constexpr uint64_t exp_mask  = 0x7FF;
+    static constexpr uint64_t abs_mask  = 0x7FFFFFFFFFFFFFFF;
+    static constexpr uint64_t Inf       = 0x7FF0000000000000;
+    static constexpr uint64_t NegInf    = 0xFFF0000000000000;
+    static constexpr uint64_t NaN       = 0x7FF0000000000001;
+    static constexpr uint64_t Neg0      = 0x8000000000000000;
+    static constexpr int PackedSize     = 1;
+    using bitwise_type                  = uint64_t;
+};
+/**
+ * @brief Number of elements of T that fit in one 128-bit (16-byte) access.
+ *
+ * Use this wherever a host-side layout and a device-side tile distribution must agree on an
+ * access granularity. Deriving it independently on each side has silently produced
+ * mismatched K interleaving, where each side walks the same elements in a different order.
+ *
+ * @tparam T element type
+ * @return element count
+ */
+template <typename T>
+CK_TILE_HOST_DEVICE constexpr int items_per_128b_access()
+{
+    // ck_tile::remove_cvref_t is not visible from this header.
+    using type = std::remove_cv_t<std::remove_reference_t<T>>;
+    static_assert(16 * numeric_traits<type>::PackedSize % sizeof(type) == 0,
+                  "128-bit access is not an integral number of elements for this type");
+    return 16 * numeric_traits<type>::PackedSize / static_cast<int>(sizeof(type));
+}
+
 } // namespace ck_tile
 
 #define CK_TILE_ARITHMETIC_USING_FLOAT(attr_, type_)                                       \
@@ -133,7 +175,7 @@ struct numeric_traits<float>
     attr_ type_ operator-(const type_& x)                                                  \
     {                                                                                      \
         constexpr uint32_t bits = sizeof(type_) * 8;                                       \
-        constexpr uint32_t mask = 1 << (bits - 1);                                         \
+        constexpr uint32_t mask = 1u << (bits - 1u);                                       \
         type_ y                 = x;                                                       \
         y.data ^= static_cast<typename type_::raw_type>(mask);                             \
         return y;                                                                          \
@@ -150,32 +192,32 @@ struct numeric_traits<float>
     {                                                                                      \
         return type_(static_cast<float>(x) / static_cast<float>(y));                       \
     }                                                                                      \
-    attr_ type_& operator+=(type_& x, const type_& y)                                      \
+    attr_ type_& operator+=([[clang::lifetimebound]] type_& x, const type_& y)             \
     {                                                                                      \
         x = type_(static_cast<float>(x) + static_cast<float>(y));                          \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator-=(type_& x, const type_& y)                                      \
+    attr_ type_& operator-=([[clang::lifetimebound]] type_& x, const type_& y)             \
     {                                                                                      \
         x = type_(static_cast<float>(x) - static_cast<float>(y));                          \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator*=(type_& x, const type_& y)                                      \
+    attr_ type_& operator*=([[clang::lifetimebound]] type_& x, const type_& y)             \
     {                                                                                      \
         x = type_(static_cast<float>(x) * static_cast<float>(y));                          \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator/=(type_& x, const type_& y)                                      \
+    attr_ type_& operator/=([[clang::lifetimebound]] type_& x, const type_& y)             \
     {                                                                                      \
         x = type_(static_cast<float>(x) / static_cast<float>(y));                          \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator++(type_& x)                                                      \
+    attr_ type_& operator++([[clang::lifetimebound]] type_& x)                             \
     {                                                                                      \
         x = type_(static_cast<float>(x) + 1.f);                                            \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator--(type_& x)                                                      \
+    attr_ type_& operator--([[clang::lifetimebound]] type_& x)                             \
     {                                                                                      \
         x = type_(static_cast<float>(x) - 1.f);                                            \
         return x;                                                                          \

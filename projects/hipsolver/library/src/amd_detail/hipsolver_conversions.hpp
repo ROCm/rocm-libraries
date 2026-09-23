@@ -70,6 +70,10 @@ hipsolverDeterministicMode_t rocblas2hip_deterministic(rocblas_atomics_mode_ mod
 
 rocblas_svect_ char2rocblas_svect(signed char svect);
 
+rocblas_direct hip2rocblas_direct(hipsolverDirectMode_t direct);
+
+rocblas_storev hip2rocblas_storev(hipsolverStorevMode_t storev);
+
 hipsolverStatus_t rocblas2hip_status(rocblas_status_ error);
 
 HIPSOLVER_END_NAMESPACE

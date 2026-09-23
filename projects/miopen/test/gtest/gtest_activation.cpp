@@ -349,7 +349,8 @@ std::string GetActivationModeName(miopenActivationMode_t mode)
     case miopenActivationPOWER: return "POWER";
     case miopenActivationLEAKYRELU: return "LEAKYRELU";
     case miopenActivationELU: return "ELU";
-    default: return "UNKNOWN";
+    case miopenActivationCLIPPEDRELU: return "CLIPPEDRELU";
+    case miopenActivationCLAMP: return "UNKNOWN";
     }
 }
 

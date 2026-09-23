@@ -1,7 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #pragma once
+
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/config.hpp"
+
+#include <utility>
 
 namespace ck_tile::core::arch::mma {
 
@@ -12,10 +16,22 @@ namespace ck_tile::core::arch::mma {
 struct PassThroughTransform
 {
     template <typename VecType>
-    CK_TILE_DEVICE static decltype(auto) exec(VecType&& v)
+    CK_TILE_DEVICE static decltype(auto) exec([[clang::lifetimebound]] VecType&& v)
     {
         return std::forward<VecType>(v);
     }
+};
+
+/**
+ * @struct MmaDefaultPassThroughTransforms
+ * @brief Implements the default MMA transforms
+ */
+struct MmaDefaultPassThroughTransforms
+{
+    using ATransform = PassThroughTransform;
+    using BTransform = PassThroughTransform;
+    using CTransform = PassThroughTransform;
+    using DTransform = PassThroughTransform;
 };
 
 /**
@@ -27,7 +43,10 @@ struct PassThroughTransform
  */
 template <typename MmaOp, typename CompilerTarget, typename Enable = void>
 // TODO: c++20 template <MmaOpI MmaOp, amdgcn_target_arch_id CompilerTarget, typename Enable = void>
-struct MmaTransformsDefaultSelector;
+struct MmaTransformsDefaultSelector
+{
+    using SelectedTransforms = MmaDefaultPassThroughTransforms;
+};
 
 #if CK_TILE_CONCEPTS
 

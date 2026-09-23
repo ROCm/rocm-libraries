@@ -43,8 +43,7 @@ namespace solver {
 /// Information required to build and run a kernel (or a set of kernels),
 /// which is expected to perform computatons as per the problem config.
 ///
-/// TODO: Currently best suits a subset of existing solvers,
-/// namely some OpenCL-written forward direct convolutions.
+/// TODO: Currently best suits a subset of existing solvers.
 /// Shall be refactored (possibly, to a class hierarchy).
 struct ConvSolution
 {

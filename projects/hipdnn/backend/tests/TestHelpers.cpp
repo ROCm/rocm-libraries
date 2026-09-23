@@ -10,7 +10,7 @@ TEST(TestHelpers, TryCatchSuccess)
 {
     auto successFunction = []() -> hipdnnStatus_t { return HIPDNN_STATUS_SUCCESS; };
 
-    hipdnnStatus_t status = tryCatch(successFunction);
+    const hipdnnStatus_t status = tryCatch(successFunction);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 }
 
@@ -18,7 +18,7 @@ TEST(TestHelpers, TryCatchException)
 {
     auto exceptionFunction = []() -> hipdnnStatus_t { throw std::runtime_error("Test exception"); };
 
-    hipdnnStatus_t status = tryCatch(exceptionFunction);
+    const hipdnnStatus_t status = tryCatch(exceptionFunction);
     EXPECT_EQ(status, HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
@@ -28,6 +28,6 @@ TEST(TestHelpers, TryCatchUnknownException)
         throw 42; // Throwing an unknown exception
     };
 
-    hipdnnStatus_t status = tryCatch(unknownExceptionFunction);
+    const hipdnnStatus_t status = tryCatch(unknownExceptionFunction);
     EXPECT_EQ(status, HIPDNN_STATUS_INTERNAL_ERROR);
 }

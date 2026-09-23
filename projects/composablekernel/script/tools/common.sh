@@ -5,7 +5,7 @@
 # Common utilities for CK Docker tools
 # Shared configuration and helper functions
 
-# Find project root (where .git directory is)
+# Find project root using relative path (fallback)
 get_project_root() {
     local script_dir="$1"
     cd "${script_dir}/../.." && pwd
@@ -149,11 +149,11 @@ is_build_configured() {
     [ -f "${build_dir}/build.ninja" ]
 }
 
-# Find project root from any subdirectory (walks up to find .git)
+# Find project root from any subdirectory (walks up to find .ck-project-root)
 find_project_root() {
     local dir="${1:-$(pwd)}"
     while [ "$dir" != "/" ]; do
-        if [ -d "$dir/.git" ]; then
+        if [ -f "$dir/.ck-project-root" ]; then
             echo "$dir"
             return 0
         fi
@@ -178,4 +178,41 @@ list_cmake_presets() {
         # Fallback: sed-based extraction (more portable than grep -P)
         sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$presets_file" | grep -v '^use-'
     fi
+}
+
+# ============================================================================
+# GPU SMI wrappers (delegate to tile_engine/ops/common/smi_cli.py)
+# ============================================================================
+
+_ck_smi_cli() {
+    local project_root
+    project_root="$(get_project_root "$(dirname "${BASH_SOURCE[0]}")")"
+    PYTHONPATH="${project_root}/tile_engine/ops/common:${PYTHONPATH:-}" \
+        python3 "${project_root}/tile_engine/ops/common/smi_cli.py" "$@"
+}
+
+ck_smi_list_gpu_ids()  { _ck_smi_cli list-ids; }
+ck_smi_count_gpus()    { _ck_smi_cli count; }
+ck_smi_show_gpu_info() { _ck_smi_cli show-info --head "${1:-10}"; }
+ck_smi_check_gpu_available() { _ck_smi_cli check; }
+ck_smi_show_version()  { _ck_smi_cli show-version; }
+
+# Run ck_smi_show_gpu_info inside a Docker container (project mounted at /workspace)
+ck_smi_show_gpu_info_in_container() {
+    local container="$1"
+    local head="${2:-10}"
+
+    # Prevent command injection via the bash -c string.
+    if ! [[ "${head}" =~ ^[0-9]+$ ]]; then
+        head=10
+    fi
+
+    docker exec "${container}" bash -c '
+        if [ -f /workspace/script/tools/common.sh ]; then
+            source /workspace/script/tools/common.sh
+            ck_smi_show_gpu_info "$1" 2>/dev/null || echo "No GPU detected"
+        else
+            echo "No GPU detected (project not mounted at /workspace)"
+        fi
+    ' -- "${head}"
 }

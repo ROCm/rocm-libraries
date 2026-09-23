@@ -32,6 +32,8 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 //Replace std::regex, as it crashes when matching long lines(GCC Bug #86164).
+#include <tensilelitehost/export.h>
+
 #ifdef _WIN32
 #include "shlwapi.h"
 #pragma comment(lib, "shlwapi.lib")
@@ -59,6 +61,7 @@ namespace TensileLite
                     lib.masterSolutions      = ctx->solutions;
                     lib.solutionsGuard       = ctx->solutionsGuard;
                     lib.loadedFiles          = ctx->loadedFiles;
+                    lib.solutionSources      = ctx->solutionSources;
                     lib.indexLoadedLibraries = static_cast<
                         std::map<std::string,
                                  std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>*>(
@@ -103,3 +106,4 @@ namespace TensileLite
 
     } // namespace Serialization
 } // namespace TensileLite
+

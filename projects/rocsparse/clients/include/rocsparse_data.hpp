@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,13 @@ class RocSPARSE_TestData
         static std::string filename
             = "(Uninitialized data. RocSPARSE_TestData::set_filename needs to be called first.)";
         return filename;
+    }
+
+    // Flag to track if a user-specified yaml file was provided via --yaml
+    static auto& yaml_filter_active()
+    {
+        static bool active = false;
+        return active;
     }
 
     // filter iterator
@@ -100,6 +107,16 @@ public:
             {
             }
         }
+    }
+
+    static void set_yaml_filter_active(bool active)
+    {
+        yaml_filter_active() = active;
+    }
+
+    static bool is_yaml_filter_active()
+    {
+        return yaml_filter_active();
     }
 
     // begin() iterator which accepts an optional filter.

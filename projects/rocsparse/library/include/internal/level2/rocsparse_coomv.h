@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using COO storage format
+*  \brief Sparse matrix vector multiplication using the COO storage format.
 *
 *  \details
 *  \p rocsparse_coomv multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times n\f$
@@ -73,14 +73,14 @@ extern "C" {
 *  This function does not produce deterministic results when A is transposed.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans       matrix operation type.
 *  @param[in]
@@ -113,9 +113,9 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p n or \p nnz is invalid.
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p alpha, \p coo_val,
-*              \p coo_row_ind, \p coo_col_ind, \p x, \p beta or \p y pointer is invalid.
+*              \p coo_row_ind, \p coo_col_ind, \p x, \p beta, or \p y pointer is invalid.
 *  \retval     rocsparse_status_arch_mismatch the device is not supported.
 *  \retval     rocsparse_status_not_implemented
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.

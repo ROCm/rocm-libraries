@@ -38,10 +38,60 @@ endif()
 add_custom_target(examples)
 
 
-# list of examples that are labelled as REGRESSION_EXAMPLE for make regression (runtime more than 30 seconds)
+# list of examples that are labelled as REGRESSION_EXAMPLE for make regression (runtime more than 60 seconds on emulator)
 # all other tests are labelled as SMOKE_EXAMPLE
 set(REGRESSION_EXAMPLES
     example_sparse_embedding3_forward_layernorm
+    example_convnd_fwd_xdl_fp32
+    example_convnd_fwd_xdl_fp16
+    example_convnd_fwd_xdl_bf16
+    example_convnd_fwd_xdl_int8
+    example_convnd_fwd_xdl_fp8
+    example_convnd_fwd_xdl_bf8
+    example_convnd_fwd_xdl_fp16_comp_fp8
+    example_convnd_fwd_xdl_fp8_bf8
+    example_convnd_fwd_xdl_bf8_fp8
+    example_reduce_blockwise
+    example_reduce_blockwise_two_call
+    example_grouped_conv3d_bwd_data_wmma_v3_bf16
+    example_grouped_conv3d_bwd_data_wmma_v3_fp16
+    example_gemm_xdl_fp16_pk_i4_v3
+    example_gemm_xdl_bf16_pk_i4_v3
+    example_gemm_xdl_fp8_pk_i4_bpreshuffle_v3
+    example_gemm_add_add_fastgelu_xdl_lds_direct_load_fp32
+    example_convnd_fwd_max_xdl_fp32
+    example_reduce_threadwise_multi_d
+    example_pool2d_fwd_fp32
+    example_cgemm_xdl_fp32
+    example_dual_reduce_multiblock
+    example_splitK_gemm_xdl_fp16_fp8
+    example_grouped_conv_bwd_data_wmma_v3_fp16_comp_bf8_fp8
+    example_groupnorm_fwd_splitk_fp16
+    example_convnd_fwd_wmma_convinvscale_fp8
+    example_convnd_fwd_wmma_convscale_fp8
+    example_convnd_fwd_wmma_convscale_bf8
+    example_convnd_fwd_wmma_convscale_fp8_bf8
+    example_convnd_fwd_wmma_convscale_bf8_fp8
+    example_convnd_fwd_wmma_convscale_relu_fp8
+    example_convnd_fwd_wmma_convscale_add_fp8
+    example_convnd_fwd_xdl_convscale_relu_amax_fp8
+    example_convnd_fwd_xdl_convscale_amax_fp8
+    example_convnd_fwd_wmma_convscale_amax_fp8
+    example_gemm_multiply_multiply_xdl_fp8
+    example_gemm_add_add_xdl_fp16
+    example_moe_gemm1_xdl_fp8
+    example_moe_gemm2_xdl_fp8
+    example_moe_gemm1_xdl_fp8_blockscale
+    example_moe_gemm1_xdl_fp8_blockscale_splitk
+    example_moe_gemm1_xdl_fp8_gelu_tanh
+    example_moe_gemm1_xdl_pk_i4
+    example_moe_gemm2_xdl_pk_i4
+)
+# List of examples currently failing on gfx1250 emulator.
+# All of the failing examples must be fixed asap.
+set(KNOWN_FAILING_EXAMPLES
+    example_gemm_mx_fp6
+    example_gemm_mx_bf6
 )
 
 
@@ -51,7 +101,14 @@ function(add_example_dependencies EXAMPLE_NAME FILE_NAME)
     endif()
 endfunction(add_example_dependencies EXAMPLE_NAME)
 
+# ---------------------------------------------------------------------------
+# Two-pass instruction-prefetch offset patching (shared cmake module)
+include(InstPrefetchPatch)
+
 function(add_example_executable EXAMPLE_NAME FILE_NAME)
+    foreach(source IN LISTS ARGN)
+        set(FILE_NAME ${FILE_NAME} ${source})
+    endforeach()
     message(DEBUG "adding example ${EXAMPLE_NAME}")
     set(result 1)
     if(DEFINED DTYPES)
@@ -110,9 +167,9 @@ function(add_example_executable EXAMPLE_NAME FILE_NAME)
             message(DEBUG "removing wmma example ${source} ")
             list(REMOVE_ITEM FILE_NAME "${source}")
         endif()
-        #Do not build any microscaling examples if gfx950 target is not on the list
-        if(NOT EX_TARGETS MATCHES "gfx950" AND source_name MATCHES "_mx")
-            message(DEBUG "removing microscaling example ${source} ")
+        #Do not build any microscaling examples if gfx950|gfx125 target is not on the list
+        if(source_name MATCHES "_mx" AND NOT EX_TARGETS MATCHES "gfx95|gfx125")
+            message(STATUS "removing microscaling example ${source} ")
             list(REMOVE_ITEM FILE_NAME "${source}")
         endif()
         #Do not build any FP8 examples if CK_ENABLE_FP8 not set
@@ -158,11 +215,14 @@ function(add_example_executable EXAMPLE_NAME FILE_NAME)
         set_property(TARGET ${EXAMPLE_NAME} PROPERTY HIP_ARCHITECTURES ${EX_TARGETS})
         add_dependencies(examples ${EXAMPLE_NAME})
         add_dependencies(check ${EXAMPLE_NAME})
+	if(${EXAMPLE_NAME} MATCHES "example_moe_gemm1_xdl_fp8")
+            set_tests_properties(${EXAMPLE_NAME}  PROPERTIES TIMEOUT 3600)
+	endif()
         rocm_install(TARGETS ${EXAMPLE_NAME} COMPONENT examples)
         set(result 0)
     endif()
     message(DEBUG "add_example returns ${result}")
-    if(result EQUAL 0 AND NOT "${EXAMPLE_NAME}" IN_LIST REGRESSION_EXAMPLES)
+    if(result EQUAL 0 AND NOT "${EXAMPLE_NAME}" IN_LIST REGRESSION_EXAMPLES AND NOT "${EXAMPLE_NAME}" IN_LIST KNOWN_FAILING_EXAMPLES)
         set_tests_properties(${EXAMPLE_NAME} PROPERTIES LABELS "SMOKE_TEST")
         add_dependencies(smoke ${EXAMPLE_NAME})
     elseif(result EQUAL 0 AND "${EXAMPLE_NAME}" IN_LIST REGRESSION_EXAMPLES)

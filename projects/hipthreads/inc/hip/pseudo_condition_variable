@@ -1,0 +1,187 @@
+// -*- C++ -*-
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef __LIBHIPTHREADS_PSEUDO_CONDITION_VARIABLE__
+#define __LIBHIPTHREADS_PSEUDO_CONDITION_VARIABLE__
+
+#include "hip/thread"
+#include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
+
+/**
+ * @file
+ * @brief Spinning condition variable variant that periodically pseudo_yield()s.
+ * @ingroup condition_variable
+ *
+ * Provides the same counter-based wait/notify semantics as condition_variable_any
+ * but inserts cooperative yield calls during long spin intervals to reduce pressure
+ * on execution resources.
+ *
+ * Differences vs:
+ * - condition_variable_any: identical logic except this one calls pseudo_yield()
+ *   every N spin iterations (configurable).
+ * - spin_condition_variable: this one is generic (templated wait) and adds yielding;
+ *   spin_condition_variable stays pure tight spin specialized to spin_mutex.
+ *
+ * @note pseudo_yield() has important limitations: it prevents the yielding
+ *       wthread from resuming until the yieldee completes execution. This means
+ *       yield-loops (A yields to B, B tries to acquire a lock held by A) will
+ *       deadlock. Exercise caution when using pseudo_condition_variable in
+ *       scenarios where threads may yield to each other.
+ *
+ * Notes:
+ * - Spurious wakeups possible: always use predicate overload.
+ * - Yield cadence currently fixed (TODO: tune / make configurable).
+ */
+
+namespace cuda {
+
+// Like condition_variable_any but it calls hip::this_thread::pseudo_yield(); when waiting for extended periods of time.
+
+/**
+ * @brief Spinning condition variable with periodic pseudo_yield.
+ * @ingroup condition_variable
+ *
+ * Mechanism:
+ * - Each waiter atomically takes a ticket (wait_counter).
+ * - Notifiers advance notify_counter.
+ * - A waiter proceeds when its ticket < notify_counter.
+ * - During the spin loop, every K iterations (default 0x10000) a
+ *   hip::this_thread::pseudo_yield() is issued to reduce wasted GPU resources.
+ *
+ * Guarantees / caveats:
+ * - No true sleep; still busy-waiting between yields.
+ * - The "unlock and sleep" operation in wait() isn't technically atomic. A notify
+ *   that occurs between taking the ticket and unlocking may "wake" the wait-er
+ *   before it unlocked.
+ * - Predicate form recommended to guard against spurious wakeups.
+ */
+class pseudo_condition_variable {
+    uint64_t wait_counter = 0;
+    uint64_t notify_counter = 0;
+
+  public:
+    /// Constructs an empty pseudo_condition_variable.
+    __device__ constexpr pseudo_condition_variable() noexcept = default;
+
+    /// \name Deleted copy / move operations
+    /// Instances are neither copyable nor movable.
+    ///@{
+    __device__ pseudo_condition_variable(const pseudo_condition_variable &) = delete;
+    __device__ pseudo_condition_variable &operator=(const pseudo_condition_variable &) = delete;
+    ///@}
+
+    /**
+     * @brief Wakes at most one waiter (if any present).
+     *
+     * Increments notify_counter iff there is at least one unmatched wait ticket.
+     * No effect if no current waiters.
+     */
+    __device__ inline void notify_one() noexcept;
+
+    /**
+     * @brief Wakes all current waiters.
+     *
+     * Sets notify_counter to wait_counter so every waiter observes progress.
+     */
+    __device__ inline void notify_all() noexcept;
+
+    /**
+     * @brief Waits until notified (may spuriously wake).
+     *
+     * Steps:
+     * 1. Atomically obtain ticket (wait_counter++).
+     * 2. Unlock supplied lock.
+     * 3. Spin until ticket < notify_counter; pseudo_yield periodically.
+     * 4. Re-lock before returning.
+     *
+     * @tparam _Lock BasicLockable providing unlock()/lock().
+     * @param __lock Held lock protecting the predicate.
+     */
+    template <class _Lock>
+    __device__ inline void wait(_Lock &__lock);
+
+    /**
+     * @brief Waits until predicate returns true.
+     *
+     * Repeats wait(lock) while !pred().
+     *
+     * @tparam _Lock BasicLockable.
+     * @tparam _Predicate Callable returning bool.
+     * @param __lock Held lock.
+     * @param __pred Predicate to satisfy.
+     */
+    template <class _Lock, class _Predicate>
+    __device__ inline void wait(_Lock &__lock, _Predicate __pred);
+};
+
+__device__ inline void pseudo_condition_variable::notify_one() noexcept {
+    // If (notify_counter + 1 <= wait_counter), increment notify_counter.
+    // If we increment notify_counter when nobody is waiting, then the next person to wait will skip waiting
+    uint64_t cached_ntfy_cnt;
+    do {
+        cached_ntfy_cnt = atomicAdd(&notify_counter, 0);
+        if (cached_ntfy_cnt >= atomicAdd(&wait_counter, 0))
+            return;
+    } while (atomicCAS(&notify_counter, cached_ntfy_cnt, cached_ntfy_cnt + 1) !=
+             cached_ntfy_cnt);
+}
+
+__device__ inline void pseudo_condition_variable::notify_all() noexcept {
+    atomicExch(&notify_counter, atomicAdd(&wait_counter, 0));
+}
+
+template <class _Lock>
+__device__ void pseudo_condition_variable::wait(_Lock &__lock) {
+    uint64_t myId = atomicAdd(&wait_counter, 1);
+    // It's possible that another thread calls notify here, and then checks the state of __lock before we get a chance
+    // to unlock it. Since we're supposed to ATOMICALLY unlock and 'sleep', it technically shouldn't be possible for
+    // another thread to 'wake' us before we've released the lock. However, from a user's perspective, this situation is
+    // nearly indistinguisable from another, perfectly legal occurence: were already a bit further ahead, in the loop
+    // 'sleeping' when the other thread called notify, then woke up and re-acquired the lock before they got the chance
+    // to do anything further. The only catch is if unlocking and re-locking a lock has side effects or doesn't return
+    // it to an identical state, the user might be able to differentiate between these two situations.
+    __lock.unlock();
+    for (uint64_t count = 0; myId >= atomicAdd(&notify_counter, 0); ++count) {
+        // TODO: Tune this parameter
+        if (count % 0x10000ULL == 0) {
+            // Note that if another thread calls notify between getting myId and unlocking the lock, we're guaranteed to
+            // never call yield, so this doesn't affect whether a user can differentiate between the 2 situations
+            // desicribed above.
+            hip::this_thread::pseudo_yield();
+        }
+    }
+    __lock.lock();
+}
+
+template <class _Lock, class _Predicate>
+__device__ inline void pseudo_condition_variable::wait(_Lock &__lock, _Predicate __pred) {
+    while (!__pred())
+        wait(__lock);
+}
+
+} // namespace cuda
+
+#endif // __LIBHIPTHREADS_PSEUDO_CONDITION_VARIABLE__

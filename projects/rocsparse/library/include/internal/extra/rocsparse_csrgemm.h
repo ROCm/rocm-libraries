@@ -39,11 +39,11 @@ extern "C" {
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note
-*  Please note, that for matrix products with more than 4096 non-zero entries per row,
-*  additional temporary storage buffer is allocated by the algorithm.
+*  Note that for matrix products with more than 4096 non-zero entries per row,
+*  an additional temporary storage buffer is allocated by the algorithm.
 *  \note
-*  Please note, that for matrix products with more than 8192 intermediate products per
-*  row, additional temporary storage buffer is allocated by the algorithm.
+*  Note that for matrix products with more than 8192 intermediate products per
+*  row, an additional temporary storage buffer is allocated by the algorithm.
 *  \note
 *  Currently, only \p trans_A == \p trans_B == \ref rocsparse_operation_none is
 *  supported.
@@ -53,7 +53,7 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans_A         matrix \f$A\f$ operation type.
 *  @param[in]
@@ -106,19 +106,19 @@ extern "C" {
 *  csr_col_ind_D   array of \p nnz_D elements containing the column indices of the sparse
 *                  CSR matrix \f$D\f$.
 *  @param[inout]
-*  info_C          structure that holds meta data for the sparse CSR matrix \f$C\f$.
+*  info_C          structure that holds metadata for the sparse CSR matrix \f$C\f$.
 *  @param[out]
 *  buffer_size     number of bytes of the temporary storage buffer required by
 *                  \ref rocsparse_csrgemm_nnz() and \ref rocsparse_scsrgemm "rocsparse_Xcsrgemm()".
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B or
+*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B, or
 *          \p nnz_D is invalid.
 *  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
 *          \p descr_A, \p csr_row_ptr_A, \p csr_col_ind_A, \p descr_B,
 *          \p csr_row_ptr_B or \p csr_col_ind_B are invalid if \p alpha is valid,
-*          \p descr_D, \p csr_row_ptr_D or \p csr_col_ind_D is invalid if \p beta is
+*          \p descr_D, \p csr_row_ptr_D, or \p csr_col_ind_D is invalid if \p beta is
 *          valid, \p info_C or \p buffer_size is invalid.
 *  \retval rocsparse_status_not_implemented
 *          \p trans_A != \ref rocsparse_operation_none,
@@ -224,23 +224,23 @@ rocsparse_status rocsparse_zcsrgemm_buffer_size(rocsparse_handle                
 /**@}*/
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using CSR storage format
+*  \brief Sparse matrix sparse matrix multiplication using the CSR storage format.
 *
 *  \details
 *  \p rocsparse_csrgemm_nnz computes the total CSR non-zero elements and the CSR row
-*  offsets, that point to the start of every row of the sparse CSR matrix, of the
+*  offsets that point to the start of every row of the sparse CSR matrix of the
 *  resulting multiplied matrix C. It is assumed that \p csr_row_ptr_C has been allocated
 *  with size \p m+1.
 *  The required buffer size can be obtained by rocsparse_scsrgemm_buffer_size(),
-*  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size() and
+*  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size(), and
 *  rocsparse_zcsrgemm_buffer_size(), respectively.
 *
 *  \note
-*  Please note, that for matrix products with more than 8192 intermediate products per
-*  row, additional temporary storage buffer is allocated by the algorithm.
+*  Note that for matrix products with more than 8192 intermediate products per
+*  row, an additional temporary storage buffer is allocated by the algorithm.
 *  \note
 *  This function supports unsorted CSR matrices as input, while output will be sorted.
-*  Please note that matrices B and D can only be unsorted up to 8192 intermediate
+*  Note that matrices B and D can only be unsorted up to 8192 intermediate
 *  products per row. If this number is exceeded, \ref rocsparse_status_requires_sorted_storage
 *  will be returned.
 *  \note
@@ -254,7 +254,7 @@ rocsparse_status rocsparse_zcsrgemm_buffer_size(rocsparse_handle                
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans_A         matrix \f$A\f$ operation type.
 *  @param[in]
@@ -316,17 +316,17 @@ rocsparse_status rocsparse_zcsrgemm_buffer_size(rocsparse_handle                
 *  @param[in]
 *  temp_buffer     temporary storage buffer allocated by the user, size is returned
 *                  by rocsparse_scsrgemm_buffer_size(),
-*                  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size() or
+*                  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size(), or
 *                  rocsparse_zcsrgemm_buffer_size().
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B or
+*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B, or
 *          \p nnz_D is invalid.
 *  \retval rocsparse_status_invalid_pointer \p descr_A, \p csr_row_ptr_A,
 *          \p csr_col_ind_A, \p descr_B, \p csr_row_ptr_B, \p csr_col_ind_B,
 *          \p descr_D, \p csr_row_ptr_D, \p csr_col_ind_D, \p descr_C,
-*          \p csr_row_ptr_C, \p nnz_C, \p info_C or \p temp_buffer is invalid.
+*          \p csr_row_ptr_C, \p nnz_C, \p info_C, or \p temp_buffer is invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
 *  \retval rocsparse_status_not_implemented
@@ -360,7 +360,7 @@ rocsparse_status rocsparse_csrgemm_nnz(rocsparse_handle          handle,
                                        void*                     temp_buffer);
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using CSR storage format
+*  \brief Sparse matrix sparse matrix multiplication using the CSR storage format.
 *
 *  \details
 *  \p rocsparse_csrgemm multiplies the scalar \f$\alpha\f$ with the sparse
@@ -398,12 +398,12 @@ rocsparse_status rocsparse_csrgemm_nnz(rocsparse_handle          handle,
 *  This function does not produce deterministic results.
 *
 *  It is assumed that \p csr_row_ptr_C has already been filled and that \p csr_val_C and
-*  \p csr_col_ind_C are allocated by the user. \p csr_row_ptr_C and allocation size of
-*  \p csr_col_ind_C and \p csr_val_C is defined by the number of non-zero elements of
-*  the sparse CSR matrix C. Both can be obtained by rocsparse_csrgemm_nnz(). The
+*  \p csr_col_ind_C are allocated by the user. \p csr_row_ptr_C and the allocation size of
+*  \p csr_col_ind_C and \p csr_val_C are defined by the number of non-zero elements of
+*  the sparse CSR matrix C. Both can be obtained by using rocsparse_csrgemm_nnz(). The
 *  required buffer size for the computation can be obtained by
 *  rocsparse_scsrgemm_buffer_size(), rocsparse_dcsrgemm_buffer_size(),
-*  rocsparse_ccsrgemm_buffer_size() and rocsparse_zcsrgemm_buffer_size(), respectively.
+*  rocsparse_ccsrgemm_buffer_size(), and rocsparse_zcsrgemm_buffer_size(), respectively.
 *
 *  \note If \f$\alpha == 0\f$, then \f$C = \beta \cdot D\f$ will be computed.
 *  \note If \f$\beta == 0\f$, then \f$C = \alpha \cdot op(A) \cdot op(B)\f$ will be computed.
@@ -411,11 +411,11 @@ rocsparse_status rocsparse_csrgemm_nnz(rocsparse_handle          handle,
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \ref rocsparse_matrix_type_general is supported.
-*  \note Please note, that for matrix products with more than 4096 non-zero entries per
-*  row, additional temporary storage buffer is allocated by the algorithm.
+*  \note Note that for matrix products with more than 4096 non-zero entries per
+*  row, an additional temporary storage buffer is allocated by the algorithm.
 *  \note
 *  This function supports unsorted CSR matrices as input, while output will be sorted.
-*  Please note that matrices B and D can only be unsorted up to 4096 non-zero entries
+*  Note that matrices B and D can only be unsorted up to 4096 non-zero entries
 *  per row. If this number is exceeded, \ref rocsparse_status_requires_sorted_storage
 *  will be returned.
 *  \note
@@ -424,7 +424,7 @@ rocsparse_status rocsparse_csrgemm_nnz(rocsparse_handle          handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans_A         matrix \f$A\f$ operation type.
 *  @param[in]
@@ -498,19 +498,19 @@ rocsparse_status rocsparse_csrgemm_nnz(rocsparse_handle          handle,
 *  @param[in]
 *  temp_buffer     temporary storage buffer allocated by the user, size is returned
 *                  by rocsparse_scsrgemm_buffer_size(),
-*                  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size() or
+*                  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size(), or
 *                  rocsparse_zcsrgemm_buffer_size().
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B or
+*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B, or
 *          \p nnz_D is invalid.
 *  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
 *          \p descr_A, \p csr_val_A, \p csr_row_ptr_A, \p csr_col_ind_A, \p descr_B,
-*          \p csr_val_B, \p csr_row_ptr_B or \p csr_col_ind_B are invalid if \p alpha
-*          is valid, \p descr_D, \p csr_val_D, \p csr_row_ptr_D or \p csr_col_ind_D is
-*          invalid if \p beta is valid, \p csr_val_C, \p csr_row_ptr_C,
-*          \p csr_col_ind_C, \p info_C or \p temp_buffer is invalid.
+*          \p csr_val_B, \p csr_row_ptr_B, or \p csr_col_ind_B are invalid if \p alpha
+*          is valid, \p descr_D, \p csr_val_D, \p csr_row_ptr_D, or \p csr_col_ind_D are
+*          invalid if \p beta is valid, or \p csr_val_C, \p csr_row_ptr_C,
+*          \p csr_col_ind_C, \p info_C, or \p temp_buffer are invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
 *  \retval rocsparse_status_not_implemented
@@ -764,13 +764,13 @@ rocsparse_status rocsparse_zcsrgemm(rocsparse_handle                handle,
 /**@}*/
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix symbolic multiplication using CSR storage format
+*  \brief Sparse matrix sparse matrix symbolic multiplication using the CSR storage format.
 *
 *  \details
-*  \p rocsparse_csrgemm_symbolic multiplies two sparsity patterns and add an extra one: \f[ opA \cdot op(B) + D \f]
+*  \p rocsparse_csrgemm_symbolic multiplies two sparsity patterns and adds an extra one: \f[ opA \cdot op(B) + D \f]
 *  with \f$m \times k\f$ matrix \f$A\f$, defined in CSR storage format, the sparse
-*  \f$k \times n\f$ matrix \f$B\f$, defined in CSR storage format and the sparse \f$m \times n\f$ matrix \f$D\f$.
-*  The *  final result is stored in the sparse \f$m \times n\f$ matrix \f$C\f$, defined in CSR
+*  \f$k \times n\f$ matrix \f$B\f$, defined in CSR storage format, and the sparse \f$m \times n\f$ matrix \f$D\f$.
+*  The final result is stored in the sparse \f$m \times n\f$ matrix \f$C\f$, defined in CSR
 *  storage format, such
 *  that
 *  \f[
@@ -797,25 +797,25 @@ rocsparse_status rocsparse_zcsrgemm(rocsparse_handle                handle,
 *    \right.
 *  \f]
 *
-*  It is assumed that \p csr_row_ptr_C has already been filled and that and
-*  \p csr_col_ind_C is allocated by the user. \p csr_row_ptr_C and allocation size of
-*  \p csr_col_ind_C is defined by the number of non-zero elements of
-*  the sparse CSR matrix C. Both can be obtained by rocsparse_csrgemm_nnz(). The
+*  It is assumed that \p csr_row_ptr_C has already been filled and that
+*  \p csr_col_ind_C is allocated by the user. \p csr_row_ptr_C and the allocation size of
+*  \p csr_col_ind_C are defined by the number of non-zero elements of
+*  the sparse CSR matrix C. Both can be obtained by using rocsparse_csrgemm_nnz(). The
 *  required buffer size for the computation can be obtained by
 *  rocsparse_scsrgemm_buffer_size(), rocsparse_dcsrgemm_buffer_size(),
-*  rocsparse_ccsrgemm_buffer_size() and rocsparse_zcsrgemm_buffer_size(), respectively.
+*  rocsparse_ccsrgemm_buffer_size(), and rocsparse_zcsrgemm_buffer_size(), respectively.
 *
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \ref rocsparse_matrix_type_general is supported.
-*  \note Please note, that for matrix products with more than 4096 non-zero entries per
-*  row, additional temporary storage buffer is allocated by the algorithm.
+*  \note Note that for matrix products with more than 4096 non-zero entries per
+*  row, an additional temporary storage buffer is allocated by the algorithm.
 *  \note This function is blocking with respect to the host.
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans_A         matrix \f$A\f$ operation type.
 *  @param[in]
@@ -875,22 +875,22 @@ rocsparse_status rocsparse_zcsrgemm(rocsparse_handle                handle,
 *  csr_col_ind_C   array of \p nnz_C elements containing the column indices of the
 *                  sparse CSR matrix \f$C\f$.
 *  @param[in]
-*  info_C          structure that holds meta data for the sparse CSR matrix \f$C\f$.
+*  info_C          structure that holds metadata for the sparse CSR matrix \f$C\f$.
 *  @param[in]
-*  temp_buffer     temporary storage buffer allocated by the user, size is returned
+*  temp_buffer     temporary storage buffer allocated by the user. The size is returned
 *                  by rocsparse_scsrgemm_buffer_size(),
-*                  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size() or
+*                  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size(), or
 *                  rocsparse_zcsrgemm_buffer_size().
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B or
+*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B, or
 *          \p nnz_D is invalid.
 *  \retval rocsparse_status_invalid_pointer
 *          \p descr_A, \p csr_row_ptr_A, \p csr_col_ind_A, \p descr_B,
-*          \p csr_row_ptr_B or \p csr_col_ind_B, \p descr_D, \p csr_row_ptr_D, \p csr_col_ind_D
+*          \p csr_row_ptr_B, \p csr_col_ind_B, \p descr_D, \p csr_row_ptr_D, \p csr_col_ind_D
 *          \p csr_row_ptr_C,
-*          \p csr_col_ind_C, \p info_C or \p temp_buffer is invalid.
+*          \p csr_col_ind_C, \p info_C, or \p temp_buffer is invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
 *  \retval rocsparse_status_not_implemented
@@ -1040,7 +1040,7 @@ rocsparse_status rocsparse_csrgemm_symbolic(rocsparse_handle          handle,
 /**@}*/
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix numeric multiplication using CSR storage format
+*  \brief Sparse matrix sparse matrix numeric multiplication using the CSR storage format.
 *
 *  \details
 *  \p rocsparse_csrgemm_numeric multiplies the scalar \f$\alpha\f$ with the sparse
@@ -1078,12 +1078,12 @@ rocsparse_status rocsparse_csrgemm_symbolic(rocsparse_handle          handle,
 *  This function does not produce deterministic results.
 *
 *  The symbolic part of the csr matrix C can be obtained by rocsparse_csrgemm_symbolic().
-*  It is assumed that \p csr_row_ptr_C and \p csr_col_ind_C have already been filled and that \p csr_val_C is allocated by the user. \p csr_row_ptr_C and allocation size of
-*  \p csr_col_ind_C and \p csr_val_C is defined by the number of non-zero elements of
+*  It is assumed that \p csr_row_ptr_C and \p csr_col_ind_C have already been filled and that \p csr_val_C is allocated by the user. \p csr_row_ptr_C and the allocation size of
+*  \p csr_col_ind_C and \p csr_val_C are defined by the number of non-zero elements of
 *  the sparse CSR matrix C. Both can be obtained by rocsparse_csrgemm_nnz(). The
 *  required buffer size for the computation can be obtained by
 *  rocsparse_scsrgemm_buffer_size(), rocsparse_dcsrgemm_buffer_size(),
-*  rocsparse_ccsrgemm_buffer_size() and rocsparse_zcsrgemm_buffer_size(), respectively.
+*  rocsparse_ccsrgemm_buffer_size(), and rocsparse_zcsrgemm_buffer_size(), respectively.
 *
 *  \note If \f$\alpha == 0\f$, then \f$C = \beta \cdot D\f$ will be computed.
 *  \note If \f$\beta == 0\f$, then \f$C = \alpha \cdot op(A) \cdot op(B)\f$ will be computed.
@@ -1091,14 +1091,14 @@ rocsparse_status rocsparse_csrgemm_symbolic(rocsparse_handle          handle,
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \ref rocsparse_matrix_type_general is supported.
-*  \note Please note, that for matrix products with more than 4096 non-zero entries per
-*  row, additional temporary storage buffer is allocated by the algorithm.
+*  \note Note that for matrix products with more than 4096 non-zero entries per
+*  row, an additional temporary storage buffer is allocated by the algorithm.
 *  \note This function is blocking with respect to the host.
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans_A         matrix \f$A\f$ operation type.
 *  @param[in]
@@ -1170,23 +1170,23 @@ rocsparse_status rocsparse_csrgemm_symbolic(rocsparse_handle          handle,
 *  csr_col_ind_C   array of \p nnz_C elements containing the column indices of the
 *                  sparse CSR matrix \f$C\f$.
 *  @param[in]
-*  info_C          structure that holds meta data for the sparse CSR matrix \f$C\f$.
+*  info_C          structure that holds metadata for the sparse CSR matrix \f$C\f$.
 *  @param[in]
-*  temp_buffer     temporary storage buffer allocated by the user, size is returned
+*  temp_buffer     temporary storage buffer allocated by the user. The size is returned
 *                  by rocsparse_scsrgemm_buffer_size(),
-*                  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size() or
+*                  rocsparse_dcsrgemm_buffer_size(), rocsparse_ccsrgemm_buffer_size(), or
 *                  rocsparse_zcsrgemm_buffer_size().
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B or
+*  \retval rocsparse_status_invalid_size \p m, \p n, \p k, \p nnz_A, \p nnz_B, or
 *          \p nnz_D is invalid.
 *  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
 *          \p descr_A, \p csr_val_A, \p csr_row_ptr_A, \p csr_col_ind_A, \p descr_B,
-*          \p csr_val_B, \p csr_row_ptr_B or \p csr_col_ind_B are invalid if \p alpha
-*          is valid, \p descr_D, \p csr_val_D, \p csr_row_ptr_D or \p csr_col_ind_D is
-*          invalid if \p beta is valid, \p csr_val_C, \p csr_row_ptr_C,
-*          \p csr_col_ind_C, \p info_C or \p temp_buffer is invalid.
+*          \p csr_val_B, \p csr_row_ptr_B, or \p csr_col_ind_B are invalid if \p alpha
+*          is valid, \p descr_D, \p csr_val_D, \p csr_row_ptr_D, or \p csr_col_ind_D is
+*          invalid if \p beta is valid, or \p csr_val_C, \p csr_row_ptr_C,
+*          \p csr_col_ind_C, \p info_C, or \p temp_buffer is invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
 *  \retval rocsparse_status_not_implemented

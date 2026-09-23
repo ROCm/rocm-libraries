@@ -88,7 +88,15 @@ namespace
                 name << '_' << arg.stride_y;
 
             if(HEMV_TYPE == HEMV_STRIDED_BATCHED || HEMV_TYPE == HEMV_BATCHED)
+            {
                 name << '_' << arg.batch_count;
+
+                if(arg.alpha_beta_stride)
+                {
+                    name << '_' << arg.stride_c;
+                    name << '_' << arg.stride_d;
+                }
+            }
 
             if(arg.api & c_API_64)
             {

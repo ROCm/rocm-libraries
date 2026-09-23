@@ -20,9 +20,11 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from math import ceil, log2
+
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr
-from rocisa.instruction import VMovB32, SCmpGeU32
+from rocisa.instruction import VMovB32, SBarrier, SBranch, SCBranchSCC0, SCmpEQU32, SCmpGeU32, SLShiftRightB32, VReadfirstlaneB32, SLongBranchNegative
 from ..Component import Component
 import abc
 
@@ -85,9 +87,29 @@ class PersistentLoopOn(PersistentLoop):
         persistentLabel = Label(label="PersistentLoopStart", comment="")
         module.add(persistentLabel)
 
+        module.add(self.reinitWaveIdx(writer, kernel))
+
         # TODO remove?
         # kStr += inst("s_add_u32", sgpr("PersistentLoopIter"), sgpr("PersistentLoopIter"), hex(1), "Inc PersistentLoop Iter")     # Back-up: not needed now
         #kStr += str(Code.WaitCnt(self.version, 0,0,"wait for outstanding stores"))
+        return module
+
+    def reinitWaveIdx(self, writer, kernel):
+        """Re-init sgprWaveIdx, which every persistent iteration needs afresh.
+
+        TDM init reads s[sgprWaveIdx], but the same sgpr is later UNDEFed and
+        reused as a temp, so on the second iteration the value would be stale.
+        Emitted at whichever label the persistent loop actually branches back to,
+        which under ReuseAcrossPersistent is the peeled iterN entry rather than
+        the loop head.
+        """
+        module = Module("PersistentLoop On reinitWaveIdx")
+        if kernel["enableTDMA"] or kernel["enableTDMB"]:
+            wavelen = kernel["WavefrontSize"]
+            with writer.allocTmpSgpr(1, tag="PersistentLoopOn_openPersistentLoop_tmpSgprRes") as tmpSgprRes:
+                module.add(VReadfirstlaneB32(sgpr(tmpSgprRes.idx), vgpr("Serial"), "first tId"))
+                module.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(tmpSgprRes.idx),
+                                           "re-init WaveIdx for persistent loop iteration"))
         return module
 
     def recalcLocalWriteAddresses(self, writer, kernel, tc):
@@ -128,8 +150,45 @@ class PersistentLoopOn(PersistentLoop):
         module = Module("PersistentLoop On closePersistentLoop")
         skCloseLoopLabel = Label("SK_CloseLoop", "")
         module.add(skCloseLoopLabel)
-        # endIter = "StreamKIterEnd" if kernel["StreamK"] == 1 else "TotalIters"
-        endIter = "TotalIters" if kernel["StreamK"] == 2 else "StreamKIterEnd"
-        module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr(endIter), comment="Check if done all StreamK iterations"))
-        module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
+        if kernel.get("DebugPersistentKernelLoopForever", False):
+            # StreamK 3 has no other exit, so this makes the kernel loop infinitely.
+            with writer.allocTmpSgpr(3, tag="PersistentLoopOn_closePersistentLoop_tmpSgprInfo") as tmpSgprInfo:
+                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
+        elif kernel["StreamK"] == 4:
+            # module.add(SCmpGeU32(src0=sgpr("StreamKTileIdx"), src1=sgpr("SKTiles"), comment="Check if done all StreamK tiles"))
+            module.add(SBarrier(comment="Sync before SK4 persistent re-entry"))
+            with writer.allocTmpSgpr(3, tag="PersistentLoopOn_closePersistentLoop_tmpSgprInfo2") as tmpSgprInfo:
+                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
+        elif kernel["StreamK"] == 5:
+            # Hybrid SK3+SK4: dispatch on the runtime mode bit captured at
+            # preLoop into StreamKHybridMode. SK4 close: barrier + always
+            # restart (dynamic queue drives exit via KernelEnd). SK3 close:
+            # compare StreamKIter against StreamKIterEnd.
+            sk5DynamicCloseLabel = Label("SK5_DynamicClose", "")
+            sk5StaticCloseLabel = Label("SK5_StaticClose", "")
+            sk5CloseDoneLabel = Label("SK5_CloseDone", "")
+            module.add(SCmpEQU32(src0=sgpr("StreamKHybridMode"), src1=0,
+                                 comment="SK5: mode bit == 0 -> SK3 (static) close"))
+            module.add(SCBranchSCC0(labelName=sk5DynamicCloseLabel.getLabelName(),
+                                    comment="SK5: branch to SK4 (dynamic) close"))
+            # SK3 (static) close path
+            module.add(sk5StaticCloseLabel)
+            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"),
+                                 comment="SK5/SK3 path: check if done all StreamK iterations"))
+            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
+            module.add(SBranch(labelName=sk5CloseDoneLabel.getLabelName(),
+                               comment="SK5: skip dynamic close"))
+            # SK4 (dynamic) close path
+            module.add(sk5DynamicCloseLabel)
+            module.add(SBarrier(comment="SK5/SK4 path: sync before persistent re-entry"))
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
+            module.add(sk5CloseDoneLabel)
+        else:
+            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
+            # Under RAP the compute section is peeled, so later tiles re-enter at
+            # the second copy rather than at the loop head; the first copy exists
+            # only to fill the resident registers. Both this branch and the peel
+            # itself read one predicate so they cannot disagree.
+            module.add(writer.longBranchScc0(Label(writer.rapPersistentLoopEntryLabel(kernel), ""), posNeg=-1))
         return module

@@ -1,0 +1,162 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "BatchnormFwdTrainingActivTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "bias_tensor_uid": 5,
+        "epsilon_tensor_uid": 6,
+        "momentum_tensor_uid": 7,
+        "peer_stats_tensor_uid": [],
+        "prev_running_mean_tensor_uid": 10,
+        "prev_running_variance_tensor_uid": 11,
+        "scale_tensor_uid": 12,
+        "x_tensor_uid": 4
+      },
+      "name": "Batchnorm_0",
+      "outputs": {
+        "inv_variance_tensor_uid": 0,
+        "mean_tensor_uid": 1,
+        "next_running_mean_tensor_uid": 8,
+        "next_running_variance_tensor_uid": 9,
+        "y_tensor_uid": 2
+      },
+      "type": "BatchnormAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 2,
+        "in_1_tensor_uid": null,
+        "in_2_tensor_uid": null,
+        "operation": "relu_fwd",
+        "relu_lower_clip": null,
+        "relu_lower_clip_slope": null,
+        "relu_upper_clip": null,
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "Pointwise_1",
+      "outputs": {
+        "out_0_tensor_uid": 3
+      },
+      "type": "PointwiseAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Batchnorm_0::INV_VARIANCE",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Batchnorm_0::MEAN",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Batchnorm_0::Y",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": true
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Pointwise_1::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "X",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "epsilon",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "value": 9.97212960147963e-05,
+      "value_type": "Float64Value",
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "momentum",
+      "strides": "${case.strides}",
+      "uid": 7,
+      "value": 0.14325573613681652,
+      "value_type": "Float64Value",
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "next_running_mean",
+      "strides": "${case.strides}",
+      "uid": 8,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "next_running_variance",
+      "strides": "${case.strides}",
+      "uid": 9,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "prev_running_mean",
+      "strides": "${case.strides}",
+      "uid": 10,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "prev_running_variance",
+      "strides": "${case.strides}",
+      "uid": 11,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 12,
+      "virtual": false
+    }
+  ]
+}

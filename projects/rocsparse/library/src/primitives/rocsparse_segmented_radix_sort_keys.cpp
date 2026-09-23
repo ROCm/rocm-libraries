@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -132,8 +132,11 @@ rocsparse_status rocsparse::primitives::sort_csr_column_indices(rocsparse_handle
     uint32_t startbit = 0;
     uint32_t endbit   = rocsparse::clz(n);
 
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(csr_col_ind_buffer1, csr_col_ind, sizeof(J) * nnz, hipMemcpyDeviceToDevice));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csr_col_ind_buffer1,
+                                                 csr_col_ind,
+                                                 sizeof(J) * nnz,
+                                                 hipMemcpyDeviceToDevice,
+                                                 handle->stream));
 
     rocsparse::primitives::double_buffer<J> indices(csr_col_ind_buffer1, csr_col_ind_buffer2);
 
@@ -153,11 +156,11 @@ rocsparse_status rocsparse::primitives::sort_csr_column_indices(rocsparse_handle
 
     if(indices.current() != csr_col_ind_buffer2)
     {
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(csr_col_ind_buffer2,
-                                           indices.current(),
-                                           sizeof(J) * nnz,
-                                           hipMemcpyDeviceToDevice,
-                                           handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csr_col_ind_buffer2,
+                                                     indices.current(),
+                                                     sizeof(J) * nnz,
+                                                     hipMemcpyDeviceToDevice,
+                                                     handle->stream));
     }
 
     return rocsparse_status_success;
@@ -196,11 +199,11 @@ rocsparse_status rocsparse::primitives::sort_csr_column_indices(rocsparse_handle
 
     if(indices.current() != csr_col_ind)
     {
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(csr_col_ind,
-                                           indices.current(),
-                                           sizeof(J) * nnz,
-                                           hipMemcpyDeviceToDevice,
-                                           handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csr_col_ind,
+                                                     indices.current(),
+                                                     sizeof(J) * nnz,
+                                                     hipMemcpyDeviceToDevice,
+                                                     handle->stream));
     }
 
     return rocsparse_status_success;

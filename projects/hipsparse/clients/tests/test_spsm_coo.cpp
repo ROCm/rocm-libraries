@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,8 +33,6 @@ TEST_ROUTINE_WITH_CONFIG(spsm_coo,
                          arg.K,
                          arg.alpha,
                          arg.alphai,
-                         arg.beta,
-                         arg.betai,
                          arg.transA,
                          arg.transB,
                          arg.orderB,
@@ -52,8 +50,6 @@ TEST_ROUTINE_WITH_CONFIG(spsm_ex_coo,
                          arg.K,
                          arg.alpha,
                          arg.alphai,
-                         arg.beta,
-                         arg.betai,
                          arg.transA,
                          arg.transB,
                          arg.orderB,

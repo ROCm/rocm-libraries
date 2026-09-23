@@ -32,7 +32,7 @@ extern "C" {
 *  \brief Scatter elements from a sparse vector into a dense vector.
 *
 *  \details
-*  \p hipsparseScatter scatters the elements from the sparse vector \f$x\f$ in the dense
+*  \p hipsparseScatter scatters the elements from the sparse vector \f$x\f$ into the dense
 *  vector \f$y\f$.
 *
 *  \code{.c}
@@ -59,7 +59,7 @@ extern "C" {
 *  </table>
 *
 *  @param[in]
-*  handle       handle to the hipsparse library context queue.
+*  handle       handle to the hipSPARSE library context queue.
 *  @param[in]
 *  vecX         sparse vector descriptor \f$x\f$.
 *  @param[out]
@@ -67,7 +67,7 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX or \p vecY is nullptr,
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, or \p vecY is nullptr,
 *          or the vector sizes or data types are incompatible.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)

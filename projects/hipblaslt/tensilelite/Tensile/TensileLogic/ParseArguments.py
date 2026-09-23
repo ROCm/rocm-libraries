@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,11 @@
 ################################################################################
 
 from argparse import ArgumentParser
+from pathlib import Path
 
 from Tensile.Toolchain.Validators import ToolchainDefaults
+
+BUNDLED_KNOWN_BUGS = object()
 
 
 def parseArguments():
@@ -63,6 +66,26 @@ def parseArguments():
         default=ToolchainDefaults.CXX_COMPILER,
         help=f"default: {ToolchainDefaults.CXX_COMPILER}",
     )
+    argParser.add_argument(
+        "--architecture",
+        dest="Architecture",
+        action="store",
+        default="all",
+        help="semicolon-separated list of gfx architectures to validate "
+        "(e.g. 'gfx1151;gfx942'); 'all' validates every logic file",
+    )
+    argParser.add_argument(
+        "--require-gfx1250v0-overlay",
+        dest="RequireGfx1250v0Overlay",
+        action="store_true",
+        help="with --check-all, fail if the gfx1250v0 overlay directory is "
+        "missing. Opt-in for the caller that actually owns the gfx1250/"
+        "gfx1250v0 split (hipBLASLt's dedicated gfx1250v0 device-library "
+        "build); not implied by --architecture=gfx1250v0 alone, since a "
+        "shared invocation can request that architecture against a corpus "
+        "that never did a v0/v1 split for gfx1250 in the first place (e.g. "
+        "hipSPARSELt's)",
+    )
 
     group = argParser.add_mutually_exclusive_group()
     group.add_argument(
@@ -73,6 +96,32 @@ def parseArguments():
         dest="CheckOnlyCustomKernels",
         action="store_true",
         help="run logic file checks only on custom kernels",
+    )
+
+    knownBugsGroup = argParser.add_mutually_exclusive_group()
+    knownBugsGroup.add_argument(
+        "--known-bugs",
+        dest="KnownBugs",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="YAML file containing (path, solution_name) pairs to skip validation for "
+        "(documented exceptions; paths relative to LogicPath). solution_name is the "
+        "solution's SolutionNameMin, which is stable across library re-tuning",
+    )
+    knownBugsGroup.add_argument(
+        "--use-bundled-known-bugs",
+        dest="KnownBugs",
+        action="store_const",
+        const=BUNDLED_KNOWN_BUGS,
+        help="use the known-bugs YAML bundled with TensileLogic",
+    )
+    argParser.add_argument(
+        "--strict-known-bugs",
+        dest="StrictKnownBugs",
+        action="store_true",
+        help="exit non-zero when a known-bugs entry no longer fails validation "
+        "(a landed fix); use in CI to force removal of stale entries",
     )
     args = argParser.parse_args()
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,12 @@ std::ostream& operator<<(std::ostream& os, const extract_digit_params& params)
     sstream << "{ start: " << params.start << ", radix_bits: " << params.radix_bits
             << ", expected_result: 0x" << std::hex << params.expected_result << " }";
     return os << sstream.str();
+}
+
+inline std::ostream& operator<<(std::ostream& stream, const __hip_bfloat16& value)
+{
+    stream << static_cast<float>(value);
+    return stream;
 }
 
 class RadixKeyCodecTest : public ::testing::TestWithParam<extract_digit_params>
@@ -321,7 +327,8 @@ using TypedRadixKeyCodecTestTypes
                        TypedRadixKeyCodecTestParams<rocprim::half>,
                        TypedRadixKeyCodecTestParams<rocprim::bfloat16>,
                        TypedRadixKeyCodecTestParams<float>,
-                       TypedRadixKeyCodecTestParams<double>>;
+                       TypedRadixKeyCodecTestParams<double>,
+                       TypedRadixKeyCodecTestParams<__hip_bfloat16>>;
 
 TYPED_TEST_SUITE(TypedRadixKeyCodecTest, TypedRadixKeyCodecTestTypes);
 

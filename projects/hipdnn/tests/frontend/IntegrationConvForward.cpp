@@ -108,6 +108,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        int deviceId = 0;
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
     }
 
     void TearDown() override
@@ -120,10 +124,6 @@ protected:
 
     static hipdnnHandle_t setupEnvironmentWithPlugin(const std::string& pluginPath)
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
-        int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
-
         // Set up plugin path - load specific plugin by absolute path
         const std::array<const char*, 1> paths = {pluginPath.c_str()};
         EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -231,7 +231,7 @@ protected:
         result = graph->get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        Workspace workspace(static_cast<size_t>(workspaceSize));
+        const Workspace workspace(static_cast<size_t>(workspaceSize));
 
         ASSERT_TRUE(tensors.x->has_uid());
         ASSERT_TRUE(tensors.w->has_uid());
@@ -254,13 +254,13 @@ protected:
     {
         const auto& testCase = GetParam();
 
-        std::vector<int64_t> xDims = {2, 3, 14, 14}; // n, c, h, w
-        std::vector<int64_t> wDims = {3, 3, 3, 3}; // k, c, h, w
-        std::vector<int64_t> yDims = {2, 3, 12, 12}; // n, k, h, w
-        std::vector<int64_t> prePadding = {0, 0};
-        std::vector<int64_t> postPadding = {0, 0};
-        std::vector<int64_t> stride = {1, 1};
-        std::vector<int64_t> dilation = {1, 1};
+        const std::vector<int64_t> xDims = {2, 3, 14, 14}; // n, c, h, w
+        const std::vector<int64_t> wDims = {3, 3, 3, 3}; // k, c, h, w
+        const std::vector<int64_t> yDims = {2, 3, 12, 12}; // n, k, h, w
+        const std::vector<int64_t> prePadding = {0, 0};
+        const std::vector<int64_t> postPadding = {0, 0};
+        const std::vector<int64_t> stride = {1, 1};
+        const std::vector<int64_t> dilation = {1, 1};
 
         // Setup environment with specified plugin
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);

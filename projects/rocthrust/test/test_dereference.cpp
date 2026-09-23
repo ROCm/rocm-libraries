@@ -41,6 +41,7 @@ template <typename Iterator1, typename Iterator2>
 void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
   simple_copy_on_device<<<1, 1>>>(first1, last1, first2);
+  HIP_CHECK(hipGetLastError());
 }
 
 TEST(DereferenceTests, TestDeviceDereferenceDeviceVectorIterator)

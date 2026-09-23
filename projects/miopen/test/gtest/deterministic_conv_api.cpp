@@ -30,6 +30,7 @@
 #include <miopen/convolution.hpp>
 
 #include "gtest_common.hpp"
+#include "gtest_desc_guard.hpp"
 #include "test_parameter_name_generator.hpp"
 
 namespace {
@@ -62,22 +63,20 @@ struct DeterministicConvApiTest : public testing::TestWithParam<TestCase>
 
         std::tie(conv_params, conv_attr) = GetParam();
 
-        miopenConvolutionDescriptor_t conv_desc;
+        ConvDescGuard conv_desc;
+        EXPECT_EQ(conv_desc.getStatus(), miopenStatusSuccess);
 
-        auto status = miopenCreateConvolutionDescriptor(&conv_desc);
+        auto status = miopenInitConvolutionDescriptor(conv_desc,
+                                                      miopenConvolutionMode_t::miopenConvolution,
+                                                      conv_params[0],
+                                                      conv_params[1],
+                                                      conv_params[2],
+                                                      conv_params[3],
+                                                      conv_params[4],
+                                                      conv_params[5]);
         EXPECT_EQ(status, miopenStatusSuccess);
 
-        status = miopenInitConvolutionDescriptor(conv_desc,
-                                                 miopenConvolutionMode_t::miopenConvolution,
-                                                 conv_params[0],
-                                                 conv_params[1],
-                                                 conv_params[2],
-                                                 conv_params[3],
-                                                 conv_params[4],
-                                                 conv_params[5]);
-        EXPECT_EQ(status, miopenStatusSuccess);
-
-        const auto& desc = miopen::deref(conv_desc);
+        const auto& desc = miopen::deref(conv_desc.get());
         EXPECT_EQ(desc.attribute.deterministic.Get(), 0); // The default value should be false
         EXPECT_TRUE(!desc.attribute.deterministic);       // Check the bool operator
 

@@ -3,16 +3,17 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BatchnormPacker.hpp>
+#include <hipdnn_frontend/detail/BatchnormUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class BatchnormNode : public BaseNode<BatchnormNode>
+class BatchnormNode : public BaseNode<BatchnormNode, NodeType::BATCHNORM>
 {
 public:
     BatchnormAttributes attributes;
@@ -21,6 +22,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(batchnormAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BatchnormAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackBatchnormOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -49,6 +60,10 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BatchnormNode missing x for pre-validation");
 
+        HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BatchnormNode missing y for pre-validation");
+
         HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BatchnormNode missing scale for pre-validation");
@@ -56,10 +71,6 @@ public:
         HIPDNN_RETURN_IF_FALSE(attributes.get_bias(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BatchnormNode missing bias for pre-validation");
-
-        HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
-                               ErrorCode::ATTRIBUTE_NOT_SET,
-                               "BatchnormNode missing y for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_epsilon(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
@@ -72,12 +83,11 @@ public:
         auto bias = attributes.get_bias();
         auto epsilon = attributes.get_epsilon();
 
-        // SECTION 2: Validate Required Parameter Dimensions
-        // Why: All required parameters (x, scale, bias, epsilon) must have dimensions
-        // set by user. Validate them upfront before proceeding with shape checks.
+        // SECTION 2: Validate Parameter Dimensions
+        // Required parameters ( x, y, scale, bias and epsilon) must have valid dimensions.
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
 
         // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
         // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
@@ -90,23 +100,20 @@ public:
             detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
-        // Why: All BN parameters (scale, bias, mean, variance) are per-channel with
-        // shape [1, C, 1, 1, ...]. This is because:
-        // - Each channel c has its own statistics: mean_c, var_c
-        // - Each channel c has its own learnable parameters: scale_c, bias_c
-        //   - scale_c controls feature importance/gain after normalization
-        //   - bias_c controls activation threshold (e.g., for ReLU: active when scale_c*xhat + bias_c > 0)
+        // Why:
+        // - BatchNorm operates per-channel: statistics (mean, variance) are computed for each channel.
+        // - Learnable parameters (scale and bias) are also associated with channels, but may now
+        //   use any broadcastable shape.
+        // - Mean and inverse variance tensors remain strictly per-channel (channel-only shape).
+        // - Backend providers may enforce additional constraints on scale and bias shapes.
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        const int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-
-        // Validate bias has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
-
+        // Validate that scale and bias tensors have matching shapes
+        HIPDNN_CHECK_ERROR(
+            detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
         // Validate optional mean and inv_variance tensors (only if dimensions set)
         HIPDNN_CHECK_ERROR(
             detail::validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));
@@ -125,10 +132,10 @@ public:
         auto nextRunningVar = attributes.get_next_running_variance();
 
         // If any running stat is provided, all must be provided
-        bool hasPrevRunningMean = prevRunningMean != nullptr;
-        bool hasPrevRunningVar = prevRunningVar != nullptr;
-        bool hasNextRunningMean = nextRunningMean != nullptr;
-        bool hasNextRunningVar = nextRunningVar != nullptr;
+        const bool hasPrevRunningMean = prevRunningMean != nullptr;
+        const bool hasPrevRunningVar = prevRunningVar != nullptr;
+        const bool hasNextRunningMean = nextRunningMean != nullptr;
+        const bool hasNextRunningVar = nextRunningVar != nullptr;
 
         if(hasPrevRunningMean || hasPrevRunningVar || hasNextRunningMean || hasNextRunningVar)
         {
@@ -235,7 +242,7 @@ public:
     void gather_hipdnn_tensors(
         std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
-        BaseNode<BatchnormNode>::gather_hipdnn_tensors(allTensors);
+        BaseNode<BatchnormNode, NodeType::BATCHNORM>::gather_hipdnn_tensors(allTensors);
 
         for(auto& tensor : attributes.peer_stats)
         {
@@ -246,15 +253,11 @@ public:
         }
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
-            attributes.pack_attributes(builder).Union());
+        return detail::createBatchnormOperation(attributes, tensorDescs, operations);
     }
 };
 

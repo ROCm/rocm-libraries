@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -118,10 +118,10 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
         handle, csr_row_ptr_C, csr_row_ptr_C + m, m, rocprim_size, rocprim_buffer));
 
     I int_max;
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&int_max, csr_row_ptr_C + m, sizeof(I), hipMemcpyDeviceToHost, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        &int_max, csr_row_ptr_C + m, sizeof(I), hipMemcpyDeviceToHost, stream));
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     // Group offset buffer
     J* d_group_offset = reinterpret_cast<J*>(buffer);
@@ -178,14 +178,14 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                                                                         rocprim_buffer));
 
         // Copy group sizes to host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&h_group_size,
-                                           d_group_size,
-                                           sizeof(J) * CSRGEMM_MAXGROUPS,
-                                           hipMemcpyDeviceToHost,
-                                           stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&h_group_size,
+                                                     d_group_size,
+                                                     sizeof(J) * CSRGEMM_MAXGROUPS,
+                                                     hipMemcpyDeviceToHost,
+                                                     stream));
 
         // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         // Permutation temporary arrays
         J* tmp_vals = reinterpret_cast<J*>(buffer);
@@ -223,7 +223,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
     {
         // First group processes all rows
         h_group_size[0] = m;
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
     }
 
     // Compute non-zero entries per row for each group
@@ -671,8 +671,8 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
     // Store nnz of C
     if(handle->pointer_mode == rocsparse_pointer_mode_device)
     {
-        RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(nnz_C, csr_row_ptr_C + m, sizeof(I), hipMemcpyDeviceToDevice, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            nnz_C, csr_row_ptr_C + m, sizeof(I), hipMemcpyDeviceToDevice, stream));
 
         // Adjust nnz by index base
         if(descr_C->base == rocsparse_index_base_one)
@@ -683,9 +683,9 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
     }
     else
     {
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             nnz_C, csr_row_ptr_C + m, sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
         // Adjust nnz by index base
         *nnz_C -= descr_C->base;

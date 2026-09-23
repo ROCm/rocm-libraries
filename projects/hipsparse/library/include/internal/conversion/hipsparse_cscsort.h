@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Sort a sparse CSC matrix
+*  \brief Sort a sparse CSC matrix.
 *
 *  \details
 *  \p hipsparseXcscsort_bufferSizeExt returns the size of the temporary storage buffer
@@ -37,7 +37,7 @@ extern "C" {
 *  allocated by the user.
 *
 *  @param[in]
-*  handle              handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m                   number of rows of the sparse CSC matrix.
 *  @param[in]
@@ -55,7 +55,7 @@ extern "C" {
 *                      \ref hipsparseXcscsort().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cscColPtr, \p cscRowInd or
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cscColPtr, \p cscRowInd, or
 *              \p pBufferSizeInBytes pointer is invalid.
 */
 HIPSPARSE_EXPORT
@@ -73,22 +73,22 @@ hipsparseStatus_t hipsparseXcscsort_bufferSizeExt(hipsparseHandle_t handle,
 *  \details
 *  \p hipsparseXcscsort sorts a matrix in CSC format. The sorted permutation vector
 *  \p P can be used to obtain sorted \p cscVal array. In this case, \p P must be
-*  initialized as the identity permutation, see \ref hipsparseCreateIdentityPermutation(). To
-*  apply the permutation vector to the CSC values, see hipsparse \ref hipsparseSgthr
+*  initialized as the identity permutation. See \ref hipsparseCreateIdentityPermutation(). To
+*  apply the permutation vector to the CSC values, see \ref hipsparseSgthr
 *  "hipsparseXgthr()".
 *
-*  \p hipsparseXcscsort requires extra temporary storage buffer that has to be allocated by
-*  the user. Storage buffer size can be determined by \ref hipsparseXcscsort_bufferSizeExt().
+*  \p hipsparseXcscsort requires extra temporary storage buffer that must be allocated by
+*  the user. The storage buffer size can be determined by \ref hipsparseXcscsort_bufferSizeExt().
 *
 *  \note
 *  \p P can be \p NULL if a sorted permutation vector is not required.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m               number of rows of the sparse CSC matrix.
 *  @param[in]
@@ -105,15 +105,15 @@ hipsparseStatus_t hipsparseXcscsort_bufferSizeExt(hipsparseHandle_t handle,
 *  cscRowInd       array of \p nnz elements containing the row indices of the sparse
 *                  CSC matrix.
 *  @param[inout]
-*  P               array of \p nnz integers containing the unsorted map indices, can be
+*  P               array of \p nnz integers containing the unsorted map indices. Can be
 *                  \p NULL.
 *  @param[in]
-*  pBuffer         temporary storage buffer allocated by the user, size is returned by
+*  pBuffer         temporary storage buffer allocated by the user. The size is returned by
 *                  \ref hipsparseXcscsort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p descrA, \p cscColPtr,
-*              \p cscRowInd or \p pBuffer pointer is invalid.
+*              \p cscRowInd, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

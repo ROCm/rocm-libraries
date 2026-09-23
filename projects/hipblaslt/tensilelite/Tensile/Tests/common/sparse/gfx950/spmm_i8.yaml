@@ -1,6 +1,7 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported yet
 GlobalParameters:
+  SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
   NumElementsToValidate: -1
@@ -9,13 +10,10 @@ GlobalParameters:
   #DataInitTypeA: 8
   #DataInitTypeB: 8
   #DataInitTypeBias: 0
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   #Device: 0
   PruneSparseMode: 0
-  MaxLDS: 163840
-  DeviceLDS: 163840
 BenchmarkProblems:
   #######################################
   # NN - standard
@@ -27,8 +25,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -60,7 +58,7 @@ BenchmarkProblems:
         - DepthU: [128,256]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -68,7 +66,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -109,8 +107,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -142,7 +140,7 @@ BenchmarkProblems:
         - DepthU: [128,256]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [0]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -150,7 +148,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -191,8 +189,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -224,7 +222,7 @@ BenchmarkProblems:
         - DepthU: [128,256]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -232,7 +230,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -273,8 +271,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -306,7 +304,7 @@ BenchmarkProblems:
         - DepthU: [128,256]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -314,7 +312,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -355,8 +353,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -386,7 +384,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -394,7 +392,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -437,8 +435,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -468,7 +466,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [0]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -476,7 +474,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -519,8 +517,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -550,7 +548,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -558,7 +556,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -601,8 +599,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -632,7 +630,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -640,7 +638,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]

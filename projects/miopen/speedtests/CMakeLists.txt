@@ -14,8 +14,8 @@ function(add_speedtest_executable TEST_NAME)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
         set_target_properties(${TEST_NAME} PROPERTIES COMPILE_FLAGS -pthread LINK_FLAGS -pthread)
     endif()
-    separate_arguments(MIOPEN_TEST_FLAGS_ARGS NATIVE_COMMAND ${MIOPEN_TEST_FLAGS})
-    target_link_libraries(${TEST_NAME} MIOpen)
+    # MIOpen_with_plugins ensures CK plugin .so's are built alongside the speedtest
+    target_link_libraries(${TEST_NAME} MIOpen_with_plugins)
     target_include_directories(${TEST_NAME} PRIVATE ../test ../src/kernels)
 endfunction(add_speedtest_executable)
 

@@ -8,6 +8,11 @@ else()
 endif()
 add_library(roc::hipsparse ALIAS hipsparse)
 
+# Add Windows version resource to library
+if(WIN32 AND BUILD_SHARED_LIBS)
+    target_sources(hipsparse PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
+
 rocm_set_soversion(hipsparse ${hipsparse_SOVERSION})
 set_target_properties(hipsparse PROPERTIES
     CXX_EXTENSIONS OFF

@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "MiopenApi.hpp"
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
-#include <miopen/miopen.h>
 #include <unordered_map>
 
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
@@ -32,6 +32,11 @@ class MiopenContainer;
 struct HipdnnMiopenHandle : HipdnnEnginePluginHandle
 {
 public:
+    HipdnnMiopenHandle(const HipdnnMiopenHandle&) = delete;
+    HipdnnMiopenHandle& operator=(const HipdnnMiopenHandle&) = delete;
+    HipdnnMiopenHandle(HipdnnMiopenHandle&&) = delete;
+    HipdnnMiopenHandle& operator=(HipdnnMiopenHandle&&) = delete;
+
     HipdnnMiopenHandle()
     {
         miopenStatus_t status = miopenCreate(&miopenHandle);
@@ -71,7 +76,7 @@ public:
 
     // Defined in HipdnnMiopenHandle.cpp to avoid circular dependency
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
-        getEngineManager();
+        getEngineManager() const;
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,
                                           std::unique_ptr<flatbuffers::DetachedBuffer> buffer)

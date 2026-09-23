@@ -111,6 +111,7 @@ void RunSingleValueTest(const ExpectedFunction& ef, const ThrustDeviceFunction& 
     device_output,
     size,
     df);
+  HIP_CHECK(hipGetLastError());
 
   size_t* device_thrust_output = new size_t[size];
   HIP_CHECK(hipMemcpy(device_thrust_output, device_output, sizeof(size_t) * size, hipMemcpyDeviceToHost));
@@ -122,6 +123,7 @@ void RunSingleValueTest(const ExpectedFunction& ef, const ThrustDeviceFunction& 
   }
 
   delete[] host_search;
+  delete[] host_input;
   delete[] host_expected;
   delete[] host_thrust_output;
   delete[] device_thrust_output;
@@ -364,6 +366,7 @@ void RunVectorTest(const ExpectedFunction& ef, const ThrustDeviceFunction& df, c
     device_input,
     device_output,
     df);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(thrust_device_output, device_output, sizeof(size_t) * size, hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < size; i++)
@@ -993,6 +996,7 @@ TEST(BinarySearchTests, TestBinarySearchDevice)
           thrust::raw_pointer_cast(&d_data[0]),
           thrust::raw_pointer_cast(&d_result[0]),
           search_value);
+        HIP_CHECK(hipGetLastError());
       }
       ASSERT_EQ(h_result, d_result);
     }

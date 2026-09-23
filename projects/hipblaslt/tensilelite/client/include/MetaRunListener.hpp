@@ -34,6 +34,10 @@
 
 #include <cstddef>
 
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
+#endif
+
 namespace TensileLite
 {
     namespace Client
@@ -65,6 +69,11 @@ namespace TensileLite
             virtual void   validateWarmups(std::shared_ptr<ProblemInputs> inputs,
                                            TimingEvents const&            startEvents,
                                            TimingEvents const&            stopEvents) override;
+
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+            virtual void preProfiler() override;
+            virtual void postProfiler() override;
+#endif
 
             virtual size_t numSyncs() override;
             virtual void   setNumSyncs(size_t count) override;

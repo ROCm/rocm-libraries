@@ -1,0 +1,20 @@
+{
+  "name": "universal_gemm_hip_512",
+  "module": "rocke.examples.common.universal_gemm_verify_hip",
+  "argv": [
+    "--arch",
+    "gfx950",
+    "--m",
+    "512",
+    "--n",
+    "512",
+    "--k",
+    "512"
+  ],
+  "digest": "a7edffa4beac99ebf68ba97607cb5085e83dc8e0e36e269e7712154866d3a024",
+  "lines": [
+    "verify max_abs_diff=0 bad=0/262144",
+    "PerfJSON: {\"ms\": <t>, \"tflops\": <t>, \"gbps\": <t>, \"max_abs_diff\": 0.0, \"bad_count\": 0, \"total\": 262144}",
+    "[gfx950] HIP-path GEMM 512x512x512: max_abs_diff=0.000e+00 tol=0e+00 bad=0/262144 -> PASS"
+  ]
+}

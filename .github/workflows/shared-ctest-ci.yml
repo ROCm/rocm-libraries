@@ -1,0 +1,44 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: Shared CTest CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'shared/ctest/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/shared-ctest-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  optional-args-regression:
+    name: Optional Argument Regression
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            shared/ctest
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: python -m pip install pyyaml
+
+      - name: Configure optional argument regression fixture
+        run: |
+          cmake -S shared/ctest/tests/optional_args_scope \
+            -B build/shared-ctest-optional-args-scope-test \
+            -DROCM_LIBRARIES_ROOT="$PWD"

@@ -2,15 +2,71 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## (Unreleased) hipTensor 2.3.0
+## hipTensor 2.5.0
 
 ### Added
+* Added broadcast support to the elementwise operations. An input tensor of `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` may now carry a subset of the output tensor's modes, in which case it's broadcast along the modes it lacks. For example, `A` with modes `{n}` can be combined with `B`, `C`, and `D` with modes `{m,n}`.
+* Added `gfx1250-strict` as a supported offload target and classified its device pass as `gfx1250`.
 
-* Added support for contractions with both data and compute types FP16 and BF16 for gfx11 and gfx12 targets.
+### Changed
+* Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_INVALID_VALUE` when a mode shared by an input tensor and the output tensor has a different extent in each, and `HIPTENSOR_STATUS_NOT_SUPPORTED` when a mode is repeated within one tensor. An input tensor that carries a mode the output tensor doesn't carry is still rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`, since that would have to be reduced away rather than broadcast.
+
+### Resolved issues
+* Fixed `hiptensorPermute` and the element-wise binary/trinary execute paths ignoring user-supplied output tensor strides, which caused the output to always be written contiguously regardless of the strides set on the output descriptor.
+* Fixed elementwise operations reading the wrong elements when two input tensors ordered the same modes differently. Every tensor's strides are now permuted into the output tensor's mode order before reaching the kernel.
+
+## hipTensor 2.4.0 for ROCm 10.1
+
+### Added
+* Added `ffm-quick` and `ffm-full` test categories for emulation tests.
+* Added a Windows version resource so `hiptensor.dll` exposes file metadata (file description, version, product name, and copyright) in File Explorer properties.
+
+### Changed
+* Reorganized test configurations per tier and category.
+
+### Optimized
+* Reduced test execution duration.
+
+### Resolved issues
+* Enabled `-frtti` on Windows to fix RTTI-related build failures.
+* Fixed batched contractions reporting success while producing incorrect results. `hiptensorCreateContraction` and `hiptensorCreateContractionTrinary` now return `HIPTENSOR_STATUS_NOT_SUPPORTED` when a mode is shared by both inputs and the output of a contraction.
+* Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when an input tensor doesn't carry the same modes as the output tensor. These configurations previously produced a valid descriptor and plan, then failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` at execution.
+* Removed the internal compiler flags `-amdgpu-early-inline-all=true` and `-amdgpu-function-calls=false` from the build, which caused excessive compile-time memory usage (OOM) with newer ROCm/LLVM toolchains (JIRA: LCOMPILER-2589).
+
+## hipTensor 2.3.0 for ROCm 7.14
+
+### Added
+* Added Windows support.
+* Added contraction support with FP16 and BF16 data and compute types for gfx11 and gfx12 targets.
 * Added support for the following new GPU targets:
   * gfx11: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153.
-  * gfx12: gfx1200, gfx1201.
-* Added unary element-wise operators to contraction.
+  * gfx12: gfx1200, gfx1201, gfx1250.
+* Added unary element-wise operators to contraction, including the new `BilinearUnary` class, dedicated instances, samples, and tests.
+* Added Dockerfiles (prebuilt and full build) and documentation to streamline hipTensor build environment setup.
+* Added the `CREATE_TEST_APP_LOCAL_DEPLOY` CMake option to stage required ROCm DLLs on Windows, and updated the Windows build documentation accordingly.
+* Added YAML-driven CTest test filter standardization, applying `quick`/`standard`/`comprehensive`/`full` tier labels to the installed test tree so tests can be run by tier with `ctest -L <tier>`.
+* Added support for trinary contractions.
+* Added hipTensor to the TheRock build system, enabling source builds, artifact distribution, and CI testing on both Linux and Windows.
+* Added native Linux packages with HPC SDK metapackages: `amdrocm-hiptensor` (runtime), `amdrocm-hiptensor-devel` (headers and CMake config), and `amdrocm-hiptensor-test` (CTest binaries).
+
+### Changed
+* Replaced numeric UID-based actor-critic kernel lookup with platform-stable string-based kernel name comparison to enable cross-platform compatibility.
+* Adopted FNV-1a string hashing in place of `std::hash` to ensure plan cache files are portable across platforms.
+* Switched to ROCm-provided CMake install functions (`rocm_export_targets`) for consistency with other ROCm libraries.
+* Adapted hipTensor to CK namespace changes for `host_tensor` functions.
+* Cleaned up `rtest` script formatting and removed invalid run commands from `rtest.xml`.
+
+### Removed
+* Removed the legacy `.jenkins` folder since CI migration to rocJenkins.
+
+### Optimized
+* Improved column-major contraction performance by applying CK-style stride reordering for column-major inputs.
+* Achieved 2x–3x speedup in contraction TFLOPS/s by using switch-case dispatch in `HiptensorUnaryOp` instead of static table lookup.
+* Re-selected `HIPTENSOR_ALGO_ACTOR_CRITIC` winning kernels for all contraction type/rank/layout combinations to reflect current Composable Kernel tile parameters.
+
+### Resolved issues
+* Fixed use-after-free bug where `hiptensorCreatePlan` held dangling pointers to user-provided descriptors; the plan now deep-copies all descriptors.
+* Fixed incorrect BF16 results in contraction with unary ops caused by silent `bhalf_t`-to-float integer promotion in cross-type overloads.
 
 ## hipTensor 2.2.0 for ROCm 7.2.0
 

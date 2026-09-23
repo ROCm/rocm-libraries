@@ -65,7 +65,8 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
 
         static const ck_tile::index_t M_Warp_Tile = 16;
         static const ck_tile::index_t N_Warp_Tile = 16;
-        static const ck_tile::index_t K_Warp_Tile = 16;
+        static const ck_tile::index_t K_Warp_Tile =
+            ck_tile::get_k_warp_tile<ADataType, M_Warp_Tile>();
     };
 
     using grouped_gemm_kargs = ck_tile::QuantGroupedGemmHostArgs;
@@ -582,10 +583,10 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
             {
 #if CK_TILE_USE_WMMA
                 auto b_shuffle_host =
-                    ck_tile::shuffle_b<GroupedGemKernelParam_Wmma>(b_k_n_tensors[i]);
+                    ck_tile::shuffle_b_v0<GroupedGemKernelParam_Wmma>(b_k_n_tensors[i]);
 #else
                 auto b_shuffle_host =
-                    ck_tile::shuffle_b<GroupedGemKernelParam_Mfma>(b_k_n_tensors[i]);
+                    ck_tile::shuffle_b_v0<GroupedGemKernelParam_Mfma>(b_k_n_tensors[i]);
 #endif
                 b_k_n_dev_buf[i]->ToDevice(b_shuffle_host.data());
             }

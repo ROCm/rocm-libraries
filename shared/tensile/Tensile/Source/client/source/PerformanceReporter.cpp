@@ -32,6 +32,8 @@
 #include <string>
 #include <unordered_map>
 
+#include <Tensile/hip/HipUtils.hpp>
+
 namespace Tensile
 {
     namespace Client
@@ -55,15 +57,15 @@ namespace Tensile
                                                  double l2ReadBwMultiplier,
                                                  double readEff)
         {
-            hipGetDeviceProperties(&m_props, deviceIndex);
+            HIP_CHECK_EXC(hipGetDeviceProperties(&m_props, deviceIndex));
 #if HIP_VERSION >= 50220730
             int hip_version;
-            hipRuntimeGetVersion(&hip_version);
+            HIP_CHECK_EXC(hipRuntimeGetVersion(&hip_version));
             if(hip_version >= 50220730)
             {
-                hipDeviceGetAttribute(&m_props.multiProcessorCount,
-                                      hipDeviceAttributePhysicalMultiProcessorCount,
-                                      deviceIndex);
+                HIP_CHECK_EXC(hipDeviceGetAttribute(&m_props.multiProcessorCount,
+                                                    hipDeviceAttributePhysicalMultiProcessorCount,
+                                                    deviceIndex));
             }
 #endif
             setNumCUs();

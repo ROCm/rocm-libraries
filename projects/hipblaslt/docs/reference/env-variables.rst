@@ -125,6 +125,8 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | Example: 32 (limits GEMM kernels to 32 compute units)
         | Default: All available compute units
 
+.. _env-type_overrides:
+
 Type overrides
 ======================
 

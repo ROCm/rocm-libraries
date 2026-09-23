@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -24,31 +24,47 @@
 #define ROCFFT_HIP_OBJ_WRAPPER_H
 
 #include "rocfft_hip.h"
+#include <type_traits>
 
-// RAII wrapper around HIP objects
-template <typename T, auto TCreate, auto TDestroy>
+// RAII wrapper around HIP objects (or rocfft objects if TSuccess == rocfft_status_success)
+template <typename T, auto TCreate, auto TDestroy, auto TSuccess = hipSuccess, auto Tinit = nullptr>
 struct hip_object_wrapper_t
 {
     hip_object_wrapper_t()
-        : obj(nullptr)
+        : obj(Tinit)
+        , owned(true)
     {
     }
 
     template <typename... Args>
     void alloc(Args&&... arg)
     {
+        const auto ret = alloc_with_err(std::forward<Args>(arg)...);
+        if(ret != TSuccess)
+        {
+            if constexpr(std::is_same_v<decltype(TSuccess), hipError_t>)
+                throw hip_runtime_error("hip object allocation failure", ret);
+            else
+                throw std::runtime_error("object allocation failure");
+        }
+    }
+
+    template <typename... Args>
+    auto alloc_with_err(Args&&... arg)
+    {
         free();
-        if(TCreate(&obj, std::forward<Args>(arg)...) != hipSuccess)
-            throw std::runtime_error("hip create failure");
+        auto ret = TCreate(&obj, std::forward<Args>(arg)...);
+        owned    = (ret == TSuccess);
+        return ret;
     }
 
     void free()
     {
-        if(obj)
+        if(obj != Tinit && owned)
         {
             (void)TDestroy(obj);
-            obj = nullptr;
         }
+        obj = Tinit;
     }
 
     operator const T&() const
@@ -62,7 +78,7 @@ struct hip_object_wrapper_t
 
     operator bool() const
     {
-        return obj != nullptr;
+        return obj != Tinit;
     }
 
     ~hip_object_wrapper_t()
@@ -74,18 +90,35 @@ struct hip_object_wrapper_t
     hip_object_wrapper_t& operator=(const hip_object_wrapper_t&) = delete;
     hip_object_wrapper_t(hip_object_wrapper_t&& other)
         : obj(other.obj)
+        , owned(other.owned)
     {
-        other.obj = nullptr;
+        other.obj   = Tinit;
+        other.owned = false;
     }
 
     hip_object_wrapper_t& operator=(hip_object_wrapper_t&& other)
     {
         std::swap(obj, other.obj);
+        std::swap(owned, other.owned);
         return *this;
     }
 
+    static hip_object_wrapper_t make_nonowned(T p)
+    {
+        hip_object_wrapper_t ret;
+        ret.obj   = p;
+        ret.owned = false;
+        return ret;
+    }
+
+    const T get_raw() const
+    {
+        return obj;
+    }
+
 private:
-    T obj;
+    T    obj;
+    bool owned = true;
 };
 
 typedef hip_object_wrapper_t<hipStream_t, hipStreamCreate, hipStreamDestroy>  hipStream_wrapper_t;

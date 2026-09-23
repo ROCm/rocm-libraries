@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -90,25 +90,23 @@ int main()
     std::cout << std::endl;
 
     hipfftHandle hipForwardPlan;
-    hipfftResult hipfft_rt;
-    hipfft_rt = hipfftPlanMany(&hipForwardPlan,
-                               rank,
-                               n,
-                               inembed,
-                               istride,
-                               idist,
-                               onembed,
-                               ostride,
-                               odist,
-                               HIPFFT_R2C, // Use HIPFFT_D2Z for double-precsion.
-                               howmany);
+    hipfftResult hipfft_rt = hipfftPlanMany(&hipForwardPlan,
+                                            rank,
+                                            n,
+                                            inembed,
+                                            istride,
+                                            idist,
+                                            onembed,
+                                            ostride,
+                                            odist,
+                                            HIPFFT_R2C, // Use HIPFFT_D2Z for double-precision.
+                                            howmany);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
     hipfftReal* gpu_data;
 
-    hipError_t hip_rt;
-    hip_rt = hipMalloc((void**)&gpu_data, total_bytes);
+    hipError_t hip_rt = hipMalloc((void**)&gpu_data, total_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
@@ -142,7 +140,8 @@ int main()
     }
     std::cout << std::endl;
 
-    hipfftDestroy(hipForwardPlan);
+    if(hipfftDestroy(hipForwardPlan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(gpu_data);
     if(hip_rt != hipSuccess)

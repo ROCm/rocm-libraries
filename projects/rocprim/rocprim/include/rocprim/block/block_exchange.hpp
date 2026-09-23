@@ -61,6 +61,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// In the examples exchange operation is performed on block of 128 threads, using type
 /// \p int with 8 items per thread.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_exchange.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

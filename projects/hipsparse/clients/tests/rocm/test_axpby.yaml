@@ -30,13 +30,13 @@ Tests:
   category: pre_checkin
   function: axpby_bad_arg
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *axpby_all_precisions
 
 - name: axpby
   category: quick
   function: axpby
   indextype: *i32
-  precision: *single_double_precisions
+  precision: *axpby_all_precisions
   N: [5000]
   nnz: [0, 500, 2500]
   alpha: [1.0]
@@ -49,7 +49,7 @@ Tests:
   category: pre_checkin
   function: axpby
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *axpby_all_precisions
   N: [22031]
   nnz: [0, 5, 1000, 10000]
   alpha: [1.0]
@@ -62,7 +62,7 @@ Tests:
   category: nightly
   function: axpby
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *axpby_all_precisions
   N: [100000, 500000]
   nnz: [0, 10000, 50000, 100000]
   alpha: [1.0]
@@ -75,7 +75,7 @@ Tests:
   category: pre_checkin
   function: axpby
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *axpby_all_precisions
   N: [22031]
   nnz: [16458]
   alpha: [2.0]
@@ -84,3 +84,4 @@ Tests:
   betai: [0.7]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   graph_test: [true]
+  

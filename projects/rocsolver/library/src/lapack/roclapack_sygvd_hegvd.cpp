@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_sygvd_hegvd.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -42,6 +43,7 @@ rocblas_status rocsolver_sygvd_hegvd_impl(rocblas_handle handle,
                                           S* D,
                                           S* E,
                                           rocblas_int* info)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "sygvd" : "hegvd");
     ROCSOLVER_ENTER_TOP(name, "--itype", itype, "--evect", evect, "--uplo", uplo, "-n", n, "--lda",
@@ -79,20 +81,25 @@ rocblas_status rocsolver_sygvd_hegvd_impl(rocblas_handle handle,
     size_t size_splits, size_tmpz;
     // size of temporary info array
     size_t size_iinfo;
+    // 2-stage workspace sizes
+    size_t size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st;
     rocsolver_sygvd_hegvd_getMemorySize<false, false, T, S>(
         handle, itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
         &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tau, &size_pivots_workArr,
-        &size_iinfo, &optim_mem);
+        &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &size_iinfo, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
-                                                      size_work3, size_work4, size_tmpz, size_splits,
-                                                      size_tau, size_pivots_workArr, size_iinfo);
+        return rocblas_set_optimal_device_memory_size(
+            handle, size_scalars, size_work1, size_work2, size_work3, size_work4, size_tmpz,
+            size_splits, size_tau, size_pivots_workArr, size_Aband, size_he2hb_work, size_V_hb2st,
+            size_tau_hb2st, size_iinfo);
 
     // memory workspace allocation
     void *scalars, *work1, *work2, *work3, *work4, *tmpz, *splits, *tau, *pivots_workArr, *iinfo;
+    void *Aband, *he2hb_work, *V_hb2st, *tau_hb2st;
     rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
-                              size_tmpz, size_splits, size_tau, size_pivots_workArr, size_iinfo);
+                              size_tmpz, size_splits, size_tau, size_pivots_workArr, size_Aband,
+                              size_he2hb_work, size_V_hb2st, size_tau_hb2st, size_iinfo);
 
     if(!mem)
         return rocblas_status_memory_error;
@@ -106,7 +113,11 @@ rocblas_status rocsolver_sygvd_hegvd_impl(rocblas_handle handle,
     splits = mem[6];
     tau = mem[7];
     pivots_workArr = mem[8];
-    iinfo = mem[9];
+    Aband = mem[9];
+    he2hb_work = mem[10];
+    V_hb2st = mem[11];
+    tau_hb2st = mem[12];
+    iinfo = mem[13];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
@@ -114,7 +125,12 @@ rocblas_status rocsolver_sygvd_hegvd_impl(rocblas_handle handle,
     return rocsolver_sygvd_hegvd_template<false, false, T>(
         handle, itype, evect, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, D, strideD,
         E, strideE, info, batch_count, (T*)scalars, work1, work2, work3, work4, (S*)tmpz,
-        (rocblas_int*)splits, (T*)tau, pivots_workArr, (rocblas_int*)iinfo, optim_mem);
+        (rocblas_int*)splits, (T*)tau, pivots_workArr, (T*)Aband, (T*)he2hb_work, (T*)V_hb2st,
+        (T*)tau_hb2st, (rocblas_int*)iinfo, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

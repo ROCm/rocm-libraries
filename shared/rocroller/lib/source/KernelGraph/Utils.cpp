@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/Utils.hpp>
 
@@ -636,7 +613,8 @@ namespace rocRoller
                || std::holds_alternative<CG::StoreLDSTile>(op) //
                || std::holds_alternative<CG::LoadTiled>(op) //
                || std::holds_alternative<CG::LoadLDSTile>(op) //
-               || std::holds_alternative<CG::LoadTileDirect2LDS>(op))
+               || std::holds_alternative<CG::LoadTileDirect2LDS>(op)
+               || std::holds_alternative<CG::LoadTiledTDMToLDS>(op))
                 return true;
             return false;
         }
@@ -755,7 +733,8 @@ namespace rocRoller
                         -> result {
                         return {kgraph.mapper.get<CT::User>(tag), GD::Upstream};
                     },
-                    [&](CIsAnyOf<CG::LoadTileDirect2LDS> auto const& op) -> result {
+                    [&](CIsAnyOf<CG::LoadTileDirect2LDS, CG::LoadTiledTDMToLDS> auto const& op)
+                        -> result {
                         if(isStorePartOfBidirectionalOp)
                         {
                             return {kgraph.mapper.get<CT::LDS>(tag), GD::Upstream};
@@ -1537,7 +1516,8 @@ namespace rocRoller
                         graph.mapper.get<CT::ElementNumber>(tag, 3)};
             }
             if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT
-               || tile.memoryType == MemoryType::WAVE_Direct2LDS)
+               || tile.memoryType == MemoryType::WAVE_Direct2LDS
+               || tile.memoryType == MemoryType::WAVE_TDMToLDS)
             {
                 return {graph.mapper.get<CT::ElementNumber>(tag, 0),
                         graph.mapper.get<CT::ElementNumber>(tag, 1)};
@@ -1624,12 +1604,14 @@ namespace rocRoller
             }
         }
 
-        Generator<int> bodyParents(int control, KernelGraph const& graph)
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, KernelGraph const& graph)
         {
-            return bodyParents(control, graph.control);
+            return containingAncestors(control, graph.control);
         }
 
-        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph)
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, ControlGraph::ControlGraph const& graph)
         {
             std::unordered_set<int> visitedNodes = {control};
 
@@ -1648,10 +1630,10 @@ namespace rocRoller
                 AssertFatal(!visitedNodes.contains(node), "Graph contains cycle!");
                 visitedNodes.insert(node);
 
-                auto isContaining
-                    = !std::holds_alternative<ControlGraph::Sequence>(graph.getEdge(edge));
+                auto controlEdge  = graph.getEdge(edge);
+                auto isContaining = !std::holds_alternative<ControlGraph::Sequence>(controlEdge);
                 if(isContaining)
-                    co_yield node;
+                    co_yield {node, controlEdge};
 
                 neighbours = graph.getNeighbours<Graph::Direction::Upstream>(node);
             }
@@ -1662,7 +1644,7 @@ namespace rocRoller
             TIMER(t, "controlStack");
             std::deque<int> rv = {control};
 
-            for(auto parent : bodyParents(control, graph))
+            for(auto [parent, edge] : containingAncestors(control, graph))
             {
                 rv.push_front(parent);
             }
@@ -1693,7 +1675,8 @@ namespace rocRoller
 
         bool isGlobalToLDSOp(KernelGraph const& graph, int op)
         {
-            return graph.control.get<ControlGraph::LoadTileDirect2LDS>(op).has_value();
+            return graph.control.get<ControlGraph::LoadTileDirect2LDS>(op).has_value()
+                   || graph.control.get<ControlGraph::LoadTiledTDMToLDS>(op).has_value();
         }
 
         std::optional<int>
@@ -1725,6 +1708,39 @@ namespace rocRoller
                     return connection.control;
 
             return {};
+        }
+
+        bool isSwappedLayout(KernelGraph const&                    graph,
+                             int                                   elementNumberTag,
+                             CoordinateGraph::ElementNumber const& elementNumber)
+        {
+            namespace CT           = rocRoller::KernelGraph::CoordinateGraph;
+            auto isThreadTileIndex = [](CT::Dimension const& node) {
+                return std::holds_alternative<CT::ThreadTileIndex>(node);
+            };
+            const auto threadTileTag
+                = *graph.coordinates
+                       .getInputNodeIndices(elementNumberTag, CT::isEdge<CT::PassThrough>)
+                       .take(1)
+                       .only();
+            const auto threadTileIndex
+                = graph.coordinates.getNode<CT::ThreadTileIndex>(threadTileTag);
+
+            return threadTileIndex.dim != elementNumber.dim;
+        }
+
+        std::optional<uint> GetVGPRBlockSetDimSize(KernelGraph const& graph, int tag)
+        {
+            auto coord = graph.mapper.get(tag, Connections::TypeAndSubDimension{"VGPRBlockSet", 0});
+            if(coord == -1)
+                return {};
+
+            auto [vgprBlockSetTag, vgprBlockSet] = graph.getDimension<CT::VGPRBlockSet>(tag);
+            AssertFatal(Expression::evaluationTimes(
+                            vgprBlockSet.size)[Expression::EvaluationTime::Translate],
+                        "Could not determine VGPRBlockSet size at translate-time.",
+                        ShowValue(vgprBlockSet));
+            return getUnsignedInt(evaluate(vgprBlockSet.size));
         }
     }
 }

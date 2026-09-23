@@ -22,22 +22,22 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
+from typing import Any, Optional
 from rocisa.instruction import SWaitCnt
 
 from Tensile.Components.CMSValidator import verify_scc_overlap
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateSCCOverlap(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
+    needs_timeline = False
+
+    def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
         return verify_scc_overlap(sched, kernel_dict, codePathIdx)
 
-    def setUp(self):
-        super().setUp()
-        self.kernel["MIWaveTileA"] = 4
-        self.kernel["MIWaveTileB"] = 4
-        
-        self.kernel["DirectToLds"] = 1
-        self.num_vmfma = 2 * self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"MIWaveTileA": 4, "MIWaveTileB": 4, "DirectToLds": 1})
+        super().setup_method(method, kernel_updates=kernel_updates)
 
     
     def test_gr_simple(self):

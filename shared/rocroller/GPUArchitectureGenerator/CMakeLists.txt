@@ -16,6 +16,7 @@ target_include_directories(isa-spec-manager
 add_executable(GPUArchitectureGenerator
     "${PROJECT_SOURCE_DIR}/lib/source/GPUArchitecture.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/GPUArchitectureLibrary.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/GPUArchitectureTarget.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Assemblers/Assembler.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Assemblers/Assembler_component.cpp"
     "${PROJECT_SOURCE_DIR}/lib/source/Assemblers/InProcessAssembler.cpp"

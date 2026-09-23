@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights
+ * Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights
  * reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -85,30 +85,38 @@ typedef void (*hipfftCallbackStoreR)(
 typedef void (*hipfftCallbackStoreD)(
     void* dataOut, size_t offset, hipfftDoubleReal element, void* callerInfo, void* sharedPointer);
 
-/*! @brief Set a callback on a plan
+/*! @brief Set a function pointer callback on a plan (deprecated)
    *
-   * @details Set either a load or store callback to run with a plan.
-   * The type of callback is specified with the 'cbtype' parameter.
-   * An array ofcallback and callback data pointers must be given -
-   * one per device executing the plan.
+   * @details Set either a load or store callback to run with a plan,
+   * specified as a device function pointer.  The type of callback is
+   * specified with the 'cbtype' parameter.  An array of callback and
+   * callback data pointers must be given - one per device executing
+   * the plan.
+   *
+   * The specified arrays must remain valid until either the plan is
+   * destroyed or callbacks are cleared from the plan.
    *
    * @param[in] plan The FFT plan.
    * @param[in] callbacks Array of callback function pointers.
    * @param[in] cbtype Type of callback being set.
    * @param[in] callbackData Array of callback function data pointers
    */
+HIPFFT_DEPRECATED_MSG(
+    "Function pointer callbacks are deprecated; use hipfftXtSetJITCallback for JIT callbacks.")
 HIPFFT_EXPORT hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
                                                void**               callbacks,
                                                hipfftXtCallbackType cbtype,
                                                void**               callbackData);
 
-/*! @brief Remove a callback from a plan
+/*! @brief Remove a function pointer callback from a plan (deprecated)
    *
-   * @details Remove a previously-set callback from a plan.
+   * @details Remove a previously-set function pointer callback from a plan.
    *
    * @param[in] plan The FFT plan.
    * @param[in] cbtype Type of callback being removed.
    */
+HIPFFT_DEPRECATED_MSG(
+    "Function pointer callbacks are deprecated; use hipfftXtSetJITCallback for JIT callbacks.")
 HIPFFT_EXPORT hipfftResult hipfftXtClearCallback(hipfftHandle plan, hipfftXtCallbackType cbtype);
 
 /*! @brief Set shared memory size for callback.
@@ -124,6 +132,79 @@ HIPFFT_EXPORT hipfftResult hipfftXtClearCallback(hipfftHandle plan, hipfftXtCall
 HIPFFT_EXPORT hipfftResult hipfftXtSetCallbackSharedSize(hipfftHandle         plan,
                                                          hipfftXtCallbackType cbtype,
                                                          size_t               sharedSize);
+
+typedef hipfftComplex (*hipfftJITCallbackLoadC)(void*              data,
+                                                unsigned long long offset,
+                                                void*              cbdata,
+                                                void*              sharedMem);
+typedef hipfftDoubleComplex (*hipfftJITCallbackLoadZ)(void*              data,
+                                                      unsigned long long offset,
+                                                      void*              cbdata,
+                                                      void*              sharedMem);
+typedef hipfftReal (*hipfftJITCallbackLoadR)(void*              data,
+                                             unsigned long long offset,
+                                             void*              cbdata,
+                                             void*              sharedMem);
+typedef hipfftDoubleReal (*hipfftJITCallbackLoadD)(void*              data,
+                                                   unsigned long long offset,
+                                                   void*              cbdata,
+                                                   void*              sharedMem);
+
+typedef void (*hipfftJITCallbackStoreC)(
+    void* data, unsigned long long offset, hipfftComplex element, void* cbdata, void* sharedMem);
+typedef void (*hipfftJITCallbackStoreZ)(void*               data,
+                                        unsigned long long  offset,
+                                        hipfftDoubleComplex element,
+                                        void*               cbdata,
+                                        void*               sharedMem);
+typedef void (*hipfftJITCallbackStoreR)(
+    void* data, unsigned long long offset, hipfftReal element, void* cbdata, void* sharedMem);
+typedef void (*hipfftJITCallbackStoreD)(
+    void* data, unsigned long long offset, hipfftDoubleReal element, void* cbdata, void* sharedMem);
+
+/*! @brief Set a JIT callback on a plan
+   *
+   * @details Set either a load or store callback to run with a plan.
+   * The type of callback is specified with the `cbtype` parameter.
+   * The callback is provided as SPIR-V on AMD platforms and as
+   * LTO-IR fatbin on CUDA platforms.
+   *
+   *  Note: JIT callbacks cannot currently be used on multi-GPU transforms.
+   *  This support will be added in a future release of hipFFT.
+   *
+   * JIT callbacks can be cleared from the plan by passing nullptr
+   * for `symbol_name` and `bitcode_data`, and 0 for
+   * `bitcode_len_bytes`.
+   *
+   * `cbdata` is an optional array of pointers of data that is passed
+   * to the callback function.  As JIT callbacks are currently only
+   * supported for single-device transforms, this array must have one
+   * pointer element in it if it is specified.  The pointer will be
+   * passed to the callback function's `cbdata` parameter when it is
+   * executed on that device.
+   *
+   * If specified, the `cbdata` array must remain valid until either
+   * the plan is destroyed or callbacks are cleared from the plan.
+   *
+   * This function must be called after the plan is allocated using
+   * ::hipfftCreate, but before the plan is initialized by any of the
+   * "MakePlan" functions.  Therefore, API functions that combine
+   * creation and initialization (::hipfftPlan1d, ::hipfftPlan2d,
+   * ::hipfftPlan3d, and ::hipfftPlanMany) cannot set a JIT callback.
+   *
+   * @param[in] plan The FFT plan.
+   * @param[in] symbol_name Name of the symbol in the compiled bitcode.
+   * @param[in] bitcode_data Pointer to bitcode data.
+   * @param[in] bitcode_len_bytes Number of bytes in the bitcode data.
+   * @param[in] cbtype Type of callback function.
+   * @param[in] cbdata Array of callback function data pointers.
+   */
+HIPFFT_EXPORT hipfftResult hipfftXtSetJITCallback(hipfftHandle         plan,
+                                                  const char*          symbol_name,
+                                                  const void*          bitcode_data,
+                                                  size_t               bitcode_len_bytes,
+                                                  hipfftXtCallbackType cbtype,
+                                                  void**               cbdata);
 
 /*! @brief Initialize a batched rank-dimensional FFT plan with
     advanced data layout and specified input, output, execution data
@@ -246,51 +327,84 @@ HIPFFT_EXPORT hipfftResult hipfftXtExec(hipfftHandle plan,
                                         void*        output,
                                         int          direction);
 
-/*! @brief Set multiple GPUs on a plan.
+/*! @brief Instructs hipFFT to use multiple GPUs for a plan.
  *
- *  Instructs hipFFT to use multiple GPUs for a plan.
- * 
  *  This function must be called after the plan is allocated using
  *  ::hipfftCreate, but before the plan is initialized by any of the
  *  "MakePlan" functions.  Therefore, API functions that combine
  *  creation and initialization (::hipfftPlan1d, ::hipfftPlan2d,
  *  ::hipfftPlan3d, and ::hipfftPlanMany) cannot use multiple GPUs.
  *
- * @param[in, out] plan
- * @param[in] count: length gpus array
- * @param[in] gpus: array of ints specifying deviceIDs
+ * @note The rocFFT backend currently requires all device IDs in
+ *  the `gpus` array to be distinct.
+ *
+ * @param[in, out] plan The FFT plan.
+ * @param[in] count Number of GPUs (length of the `gpus` array).
+ * @param[in] gpus Array of device IDs.
  *
  * @warning Experimental
  */
 HIPFFT_EXPORT hipfftResult hipfftXtSetGPUs(hipfftHandle plan, int count, int* gpus);
 
-/*! @brief Layout details of a multi-device memory descriptor.
+/*! @brief Enumeration type identifying the kind of data distribution, observed by
+ *  a multi-device data descriptor (i.e., an instance of ::hipLibXtDesc) for a given
+ *  data set.
  */
 typedef enum hipfftXtSubFormat_t
 {
-    HIPFFT_XT_FORMAT_INPUT             = 0x00,
-    HIPFFT_XT_FORMAT_OUTPUT            = 0x01,
-    HIPFFT_XT_FORMAT_INPLACE           = 0x02,
-    HIPFFT_XT_FORMAT_INPLACE_SHUFFLED  = 0x03,
+    /*!
+     *  This subformat represents a division along the batch dimension for a
+     *  compact (not padded) I/O data set of a plan initialized for a batched
+     *  transform (i.e., `batch` > 1). This value identifies the input data
+     *  of the plan for which it is created (by ::hipfftXtMalloc).
+     *  Descriptors of this subformat can be used in out-of-place executions. */
+    HIPFFT_XT_FORMAT_INPUT = 0x00,
+    /*!
+     *  Same distribution as ::HIPFFT_XT_FORMAT_INPUT, but identifies the
+     *  output data of the plan for which it is created (by ::hipfftXtMalloc). */
+    HIPFFT_XT_FORMAT_OUTPUT = 0x01,
+    /*!
+     *  This format represents a division along the batch (resp. slowest) dimension
+     *  of a batched (resp. unbatched) data set. Descriptors of this subformat can
+     *  be used for in-place executions of multi-device plans, i.e., they account
+     *  for padding in the fastest dimensions for real data. */
+    HIPFFT_XT_FORMAT_INPLACE = 0x02,
+    /*!
+     *  This subformat is restricted to unbatched, multi-dimensional data sets,
+     *  and represents a division along the second-slowest dimension.
+     *  Descriptors of this subformat can be used for in-place executions of
+     *  multi-device plans for an unbatched transform. */
+    HIPFFT_XT_FORMAT_INPLACE_SHUFFLED = 0x03,
+    /*! This subformat is specific to unbatched, one-dimensional transforms (not
+     *  implemented with rocfft backend). */
     HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED = 0x04,
-    HIPFFT_FORMAT_UNDEFINED            = 0x05
+    /*! Undefined subformat that should never be used explicitly. */
+    HIPFFT_FORMAT_UNDEFINED = 0x05
 } hipfftXtSubFormat;
 
-/*! @brief Allocate memory on multiple devices.
- *
- *  Allocate memory on multiple devices for the specified plan.
- *  Returns a \ref hipLibXtDesc descriptor which includes pointers
- *  to the allocated memory, devices that memory resides on, and
- *  sizes allocated.
- *
- *  The subformat indicates whether the memory will be used for FFT
- *  input or output.
- *
- *  The memory must be freed by calling ::hipfftXtFree.
+/*! @brief Allocates a multi-device descriptor (i.e., a ::hipLibXtDesc instance),
+ *  tailored to a specific multi-device plan's needs. The allocated descriptor
+ *  must be freed using ::hipfftXtFree when no longer needed.
  * 
- * @param[in] plan FFT plan to allocate descriptor memory for.
- * @param[out] desc Pointer to descriptors for allocated memory, the devices used, and sizes.
- * @param[in] format Subformat determines whether memory is used for FFT input or output.
+ *  @details The data set of interest that is considered for the definition of
+ *  the desired descriptor is the plan's expected input data set, unless
+ *  `format` is ::HIPFFT_XT_FORMAT_OUTPUT. For values of `format` consistent
+ *  with in-place operations (i.e., ::HIPFFT_XT_FORMAT_INPLACE or
+ *  ::HIPFFT_XT_FORMAT_INPLACE_SHUFFLED), the created descriptor is usable for
+ *  both the plan's input and output data sets.
+ * 
+ *  @note Multi-device descriptors resulting in a division of real data sets
+ *    along their fastest dimension are not supported. As a result,
+ *    ::hipfftXtMalloc does not produce usable descriptors for requests to
+ *    create a multi-device descriptor of subformat value
+ *    ::HIPFFT_XT_FORMAT_INPLACE_SHUFFLED (resp. ::HIPFFT_XT_FORMAT_INPLACE)
+ *    given a plan initialized for an unbatched two-dimensional real forward
+ *    (resp. inverse) transform.
+ *
+ * @param[in] plan Multi-device FFT plan to allocate descriptor memory for.
+ * @param[out] desc Address of the pointer to the created descriptor.
+ * @param[in] format Desired descriptor's subformat, identifying the plan's
+ * I/O data set of interest (see ::hipfftXtSubFormat for more details).
  *
  * @warning Experimental
  */
@@ -300,15 +414,23 @@ HIPFFT_EXPORT hipfftResult hipfftXtMalloc(hipfftHandle      plan,
 
 /*! @brief Copy data to/from \ref hipLibXtDesc descriptors.
  *
- *  Copy data according to the hipfftXtCopyType
+ * @details If `type` is ::HIPFFT_COPY_HOST_TO_DEVICE (resp.
+ * ::HIPFFT_COPY_DEVICE_TO_HOST), `src` (resp. `dest`) must point to a
+ * host-residing memory buffer and `dest` (resp. `src`) must point to a
+ * ::hipLibXtDesc descriptor. That descriptor must be fit for storing the plan's
+ * input (resp. output) data set assuming it's distributed consistently with the
+ * descriptor's own `subFormat` value (see ::hipfftXtSubFormat for more details).
+ * The host buffer must be large enough to hold the plan's input (resp. output)
+ * data (accounting for possible padding in real domain for plans and descriptors
+ * specific to data for in-place real transforms).
+ * ::HIPFFT_COPY_DEVICE_TO_DEVICE copies are supported only from descriptors of
+ * format ::HIPFFT_XT_FORMAT_INPLACE_SHUFFLED to descriptors of format
+ * ::HIPFFT_XT_FORMAT_INPLACE along with plans that support both formats.
  *
- *  - ::HIPFFT_COPY_HOST_TO_DEVICE: dest points to a \ref hipLibXtDesc structure that describes multi-device memory layout.  src points to a host memory buffer.
- *  - ::HIPFFT_COPY_DEVICE_TO_HOST: src points to a \ref hipLibXtDesc structure that describes multi-device memory layout.  dest points to a host memory buffer.
- *  - ::HIPFFT_COPY_DEVICE_TO_DEVICE: Both dest and src point to a \ref hipLibXtDesc structure that describes multi-device memory layout.  The two structures must describe memory with the same number of devices and memory sizes.
- * 
- * @param[in] plan Plan which has the descriptor.
- * @param[out] dest Buffer that will be populated.
- * @param[in] src Buffer that will be copied from.
+ * @param[in] plan Multi-device FFT plan of interest, defining the data set of
+ * relevance for the desired copy operation.
+ * @param[out] dest Opaque pointer to the copy destination.
+ * @param[in] src Opaque pointer to the copy source.
  * @param[in] type Type of copy operation to perform.
  *
  * @warning Experimental
@@ -326,13 +448,23 @@ HIPFFT_EXPORT hipfftResult hipfftXtMemcpy(hipfftHandle     plan,
  */
 HIPFFT_EXPORT hipfftResult hipfftXtFree(hipLibXtDesc* desc);
 
-/** @defgroup hipfftXtExecDescriptor Execute FFTs using hipLibXtDesc descriptors.
- *
- *  Execute FFTs using hipLibXtDesc descriptors.  Inputs and
- *  outputs are pointers to hipLibXtDesc descriptors.
- *  In-place transforms are performed by passing the same pointer for
- *  input and output.
+/** @defgroup hipfftXtExecDescriptor Multi-device descriptor execution
  * 
+ * Executes multi-device transforms using ::hipLibXtDesc descriptors as
+ * `input` and `output`. In-place transforms require `input == output`.
+ *
+ * After a successful unbatched multi-dimensional in-place execution, the
+ * given descriptor's `subFormat` is toggled: the descriptor's `subFormat`
+ * changes from ::HIPFFT_XT_FORMAT_INPLACE to ::HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+ * and vice versa.  This reflects the data redistribution operated by the
+ * transform.
+ *
+ * The `subFormat` value(s) of the given descriptor(s) must be compatible
+ * with the desired execution's placement (see ::hipfftXtSubFormat). For
+ * unbatched multi-dimensional transforms, only in-place execution is
+ * supported (`input == output` required and the descriptor's subformat
+ * must be ::HIPFFT_XT_FORMAT_INPLACE or ::HIPFFT_XT_FORMAT_INPLACE_SHUFFLED).
+ *
  * @warning Experimental
  */
 

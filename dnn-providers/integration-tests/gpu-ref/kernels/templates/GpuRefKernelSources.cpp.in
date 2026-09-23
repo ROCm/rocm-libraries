@@ -1,0 +1,63 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+// Auto-generated GPU reference kernel sources - DO NOT EDIT
+#include "GpuRefKernelSources.hpp"
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+
+@KERNEL_DEFINITIONS@
+
+@HEADER_DEFINITIONS@
+
+namespace hipdnn_gpu_ref
+{
+
+static const std::unordered_map<std::string_view, std::string_view>& getKernelMap()
+{
+    static const std::unordered_map<std::string_view, std::string_view> s_kernelMap{
+@KERNEL_MAP_ENTRIES@
+    };
+    return s_kernelMap;
+}
+
+std::string_view getGpuRefKernelSrc(const char* name)
+{
+    const auto& map = getKernelMap();
+    auto it = map.find(name);
+    if(it == map.end())
+    {
+        throw std::runtime_error(std::string("Failed to load GPU ref kernel source: ") + name);
+    }
+    return it->second;
+}
+
+static const std::unordered_map<std::string_view, std::string_view>& getIncludeMap()
+{
+    static const std::unordered_map<std::string_view, std::string_view> s_data{
+@HEADER_MAP_ENTRIES@
+    };
+    return s_data;
+}
+
+void getGpuRefKernelIncList(std::vector<std::string_view>& includeTexts,
+                            std::vector<const char*>& includeNames)
+{
+    static const std::vector<const char*> s_allIncludes = {
+@HEADER_FILENAMES@
+    };
+
+    for(const char* filename : s_allIncludes)
+    {
+        const auto& map = getIncludeMap();
+        auto it = map.find(filename);
+        if(it != map.end())
+        {
+            includeTexts.push_back(it->second);
+            includeNames.push_back(filename);
+        }
+    }
+}
+
+} // namespace hipdnn_gpu_ref

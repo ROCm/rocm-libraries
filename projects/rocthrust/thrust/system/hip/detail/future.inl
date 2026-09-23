@@ -1,5 +1,5 @@
 // Copyright (c) 2018 NVIDIA Corporation
-// Modifications Copyright© 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright© 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 // Author: Bryce Adelstein Lelbach <brycelelbach@gmail.com>
 //
 // Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
@@ -698,7 +698,7 @@ public:
     thrust::hip_rocprim::throw_on_error(hipGetDevice(&device_));
   }
 
-  THRUST_HOST virtual ~unique_eager_event()
+  THRUST_HOST ~unique_eager_event()
   {
     // FIXME: If we could asynchronously handle destruction of keep alives, we
     // could avoid doing this.

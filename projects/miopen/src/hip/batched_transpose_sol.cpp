@@ -243,19 +243,20 @@ static inline BatchedTransposeParam HeuristicGet(const ExecutionContext& ctx,
         // Early heuristic for cases that has very large width, very small height (or vice versa)
         if(hw_radio <= 48)
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 64, 1, 1, 1, 1}
-                                : BatchedTransposeParam{64, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 64, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{64, 4, 1, 1, 1, 1};
         }
         else if(hw_radio <= 128)
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 128, 1, 1, 1, 1}
-                                : BatchedTransposeParam{128, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 128, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{128, 4, 1, 1, 1, 1};
         }
         else
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 256, 1, 1, 1, 1}
-                                : BatchedTransposeParam{256, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 256, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{256, 4, 1, 1, 1, 1};
         }
+        return best_kernel;
     }
 
     for(const auto& it : std::ranges::reverse_view(kernel_list))
@@ -333,12 +334,8 @@ BatchedTransposeSolution::BatchedTransposeSolution(const ExecutionContext& ctx,
                                                    uint32_t width_)
     : data_type(data_type_), batch(batch_), height(height_), width(width_)
 {
-    if(!(data_type == miopenHalf     //
-         || data_type == miopenFloat //
-         || data_type == miopenInt32 //
-         || data_type == miopenInt8  //
-         || data_type == miopenBFloat16))
-        MIOPEN_THROW("These data type are not supported");
+    if(!IsApplicable(data_type))
+        MIOPEN_THROW("This data type is not supported");
     num_cu                 = ctx.GetStream().GetMaxComputeUnits();
     std::size_t data_size  = miopen::GetTypeSize(data_type);
     kernel_param_heuristic = batched_transpose::HeuristicGet(ctx, data_size, batch, height, width);

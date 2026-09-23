@@ -85,7 +85,7 @@ TEST_F(TestHipblasltHipdnnEnginePluginHandle, MultipleBuffers)
 
 TEST_F(TestHipblasltHipdnnEnginePluginHandle, SetStreamStoresStream)
 {
-    hipStream_t fakeStream = reinterpret_cast<hipStream_t>(0x123);
+    auto fakeStream = reinterpret_cast<hipStream_t>(0x123);
 
     EXPECT_NO_THROW(_handle->setStream(fakeStream));
     EXPECT_EQ(_handle->getStream(), fakeStream);

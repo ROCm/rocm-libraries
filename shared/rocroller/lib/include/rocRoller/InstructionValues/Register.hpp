@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -151,6 +128,7 @@ namespace rocRoller
             //> Returns a new instruction that only allocates registers for this value.
             Instruction allocate();
             void        allocate(Instruction& inst);
+            void        setForceReservedRegion();
 
             bool canAllocateNow() const;
             void allocateNow();
@@ -161,8 +139,9 @@ namespace rocRoller
             constexpr bool isSpecial() const;
             constexpr bool isTTMP() const;
             constexpr bool isSCC() const;
+            constexpr bool isEXECZ() const;
             bool           isVCC() const;
-            constexpr bool isExec() const;
+            bool           isEXEC() const;
 
             /**
              * Asserts that `this` is in a valid state to be used as an operand to an instruction.
@@ -187,7 +166,7 @@ namespace rocRoller
 
             void setVariableType(VariableType value);
 
-            void        toStream(std::ostream& os) const;
+            void        toStream(std::ostream& os, bool useNormalized = false) const;
             std::string toString() const;
             std::string description() const;
 
@@ -374,7 +353,7 @@ namespace rocRoller
             /**
              * Implementation of toString() for general-purpose registers.
              */
-            void gprString(std::ostream& os) const;
+            void gprString(std::ostream& os, bool useNormalized = false) const;
 
             /**
              * Implementation of toString() for special registers.
@@ -462,8 +441,11 @@ namespace rocRoller
 
             int               registerCount() const;
             AllocationOptions options() const;
+            void              setOptions(AllocationOptions options = {});
 
             std::vector<int> const& registerIndices() const;
+
+            std::vector<int> const& normalizedRegisterIndices() const;
 
             void setAllocation(std::shared_ptr<Allocator> allocator,
                                std::vector<int> const&    registers);
@@ -502,6 +484,7 @@ namespace rocRoller
 
             std::shared_ptr<Allocator> m_allocator;
             std::vector<int>           m_registerIndices;
+            std::vector<int>           m_normalizedRegisterIndices;
 
             std::string m_name;
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "rocsparse_csritilu0x_buffer_size.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_csritilu0_driver.hpp"
 #include "rocsparse_csritilu0x_driver.hpp"
 
 namespace rocsparse
@@ -53,13 +54,15 @@ namespace rocsparse
                     rocsparse_itilu0_alg_sync_split>::buffer_size<I, J>::run(parameters...)));
             return rocsparse_status_success;
         }
-        case rocsparse_itilu0_alg_sync_split_fusion:
+        // LCOV_EXCL_START
+        case deprecated_rocsparse_itilu0_alg_sync_split_fusion:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>::
+                (rocsparse::csritilu0x_driver_t<deprecated_rocsparse_itilu0_alg_sync_split_fusion>::
                      buffer_size<I, J>::run(parameters...)));
             return rocsparse_status_success;
         }
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);

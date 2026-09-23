@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 """Get host/gpu specs."""
 
+import json
 import re
 import socket
 import subprocess
@@ -70,7 +71,16 @@ class MachineSpecs:
 
 def run(cmd):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return p.stdout.decode('ascii')
+    return p.stdout.decode('utf-8', errors='replace')
+
+
+def parse_amdsmi_json(text):
+    # amd-smi may prepend non-JSON warnings (e.g. permission notices) to
+    # stdout. Strip anything before the first '{' so json.loads succeeds.
+    idx = text.find('{')
+    if idx < 0:
+        return {}
+    return json.loads(text[idx:])
 
 
 def search(pattern, string):
@@ -130,33 +140,81 @@ def get_machine_specs(devicenum, type='default'):
         rocmversion = rocm_info.strip()
 
     if type == 'device' or type == 'default':
-        rocm_smi_found = shutil.which('rocm-smi') != None
-        if rocm_smi_found:
-            rocm_smi = run([
-                'rocm-smi', '--showvbios', '--showid', '--showproductname',
-                '--showperflevel', '--showclocks', '--showmeminfo', 'vram'
-            ])
+        amd_smi_found = shutil.which('amd-smi') is not None
+        static_entry = None
+        metric_entry = None
+        if amd_smi_found:
+            try:
+                static_data = parse_amdsmi_json(
+                    run([
+                        'amd-smi', 'static', '--vbios', '--vram', '--board',
+                        '--asic', '--json'
+                    ]))
+                metric_data = parse_amdsmi_json(
+                    run([
+                        'amd-smi', 'metric', '--clock', '--perf-level',
+                        '--json'
+                    ]))
+                for entry in static_data.get('gpu_data', []):
+                    if entry.get('gpu') == devicenum:
+                        static_entry = entry
+                        break
+                for entry in metric_data.get('gpu_data', []):
+                    if entry.get('gpu') == devicenum:
+                        metric_entry = entry
+                        break
+            except (json.JSONDecodeError, ValueError, KeyError):
+                pass
+
+        # Conversion factors from amd-smi size units to GiB. Tolerates the
+        # MB/MiB (and KB/KiB, GB/GiB) ambiguity in amd-smi output by treating
+        # them as equivalent powers of 2.
+        unit_to_gib = {
+            'KB': 1 / 1024**2,
+            'KiB': 1 / 1024**2,
+            'MB': 1 / 1024,
+            'MiB': 1 / 1024,
+            'GB': 1.0,
+            'GiB': 1.0,
+            'TB': 1024.0,
+            'TiB': 1024.0,
+        }
+
+        if static_entry is not None:
+            vbios = static_entry.get('ifwi', {}).get('part_number',
+                                                    'no amd-smi')
+            gpuid = static_entry.get('asic', {}).get('device_id', 'no amd-smi')
+            deviceinfo = static_entry.get('asic', {}).get(
+                'market_name', 'no amd-smi')
+            vram_size = static_entry.get('vram', {}).get('size', {})
+            vram_value = vram_size.get('value', 0)
+            vram_unit = vram_size.get('unit', 'MB')
+            vram_gib = float(vram_value) * unit_to_gib.get(vram_unit, 0)
         else:
-            rocm_smi = ""
+            vbios = 'no amd-smi'
+            gpuid = 'no amd-smi'
+            deviceinfo = 'no amd-smi'
+            vram_gib = 0
 
-        device = rf'^GPU\[{devicenum}\]\s*: '
+        if metric_entry is not None:
+            perflevel = metric_entry.get('perf_level', 'no amd-smi')
+            if isinstance(perflevel, str):
+                perflevel = perflevel.replace('AMDSMI_DEV_PERF_LEVEL_',
+                                              '').lower()
+            mem_clk = metric_entry.get('clock',
+                                       {}).get('mem_0', {}).get('clk', {})
+            mclk = '{}{}'.format(mem_clk.get('value', 0),
+                                 mem_clk.get('unit', '')) if mem_clk else 0
+            gfx_clk = metric_entry.get('clock',
+                                       {}).get('gfx_0', {}).get('clk', {})
+            sclk = '{}{}'.format(gfx_clk.get('value', 0),
+                                 gfx_clk.get('unit', '')) if gfx_clk else 0
+        else:
+            perflevel = 'no amd-smi'
+            mclk = 0
+            sclk = 0
 
-        vbios = search(device + r'VBIOS version: (.*?)$',
-                       rocm_smi) if rocm_smi_found else "no rocm-smi"
-        gpuid = search(device + r'GPU ID: (.*?)$',
-                       rocm_smi) if rocm_smi_found else "no rocm-smi"
-        deviceinfo = search(device + r'Card series:\s*(.*?)$',
-                            rocm_smi) if rocm_smi_found else "no rocm-smi"
-        vram = search(device + r'.... Total Memory .B.: (\d+)$',
-                      rocm_smi) if rocm_smi_found else 0
-        perflevel = search(device + r'Performance Level: (.*?)$',
-                           rocm_smi) if rocm_smi_found else "no rocm-smi"
-        mclk = search(device +
-                      r'mclk.*\((.*?)\)$', rocm_smi) if rocm_smi_found else 0
-        sclk = search(device +
-                      r'sclk.*\((.*?)\)$', rocm_smi) if rocm_smi_found else 0
-
-        vram = '{:.2f} GiB'.format(float(vram) / 1024**3 if vram else 0)
+        vram = '{:.2f} GiB'.format(vram_gib)
 
         if gpuid == '0x66af':
             # radeon7: float: 13.8 TFLOPs, double: 3.46 TFLOPs, 1024 GB/s

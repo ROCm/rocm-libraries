@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -63,11 +63,10 @@ auto reduce_with_initial(T output, T initial_value, BinaryFunction reduce_op) ->
 }
 
 template<
-    class ArchConfig,
+    class TargetConfig,
     bool WithInitialValue,
-    bool         FitLarger,
-    unsigned int FitItems,
     class ResultType,
+    unsigned int ItemsPerThread = TargetConfig::params.kernel_config.items_per_thread,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -80,25 +79,26 @@ void block_reduce_kernel_impl(InputIterator input,
                               InitValueType initial_value,
                               BinaryFunction reduce_op)
 {
-    static constexpr reduce_config_params params = ArchConfig::params;
+    static constexpr reduce_config_params params = TargetConfig::params;
 
     constexpr unsigned int block_size = params.kernel_config.block_size;
-    constexpr unsigned int items_per_thread
-        = FitLarger ? params.kernel_config.items_per_thread * FitItems
-                    : ceiling_div(params.kernel_config.items_per_thread, FitItems);
 
     using result_type = ResultType;
 
-    using block_reduce_type
-        = ::rocprim::block_reduce<result_type, block_size, params.block_reduce_method>;
-    constexpr unsigned int items_per_block = block_size * items_per_thread;
+    using block_reduce_type                = ::rocprim::block_reduce<result_type,
+                                                      block_size,
+                                                      params.block_reduce_method,
+                                                      1,
+                                                      1,
+                                                      TargetConfig::wavefront>;
+    constexpr unsigned int items_per_block = block_size * ItemsPerThread;
 
     const unsigned int flat_id             = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id       = ::rocprim::detail::block_id<0>();
     const size_t       block_offset        = flat_block_id * items_per_block;
     const unsigned int valid_in_last_block = input_size - block_offset;
 
-    result_type values[items_per_thread];
+    result_type values[ItemsPerThread];
     result_type output_value;
     // last incomplete block
     if(flat_block_id == (input_size / items_per_block))
@@ -110,7 +110,7 @@ void block_reduce_kernel_impl(InputIterator input,
 
         output_value = values[0];
         ROCPRIM_UNROLL
-        for(unsigned int i = 1; i < items_per_thread; i++)
+        for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             unsigned int offset = i * block_size;
             if(flat_id + offset < valid_in_last_block)

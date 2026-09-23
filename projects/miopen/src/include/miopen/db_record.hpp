@@ -26,6 +26,7 @@
 #ifndef GUARD_MIOPEN_DB_RECORD_HPP_
 #define GUARD_MIOPEN_DB_RECORD_HPP_
 
+#include <miopen/config.hpp>
 #include <miopen/logger.hpp>
 
 #include <cassert>
@@ -71,7 +72,7 @@ enum class DbKinds : std::uint8_t
 /// Upon construction, allows getting and modifying contents of a record (IDs and VALUES).
 ///
 /// All operations are MP- and MT-safe.
-class MIOPEN_INTERNALS_EXPORT DbRecord
+class DbRecord
 {
 public:
     template <class TValue>
@@ -196,11 +197,11 @@ private:
         return ss.str();
     }
 
-    bool ParseContents(std::istream& contents);
+    MIOPEN_INTERNALS_EXPORT bool ParseContents(std::istream& contents);
     void WriteContents(std::ostream& stream) const;
     void WriteIdsAndValues(std::ostream& stream) const;
-    bool SetValues(const std::string& id, const std::string& values);
-    bool GetValues(const std::string& id, std::string& values) const;
+    MIOPEN_INTERNALS_EXPORT bool SetValues(const std::string& id, const std::string& values);
+    MIOPEN_INTERNALS_EXPORT bool GetValues(const std::string& id, std::string& values) const;
 
     DbRecord(const std::string& key_) : key(key_) {}
 
@@ -232,7 +233,7 @@ public:
     /// E.g. this = {ID1:VALUE1}
     ///      that = {ID1:VALUE3, ID2:VALUE2}
     ///      this.Merge(that) = {ID1:VALUE1, ID2:VALUE2}
-    void Merge(const DbRecord& that);
+    MIOPEN_INTERNALS_EXPORT void Merge(const DbRecord& that);
 
     /// Obtains VALUES from an object of class T and sets it in record (in association with ID,
     /// under the current KEY).

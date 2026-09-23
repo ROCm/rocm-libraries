@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,11 +34,11 @@ namespace rocsparse
                                                     J                   block_dim,
                                                     const I* __restrict__ bsr_row_ptr,
                                                     const J* __restrict__ bsr_col_ind,
-                                                    T* __restrict__ bsr_val,
+                                                    T* bsr_val,
                                                     const I* __restrict__ bsr_diag_ind,
                                                     int32_t* __restrict__ block_done,
                                                     const J* __restrict__ block_map,
-                                                    J* __restrict__ zero_pivot,
+                                                    J*                   zero_pivot,
                                                     rocsparse_index_base idx_base)
     {
         auto lid = hipThreadIdx_x & (WFSIZE - 1);
@@ -191,7 +191,7 @@ namespace rocsparse
                                     }
 
                                     // If a match has been found, do linear combination
-                                    local_sum = rocsparse::fma(vp, rocsparse::conj(vj), local_sum);
+                                    local_sum = rocsparse::fma(vj, rocsparse::conj(vp), local_sum);
                                 }
                             }
                         }
@@ -219,15 +219,18 @@ namespace rocsparse
                 // Check if 'col' row is complete
                 if(j == row)
                 {
-                    bsr_val[row_diag]
-                        = rocsparse::sqrt(rocsparse::abs(bsr_val[row_diag] - row_sum));
+                    // Release-store so the consuming lanes of this wavefront observe the
+                    // freshly computed diagonal entry
+                    rocsparse::atomic_store(&bsr_val[row_diag],
+                                            static_cast<T>(rocsparse::sqrt(
+                                                rocsparse::abs(bsr_val[row_diag] - row_sum))),
+                                            __ATOMIC_RELEASE,
+                                            __HIP_MEMORY_SCOPE_WAVEFRONT);
                 }
 
-                // Ensure previous writes to global memory are seen by all threads
-                __threadfence();
-
-                // Load diagonal entry
-                T diag_val = bsr_val[row_diag];
+                // Acquire-load the diagonal entry; this pairs with the release-store above
+                T diag_val = rocsparse::atomic_load(
+                    &bsr_val[row_diag], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WAVEFRONT);
 
                 // Row has numerical zero pivot
                 if(diag_val == static_cast<T>(0))
@@ -279,7 +282,7 @@ namespace rocsparse
                             }
 
                             // If a match has been found, do linear combination
-                            local_sum = rocsparse::fma(vk, rocsparse::conj(vj), local_sum);
+                            local_sum = rocsparse::fma(vj, rocsparse::conj(vk), local_sum);
                         }
                     }
 
@@ -301,7 +304,7 @@ namespace rocsparse
                         }
 
                         // If a match has been found, do linear combination
-                        local_sum = rocsparse::fma(vk, rocsparse::conj(vj), local_sum);
+                        local_sum = rocsparse::fma(vj, rocsparse::conj(vk), local_sum);
                     }
 
                     val     = (val - local_sum) / diag_val;
@@ -335,14 +338,14 @@ namespace rocsparse
                                J                   mb,
                                const I* __restrict__ bsr_row_ptr,
                                const J* __restrict__ bsr_col_ind,
-                               T* __restrict__ bsr_val,
+                               T*      bsr_val,
                                int64_t bsr_val_stride,
                                const I* __restrict__ bsr_diag_ind,
                                J bsr_dim,
                                int32_t* __restrict__ done_array,
                                int64_t done_array_stride,
                                const J* __restrict__ map,
-                               J* __restrict__ zero_pivot,
+                               J*                   zero_pivot,
                                int64_t              zero_pivot_stride,
                                rocsparse_index_base idx_base)
     {
@@ -372,6 +375,7 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
+        auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_general<SLEEP, BLOCKSIZE, WFSIZE>),
@@ -390,8 +394,8 @@ namespace rocsparse
             done_array,
             done_array_stride,
             reinterpret_cast<const J*>(trm_info->get_row_map()),
-            reinterpret_cast<J*>(bsric0_info->get_zero_pivot()),
-            bsric0_info->get_zero_pivot_stride(),
+            reinterpret_cast<J*>(numeric_exact->get_position()),
+            numeric_exact->get_stride(),
             A->descr->base);
 
         return rocsparse_status_success;
@@ -412,7 +416,7 @@ namespace rocsparse
             return rocsparse::
                 bsric0_kernel_general_launch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -437,7 +441,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -496,7 +500,7 @@ rocsparse::bsric0_kernel_launch_t rocsparse::find_bsric0_kernel_general_launch(
     rocsparse_handle handle, rocsparse_bsric0_info bsric0_info, rocsparse_const_spmat_descr A)
 {
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
-    const bool sleep = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
+    const bool sleep = (gcn_arch_name == rocsparse_arch_names::gfx908 && handle->asic_rev < 2);
     if(sleep)
     {
         return rocsparse::transform_t_type<true, 64, 64>(A->data_type, A->row_type, A->col_type);

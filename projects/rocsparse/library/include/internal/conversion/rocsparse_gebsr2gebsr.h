@@ -39,16 +39,16 @@ extern "C" {
 *  storage buffer must be allocated by the user.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle           handle to the rocsparse library context queue.
+*  handle           handle to the rocSPARSE library context queue.
 *  @param[in]
-*  dir              the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column
+*  dir              the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column.
 *  @param[in]
 *  mb               number of block rows of the general BSR sparse matrix \f$A\f$.
 *  @param[in]
@@ -56,7 +56,7 @@ extern "C" {
 *  @param[in]
 *  nnzb             number of blocks in the general BSR sparse matrix \f$A\f$.
 *  @param[in]
-*  descr_A          the descriptor of the general BSR sparse matrix \f$A\f$, the supported matrix type is
+*  descr_A          the descriptor of the general BSR sparse matrix \f$A\f$. The supported matrix type is
 *                   \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  bsr_val_A        array of \p nnzb*row_block_dim_A*col_block_dim_A containing the values of the sparse general BSR
@@ -80,10 +80,10 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb or \p nb or \p nnzb or \p row_block_dim_A or
-*              \p col_block_dim_A or \p row_block_dim_C or \p col_block_dim_C is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p bsr_row_ptr_A or \p bsr_col_ind_A
-*              or \p descr_A or \p buffer_size pointer is invalid.
+*  \retval     rocsparse_status_invalid_size \p mb, \p nb, \p nnzb, \p row_block_dim_A,
+*              \p col_block_dim_A, \p row_block_dim_C, or \p col_block_dim_C is invalid.
+*  \retval     rocsparse_status_invalid_pointer \p bsr_row_ptr_A, \p bsr_col_ind_A,
+*              \p descr_A, or \p buffer_size pointer is invalid.
 */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -153,14 +153,14 @@ rocsparse_status rocsparse_zgebsr2gebsr_buffer_size(rocsparse_handle            
 
 /*! \ingroup conv_module
 *  \details
-*  This function takes a sparse GEneral BSR matrix as input and computes the block row offset array, \p bsr_row_ptr_C,
-*  and the total number of nonzero blocks, \p nnz_total_dev_host_ptr, that will result from converting the GEneral BSR
-*  format input matrix to a GEneral BSR format output matrix. The input and output matrices can have different row and
+*  This function takes a sparse general BSR matrix as input and computes the block row offset array, \p bsr_row_ptr_C,
+*  and the total number of non-zero blocks, \p nnz_total_dev_host_ptr, that result from converting the general BSR
+*  format input matrix to a general BSR format output matrix. The input and output matrices can have different row and
 *  column block dimensions. \p rocsparse_gebsr2gebsr_nnz is the second step in the conversion and is used in conjunction with
 *  \ref rocsparse_sgebsr2gebsr_buffer_size "rocsparse_Xgebsr2gebsr_buffer_size()" and
 *  \ref rocsparse_sgebsr2gebsr "rocsparse_Xgebsr2gebsr()".
 *
-*  \p rocsparse_gebsr2gebsr_nnz accepts both host and device pointers for \p nnz_total_dev_host_ptr which can be set by
+*  \p rocsparse_gebsr2gebsr_nnz accepts both host and device pointers for \p nnz_total_dev_host_ptr, which can be set by
 *  calling \ref rocsparse_set_pointer_mode prior to calling \p rocsparse_gebsr2gebsr_nnz.
 *
 *  \note
@@ -170,9 +170,9 @@ rocsparse_status rocsparse_zgebsr2gebsr_buffer_size(rocsparse_handle            
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle                  handle to the rocsparse library context queue.
+*  handle                  handle to the rocSPARSE library context queue.
 *  @param[in]
-*  dir                     the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column
+*  dir                     the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column.
 *  @param[in]
 *  mb                      number of block rows of the general BSR sparse matrix \f$A\f$.
 *  @param[in]
@@ -180,7 +180,7 @@ rocsparse_status rocsparse_zgebsr2gebsr_buffer_size(rocsparse_handle            
 *  @param[in]
 *  nnzb                    number of blocks in the general BSR sparse matrix \f$A\f$.
 *  @param[in]
-*  descr_A                 the descriptor of the general BSR sparse matrix \f$A\f$, the supported matrix type is
+*  descr_A                 the descriptor of the general BSR sparse matrix \f$A\f$. The supported matrix type is
 *                          \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  bsr_row_ptr_A           array of \p mb+1 elements that point to the start of every block row of the
@@ -192,7 +192,7 @@ rocsparse_status rocsparse_zgebsr2gebsr_buffer_size(rocsparse_handle            
 *  @param[in]
 *  col_block_dim_A         column size of the blocks in the sparse general BSR matrix \f$A\f$.
 *  @param[in]
-*  descr_C                 the descriptor of the general BSR sparse matrix \f$C\f$, the supported matrix type is
+*  descr_C                 the descriptor of the general BSR sparse matrix \f$C\f$. The supported matrix type is
 *                          \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  bsr_row_ptr_C           array of \p mb_C+1 elements that point to the start of every block row of the
@@ -202,17 +202,17 @@ rocsparse_status rocsparse_zgebsr2gebsr_buffer_size(rocsparse_handle            
 *  @param[in]
 *  col_block_dim_C         column size of the blocks in the sparse general BSR matrix \f$C\f$.
 *  @param[out]
-*  nnz_total_dev_host_ptr  total number of nonzero blocks in general BSR sparse matrix \f$C\f$ stored using device or host memory.
+*  nnz_total_dev_host_ptr  total number of non-zero blocks in general BSR sparse matrix \f$C\f$ stored using device or host memory.
 *  @param[out]
 *  temp_buffer             buffer allocated by the user whose size is determined by calling
 *                          \ref rocsparse_sgebsr2gebsr_buffer_size "rocsparse_Xgebsr2gebsr_buffer_size()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb or \p nb or \p nnzb or \p row_block_dim_A or
-*              \p col_block_dim_A or \p row_block_dim_C or \p col_block_dim_C is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p bsr_row_ptr_A or \p bsr_col_ind_A
-*              or \p bsr_row_ptr_C or \p descr_A or \p descr_C or \p temp_buffer pointer is invalid.
+*  \retval     rocsparse_status_invalid_size \p mb, \p nb, \p nnzb, \p row_block_dim_A,
+*              \p col_block_dim_A, \p row_block_dim_C, or \p col_block_dim_C is invalid.
+*  \retval     rocsparse_status_invalid_pointer \p bsr_row_ptr_A, \p bsr_col_ind_A,
+*              \p bsr_row_ptr_C, \p descr_A, \p descr_C, or \p temp_buffer pointer is invalid.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_gebsr2gebsr_nnz(rocsparse_handle          handle,
@@ -237,7 +237,7 @@ rocsparse_status rocsparse_gebsr2gebsr_nnz(rocsparse_handle          handle,
 *  This function converts the general BSR sparse matrix \f$A\f$ to another general BSR sparse matrix \f$C\f$.
 *
 *  \details
-*  \p rocsparse_gebsr2gebsr converts a GEneral BSR matrix \f$A\f$ into a GEneral BSR matrix \f$C\f$. The input
+*  \p rocsparse_gebsr2gebsr converts a general BSR matrix \f$A\f$ into a general BSR matrix \f$C\f$. The input
 *  and output matrices can have different row and column block dimensions. The input matrix \f$A\f$ is assumed
 *  to be allocated such that array \p bsr_row_ptr_A has length \p mb+1, \p bsr_col_ind_A has length \p nnzb, and
 *  \p bsr_val_A has length \p nnzb*row_block_dim_A*col_block_dim_A. The output matrix \f$C\f$ is assumed to be
@@ -253,17 +253,17 @@ rocsparse_status rocsparse_gebsr2gebsr_nnz(rocsparse_handle          handle,
 *    nb\_C = (n + col\_block\_dim\_C - 1) / col\_block\_dim\_C
 *  \f]
 *  The number of non-zero blocks in the output sparse \f$C\f$ matrix (i.e. \p nnzb_C) is computed using
-*  \ref rocsparse_gebsr2gebsr_nnz() which also fills in \p bsr_row_ptr_C array.
+*  \ref rocsparse_gebsr2gebsr_nnz() which also fills in the \p bsr_row_ptr_C array.
 *
-*  Converting from a sparse GEneral BSR matrix to a sparse GEneral BSR matrix requires three steps. First,
-*  the user calls \ref rocsparse_sgebsr2gebsr_buffer_size "rocsparse_Xgebsr2gebsr_buffer_size()" in
-*  order to determine the size of the required temporary storage buffer. Once this has been determined,
-*  the user allocates this buffer. The user also now allocates the \p bsr_row_ptr_C array to have length
-*  \p mb_C+1 and passes this to the function \ref rocsparse_gebsr2gebsr_nnz. This will fill the \p bsr_row_ptr_C
-*  array and also compute the total number of nonzero blocks in the GEneral BSR output \f$C\f$ matrix. Now that
-*  the total number of nonzero blocks is known, the user can allocate the \p bsr_col_ind_C and \p bsr_val_C arrays.
-*  Finally, the user calls \p rocsparse_gebsr2gebsr to complete the conversion. Once the conversion is complete,
-*  the temporary storage buffer can be deallocated. See example below.
+*  Converting from a sparse general BSR matrix to a sparse general BSR matrix requires three steps. First,
+*  call \ref rocsparse_sgebsr2gebsr_buffer_size "rocsparse_Xgebsr2gebsr_buffer_size()"
+*  to determine the size of the required temporary storage buffer. After this has been determined,
+*  allocate this buffer. Also allocate the \p bsr_row_ptr_C array to have length
+*  \p mb_C+1 and pass it to the function \ref rocsparse_gebsr2gebsr_nnz. This will fill the \p bsr_row_ptr_C
+*  array and also compute the total number of non-zero blocks in the general BSR output \f$C\f$ matrix. Now that
+*  the total number of non-zero blocks is known, allocate the \p bsr_col_ind_C and \p bsr_val_C arrays.
+*  Finally, call \p rocsparse_gebsr2gebsr to complete the conversion. After the conversion is complete,
+*  the temporary storage buffer can be deallocated. See the example below.
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -272,9 +272,9 @@ rocsparse_status rocsparse_gebsr2gebsr_nnz(rocsparse_handle          handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle           handle to the rocsparse library context queue.
+*  handle           handle to the rocSPARSE library context queue.
 *  @param[in]
-*  dir              the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column
+*  dir              the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column.
 *  @param[in]
 *  mb               number of block rows of the general BSR sparse matrix \f$A\f$.
 *  @param[in]
@@ -282,7 +282,7 @@ rocsparse_status rocsparse_gebsr2gebsr_nnz(rocsparse_handle          handle,
 *  @param[in]
 *  nnzb             number of blocks in the general BSR sparse matrix \f$A\f$.
 *  @param[in]
-*  descr_A          the descriptor of the general BSR sparse matrix \f$A\f$, the supported matrix type is
+*  descr_A          the descriptor of the general BSR sparse matrix \f$A\f$. The supported matrix type is
 *                   \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  bsr_val_A        array of \p nnzb*row_block_dim_A*col_block_dim_A containing the values of the sparse general BSR matrix \f$A\f$.
@@ -296,7 +296,7 @@ rocsparse_status rocsparse_gebsr2gebsr_nnz(rocsparse_handle          handle,
 *  @param[in]
 *  col_block_dim_A  column size of the blocks in the sparse general BSR matrix \f$A\f$.
 *  @param[in]
-*  descr_C          the descriptor of the general BSR sparse matrix \f$C\f$, the supported matrix type is
+*  descr_C          the descriptor of the general BSR sparse matrix \f$C\f$. The supported matrix type is
 *                   \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  bsr_val_C        array of \p nnzb_C*row_block_dim_C*col_block_dim_C containing the values of the sparse general BSR matrix \f$C\f$.
@@ -310,19 +310,19 @@ rocsparse_status rocsparse_gebsr2gebsr_nnz(rocsparse_handle          handle,
 *  @param[in]
 *  col_block_dim_C  column size of the blocks in the sparse general BSR matrix \f$C\f$.
 *  @param[out]
-*  temp_buffer      buffer allocated by the user whose size is determined by calling
+*  temp_buffer      buffer allocated by the user. Its size is determined by calling
 *                   \ref rocsparse_sgebsr2gebsr_buffer_size "rocsparse_Xgebsr2gebsr_buffer_size()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb or \p nb or \p nnzb or \p row_block_dim_A or
-*              \p col_block_dim_A or \p row_block_dim_C or \p col_block_dim_C is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p bsr_row_ptr_A or \p bsr_col_ind_A or \p bsr_val_A
-*              or \p bsr_row_ptr_C or \p bsr_col_ind_C or \p bsr_val_C or \p descr_A or \p descr_C
+*  \retval     rocsparse_status_invalid_size \p mb, \p nb, \p nnzb, \p row_block_dim_A,
+*              \p col_block_dim_A, \p row_block_dim_C, or \p col_block_dim_C is invalid.
+*  \retval     rocsparse_status_invalid_pointer \p bsr_row_ptr_A, \p bsr_col_ind_A, \p bsr_val_A,
+*              \p bsr_row_ptr_C, \p bsr_col_ind_C, \p bsr_val_C, \p descr_A, \p descr_C,
 *              or \p temp_buffer pointer is invalid.
 *
 *  \par Example
-*  This example converts a GEneral BSR matrix into an GEneral BSR matrix.
+*  This example converts a general BSR matrix into an general BSR matrix.
 *  \snippet example_rocsparse_gebsr2gebsr.cpp doc example
 */
 /**@{*/

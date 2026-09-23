@@ -1,0 +1,50 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Regression: per-pred queue length cap restores convergence on a self-loop
+# that never drains one of its counters.
+#
+# The loop carries a token-0 DS dep consumed by the wmma (exactly the
+# waitcnt_insertion_loop_carried_local_prefix scenario -> s_wait_dscnt 3),
+# but it ALSO issues two tensor_load_to_lds (token 5) every iteration with
+# no barrier to drain them. The tensor counter is therefore never drained
+# inside the loop, so its per-pred FIFO at the header grows by two ops on
+# every fixed-point iteration.
+#
+# Without a queue-length cap that growth never stabilises: the solver hits
+# its iteration cap and falls back to s_wait_* 0 at every anchor, so the
+# wmma's DS drain collapses to dlcnt = 0 (a silent under-count of an
+# unrelated, correctly-draining counter). The cap (kMaxInFlight, applied in
+# appendToAllPaths) bounds the undrained tensor FIFO so the dataflow reaches
+# a fixed point and the wmma keeps its correct dlcnt = 3.
+#
+# The positive dlcnt = 3 is the load-bearing assertion: the pre-fix cap-hit
+# fallback also emits 0, so only a non-zero value proves convergence.
+#
+# CHECK-LABEL: @waitcnt_insertion_self_loop_undrained_counter_cap
+#
+# Undrained tensor loads in the loop do not get a wait (no barrier), but they
+# must not break convergence of the DS drain.
+# CHECK: ^loop
+# CHECK: tensor_load_to_lds{{.*}}tokens = [5]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [5]
+# CHECK: s_wait_dscnt{{.*}}dlcnt = 3
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_self_loop_undrained_counter_cap() {
+^entry:
+  v[20:21] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [5] } }
+  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { mod.memtoken = { tokens = [5] } }
+  v[30:31] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[32:33] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[34:35] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[40:47], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[20:21] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

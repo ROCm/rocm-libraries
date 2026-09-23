@@ -100,6 +100,8 @@ struct select_block_adjacent_difference_impl<
 /// In the examples discontinuity operation is performed on block of 128 threads, using type
 /// \p int.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_adjacent_difference.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

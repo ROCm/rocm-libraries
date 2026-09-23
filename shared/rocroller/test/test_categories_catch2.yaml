@@ -1,0 +1,65 @@
+# Rocroller Test Categories Configuration
+# Includes tests for catch2 based rocroller-tests-catch.
+
+test_categories:
+  quick:
+    description: "Quick tests (smoke)"
+    test_patterns: 
+    exclude: 
+    test_tags:
+      - "[kernel-graph]"
+    exclude_tags:
+      - "[gpu]"
+    labels:
+      - "quick"
+      - "smoke"
+
+  standard:
+    description: "Standard tests (precheckin)"
+    test_patterns: 
+    exclude: 
+    test_tags:
+      - "[]"
+    exclude_tags:
+    labels:
+      - "standard"
+      - "pr"
+
+  comprehensive:
+    description: "Comprehensive tests (nightly)"
+    test_patterns: 
+    exclude: 
+    test_tags:
+      - "[]"
+    exclude_tags:
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Full tests (weekly)"
+    test_patterns: 
+    exclude: 
+    test_tags:
+      - "[]"
+    exclude_tags:
+    labels:
+      - "full"
+      - "weekly"
+
+
+# GPU-specific exclusions can be added here when needed (see shared/ctest/README.md).
+# exclude_gpu:
+#   exclude_gpu_gfxXXXX:
+#     test_patterns: [...]
+#     labels: ["quick", "standard", "comprehensive", "stress", "ex_gpu_gfxXXXX"]
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600    # 10 min (quick suite can exceed 300s on some systems)
+    standard: 7200    # ~2 hours (standard can take over an hour)
+    comprehensive: 28800   # 8 hours
+    full: 86400       # 24 hours

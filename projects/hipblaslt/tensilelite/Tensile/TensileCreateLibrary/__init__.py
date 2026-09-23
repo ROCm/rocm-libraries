@@ -1,1 +1,1 @@
-from .Run import copyStaticFiles, run, writeSolutionsAndKernels
+from .Run import copyStaticFiles, libraryDir, libraryRoot, run, tensileLibraryFile, writeSolutionsAndKernels

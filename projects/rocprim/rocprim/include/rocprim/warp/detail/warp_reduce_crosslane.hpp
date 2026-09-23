@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,7 @@ private:
         // be done at the C++ constexpr-level.
         if constexpr(UseDPP)
         {
-            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP())
+            if(ROCPRIM_HAS_DPP())
             {
                 f(warp_reduce_dpp<T, VirtualWaveSize, UseAllReduce>{});
             }

@@ -1,0 +1,70 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Two stacked merges. The final consumer (^exit) reads a value that was
+# defined as a PHI in ^mid, one merge away. Without forward propagation of
+# PhiSummary across blocks the consumer would not see the underlying DS
+# loads and would (incorrectly) emit no wait. This test pins the wait to
+# the value derived from the PHI summary.
+#
+#                          ^entry
+#                            |
+#                     s_cbranch_scc1 ^p2
+#                          /    \
+#                         v      v
+#                       ^p1     ^p2
+#               v0  = ds_load_b32         v1  = ds_load_b32
+#               v20 = ds_load_b32         v22 = ds_load_b32
+#               v21 = ds_load_b32
+#                          \     /
+#                           v   v
+#                            ^mid     <- PHIs for v0,v1 inserted here
+#                            |
+#                     s_cbranch_scc1 ^q2
+#                          /     \
+#                         v       v
+#                       ^q1      ^q2     (both empty; PHI just passes through)
+#                          \     /
+#                           v   v
+#                           ^exit
+#                  v7 = v_add_f32(v0, v1)   (uses both PHIs)
+#
+# PhiSummary at ^mid:
+#   v0_phi.waits[DS] = w(v0) via p1 = 2  (v0 at idx 0 of [v0, v20, v21])
+#   v1_phi.waits[DS] = w(v1) via p2 = 1  (v1 at idx 0 of [v1, v22])
+#
+# The summaries must traverse ^mid -> {^q1, ^q2} -> ^exit. At ^exit the
+# consumer tightens required[DS] = min(2, 1) = 1.
+#
+# CHECK-LABEL: @waitcnt_insertion_phi_summary_two_level_merge
+# CHECK-LABEL: ^exit:
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 1
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_phi_summary_two_level_merge() {
+^entry:
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1)
+  "st.s_cbranch_scc1"("p2", SCC0)
+  Successors: ^p1, ^p2
+^p1:
+  v0 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 0, gds = false } }
+  v20 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 4, gds = false } }
+  v21 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 8, gds = false } }
+  Successors: ^mid
+^p2:
+  v1 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 16, gds = false } }
+  v22 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 20, gds = false } }
+  Successors: ^mid
+^mid:
+  SCC1 = "st.s_cmp_eq_u32"(s14, 0x1)
+  "st.s_cbranch_scc1"("q2", SCC1)
+  Successors: ^q1, ^q2
+^q1:
+  Successors: ^exit
+^q2:
+  Successors: ^exit
+^exit:
+  v7 = "st.v_add_f32"(v0, v1)
+}

@@ -934,6 +934,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuarded)
         device_input,
         device_output,
         device_ranks);
+    HIP_CHECK(hipGetLastError());
 
     [[maybe_unused]] type* host_output = new type[size];
     HIP_CHECK(hipMemcpy(host_output, device_output, sizeof(type) * size, hipMemcpyDeviceToHost));
@@ -1059,6 +1060,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedFlagged)
         device_output,
         device_ranks,
         device_flags);
+    HIP_CHECK(hipGetLastError());
 
     type* host_output = new type[size];
     HIP_CHECK(hipMemcpy(host_output, device_output, sizeof(type) * size, hipMemcpyDeviceToHost));
@@ -1840,6 +1842,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuardedNoOutputParam)
         0,
         device_input,
         device_ranks);
+    HIP_CHECK(hipGetLastError());
 
     HIP_CHECK(hipMemcpy(host_input, device_input, sizeof(type) * size, hipMemcpyDeviceToHost));
 
@@ -1960,6 +1963,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedFlaggedNoOutputParam)
         device_input,
         device_ranks,
         device_flags);
+    HIP_CHECK(hipGetLastError());
 
     HIP_CHECK(hipMemcpy(host_input, device_input, sizeof(type) * size, hipMemcpyDeviceToHost));
 

@@ -69,6 +69,7 @@ function(hipdnn_enable_spdlog TARGET_NAME)
         elseif(TARGET fmt::fmt)
             hipdnn_add_dependency_includes(${TARGET_NAME} fmt::fmt
                 COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
+            target_link_libraries(${TARGET_NAME} PUBLIC fmt::fmt)
         else()
             message(FATAL_ERROR "hipdnn_enable_spdlog: fmt package found but no usable target. "
                 "Expected fmt::fmt-header-only or fmt::fmt.")

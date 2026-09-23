@@ -218,9 +218,11 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
     if(!stridey)
         stridey = N;
 
-    Ta                   h_alpha    = arg.get_alpha<Ta>();
-    Tex                  h_alpha_ex = (Tex)h_alpha;
+    Ta                   h_alpha = arg.get_alpha<Ta>();
     rocblas_local_handle handle{arg};
+
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
 
     // argument sanity check before allocating invalid memory
     if(N <= 0 || batch_count <= 0)
@@ -258,14 +260,15 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
     HOST_MEMCHECK(host_strided_batch_vector<Ty>, hy2, (N, incy, stridey, batch_count));
     HOST_MEMCHECK(host_strided_batch_vector<Tex>, hx_ex, (N, incx, stridex, batch_count));
     HOST_MEMCHECK(host_strided_batch_vector<Tex>, hy_ex, (N, incy, stridey, batch_count));
-    HOST_MEMCHECK(host_vector<Ta>, halpha, (1));
+    HOST_MEMCHECK(host_vector<Ta>, halpha, (batch_count, alpha_stride));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_strided_batch_vector<Tx>, dx, (N, incx, stridex, batch_count));
     DEVICE_MEMCHECK(device_strided_batch_vector<Ty>, dy, (N, incy, stridey, batch_count));
-    DEVICE_MEMCHECK(device_vector<Ta>, dalpha, (1));
+    DEVICE_MEMCHECK(device_vector<Ta>, dalpha, (batch_count, alpha_stride));
 
-    halpha[0] = h_alpha;
+    // Assign host alpha (per-batch when alpha striding is enabled).
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
 
     // Initialize data on host memory
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, true);
@@ -371,7 +374,7 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
                         device_strided_batch_vector<Tx>, dx_copy, (N, incx, stridex, batch_count));
                     DEVICE_MEMCHECK(
                         device_strided_batch_vector<Ty>, dy_copy, (N, incy, stridey, batch_count));
-                    DEVICE_MEMCHECK(device_vector<Ta>, dalpha_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<Ta>, dalpha_copy, (batch_count, alpha_stride));
 
                     // copy data from CPU to device
                     CHECK_HIP_ERROR(dx_copy.transfer_from(hx));
@@ -410,10 +413,11 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
         {
             cpu_time_used = get_time_us_no_sync();
 
-            // Compute the host solution.
+            // Compute the host solution (per-batch alpha when alpha striding is enabled).
             for(int64_t b = 0; b < batch_count; ++b)
             {
-                ref_axpy<Tex>(N, h_alpha_ex, hx_ex[b], incx, hy_ex[b], incy);
+                Tex alpha_ex = (Tex)halpha[b * alpha_stride];
+                ref_axpy<Tex>(N, alpha_ex, hx_ex[b], incx, hy_ex[b], incy);
             }
             cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
@@ -467,6 +471,15 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
         // Transfer from host to device.
         CHECK_HIP_ERROR(dy.transfer_from(hy));
 
+        const Ta* alpha = &h_alpha;
+        if(ab_striding)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(dalpha.transfer_from(halpha));
+            alpha = dalpha;
+            handle.pre_test(arg);
+        }
+
         for(int iter = 0; iter < total_calls; iter++)
         {
             if(iter == number_cold_calls)
@@ -475,7 +488,7 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
             DAPI_DISPATCH(rocblas_axpy_strided_batched_ex_fn,
                           (handle,
                            N,
-                           &h_alpha,
+                           alpha,
                            alpha_type,
                            dx,
                            x_type,
@@ -490,6 +503,9 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        if(ab_striding)
+            handle.post_test(arg);
 
         ArgumentModel<e_N, e_alpha, e_incx, e_incy, e_stride_x, e_stride_y, e_batch_count>{}
             .log_args<Ta>(rocblas_cout,

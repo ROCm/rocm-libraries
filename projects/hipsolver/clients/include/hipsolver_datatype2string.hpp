@@ -92,6 +92,10 @@ char hipsolver2char_eform(hipsolverEigType_t value);
 
 char hipsolver2char_erange(hipsolverEigRange_t value);
 
+char hipsolver2char_direct(hipsolverDirectMode_t value);
+
+char hipsolver2char_storev(hipsolverStorevMode_t value);
+
 /* ============================================================================================ */
 /*  Convert lapack char constants to hipsolver type. */
 
@@ -110,3 +114,7 @@ hipsolverEigMode_t char2hipsolver_evect(char value);
 hipsolverEigType_t char2hipsolver_eform(char value);
 
 hipsolverEigRange_t char2hipsolver_erange(char value);
+
+hipsolverDirectMode_t char2hipsolver_direct(char value);
+
+hipsolverStorevMode_t char2hipsolver_storev(char value);

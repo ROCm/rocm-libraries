@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,10 +29,10 @@
 
 namespace rocsparse
 {
-    rocsparse_status csrsm_zero_pivot(rocsparse_handle         handle,
-                                      rocsparse::pivot_info_t* info,
-                                      rocsparse_indextype      indextype,
-                                      void*                    position);
+    rocsparse_status csrsm_zero_pivot(rocsparse_handle     handle,
+                                      rocsparse_csrsm_info info,
+                                      rocsparse_indextype  indextype,
+                                      void*                position);
 
     rocsparse_status csrsm_buffer_size_quickreturn(rocsparse_handle          handle,
                                                    rocsparse_operation       trans_A,
@@ -261,7 +261,8 @@ namespace rocsparse
                                       rocsparse_mat_info        info,
                                       rocsparse_solve_policy    policy,
                                       rocsparse_csrsm_info      csrsm_info,
-                                      void*                     temp_buffer);
+                                      void*                     temp_buffer,
+                                      bool                      force_conj = false);
 
     template <typename I, typename J, typename T>
     rocsparse_status csrsm_solve_template(rocsparse_handle          handle,
@@ -281,7 +282,8 @@ namespace rocsparse
                                           rocsparse_mat_info        info,
                                           rocsparse_solve_policy    policy,
                                           rocsparse_csrsm_info      csrsm_info,
-                                          void*                     temp_buffer)
+                                          void*                     temp_buffer,
+                                          bool                      force_conj = false)
     {
 
         const rocsparse_status status = rocsparse::csrsm_solve_quickreturn(handle,
@@ -325,7 +327,8 @@ namespace rocsparse
                                                                         info,
                                                                         policy,
                                                                         csrsm_info,
-                                                                        temp_buffer)));
+                                                                        temp_buffer,
+                                                                        force_conj)));
         return rocsparse_status_success;
     }
 
@@ -395,6 +398,7 @@ namespace rocsparse
                                  rocsparse_mat_info        info,
                                  rocsparse_solve_policy    policy,
                                  rocsparse_csrsm_info      csrsm_info,
-                                 void*                     temp_buffer);
+                                 void*                     temp_buffer,
+                                 bool                      force_conj = false);
 
 }

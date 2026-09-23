@@ -8,6 +8,8 @@
 
 #include <cstdint>
 #include <gmock/gmock.h>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -20,6 +22,10 @@ public:
     // Mock all public methods from EnginePlugin
     MOCK_METHOD(hipdnnEnginePluginHandle_t, createHandle, (), (const));
     MOCK_METHOD(std::vector<int64_t>, getAllEngineIds, (), (const));
+    // Left unstubbed, gmock returns false: the "plugin exports no engine names"
+    // case, which resolves to the hexadecimal fallback.
+    MOCK_METHOD(bool, hasEngineName, (), (const));
+    MOCK_METHOD(std::optional<std::string>, getEngineName, (int64_t engineId), (const));
     MOCK_METHOD(void, destroyHandle, (hipdnnEnginePluginHandle_t handle), (const));
     MOCK_METHOD(void, setStream, (hipdnnEnginePluginHandle_t handle, hipStream_t stream), (const));
     MOCK_METHOD(std::vector<int64_t>,
@@ -49,6 +55,22 @@ public:
                  const hipdnnPluginConstData_t* engineConfig,
                  const hipdnnPluginConstData_t* opGraph),
                 (const));
+    MOCK_METHOD(bool, supportsExecutionContextSerialization, (), (const));
+    MOCK_METHOD(void,
+                serializeExecutionContext,
+                (hipdnnEnginePluginHandle_t handle,
+                 hipdnnEnginePluginExecutionContext_t executionContext,
+                 hipdnnPluginConstData_t* serializedContext),
+                (const));
+    MOCK_METHOD(void,
+                destroySerializedExecutionContext,
+                (hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* serializedContext),
+                (const));
+    MOCK_METHOD(hipdnnEnginePluginExecutionContext_t,
+                createExecutionContextFromSerialized,
+                (hipdnnEnginePluginHandle_t handle,
+                 const hipdnnPluginConstData_t* serializedContext),
+                (const));
     MOCK_METHOD(void,
                 destroyExecutionContext,
                 (hipdnnEnginePluginHandle_t handle,
@@ -67,10 +89,25 @@ public:
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers),
                 (const));
+    MOCK_METHOD(bool, hasOverrideExecute, (), (const));
+    MOCK_METHOD(void,
+                executeOpGraphWithOverrides,
+                (hipdnnEnginePluginHandle_t handle,
+                 hipdnnEnginePluginExecutionContext_t executionContext,
+                 void* workspace,
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 uint32_t numOverrides,
+                 const int64_t* overrideUniqueIds,
+                 const uint32_t* overrideLengths,
+                 const int64_t* const* overrideShapes,
+                 const int64_t* const* overrideStrides),
+                (const));
 
     // Mock inherited methods from PluginBase
     MOCK_METHOD(std::string_view, name, (), (const));
     MOCK_METHOD(std::string_view, version, (), (const));
+    MOCK_METHOD(std::string_view, apiVersion, (), (const));
     MOCK_METHOD(hipdnnPluginType_t, type, (), (const));
     MOCK_METHOD(hipdnnPluginStatus_t, setLoggingCallback, (hipdnnCallback_t callback), (const));
 };

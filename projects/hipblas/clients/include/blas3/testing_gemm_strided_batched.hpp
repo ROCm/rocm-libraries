@@ -331,7 +331,7 @@ void testing_gemm_strided_batched_bad_arg(const Arguments& arg)
                         stride_C,
                         batch_count));
 
-            // If K == 0, alpha, A, and B can be nullptr
+            // If K == 0, A, and B can be nullptr
             DAPI_CHECK(hipblasGemmStridedBatchedFn,
                        (handle,
                         transA,
@@ -339,7 +339,7 @@ void testing_gemm_strided_batched_bad_arg(const Arguments& arg)
                         M,
                         N,
                         0,
-                        nullptr,
+                        alpha,
                         nullptr,
                         lda,
                         stride_A,

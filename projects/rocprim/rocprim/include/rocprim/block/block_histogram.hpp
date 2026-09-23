@@ -101,6 +101,8 @@ struct select_block_histogram_impl<block_histogram_algorithm::using_sort>
 /// In the examples histogram operation is performed on block of 192 threads, each provides
 /// one \p int value, result is returned using the same variable as for input.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_histogram.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

@@ -1,37 +1,78 @@
 name: pre-commit
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
   pull_request:
     branches: [develop]
 
 permissions:
   contents: read
 
+concurrency:
+  # For PRs, group by PR number so a new commit cancels any in-progress run
+  # for the same PR. For postsubmits, group by commit SHA (unique per commit)
+  # so runs never cancel each other. The workflow name is prepended to avoid
+  # conflicts between different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   pre-commit:
     runs-on: ubuntu-24.04
+    env:
+      # For PRs, diff against the base branch. For pushes, diff against the
+      # commit that existed before the push (github.event.before).
+      FROM_REF: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || github.event.before }}
+      DEFAULT_REF: ${{ format('origin/{0}', github.event.repository.default_branch) }}
+      # A branch-creation push has no source ref in its event payload. It falls
+      # back to the default branch's merge base and can include inherited changes
+      # when the branch originates elsewhere. PRs use their actual base ref.
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0 # 0 fetches all commit history for --from-ref/--to-ref to function
+          # Blobless partial clone; the sparse-checkout below materializes only
+          # the projects touched by the diff instead of the full ~9 GB tree.
+          filter: blob:none
+          sparse-checkout: .github
 
-      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Prepare pre-commit diff base and sparse-checkout
+        id: prep
+        env:
+          CURRENT_BRANCH: ${{ github.ref_name }}
+        run: |
+          python .github/scripts/pre_commit_helper.py \
+          --from-ref $FROM_REF \
+          --default-ref $DEFAULT_REF \
+          --pushed-branch-name $CURRENT_BRANCH \
+          --changed-files-file "$RUNNER_TEMP/pre-commit-changed-files.txt"
 
       - name: Detect project changes
         id: changes
         env:
+          CHANGED_FILES_FILE: ${{ steps.prep.outputs.changed_files_file }}
           # Add project names here (one per line) to enable conditional dependency installation
           PROJECTS_WITH_OPTIONAL_DEPS: >-
             hipdnn
         run: |
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD)
-
           # Check each project for changes
           for project in $PROJECTS_WITH_OPTIONAL_DEPS; do
-            if echo "$CHANGED_FILES" | grep -qE "^(projects|shared)/$project/"; then
-              echo "${project}_changed=true" >> $GITHUB_OUTPUT
+            if grep -qE "^(projects|shared)/$project/" "$CHANGED_FILES_FILE"; then
+              echo "${project}_changed=true" >> "$GITHUB_OUTPUT"
             else
-              echo "${project}_changed=false" >> $GITHUB_OUTPUT
+              # grep exits 1 for "no match" (fine) vs >1 for a real error (e.g. unreadable file).
+              grep_status=$?
+              if [ "$grep_status" -ne 1 ]; then
+                exit "$grep_status"
+              fi
+              echo "${project}_changed=false" >> "$GITHUB_OUTPUT"
             fi
           done
 
@@ -51,5 +92,5 @@ jobs:
 
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
         with:
-          # Only check changed files in the PR
-          extra_args: --from-ref origin/${{ github.event.pull_request.base.ref }} --to-ref HEAD
+          # Only check changed files in the PR/push.
+          extra_args: --from-ref ${{ steps.prep.outputs.diff_ref }} --to-ref HEAD

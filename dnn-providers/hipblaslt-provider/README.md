@@ -4,7 +4,17 @@ The hipBLASLt provider plugin is a wrapping around hipBLASLt that provides engin
 :construction: **This project is under active development** :construction:
 
 ## Building
-This plugin is built as a standalone plugin. To build the plugin, first install hipDNN and hipBLASLt on the system and then follow these steps:
+
+### Building with the superbuild
+Build hipDNN and hipblaslt-provider together from the rocm-libraries root using the superbuild. See [Superbuild](../../projects/hipdnn/docs/Superbuild.md) for details.
+
+```bash
+cmake --preset hipdnn
+cmake --build --preset default
+```
+
+### Building as a standalone plugin
+To build the plugin standalone, first install hipDNN and hipBLASLt on the system and then follow these steps:
 
 1. Navigate to the `dnn-providers/hipblaslt-provider` directory.
 1. Make a build directory using `mkdir build && cd build`.

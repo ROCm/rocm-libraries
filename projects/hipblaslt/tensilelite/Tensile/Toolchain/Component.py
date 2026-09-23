@@ -25,7 +25,7 @@
 from os import name as os_name
 from os import environ
 from pathlib import Path
-from re import search, IGNORECASE
+from re import search, sub, IGNORECASE
 from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
@@ -159,6 +159,34 @@ class Assembler(Component):
             "-c",
         ]
 
+    @staticmethod
+    def _retargetAssemblySource(targetGfx: str, srcPath: str):
+        path = Path(srcPath)
+        try:
+            src = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            # Opportunistic rewrite: a source that can't be read here (missing,
+            # unreadable, not text) is left alone -- the assembler invocation
+            # right after this will raise its own clear error if srcPath is
+            # genuinely bad, rather than a confusing traceback from this helper.
+            return
+
+        target = f"amdgcn-amd-amdhsa--{targetGfx}"
+        updated = sub(
+            r'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^"]*")',
+            rf'\1{target}\2',
+            src,
+        )
+        updated = sub(
+            r'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^\s]*)',
+            rf'\1{target}\2',
+            updated,
+        )
+
+        if updated != src:
+            print2(f"Retargeting assembly source {path.name} to {targetGfx}")
+            path.write_text(updated)
+
     def __call__(self, targetGfx: str, wavefrontSize: int, srcPath: str, destPath: str):
         """Assemble an assembly source file into an object file.
         Args:
@@ -168,7 +196,11 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
+        self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
+        # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
+        if targetGfx.startswith(("gfx11", "gfx12")):
+            args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
             f"-mcpu={targetGfx}",
@@ -224,6 +256,11 @@ class Compiler(Component):
             self.default_args.append("--save-temps")
         if os_name == "nt":                                                    # should we use fPIIC on all arches?
             self.default_args.extend(["-fms-extensions", "-fms-compatibility", "-fPIC", "-Wno-deprecated-declarations"])
+            # amdclang++ on Windows does not read ROCM_PATH from the environment;
+            # it requires --rocm-path on the command line to locate HIP headers.
+            rocm_path = environ.get("ROCM_PATH", "")
+            if rocm_path:
+                self.default_args.append(f"--rocm-path={rocm_path}")
 
 
     def __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str):

@@ -135,6 +135,23 @@ Sample kernels are built with minimal infrastructure as possible and use more ap
 * ``perf_dgemm``: a performant GEMM kernel with ``d`` denoting double-precision floating-point data type.
 * ``perf_hgemm``: a performant GEMM kernel with ``h`` denoting half-precision floating-point data type.
 
+Community Samples
+^^^^^^^^^^^^^^^^^^
+
+rocWMMA provides a ``samples/community/`` directory for community-contributed samples that
+demonstrate advanced techniques, specialized use cases, or experimental approaches extending
+beyond the core competency demonstrations in the official samples directory.
+
+Community samples have reduced review requirements compared to official samples and may not be
+maintained with the same rigor. They are provided as-is and may not work on all GPU architectures
+or with all data types. Users are encouraged to adapt these examples for their specific use cases.
+
+The community samples directory is currently available for contributions. As samples accumulate,
+they may be organized into subdirectories by technique or domain (e.g., fusion/, ml-models/,
+optimizations/, advanced/, experimental/).
+
+To build community samples, configure with ``-DROCWMMA_BUILD_COMMUNITY_SAMPLES=ON``.
+
 GEMV
 ^^^^^
 
@@ -208,6 +225,8 @@ The ``samples`` directory contains the sample codes for the following use cases:
 - ``samples/perf_hgemm.cpp``: High performant multi-block GEMM algorithm demonstration with LDS memory, macro tile collaboration, data reuse and optimized pipeline for half-precision floating-point types.
 - ``samples/simple_dlrm.cpp``: Simple Deep Learning Recommendation Model (DLRM) for machine learning.
 - ``samples/common.hpp``: Common code used by all the above rocWMMA sample files.
+- ``samples/community/``: Community-contributed samples demonstrating advanced techniques.
+  See the Community Samples section above for details.
 
 ``test`` directory
 ^^^^^^^^^^^^^^^^^^^^^^^

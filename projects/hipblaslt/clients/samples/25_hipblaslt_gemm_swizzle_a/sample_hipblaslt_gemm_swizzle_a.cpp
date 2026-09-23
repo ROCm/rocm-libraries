@@ -80,6 +80,25 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
     std::copy(static_cast<const T*>(permuted.template as<void>()), static_cast<const T*>(permuted.template as<void>()) + m * k, dst);
 }
 
+template <typename T>
+void host_swizzle_copy_back(void* d_a, int m, int k, bool is_col_major)
+{
+    const size_t count = static_cast<size_t>(m) * static_cast<size_t>(k);
+
+    std::vector<T> src(count, static_cast<T>(0));
+    std::vector<T> dst(count, static_cast<T>(0));
+
+    CHECK_HIP_ERROR(hipMemcpy(src.data(), d_a,
+                              sizeof(T) * count,
+                              hipMemcpyDeviceToHost));
+
+    swizzleTensor(dst.data(), src.data(), m, k, is_col_major);
+
+    CHECK_HIP_ERROR(hipMemcpy(d_a, dst.data(),
+                              sizeof(T) * count,
+                              hipMemcpyHostToDevice));
+}
+
 void simpleGemm(hipblasLtHandle_t  handle,
                 hipblasOperation_t trans_a,
                 hipblasOperation_t trans_b,
@@ -295,26 +314,16 @@ void simpleGemm(hipblasLtHandle_t  handle,
             hipblasLtOrder_t orderA = HIPBLASLT_ORDER_COL16_4R8;
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                 matA, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
-            std::vector<hipblasLtHalf> src(m * k, 0);
-            std::vector<hipblasLtHalf> dst(m * k, 0);
-            CHECK_HIP_ERROR(hipMemcpy(src.data(), d_a, m * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToHost));
-            swizzleTensor(dst.data(), src.data(), m, k, true);
-            CHECK_HIP_ERROR(hipMemcpy(d_a, dst.data(), m * k * sizeof(hipblasLtHalf), hipMemcpyHostToDevice));
+
+            host_swizzle_copy_back<hipblasLtHalf>(d_a, m, k, true);
         }
         else if(swizzleA && TiAB == HIP_R_8F_E4M3_FNUZ)
         {
             hipblasLtOrder_t orderA = HIPBLASLT_ORDER_COL16_4R16;
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                 matA, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
-            hipblaslt_f8_fnuz* src;
-            hipblaslt_f8_fnuz* dst;
-            CHECK_HIP_ERROR(
-                hipMalloc(&src, m * k * sizeof(hipblaslt_f8_fnuz))); // Allocate memory on device
-            CHECK_HIP_ERROR(
-                hipMalloc(&dst, m * k * sizeof(hipblaslt_f8_fnuz))); // Allocate memory on device
-            CHECK_HIP_ERROR(hipMemcpy(src, d_a, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyDeviceToHost));
-            swizzleTensor(dst, src, m, k, true);
-            CHECK_HIP_ERROR(hipMemcpy(d_a, dst, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyHostToDevice));
+
+            host_swizzle_copy_back<hipblaslt_f8_fnuz>(d_a, m, k, true);
         }
     }
     else

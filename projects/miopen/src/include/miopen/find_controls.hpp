@@ -27,6 +27,7 @@
 #ifndef GUARD_MIOPEN_FIND_CONTROLS_HPP_
 #define GUARD_MIOPEN_FIND_CONTROLS_HPP_
 
+#include <miopen/db_disable.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/miopen.h>
@@ -60,7 +61,7 @@ enum class FindEnforceAction
     EnforcedLast_  = DbClean,
 };
 
-class MIOPEN_INTERNALS_EXPORT FindEnforce
+class FindEnforce
 {
     FindEnforceAction action;
 
@@ -72,7 +73,7 @@ private:
     }
 
 public:
-    FindEnforce();
+    MIOPEN_INTERNALS_EXPORT FindEnforce();
     explicit FindEnforce(FindEnforceAction action_) : action(action_) {}
 
     template <class Context>
@@ -107,7 +108,7 @@ public:
 
 MIOPEN_INTERNALS_EXPORT std::optional<std::vector<solver::Id>> GetEnvFindOnlySolver();
 
-class MIOPEN_INTERNALS_EXPORT FindMode
+class FindMode
 {
 public:
     enum class Values
@@ -140,7 +141,7 @@ private:
 
 public:
     // Todo: remove default value of primitive
-    FindMode(solver::Primitive primitive = solver::Primitive::Convolution);
+    MIOPEN_INTERNALS_EXPORT FindMode(solver::Primitive primitive = solver::Primitive::Convolution);
     Values Get() const { return value; }
     void Set(Values const v) { value = v; }
 
@@ -170,12 +171,10 @@ public:
     bool IsTrustVerify(const Context& context) const
     {
         // TrustVerify uses user db as groud truth, disable if no user db
-#if MIOPEN_DISABLE_USERDB
-        return false;
-#else
+        if(IsUserDbDisabled())
+            return false;
         return (value == Values::TrustVerify || value == Values::TrustVerifyFull) &&
                IsEnabled(context);
-#endif
     }
 
     template <class Context>

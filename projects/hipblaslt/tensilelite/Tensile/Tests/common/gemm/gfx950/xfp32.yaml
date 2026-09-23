@@ -1,24 +1,24 @@
 TestParameters:
-  marks: [skip-gfx942, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx942, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
   PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
+  DataInitTypeA: 12
+  DataInitTypeB: 13
   BoundsCheck: 2
   KeepBuildTmp: True
   EnqueuesPerSync: 10
   NumWarmups: 5
-  MaxLDS: 163840
-  DeviceLDS: 163840
 
 BenchmarkProblems:
   ########################################
@@ -30,31 +30,37 @@ BenchmarkProblems:
       DataType: S
       DestDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 9, 4, 1]
+          - [16, 16, 32, 1, 1, 3, 2, 4, 1]
+          - [16, 16, 32, 1, 1, 6, 2, 2, 2]
+          - [16, 16, 32, 1, 1, 2, 6, 2, 2]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2]
           - [16, 16, 32, 1, 1, 4,16, 4, 1]
           - [16, 16, 32, 1, 1,16, 4, 1, 4]
-        - DepthU: [ 32 ]
+        - DepthU: [ 32, 64 ]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StaggerU: [0]
         - 1LDSBuffer: [0]
-        - DirectToLds: [0,1] # carson: was 1
+        - DirectToLds: [0,1]
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
         - VectorWidthA: [-1,4,1]
         - VectorWidthB: [-1,4,1]
+        - TailloopInNll: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -65,19 +71,21 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 2, 3, 2, 2]
           - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
           - [16, 16, 32, 1, 1, 3, 2, 2, 2]
-        - DepthU: [64]
+        - DepthU: [32,64]
           #- AssertSummationElementMultiple: [64]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - ClusterLocalRead: [0, 1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [4]
@@ -96,6 +104,8 @@ BenchmarkProblems:
         - NumElementsPerBatchStore: [16]
         - WorkGroupMappingXCC: [8]
         - StoreVectorWidth: [2]
+        - UsePLRPack: [0,1]
+        - UnrollLoopSwapGlobalReadOrder: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -104,6 +114,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  4,  4 , 2,2 ]
@@ -119,7 +130,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,4]
         - GlobalReadVectorWidthB: [1,2,4]
         - LocalReadVectorWidth: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -134,14 +145,15 @@ BenchmarkProblems:
       DataType: S
       DestDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1, 1, 4, 1]
@@ -153,9 +165,10 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthA: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
+        - TailloopInNll: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -166,6 +179,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 2, 3, 2, 2]
@@ -175,9 +189,9 @@ BenchmarkProblems:
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - ClusterLocalRead: [0, 1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [4]
@@ -206,6 +220,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  4,  4 , 2,2 ]
@@ -221,9 +236,11 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,4]
         - GlobalReadVectorWidthB: [1,2,4]
         - LocalReadVectorWidth: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - VectorWidthA: [-1,2]
         - VectorWidthB: [-1,2]
+        - UsePLRPack: [0,1]
+        - UnrollLoopSwapGlobalReadOrder: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -238,16 +255,19 @@ BenchmarkProblems:
       DataType: S
       DestDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
+          - [32, 32, 16, 1, 1, 3, 1, 2, 2]
+          - [16, 16, 32, 1, 1, 6, 2, 2, 2]
           - [16, 16, 32, 1, 1, 1, 1, 4, 1]
         - DepthU: [ 32 ]
         - PrefetchGlobalRead: [1]
@@ -255,9 +275,12 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthA: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
+        - DirectToLds: [0,1]
+        - TailloopInNll: [false, true]
+        - ClusterLocalRead: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -268,11 +291,13 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  4,  4 , 2,2 ]
           - [16, 16, 32, 1,  1,  6,  4 , 2,2 ]
           - [16, 16, 32, 1,  1,  6,  6 , 2,2 ]
+        - ClusterLocalRead: [0, 1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [32]
@@ -283,9 +308,10 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,4]
         - GlobalReadVectorWidthB: [1,2,4]
         - LocalReadVectorWidth: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - VectorWidthA: [-1,1]
         - VectorWidthB: [-1,1]
+        - UsePLRPack: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -300,14 +326,15 @@ BenchmarkProblems:
       DataType: S
       DestDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1, 1, 4, 1]
@@ -319,7 +346,8 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthA: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
+        - TailloopInNll: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -330,11 +358,13 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  4,  4 , 2,2 ]
           - [16, 16, 32, 1,  1,  6,  4 , 2,2 ]
           - [16, 16, 32, 1,  1,  6,  6 , 2,2 ]
+        - ClusterLocalRead: [0, 1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [32]
@@ -345,9 +375,10 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,4]
         - GlobalReadVectorWidthB: [1,2,4]
         - LocalReadVectorWidth: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - VectorWidthA: [-1,2]
         - VectorWidthB: [-1,2]
+        - UsePLRPack: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

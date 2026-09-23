@@ -1,33 +1,165 @@
 # Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+from invoke.exceptions import Exit
 from invoke.tasks import task
 import os
+import pathlib
+import shlex
+import shutil
+import subprocess
+import sys
 
-def detect_gpu_arch():
-    import subprocess
-    import sys
-    try:
-        result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
-        if result.returncode == 0:
-            target = next((line.strip() for line in result.stdout.splitlines() if line.startswith("gfx") and line.strip() != "gfx000"), None)
-            if target:
-                return target
-    except FileNotFoundError:
-        print("Error: 'rocm_agent_enumerator' command not found. Please install ROCm.", file=sys.stderr)
+_TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
-    except subprocess.TimeoutExpired:
-        print("Error: GPU detection timed out. Hardware might be unresponsive.", file=sys.stderr)
+# Ensure the Tensile package (shipped next to this file) is importable when
+# invoke runs from the tensilelite root, regardless of cwd/sys.path state.
+if str(_TASKS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TASKS_DIR))
 
-    except Exception as e:
-        print(f"An unexpected error occurred during GPU detection: {e}", file=sys.stderr)
+from Tensile.RocisaStatus import _rocisa_install_status
 
-    print(f"Failed to detect a valid GPU architecture (gfx target not found).", file=sys.stderr)
-    return None
+# gfx1250 v0/v1 ASIC-revision detection lives in the packaged Tensile tree
+# (invoke-free) so CI test artifacts can exercise it directly; these @task
+# wrappers only expose it on the invoke command line.
+from Tensile.GpuRevisionTarget import detect_gpu_arch, detect_gpu_revision_target
+
+
+def _cmake_bool(value):
+    return "ON" if value else "OFF"
+
+
+def _detect_rocm():
+    """Detect ROCm installation path.
+
+    Priority: ROCM_PATH env > rocm-sdk path --root > /opt/rocm.
+    """
+    env_path = os.environ.get("ROCM_PATH")
+    if env_path:
+        return env_path
+
+    if shutil.which("rocm-sdk"):
+        try:
+            result = subprocess.check_output(
+                ["rocm-sdk", "path", "--root"], stderr=subprocess.DEVNULL
+            ).decode().strip()
+            if result:
+                return result
+        except subprocess.CalledProcessError:
+            pass
+
+    return "/opt/rocm"
+
 
 @task
 def get_gpu_arch(c):
     print(detect_gpu_arch())
+
+
+@task
+def get_gpu_revision_target(c):
+    """Print the Tensile --gpu-targets value, split by gfx1250 v0/v1 revision."""
+    print(detect_gpu_revision_target())
+
+@task(
+    help={
+        "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
+        "static": "Build rocisa's source StinkyTofu dependency static instead of shared.",
+        "rebuild_on_import": "Deprecated compatibility default: rebuild editable rocisa on its first import. Pass --no-rebuild-on-import to disable it.",
+    }
+)
+def rocisa(c, rocisa_dir=None, static=False, rebuild_on_import=True):
+    """Install rocisa as an editable pip package.
+
+    Not required before `invoke build-client` — the client build includes
+    rocisa. Run this task to make rocisa importable system-wide (outside the
+    build directory), or after changes to rocisa's pyproject.toml or CMakeLists.txt.
+
+    Pass --static to build its source StinkyTofu dependency static — useful for
+    exercising the static-plugin path covered by
+    rocisa/test/test_pass_plugin.py::TestHelloWorldPassIntegrationStatic.
+
+    Rebuild-on-import remains enabled by default for compatibility, but is
+    deprecated because an ordinary import should not perform a native build.
+    Pass --no-rebuild-on-import to opt out before the default changes in a
+    future release.
+    """
+    _pip_install_rocisa(
+        c,
+        rocisa_dir,
+        shared=not static,
+        rebuild_on_import=rebuild_on_import,
+    )
+
+
+def _pip_install_rocisa(c, rocisa_dir=None, shared=True, rebuild_on_import=True):
+    """Editable-install rocisa via scikit-build-core.
+
+    Factored out of the `rocisa` task so `build_client` can reuse it to keep
+    the editable install fresh.
+
+    rebuild_on_import=True preserves the deprecated compatibility behavior of
+    rebuilding on a first import. Explicit build-task rebuilds pass false: they
+    have already refreshed the extension and do not need another import build.
+    """
+    src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
+    rocm = _detect_rocm()
+
+    cmake_args = (
+        f"-DROCM_PATH={rocm}"
+        f" -DBUILD_SHARED_LIBS={_cmake_bool(shared)}"
+        f" -DROCISA_INCLUDE_BUILD_INFO=ON"
+        f" -DROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON"
+    )
+    if shutil.which("ccache"):
+        cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+    env = dict(os.environ, CMAKE_ARGS=cmake_args)
+    env["SKBUILD_EDITABLE_REBUILD"] = "true" if rebuild_on_import else "false"
+    if rebuild_on_import:
+        print(
+            "warning: rocisa rebuild-on-import is deprecated; use "
+            "'invoke rocisa --no-rebuild-on-import' to opt out before the "
+            "default changes in a future release.",
+            file=sys.stderr,
+        )
+    env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
+    c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
+
+
+def _maybe_rebuild_rocisa(c, rocisa_dir=None):
+    """Refresh the editable rocisa so `import rocisa` picks up C++ edits.
+
+    Only acts when rocisa is installed editable (pip install -e). When
+    non-editable (e.g. tox), does nothing.
+
+    Degrades to a warning — never a hard failure — when the build backend
+    (scikit-build-core / nanobind) is unavailable.
+    """
+    import importlib.util
+
+    if _rocisa_install_status() != "editable":
+        return
+
+    missing = [m for m in ("scikit_build_core", "nanobind") if importlib.util.find_spec(m) is None]
+    if missing:
+        print(
+            "warning: editable rocisa is installed but its build backend is "
+            f"unavailable ({', '.join(missing)}); skipping rocisa rebuild. If you "
+            "changed rocisa C++ sources, run 'invoke rocisa' where the build deps exist.",
+            file=sys.stderr,
+        )
+        return
+
+    try:
+        print("Rebuilding editable rocisa to pick up any C++ source changes...")
+        _pip_install_rocisa(c, rocisa_dir, rebuild_on_import=False)
+    except Exception as e:
+        print(
+            f"warning: rocisa rebuild failed ({e}); continuing with the client build. "
+            "Run 'invoke rocisa' manually to refresh the bindings.",
+            file=sys.stderr,
+        )
+
 
 @task(
     help={
@@ -36,20 +168,68 @@ def get_gpu_arch(c):
         "build": "Build the tensilelite-client executable.",
         "build_dir": "Path to client build dir.",
         "build_type": "CMake build type (e.g. Release, Debug).",
-        "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101)."
+        "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101).",
+        "rocm_path": "Path to a ROCm install whose amdclang/amdclang++ should be used.",
+        "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
+        "enable_rocprof": "Build tensilelite-client with rocprof.",
+        "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
+        "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
+        "enable_asan": "Enable AddressSanitizer.",
+        "enable_tsan": "Enable ThreadSanitizer.",
+        "enable_sdma": "Build the GPU-initiated SDMA transport path; needs hsakmt and hsa-runtime64.",
     }
 )
-def build_client(c, clean=False, configure=True, build=True, build_dir="build_tmp", build_type="Release", gpu_targets=None):
+def build_client(
+    c,
+    clean=False,
+    configure=True,
+    build=True,
+    build_dir="build_tmp",
+    build_type="Release",
+    gpu_targets=None,
+    rocm_path=None,
+    export_compile_commands=False,
+    enable_rocprof=False,
+    cxx_flags_release=None,
+    rebuild_rocisa=True,
+    enable_asan=False,
+    enable_tsan=False,
+    enable_sdma=False,
+):
+    """Build the tensilelite-client C++ executable.
+
+    To run Tensile after building, use: Tensile/bin/Tensile <args>
+    CMake builds rocisa in the client build directory. When rocisa is
+    installed editable, the bindings are refreshed to pick up C++ edits
+    (disable with --no-rebuild-rocisa).
+    """
+
+    if enable_asan and enable_tsan:
+        raise Exit("Error: ASAN and TSAN cannot be enabled simultaneously", code=1)
 
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
-        if gpu_targets == "None":
-            print("Error: No GPU detected and no gpu_targets provided. Skipping build.")
-            return
+        if not gpu_targets:
+            raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
+    if rocm_path:
+        cmake_c_compiler = os.path.join(rocm_path, "bin", "amdclang")
+        cmake_cxx_compiler = os.path.join(rocm_path, "bin", "amdclang++")
+
+        for compiler in (cmake_c_compiler, cmake_cxx_compiler):
+            try:
+                subprocess.run([compiler, "--version"], capture_output=True, timeout=5, check=True)
+            except FileNotFoundError:
+                raise Exit(f"Error: compiler not found at {compiler}", code=1)
+            except subprocess.SubprocessError as e:
+                raise Exit(f"Error: compiler check failed for {compiler}: {e}", code=1)
+
+    if rebuild_rocisa:
+        _maybe_rebuild_rocisa(c)
+
     if clean and os.path.exists(build_dir):
-        c.run(f"rm -rf {build_dir}")
+        c.run(f"rm -rf {shlex.quote(build_dir)}")
 
     if configure:
         os.makedirs(build_dir, exist_ok=True)
@@ -58,13 +238,131 @@ def build_client(c, clean=False, configure=True, build=True, build_dir="build_tm
             "cmake",
             "--preset",
             "tensilelite",
-            "-S", "../",
+            "-S", str(_TASKS_DIR.parent),
             "-B", build_dir,
             f"-DCMAKE_BUILD_TYPE={build_type}",
-            f"-DGPU_TARGETS={gpu_targets}"
+            f"-DGPU_TARGETS={gpu_targets}",
+            f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={_cmake_bool(enable_rocprof)}",
         ]
 
-        c.run(" ".join(cmake_cmd))
+        if cxx_flags_release is not None:
+            cmake_cmd.append(f"-DCMAKE_CXX_FLAGS_RELEASE={cxx_flags_release}")
+        if rocm_path:
+            cmake_cmd.append(f"-DCMAKE_C_COMPILER={cmake_c_compiler}")
+            cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cmake_cxx_compiler}")
+        if shutil.which("ccache"):
+            cmake_cmd.append("-DCMAKE_C_COMPILER_LAUNCHER=ccache")
+            cmake_cmd.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
+        if export_compile_commands:
+            cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+        if enable_asan:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_ASAN=ON")
+        if enable_tsan:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
+        if enable_sdma:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_SDMA=ON")
+        c.run(shlex.join(cmake_cmd))
 
     if build:
-        c.run(f"cmake --build {build_dir} --parallel")
+        c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
+
+
+@task
+def precommit_install(c):
+    """Install the hipblaslt/TensileLite git pre-commit hook (run once after `uv sync`).
+
+    Clears core.hooksPath only when it points at the default hooks dir; bails if
+    it points somewhere custom.
+    """
+    root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], text=True
+    ).strip()
+    common = subprocess.check_output(
+        ["git", "rev-parse", "--git-common-dir"], text=True, cwd=root
+    ).strip()
+    common_path = pathlib.Path(common)
+    if not common_path.is_absolute():
+        common_path = (pathlib.Path(root) / common_path).resolve()
+    default_hooks = str(common_path / "hooks")
+    hooks_path = subprocess.run(
+        ["git", "config", "--get", "core.hooksPath"],
+        cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+
+    if hooks_path:
+        if os.path.realpath(hooks_path) == os.path.realpath(default_hooks):
+            print(f"core.hooksPath is set to the default ({hooks_path}); clearing it "
+                  "(redundant; git-lfs hooks are unaffected).")
+            with c.cd(root):
+                c.run("git config --unset-all core.hooksPath")
+        else:
+            raise Exit(
+                f"Refusing to install: core.hooksPath is set to a custom path "
+                f"({hooks_path}), not the default ({default_hooks}). Resolve that "
+                "first.",
+                code=1,
+            )
+
+    config = "projects/hipblaslt/.pre-commit-config.yaml"
+    with c.cd(root):
+        c.run(f"pre-commit install --config {shlex.quote(config)}", pty=True)
+
+
+@task(
+    help={
+        "build_dir": "Path to coverage build dir.",
+        "gpu_targets": "GPU targets (e.g. gfx90a,gfx942).",
+        "rocm_path": "Path to ROCm installation.",
+        "clean": "Remove build directory before building.",
+    }
+)
+def build_coverage(
+    c,
+    build_dir="build_cov",
+    gpu_targets=None,
+    rocm_path=None,
+    clean=False,
+):
+    """Build TensileLite with code coverage instrumentation.
+
+    Builds rocisa, tensilelite-host, and client with LLVM coverage flags.
+    Run tests with tox -e coverage-cpp to generate coverage reports.
+    """
+    if gpu_targets is None:
+        gpu_targets = detect_gpu_arch()
+        if not gpu_targets:
+            print("Error: No GPU detected and no gpu_targets provided.")
+            return
+
+    if clean and os.path.exists(build_dir):
+        c.run(f"rm -rf {shlex.quote(build_dir)}")
+
+    os.makedirs(build_dir, exist_ok=True)
+
+    rocm = rocm_path or _detect_rocm()
+    cmake_c = os.path.join(rocm, "bin", "amdclang")
+    cmake_cxx = os.path.join(rocm, "bin", "amdclang++")
+
+    cmake_cmd = [
+        "cmake",
+        "--preset", "tensilelite",
+        "-S", "../",
+        "-B", build_dir,
+        "-DCMAKE_BUILD_TYPE=Debug",
+        f"-DGPU_TARGETS={gpu_targets}",
+        f"-DCMAKE_C_COMPILER={cmake_c}",
+        f"-DCMAKE_CXX_COMPILER={cmake_cxx}",
+        "-DTENSILELITE_ENABLE_COVERAGE=ON",
+        "-DROCISA_ENABLE_COVERAGE=ON",
+        "-DTENSILELITE_BUILD_TESTING=ON",
+        "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
+    ]
+
+    if shutil.which("ccache"):
+        cmake_cmd.extend([
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        ])
+
+    c.run(shlex.join(cmake_cmd))
+    c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))

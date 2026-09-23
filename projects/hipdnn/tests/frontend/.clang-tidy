@@ -1,0 +1,9 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# Disable bugprone-unchecked-optional-access in test code because clang-tidy's
+# flow analysis does not recognise gtest ASSERT_TRUE(opt.has_value()) as a
+# guard, producing only false positives in test files.
+InheritParentConfig: true
+Checks: >
+  -bugprone-unchecked-optional-access

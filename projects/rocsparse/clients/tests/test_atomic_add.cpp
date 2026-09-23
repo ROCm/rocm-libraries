@@ -24,6 +24,7 @@
 
 // Include the actual rocsparse implementation for atomic_add
 #include "rocsparse_common.hpp"
+#include "rocsparse_data.hpp"
 
 #include <gtest/gtest.h>
 #include <hip/hip_fp16.h>
@@ -139,10 +140,26 @@ void test_atomic_add_accuracy(int size, int num_adds, int target_idx)
 // =============================================================================
 class atomic_add_f16_pre_checkin : public ::testing::TestWithParam<std::tuple<int, int, int>>
 {
+protected:
+    void SetUp() override
+    {
+        if(RocSPARSE_TestData::is_yaml_filter_active())
+        {
+            GTEST_SKIP() << "Skipping non-yaml test when --yaml filter is active";
+        }
+    }
 };
 
 class atomic_add_bf16_pre_checkin : public ::testing::TestWithParam<std::tuple<int, int, int>>
 {
+protected:
+    void SetUp() override
+    {
+        if(RocSPARSE_TestData::is_yaml_filter_active())
+        {
+            GTEST_SKIP() << "Skipping non-yaml test when --yaml filter is active";
+        }
+    }
 };
 
 TEST_P(atomic_add_f16_pre_checkin, Accuracy)

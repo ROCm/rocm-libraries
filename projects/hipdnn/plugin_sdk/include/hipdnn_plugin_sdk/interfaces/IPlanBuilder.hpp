@@ -7,9 +7,9 @@
 #include <memory>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
@@ -48,9 +48,10 @@ public:
      * @param opGraph The operation graph to check.
      * @return true if this plan builder can handle the graph, false otherwise.
      */
-    // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    virtual bool isApplicable(const THandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    virtual bool
+        // NOLINTNEXTLINE(portability-template-virtual-member-function)
+        isApplicable(const THandle& handle,
+                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     /**
@@ -61,10 +62,11 @@ public:
      * @param executionSettings The plugin-specific execution settings.
      * @return The maximum workspace size in bytes.
      */
-    // NOLINTNEXTLINE(portability-template-virtual-member-function)
-    virtual size_t getMaxWorkspaceSize(const THandle& handle,
-                                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                       const TSettings& executionSettings) const
+    virtual size_t
+        // NOLINTNEXTLINE(portability-template-virtual-member-function)
+        getMaxWorkspaceSize(const THandle& handle,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                            const TSettings& executionSettings) const
         = 0;
 
     /**
@@ -78,8 +80,8 @@ public:
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void initializeExecutionSettings(
         const THandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         TSettings& executionSettings) const
         = 0;
 
@@ -88,6 +90,10 @@ public:
      *
      * Creates an IPlan instance and stores it on the execution context.
      * The plan should be ready for execution after this call.
+     *
+     * Called after initializeExecutionSettings() for the same @p engineConfig: an
+     * implementation may read the settings already on @p executionContext instead of
+     * parsing the config a second time, so calling this first may build against defaults.
      *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph to build a plan for.
@@ -99,8 +105,9 @@ public:
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void buildPlan(
         const THandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+            engineConfig,
         TContext& executionContext) const
         = 0;
 
@@ -114,10 +121,10 @@ public:
      * @param opGraph The operation graph.
      * @return A vector of KnobT objects representing the custom knobs.
      */
-    virtual std::vector<hipdnn_data_sdk::data_objects::KnobT>
+    virtual std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
         // NOLINTNEXTLINE(portability-template-virtual-member-function)
         getCustomKnobs(const THandle& handle,
-                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 };
 

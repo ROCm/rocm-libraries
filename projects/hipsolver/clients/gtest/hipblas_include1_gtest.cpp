@@ -125,7 +125,7 @@ class HIPBLAS_INCLUDE1 : public ::TestWithParam<hipblas_include1_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <typename T>

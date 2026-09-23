@@ -16,7 +16,6 @@ if(HIPSPARSE_ENABLE_BENCHMARKS)
 endif()
 
 if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
-    enable_testing()
     add_subdirectory(tests)
 
     set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_common.yaml")

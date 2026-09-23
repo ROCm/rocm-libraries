@@ -299,6 +299,26 @@ The project uses clang-tidy to automatically enforce many of the coding style gu
 
 The CI pipeline automatically runs clang-tidy on all pull requests to ensure compliance before merging.
 
+#### Common Clang-Tidy Pitfalls
+
+**Multilevel pointer conversions (`bugprone-multi-level-implicit-pointer-conversion`):**
+The backend C API uses `const void*` parameters in functions like `setAttribute`. When passing a pointer-to-pointer (e.g., `HipdnnBackendDescriptor**` or `hipdnnHandle_t*`), the implicit conversion to `const void*` is a multilevel pointer conversion that clang-tidy flags as an error.
+
+Always use an explicit `static_cast<const void*>(...)` in these cases:
+
+```cpp
+// Wrong — implicit multilevel pointer conversion
+desc->setAttribute(HIPDNN_ATTR_OPERATION_FOO_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
+
+// Correct — explicit cast
+desc->setAttribute(HIPDNN_ATTR_OPERATION_FOO_X,
+                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                   1,
+                   static_cast<const void*>(&xDesc));
+```
+
+This applies whenever the address-of a pointer variable (e.g., `&xDesc` where `xDesc` is a `HipdnnBackendDescriptor*`) or a `.data()` call on a container of pointers (e.g., `ops.data()` where `ops` is `std::array<HipdnnBackendDescriptor*, N>`) is passed to a `const void*` parameter.
+
 ### 15.2 Test Naming Enforcement Tool
 
 A dedicated test naming enforcement tool is available to automatically validate that all test names follow the conventions outlined in Section 11.

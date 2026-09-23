@@ -58,73 +58,9 @@ TEST(TestMatmulAttributes, CreateMatmulAttributes)
     EXPECT_EQ(cTensor->get_stride(), (std::vector<int64_t>{16, 1}));
 }
 
-TEST(TestMatmulAttributes, PackAttributes)
-{
-    hipdnn_frontend::graph::MatmulAttributes matmulAttributes;
-
-    // Set tensors with UIDs
-    auto aTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    aTensor->set_uid(1);
-    matmulAttributes.set_a(aTensor);
-
-    auto bTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    bTensor->set_uid(2);
-    matmulAttributes.set_b(bTensor);
-
-    auto cTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    cTensor->set_uid(3);
-    matmulAttributes.set_c(cTensor);
-
-    // Also set tensor properties and validate getters alias same objects
-    aTensor->set_name("A")
-        .set_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_dim({2, 3})
-        .set_stride({3, 1});
-    bTensor->set_name("B")
-        .set_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_dim({3, 4})
-        .set_stride({4, 1});
-    cTensor->set_name("C")
-        .set_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_dim({2, 4})
-        .set_stride({4, 1});
-
-    EXPECT_EQ(matmulAttributes.get_a(), aTensor);
-    EXPECT_EQ(matmulAttributes.get_b(), bTensor);
-    EXPECT_EQ(matmulAttributes.get_c(), cTensor);
-
-    EXPECT_EQ(aTensor->get_name(), "A");
-    EXPECT_EQ(aTensor->get_data_type(), hipdnn_frontend::DataType::FLOAT);
-    EXPECT_EQ(aTensor->get_dim(), (std::vector<int64_t>{2, 3}));
-    EXPECT_EQ(aTensor->get_stride(), (std::vector<int64_t>{3, 1}));
-
-    EXPECT_EQ(bTensor->get_name(), "B");
-    EXPECT_EQ(bTensor->get_data_type(), hipdnn_frontend::DataType::FLOAT);
-    EXPECT_EQ(bTensor->get_dim(), (std::vector<int64_t>{3, 4}));
-    EXPECT_EQ(bTensor->get_stride(), (std::vector<int64_t>{4, 1}));
-
-    EXPECT_EQ(cTensor->get_name(), "C");
-    EXPECT_EQ(cTensor->get_data_type(), hipdnn_frontend::DataType::FLOAT);
-    EXPECT_EQ(cTensor->get_dim(), (std::vector<int64_t>{2, 4}));
-    EXPECT_EQ(cTensor->get_stride(), (std::vector<int64_t>{4, 1}));
-
-    // Pack attributes
-    flatbuffers::FlatBufferBuilder builder;
-    auto packedAttributes = matmulAttributes.pack_attributes(builder);
-    builder.Finish(packedAttributes);
-
-    auto buffer = builder.GetBufferPointer();
-    auto matmulFb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::MatmulAttributes>(buffer);
-
-    // Verify packed tensor UIDs
-    EXPECT_EQ(matmulFb->a_tensor_uid(), 1);
-    EXPECT_EQ(matmulFb->b_tensor_uid(), 2);
-    EXPECT_EQ(matmulFb->c_tensor_uid(), 3);
-}
-
 TEST(TestMatmulAttributes, DefaultValues)
 {
-    hipdnn_frontend::graph::MatmulAttributes matmulAttributes;
+    const hipdnn_frontend::graph::MatmulAttributes matmulAttributes;
 
     // Check that tensors are null by default
     EXPECT_EQ(matmulAttributes.get_a(), nullptr);
@@ -232,4 +168,72 @@ TEST(TestMatmulAttributes, SetTensorsConstRef)
     EXPECT_EQ(matmulAttributes.get_a(), aTensor);
     EXPECT_EQ(matmulAttributes.get_b(), bTensor);
     EXPECT_EQ(matmulAttributes.get_c(), cTensor);
+}
+
+TEST(TestMatmulAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::MatmulAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto a1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    a1->set_uid(1).set_name("A").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_a(a1);
+
+    auto b1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    b1->set_uid(2).set_name("B").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_b(b1);
+
+    auto c1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    c1->set_uid(3).set_name("C").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_c(c1);
+
+    hipdnn_frontend::graph::MatmulAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto a2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    a2->set_uid(1).set_name("A").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_a(a2);
+
+    auto b2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    b2->set_uid(2).set_name("B").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_b(b2);
+
+    auto c2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    c2->set_uid(3).set_name("C").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_c(c2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchA = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    structuralMismatchA->set_uid(99).set_name("MismatchedA");
+    attr2.set_a(structuralMismatchA);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_a(a2); // Revert
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchA = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchA
+        ->set_uid(555) // Diverges from attr1's a1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's a1 ("A")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_a(logicalMatchA);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Sanity check on the trivial hooks themselves: since MatmulAttributes has
+    // no extra fields, two default-constructed instances (no tensors, no name,
+    // NOT_SET compute type) should still be logically and strictly equal.
+    const hipdnn_frontend::graph::MatmulAttributes emptyAttr1;
+    const hipdnn_frontend::graph::MatmulAttributes emptyAttr2;
+    EXPECT_TRUE(emptyAttr1 == emptyAttr2);
+    EXPECT_TRUE(emptyAttr1.logicallyEquals(emptyAttr2));
 }

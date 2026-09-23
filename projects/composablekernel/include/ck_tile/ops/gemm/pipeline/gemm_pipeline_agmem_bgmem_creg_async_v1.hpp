@@ -13,7 +13,7 @@ namespace ck_tile {
 //  A Tile Window: global memory
 //  B Tile Window: global memory
 //  C Distributed tensor: register
-template <typename Problem, typename Policy = GemmPipelineAgBgCrCompAsyncDefaultPolicy>
+template <typename Problem, typename Policy = GemmPipelineAgBgCrCompAsyncDefaultPolicy<>>
 struct GemmPipelineAGmemBGmemCRegAsyncV1 : public BaseGemmPipelineAGmemBGmemCRegV1<Problem>
 {
     using Base             = BaseGemmPipelineAGmemBGmemCRegV1<Problem>;
@@ -42,6 +42,8 @@ struct GemmPipelineAGmemBGmemCRegAsyncV1 : public BaseGemmPipelineAGmemBGmemCReg
     using I0 = number<0>;
     using I1 = number<1>;
     using I2 = number<2>;
+
+    static constexpr bool LargeTensors = Problem::LargeTensors;
 
     static constexpr index_t BlockSize = Problem::kBlockSize;
 

@@ -214,141 +214,6 @@ TEST(TestBatchnormAttributes, CreateBatchnormAttributes)
     EXPECT_EQ(epsilonTensor->get_stride(), (std::vector<int64_t>{1}));
 }
 
-TEST(TestBatchnormAttributes, PackAttributes)
-{
-    hipdnn_frontend::graph::BatchnormAttributes batchnormAttributes;
-
-    auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    xTensor->set_uid(1);
-    batchnormAttributes.set_x(xTensor);
-
-    auto yTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    yTensor->set_uid(2);
-    batchnormAttributes.set_y(yTensor);
-
-    auto scaleTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    scaleTensor->set_uid(3);
-    batchnormAttributes.set_scale(scaleTensor);
-
-    auto biasTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    biasTensor->set_uid(4);
-    batchnormAttributes.set_bias(biasTensor);
-
-    auto prevMeanTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    prevMeanTensor->set_uid(5);
-    batchnormAttributes.set_prev_running_mean(prevMeanTensor);
-
-    auto prevVarianceTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    prevVarianceTensor->set_uid(6);
-    batchnormAttributes.set_prev_running_variance(prevVarianceTensor);
-
-    auto momentumTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    momentumTensor->set_uid(7);
-    batchnormAttributes.set_momentum(momentumTensor);
-
-    auto meanTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    meanTensor->set_uid(8);
-    batchnormAttributes.set_mean(meanTensor);
-
-    auto invVarianceTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    invVarianceTensor->set_uid(9);
-    batchnormAttributes.set_inv_variance(invVarianceTensor);
-
-    auto nextMeanTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    nextMeanTensor->set_uid(10);
-    batchnormAttributes.set_next_running_mean(nextMeanTensor);
-
-    auto nextVarianceTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    nextVarianceTensor->set_uid(11);
-    batchnormAttributes.set_next_running_variance(nextVarianceTensor);
-
-    auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(14);
-    batchnormAttributes.set_epsilon(epsilonTensor);
-
-    auto peerStat1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    peerStat1->set_uid(12);
-
-    auto peerStat2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    peerStat2->set_uid(13);
-
-    batchnormAttributes.set_peer_stats({peerStat1, peerStat2});
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto packedAttributes = batchnormAttributes.pack_attributes(builder);
-    builder.Finish(packedAttributes);
-
-    auto buffer = builder.GetBufferPointer();
-    auto batchnormAttributesFb
-        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::BatchnormAttributes>(buffer);
-
-    EXPECT_EQ(batchnormAttributesFb->x_tensor_uid(), 1);
-    EXPECT_EQ(batchnormAttributesFb->y_tensor_uid(), 2);
-    EXPECT_EQ(batchnormAttributesFb->scale_tensor_uid(), 3);
-    EXPECT_EQ(batchnormAttributesFb->bias_tensor_uid(), 4);
-    EXPECT_EQ(batchnormAttributesFb->prev_running_mean_tensor_uid(), 5);
-    EXPECT_EQ(batchnormAttributesFb->prev_running_variance_tensor_uid(), 6);
-    EXPECT_EQ(batchnormAttributesFb->momentum_tensor_uid(), 7);
-    EXPECT_EQ(batchnormAttributesFb->mean_tensor_uid(), 8);
-    EXPECT_EQ(batchnormAttributesFb->inv_variance_tensor_uid(), 9);
-    EXPECT_EQ(batchnormAttributesFb->next_running_mean_tensor_uid(), 10);
-    EXPECT_EQ(batchnormAttributesFb->next_running_variance_tensor_uid(), 11);
-    EXPECT_EQ(batchnormAttributesFb->epsilon_tensor_uid(), 14);
-
-    ASSERT_EQ(batchnormAttributesFb->peer_stats_tensor_uid()->size(), 2);
-    EXPECT_EQ(batchnormAttributesFb->peer_stats_tensor_uid()->Get(0), 12);
-    EXPECT_EQ(batchnormAttributesFb->peer_stats_tensor_uid()->Get(1), 13);
-}
-
-TEST(TestBatchnormAttributes, PackAttributesWithoutOptionalValues)
-{
-    hipdnn_frontend::graph::BatchnormAttributes batchnormAttributes;
-
-    auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    xTensor->set_uid(1);
-    batchnormAttributes.set_x(xTensor);
-
-    auto yTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    yTensor->set_uid(2);
-    batchnormAttributes.set_y(yTensor);
-
-    auto scaleTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    scaleTensor->set_uid(3);
-    batchnormAttributes.set_scale(scaleTensor);
-
-    auto biasTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    biasTensor->set_uid(4);
-    batchnormAttributes.set_bias(biasTensor);
-
-    auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(5);
-    batchnormAttributes.set_epsilon(epsilonTensor);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto packedAttributes = batchnormAttributes.pack_attributes(builder);
-    builder.Finish(packedAttributes);
-
-    auto buffer = builder.GetBufferPointer();
-    auto batchnormAttributesFb
-        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::BatchnormAttributes>(buffer);
-
-    EXPECT_EQ(batchnormAttributesFb->x_tensor_uid(), 1);
-    EXPECT_EQ(batchnormAttributesFb->y_tensor_uid(), 2);
-    EXPECT_EQ(batchnormAttributesFb->scale_tensor_uid(), 3);
-    EXPECT_EQ(batchnormAttributesFb->bias_tensor_uid(), 4);
-    EXPECT_EQ(batchnormAttributesFb->epsilon_tensor_uid(), 5);
-
-    EXPECT_EQ(batchnormAttributesFb->prev_running_mean_tensor_uid(), flatbuffers::nullopt);
-    EXPECT_EQ(batchnormAttributesFb->prev_running_variance_tensor_uid(), flatbuffers::nullopt);
-    EXPECT_EQ(batchnormAttributesFb->momentum_tensor_uid(), flatbuffers::nullopt);
-    EXPECT_EQ(batchnormAttributesFb->mean_tensor_uid(), flatbuffers::nullopt);
-    EXPECT_EQ(batchnormAttributesFb->inv_variance_tensor_uid(), flatbuffers::nullopt);
-    EXPECT_EQ(batchnormAttributesFb->next_running_mean_tensor_uid(), flatbuffers::nullopt);
-    EXPECT_EQ(batchnormAttributesFb->next_running_variance_tensor_uid(), flatbuffers::nullopt);
-
-    ASSERT_EQ(batchnormAttributesFb->peer_stats_tensor_uid()->size(), 0);
-}
-
 TEST(TestBatchnormAttributes, SetXWithMove)
 {
     hipdnn_frontend::graph::BatchnormAttributes batchnormAttributes;
@@ -499,7 +364,7 @@ TEST(TestBatchnormAttributes, SimplifiedSetPeerStatsWithMove)
     peerStatsMove.push_back(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     peerStatsMove.push_back(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
 
-    size_t originalSize = peerStatsMove.size();
+    const size_t originalSize = peerStatsMove.size();
     batchnormAttributes.set_peer_stats(std::move(peerStatsMove));
 
     // Verify the vector was moved
@@ -522,4 +387,155 @@ TEST(TestBatchnormAttributes, SimplifiedSetPreviousRunningStatsWithMove)
     EXPECT_NE(batchnormAttributes.get_prev_running_mean(), nullptr);
     EXPECT_NE(batchnormAttributes.get_prev_running_variance(), nullptr);
     EXPECT_NE(batchnormAttributes.get_momentum(), nullptr);
+}
+
+TEST(TestBatchnormAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::BatchnormAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x1->set_uid(1)
+        .set_name("X")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scale1->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto bias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    bias1->set_uid(3)
+        .set_name("Bias")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    // Set initial core tensors for attr1
+    attr1.set_x(x1).set_scale(scale1).set_bias(bias1);
+
+    hipdnn_frontend::graph::BatchnormAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x2->set_uid(1)
+        .set_name("X")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scale2->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto bias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    bias2->set_uid(3)
+        .set_name("Bias")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    // Set initial core tensors for attr2
+    attr2.set_x(x2).set_scale(scale2).set_bias(bias2);
+
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::HALF);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT); // Revert
+
+    auto momentum1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    momentum1->set_uid(7)
+        .set_name("Momentum")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+    attr1.set_momentum(momentum1);
+
+    // Fails because attr1 specifies an optional tensor that attr2 lacks entirely
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+
+    auto momentum2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    momentum2->set_uid(7)
+        .set_name("Momentum")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+    attr2.set_momentum(momentum2);
+
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Test Custom Peer Stats Vector Matrix Structural Differences
+    auto peerTensor1Attr1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor1Attr1->set_uid(12)
+        .set_name("Peer1")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto peerTensor2Attr1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor2Attr1->set_uid(13)
+        .set_name("Peer2")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto peerTensor1Attr2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor1Attr2->set_uid(12)
+        .set_name("Peer1")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    auto peerTensor2Attr2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor2Attr2->set_uid(13)
+        .set_name("Peer2")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    attr1.set_peer_stats({peerTensor1Attr1, peerTensor2Attr1});
+    attr2.set_peer_stats({peerTensor1Attr2}); // Sizing mismatch
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+
+    attr2.set_peer_stats({peerTensor1Attr2, peerTensor2Attr2});
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+
+    auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchX
+        ->set_uid(9999) // Divergent Tracking ID
+        .set_name("DIVERGENT_TRAINING_X") // Divergent Descriptor Name
+        .set_data_type(hipdnn_frontend::DataType::FLOAT) // Layout stays identical
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+    attr2.set_x(logicalMatchX);
+
+    // Expecting: Strict evaluation breaks, but functional graph identity passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+    attr2.set_x(x2); // Revert to matching state
+
+    auto logicalMatchPeer2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchPeer2
+        ->set_uid(8888) // Divergent Tracking ID
+        .set_name("PEER2_ALT_NAME") // Divergent Descriptor Name
+        .set_data_type(hipdnn_frontend::DataType::FLOAT) // Layout stays identical
+        .set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8});
+
+    attr2.set_peer_stats({peerTensor1Attr2, logicalMatchPeer2});
+
+    // Expecting: peer_stats custom strictEqualsImpl fails, but logicallyEqualsImpl passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
 }

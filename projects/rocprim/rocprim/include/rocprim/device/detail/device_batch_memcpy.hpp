@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2023-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2023-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -118,7 +118,8 @@ template<bool IsMemCpy,
          typename std::enable_if<IsMemCpy, int>::type = 0>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static Alias read_item(InputIt buffer_src, Offset offset)
 {
-    return *(reinterpret_cast<Alias*>(buffer_src) + offset);
+    // Note: we must reinterpret_cast to const Alias because InputIt may be a const type.
+    return *(reinterpret_cast<const Alias*>(buffer_src) + offset);
 }
 
 template<bool IsMemCpy,
@@ -396,10 +397,13 @@ private:
                                                    batch_memcpy_config_params params)
     {
         auto size_class = batch_memcpy::size_class::tlev;
-        size_class
-            = size > params.wlev_size_threshold ? batch_memcpy::size_class::wlev : size_class;
-        size_class
-            = size > params.blev_size_threshold ? batch_memcpy::size_class::blev : size_class;
+        // We presume the size to be no larger than maximum of unsigned int
+        size_class = static_cast<unsigned int>(size) > params.wlev_size_threshold
+                         ? batch_memcpy::size_class::wlev
+                         : size_class;
+        size_class = static_cast<unsigned int>(size) > params.blev_size_threshold
+                         ? batch_memcpy::size_class::blev
+                         : size_class;
         return size_class;
     }
 
@@ -430,10 +434,10 @@ private:
                                                           blev_block_scan_state_type,
                                                           rocprim::plus<tile_offset_type>>;
 
-    template<class ArchConfig>
+    template<class TargetConfig>
     struct non_blev_memcpy
     {
-        ROCPRIM_DEVICE static constexpr batch_memcpy_config_params params = ArchConfig::params;
+        ROCPRIM_DEVICE static constexpr batch_memcpy_config_params params = TargetConfig::params;
 
         ROCPRIM_DEVICE static constexpr uint32_t block_size
             = params.non_blev_batch_memcpy_kernel_config.block_size;
@@ -453,24 +457,47 @@ private:
         ROCPRIM_DEVICE static constexpr uint32_t blev_buffers_per_thread = buffers_per_thread;
         ROCPRIM_DEVICE static constexpr uint32_t tlev_buffers_per_thread = buffers_per_thread;
 
-        using buffer_load_type
-            = rocprim::block_load<buffer_size_type,
+        using buffer_load_type = rocprim::block_load<buffer_size_type,
+                                                     block_size,
+                                                     buffers_per_thread,
+                                                     rocprim::block_load_method::block_load_striped,
+                                                     1,
+                                                     1,
+                                                     TargetConfig::wavefront>;
+
+        using block_size_scan_type = rocprim::block_scan<size_class_counter,
+                                                         block_size,
+                                                         block_scan_algorithm::default_algorithm,
+                                                         1,
+                                                         1,
+                                                         TargetConfig::wavefront>;
+
+        using block_blev_tile_count_scan_type
+            = rocprim::block_scan<tile_offset_type,
                                   block_size,
-                                  buffers_per_thread,
-                                  rocprim::block_load_method::block_load_striped>;
-
-        using block_size_scan_type = rocprim::block_scan<size_class_counter, block_size>;
-
-        using block_blev_tile_count_scan_type = rocprim::block_scan<tile_offset_type, block_size>;
+                                  block_scan_algorithm::default_algorithm,
+                                  1,
+                                  1,
+                                  TargetConfig::wavefront>;
 
         using block_run_length_decode_type
             = rocprim::block_run_length_decode<buffer_offset_type,
                                                block_size,
                                                tlev_buffers_per_thread,
-                                               tlev_bytes_per_thread>;
+                                               tlev_bytes_per_thread,
+                                               uint32_t,
+                                               1,
+                                               1,
+                                               TargetConfig::wavefront>;
 
-        using block_exchange_tlev_type = rocprim::
-            block_exchange<zipped_tlev_byte_assignment, block_size, tlev_bytes_per_thread>;
+        using block_exchange_tlev_type
+            = rocprim::block_exchange<zipped_tlev_byte_assignment,
+                                      block_size,
+                                      tlev_bytes_per_thread,
+                                      1,
+                                      1,
+                                      block_padding_hint::avoid_conflicts,
+                                      TargetConfig::wavefront>;
 
         struct storage
         {
@@ -519,7 +546,7 @@ private:
             ROCPRIM_UNROLL
             for(uint32_t i = 0; i < buffers_per_thread; ++i)
             {
-                auto size_class = get_size_class(buffer_sizes[i], ArchConfig::params);
+                auto size_class = get_size_class(buffer_sizes[i], TargetConfig::params);
                 counters.add(size_class, buffer_sizes[i] > 0 ? 1 : 0);
             }
             return counters;
@@ -543,7 +570,7 @@ private:
                     continue;
                 }
 
-                const auto     size_class   = get_size_class(buffer_sizes[i], ArchConfig::params);
+                const auto     size_class   = get_size_class(buffer_sizes[i], TargetConfig::params);
                 const uint32_t write_offset = counters.get(size_class);
                 buffers_by_size_class[write_offset]
                     = buffer_tuple{static_cast<tlev_byte_offset_type>(buffer_sizes[i]), buffer_id};
@@ -968,7 +995,7 @@ public:
         }
     }
 
-    template<class ArchConfig>
+    template<class TargetConfig>
     static ROCPRIM_DEVICE
     void non_blev_memcpy_kernel_impl(copyable_buffers            buffers,
                                      buffer_offset_type          num_buffers,
@@ -977,27 +1004,27 @@ public:
                                      blev_block_scan_state_type  blev_block_scan_state,
                                      ordered_bid_type            ordered_bid)
     {
-        ROCPRIM_SHARED_MEMORY typename non_blev_memcpy<ArchConfig>::storage_type temp_storage;
+        ROCPRIM_SHARED_MEMORY typename non_blev_memcpy<TargetConfig>::storage_type temp_storage;
 
         auto tile_id = ordered_bid.get(rocprim::flat_tile_thread_id(),
                                        temp_storage.get().shared.ordered_bid);
 
-        non_blev_memcpy<ArchConfig>{}.copy(temp_storage.get(),
-                                           buffers,
-                                           num_buffers,
-                                           blev_buffers,
-                                           blev_buffer_scan_state,
-                                           blev_block_scan_state,
-                                           tile_id /* rocprim::flat_block_id() */);
+        non_blev_memcpy<TargetConfig>{}.copy(temp_storage.get(),
+                                             buffers,
+                                             num_buffers,
+                                             blev_buffers,
+                                             blev_buffer_scan_state,
+                                             blev_block_scan_state,
+                                             tile_id /* rocprim::flat_block_id() */);
     }
 
-    template<typename ArchConfig>
+    template<typename TargetConfig>
     static ROCPRIM_DEVICE
     void blev_memcpy_kernel_impl(copyable_blev_buffers       blev_buffers,
                                  blev_buffer_scan_state_type buffer_offset_tile,
                                  tile_offset_type            last_tile_offset)
     {
-        static constexpr batch_memcpy_config_params params = ArchConfig::params;
+        static constexpr batch_memcpy_config_params params = TargetConfig::params;
         static constexpr uint32_t                   blev_block_size
             = params.blev_batch_memcpy_kernel_config.block_size;
         static constexpr uint32_t blev_bytes_per_thread
@@ -1039,8 +1066,10 @@ public:
                 = (tile_id - blev_buffers.offsets[buffer_id]) * blev_tile_size;
 
             // If the tile has already reached beyond the work of the end of the last buffer
+            // We presume the size to be no larger than maximum of unsigned int
             if(buffer_id >= num_blev_buffers - 1
-               && tile_offset_within_buffer > blev_buffers.sizes[buffer_id])
+               && tile_offset_within_buffer
+                      > static_cast<unsigned int>(blev_buffers.sizes[buffer_id]))
             {
                 return;
             }
@@ -1106,13 +1135,7 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
         {
             using Selector = batch_memcpy_config_selector<InputBufferItType, IsMemCpy>;
 
-            target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -1233,9 +1256,9 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
 
             ROCPRIM_RETURN_ON_ERROR(hipSetDevice(device_id));
 
-            auto blev_memcpy_kernel = [=](auto arch_config)
+            auto blev_memcpy_kernel = [=](auto target_config)
             {
-                batch_memcpy_impl_type::template blev_memcpy_kernel_impl<decltype(arch_config)>(
+                batch_memcpy_impl_type::template blev_memcpy_kernel_impl<decltype(target_config)>(
                     blev_buffers,
                     scan_state_buffer,
                     batch_memcpy_grid_size - 1);
@@ -1305,15 +1328,15 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
                                                         num_blocks,
                                                         start);
 
-            auto non_blev_memcpy_kernel = [=](auto arch_config)
+            auto non_blev_memcpy_kernel = [=](auto target_config)
             {
-                batch_memcpy_impl_type::template non_blev_memcpy_kernel_impl<decltype(arch_config)>(
-                    buffers,
-                    num_copies,
-                    blev_buffers,
-                    scan_state_buffer,
-                    scan_state_block,
-                    ordered_bid);
+                batch_memcpy_impl_type::template non_blev_memcpy_kernel_impl<
+                    decltype(target_config)>(buffers,
+                                             num_copies,
+                                             blev_buffers,
+                                             scan_state_buffer,
+                                             scan_state_block,
+                                             ordered_bid);
             };
 
             // Launch batch_memcpy_non_blev_kernel.

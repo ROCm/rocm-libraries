@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -94,7 +71,7 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");
@@ -316,9 +293,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
-                SKIP("This observer only applies to CDNA archictectures");
+                SKIP("This observer only applies to CDNA4 or earlier archictectures");
             }
 
             SECTION("Has hazard with 2nd op (non-trans) accessing the same register")
@@ -407,9 +384,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
-                SKIP("This observer only applies to CDNA archictectures");
+                SKIP("This observer only applies to CDNA4 or earlier archictectures");
             }
 
             SECTION("Hazard with VALU write followed by a readlane or permlane")
@@ -516,7 +493,7 @@ namespace HazardObserverTest
 
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");
@@ -559,7 +536,7 @@ namespace HazardObserverTest
 
                 std::vector<Instruction> insts
                     = {Instruction("v_cmpx_eq_u32", {}, {s[0], v[0]}, {}, ""),
-                       Instruction("v_xor_b32", {v[1]}, {v[0], context->getExec()}, {}, ""),
+                       Instruction("v_xor_b32", {v[1]}, {v[0], context->getEXEC()}, {}, ""),
                        Instruction("s_endpgm", {}, {}, {}, "")};
 
                 if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
@@ -625,9 +602,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
-                SKIP("This observer only applies to CDNA archictectures");
+                SKIP("This observer only applies to CDNA4 or earlier archictectures");
             }
 
             auto context = TestContext::ForTarget(arch);
@@ -660,7 +637,7 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");

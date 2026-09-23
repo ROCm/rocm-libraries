@@ -1,6 +1,17 @@
 # hipDNN - Engine Configuration Knobs Design Document
 
 - Contributors: Mitch Ousdahl
+- **Status**: Implemented ✅
+- **Implementation Version**: hipDNN 1.0+
+
+> [!NOTE]
+> **Implementation Status**: This RFC has been implemented in hipDNN. The design described here reflects the current implementation with minor deviations noted in sections below.
+>
+> **User Documentation**: For practical usage information, see:
+> - [hipDNN Knobs Documentation](../Knobs.md) - Complete user guide with examples
+> - [HowTo Guide - Configuring Knobs](../HowTo.md#configuring-engine-knobs) - Quick start guide
+> - [Plugin Development - Providing Knobs](../PluginDevelopment.md#providing-knobs) - Plugin developer guide
+> - [MIOpen Provider Knobs](../../../dnn-providers/miopen-provider/docs/Knobs.md) - MIOpen-specific knobs
 
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
@@ -13,6 +24,7 @@
 8. [Testing Plan](#8-testing-plan)
 9. [Future Considerations](#9-future-considerations)
 10. [Glossary](#10-glossary)
+11. [Implementation Notes](#11-implementation-notes)
 
 ## 1. Executive Summary
 
@@ -831,3 +843,196 @@ Future work could integrate knobs with auto-tuning:
 - **Finalization**: The process of validating and locking a configuration
 - **Auto-Tuning**: Automatically searching for optimal knob values
 - **Preset**: A predefined collection of knob settings for common use cases
+
+## 11. Implementation Notes
+
+This section documents the actual implementation status and any deviations from the proposed design.
+
+### 11.1 Implementation Status
+
+**Status**: ✅ **Implemented**
+
+The knobs system has been fully implemented in hipDNN as of version 1.0+. The implementation follows the design proposed in this RFC with the following components completed:
+
+#### ✅ Completed Components
+
+1. **FlatBuffer Schemas** (Phase 1.1)
+   - `data_sdk/schemas/knob_value.fbs` - Core knob schema with union types
+   - `engine_details.fbs` - Updated with knob metadata support
+   - `engine_config.fbs` - Updated with knob settings support
+   - All schemas support int64, float64, and string value types
+
+2. **Backend API** (Phase 1.2)
+   - `HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE` - Query knob metadata
+   - `HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES` - Set knob values
+   - Validation during `hipdnnBackendFinalize(engineCfg)`
+   - Error reporting for invalid knob values
+
+3. **Frontend API** (Phase 2)
+   - `Knob` class - Wraps knob metadata with type-safe accessors
+   - `KnobSetting` class - Type-safe knob value setting
+   - Constraint classes: `IntConstraint`, `FloatConstraint`, `StringConstraint`, `EmptyConstraint`
+   - `Graph::get_knobs_for_engine()` - Query available knobs
+   - `Graph::get_knob_lookup_for_engine()` - Query knobs as map
+   - `Graph::create_execution_plan_ext()` - Create plan with knob settings
+
+4. **MIOpen Provider** (Phase 3)
+   - Implemented `global.benchmarking` knob
+   - Implemented `global.workspace_size_limit` custom knob for convolution operations
+   - Dynamic knob registration based on operation type
+   - Knob validation and application in plan builders
+
+5. **Documentation** (Phase 4)
+   - Core hipDNN knobs documentation
+   - User guide (HowTo) with quick start
+   - Plugin development guide for knob providers
+   - MIOpen provider knobs documentation with examples
+   - This RFC updated with implementation status
+
+### 11.2 Implementation Deviations
+
+The following deviations from the original RFC were made during implementation:
+
+#### 1. Knob ID Hashing
+
+**RFC Proposed**: Hash knob ID strings to int64_t for efficient lookup
+
+**Implemented**: Knob IDs remain as strings throughout the system
+
+**Rationale**:
+- String IDs provide better debuggability and logging
+- String comparison performance is acceptable for configuration-time operations
+- Easier integration with FlatBuffers
+- No measurable performance impact since knobs are set at plan creation, not execution
+
+#### 2. Frontend API Naming
+
+**RFC Proposed**: `Graph::create_execution_plan(...)` with knob overloads
+
+**Implemented**: `Graph::create_execution_plan_ext(...)` with `KnobSetting` vector
+
+**Rationale**:
+- `_ext` suffix distinguishes the extended API from potential future simplified APIs
+- Vector of `KnobSetting` is more flexible than individual overloads
+- Consistent with other extended APIs in hipDNN
+
+#### 3. Constraint Representation
+
+**RFC Proposed**: Complex constraint expressions (e.g., "power of 2" constraints)
+
+**Implemented**: Explicit valid values list for complex constraints
+
+**Rationale**:
+- Simpler to implement and validate
+- More explicit and easier to document
+- Covers all practical use cases
+- Example: For "power of 2", use `validValues = {8, 16, 32, 64, 128}` instead of a complex predicate
+
+### 11.3 Known Limitations
+
+1. **String-based Knob IDs**: Slightly less efficient than integer IDs, but acceptable for configuration-time operations.
+
+2. **No Auto-Tuning Integration**: Auto-tuning integration (section 9.1) is planned for a future release.
+
+### 11.4 Actual API Signatures
+
+The implemented API signatures differ slightly from the RFC proposal:
+
+#### Frontend Knob Class
+```cpp
+class Knob {
+public:
+    static std::pair<Error, Knob> tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData);
+
+    const std::string& knobId() const;
+    const std::string& description() const;
+    bool isDeprecated() const;
+    KnobValueType valueType() const;
+    const KnobValueVariant& defaultValue() const;
+    const IConstraint* constraint() const;
+    Error validate(const KnobSetting& setting) const;
+};
+```
+
+#### Frontend KnobSetting Class
+```cpp
+class KnobSetting {
+public:
+    KnobSetting(std::string knobId, KnobValueVariant value);
+    template <typename T> KnobSetting(std::string knobId, const T& value);
+
+    const std::string& knobId() const;
+    const KnobValueVariant& value() const;
+    template <typename T> void setValue(const T& value);
+};
+```
+
+#### Graph Methods
+```cpp
+class Graph {
+public:
+    Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const;
+    Error get_knob_lookup_for_engine(int64_t engineId,
+                                     std::unordered_map<std::string, Knob>& knobs) const;
+    Error create_execution_plan_ext(int64_t engineId,
+                                    const std::vector<KnobSetting>& settings);
+};
+```
+
+### 11.5 Testing Status
+
+**Unit Tests**: ✅ Completed
+- `frontend/tests/TestKnob.cpp` - Knob class tests
+- `frontend/tests/TestKnobSetting.cpp` - KnobSetting class tests
+- `frontend/tests/TestGraph.cpp` - Graph knob API tests
+
+**Integration Tests**: ✅ Completed
+- MIOpen provider knob tests
+- End-to-end knob setting and validation tests
+
+**Plugin Tests**: ✅ Completed
+- MIOpen benchmarking knob tests
+- MIOpen workspace limit knob tests
+
+### 11.6 Production Usage
+
+The knobs system is currently used in production by:
+
+1. **MIOpen Provider**
+   - `global.benchmarking` - Enable/disable kernel benchmarking
+   - `global.workspace_size_limit` - Control convolution workspace memory
+
+2. **Internal Tests and Samples**
+   - Test suites use knobs for configuring test behavior
+   - Samples demonstrate knob usage patterns
+
+### 11.7 Migration Path
+
+For users migrating from earlier versions without knobs:
+
+1. **No action required for default behavior**: All knobs have sensible defaults
+2. **Opt-in configuration**: Knobs are optional; existing code continues to work
+3. **Progressive enhancement**: Users can gradually adopt knobs for specific tuning needs
+
+### 11.8 Related Documentation
+
+For implementation details and usage examples, refer to:
+
+- **User Documentation**:
+  - [hipDNN Knobs](../Knobs.md) - Complete user guide
+  - [HowTo - Configuring Knobs](../HowTo.md#configuring-engine-knobs) - Quick start
+  - [MIOpen Knobs](../../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
+
+- **Developer Documentation**:
+  - [Plugin Development - Providing Knobs](../PluginDevelopment.md#providing-knobs) - Plugin author guide
+
+- **Implementation Files**:
+  - `frontend/include/hipdnn_frontend/knob/Knob.hpp`
+  - `frontend/include/hipdnn_frontend/knob/KnobSetting.hpp`
+  - `frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp`
+  - `data_sdk/schemas/knob_value.fbs`
+
+---
+
+**Last Updated**: 2026-02-18
+**Implemented By**: Mitch Ousdahl and contributors

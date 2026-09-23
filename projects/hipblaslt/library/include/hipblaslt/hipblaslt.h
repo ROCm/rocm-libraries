@@ -44,6 +44,7 @@
 #define _HIPBLASLT_H_
 
 #include "hipblaslt/hipblaslt-export.h"
+#include "hipblaslt/hipblaslt-opt-in-features.h"
 #include "hipblaslt/hipblaslt-version.h"
 #ifndef LEGACY_HIPBLAS_DIRECT
 #include <hipblas-common/hipblas-common.h>
@@ -85,7 +86,7 @@
 typedef enum {
   HIPBLASLT_EPILOGUE_DEFAULT = 1,                 /**<No special postprocessing. Scale and quantize the results if necessary.*/
   HIPBLASLT_EPILOGUE_RELU = 2,                    /**<Apply ReLU pointwise transform to the results (``x:=max(x, 0)``)*/
-  HIPBLASLT_EPILOGUE_BIAS = 4,                    /**<Apply (broadcast) bias from the bias vector. The bias vector length must match the number of rows in matrix D, and it must be packed (so the stride between vector elements is one). The bias vector is broadcast to all columns and added before applying the final postprocessing.*/
+  HIPBLASLT_EPILOGUE_BIAS = 4,                    /**<Apply bias from the bias vector, and broadcast to all columns if HIPBLAST_MATMUL_DESC_BIAS_BATCH_STRIDE = 0. The bias vector length must match the number of rows in matrix D, and it must be packed (so the stride between vector elements is one). The bias vector is broadcast to all columns if HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE is 0 and added before applying the final postprocessing.*/
   HIPBLASLT_EPILOGUE_RELU_BIAS = 6,               /**<Apply bias and then ReLU transform.*/
   HIPBLASLT_EPILOGUE_GELU = 32,                   /**<Apply GELU pointwise transform to the results (``x:=GELU(x)``).*/
   HIPBLASLT_EPILOGUE_GELU_BIAS = 36,              /**<Apply Bias and then GELU transform.*/
@@ -108,9 +109,139 @@ typedef enum {
   HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT = 131204, /**<Output GEMM results after applying bias but before applying clamp transform.*/
 } hipblasLtEpilogue_t;
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+/*! \ingroup types_module
+ *  \brief Stages that can be selected on a fused epilogue descriptor.
+ *
+ *  \details
+ *  Unlike the flat ``hipblasLtEpilogue_t`` enum, these values name epilogue stages that are
+ *  accumulated into a ``hipblasLtFusedEpilogueDescriptor_t`` via ``hipblasLtFusedEpilogueAdd``
+ *  and attached to a matmul descriptor through ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE``.
+ *
+ *  The fused epilogue API offers several families, each with its own composition rule. Values
+ *  ``0``-``6`` are reserved for the chainable family (residual add, RMSNorm, partial RMSNorm
+ *  stats, RMSNorm scale-apply, AMax, requant) and for the gated linear units, which compose
+ *  by their own rules. All-to-all is the collective family: a single stage that does not
+ *  compose with any other, so adding a companion stage is rejected at ``Add`` time.
+ */
+typedef enum {
+  HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX = 7, /**<Collective family: redistribute a leading run of D's free-0 (feature) positions across the ranks of the registered device communicator, from the GEMM's own store path. Single stage; not chainable. The ``PREFIX`` suffix names the dispatch criterion - the exported region is the positional run ``[0, AM)`` given by ``HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT``.*/
+} hipblasLtFuseableEpilogue_t;
+
+/*! \ingroup types_module
+ *  \brief Attributes settable on a fused epilogue descriptor.
+ *
+ *  \details
+ *  Values ``0``-``11`` are reserved for the chainable family's attributes.
+ */
+typedef enum {
+  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS = 13, /**<Required. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT = 14, /**<Required. ``AM``, the number of leading free-0 (feature) positions of D that are redistributed; the per-rank shard is ``AM / world``. Must be positive and divide by ``world``. This participates in solution selection, so it has the same standing as M, N, and K: setting it after ``hipblasLtMatmulAlgoGetHeuristic`` invalidates the returned algo. Data type: ``int64_t``.*/
+  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
+  HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL = 16, /**<Optional, default ``0``. Which of the communicator's ``nChannels`` flag regions this operation uses. Concurrent operations need distinct channels and disjoint queue sets; every rank of one launch group must pass the same channel, which the library cannot verify. Data type: ``uint32_t``.*/
+} hipblasLtFusedEpilogueAttribute_t;
+
+/*! \ingroup types_module
+ *  \brief How a fused all-to-all establishes receive completion.
+ */
+typedef enum {
+  HIPBLASLT_A2A_COMPLETION_IN_KERNEL = 0, /**<The kernel does not retire until this rank's receive buffer is fully populated, so ordinary stream semantics cover the collective and the receive buffer is safe to read once this rank's stream is synchronized.*/
+
+  /* Value 1 is reserved for a deferred mode, in which the kernel retires before
+     inbound data lands. It ships together with the primitive a caller would wait
+     on, not before it. */
+} hipblasLtA2ACompletionMode_t;
+
+/*! \ingroup types_module
+ *  \brief One caller-created copy-engine (SDMA) queue, as four addresses.
+ *
+ *  \details
+ *  Creating a copy-engine queue means allocating its ring and creating the queue against a
+ *  topology node and engine, all of which goes through the kernel-mode thunk. Leaving that to
+ *  the caller is what keeps the thunk out of hipBLASLt's build: the caller reads these four
+ *  values out of the queue it created, and the library stores them and hands them to the kernel
+ *  without interpreting any of them.
+ */
+typedef struct {
+  void* queueBuf; /**<Copy-engine ring base.*/
+  void* rptr;     /**<Hardware read pointer.*/
+  void* wptr;     /**<Hardware write pointer.*/
+  void* doorbell; /**<Doorbell.*/
+} hipblasLtSdmaQueue_t;
+
+/*! \ingroup types_module
+ *  \brief Opaque handle representing a fused epilogue.
+ *
+ *  \details
+ *  Use the following functions to manipulate this handle:
+ *
+ *  \ref hipblasLtFusedEpilogueCreate(): To create one instance of the handle.
+ *
+ *  \ref hipblasLtFusedEpilogueAdd(): To select a fused epilogue stage.
+ *
+ *  \ref hipblasLtFusedEpilogueSetAttribute(): To configure that stage's parameters.
+ *
+ *  \ref hipblasLtFusedEpilogueDestroy(): To destroy a previously created handle and release
+ *  the resources.
+ */
+typedef struct hipblasLtFusedEpilogueDescriptor* hipblasLtFusedEpilogueDescriptor_t;
+
+/*! \ingroup types_module
+ *  \brief Largest world size a device communicator supports.
+ *
+ *  \details
+ *  An implementation limit rather than an API one: the kernel's per-peer state is a fixed-size
+ *  array and the drain wait's lane mask also bounds it.
+ */
+#define HIPBLASLT_DEVICE_COMM_MAX_WORLD 8
+
+/*! \ingroup types_module
+ *  \brief Caller-supplied allgather used to register a device communicator.
+ *
+ *  \details
+ *  A true allgather: rank ``r``'s \p sendbuf (\p bytesPerRank bytes) must land at
+ *  ``recvbuf + r * bytesPerRank`` on every rank, and \p recvbuf must be readable on return.
+ *  The payload is opaque; the caller must not interpret or reorder it.
+ *
+ *  The library performs no rendezvous of its own, which is why one entry point covers both
+ *  deployment shapes: across processes this is ``MPI_Allgather`` or a ``torch.distributed``
+ *  store, and within one process it is rank-indexed storage plus a barrier. Only at
+ *  ``world == 1``, with nothing to collect, does it degenerate to a memcpy of \p sendbuf.
+ *
+ *  Returning before every rank has contributed does not deadlock but fails registration: a
+ *  slot no rank has written cannot pass validation.
+ *
+ *  @param[in]
+ *  userData      the pointer passed to ``hipblasLtSetDeviceComm``, verbatim.
+ *  @param[in]
+ *  sendbuf       this rank's contribution, \p bytesPerRank bytes.
+ *  @param[out]
+ *  recvbuf       receives ``world * bytesPerRank`` bytes in rank order.
+ *  @param[in]
+ *  bytesPerRank  size of each rank's contribution.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS the exchange completed and \p recvbuf is readable.
+ */
+typedef hipblasStatus_t (*hipblasLtDeviceCommAllgatherFn)(void*       userData,
+                                                          const void* sendbuf,
+                                                          void*       recvbuf,
+                                                          size_t      bytesPerRank);
+#endif
+
+/*! \ingroup types_module
+ *  \brief Specify the batch mode of the matrices.
+ */
+
+typedef enum {
+	HIPBLASLT_BATCH_MODE_STRIDED = 0,
+	HIPBLASLT_BATCH_MODE_POINTER_ARRAY = 1,
+} hipblasLtBatchMode_t;
+
 /*! \ingroup types_module
  *  \brief Specifies the attributes that define the details of the matrix.
  */
+
 typedef enum {
   HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT = 0,         /**<Number of batches of this matrix. Default value is 1. Data type: ``int32_t``. */
   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET = 1, /**<Stride (in elements) to the next matrix for the strided batch operation. Default value is 0. Data type: ``int64_t``. */
@@ -153,6 +284,25 @@ typedef enum {
    * ``int64_t``
    */
   HIPBLASLT_MATRIX_LAYOUT_LD = 6,
+
+  /** Matrix Batch Mode.
+   * Batched GEMM can be either:
+   * 1. Strided Batch: Single contiguous memory allocation and stride between matrices in
+   * the batch is specified in terms of number of elements.
+   * 2. General Batched: This uses pointer array with each pointer storing the base address
+   * of the matrices in the batch.
+   * See hipblasLtBatchMode_t
+   */
+  HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
+
+  /** Matrix Offset.
+   *
+   * For ``General Batched GEMM``, we can support for users to access a sub-matrix of
+   * the original matrix by adding an ``offset`` value (in elements) from the base address.
+   * Note that for non-batched or Strided Batch GEMM case, we can directly apply
+   * the offset value by using the strided-offset value.
+   */
+  HIPBLASLT_MATRIX_LAYOUT_OFFSET = 8
 } hipblasLtMatrixLayoutAttribute_t;
 
 /*! \ingroup types_module
@@ -175,8 +325,25 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F = 4,    /**<Not supported yet. Scaling factors are tensors that contain a dedicated ``FP32`` scaling factor for each 128-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F = 5, /**<Not supported yet. Scaling factors are tensors that contain a dedicated ``FP32`` scaling factor for each 128x128-element block in the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT = 1001, /**< Scaling factors are tensors that contain a dedicated 8-bit ``R_8F_UE8M0`` value for each 32-element block in the innermost dimension of the corresponding data tensor. The scale data is pre-swizzled to match the memory access pattern expected by the kernel. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT = 1002, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``R_8F_UE8M0`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT = 1003, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E4M3`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT = 1004, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT = 1005, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
+
+/*! \ingroup types_module
+ *  \brief Mode values for the ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT``
+ *  attribute and the C++ ext ``GemmPreference::setStreamKTileSchedulingMode``.
+ *
+ *  The attribute storage stays ``int32_t``; values outside ``{0, 1, 2}`` are
+ *  rejected by the setter with ``HIPBLAS_STATUS_INVALID_VALUE``.
+ */
+typedef enum {
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF  = 0, /**< SK3 static work-assignment sub-path (default). When ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is positive the library heuristic still runs per launch to pick SK4 when appropriate. */
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_ON   = 1, /**< Always request the SK4 dynamic per-XCD work-queue sub-path on StreamK=5 kernels. */
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO = 2, /**< Always let hipBLASLt's heuristic pick between SK3 and SK4 per launch based on tile/CU geometry. */
+} hipblasLtStreamKTileSchedulingMode_t;
 
 /*! \ingroup types_module
  *  \brief Specifies the attributes that define the specifics of the matrix multiply operation.
@@ -198,12 +365,19 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_POINTER_MODE = 13,              /**<Specifies that alpha and beta are passed by reference, whether they are scalars on the host or on the device, or device vectors. Default value is: ``HIPBLASLT_POINTER_MODE_HOST`` (on the host). Data type: ``int32_t`` based on ``hipblasLtPointerMode_t``. */
   HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER = 14,           /**<Device pointer to the memory location that on completion will be set to the maximum of the absolute values in the output matrix. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE = 22,    /**<Type of the auxiliary vector in the device memory. Default value is: ``HIPBLASLT_DATATYPE_INVALID`` (using D matrix type). Data type: ``int32_t`` based on ``hipDataType``. */
+  HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE = 23,              /**<The batch stride of the bias vector pointer in the device memory. This is only applicable for hipblasltBatchMode_t is 0 (Strided Batched GEMM) and hipblasltEpilogue_t is BIAS enabled. Default value is 0 meaning same bias value broadcast across all batches. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_A_SCALE_MODE = 31,                   /**<Scaling mode that defines how the matrix scaling factor for matrix A is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE = 32,                   /**<Scaling mode that defines how the matrix scaling factor for matrix B is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
+  HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET = 33,                /**<Target the matmul kernel selection and persistent-grid sizing for this many compute units (CUs). Set to ``0`` (the default) to use all CUs the device exposes. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. This is a hint to the library heuristics; the launched grid is not guaranteed to use exactly this many CUs. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT = 100,     /**<Compute input A types. Defines the data type used for the input A of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,           /**<Compute input B types. Defines the data type used for the input B of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,              /**<First extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<Second extra argument for the activation function. Data type: ``float``. */
+  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,      /**<Select the hipBLASLt StreamK tile scheduling mode for StreamK=5 hybrid kernels (static SK3 vs dynamic SK4 work-queue sub-paths). Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtStreamKTileSchedulingMode_t``: ``0`` (``OFF``, default) uses the SK3 static sub-path; when ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is set to a positive value the library heuristic still runs per launch to pick SK4 when appropriate; ``1`` (``ON``) always requests the SK4 dynamic work-queue sub-path when the selected kernel supports it; ``2`` (``AUTO``) always lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT = 105, /**<Request a uniform summation order across the M dimension. Provided as an ``_EXT`` attribute. When enabled, hipBLASLt guarantees that if every row of matrix A is the identical vector, every row of the output matrix D is bitwise identical. This is uniformity across the M dimension within a single run; it is **not** run-to-run determinism. ``0`` (default) inherits the handle-level request (``hipblasLtSetUniformSummationOrder``); ``1`` enables this GEMM. Other values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Enabling the mode restricts kernel selection and the launch configuration, so it can reduce performance, and hipblasLtMatmul() returns ``HIPBLAS_STATUS_INVALID_VALUE`` when no uniform-safe configuration exists for the resolved launch rather than silently producing a non-uniform result. Data type: ``int32_t``. */
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+  HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` built with ``hipblasLtFusedEpilogueCreate`` / ``...Add`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Setting the attribute validates that the selected stages have all of their required parameters; set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
+#endif
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -213,7 +387,8 @@ typedef enum {
 typedef enum {
   HIPBLASLT_MATMUL_PREF_SEARCH_MODE = 0,          /**<Search mode. Data type: ``uint32_t``. */
   HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Data type: ``uint64_t``. */
-  HIPBLASLT_MATMUL_PREF_MAX = 2
+  HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET = 2,      /**<Bias heuristic algorithm selection toward kernels that perform well at this targeted compute-unit count. ``0`` (default) means no constraint. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_PREF_MAX = 3
 } hipblasLtMatmulPreferenceAttributes_t;
 
 /*! \ingroup types_module
@@ -230,6 +405,15 @@ typedef enum {
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    */
   HIPBLASLT_ORDER_ROW = 1,
+  
+  /**
+   * Data is ordered in column-major ordered tiles of composite tiles with a total of 32 columns and 128 rows.
+   * A tile is composed of 4 inner tiles in column-major with a total of 32 rows and 128 columns.
+   * The element offset within the tile is calculated as ``row%32+32*col+(row/32)*32*32``.
+   * Note that for this order, the number of columns (rows) of the tensor has to be a multiple of 32(128) or
+   * pre-padded to 32(128).
+   */
+  HIPBLASLT_ORDER_COL16_4R32 = 99,
   /**
    * Data is ordered in column-major ordered tiles of composite tiles with a total of 16 columns and 64 rows.
    * A tile is composed of 4 inner tiles in column-major with a total of 16 rows and 16 columns.
@@ -312,10 +496,15 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *  \brief Handle to the hipBLASLt library context queue.
  *
  *  \details
- *  The ``hipblasLtHandle_t`` type is a pointer type to an opaque structure holding the hipBLASLt library context. Use the following functions to manipulate this library context:
+ *  The ``hipblasLtHandle_t`` type is a pointer type to an opaque structure holding the hipBLASLt library context.
+ *  A handle encapsulates the execution state and manages device-side resources associated with the submitted operations.
+ *
+ *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
+ *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():
- *  To initialize the hipBLASLt library context and return a handle to an opaque structure holding the hipBLASLt library context.
+ *  To initialize the hipBLASLt library context and return a handle to an opaque structure holding the hipBLASLt library context.  
  *  
  *  \ref hipblasLtDestroy():
  *  To destroy a previously created hipBLASLt library context descriptor and release the resources.
@@ -452,6 +641,184 @@ hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle);
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle);
+
+/*! \ingroup library_module
+ *  \brief Set the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  The hipBLASLt analogue of cuBLAS's ``cublasSetSmCountTarget``. The value
+ *  hints how many compute units hipBLASLt should target for kernel selection
+ *  and persistent-grid sizing on subsequent matmul calls that use this handle.
+ *
+ *  ``0`` (the default) means "no override; use all CUs the device exposes".
+ *  Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. A
+ *  per-matmul-descriptor (``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET``) or
+ *  per-preference (``HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET``) attribute, when
+ *  set to a non-zero value, takes precedence over this handle-level value.
+ *
+ *  The user must ensure thread safety when modifying handle state from
+ *  multiple threads, the same as for any other handle-mutating helper.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[in]
+ *  smCountTarget    target CU/SM count; ``0`` for "use all CUs".
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is negative.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t           smCountTarget);
+
+/*! \ingroup library_module
+ *  \brief Return the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  Returns the value previously programmed via ``hipblasLtSetSmCountTarget``.
+ *  Equivalent to cuBLAS's ``cublasGetSmCountTarget``.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[out]
+ *  smCountTarget    receives the previously stored value (``0`` if never set).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t*          smCountTarget);
+
+/*! \ingroup library_module
+ *  \brief Set the handle-level uniform-summation-order request.
+ *
+ *  \details
+ *  Enables or disables uniform summation order for subsequent GEMMs on
+ *  this handle. ``0`` off (default), ``1`` on. See
+ *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
+ *
+ *  @param[in]
+ *  handle                     hipBLASLt library context.
+ *  @param[in]
+ *  uniformSummationOrder      ``0`` (default, off) or ``1`` (on).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p uniformSummationOrder is not ``0`` or ``1``.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetUniformSummationOrder(hipblasLtHandle_t handle,
+                                                  int32_t           uniformSummationOrder);
+
+/*! \ingroup library_module
+ *  \brief Return the handle-level uniform-summation-order request.
+ *
+ *  \details
+ *  Returns the value previously programmed via
+ *  ``hipblasLtSetUniformSummationOrder``. ``0`` if never set.
+ *
+ *  @param[in]
+ *  handle                     hipBLASLt library context.
+ *  @param[out]
+ *  uniformSummationOrder      receives the previously stored value (``0`` if never set).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p uniformSummationOrder is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetUniformSummationOrder(hipblasLtHandle_t handle,
+                                                  int32_t*          uniformSummationOrder);
+
+/*! \ingroup library_module
+ *  \brief Drain the post-GEMM check-numerics flag without destroying the handle.
+ *
+ *  \details
+ *  When \c HIPBLASLT_CHECK_NUMERICS is set, this function performs a
+ *  device-wide synchronize, reads the persistent NaN flag, and resets it.
+ *  The matmul \c call_id of the FIRST scanned NaN observed since the
+ *  previous drain (or handle creation) is written to \p first_nan_call_id
+ *  if non-null. Zero means no NaN was observed in that window. Frameworks
+ *  (e.g. PyTorch) call this to obtain a result without relying on the
+ *  handle destructor (which may not run if the process is killed).
+ *
+ *  When the env var is not set, the function is a no-op and returns
+ *  \c HIPBLAS_STATUS_SUCCESS with \p *first_nan_call_id set to 0.
+ *
+ *  @param[in]
+ *  handle Pointer to the allocated hipBLASLt handle.
+ *  @param[out]
+ *  first_nan_call_id Optional. If non-null, receives the call_id of the
+ *  first NaN seen in this drain window (0 = none).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS Drain completed (or scanning disabled).
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
+                                            uint32_t*         first_nan_call_id);
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+/*! \ingroup library_module
+ *  \brief Register this handle's view of a device communicator.
+ *
+ *  \details
+ *  A collective fused epilogue needs to know which rank it is, how many peers it has, and where
+ *  those peers' library-owned flag regions live. This call establishes all three: it allocates
+ *  this device's flag state as \p nChannels independent regions and exchanges the peer addresses
+ *  through \p allgather. That state is invisible to the caller and its lifetime follows the
+ *  handle.
+ *
+ *  The call is collective, forming one communicator per group. Every rank calls it on its own
+ *  handle, it blocks until all of them have reached it, and the library may invoke \p allgather
+ *  more than once, always in the same order on every rank. It may be made at most once per
+ *  handle, which makes \p world immutable: \p world participates in solution selection, so
+ *  changing communicators means destroying the handle. Registration is optional but is not a
+ *  fallback - a collective stage on a handle with no communicator fails at ``hipblasLtMatmul``
+ *  rather than degrading to an unfused GEMM.
+ *
+ *  Both deployment shapes use this one entry point; whether the ranks are threads of one process
+ *  or separate processes, only \p allgather differs.
+ *
+ *  @param[in]
+ *  handle      hipBLASLt library context. Must not already carry a communicator.
+ *  @param[in]
+ *  rank        this rank's index; must be less than \p world.
+ *  @param[in]
+ *  world       number of ranks in the group; ``1`` to ``HIPBLASLT_DEVICE_COMM_MAX_WORLD``.
+ *  @param[in]
+ *  nChannels   number of independent flag regions to allocate, one per concurrent operation.
+ *              Must be at least ``1``, and must agree across ranks. See
+ *              ``HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL``.
+ *  @param[in]
+ *  allgather   caller-supplied allgather; must not be NULL.
+ *  @param[in]
+ *  userData    passed back to \p allgather verbatim; never dereferenced by the library.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         the communicator is registered on this handle.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p rank is not less than \p world, \p world is outside
+ *                                         its range, \p nChannels is zero, \p allgather is NULL,
+ *                                         this handle already carries a communicator, or the
+ *                                         ranks disagree about \p world or \p nChannels.
+ *  \retval HIPBLAS_STATUS_ALLOC_FAILED    the flag regions could not be allocated.
+ *  \retval HIPBLAS_STATUS_NOT_SUPPORTED   a peer's flag region cannot be addressed from this
+ *                                         rank's device: it is in another process and cannot be
+ *                                         mapped into this one, or peer access to its device is
+ *                                         unavailable.
+ *  Any other status is one the caller's \p allgather returned, propagated unchanged.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t              handle,
+                                       uint32_t                       rank,
+                                       uint32_t                       world,
+                                       uint32_t                       nChannels,
+                                       hipblasLtDeviceCommAllgatherFn allgather,
+                                       void*                          userData);
+#endif
 
 /*! \ingroup library_module
  *  \brief Create a matrix layout descriptor.
@@ -668,6 +1035,97 @@ hipblasStatus_t hipblasLtMatmulDescGetAttribute(hipblasLtMatmulDesc_t           
                                                 size_t                          sizeInBytes,
                                                 size_t*                         sizeWritten);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+/*! \ingroup library_module
+ *  \brief Create a fused epilogue descriptor.
+ *
+ *  \details
+ *  Creates an empty fused epilogue descriptor. Select a stage with
+ *  ``hipblasLtFusedEpilogueAdd``, configure it with ``hipblasLtFusedEpilogueSetAttribute``, and
+ *  attach it to a matmul descriptor through ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE``.
+ *
+ *  @param[out]
+ *  desc  receives the created descriptor.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS       the descriptor was created.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE \p desc is null.
+ *  \retval HIPBLAS_STATUS_ALLOC_FAILED  the descriptor could not be allocated.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc);
+
+/*! \ingroup library_module
+ *  \brief Select a fused epilogue stage on a descriptor.
+ *
+ *  \details
+ *  Appends \p epilogue to the descriptor's stages. Every stage belongs to a family, derived from
+ *  \p epilogue rather than declared by the caller, and each family defines which of its stages
+ *  may be combined and in what order. A stage that does not compose with those already present
+ *  is rejected here rather than at launch. See \ref hipblasLtFuseableEpilogue_t for the
+ *  per-family rules.
+ *
+ *  @param[in]
+ *  desc      the descriptor to add to.
+ *  @param[in]
+ *  epilogue  the stage to select.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS       the stage was added.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE \p desc is null, \p epilogue is unrecognized, \p epilogue
+ *                                       is already present, or it does not compose with the
+ *                                       stages already on the descriptor.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
+                                          hipblasLtFuseableEpilogue_t        epilogue);
+
+/*! \ingroup library_module
+ *  \brief Set a parameter of a fused epilogue stage.
+ *
+ *  \details
+ *  Stage parameters travel with the stage that consumes them, so they are set here rather than on
+ *  the matmul descriptor. Which attributes apply, and which of them are required, follows from
+ *  the stages added to \p desc; see \ref hipblasLtFusedEpilogueAttribute_t. An array-valued
+ *  attribute takes the address of a host array together with the size of all of its elements,
+ *  and the library copies the entries, so the caller's array need not outlive the call.
+ *
+ *  @param[in]
+ *  desc         the descriptor to configure.
+ *  @param[in]
+ *  attr         which parameter to set.
+ *  @param[in]
+ *  buf          the value to set. Must not be null.
+ *  @param[in]
+ *  sizeInBytes  size of \p buf. Must be at least the attribute's element size, and for an
+ *               array-valued attribute an exact multiple of it.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS       the value was stored.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE \p desc or \p buf is null, \p attr is unrecognized,
+ *                                       \p sizeInBytes does not match the attribute, or the
+ *                                       value is outside the attribute's accepted range.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueSetAttribute(hipblasLtFusedEpilogueDescriptor_t desc,
+                                                   hipblasLtFusedEpilogueAttribute_t  attr,
+                                                   const void*                        buf,
+                                                   size_t                             sizeInBytes);
+
+/*! \ingroup library_module
+ *  \brief Destroy a fused epilogue descriptor.
+ *
+ *  \details
+ *  Releases the descriptor. Any matmul descriptor still referencing it must not be used
+ *  afterwards. Destroying the descriptor does not touch the memory its attributes named, which
+ *  stays the caller's to free.
+ *
+ *  @param[in]
+ *  desc  the descriptor to destroy. Passing NULL is not an error.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS the descriptor was destroyed.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t desc);
+#endif
+
 /*! \ingroup library_module
  *  \brief Create a preference descriptor.
  *
@@ -823,7 +1281,7 @@ hipblasStatus_t
                                     int*                             returnAlgoCount);
 
 /*! \ingroup library_module
- *  \brief Retrieve the possible algorithms.
+ *  \brief Compute a matrix multiplication on the described inputs.
  *
  *  \details
  *  This function computes the matrix multiplication of matrices A and B to

@@ -1,32 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
-#include <boost/algorithm/string.hpp>
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <algorithm>
+#include <cctype> // std::isspace()
 #include <iostream>
 #include <numeric>
 #include <ostream>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -139,7 +119,21 @@ bool DbRecord::ParseContents(std::istream& contents)
 
         auto id     = id_and_values.substr(0, id_size);
         auto values = id_and_values.substr(id_size + 1);
-        boost::trim(values);
+
+        const auto ltrim = [](std::string& str) {
+            auto e = std::ranges::find_if_not(str, [](char c) { return std::isspace(c); });
+            str.erase(str.begin(), e);
+            return str;
+        };
+        const auto rtrim = [](std::string& str) {
+            auto e = std::ranges::find_if_not(str | std::views::reverse,
+                                              [](char c) { return std::isspace(c); });
+            str.erase(e.base(), str.end());
+            return str;
+        };
+
+        ltrim(values);
+        rtrim(values);
 
 #if WORKAROUND_ISSUE_1987
         // Detect legacy find-db item (v.1.0 ID:VALUES) and transform it to the current format.

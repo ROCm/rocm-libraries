@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -73,12 +73,41 @@ namespace rocisa
             return "F8B8N";
         case rocisa::DataType::BFloat8Float8_fnuz:
             return "B8F8N";
-        case rocisa::DataType::Count:;
+#ifdef TENSILE_USE_FP6
+        case rocisa::DataType::Float6:
+            return "F6";
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+        case rocisa::DataType::BFloat6:
+            return "B6";
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+            return "F4";
+#endif // #ifdef TENSILE_USE_FP4
+#ifndef TENSILE_USE_FP6
+        case rocisa::DataType::Float6:
+            return "F6";
+#endif
+#ifndef TENSILE_USE_BF6
+        case rocisa::DataType::BFloat6:
+            return "B6";
+#endif
+#ifndef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+            return "F4";
+#endif
+        case rocisa::DataType::E8:
+            return "E8";
+        case rocisa::DataType::E5M3:
+            return "E5M3";
+        case rocisa::DataType::Count:
+            return "Invalid";
         }
         return "Invalid";
     }
 
-    size_t GetElementSize(rocisa::DataType d)
+    float GetElementSize(rocisa::DataType d)
     {
         switch(d)
         {
@@ -120,7 +149,45 @@ namespace rocisa
             return TensileLite::TypeInfo<Float8BFloat8_fnuz>::ElementSize;
         case rocisa::DataType::BFloat8Float8_fnuz:
             return TensileLite::TypeInfo<BFloat8Float8_fnuz>::ElementSize;
-        case rocisa::DataType::Count:;
+#ifdef _WIN32
+        case rocisa::DataType::Float6:
+            return TensileLite::TypeInfo<TensileLite::Float6>::ElementSize;
+        case rocisa::DataType::BFloat6:
+            return TensileLite::TypeInfo<TensileLite::BFloat6>::ElementSize;
+        case rocisa::DataType::Float4:
+            return TensileLite::TypeInfo<TensileLite::Float4>::ElementSize;
+#else // _WIN32
+#ifdef TENSILE_USE_FP6
+        case rocisa::DataType::Float6:
+            return TensileLite::TypeInfo<TensileLite::Float6x32>::ElementSize;
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+        case rocisa::DataType::BFloat6:
+            return TensileLite::TypeInfo<TensileLite::BFloat6x32>::ElementSize;
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+            return TensileLite::TypeInfo<TensileLite::Float4x2>::ElementSize;
+#endif // #ifdef TENSILE_USE_FP4
+#ifndef TENSILE_USE_FP6
+        case rocisa::DataType::Float6:
+            return 24.f / 32.f; // same as TypeInfo<Float6x32>, 32 x 6-bit in 24 bytes
+#endif
+#ifndef TENSILE_USE_BF6
+        case rocisa::DataType::BFloat6:
+            return 24.f / 32.f;
+#endif
+#ifndef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+            return 0.5f; // TypeInfo<Float4x2>: 2 x fp4 in 1 byte
+#endif
+#endif // _WIN32
+        case rocisa::DataType::E8:
+            return TensileLite::TypeInfo<TensileLite::E8>::ElementSize;
+        case rocisa::DataType::E5M3:
+            return TensileLite::TypeInfo<TensileLite::E5M3>::ElementSize;
+        case rocisa::DataType::Count:
+            return 1;
         }
         return 1;
     }
@@ -210,7 +277,6 @@ namespace TensileLite
 
         info.packing     = T_Info::Packing;
         info.elementSize = T_Info::ElementSize;
-        info.segmentSize = T_Info::SegmentSize;
 
         info.isComplex  = T_Info::IsComplex;
         info.isIntegral = T_Info::IsIntegral;
@@ -239,6 +305,57 @@ namespace TensileLite
         registerTypeInfo<BFloat8Float8>();
         registerTypeInfo<Float8BFloat8_fnuz>();
         registerTypeInfo<BFloat8Float8_fnuz>();
+#ifdef _WIN32
+        registerTypeInfo<Float6>();
+        registerTypeInfo<BFloat6>();
+        registerTypeInfo<Float4>();
+#else // _WIN32
+#ifdef TENSILE_USE_FP6
+        registerTypeInfo<Float6x32>();
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+        registerTypeInfo<BFloat6x32>();
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+        registerTypeInfo<Float4x2>();
+#endif // #ifdef TENSILE_USE_FP4
+#endif // _WIN32
+        registerTypeInfo<E8>();
+        registerTypeInfo<E5M3>();
+
+        registerThinOcpFpTypesWhenNoExtOcp();
+    }
+
+    void DataTypeInfo::registerThinOcpFpTypesWhenNoExtOcp()
+    {
+        auto* const data = getData();
+
+        auto addIfMissing = [data](rocisa::DataType         dt,
+                                   char const*              abbrev,
+                                   float                    elementSize,
+                                   size_t                   packing) {
+            if(data->find(dt) != data->end())
+                return;
+            DataTypeInfo info;
+            info.dataType    = dt;
+            info.name        = rocisa::toString(dt);
+            info.abbrev      = abbrev;
+            info.elementSize = elementSize;
+            info.packing     = packing;
+            info.isComplex   = false;
+            info.isIntegral  = false;
+            addInfoObject(info);
+        };
+
+#ifndef TENSILE_USE_FP6
+        addIfMissing(rocisa::DataType::Float6, "F6", 12.f / 16.f, 16);
+#endif
+#ifndef TENSILE_USE_BF6
+        addIfMissing(rocisa::DataType::BFloat6, "B6", 12.f / 16.f, 16);
+#endif
+#ifndef TENSILE_USE_FP4
+        addIfMissing(rocisa::DataType::Float4, "F4", 0.5f, 2);
+#endif
     }
 
     void DataTypeInfo::registerAllTypeInfoOnce()
@@ -293,9 +410,8 @@ namespace TensileLite
         return std::visit(
             [](const auto& cv) {
                 using T = std::decay_t<decltype(cv)>;
-                if constexpr(std::is_same_v<
-                                 T,
-                                 std::complex<float>> || std::is_same_v<T, std::complex<double>>)
+                if constexpr(std::is_same_v<T, std::complex<float>>
+                             || std::is_same_v<T, std::complex<double>>)
                     return "(" + std::to_string(cv.real()) + ", " + std::to_string(cv.imag()) + ")";
                 else
                     return std::to_string(cv);
@@ -336,5 +452,112 @@ namespace TensileLite
         default:
             throw std::runtime_error("Unsupported variant cast type.");
         }
+    }
+
+    std::string toString(CustomArgType arg)
+    {
+        switch(arg)
+        {
+        case CustomArgType::int8:
+            return "int8";
+        case CustomArgType::uint8:
+            return "uint8";
+        case CustomArgType::int16:
+            return "int16";
+        case CustomArgType::uint16:
+            return "uint16";
+        case CustomArgType::int32:
+            return "int32";
+        case CustomArgType::uint32:
+            return "uint32";
+        case CustomArgType::int64:
+            return "int64";
+        case CustomArgType::uint64:
+            return "uint64";
+        case CustomArgType::float4:
+            return "float4";
+        case CustomArgType::float6:
+            return "float6";
+        case CustomArgType::float8:
+            return "float8";
+        case CustomArgType::bfloat8:
+            return "bfloat8";
+        case CustomArgType::float16:
+            return "float16";
+        case CustomArgType::bfloat16:
+            return "bfloat16";
+        case CustomArgType::float32:
+            return "float32";
+        case CustomArgType::tfloat32:
+            return "tfloat32";
+        case CustomArgType::float64:
+            return "float64";
+        case CustomArgType::boolean:
+            return "boolean";
+        case CustomArgType::address:
+            return "address";
+        case CustomArgType::CustomArgType_Count:
+            break;
+        }
+
+        throw std::runtime_error(concatenate("Invalid CustomArgType value: ", static_cast<int>(arg)));
+    }
+
+    CustomArgType fromStringCustomArgType(std::string& str)
+    {
+        if(str == toString(CustomArgType::int8))
+            return CustomArgType::int8;
+        else if(str == toString(CustomArgType::uint8))
+            return CustomArgType::uint8;
+        else if(str == toString(CustomArgType::int16))
+            return CustomArgType::int16;
+        else if(str == toString(CustomArgType::uint16))
+            return CustomArgType::uint16;
+        else if(str == toString(CustomArgType::int32))
+            return CustomArgType::int32;
+        else if(str == toString(CustomArgType::uint32))
+            return CustomArgType::uint32;
+        else if(str == toString(CustomArgType::int64))
+            return CustomArgType::int64;
+        else if(str == toString(CustomArgType::uint64))
+            return CustomArgType::uint64;
+        else if(str == toString(CustomArgType::float4))
+            return CustomArgType::float4;
+        else if(str == toString(CustomArgType::float6))
+            return CustomArgType::float6;
+        else if(str == toString(CustomArgType::float8))
+            return CustomArgType::float8;
+        else if(str == toString(CustomArgType::bfloat8))
+            return CustomArgType::bfloat8;
+        else if(str == toString(CustomArgType::float16))
+            return CustomArgType::float16;
+        else if(str == toString(CustomArgType::bfloat16))
+            return CustomArgType::bfloat16;
+        else if(str == toString(CustomArgType::float32))
+            return CustomArgType::float32;
+        else if(str == toString(CustomArgType::tfloat32))
+            return CustomArgType::tfloat32;
+        else if(str == toString(CustomArgType::float64))
+            return CustomArgType::float64;
+        else if(str == toString(CustomArgType::boolean))
+            return CustomArgType::boolean;
+        else if(str == toString(CustomArgType::address))
+            return CustomArgType::address;
+        else
+            throw std::runtime_error(concatenate("Invalid argument type: ", str));
+        return CustomArgType::CustomArgType_Count;
+    }
+
+    std::ostream& operator<<(std::ostream& stream, const CustomArgType& t)
+    {
+        return stream << toString(t);
+    }
+
+    std::istream& operator>>(std::istream& stream, CustomArgType& t)
+    {
+        std::string strValue;
+        stream >> strValue;
+        t = fromStringCustomArgType(strValue);
+        return stream;
     }
 } // namespace TensileLite

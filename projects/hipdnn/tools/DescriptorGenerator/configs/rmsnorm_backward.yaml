@@ -1,0 +1,135 @@
+operation:
+  name: "RMSNormBackward"
+  class_name: "RMSNormBackwardOperationDescriptor"
+  fbs_table: "RMSNormBackwardAttributes"
+  fbs_generated_header: "rmsnorm_backward_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD"
+
+  frontend:
+    packer_function: "createRMSNormBackwardOperation"
+    unpacker_function: "unpackRMSNormBackwardOperation"
+    node_class: "RMSNormBackwardNode"
+    attributes_class: "RMSNormBackwardAttributes"
+
+    inputs:
+      - name: "dy"
+        enum_name: "DY"
+        required: true
+        getter_name: "get_dy"
+        setter_name: "set_dy"
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "scale"
+        enum_name: "SCALE"
+        required: true
+        getter_name: "get_scale"
+        setter_name: "set_scale"
+      - name: "inv_rms"
+        enum_name: "INV_RMS"
+        required: true
+        getter_name: "get_inv_rms"
+        setter_name: "set_inv_rms"
+
+    outputs:
+      - name: "dx"
+        enum_name: "DX"
+        required: true
+        getter_name: "get_dx"
+        setter_name: "set_dx"
+      - name: "dscale"
+        enum_name: "DSCALE"
+        required: true
+        getter_name: "get_dscale"
+        setter_name: "set_dscale"
+      - name: "dbias"
+        enum_name: "DBIAS"
+        required: false
+        getter_name: "get_dbias"
+        setter_name: "set_dbias"
+
+    graph_method_name: "rmsnorm_backward"
+    graph_method_params:
+      - name: "dy"
+        tensor_name: "dy"
+      - name: "x"
+        tensor_name: "x"
+      - name: "scale"
+        tensor_name: "scale"
+      - name: "inv_rms"
+        tensor_name: "inv_rms"
+    graph_return_type: "array"
+    graph_return_outputs:
+      - "dx"
+      - "dscale"
+      - "dbias"
+
+  tensor_fields:
+    - name: "dy"
+      fbs_field: "dy_tensor_uid"
+      attr_suffix: "DY_EXT"
+      required: true
+      frontend_getter: "get_dy()"
+
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X_EXT"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE_EXT"
+      required: true
+      frontend_getter: "get_scale()"
+
+    - name: "inv_rms"
+      fbs_field: "inv_rms_tensor_uid"
+      attr_suffix: "INV_RMS_EXT"
+      required: true
+      frontend_getter: "get_inv_rms()"
+
+    - name: "dx"
+      fbs_field: "dx_tensor_uid"
+      attr_suffix: "DX_EXT"
+      required: true
+      frontend_getter: "get_dx()"
+
+    - name: "dscale"
+      fbs_field: "dscale_tensor_uid"
+      attr_suffix: "DSCALE_EXT"
+      required: true
+      frontend_getter: "get_dscale()"
+
+    - name: "dbias"
+      fbs_field: "dbias_tensor_uid"
+      attr_suffix: "DBIAS_EXT"
+      required: false
+      frontend_getter: "get_dbias()"
+
+  data_fields: []
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT"
+
+  test_data:
+    tensor_uids: { dy: 70, x: 71, scale: 72, inv_rms: 73, dx: 74, dscale: 75, dbias: 76 }
+    tensor_configs:
+      dy: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      scale: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      inv_rms: { dims: [1, 1, 1, 1], strides: [1, 1, 1, 1] }
+      dx: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      dscale: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      dbias: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+    field_values: {}

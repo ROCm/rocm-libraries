@@ -1,0 +1,53 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "MatmulTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "a_tensor_uid": 1,
+        "b_tensor_uid": 2
+      },
+      "name": "Matmul_0",
+      "outputs": {
+        "c_tensor_uid": 0
+      },
+      "type": "MatmulAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Matmul_0::C",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "a",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "b",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    }
+  ]
+}

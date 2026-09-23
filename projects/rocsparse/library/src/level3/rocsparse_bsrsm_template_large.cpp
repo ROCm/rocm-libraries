@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,27 +100,27 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-#define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                          \
-    dim3 bsrsm_blocks(((nrhs - 1) / NCOL + 1) * mb);                                             \
-    dim3 bsrsm_threads(NCOL* M_);                                                                \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_>),                                \
-                                       bsrsm_blocks,                                             \
-                                       bsrsm_threads,                                            \
-                                       0,                                                        \
-                                       stream,                                                   \
-                                       mb,                                                       \
-                                       nrhs,                                                     \
-                                       local_bsr_row_ptr,                                        \
-                                       local_bsr_col_ind,                                        \
-                                       local_bsr_val,                                            \
-                                       block_dim,                                                \
-                                       Xt,                                                       \
-                                       ldimX,                                                    \
-                                       done_array,                                               \
-                                       (const rocsparse_int*)trm_info->get_row_map(),            \
-                                       (rocsparse_int*)info->get_bsrsm_info()->get_zero_pivot(), \
-                                       descr->base,                                              \
-                                       descr->diag_type,                                         \
+#define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                        \
+    dim3 bsrsm_blocks(((nrhs - 1) / NCOL + 1) * mb);                                           \
+    dim3 bsrsm_threads(NCOL* M_);                                                              \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_>),                              \
+                                       bsrsm_blocks,                                           \
+                                       bsrsm_threads,                                          \
+                                       0,                                                      \
+                                       stream,                                                 \
+                                       mb,                                                     \
+                                       nrhs,                                                   \
+                                       local_bsr_row_ptr,                                      \
+                                       local_bsr_col_ind,                                      \
+                                       local_bsr_val,                                          \
+                                       block_dim,                                              \
+                                       Xt,                                                     \
+                                       ldimX,                                                  \
+                                       done_array,                                             \
+                                       (const rocsparse_int*)trm_info->get_row_map(),          \
+                                       (rocsparse_int*)info->get_bsrsm_info()->get_position(), \
+                                       descr->base,                                            \
+                                       descr->diag_type,                                       \
                                        dir);
 
         hipStream_t stream = handle->stream;
@@ -148,7 +148,8 @@ namespace rocsparse
         }
 
         // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * mb * narrays, stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * mb * narrays, stream));
 
         auto bsrsm_info = info->get_bsrsm_info();
         auto trm_info   = info->get_bsrsm_info(trans_A, descr->fill_mode);
@@ -157,11 +158,11 @@ namespace rocsparse
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
             static const rocsparse_int max = std::numeric_limits<rocsparse_int>::max();
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(bsrsm_info->get_zero_pivot(),
-                                               &max,
-                                               sizeof(rocsparse_int),
-                                               hipMemcpyHostToDevice,
-                                               stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(bsrsm_info->get_position(),
+                                                         &max,
+                                                         sizeof(rocsparse_int),
+                                                         hipMemcpyHostToDevice,
+                                                         stream));
         }
 
         rocsparse_fill_mode fill_mode = descr->fill_mode;
@@ -219,8 +220,15 @@ namespace rocsparse
             local_bsr_col_ind = (const rocsparse_int*)trm_info->get_transposed_col_ind();
             local_bsr_val     = (const T*)bsrt_val;
 
-            fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                 : rocsparse_fill_mode_lower;
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_lower:
+                fill_mode = rocsparse_fill_mode_upper;
+                break;
+            case rocsparse_fill_mode_upper:
+                fill_mode = rocsparse_fill_mode_lower;
+                break;
+            }
         }
 
         // Determine gcn_arch and ASIC revision
@@ -229,15 +237,20 @@ namespace rocsparse
         const int         wfSize        = handle->wavefront_size;
 
         // gfx908 A0/1
-        if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+        if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
         {
-            if(fill_mode == rocsparse_fill_mode_upper)
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_upper:
             {
                 LAUNCH_LARGE_KERNEL(rocsparse::bsrsm_upper_large_kernel, 16, true);
+                break;
             }
-            else
+            case rocsparse_fill_mode_lower:
             {
                 LAUNCH_LARGE_KERNEL(rocsparse::bsrsm_lower_large_kernel, 16, true);
+                break;
+            }
             }
         }
         else
@@ -256,13 +269,18 @@ namespace rocsparse
 #define DEFINE_CASE(i)                                               \
     case i:                                                          \
     {                                                                \
-        if(fill_mode == rocsparse_fill_mode_upper)                   \
+        switch(fill_mode)                                            \
+        {                                                            \
+        case rocsparse_fill_mode_upper:                              \
         {                                                            \
             LAUNCH_LARGE_KERNEL(bsrsm_upper_large_kernel, i, false); \
+            break;                                                   \
         }                                                            \
-        else                                                         \
+        case rocsparse_fill_mode_lower:                              \
         {                                                            \
             LAUNCH_LARGE_KERNEL(bsrsm_lower_large_kernel, i, false); \
+            break;                                                   \
+        }                                                            \
         }                                                            \
         break;                                                       \
     }

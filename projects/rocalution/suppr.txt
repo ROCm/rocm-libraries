@@ -1,0 +1,4 @@
+leak:libhsa-runtime64
+leak:libamd_comgr
+leak:libamdhip64
+leak:libhsakmt

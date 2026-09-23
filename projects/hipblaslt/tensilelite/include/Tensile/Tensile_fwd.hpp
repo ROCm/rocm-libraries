@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     class Problem;
@@ -36,3 +38,4 @@ namespace TensileLite
     class Solution;
     class SolutionAdapter;
 } // namespace TensileLite
+

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,11 @@ if(BUILD_MEMSTAT)
   add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
 endif()
 
+# ROCSPARSE_DEBUG ?
+if(BUILD_ROCSPARSE_DEBUGGING)
+  add_compile_options(-DROCSPARSE_DEBUGGING)
+endif()
+
 if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
@@ -44,9 +49,35 @@ if (rocblas_FOUND)
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 
-# Configure a header file to pass the rocSPARSE version
+# Configure the version header (version numbers only) and the config header
+# (build-time feature flags). Variables referenced via #cmakedefine in the
+# .h.in must be set (or unset) prior to the configure_file() calls.
+set(ROCSPARSE_WITH_SPMAT_SCALE ${ROCSPARSE_ENABLE_SPMAT_SCALE})
+set(ROCSPARSE_WITH_SDDMM_BATCHED ${ROCSPARSE_ENABLE_SDDMM_BATCHED})
+set(ROCSPARSE_WITH_ELL_TRSV ${BUILD_WITH_ELL_TRSV})
+set(ROCSPARSE_WITH_DIAGONAL_SOLVE ${BUILD_WITH_DIAGONAL_SOLVE})
+
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
+)
+
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-config.h.in"
+               "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-config.h"
+)
+
+# Guardrail: every feature flag that gates a public header must be registered in
+# the config template above (see cmake/CheckFeatureFlags.cmake). EXCLUDE lists
+# flags that appear in a public header but are intentionally build-only and never
+# reach consumers; only ROCSPARSE_WITH_MEMSTAT qualifies (it gates dev-only
+# memory-tracing routines in rocsparse-auxiliary.h). Other build-only flags
+# (ASAN, ROCBLAS) are used solely in src, never in public headers, so the
+# guardrail never sees them and they do not need excluding.
+include(CheckFeatureFlags)
+check_config_header_flags(
+  PREFIX   ROCSPARSE_WITH_
+  TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-config.h.in"
+  HEADERS  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  EXCLUDE  ROCSPARSE_WITH_MEMSTAT
 )
 
 # Public rocSPARSE headers
@@ -59,6 +90,7 @@ set(rocsparse_headers_public
   include/rocsparse.h
   include/internal
   ${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h
+  ${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-config.h
   include/internal
 )
 
@@ -71,8 +103,21 @@ include(src/CMakeLists.txt)
 add_library(rocsparse ${rocsparse_source} ${rocsparse_headers_public})
 add_library(roc::rocsparse ALIAS rocsparse)
 
+# Add Windows version resource to library
+if(WIN32 AND BUILD_SHARED_LIBS)
+    target_sources(rocsparse PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
+
 # Target compile options
 target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall)
+
+# Optionally remove the deprecated rocsparse_indextype_u16 index type from the
+# public API. ROCSPARSE_KEEP_INTERNAL_U16 is defined only for the library's own
+# translation units, keeping the enumerator available so that internal switch
+# statements remain valid (avoiding -Wswitch warnings) while still returning
+# "not implemented" for the deprecated value.
+target_compile_definitions(rocsparse PRIVATE ROCSPARSE_KEEP_INTERNAL_U16)
+message(STATUS "Building rocSPARSE with rocsparse_indextype_u16 removed.")
 
 # Target include directories
 target_include_directories(rocsparse
@@ -97,7 +142,16 @@ endif()
 
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocsparse PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_libraries(rocsparse PRIVATE -fprofile-instr-generate)
+  # Instrument host code only. Device-side coverage makes the HIP runtime abort
+  # while dumping the profile at process exit, after every test has already
+  # passed (AISPARSE-778). Both halves matter: the compile flags suppress the
+  # __profd_* counter globals, and the host-only link keeps the AMDGPU profile
+  # runtime, which contributes __llvm_profile_sections_*, out of the device image.
+  target_compile_options(rocsparse PRIVATE
+    "SHELL:-Xarch_device -fno-profile-instr-generate"
+    "SHELL:-Xarch_device -fno-coverage-mapping")
+  target_link_options(rocsparse PRIVATE -u__llvm_profile_runtime)
+  target_link_libraries(rocsparse PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
 endif()
 
 if (NOT WIN32)

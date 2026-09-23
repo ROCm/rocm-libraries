@@ -8,4 +8,5 @@
 
 const char* const PLUGIN_NAME = "Plugin2";
 const char* const PLUGIN_VERSION = "2.0";
+const char* const PLUGIN_API_VERSION = "0.1.0";
 const hipdnnPluginType_t PLUGIN_TYPE = HIPDNN_PLUGIN_TYPE_UNSPECIFIED;

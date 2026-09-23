@@ -34,6 +34,24 @@ namespace rocisa
     ////////////////////////////////////////
     // Branch
     ////////////////////////////////////////
+
+    // Add an s_setpc_b64 to \p module with \p labelName recorded as the
+    // long-branch target hint (SSetPCB64::longBranchLabel). Used by every
+    // SLongBranch* helper below so the StinkyTofu IR converter can recover the
+    // static target without re-pattern-matching the surrounding sequence.
+    //
+    // The hint has no effect on the emitted assembly; it only travels along
+    // with the IR through the rocisa -> stinkytofu lowering boundary.
+    inline void addSSetPCB64WithLongBranchLabel(const std::shared_ptr<Module>&    module,
+                                                const std::shared_ptr<Container>& src,
+                                                const std::string&                labelName,
+                                                const std::string&                comment)
+    {
+        auto inst             = std::make_shared<SSetPCB64>(src, comment);
+        inst->longBranchLabel = labelName;
+        module->add(inst);
+    }
+
     //////////////////////////////////////////////////////////////////////////////
     // longBranch - 32 bit offset
     // s_branch class instructions take a label operand which is truncated to 16 bit
@@ -69,14 +87,16 @@ namespace rocisa
         module->addT<SSubU32>(
             sgpr(tmpSgpr), sgpr(tmpSgpr), sgpr(tmpSgpr + 2), "sub target branch offset");
         module->addT<SSubBU32>(sgpr(tmpSgpr + 1), sgpr(tmpSgpr + 1), 0, "sub high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgpr, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgpr, 2), labelName,
+                                        "branch to " + labelName);
 
         // positive offset
         module->addT<Label>(positiveLabel);
         module->addT<SAddU32>(
             sgpr(tmpSgpr), sgpr(tmpSgpr), sgpr(tmpSgpr + 2), "add target branch offset");
         module->addT<SAddCU32>(sgpr(tmpSgpr + 1), sgpr(tmpSgpr + 1), 0, "add high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgpr, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgpr, 2), labelName,
+                                        "branch to " + labelName);
 
         return module;
     }
@@ -120,25 +140,42 @@ namespace rocisa
             module->addComment(comment);
         }
 
-        if(tmpSgprRes.size < 3)
+        if(capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasAdd_PC_i64"))
         {
-            throw std::runtime_error("ContinuousRegister size must be at least 3.");
-        }
+            //what '.' does is to create a label right before that instruction
+            //So s_add_pc_i64 (target_label - .) effectively becomes:
+            //      .temp_label
+            //      s_add_pc_i64 (target_label - temp_label)
+            //the size of s_add_pc_i64 (target_label - temp_label) is 8 + 4 bytes, so you will need to do -12 as well
 
-        int tmpSgprX2, tmpSgprX1;
-        if(tmpSgprRes.idx % 2 == 0)
-        {
-            tmpSgprX2 = tmpSgprRes.idx;
-            tmpSgprX1 = tmpSgprRes.idx + 2;
+            //TODO: remove hardcore "-.-12" when compiler update for label value calculation
+            module->addT<SAddPCI64_SIMM>(
+                labelName + "-.-12",
+                "Add PC to " + labelName
+                    + ", the constant correction is dependent on the current assembler behavior.");
         }
         else
         {
-            tmpSgprX2 = tmpSgprRes.idx + 1;
-            tmpSgprX1 = tmpSgprRes.idx;
+            if(tmpSgprRes.size < 3)
+            {
+                throw std::runtime_error("ContinuousRegister size must be at least 3.");
+            }
+            int tmpSgprX2, tmpSgprX1;
+            if(tmpSgprRes.idx % 2 == 0)
+            {
+                tmpSgprX2 = tmpSgprRes.idx;
+                tmpSgprX1 = tmpSgprRes.idx + 2;
+            }
+            else
+            {
+                tmpSgprX2 = tmpSgprRes.idx + 1;
+                tmpSgprX1 = tmpSgprRes.idx;
+            }
+            auto cr = ContinuousRegister(tmpSgprX1, 1);
+            module->add(SGetPositivePCOffset(tmpSgprX2, label, cr));
+            addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                            "branch to " + labelName);
         }
-        auto cr = ContinuousRegister(tmpSgprX1, 1);
-        module->add(SGetPositivePCOffset(tmpSgprX2, label, cr));
-        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
 
         return module;
     }
@@ -179,8 +216,102 @@ namespace rocisa
         module->addT<SSubU32>(
             sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "sub target branch offset");
         module->addT<SSubBU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "sub high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                        "branch to " + labelName);
 
+        return module;
+    }
+
+    // Split-register overloads: accept a 2-aligned pair and a separate offset SGPR
+    // so the caller does not need 3 contiguous SGPRs.
+
+    inline std::shared_ptr<Module>
+        SGetPositivePCOffset(int sgprIdx, const Label& label, int tmpSgprOff)
+    {
+        auto cr = ContinuousRegister(tmpSgprOff, 1);
+        return SGetPositivePCOffset(sgprIdx, label, cr);
+    }
+
+    inline std::shared_ptr<Module> SLongBranchPositive(const Label&       label,
+                                                       ContinuousRegister& pcPair,
+                                                       ContinuousRegister& offSgpr,
+                                                       const std::string&  comment = "")
+    {
+        std::string labelName = label.getLabelName();
+        auto        module    = std::make_shared<Module>("SLongBranchPositive " + labelName);
+        if(!comment.empty())
+            module->addComment(comment);
+        if(pcPair.size < 2 || pcPair.idx % 2 != 0)
+            throw std::runtime_error("pcPair must be a 2-aligned pair.");
+        if(offSgpr.size < 1)
+            throw std::runtime_error("offSgpr must have at least 1 register.");
+        module->add(SGetPositivePCOffset(pcPair.idx, label, offSgpr.idx));
+        addSSetPCB64WithLongBranchLabel(module, sgpr(pcPair.idx, 2), labelName,
+                                        "branch to " + labelName);
+        return module;
+    }
+
+    inline std::shared_ptr<Module> SLongBranchNegative(const Label&       label,
+                                                       ContinuousRegister& pcPair,
+                                                       ContinuousRegister& offSgpr,
+                                                       const std::string&  comment = "")
+    {
+        std::string labelName = label.getLabelName();
+        auto        module    = std::make_shared<Module>("SLongBranchNegative " + labelName);
+        if(!comment.empty())
+            module->addComment(comment);
+        if(pcPair.size < 2 || pcPair.idx % 2 != 0)
+            throw std::runtime_error("pcPair must be a 2-aligned pair.");
+        if(offSgpr.size < 1)
+            throw std::runtime_error("offSgpr must have at least 1 register.");
+        int tmpSgprX2 = pcPair.idx;
+        int tmpSgprX1 = offSgpr.idx;
+        module->addT<SGetPCB64>(sgpr(tmpSgprX2, 2), "addr of next instr");
+        module->addT<SAddI32>(sgpr(tmpSgprX1), labelName, 4, "target branch offset");
+        module->addT<SAbsI32>(sgpr(tmpSgprX1), sgpr(tmpSgprX1), "abs offset");
+        module->addT<SSubU32>(
+            sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "sub target branch offset");
+        module->addT<SSubBU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "sub high and carry");
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                        "branch to " + labelName);
+        return module;
+    }
+
+    inline std::shared_ptr<Module> SLongBranch(const Label&        label,
+                                               ContinuousRegister& pcPair,
+                                               ContinuousRegister& offSgpr,
+                                               const std::string&  positiveLabelStr,
+                                               const std::string&  comment = "")
+    {
+        std::string labelName = label.getLabelName();
+        auto        module    = std::make_shared<Module>("SLongBranch " + labelName);
+        if(!comment.empty())
+            module->addComment(comment);
+        if(pcPair.size < 2 || pcPair.idx % 2 != 0)
+            throw std::runtime_error("pcPair must be a 2-aligned pair.");
+        if(offSgpr.size < 1)
+            throw std::runtime_error("offSgpr must have at least 1 register.");
+        int tmpSgprX2 = pcPair.idx;
+        int tmpSgprX1 = offSgpr.idx;
+        Label positiveLabel(positiveLabelStr, "");
+        module->addT<SGetPCB64>(sgpr(tmpSgprX2, 2), "addr of next instr");
+        module->addT<SAddI32>(sgpr(tmpSgprX1), labelName, 4, "target branch offset");
+        module->addT<SCmpGeI32>(sgpr(tmpSgprX1), 0, "check positive or negative");
+        module->addT<SCBranchSCC1>(positiveLabel.getLabelName(), "jump when positive");
+        // negative offset
+        module->addT<SAbsI32>(sgpr(tmpSgprX1), sgpr(tmpSgprX1), "abs offset");
+        module->addT<SSubU32>(
+            sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "sub target branch offset");
+        module->addT<SSubBU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "sub high and carry");
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                        "branch to " + labelName);
+        // positive offset
+        module->addT<Label>(positiveLabel);
+        module->addT<SAddU32>(
+            sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "add target branch offset");
+        module->addT<SAddCU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "add high and carry");
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                        "branch to " + labelName);
         return module;
     }
 
@@ -358,6 +489,151 @@ namespace rocisa
         return module;
     }
 
+    ////////////////////////////////////////////////////////////////////////////////
+    // True16 conversion helpers.
+    // These query the NoSDWA arch cap at runtime and emit either:
+    //   - true16 encoding (op_sel / byte_sel) on NoSDWA targets (gfx11+), or
+    //   - SDWA encoding (src0_sel / dst_sel)  on legacy targets.
+    // Callers only provide a semantic `sel` (HighBitSel::LOW or HighBitSel::HIGH).
+    ////////////////////////////////////////////////////////////////////////////////
+
+    // Copy of an InstructionInput with its register operand tagged .l/.h; non-register inputs pass through.
+    inline InstructionInput inputWithHalf(const InstructionInput& src, HighBitSel sel)
+    {
+        if(auto pc = std::get_if<std::shared_ptr<Container>>(&src))
+        {
+            if(auto rc = std::dynamic_pointer_cast<RegisterContainer>(*pc))
+            {
+                // clone() (not make_shared) keeps the dynamic type so a Holder still lowers to its VGPR.
+                auto copy = std::static_pointer_cast<RegisterContainer>(rc->clone());
+                copy->setHalfSelect(sel);
+                return std::static_pointer_cast<Container>(copy);
+            }
+        }
+        return src;
+    }
+
+    // Copy of a register container tagged with a true16 half-select.
+    inline std::shared_ptr<RegisterContainer>
+        regWithHalf(const std::shared_ptr<RegisterContainer>& reg, HighBitSel sel)
+    {
+        // clone() (not make_shared) keeps the dynamic type so a Holder still lowers to its VGPR.
+        auto copy = std::static_pointer_cast<RegisterContainer>(reg->clone());
+        copy->setHalfSelect(sel);
+        return copy;
+    }
+
+    // NoSDWA-gated true16 half-select: tags reg .l/.h on true16 (NoSDWA) targets,
+    // returns it unchanged on legacy (SDWA). Wrap operands at the call site.
+    inline std::shared_ptr<RegisterContainer>
+        t16(const std::shared_ptr<RegisterContainer>& reg, HighBitSel sel)
+    {
+        if(reg && capOrDefault(rocIsa::getInstance().getArchCaps(), "NoSDWA"))
+        {
+            return regWithHalf(reg, sel);
+        }
+        return reg;
+    }
+    /// Convert F16 → F32, selecting src half-word by `sel`.
+    inline std::shared_ptr<Item>
+        ECvtF16toF32(const std::shared_ptr<RegisterContainer>& dst,
+                     const InstructionInput&                   src,
+                     HighBitSel                                sel,
+                     const std::string&                        comment = "")
+    {
+        rocIsa& instance = rocIsa::getInstance();
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
+        {
+            return std::make_shared<VCvtF16toF32>(
+                dst, inputWithHalf(src, sel), std::nullopt, comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.src0_sel = (sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
+        return std::make_shared<VCvtF16toF32>(
+            dst, src, sdwa, comment);
+    }
+
+    // Convert F32->F16. sel=nullopt writes the low half (plain cvt on legacy;
+    // true16 requires a half, so it defaults to LOW).
+    inline std::shared_ptr<Item>
+        ECvtF32toF16(const std::shared_ptr<RegisterContainer>& dst,
+                     const InstructionInput&                   src,
+                     std::optional<HighBitSel>                 sel     = std::nullopt,
+                     const std::string&                        comment = "")
+    {
+        rocIsa& instance = rocIsa::getInstance();
+        const bool noSDWA = capOrDefault(instance.getArchCaps(), "NoSDWA");
+
+        if(!sel.has_value())
+        {
+            // Plain 16-bit cvt is legal only on legacy; true16 must select a half.
+            if(!noSDWA)
+            {
+                return std::make_shared<VCvtF32toF16>(
+                    dst, src, std::nullopt, comment);
+            }
+            sel = HighBitSel::LOW;
+        }
+
+        if(noSDWA)
+        {
+            return std::make_shared<VCvtF32toF16>(
+                regWithHalf(dst, *sel), src, std::nullopt, comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.dst_sel = (*sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
+        return std::make_shared<VCvtF32toF16>(
+            dst, src, sdwa, comment);
+    }
+
+    /// Unpack packed-FP8 → 2×F32, selecting src half-word by `sel`.
+    inline std::shared_ptr<Item>
+        ECvtPkFP8toF32(const std::shared_ptr<RegisterContainer>& dst,
+                       const InstructionInput&                   src,
+                       HighBitSel                                sel,
+                       const std::string&                        comment = "")
+    {
+        rocIsa& instance = rocIsa::getInstance();
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
+        {
+            return std::make_shared<VCvtPkFP8toF32>(
+                dst, inputWithHalf(src, sel), std::nullopt, std::nullopt,
+                comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.src0_sel = (sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
+        return std::make_shared<VCvtPkFP8toF32>(
+            dst, src, sdwa, std::nullopt, comment);
+    }
+
+    /// Unpack packed-BF8 → 2×F32, selecting src half-word by `sel`.
+    inline std::shared_ptr<Item>
+        ECvtPkBF8toF32(const std::shared_ptr<RegisterContainer>& dst,
+                       const InstructionInput&                   src,
+                       HighBitSel                                sel,
+                       const std::string&                        comment = "")
+    {
+        rocIsa& instance = rocIsa::getInstance();
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
+        {
+            return std::make_shared<VCvtPkBF8toF32>(
+                dst, inputWithHalf(src, sel), std::nullopt, std::nullopt,
+                comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.src0_sel = (sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
+        return std::make_shared<VCvtPkBF8toF32>(
+            dst, src, sdwa, std::nullopt, comment);
+    }
+
     inline std::shared_ptr<Item>
         VCvtBF16toFP32(const std::shared_ptr<RegisterContainer>&         dst,
                        const std::shared_ptr<RegisterContainer>&         src,
@@ -365,34 +641,31 @@ namespace rocisa
                        int                                               vi,
                        const std::string&                                comment = "")
     {
-        auto& instance = rocIsa::getInstance();
-        if(instance.getAsmCaps()["HasBF16CVT"])
-        {
-            auto select_bit = SelectBit::WORD_0;
-            if(vi % 2 == 1)
-            {
-                select_bit = SelectBit::WORD_1;
-            }
-            auto sdwa     = SDWAModifiers();
-            sdwa.src0_sel = select_bit;
-            return std::make_shared<PVCvtBF16toFP32>(dst, src, sdwa, "cvt bf16 to f32");
-        }
-        else
+        rocIsa& instance = rocIsa::getInstance();
+        if(!capOrDefault(instance.getAsmCaps(), "HasBF16CVT"))
         {
             if((vi % 2) == 1)
             {
                 if(!vgprMask.has_value())
-                {
                     throw std::runtime_error("vgprMask is null");
-                }
                 return std::make_shared<VAndB32>(
                     dst, src, *vgprMask, "cvt bf16 to fp32. " + comment);
             }
-            else
-            {
-                return std::make_shared<VLShiftLeftB32>(
-                    dst, 16, src, "cvt bf16 to fp32. " + comment);
-            }
+            return std::make_shared<VLShiftLeftB32>(
+                dst, 16, src, "cvt bf16 to fp32. " + comment);
         }
+
+        if(capOrDefault(instance.getArchCaps(), "NoSDWA"))
+        {
+            const HighBitSel sel = (vi % 2) ? HighBitSel::HIGH : HighBitSel::LOW;
+            return std::make_shared<PVCvtBF16toFP32>(
+                dst, regWithHalf(src, sel), std::nullopt, std::nullopt,
+                "cvt bf16 to fp32. " + comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.src0_sel = (vi % 2 == 1) ? SelectBit::WORD_1 : SelectBit::WORD_0;
+        return std::make_shared<PVCvtBF16toFP32>(
+            dst, src, sdwa, std::nullopt, "cvt bf16 to fp32. " + comment);
     }
 } // namespace rocisa

@@ -33,24 +33,24 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse COO matrix
+*  \brief Convert a sparse CSR matrix into a sparse COO matrix.
 *
 *  \details
-*  \p rocsparse_csr2coo converts the CSR array containing the row offsets, that point
-*  to the start of every row, into a COO array of row indices.
+*  \p rocsparse_csr2coo converts the CSR array containing the row offsets that point
+*  to the start of every row into a COO array of row indices.
 *
 *  \p rocsparse_csr2coo can also be used to convert a CSC array containing the column offsets
 *  into a COO array of column indices.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  csr_row_ptr array of \p m+1 elements that point to the start of every row
 *              of the sparse CSR matrix.

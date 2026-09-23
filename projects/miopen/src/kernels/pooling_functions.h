@@ -62,8 +62,7 @@ __device__ float approxRcp(float x)
     // 1. The inputs are required to be normalized. This should be the
     //    case for most float operations that result from other float
     //    operations.
-    // 2. The accuracy is 1 ULP. This is fine for OpenCL, where the
-    //    required accuracy is only 2.5 ULP, but not for HIP.
+    // 2. The accuracy is 1 ULP.
     // The performance difference between v_rcp_f32 and actual division
     // is quite significant, hence this function for cases where 1 ULP
     // is close enough.

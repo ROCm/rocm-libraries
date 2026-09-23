@@ -29,6 +29,8 @@
 #include <Tensile/Comparison.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <>
@@ -67,3 +69,4 @@ namespace std
         }
     };
 } // namespace std
+

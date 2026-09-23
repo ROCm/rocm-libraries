@@ -119,6 +119,25 @@ rocsolver_<type>lange()
    :outline:
 .. doxygenfunction:: rocsolver_slange
 
+.. _gecon:
+
+rocsolver_<type>gecon()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_cgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_dgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_sgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_zgecon
+   :outline:
+.. doxygenfunction:: rocsolver_cgecon
+   :outline:
+.. doxygenfunction:: rocsolver_dgecon
+   :outline:
+.. doxygenfunction:: rocsolver_sgecon
 
 
 
@@ -155,6 +174,14 @@ rocsolver_<type>larfg()
 
 rocsolver_<type>larft()
 ---------------------------------------
+.. doxygenfunction:: rocsolver_zlarft_64
+   :outline:
+.. doxygenfunction:: rocsolver_clarft_64
+   :outline:
+.. doxygenfunction:: rocsolver_dlarft_64
+   :outline:
+.. doxygenfunction:: rocsolver_slarft_64
+   :outline:
 .. doxygenfunction:: rocsolver_zlarft
    :outline:
 .. doxygenfunction:: rocsolver_clarft

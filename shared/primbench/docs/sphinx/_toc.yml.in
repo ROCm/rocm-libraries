@@ -1,0 +1,28 @@
+root: index
+subtrees:
+  - caption: Install
+    entries:
+      - file: install/install
+  - caption: Conceptual
+    entries:
+      - file: conceptual/primbench-noise-reduction
+  - caption: How to
+    entries:
+      - file: how-to/configure-settings
+      - file: how-to/validate-output
+  - caption: Tutorials
+    entries:
+      - file: tutorial/use-primbench
+        title: Using Primbench
+  - caption: Reference
+    entries:
+      - file: reference/primbench-api
+        title: Primbench API
+      - file: reference/cli-options
+      - file: reference/primbench-json-output
+        title: JSON output format
+      - file: reference/primbench-csv-output
+        title: CSV output
+  - caption: About
+    entries:
+      - file: license

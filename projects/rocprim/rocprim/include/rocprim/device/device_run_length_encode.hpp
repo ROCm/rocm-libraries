@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,10 +42,12 @@
 #include <iostream>
 #include <iterator>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -133,13 +135,7 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const auto params = get_config<Selector>(non_trivial_config{}, current_target);
 
@@ -213,9 +209,9 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                                                         grid_size,
                                                         start);
 
-            auto non_trivial_kernel = [=](auto arch_config)
+            auto non_trivial_kernel = [=](auto target_config)
             {
-                run_length_encode::non_trivial_kernel_impl<decltype(arch_config),
+                run_length_encode::non_trivial_kernel_impl<decltype(target_config),
                                                            offset_count_pair_type>(
                     input,
                     offsets_output,
@@ -245,6 +241,8 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
 }
 } // namespace run_length_encode
 } // namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel run-length encoding for device level.
 ///
@@ -405,6 +403,8 @@ inline hipError_t run_length_encode(void*                   temporary_storage,
 /// In this example a device-level run-length encoding of non-trivial runs is performed on an array of
 /// integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_run_length_encode.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
@@ -465,9 +465,9 @@ inline hipError_t run_length_encode_non_trivial_runs(void*                   tem
         debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_

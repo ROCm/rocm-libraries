@@ -28,6 +28,8 @@
 
 #include <type_traits>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -231,3 +233,4 @@ namespace std
         }
     };
 } // namespace std
+

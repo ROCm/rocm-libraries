@@ -57,8 +57,7 @@ profiles:
     - executable: "test/rocroller-tests"
       framework: "gtest"
       include: []
-      exclude:
-        - "*GEMM*"
+      exclude: []
     - executable: "test/rocroller-tests-catch"
       framework: "catch2"
       include: []

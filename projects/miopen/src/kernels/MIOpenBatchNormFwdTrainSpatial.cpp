@@ -85,7 +85,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
 
         if(lid < segment)
         {
-            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
+            // Unroll the loop with a hint of 2 when using FP16.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr int unrollHint =
                 mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
@@ -107,30 +107,11 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
         }
         __syncthreads();
 
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            cast<FpAccumType>(INHW),
+            lid);
 
         // Reduction complete
 
@@ -151,7 +132,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
             FpAccumType inhat = cast<FpAccumType>(0.);
             FpPrecType value;
 
-            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
+            // Unroll the loop with a hint of 2 when using FP16.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr int unrollHint =
                 mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
@@ -230,9 +211,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
         unsigned int index       = 0;
         const unsigned int lid   = threadIdx.x;
         const unsigned int grpid = blockIdx.x;
+        FpPrecType curN          = cast<FpPrecType>(0.);
 
         // Note: this variable is only used when mio_config::layout_nhwc is false.
-        unsigned int chwid;
+        [[maybe_unused]] unsigned int chwid;
         if constexpr(!mio_config::layout_nhwc)
         {
             chwid = grpid * mio_bn_config::hw;
@@ -261,8 +243,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                     hwidx = (k + (lid << 2)) - (nidx * mio_bn_config::hw);
                     index = nidx * mio_bn_config::chw + chwid + hwidx;
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    miopen::batchnorm::_accumulate(mean, read4);
-                    miopen::batchnorm::_accumulate_mad(variance, read4, read4);
+                    typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
+                        cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
+
+                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
                 }
             }};
 
@@ -279,8 +263,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                 if(index + 3 < (mio_bn_config::nchw))
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    miopen::batchnorm::_accumulate(mean, read4);
-                    miopen::batchnorm::_accumulate_mad(variance, read4, read4);
+                    typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
+                        cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
+
+                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
                 }
             }
         }
@@ -300,17 +286,19 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         {
                             index = nidx * mio_bn_config::chw + chwid + hwidx;
                         }
-                        const auto xin = cast<FpPrecType>(in[index]);
-                        mean += xin;
-                        variance = fma(xin, xin, variance);
+                        const auto xin     = cast<FpPrecType>(in[index]);
+                        FpPrecType oldMean = mean;
+                        mean               = (mean * curN + xin) / (curN + 1.f);
+                        curN += 1.f;
+                        variance = fma(xin - mean, xin - oldMean, variance);
                     }
                 }};
 
             if constexpr(rem > 0u)
             {
-                // Note: hip compiler has a bug, it throws compiler warning for comparing unsigned
-                // int with 0 value, when rem is 0. but when rem is 0, this code block should not be
-                // compiled due to the if constexpr used above.
+                // Note: The HIP compiler has a bug, it throws compiler warning for comparing
+                // unsigned int with 0 value, when rem is 0. but when rem is 0, this code block
+                // should not be compiled due to the if constexpr used above.
                 if(lid < rem)
                 {
                     unsigned int remkey = lid + less;
@@ -325,43 +313,40 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         index = nidx * mio_bn_config::chw + chwid + hwidx;
                     }
 
-                    const auto xin =
-                        index < mio_bn_config::nchw ? cast<FpPrecType>(in[index]) : FpPrecType{0};
-                    mean += xin;
-                    variance = fma(xin, xin, variance);
+                    bool contributeToVariance = (index < mio_bn_config::nchw);
+                    FpPrecType xin =
+                        contributeToVariance ? cast<FpPrecType>(in[index]) : cast<FpPrecType>(0.);
+                    FpPrecType oldMean = mean;
+                    mean = contributeToVariance ? ((mean * curN + xin) / (curN + 1.f)) : mean;
+                    curN += contributeToVariance ? 1.f : 0.f;
+                    variance += contributeToVariance ? ((xin - mean) * (xin - oldMean)) : 0;
                 }
             }
         }
 
         __syncthreads();
 
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+        constexpr auto lcl_data_size = mio_bn_config::lds_gcn_size;
         __shared__ FpAccumType lcl_data_x[lcl_data_size];
         __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        __shared__ FpAccumType lcl_data_c[lcl_data_size];
+
+        __builtin_amdgcn_sched_barrier(0);
+
+        miopen::reduction::reduce2_welford<FpAccumType, lcl_data_size>(
+            mean,
+            variance,
+            curN,
+            static_cast<FpAccumType>(INHW),
+            lcl_data_x,
+            lcl_data_y,
+            lcl_data_c,
+            lid);
+
+        __builtin_amdgcn_sched_barrier(0);
 
         // REDUCTION COMPLETE ---------------------------
-        variance = fma(-mean, mean, variance);
+
         if(variance < FpPrecType{0})
         {
             variance = FpPrecType{0};
@@ -415,9 +400,28 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         xhat[j]              = (cast<FpPrecType>(in[index]) - mean) * invVariance;
                     }
 
+                    // Synchronization is not required for correctness but enhances performance.
+                    //
+                    // Loop is memory bound as it iterates across all the batches in the tensor,
+                    // and has memory access strides of CHW size once all the elements in a single
+                    // sample have been processed, which may be large.
+                    //
+                    // `__syncthreads()` helps to coalesce memory accesses as each work-item
+                    // accesses adjacent elements to its neighbours on the same loop iteration,
+                    // leading to contiguous memory access across all the waves in a workgroup. By
+                    // keeping all the waves on the same loop iteration it prevents waves on
+                    // different loop iterations from stalling as they wait for memory.
+                    //
+                    // This can be seen by profiling the kernel with rocprofv3 and comparing the
+                    // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
+                    // compute viewer and seeing the impact on occupancy.
+                    //
+                    // TODO: This call is within the scope of an `if` condition, but it is not clear
+                    // that this control flow is guanteed to be uniform across all threads in a
+                    // workgroup, risking deadlock. Further investigation is needed.
                     __syncthreads();
 
-                    for(unsigned int j = 0; j < max_read; ++j) // This part takes 0.405
+                    for(unsigned int j = 0; j < max_read; ++j)
                     {
                         const unsigned int l = k + (max_read * lid) + j;
                         nidx                 = l / mio_bn_config::hw;
@@ -523,30 +527,11 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
         }
         __syncthreads();
 
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         variance = fma(-mean, mean, variance);
         if(variance < 0)
@@ -674,7 +659,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                                       ygid * ystride * mio_bn_config::vec_size_y +
                                       xgid * xstride * mio_bn_config::vec_size_x;
 
-            // The original OpenCL kernel unrolled the loop only when this condition was met.
+            // Unroll the loop only when this condition is met.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr unsigned int unrollHint =
                 mio_bn_config::hw > mio_bn_config::loop_unroll_max_hw ? 1 : 2;
@@ -712,9 +697,9 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
     FinalMeanVariance(FpType* __restrict__ meanvarbuff,
                       FpPrecType INHW,
                       double epsilon,
-                      unsigned int& xgid,
-                      unsigned int& ygid,
-                      unsigned int& zgid,
+                      const unsigned int& xgid,
+                      const unsigned int& ygid,
+                      const unsigned int& zgid,
                       unsigned int& commitID,
                       FpPrecType_C& mean,
                       FpPrecType_C& variance,
@@ -725,8 +710,6 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         mean        = cast<FpPrecType_C>(0.);
 
         unsigned int xgrp_id = blockIdx.x;
-        unsigned int ygrp_id = blockIdx.y;
-        unsigned int zgrp_id = blockIdx.z;
 
         // These values (?grp_sz) cannot be substituted with mio_bn_config::launch_dim.grp? because
         // the dimensions of the blocks for this kernel may be different from the other
@@ -741,17 +724,10 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         unsigned int ylid = threadIdx.y;
         unsigned int zlid = threadIdx.z;
 
-        xgid = xgrp_id * xgrp_sz + xlid;
-        ygid = ygrp_id * ygrp_sz + ylid;
-        zgid = zgrp_id * zgrp_sz + zlid;
-
         unsigned int xstride = mio_config::layout_nhwc ? 1 : mio_bn_config::hw;
         unsigned int ystride = mio_config::layout_nhwc ? mio_bn_config::c : 1;
 
         commitID = 0;
-
-        if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
-            return;
 
         for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
         {
@@ -800,14 +776,8 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         }
         else
         {
-            // C++17 idiomatic: ensure array size is never zero using constexpr ternary
-            constexpr auto lds_gcn_array_size = grp_final_total >= 64 ? grp_final_total / 64 : 1;
-
-            commitID = 64;
-            __shared__ FpAccumCType lcl_data_x[lds_gcn_array_size];
-            __shared__ FpAccumCType lcl_data_y[lds_gcn_array_size];
-            miopen::reduction::gcn_reduce2(
-                mean, variance, INHW, lcl_data_x, lcl_data_y, ylid + zlid * ygrp_sz);
+            miopen::reduction::reduce2<FpPrecType_C, grp_final_total>(
+                mean, variance, static_cast<FpPrecType_C>(INHW), ylid + zlid * ygrp_sz);
         }
 
         variance    = miopen::fma(-mean, mean, variance);
@@ -906,14 +876,8 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         }
         else
         {
-            __shared__ FpAccumCType lcl_data_x[mio_bn_config::lds_gcn_size];
-            __shared__ FpAccumCType lcl_data_y[mio_bn_config::lds_gcn_size];
-            miopen::reduction::gcn_reduce2(mean,
-                                           variance,
-                                           cast<FpAccumType>(1.0),
-                                           lcl_data_x,
-                                           lcl_data_y,
-                                           ylid + zlid * ygrp_sz);
+            miopen::reduction::reduce2<FpPrecType_C, mio_bn_config::lds_size>(
+                mean, variance, static_cast<FpPrecType_C>(1.0), ylid + zlid * ygrp_sz);
         }
 
         if(ylid == 0 && zlid == 0)
@@ -1084,10 +1048,13 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     fp_prec_c_type variance;
     fp_prec_c_type invVariance;
 
-    unsigned int xgid;
-    unsigned int ygid;
-    unsigned int zgid;
+    unsigned int xgid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int ygid = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int zgid = blockIdx.z * blockDim.z + threadIdx.z;
     unsigned int commitID;
+
+    if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
+        return;
 
     miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.FinalMeanVariance(
         meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);

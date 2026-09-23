@@ -185,7 +185,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
              sizeof(msg),
              "hiptensorReduce: handle=%p, alpha=%p, A=%p, descA=%p, modeA=%p, beta=%p, C=%p, "
              "descC=%p, modeC=%p, D=%p, descD=%p, modeD=%p, opReduce=%s, typeCompute=%s, "
-             "workspace=%p, workspaceSize=%lu, stream=%p",
+             "workspace=%p, workspaceSize=%llu, stream=%p",
              handle,
              alpha,
              A,
@@ -201,7 +201,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
              hiptensor::opTypeToString(opReduce).c_str(),
              hiptensor::computeTypeToString(typeCompute).c_str(),
              workspace,
-             workspaceSize,
+             static_cast<unsigned long long>(workspaceSize),
              stream);
 
     logger->logAPITrace("hiptensorReduce", msg);
@@ -394,7 +394,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                 // log perf metrics (not name/id)
                 snprintf(msg,
                          sizeof(msg),
-                         "KernelId: %lu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
+                         "KernelId: %zu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
                          metrics.mKernelUid,
                          metrics.mKernelName.c_str(),
                          metrics.mAvgTimeMs,

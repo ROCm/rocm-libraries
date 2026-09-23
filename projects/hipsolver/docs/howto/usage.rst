@@ -125,6 +125,14 @@ Performance implications of the hipsolverDn API
       Even though the compatibility API does not provide ``bufferSize`` helpers for these functions, the functions still require
       a workspace to use rocSOLVER. This workspace is automatically managed, but it might result in device memory reallocations with a corresponding overhead.
 
+*  An eigensolver for general matrices has not yet been implemented in rocSOLVER. These components rely on LAPACK to provide this functionality.
+   The :ref:`hipsolverDnXgeev <dense_geev>` functions take the user-provided host workspace, copy the data to the host, use LAPACK to perform the
+   eigenvalue decomposition, and then copy the resulting data back to the device.
+
+   .. note::
+
+      :ref:`hipsolverDnXgeev <dense_geev>` operates on the CPU and performs memory transfers to and from the device.
+
 .. _sparse_api_differences:
 
 Using the hipsolverSp API
@@ -247,7 +255,7 @@ Different signatures and additional API methods
 
       ``lwork`` is ignored when the wrapper calls cuSOLVER because it is not needed.
 
-*  All rocSOLVER functions called by hipSOLVER require a workspace. To allow the user to specify one, 
+*  All rocSOLVER functions called by hipSOLVER require a workspace. To allow the user to specify one,
    :ref:`hipsolverXgetrs <getrs>`, :ref:`hipsolverXpotrfBatched <potrf_batched>`, :ref:`hipsolverXpotrs <potrs>`, and
    :ref:`hipsolverXpotrsBatched <potrs_batched>` require ``work`` and ``lwork`` as arguments.
 

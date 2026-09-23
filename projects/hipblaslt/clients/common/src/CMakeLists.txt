@@ -4,6 +4,7 @@
 target_sources(hipblaslt-clients-common
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/singletons.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_bench_options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cblas_interface.cpp"
@@ -14,10 +15,6 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init_device.cpp"
 )
 
-if(HIPBLASLT_ENABLE_ROCROLLER)
-    target_sources(hipblaslt-clients-common PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGen.cpp")
-endif()
-
 if(HIPBLASLT_ENABLE_BLIS)
     target_sources(hipblaslt-clients-common
         PRIVATE
@@ -26,5 +23,7 @@ if(HIPBLASLT_ENABLE_BLIS)
 endif()
 
 if(amd_smi_FOUND)
-    target_link_libraries(hipblaslt-clients-common PRIVATE amd_smi)
+    # PUBLIC: efficiency_monitor.hpp includes <amd_smi/amdsmi.h> directly, so
+    # consumers like hipblaslt-bench need the include path propagated too.
+    target_link_libraries(hipblaslt-clients-common PUBLIC amd_smi)
 endif()

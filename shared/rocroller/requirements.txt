@@ -13,6 +13,7 @@ pytest-cmake
 pytest-cov
 pytest-mock
 scipy
+pylint
 pyyaml
 joblib
 # codeql

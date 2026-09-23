@@ -5,8 +5,8 @@
 
 #include <string>
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
 namespace hipdnn_plugin_sdk
 {
@@ -19,11 +19,11 @@ public:
     {
         flatbuffers::FlatBufferBuilder builder;
         auto knobIdOffset = builder.CreateString(knobId);
-        auto intValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value);
-        auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
+        auto intValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
+        auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
             builder,
             knobIdOffset,
-            hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+            hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue,
             intValue.Union());
         builder.Finish(knobSetting);
         return builder.Release();
@@ -34,11 +34,11 @@ public:
     {
         flatbuffers::FlatBufferBuilder builder;
         auto knobIdOffset = builder.CreateString(knobId);
-        auto floatValue = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, value);
-        auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
+        auto floatValue = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, value);
+        auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
             builder,
             knobIdOffset,
-            hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
+            hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue,
             floatValue.Union());
         builder.Finish(knobSetting);
         return builder.Release();
@@ -51,11 +51,11 @@ public:
         auto knobIdOffset = builder.CreateString(knobId);
         auto strValueOffset = builder.CreateString(value);
         auto stringValue
-            = hipdnn_data_sdk::data_objects::CreateStringValue(builder, strValueOffset);
-        auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
+            = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, strValueOffset);
+        auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
             builder,
             knobIdOffset,
-            hipdnn_data_sdk::data_objects::KnobValue::StringValue,
+            hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue,
             stringValue.Union());
         builder.Finish(knobSetting);
         return builder.Release();

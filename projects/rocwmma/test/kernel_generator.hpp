@@ -287,9 +287,10 @@ namespace rocwmma
                     // Only gfx950 and gfx12 devices support f8
                     using DeviceInfo = HipDevice;
                     auto arch        = DeviceInfo::instance()->getGcnArch();
-                    if(arch != DeviceInfo::hipGcnArch_t::GFX1200
+                    if(arch != DeviceInfo::hipGcnArch_t::GFX950
+                       && arch != DeviceInfo::hipGcnArch_t::GFX1200
                        && arch != DeviceInfo::hipGcnArch_t::GFX1201
-                       && arch != DeviceInfo::hipGcnArch_t::GFX950)
+                       && arch != DeviceInfo::hipGcnArch_t::GFX1250)
                     {
                         // Current KernelParams have f8: skip kernel on host.
                         next_kernel(kernels);
