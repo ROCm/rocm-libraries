@@ -37,13 +37,13 @@ they are not available behavior in the current API.
 | Planned component | Input and output | Intended interaction |
 | --- | --- | --- |
 | Searchable `JustInTime` solution library and equality-first priority | A problem description selects existing tuned equality results before JIT is considered | The library would prefer a matching tuned result, then search compatible JIT entries before requesting another compilation |
-| Separate planning and prediction-input protocol | Operation, target and specialization facts produce a structured compilation plan | The library could inspect the plan and check for existing code before invoking a backend compiler; today's provider combines these steps |
+| Separate planning and prediction-input protocol | Operation, target and specialization facts produce a structured compilation plan | The library could inspect the plan and check for existing code before invoking a backend compiler; the initial provider design combines these steps |
 | Persistent code cache | A plan identity and compatibility information locate a stored bundle | A cache hit would supply the bundle to the loader; a miss would compile and then store it |
-| Exact epilogue specialization | Concrete output operations, such as bias and activation, become specialization inputs | Planning would include these operations when selecting or compiling code; the initial model omits their cost |
+| Exact epilogue specialization | Concrete output operations, such as bias and activation, become specialization inputs | Planning would include these operations when selecting or compiling code; the initial prediction model does not account for their cost |
 | Tuning blueprints | Stored knowledge supplies choices that the performance model does not predict | A provider would combine those choices with predicted parameters before validation |
 | Additional operation adapters and providers | An operation-specific description becomes a generic request and an executable result | Attention is a possible later operation; no Attention request factory or provider is implemented |
 
-The backend interface is private and compiled into the library. A stable plugin
+The backend interface is designed as a private interface compiled into the library. A stable plugin
 binary interface and dynamic provider discovery are also TBD. Keeping provider
 options and tuning schemas out of the public common types leaves room to add
 these components without turning every request into a TensileLite recipe.
