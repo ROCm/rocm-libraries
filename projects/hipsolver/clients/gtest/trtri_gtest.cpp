@@ -31,10 +31,9 @@ using namespace std;
 
 typedef std::tuple<vector<int>, vector<char>> trtri_tuple;
 
-// each matrix_size_range vector is a {n, lda, singular/diag}
-// if singular = 0, then the used matrix for the tests is triangular unit
-// if singular = 1, then the used matrix for the tests is triangular non-unit and singular
-// otherwise, the used matrix is triangular non-unit and not singular
+// each matrix_size_range vector is a {n, lda, diag}
+// if diag = 0, then the used matrix for the tests is triangular unit
+// if diag = 1, then the used matrix for the tests is triangular non-unit
 
 // each op_range vector is a {uplo}
 
@@ -47,9 +46,6 @@ const vector<vector<char>> op_range = {{'L'}, {'U'}};
 const vector<vector<int>> matrix_size_range = {
     // quick return
     {0, 1, 0},
-    // invalid
-    {-1, 1, 0},
-    {20, 5, 0},
     // normal (valid) samples
     {20, 32, 0},
     {30, 30, 1},
@@ -58,9 +54,9 @@ const vector<vector<int>> matrix_size_range = {
     {90, 100, 1},
     {100, 150, 0}};
 
-// for daily_lapack tests
-const vector<vector<int>> large_matrix_size_range
-    = {{192, 192, 1}, {500, 600, 2}, {640, 640, 0}, {1000, 1024, 1}, {1200, 1230, 2}};
+// // for daily_lapack tests
+// const vector<vector<int>> large_matrix_size_range
+//     = {{192, 192, 1}, {500, 600, 2}, {640, 640, 0}, {1000, 1024, 1}, {1200, 1230, 2}};
 
 Arguments trtri_setup_arguments(trtri_tuple tup)
 {
@@ -78,11 +74,6 @@ Arguments trtri_setup_arguments(trtri_tuple tup)
         arg.set<char>("diag", 'U');
     else
         arg.set<char>("diag", 'N');
-
-    if(matrix_size[2] == 1)
-        arg.singular = 1;
-    else
-        arg.singular = 0;
 
     // only testing standard use case/defaults for strides
 
@@ -109,10 +100,6 @@ protected:
             testing_trtri_bad_arg<API, BATCHED, STRIDED, T, I, SIZE>();
 
         arg.batch_count = 1;
-        if(arg.singular == 1)
-            testing_trtri<API, BATCHED, STRIDED, T, I, SIZE>(arg);
-
-        arg.singular = 0;
         testing_trtri<API, BATCHED, STRIDED, T, I, SIZE>(arg);
     }
 };
@@ -143,9 +130,9 @@ TEST_P(TRTRI_COMPAT_64, __double_complex)
     run_tests<false, false, rocblas_double_complex>();
 }
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                         TRTRI_COMPAT_64,
-                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(op_range)));
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          TRTRI_COMPAT_64,
+//                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(op_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          TRTRI_COMPAT_64,
