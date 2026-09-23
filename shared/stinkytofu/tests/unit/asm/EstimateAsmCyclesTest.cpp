@@ -1148,3 +1148,34 @@ SCC0 = "st.s_cmp_eq_i32"(s[12], 0x2) { issueCycles = 1, latencyCycles = 1 }
     unsigned int cycles = runPassAndGetResult();
     EXPECT_EQ(779, cycles) << "Expected 779 cycles for gfx1250 loop body example";
 }
+
+// Regression test: EstimateAsmCyclesAnalysis must be a pure query.
+// AM.getResult<EstimateAsmCyclesAnalysis>() is not tracked as a transform by
+// AnalysisManager, so if it mutated the IR (comment annotations) or the
+// function's metadata, that mutation would never trigger invalidation of
+// other cached analyses -- silently breaking the read-only analysis
+// contract. Guard both channels the underlying pass can mutate through.
+TEST_F(EstimateAsmCyclesTest, AnalysisDoesNotMutateIROrMetadata) {
+    createLabel("label_LoopBeginL");
+    StinkyInstruction* add = createVAddF32(0, 1, 2, 5);
+    StinkyInstruction* mul = createVMulF32(3, 4, 5, 3);
+
+    auto commentOf = [](StinkyInstruction* inst) -> std::string {
+        auto* c = inst->getModifier<CommentData>();
+        return c ? c->comment : std::string();
+    };
+    const std::string addCommentBefore = commentOf(add);
+    const std::string mulCommentBefore = commentOf(mul);
+
+    unsigned int cycles = runPassAndGetResult();
+    EXPECT_EQ(cycles, 8);
+
+    EXPECT_EQ(commentOf(add), addCommentBefore)
+        << "EstimateAsmCyclesAnalysis must not annotate instructions with <This "
+           "is N-cycle> comments -- that mutation is reserved for "
+           "createEstimateAsmCyclesPass() as an explicit transform.";
+    EXPECT_EQ(commentOf(mul), mulCommentBefore);
+    EXPECT_FALSE(func->hasMetaData("EstimateAsmCyclesPass.totalCycles"))
+        << "EstimateAsmCyclesAnalysis must not publish total-cycles function "
+           "metadata as a side effect of AM.getResult().";
+}

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,7 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_sort_comparator.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/block/block_radix_rank.hpp>
@@ -179,7 +180,67 @@ void inline compare_partial_sort(InputVector     input,
     compare_partial_sort_cpp_17(input, output, middle, compare_op);
 }
 
-TYPED_TEST_SUITE(RocprimDevicePartialSortTests, RocprimDevicePartialSortTestsParams);
+struct RocprimDevicePartialSortTestsNameGenerator
+{
+    template<class T>
+    static std::string type_tag_or_custom()
+    {
+        using U = std::remove_cv_t<T>;
+        if constexpr(std::is_same_v<U, test_utils::custom_float_type>) return "CustomFloatType";
+        else if constexpr(std::is_same_v<U, test_utils::custom_test_array_type<int, 4>>)
+            return "ArrayInt32x4";
+        else return type_tag<U>();
+    }
+
+    // A unique token per distinct config
+    template<class Config>
+    static std::string config_tag()
+    {
+        if constexpr(std::is_same_v<Config, ::rocprim::default_config>) return "";
+        else if constexpr(std::is_same_v<
+                              Config,
+                              ::rocprim::partial_sort_config<::rocprim::nth_element_config<
+                                  128,
+                                  4,
+                                  32,
+                                  16,
+                                  ::rocprim::block_radix_rank_algorithm::basic>>>)
+            return "_CfgNth128";
+        else
+            static_assert(dependent_false<Config>::value,
+                          "config_tag: add a unique token for this config");
+    }
+
+    // A unique token per distinct decomposer
+    template<class Decomposer>
+    static std::string decomposer_tag()
+    {
+        if constexpr(std::is_same_v<Decomposer, ::rocprim::identity_decomposer>) return "";
+        else if constexpr(std::is_same_v<
+                              Decomposer,
+                              test_utils::custom_test_type_decomposer<
+                                  common::custom_type<int, int, true>>>)
+            return "_DecompCustomInt2";
+        else
+            static_assert(dependent_false<Decomposer>::value,
+                          "decomposer_tag: add a unique token for this decomposer");
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag_or_custom<typename Params::key_type>();
+        n += config_tag<typename Params::config>();
+        n += decomposer_tag<typename Params::decomposer>();
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        if constexpr(Params::use_indirect_iterator) n += "_Indirect";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDevicePartialSortTests,
+                 RocprimDevicePartialSortTestsParams,
+                 RocprimDevicePartialSortTestsNameGenerator);
 
 TYPED_TEST(RocprimDevicePartialSortTests, PartialSort)
 {

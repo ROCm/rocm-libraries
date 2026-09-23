@@ -12,7 +12,8 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
-#include "ScratchDirectory.hpp"
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
@@ -77,6 +78,7 @@ inline GraphSession declinedSession()
 inline GraphSession buildErrorSession(std::string error)
 {
     GraphSession session;
+    session.buildFailed = true;
     session.buildError = std::move(error);
     return session;
 }

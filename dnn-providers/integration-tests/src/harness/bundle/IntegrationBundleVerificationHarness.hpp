@@ -31,6 +31,7 @@
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
@@ -39,6 +40,18 @@ namespace hipdnn_integration_tests::bundle
 
 // OutputTensors and ExpectedTensorLookup come from OutputComparison.hpp, which owns
 // the comparison this harness drives.
+
+// The probe SKIP_IF_NO_DEVICES() makes, spelled out because that macro's
+// GTEST_SKIP() returns from SetUp() and would carry the skip off before the
+// authoring log could be told about it. Same condition, same message, so a CI log
+// reader cannot tell the two apart. Only reached under a DEVICE policy, so the unit
+// tests -- which run HOST -- still never touch the HIP runtime.
+inline bool noHipDevicesAvailable()
+{
+    int deviceCount = 0;
+    const auto result = hipGetDeviceCount(&deviceCount);
+    return result == hipErrorNoDevice || deviceCount == 0;
+}
 
 // detail::buildVariantPack() lives in VariantPackBuilder.hpp -- both harnesses use
 // it, so it is not this one's to own.
@@ -93,18 +106,21 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
-        if(_deps.policy.useDevice())
+        if(_deps.policy.useDevice() && noHipDevicesAvailable())
         {
-            SKIP_IF_NO_DEVICES();
+            noteSkipBeforeObservation();
+            GTEST_SKIP() << "No devices available. Skipping test.";
         }
 
         if(_bundle == nullptr)
         {
+            noteSkipBeforeObservation();
             GTEST_SKIP() << "No bundle set";
         }
 
         if(auto reason = checkTomlSkip(currentTestName()))
         {
+            noteSkipBeforeObservation();
             GTEST_SKIP() << "[arch " << _deps.policy.arch << "] " << *reason;
         }
 
@@ -119,32 +135,34 @@ public:
         // nothing caches it on the harness.
         GraphSession session = openGraph();
 
-        // Phase 1: read the claim facts before anything can cut the test short. This
-        // has to sit above runComparison(): every mode has an early return that would
-        // otherwise leave the graph's claims undecided while the run exited 0.
+        if(TestConfig::get().writeSupportClaims())
+        {
+            observeAndRecordSupport(session);
+            GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
+        }
+
+        // Enforcement + verification only below this point.
+        //
+        // Read the claim facts before anything can cut the test short: every mode
+        // has an early return that would otherwise leave the graph's claims
+        // undecided while the run exited 0.
         const auto observation = checkSupportClaims(session);
         recordClaimCoverage(observation);
 
-        // Phase 2: either a claim already failed, or this bundle gets run.
         VerificationOutcome outcome;
         try
         {
             if(const auto blocked = claimBlocked(observation))
             {
-                // A broken claim means the engine will not take the graph, so there is
-                // nothing to compare. Running anyway would execute nothing, leave the
-                // NaN sentinel outputs untouched, and pile a tensor diff on the real
-                // message.
                 outcome = *blocked;
             }
             else
             {
                 outcome = runComparison(session);
 
-                // Kept as a live check because "the test did nothing and went green"
-                // is the failure this harness exists to catch. Only asked on this
-                // path: a blocked claim never reached the depth, and is already a
-                // failure.
+                // "the test did nothing and went green" is the failure this harness
+                // exists to catch. Only asked on this path: a blocked claim never
+                // reached the depth, and is already a failure.
                 const VerificationDepth required = bundleRequiredDepth();
                 EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
                     << "test passed without reaching " << toString(required) << " for "
@@ -155,14 +173,12 @@ public:
         {
             // This graph was already counted as queried, so a verdict that never
             // lands leaves the summary short a row and reconciles against nothing.
-            // HARNESS at NOT_REACHED because a throw in here is our bug and proves
-            // nothing about the engine: it must not demote the claim, and it must
-            // not confirm it either.
+            // HARNESS at NOT_REACHED because a throw is our bug and proves nothing
+            // about the engine.
             outcome = VerificationOutcome::failed(
                 VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, e.what());
         }
 
-        // Phase 3: one verdict, then one pass/fail/skip, both from the same outcome.
         commitClaims(observation.results, outcome);
         reportOutcome(outcome);
     }
@@ -174,13 +190,34 @@ public:
         return _inputFillRecipes;
     }
 
+    /// Mode B/C support observation: which engines take this graph?
+    ///
+    /// Returns observations rather than recording them to a singleton, so a test
+    /// can call it with a canned engine list and inspect the result. Mode C
+    /// (--test-engine) narrows to _engineUnderTest automatically.
+    std::vector<ObservedGraphSupport> observeSupportOnly(const GraphSession& session,
+                                                         const std::vector<LoadedEngine>& engines);
+
 private:
     // The one place a graph is built and the ranked list is asked for.
     GraphSession openGraph();
 
     void applyMetadataGuards() const;
 
+    // Called at every SetUp() exit that returns before TestBody(). Must run before
+    // the GTEST_SKIP() beside it, because GTEST_SKIP() expands to a return.
+    //
+    // static because no harness state is read or written -- the count lives in the
+    // process-wide log, which is what lets a skip recorded here be subtracted by an
+    // authoring run in main().
+    static void noteSkipBeforeObservation()
+    {
+        SupportObservationLog::get().recordSkipBeforeObservation();
+    }
+
     SupportObservation checkSupportClaims(const GraphSession& session);
+
+    void observeAndRecordSupport(const GraphSession& session);
 
     // Applies the coverage rules to the run counters, and fails this test if a
     // sidecar exists that the query somehow did not reach.

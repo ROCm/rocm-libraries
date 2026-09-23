@@ -27,7 +27,7 @@ from typing import Dict, Optional
 
 import rocisa
 
-from Tensile.Common import IsaVersion, IsaInfo, print2, elineno
+from Tensile.Common import IsaVersion, IsaInfo, print2, elineno, effectiveMatrixInstMN
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.DataType import DataType
 from Tensile.Common.MatrixInstructionNaming import backendCapsLoaded, matrixInstructionMnemonic
@@ -44,7 +44,8 @@ def matrixInstructionToMIParameters(
       wavefrontSize: int,
       problemType: dict,
       workGroup: Optional[list],
-      isaInfoMap: Dict[IsaVersion, IsaInfo]
+      isaInfoMap: Dict[IsaVersion, IsaInfo],
+      sourceSwap: bool = False
     ):
     """
     Converts a 9-item matrix instruction into the associated 4-item representation and
@@ -55,6 +56,8 @@ def matrixInstructionToMIParameters(
         isa: The ISA tuple.
         wavefrontSize: The wavefront size. Typically "WavefrontSize" in a solution.
         problemType: The problem type dictionary. Typically "ProblemType" in a solution.
+        sourceSwap: The solution's SourceSwap flag. When set on a non-square MI the
+            stored MatrixInstM/N are the effective (transposed) extents.
     """
     print2(f">> Converting MatrixInstruction {mi} to MI parameters")
 
@@ -150,6 +153,11 @@ def matrixInstructionToMIParameters(
       duplicateFactor = 32 // result["MatrixInstN"] if not isgfx950 else 1
       result['MIInputPerThreadMXSB'] = result['MIInputPerThreadB'] // problemType["MXBlockB"] * duplicateFactor
     result['MIInputPerThreadMetadata'] = result['MIInputPerThread'] if not isSparse else result['MIInputPerThread'] // 8
+
+    # Every derivation above intentionally uses the physical mi[0]/mi[1] (opcode dims,
+    # MX duplicateFactor, MIInputPerThreadA/B); only the final stored M/N flip.
+    # MIBlock[0]/[1] stays physical.
+    result["MatrixInstM"], result["MatrixInstN"] = effectiveMatrixInstMN(mi[0], mi[1], sourceSwap)
 
     print2(f">> MI Parameters: {pprint.pformat(result)}")
     return result
@@ -306,16 +314,11 @@ def validateMIParameters(
         assert miEnabled == False, elineno()
         return True
 
-    # With SourceSwap the MatrixInstruction's M/N are transposed relative to
-    # MatrixInstM/MatrixInstN (e.g. F4 32x16 WMMA). This validator is dual-use:
-    # solution generation keeps the instruction order (M=mi4[0], N=mi4[1]) while
-    # the serialized logic yaml stores the swapped order, so accept either
-    # orientation when SourceSwap is set.
-    if solution.get("SourceSwap", False):
-        assert {solution["MatrixInstM"], solution["MatrixInstN"]} == {mi4[0], mi4[1]}, elineno()
-    else:
-        assert solution["MatrixInstM"] == mi4[0], elineno()
-        assert solution["MatrixInstN"] == mi4[1], elineno()
+    # Compare M/N in effective space: solution's MatrixInstM/N are already effective
+    # (SourceSwap-transposed), and we derive the same from the physical mi4.
+    expM, expN = effectiveMatrixInstMN(mi4[0], mi4[1], solution.get("SourceSwap", False))
+    assert solution["MatrixInstM"] == expM, elineno()
+    assert solution["MatrixInstN"] == expN, elineno()
     assert solution["MatrixInstK"] == mi4[2], elineno()
     assert solution["MatrixInstB"] == mi4[3], elineno()
 

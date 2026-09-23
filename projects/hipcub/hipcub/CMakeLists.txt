@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -74,17 +74,15 @@ rocm_install(
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
-include(ROCMExportTargetsHeaderOnly)
-
 # Export targets
 if(HIP_COMPILER STREQUAL "clang")
-  rocm_export_targets_header_only(
+  rocm_export_targets(
     TARGETS hip::hipcub
     DEPENDS PACKAGE rocprim
     NAMESPACE hip::
   )
 else()
-  rocm_export_targets_header_only(
+  rocm_export_targets(
     TARGETS hip::hipcub
     NAMESPACE hip::
   )

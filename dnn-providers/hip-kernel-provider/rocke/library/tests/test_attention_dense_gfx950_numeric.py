@@ -104,6 +104,20 @@ def _spec(
     )
 
 
+def _launcher_for(spec):
+    """The cached ``KernelLauncher`` for ``spec``, or None if none is compiled.
+
+    ``run_attention_dense_torch`` owns ``_DENSE_LAUNCHER_CACHE`` internally and
+    exposes no accessor, so this reads the module-level dict through the very
+    key function the production path uses -- a test-local reimplementation of
+    the key would assert against itself rather than against the shipped one.
+    """
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    return _DENSE_LAUNCHER_CACHE.get(attention_dense_cache_key(spec, arch="gfx950"))
+
+
 def _tolerance(dtype):
     """Numerical tolerance for max_abs error (matches gfx942).
 
@@ -189,6 +203,85 @@ class TestDenseNumeric:
         assert max_abs < tol, (
             f"{dtype} D{d} GQA{hq}/{hkv} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    def test_one_binary_serves_every_shape(self):
+        """One compiled artifact, two shapes, correct numerics at both.
+
+        The cohort above runs many shapes, but it stopped discriminating the
+        moment batch/seqlen_q/seqlen_kv became runtime kernel params: it passes
+        identically whether N shapes are served by N binaries or by one. The
+        property that actually needs a guard now is *artifact reuse*.
+
+        ``is`` on the launcher covers the whole path rather than just the key
+        function. A key regression would land the two shapes in different cache
+        slots; a lookup regression would overwrite the one slot with a freshly
+        compiled launcher. Both yield a different object, and neither is visible
+        to a numeric assertion -- recompiling per shape is *correct*, merely
+        wasteful, so what regresses is the AOT instance count and first-call
+        latency, which no accuracy check can see.
+
+        Paired with the numeric check at both shapes so the test cannot pass by
+        reusing one binary that happens to be wrong for the second shape.
+        """
+        import torch
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        dtype, d, hq, hkv = "bf16", 128, 16, 4  # flagship default, non-persistent
+        tol = _tolerance(dtype)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 1.0 / math.sqrt(d)
+
+        shapes = ((1, 512), (4, 1024))
+        specs = [_spec(dtype, d, hq, hkv, False, batch=b, sq=s) for b, s in shapes]
+
+        # Preconditions: genuinely different shapes, on the runtime path, and
+        # sharing one key -- otherwise the reuse assertion is vacuous.
+        assert specs[0].runtime_shape, "cohort row is not on the runtime-shape path"
+        assert (specs[0].batch, specs[0].seqlen_q) != (
+            specs[1].batch,
+            specs[1].seqlen_q,
+        )
+        keys = [attention_dense_cache_key(s, arch="gfx950") for s in specs]
+        assert keys[0] == keys[1], f"shapes {shapes} did not share a cache key"
+
+        # Own the cache state: evicting first makes the "exactly one new entry"
+        # assertion independent of which tests ran before this one.
+        _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+        before = set(_DENSE_LAUNCHER_CACHE)
+
+        launchers = []
+        for (B, S), spec in zip(shapes, specs):
+            torch.manual_seed(0)
+            q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+            k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+            v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+            out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+            run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+            torch.cuda.synchronize()
+            launchers.append(_launcher_for(spec))
+
+            ref = _standard_reference(q, k, v, scale)
+            max_abs = (ref - out.float()).abs().max().item()
+            assert max_abs < tol, f"B={B} S={S}: max_abs={max_abs:.3e} >= {tol}"
+
+        assert launchers[0] is not None, (
+            "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is "
+            "no longer keyed by attention_dense_cache_key and this test is blind"
+        )
+        assert launchers[0] is launchers[1], (
+            f"shapes {shapes} share a cache key but were served by DIFFERENT "
+            "launcher objects -- the runtime-shape kernel recompiled per shape, "
+            "so the AOT instance count still scales with the shape space"
+        )
+        assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+            "two shapes on the runtime path added more than one cache entry: "
+            f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
         )
 
 
