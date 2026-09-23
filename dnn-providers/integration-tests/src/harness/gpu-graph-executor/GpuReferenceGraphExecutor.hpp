@@ -136,6 +136,9 @@ private:
 
         switch(node.attributes_type())
         {
+        case NodeAttrs::BatchnormAttributes:
+            return detail::GpuBatchnormFwdTrainSignatureKey(
+                node, tensorMap, node.compute_data_type());
         case NodeAttrs::ConvolutionFwdAttributes:
             return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::LayernormAttributes:
@@ -161,7 +164,6 @@ private:
 
         // Node types with no GPU plan yet - throw descriptive error
         case NodeAttrs::BatchnormBackwardAttributes:
-        case NodeAttrs::BatchnormAttributes:
         case NodeAttrs::ConvolutionBwdAttributes:
         case NodeAttrs::ConvolutionWrwAttributes:
         case NodeAttrs::MatmulAttributes:
