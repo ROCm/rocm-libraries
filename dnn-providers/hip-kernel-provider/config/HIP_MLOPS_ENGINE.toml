@@ -28,8 +28,13 @@ version = 1
 #   filters:       array of GTest globs matched against the full GTest name
 #   tensors:       array of globs matched against the output tensor's label — its
 #                  name, or "uid=N" when the graph did not name it
-#   validator:     "allclose" or "rms"
-#   rms_threshold: required when validator = "rms"
+#   validator:     "allclose", "allclose_matching_infinities" or "rms"
+#   rms_threshold: required when validator = "rms", and must be absent otherwise
+# "allclose_matching_infinities" grades as "allclose" does, at the same resolved
+# atol/rtol, except that an element that is infinite with the same sign in both the
+# reference and the device output compares equal — for an output whose correct value
+# is infinite on both sides, such as a fully masked SDPA forward log-sum-exp row.
+# NaN, opposite-signed infinities and finite-versus-infinite still fail.
 # Later entries take precedence.
 #
 # Layernorm backward's dscale/dbias are reductions over the batch axes:

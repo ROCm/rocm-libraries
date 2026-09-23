@@ -14,6 +14,36 @@
 namespace hipdnn_integration_tests::bundle
 {
 
+namespace
+{
+
+/// The report a glob-selected validator produces when it cannot grade the tensor the
+/// glob caught. Shared by every such validator so an operator is told the same three
+/// things — which tensor, which config section, and what to change — whichever one
+/// over-matched.
+///
+/// `validatorName` is the TOML spelling, because the config line is what the reader
+/// has to edit.
+std::string validatorNotApplicable(const std::string& label,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                   const char* validatorName,
+                                   const char* reason)
+{
+    std::ostringstream error;
+    error << "\nValidator override NOT APPLICABLE\n"
+          << "  Tensor: " << label << "\n"
+          << "  Data type: " << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType)
+          << "\n"
+          << "  A [[validator_overrides]] entry in this engine's TOML config selected the\n  "
+          << validatorName << " validator for this tensor, but it does not support this data type ("
+          << reason
+          << ").\n"
+             "  Narrow that entry's 'tensors' glob so it no longer matches this tensor.\n";
+    return error.str();
+}
+
+} // namespace
+
 std::string tensorLabel(int64_t uid, const std::string& name)
 {
     if(!name.empty())
@@ -42,10 +72,11 @@ ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType 
                 {}};
 
     case ValidatorKind::RMS:
-        // Only RMS is caught. It is the one kind a [[validator_overrides]] glob can
-        // select, so an unsupported data type here is an operator's config mistake and
-        // deserves a legible answer. allclose is the default that nothing selects, so
-        // there is no glob to blame and its own throw stays a throw.
+        // Only the glob-selectable kinds are caught. They are the kinds a
+        // [[validator_overrides]] entry can pick, so an unsupported data type here is an
+        // operator's config mistake and deserves a legible answer. allclose is the
+        // default that nothing selects, so there is no glob to blame and its own throw
+        // stays a throw.
         try
         {
             return {
@@ -54,21 +85,25 @@ ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType 
         }
         catch(const std::exception& e)
         {
-            std::ostringstream error;
-            error << "\nValidator override NOT APPLICABLE\n"
-                  << "  Tensor: " << label << "\n"
-                  << "  Data type: "
-                  << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType) << "\n"
-                  << "  A [[validator_overrides]] entry in this engine's TOML config selected the\n"
-                     "  rms validator for this tensor, but it does not support this data type ("
-                  << e.what()
-                  << ").\n"
-                     "  Narrow that entry's 'tensors' glob so it no longer matches this tensor.\n";
-            return {nullptr, error.str()};
+            return {nullptr, validatorNotApplicable(label, dataType, "rms", e.what())};
+        }
+
+    case ValidatorKind::ALLCLOSE_MATCHING_INFINITIES:
+        try
+        {
+            return {hipdnn_test_sdk::utilities::createAllCloseMatchingInfinitiesValidator(
+                        dataType, tolerance.atol, tolerance.rtol),
+                    {}};
+        }
+        catch(const std::exception& e)
+        {
+            return {
+                nullptr,
+                validatorNotApplicable(label, dataType, "allclose_matching_infinities", e.what())};
         }
 
     default:
-        // A kind that is neither, i.e. a new ValidatorKind whose case was never written.
+        // A new ValidatorKind whose case above was never written.
         // Grading it as allclose by omission is exactly the silent miscompare this whole
         // mechanism exists to prevent, so refuse instead.
         throw std::invalid_argument("makeValidator: unhandled ValidatorKind");

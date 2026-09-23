@@ -47,12 +47,21 @@ using ExpectedTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor&(
 /// through cancellation — layernorm/RMSNorm backward dscale/dbias — where per-element
 /// relative error is unbounded while the aggregate error is not.
 ///
-/// Nothing selects RMS on its own: only an engine's TOML config can, via a
-/// [[validator_overrides]] entry naming the tensor.
+/// ALLCLOSE_MATCHING_INFINITIES grades exactly as ALLCLOSE does, except that an
+/// element that is infinite with the same sign in both the reference and the device
+/// output compares equal. NaN, opposite-signed infinities and finite-versus-infinite
+/// disagreements still fail, and finite elements are still graded by atol/rtol. It
+/// exists for an output whose correct value is infinite on both sides — an SDPA
+/// forward log-sum-exp row that is fully masked, whose reference and device values
+/// are both -inf and are both right.
+///
+/// Nothing selects RMS or ALLCLOSE_MATCHING_INFINITIES on its own: only an engine's
+/// TOML config can, via a [[validator_overrides]] entry naming the tensor.
 enum class ValidatorKind
 {
     ALLCLOSE,
     RMS,
+    ALLCLOSE_MATCHING_INFINITIES,
 };
 
 /// How one tensor is compared. Resolved per output tensor, and overridable per test
@@ -73,6 +82,12 @@ struct ComparisonTolerance
     static ComparisonTolerance rms(float threshold)
     {
         return ComparisonTolerance{0.0f, 0.0f, ValidatorKind::RMS, threshold};
+    }
+
+    static ComparisonTolerance allCloseMatchingInfinities(float atolIn, float rtolIn)
+    {
+        return ComparisonTolerance{
+            atolIn, rtolIn, ValidatorKind::ALLCLOSE_MATCHING_INFINITIES, 0.0f};
     }
 };
 
@@ -130,11 +145,12 @@ struct ValidatorSelection
 
 /// Builds the validator `tolerance` selects for one output tensor.
 ///
-/// RMS is implemented for FLOAT/HALF/BFLOAT16/DOUBLE only, so a `tensors` glob one
-/// wildcard too wide can select it for an integer output. The TOML parser cannot catch
-/// that — a tensor's data type is not known until its graph is read — so it surfaces
-/// here as a named failure that says which glob over-matched, rather than as an
-/// exception unwinding out of the test body.
+/// RMS and ALLCLOSE_MATCHING_INFINITIES are both implemented for FLOAT/HALF/BFLOAT16/
+/// DOUBLE only — RMS has no integer formulation, and an integer has no infinity to
+/// match — so a `tensors` glob one wildcard too wide can select either of them for an
+/// integer output. The TOML parser cannot catch that — a tensor's data type is not
+/// known until its graph is read — so it surfaces here as a named failure that says
+/// which glob over-matched, rather than as an exception unwinding out of the test body.
 ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                                  const std::string& label,
                                  const ComparisonTolerance& tolerance);
