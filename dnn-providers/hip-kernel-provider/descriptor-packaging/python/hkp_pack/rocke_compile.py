@@ -1,4 +1,5 @@
 import dataclasses
+import hashlib
 import inspect
 import typing
 from importlib import import_module
@@ -6,6 +7,7 @@ from pathlib import Path
 
 from .errors import HkpPackError
 from .variant import _hash_payload
+from .agreement import OriginObserver, observe
 
 try:
     from types import UnionType as _UnionType
@@ -177,17 +179,14 @@ def _resolve_spec_class(module, builder_fn):
 def _require_spec_arch_signature(builder_fn, builder):
     """Require exactly `(spec, *, arch)` — nothing the UKD cannot supply.
 
-    Keyword-only parameters beyond `arch` are the dangerous case, and the
-    original check could not see them: it counted only POSITIONAL_ONLY and
-    POSITIONAL_OR_KEYWORD. `gfx942/attention_dense.py`'s
-    `tuning: Gfx942DenseTuning = _DEFAULT_TUNING` slipped through and was
-    silently frozen at its default on every pack, with nothing in the descriptor
-    able to influence it and nothing in the output recording that.
+    Keyword-only parameters beyond `arch` are the dangerous case. A builder that
+    takes a defaulted tuning object would leave that tuning value silently frozen
+    at its default on every pack, with nothing in the descriptor able to
+    influence it and nothing in the output recording that.
 
-    That is not a hypothetical: the tuning class's own docstring warns the
-    pattern "is exactly how a real +79% got reported as -17% in this tree."
-    Silently defaulting a performance knob is worse than refusing to build,
-    because the artifact looks fine.
+    That is not a hypothetical: a silently defaulted knob is exactly how a real
+    regression got mis-reported in this tree. Defaulting a performance knob out
+    of sight is worse than refusing to build, because the artifact looks fine.
 
     A parameter with a default is still rejected. Having a default is what makes
     it invisible; it does not make it unimportant.
@@ -341,8 +340,10 @@ def _check_support_predicate(module, builder, spec_obj, arch):
         )
 
 
-def compile_rocke_variant(source, builder, spec, arch, out_dir):
-    """Compile one rocke UKD variant for one arch, returning (co_path, symbol).
+def compile_rocke_variant(
+    source, builder, spec, arch, out_dir, requests=None, origins=None
+):
+    """Compile one variant, returning (code object, captured symbol, observations).
 
     Imports the builder module named by `source` — a dotted module path resolved
     through the importable `kernels` package, never a file path under the source
@@ -378,6 +379,11 @@ def compile_rocke_variant(source, builder, spec, arch, out_dir):
         raise HkpPackError(f"invalid spec for {spec_cls.__name__}: {exc}") from exc
 
     _check_support_predicate(module, builder, spec_obj, arch)
+    # Observed BEFORE the builder runs, on the object `builder_fn` is about to be
+    # handed: reading the same attributes afterwards would observe whatever the
+    # builder left behind.
+    origins = origins if origins is not None else OriginObserver()
+    observations = observe(spec_obj, builder_fn, requests or {}, origins)
 
     try:
         kernel = builder_fn(spec_obj, arch=arch)
@@ -408,4 +414,10 @@ def compile_rocke_variant(source, builder, spec, arch, out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)
     co_path = out_dir / f"{rocke_variant_key(source, builder, spec)}.co"
     co_path.write_bytes(artifact.hsaco)
-    return co_path, artifact.kernel_name
+    origins.stable()
+    # The arch, captured symbol and code object identify which compile these
+    # observations came from; a reader binds all three to the shipped descriptor.
+    observations["arch"] = arch
+    observations["symbol"] = artifact.kernel_name
+    observations["code_object_sha256"] = hashlib.sha256(artifact.hsaco).hexdigest()
+    return co_path, artifact.kernel_name, observations

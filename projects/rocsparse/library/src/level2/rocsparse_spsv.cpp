@@ -117,10 +117,6 @@ namespace rocsparse
         {
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSV
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // CSC triangular solve is dispatched through the cscsv_* wrappers,
             // which internally express it as a transposed CSR solve (no descriptor
             // is allocated). This mirrors the CSR path below one-to-one.
@@ -183,7 +179,6 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
             // LCOV_EXCL_STOP
             break;
-#endif
         }
         case rocsparse_format_csr:
         {

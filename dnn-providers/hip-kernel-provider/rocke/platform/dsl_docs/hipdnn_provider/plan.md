@@ -371,7 +371,7 @@ real CPU-reference verification, both of which are meaningful only on a
 non-trivial kernel.
 
 **Op:** forward 2D convolution via `build_implicit_gemm_conv`
-(`dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/common/conv_implicit_gemm.py`).
+(`dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`).
 
 **Shape:** the bake-off shape from
 `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/common/bake_off_implicit_gemm.py`
@@ -572,7 +572,7 @@ simplicity.
 - **P-4.** Confirm the `rocke` package version surface. Does
   `rocke.__version__` exist? If not, plan a small upstream patch to
   add it (we need it for the cache key).
-- **P-5.** Read `instances/common/conv_implicit_gemm.py` and
+- **P-5.** Read `library/kernels/common/conv_implicit_gemm.py` and
   `examples/common/bake_off_implicit_gemm.py` end to end. Inventory the 36
   spec fields, mark which are graph-derived vs constexpr defaults, and
   capture the bake-off knob values verbatim. This becomes the
@@ -822,7 +822,7 @@ All entries are committed code or in-tree documentation.
 
 - DSL compile entry: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/helpers/compile.py`
 - DSL instances: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/`
-- DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/common/conv_implicit_gemm.py`
+- DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`
 - DSL conv example (shape + perf numbers cited in §4): `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/common/bake_off_implicit_gemm.py`
 - Existing DSL C++ launcher (HSACO load + launch): `projects/composablekernel/example/ck_tile/dsl/common/launcher.cpp`
 - Plugin SDK developer guide: `projects/hipdnn/docs/PluginDevelopment.md`

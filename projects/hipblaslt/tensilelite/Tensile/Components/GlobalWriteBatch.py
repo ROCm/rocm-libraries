@@ -856,6 +856,8 @@ class GlobalWriteBatchWriter:
     # Primer SGPRs for delayed incrementToNextRow (NonEdge / optSrdIncForRow).
     module.add(SMovB32(dst=sgpr(self.tmpS01),   src=0, comment="Init sgpr offset"))
     module.add(SMovB32(dst=sgpr(self.tmpS01+1), src=0, comment="Init sgpr offset"))
+    if self.parentWriter.states.useGateResidual:
+      module.add(SMovB32(dst=sgpr("CLSGateRowInc"), src=0, comment="Init Gate CLS row offset"))
     if self.kernel["StoreRemapVectorWidth"] and self.kernel["CompactLoopStore"]:
       # Batch 0 checks out; later batches reuse parentWriter.compactLoopStoreVgpr.
       self.CompactLoopStoreVgpr = self.parentWriter.vgprPool.checkOut(1, tag="CompactLoopStoreVgpr_tmpVgpr")
@@ -1189,7 +1191,8 @@ class GlobalWriteBatchWriter:
             gateLoadMod = self.parentWriter.readInput(
                 self.kernel, self.ss, 'Gate',
                 _prologLoadDtype,
-                addrCalc, vc0, dataGate, self.gwvw, addrGateVgpr, self.tmpS01)
+                addrCalc, vc0, dataGate, self.gwvw, addrGateVgpr, self.tmpS01, elementIdx, self.batchIdx,
+                overrideAfterPrimerRows=_emitOverrideRows)
             _glTgt.add(gateLoadMod)
           else:
             # no-opt (edge) multi-dtype: per-dtype dispatcher per element (gate
@@ -1237,7 +1240,8 @@ class GlobalWriteBatchWriter:
                   (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrGateVgpr, self.addrD, 0))
               module.add(self.parentWriter.readInput(
                   self.kernel, self.ss, 'Gate', gDtype,
-                  addrCalc, vc0, dataGate, self.gwvw, addrGateVgpr, self.tmpS01))
+                  addrCalc, vc0, dataGate, self.gwvw, addrGateVgpr, self.tmpS01, elementIdx, self.batchIdx,
+                  overrideAfterPrimerRows=_emitOverrideRows))
               # Restore bpe/offset for the next branch in this elem.
               self.parentWriter.states.bpeGate = _savedBpeGate
               addrCalc.globalOffsetGate = _savedGlobalOffsetGate
@@ -1616,7 +1620,8 @@ class GlobalWriteBatchWriter:
             bufferOOB, (ei == 0), self.tmpVgpr, self.tmpSgpr, addrGateVgpr, self.addrD, 0))
         module.add(self.parentWriter.readInput(
             self.kernel, self.ss, 'Gate', gDtype, addrCalc, element[3], dataGate,
-            self.gwvw, addrGateVgpr, self.tmpS01))
+            self.gwvw, addrGateVgpr, self.tmpS01, ei, self.batchIdx,
+            overrideAfterPrimerRows=self._lookaheadRowInc(ei)))
 
     if not multi:
       # single-dtype: no GateType dispatch needed, just the loads.

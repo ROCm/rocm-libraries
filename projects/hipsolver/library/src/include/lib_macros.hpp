@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -79,6 +79,14 @@
     {                                                   \
         cusolverStatus_t _status = (STATUS);            \
         if(_status != CUSOLVER_STATUS_SUCCESS)          \
+            return hipsolver::cuda2hip_status(_status); \
+    } while(0)
+
+#define CHECK_CUBLAS_ERROR(STATUS)                      \
+    do                                                  \
+    {                                                   \
+        cublasStatus_t _status = (STATUS);              \
+        if(_status != CUBLAS_STATUS_SUCCESS)            \
             return hipsolver::cuda2hip_status(_status); \
     } while(0)
 

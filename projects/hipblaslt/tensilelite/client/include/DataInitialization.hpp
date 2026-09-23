@@ -37,6 +37,7 @@
 #include <mxDataGen.hpp>
 
 #include <cstddef>
+#include <map>
 #include <random>
 
 #include "RunListener.hpp"
@@ -1191,6 +1192,10 @@ namespace TensileLite
             // hand back gpuInput.valid as-is rather than re-swizzling).
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
+
+            // Scale descriptor most recently swizzled into gpuInput.valid, per
+            // tensor index. The MX equivalent of g_swizzleCache.
+            std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
         };
 
         template <>
@@ -2592,9 +2597,9 @@ namespace TensileLite
                 Float4x2 value;
             } x;
 
-            uint8_t val0 = static_cast<uint8_t>(rand() % 15);
-            uint8_t val1 = static_cast<uint8_t>(rand() % 15);
-            x.bits = (val1 << 4) | val0;
+            uint8_t val0 = static_cast<uint8_t>(rand() % 16);
+            uint8_t val1 = static_cast<uint8_t>(rand() % 16);
+            x.bits       = (val1 << 4) | val0;
             return x.value;
         }
         template <>

@@ -48,7 +48,7 @@ if(BUILD_SHARED_LIBS)
     # lib dir. When rocisa add_subdirectory's stinkytofu with EXCLUDE_FROM_ALL this
     # rule does not fire; rocisa installs the plugin into its wheel itself.
     install(TARGETS stinkytofu-plugin-helloworld
-        DESTINATION "lib/${STINKYTOFU_PLUGIN_INSTALL_RELDIR}")
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/${STINKYTOFU_PLUGIN_INSTALL_RELDIR}")
 else()
     add_library(stinkytofu-plugin-helloworld OBJECT
         HelloWorldPass.cpp

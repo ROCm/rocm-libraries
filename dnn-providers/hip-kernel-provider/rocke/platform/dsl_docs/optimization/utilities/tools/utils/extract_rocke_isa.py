@@ -12,7 +12,7 @@ if str(ROCKE_ROOT) not in sys.path:
     sys.path.insert(0, str(ROCKE_ROOT))
 
 from rocke.helpers import compile_kernel  # noqa: E402
-from rocke.instances.common.conv_implicit_gemm import (  # noqa: E402
+from kernels.common.conv_implicit_gemm import (  # noqa: E402
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,

@@ -40,6 +40,7 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_memory_check.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/detail/various.hpp>
@@ -150,7 +151,51 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
                      false,
                      rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>>>;
 
-TYPED_TEST_SUITE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
+struct RocprimDeviceSortTestsNameGenerator
+{
+    template<class T>
+    static std::string type_tag_or_custom()
+    {
+        if constexpr(std::is_same_v<T, common::custom_type_copyable<char, double, true>>)
+            return "CustomCopyableCharDouble";
+        else if constexpr(std::is_same_v<T, test_utils::custom_float_type>)
+            return "CustomFloatType";
+        else if constexpr(std::is_same_v<T, test_utils::custom_test_array_type<int, 4>>)
+            return "ArrayInt32x4";
+        else if constexpr(std::is_same_v<T, common::custom_huge_type<2048, float>>)
+            return "CustomHuge2048Float";
+        else
+            return type_tag<T>();
+    }
+
+    // A unique token per distinct config
+    template<class Config>
+    static std::string config_tag()
+    {
+        if constexpr(std::is_same_v<Config, ::rocprim::default_config>) return "";
+        else if constexpr(std::is_same_v<Config,
+                                         ::rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>>)
+            return "_CfgMs128";
+        else
+            static_assert(dependent_false<Config>::value,
+                          "config_tag: add a unique token for this config");
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag_or_custom<typename Params::key_type>() + "_"
+                        + type_tag_or_custom<typename Params::value_type>();
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        if constexpr(Params::use_indirect_iterator) n += "_Indirect";
+        n += config_tag<typename Params::config>();
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceSortTests,
+                 RocprimDeviceSortTestsParams,
+                 RocprimDeviceSortTestsNameGenerator);
 
 // When running under Valgrind, we need to disable some larger-sized tests because they
 // either hang or are too slow. This function checks to see if both:
