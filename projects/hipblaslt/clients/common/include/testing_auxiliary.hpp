@@ -26,16 +26,13 @@
 
 #pragma once
 
-#include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
-#include "hipblaslt_test.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
-#include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
-#include "hipblaslt_random.hpp"
-#include "hipblaslt_vector.hpp"
+#include "hipblaslt_test.hpp"
+#include <hipblaslt/hipblaslt-ext-op.h>
+#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
+#include <hipblaslt/hipblaslt.h>
 #ifdef CODE_COVERAGE
 #include "check_numerics_matrix.hpp"
 #include "hipblaslt_internal.hpp"
@@ -45,7 +42,6 @@
 #include "tensile_host.hpp"
 #include "utility.hpp"
 #endif
-#include "unit.hpp"
 #include "utility.hpp"
 #include <limits>
 

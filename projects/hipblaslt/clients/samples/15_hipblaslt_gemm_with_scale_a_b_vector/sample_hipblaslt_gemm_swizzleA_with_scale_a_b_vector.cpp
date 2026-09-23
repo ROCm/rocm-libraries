@@ -25,11 +25,15 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/tensor.hpp>
+#include <span>
+#include <type_traits>
 
-#include "TensorDataManipulation.hpp"
 #include "datatype_interface.hpp"
 #include "helper.h"
 
@@ -61,23 +65,39 @@ void calculateKforSwizzling(hipDataType datatype, size_t& MiK, size_t& MiKv, siz
 template <typename T>
 void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
 {
-    using Tensor = Tensor::Manipulation::Tensor;
-    size_t MiM   = 16;
+    using Storage = std::conditional_t<
+        sizeof(T) == 1,
+        std::uint8_t,
+        std::conditional_t<sizeof(T) == 2,
+                           std::uint16_t,
+                           std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>>>;
+    static_assert(sizeof(T) == sizeof(Storage));
+
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
+
+    size_t MiM = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(hipblaslt_type2datatype<T>(), MiK, MiKv, PackK);
-    auto tmpTensor = Tensor::create<T>({m, k});
-    std::copy(src, src + (m * k), tmpTensor.template as<T>());
 
+    std::vector<Storage> nativeStorage(m * k);
+    const auto           sourceBytes = std::as_bytes(std::span(src, m * k));
+    auto                 nativeBytes = std::as_writable_bytes(std::span(nativeStorage));
+    std::copy(sourceBytes.begin(), sourceBytes.end(), nativeBytes.begin());
+
+    const Shape sourceShape = colMaj ? Shape{k, m} : Shape{m, k};
+    Tensor      tmpTensor   = Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(sourceShape),
+                                                 std::span<const Storage>(nativeStorage));
     if(colMaj)
-    {
-        auto orgTensor = Tensor::create<T>({k, m});
-        std::copy(src, src + (m * k), orgTensor.template as<T>());
-        tmpTensor = permute(orgTensor, {1, 0});
-    }
+        tmpTensor = tmpTensor.copyWithPermutedDimensions({1, 0});
 
-    tmpTensor.reshape({m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor permuted = permute(tmpTensor, {0, 2, 3, 1, 4});
-    std::copy(permuted.template as<T>(), permuted.template as<T>() + (m * k), dst);
+    const Tensor permuted
+        = tmpTensor.reshapeSharingStorage(Shape{m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK})
+              .copyWithPermutedDimensions({0, 2, 3, 1, 4});
+    const std::span<const std::byte> swizzledBytes = permuted.rawEncodedBackingStorage();
+    auto destinationBytes                          = std::as_writable_bytes(std::span(dst, m * k));
+    std::copy(swizzledBytes.begin(), swizzledBytes.end(), destinationBytes.begin());
 }
 
 void simpleGemm(hipblasLtHandle_t  handle,
@@ -182,15 +202,20 @@ int main()
     const hip_bfloat16* regularCpuD  = static_cast<hip_bfloat16*>(runner.d);
     const hip_bfloat16* swizzledCpuD = static_cast<hip_bfloat16*>(swizzleRunner.d);
 
-    for(size_t i = 0; i < m * n; ++i)
+    using namespace roc::host_numerics;
+    const auto layout = Layout::contiguousLastDimensionFastest(Shape{m * n});
+    const auto expected = Tensor::copyEncodedBackingStorage(
+        ScalarType::BFloat16,
+        layout,
+        std::as_bytes(std::span<const hip_bfloat16>(regularCpuD, m * n)));
+    const auto observed = Tensor::copyEncodedBackingStorage(
+        ScalarType::BFloat16,
+        layout,
+        std::as_bytes(std::span<const hip_bfloat16>(swizzledCpuD, m * n)));
+    if(!compare(observed, expected, nearComparisonOptions(1e-5)).passed())
     {
-        const auto diff = std::abs(float(regularCpuD[i] - float(swizzledCpuD[i])));
-        if(diff > 1e-5)
-        {
-            std::cerr << "F8 Swizzle Validation Error at index: " << i << ", diff: " << diff
-                      << '\n';
-            break;
-        }
+        std::cerr << "F8 swizzle validation failed.\n";
+        return 1;
     }
 
     std::cout << "Matrix multiplication and validation completed successfully." << std::endl;

@@ -24,9 +24,13 @@
  *
  *******************************************************************************/
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
+#include <roc/host_numerics/generation.hpp>
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
@@ -51,6 +55,55 @@
         exit(EXIT_FAILURE);                                                               \
     }
 #endif
+
+namespace hipblaslt_sample_detail
+{
+    enum class GemmInitializationSequence : std::uint64_t
+    {
+        A          = 0,
+        B          = 1,
+        C          = 2,
+        Bias       = 3,
+        ScaleAlpha = 4,
+    };
+
+    enum class LayerNormInitializationSequence : std::uint64_t
+    {
+        Input = 0,
+        Gamma = 1,
+        Beta  = 2,
+    };
+
+    enum class AMaxInitializationSequence : std::uint64_t
+    {
+        Input = 0,
+    };
+
+    constexpr std::uint64_t groupedInitializationSequence(std::uint64_t            group,
+                                                        GemmInitializationSequence role)
+    {
+        return (group << 32) | static_cast<std::uint64_t>(role);
+    }
+
+    template <typename Type>
+    void generateUniformInteger(Type* values, size_t elements, std::uint64_t sequence)
+    {
+        const std::uint64_t recipeSeed
+            = hipblaslt::host_numerics::initialization::seedForSequence(
+                hipblaslt::host_numerics::defaultInitializationSeed, sequence);
+        const auto recipe = roc::host_numerics::GenerationRecipe::realOnly(
+            roc::host_numerics::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
+            {.seed = recipeSeed});
+        auto generated = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            values,
+            elements,
+            roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                roc::host_numerics::Shape{elements}));
+        roc::host_numerics::generate(generated, recipe);
+        hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
+            values, elements, generated);
+    }
+} // namespace hipblaslt_sample_detail
 
 template <typename InTypeA,
           typename InTypeB,
@@ -78,16 +131,15 @@ struct Runner
         CHECK_HIP_ERROR(hipStreamCreate(&stream));
         CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
 
-        if constexpr(
-            false
+        if constexpr(false
 #if defined(HIPBLASLT_USE_FP4)
-            || std::is_same_v<InTypeA, hipblaslt_f4x2>
+                     || std::is_same_v<InTypeA, hipblaslt_f4x2>
 #endif
 #if defined(HIPBLASLT_USE_FP6)
-            || std::is_same_v<InTypeA, hipblaslt_f6x16>
+                     || std::is_same_v<InTypeA, hipblaslt_f6x16>
 #endif
 #if defined(HIPBLASLT_USE_BF6)
-            || std::is_same_v<InTypeA, hipblaslt_bf6x16>
+                     || std::is_same_v<InTypeA, hipblaslt_bf6x16>
 #endif
         )
         {
@@ -99,16 +151,15 @@ struct Runner
             a_factor = 1;
         }
 
-        if constexpr(
-            false
+        if constexpr(false
 #if defined(HIPBLASLT_USE_FP4)
-            || std::is_same_v<InTypeB, hipblaslt_f4x2>
+                     || std::is_same_v<InTypeB, hipblaslt_f4x2>
 #endif
 #if defined(HIPBLASLT_USE_FP6)
-            || std::is_same_v<InTypeB, hipblaslt_f6x16>
+                     || std::is_same_v<InTypeB, hipblaslt_f6x16>
 #endif
 #if defined(HIPBLASLT_USE_BF6)
-            || std::is_same_v<InTypeB, hipblaslt_bf6x16>
+                     || std::is_same_v<InTypeB, hipblaslt_bf6x16>
 #endif
         )
         {
@@ -134,10 +185,15 @@ struct Runner
 
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
-        for(int i = 0; i < m * n * batch_count; i++)
-            ((OutType*)c)[i] = static_cast<OutType>((rand() % 7) - 3);
-        for(int i = 0; i < m * batch_count; ++i)
-            ((float*)alphaVec)[i] = static_cast<float>((rand() % 7) - 3);
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<OutType*>(c),
+            size_t(m * n * batch_count),
+            static_cast<std::uint64_t>(hipblaslt_sample_detail::GemmInitializationSequence::C));
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<float*>(alphaVec),
+            size_t(m * batch_count),
+            static_cast<std::uint64_t>(
+                hipblaslt_sample_detail::GemmInitializationSequence::ScaleAlpha));
     }
 
     ~Runner()
@@ -186,8 +242,11 @@ struct Runner
 
             CHECK_HIP_ERROR(hipMalloc(&d_biasVec, biasElems * sizeof(BiasType)));
             CHECK_HIP_ERROR(hipHostMalloc(&biasVec, biasElems * sizeof(BiasType)));
-            for(int i = 0; i < biasElems; ++i)
-                ((BiasType*)biasVec)[i] = static_cast<BiasType>((rand() % 7) - 3);
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<BiasType*>(biasVec),
+                size_t(biasElems),
+                static_cast<std::uint64_t>(
+                    hipblaslt_sample_detail::GemmInitializationSequence::Bias));
         }
     }
 
@@ -300,14 +359,30 @@ struct RunnerVec
             CHECK_HIP_ERROR(hipHostMalloc(&d[j], m[j] * n[j] * batch_count[j] * sizeof(OutType)));
             CHECK_HIP_ERROR(hipHostMalloc(&alphaVec[j], m[j] * batch_count[j] * sizeof(float)));
 
-            for(int i = 0; i < m[j] * k[j] * batch_count[j]; i++)
-                ((InTypeA*)a[j])[i] = static_cast<InTypeA>((rand() % 7) - 3);
-            for(int i = 0; i < n[j] * k[j] * batch_count[j]; i++)
-                ((InTypeB*)b[j])[i] = static_cast<InTypeB>((rand() % 7) - 3);
-            for(int i = 0; i < m[j] * n[j] * batch_count[j]; i++)
-                ((OutType*)c[j])[i] = static_cast<OutType>((rand() % 7) - 3);
-            for(int i = 0; i < m[j] * batch_count[j]; i++)
-                ((float*)alphaVec[j])[i] = static_cast<float>((rand() % 7) - 3);
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<InTypeA*>(a[j]),
+                size_t(m[j] * k[j] * batch_count[j]),
+                hipblaslt_sample_detail::groupedInitializationSequence(
+                    static_cast<std::uint64_t>(j),
+                    hipblaslt_sample_detail::GemmInitializationSequence::A));
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<InTypeB*>(b[j]),
+                size_t(n[j] * k[j] * batch_count[j]),
+                hipblaslt_sample_detail::groupedInitializationSequence(
+                    static_cast<std::uint64_t>(j),
+                    hipblaslt_sample_detail::GemmInitializationSequence::B));
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<OutType*>(c[j]),
+                size_t(m[j] * n[j] * batch_count[j]),
+                hipblaslt_sample_detail::groupedInitializationSequence(
+                    static_cast<std::uint64_t>(j),
+                    hipblaslt_sample_detail::GemmInitializationSequence::C));
+            hipblaslt_sample_detail::generateUniformInteger(
+                static_cast<float*>(alphaVec[j]),
+                size_t(m[j] * batch_count[j]),
+                hipblaslt_sample_detail::groupedInitializationSequence(
+                    static_cast<std::uint64_t>(j),
+                    hipblaslt_sample_detail::GemmInitializationSequence::ScaleAlpha));
         }
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
@@ -423,12 +498,21 @@ struct LayerNormRunner
         CHECK_HIP_ERROR(hipHostMalloc(&gamma, n * sizeof(Type)));
         CHECK_HIP_ERROR(hipHostMalloc(&beta, n * sizeof(Type)));
 
-        for(int i = 0; i < m * n; i++)
-            ((Type*)in)[i] = static_cast<Type>((rand() % 7) - 3);
-        for(int i = 0; i < n; i++)
-            ((Type*)gamma)[i] = static_cast<Type>((rand() % 7) - 3);
-        for(int i = 0; i < n; i++)
-            ((Type*)beta)[i] = static_cast<Type>((rand() % 7) - 3);
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<Type*>(in),
+            size_t(m * n),
+            static_cast<std::uint64_t>(
+                hipblaslt_sample_detail::LayerNormInitializationSequence::Input));
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<Type*>(gamma),
+            size_t(n),
+            static_cast<std::uint64_t>(
+                hipblaslt_sample_detail::LayerNormInitializationSequence::Gamma));
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<Type*>(beta),
+            size_t(n),
+            static_cast<std::uint64_t>(
+                hipblaslt_sample_detail::LayerNormInitializationSequence::Beta));
     }
 
     ~LayerNormRunner()
@@ -507,8 +591,10 @@ struct OptAMaxRunner
         CHECK_HIP_ERROR(hipHostMalloc(&out, sizeof(Type)));
         CHECK_HIP_ERROR(hipHostMalloc(&in, m * n * sizeof(Type)));
 
-        for(int i = 0; i < m * n; i++)
-            ((Type*)in)[i] = static_cast<Type>((rand() % 7) - 3);
+        hipblaslt_sample_detail::generateUniformInteger(
+            static_cast<Type*>(in),
+            size_t(m * n),
+            static_cast<std::uint64_t>(hipblaslt_sample_detail::AMaxInitializationSequence::Input));
     }
 
     ~OptAMaxRunner()

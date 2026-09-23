@@ -792,105 +792,133 @@ namespace MatrixMultiplyTest
     };
 
     template <typename TA, typename TB>
-    void exeScaledCPUMM(unsigned    M,
-                        unsigned    N,
-                        unsigned    K,
-                        const float scaleA,
-                        const float scaleB,
-                        float       alpha,
-                        double      err,
-                        bool        transA,
-                        bool        transB,
-                        const uint  scaleBlockSize)
+    void executeScaledHostReference(unsigned    M,
+                                    unsigned    N,
+                                    unsigned    K,
+                                    const float scaleA,
+                                    const float scaleB,
+                                    float       alpha,
+                                    double      err,
+                                    bool        transA,
+                                    bool        transB,
+                                    const uint  scaleBlockSize)
     {
         auto dataTypeA = TypeInfo<TA>::Var.dataType;
         auto dataTypeB = TypeInfo<TB>::Var.dataType;
+        AssertFatal(scaleBlockSize > 0, "Scale block size must be nonzero.");
+        AssertFatal(K % scaleBlockSize == 0,
+                    "K must be divisible by the scale block size.",
+                    ShowValue(K),
+                    ShowValue(scaleBlockSize));
 
         TensorDescriptor descA(dataTypeA, {M, K}, "T");
         TensorDescriptor descB(dataTypeB, {K, N}, "T");
 
-        auto A     = DGenVector<TA>(descA, -1.0, 1.0, 9861u);
-        auto B     = DGenVector<TB>(descB, -1.0, 1.0, 9861u);
-        auto C     = std::vector<float>(M * N);
-        auto D     = std::vector<float>(M * N);
-        auto ref_D = std::vector<float>(M * N);
+        auto generatedA
+            = HostNumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, 9861u);
+        auto generatedB
+            = HostNumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, 9861u);
+        using PackedTypeA = typename PackedTypeOf<TA>::type;
+        using PackedTypeB = typename PackedTypeOf<TB>::type;
+        auto A            = HostNumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
+        auto B            = HostNumerics::copyTensorStorage<PackedTypeB>(generatedB.data);
+        auto C            = std::vector<float>(M * N);
 
         auto AX = std::vector<uint8_t>(M * K / scaleBlockSize);
         auto BX = std::vector<uint8_t>(K * N / scaleBlockSize);
         std::fill(AX.begin(), AX.end(), scaleA);
         std::fill(BX.begin(), BX.end(), scaleB);
 
-        // TODO: now only works for _TN for A and B, need to enable other data layout
-        ScaledCPUMM(D, C, A, B, AX, BX, M, N, K, alpha, 0.0, transA, transB, scaleBlockSize);
+        TensorDescriptor referenceDescA(dataTypeA, {M, K}, transA ? "T" : "N");
+        TensorDescriptor referenceDescB(dataTypeB, {K, N}, transB ? "T" : "N");
+        TensorDescriptor descC(DataType::Float, {M, N}, "N");
+
+        auto D = HostNumerics::convertHostReference<float>(HostNumerics::computeHostReference(
+            HostNumerics::hostTensor(referenceDescA, A),
+            HostNumerics::hostTensor(referenceDescB, B),
+            HostNumerics::hostTensor(descC, C),
+            HostNumerics::hostScaleTensor(DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize),
+            HostNumerics::hostScaleTensor(DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize),
+            scaleBlockSize,
+            alpha,
+            0.0f));
 
         alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
 
-        CPUMM(ref_D, C, A, B, M, N, K, alpha, 0.0, transA, transB);
+        auto reference = HostNumerics::convertHostReference<float>(
+            HostNumerics::computeHostReference(HostNumerics::hostTensor(referenceDescA, A),
+                                               HostNumerics::hostTensor(referenceDescB, B),
+                                               HostNumerics::hostTensor(descC, C),
+                                               std::nullopt,
+                                               std::nullopt,
+                                               0,
+                                               alpha,
+                                               0.0f));
 
-        double rnorm = relativeNormL2(D, ref_D);
+        double rnorm = relativeNormL2(D, reference);
         Log::info("RNorm is {}", rnorm);
         ASSERT_LT(rnorm, err);
     }
 
     template <typename TA>
-    void scaledCPUMMMixed(rocRoller::DataType typeB,
-                          const int           m,
-                          const int           n,
-                          const int           k,
-                          const float         scaleA,
-                          const float         scaleB,
-                          float               alpha,
-                          double              err,
-                          bool                transA,
-                          bool                transB,
-                          const uint          scaleBlockSize = 32)
+    void scaledHostReferenceMixed(rocRoller::DataType typeB,
+                                  const int           m,
+                                  const int           n,
+                                  const int           k,
+                                  const float         scaleA,
+                                  const float         scaleB,
+                                  float               alpha,
+                                  double              err,
+                                  bool                transA,
+                                  bool                transB,
+                                  const uint          scaleBlockSize = 32)
     {
         if(typeB == rocRoller::DataType::FP8)
-            exeScaledCPUMM<TA, FP8>(
+            executeScaledHostReference<TA, FP8>(
                 m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeB == rocRoller::DataType::BF8)
-            exeScaledCPUMM<TA, BF8>(
+            executeScaledHostReference<TA, BF8>(
                 m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeB == rocRoller::DataType::FP6)
-            exeScaledCPUMM<TA, FP6>(
+            executeScaledHostReference<TA, FP6>(
                 m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeB == rocRoller::DataType::BF6)
-            exeScaledCPUMM<TA, BF6>(
+            executeScaledHostReference<TA, BF6>(
                 m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeB == rocRoller::DataType::FP4)
-            exeScaledCPUMM<TA, FP4>(
+            executeScaledHostReference<TA, FP4>(
                 m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else
             Throw<FatalError>("Invalid type.");
     }
 
-    void scaledCPUMMMixed(rocRoller::DataType typeA,
-                          rocRoller::DataType typeB,
-                          const int           m,
-                          const int           n,
-                          const int           k,
-                          const float         scaleA,
-                          const float         scaleB,
-                          float               alpha,
-                          double              err,
-                          bool                transA,
-                          bool                transB,
-                          const uint          scaleBlockSize = 32)
+    void scaledHostReferenceMixed(rocRoller::DataType typeA,
+                                  rocRoller::DataType typeB,
+                                  const int           m,
+                                  const int           n,
+                                  const int           k,
+                                  const float         scaleA,
+                                  const float         scaleB,
+                                  float               alpha,
+                                  double              err,
+                                  bool                transA,
+                                  bool                transB,
+                                  const uint          scaleBlockSize = 32)
     {
         if(typeA == rocRoller::DataType::FP8)
-            scaledCPUMMMixed<FP8>(
+            scaledHostReferenceMixed<FP8>(
                 typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeA == rocRoller::DataType::BF8)
-            scaledCPUMMMixed<BF8>(
+            scaledHostReferenceMixed<BF8>(
                 typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeA == rocRoller::DataType::FP6)
-            scaledCPUMMMixed<FP6>(
+            scaledHostReferenceMixed<FP6>(
                 typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeA == rocRoller::DataType::BF6)
-            scaledCPUMMMixed<BF6>(
+            scaledHostReferenceMixed<BF6>(
                 typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeA == rocRoller::DataType::FP4)
-            scaledCPUMMMixed<FP4>(
+            scaledHostReferenceMixed<FP4>(
                 typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else
             Throw<FatalError>("Invalid type.");
@@ -909,7 +937,7 @@ namespace MatrixMultiplyTest
 
         float alpha = 1.0f;
 
-        scaledCPUMMMixed(
+        scaledHostReferenceMixed(
             typeA, typeB, M, N, K, scaleA, scaleB, alpha, 1.e-5, transA == "T", transB == "T");
     }
 

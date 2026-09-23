@@ -36,6 +36,9 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <roc/host_numerics/operation_types.hpp>
+#include <span>
+#include <vector>
 
 namespace TensileLite
 {
@@ -97,24 +100,16 @@ namespace TensileLite
 
             bool validate(ContractionProblemGemm const& problem,
                           ContractionInputs const&      reference,
-                          ContractionInputs const&      result);
+                          ContractionInputs const&      result,
+                          const roc::host_numerics::OutputSelection& outputSelection);
 
             bool checkResults(TensorDescriptor const& tensor,
                               void const*             refPtr,
                               void const*             resPtr,
                               size_t                  maxElements,
                               bool                    isgpu,
-                              size_t                  validationStride,
+                              const roc::host_numerics::OutputSelection& outputSelection,
                               double                  threshold);
-
-            template <typename ValidType>
-            bool checkResultsTyped(TensorDescriptor const& tensor,
-                                   ValidType const*        reference,
-                                   ValidType const*        result,
-                                   size_t                  maxElement,
-                                   bool                    isgpu,
-                                   size_t                  validationStride,
-                                   double                  threshold);
 
             void printTensors(ContractionProblemGemm const& problem,
                               ContractionInputs const&      reference,
@@ -133,6 +128,7 @@ namespace TensileLite
 
             std::shared_ptr<DataInitialization> m_dataInit;
             std::shared_ptr<ProblemInputs>      m_referenceInputs;
+            std::vector<roc::host_numerics::OutputSelection> m_outputSelections;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;

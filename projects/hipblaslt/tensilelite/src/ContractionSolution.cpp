@@ -38,10 +38,8 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <mxDataGenerator/PreSwizzle.hpp>
-#endif
 #include <origami/streamk.hpp>
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -66,20 +64,14 @@ namespace TensileLite
 {
     namespace
     {
-        // Batch stride for pre-swizzled gfx950 MX scales. The padding rule lives in
-        // mxDataGenerator, which is an optional dependency (see tensilelite/CMakeLists.txt),
-        // so fail loudly rather than silently substituting an unpadded stride that would
-        // make the kernel read the wrong scale block.
-        size_t preSwizzledScaleBatchStride([[maybe_unused]] TensorDescriptor const& t,
-                                          [[maybe_unused]] char const*            semantic)
+        // Batch stride for pre-swizzled gfx950 MX scales.
+        size_t preSwizzledScaleBatchStride(TensorDescriptor const&      tensor,
+                                           [[maybe_unused]] char const* semantic)
         {
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-            return DGen::preSwizzleScalesGFX950PaddedSize(t.sizes()[1], t.sizes()[0]);
-#else
-            throw std::runtime_error(concatenate(
-                semantic,
-                " requires mxDataGenerator; rebuild with HIPBLASLT_ENABLE_MXDATAGENERATOR=ON"));
-#endif
+            using namespace roc::host_numerics::amd_gpu_layout;
+            return planMxScaleStorage(
+                       {tensor.sizes()[1], tensor.sizes()[0]}, 0, MxScaleStorageLayout::Gfx950)
+                .physicalByteCount;
         }
     }
 

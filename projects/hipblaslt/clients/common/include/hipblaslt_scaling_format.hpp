@@ -4,7 +4,7 @@
 #pragma once
 
 // Lightweight scaling-format enum for client code paths that must not pull in
-// hipblaslt_ostream.hpp (e.g. hipblaslt-mxdatagen compiled with -x hip).
+// hipblaslt_ostream.hpp.
 
 typedef enum class _hipblaslt_scaling_format
 {

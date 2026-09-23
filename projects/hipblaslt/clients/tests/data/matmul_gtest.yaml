@@ -109,7 +109,7 @@ Tests:
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
 # Special floating-point inputs on 64x64, FP types only. The inf, neg_inf and nan cases exercise
-# check_special_value_consistency(): CPU and GPU must agree on the IEEE class (no Inf->NaN).
+# Host comparison requires CPU and GPU to agree on the IEEE class (no Inf->NaN).
 # The zero and neg_zero cases are ordinary initialization coverage that flows through the normal
 # unit check; the consistency check does not inspect the sign of zero.
 - name: matmul_special_fp_64x64
