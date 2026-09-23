@@ -123,7 +123,7 @@ TEST(TestGfx950AttentionDenseGeometry, SingleHeadSingleBatchIsAOneDeepGrid)
     EXPECT_EQ(geometry.gridZ, 1U);
 }
 
-/// The launches the plan's witnesses name, read off attention_dense_grid/_block for each
+/// Representative launches, read off attention_dense_grid/_block for each
 /// block_m. The same graph launches differently per selected tile, so a prepare() that
 /// used one tile's block_m for another's binary produces exactly one of these mismatches.
 TEST(TestGfx950AttentionDenseGeometry, WitnessLaunchesDependOnTheSelectedBlockM)

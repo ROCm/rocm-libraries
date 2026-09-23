@@ -537,7 +537,7 @@ std::vector<KernelSpec> cohortOf(const KernelSpec& semantic, const std::vector<T
     return cohort;
 }
 
-/// BF16/D128/H9/9 noncausal: the cross-attention cohort the long-KV witnesses use.
+/// BF16/D128/H9/9 noncausal: a cross-attention cohort, used for the long-KV cases.
 KernelSpec canonicalD128H9()
 {
     KernelSpec spec = canonicalAligned();
