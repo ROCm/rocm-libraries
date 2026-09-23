@@ -149,21 +149,27 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
+        // On by default so that a lane which forgets to ask for it still gets it: the
+        // failure this guards against is a sidecar quietly going stale, and a default
+        // of off means every new engine has to remember to opt in before it is
+        // protected. Passing it explicitly is still meaningful -- it is the difference
+        // between "check if you can" and "check, and say so if you cannot", which is
+        // what the --test-engine requirement below keys on.
         parser.add_argument("--enforce-support-claims")
-            .default_value(false)
+            .default_value(true)
             .implicit_value(true)
-            .help("Enforce engine support claims from .support.json sidecars. "
+            .help("Enforce engine support claims from .support.json sidecars (default). "
                   "A broken claim (engine no longer supports a claimed graph) becomes "
-                  "a test FAIL instead of a silent SKIP.");
-        parser.add_argument("--report-support-claims")
+                  "a test FAIL instead of a silent SKIP. Passing this explicitly also "
+                  "makes a missing --test-engine an error rather than a quiet "
+                  "downgrade to reporting.");
+        // argparse has no automatic --no- negation, so the opt-out is its own flag.
+        parser.add_argument("--no-enforce-support-claims")
             .default_value(false)
             .implicit_value(true)
-            .help("Query engine support claims from .support.json sidecars and print "
-                  "the support-claim summary, without failing any test. The "
-                  "observe-only half of --enforce-support-claims: same query, same "
-                  "verdicts, exit code unchanged. Use it to measure how many claims "
-                  "would break before turning enforcement on. Implied by "
-                  "--enforce-support-claims.");
+            .help("Turn off support claim enforcement. Claims are still read and the "
+                  "summary is still printed -- a broken claim is reported instead of "
+                  "failing the test.");
         parser.add_argument("--write-support-claims")
             .default_value(false)
             .implicit_value(true)
@@ -325,8 +331,21 @@ int main(int argc, char** argv) noexcept
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.verificationMode = verificationMode;
         opts.captureDir = std::move(captureDir);
-        opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
-        opts.reportSupportClaims = parser.get<bool>("--report-support-claims");
+        // Enforcement defaults on, so the positive flag's *value* is always true and
+        // says nothing. What it is asked for here is whether it was typed: that is the
+        // only thing separating a lane that means to enforce from one that merely
+        // inherited the default, and the checks below owe those two different answers.
+        const bool enforceAsked = parser.is_used("--enforce-support-claims");
+        const bool enforceRefused = parser.get<bool>("--no-enforce-support-claims");
+
+        if(enforceAsked && enforceRefused)
+        {
+            std::cerr << "--enforce-support-claims and --no-enforce-support-claims are "
+                      << "mutually exclusive.\n";
+            return 1;
+        }
+
+        opts.enforceSupportClaims = !enforceRefused;
         opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
 
         if(opts.writeSupportClaims && !opts.articlePath.has_value())
@@ -349,16 +368,46 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // Writing authors the claims; enforcing and reporting both check them
-        // against the very file the same run would be rewriting. Whichever way that
-        // race landed the answer would be meaningless, so neither combination is
-        // allowed. --enforce and --report *are* compatible: enforcement is
-        // reporting plus a failure, so a run given both enforces.
-        if(opts.writeSupportClaims && (opts.enforceSupportClaims || opts.reportSupportClaims))
+        // Writing authors the claims; enforcing checks them against the very file the
+        // same run would be rewriting. Whichever way that race landed the answer
+        // would be meaningless, so the two never run together.
+        //
+        // Only a typed --enforce-support-claims is a contradiction worth refusing.
+        // Inheriting the default is not a request, and erroring on it would make
+        // --write-support-claims unusable without an opt-out flag that says nothing
+        // about what the run is for.
+        if(opts.writeSupportClaims)
         {
-            std::cerr << "--write-support-claims is mutually exclusive with "
-                      << "--enforce-support-claims and --report-support-claims.\n";
-            return 1;
+            if(enforceAsked)
+            {
+                std::cerr << "--write-support-claims is mutually exclusive with "
+                          << "--enforce-support-claims.\n";
+                return 1;
+            }
+            opts.enforceSupportClaims = false;
+        }
+
+        // Enforcement checks a sidecar against a named engine. Without one there is
+        // nothing to check, and silently degrading to "enforced nothing, exit 0" is
+        // the exact failure --enforce-support-claims exists to prevent -- so a run
+        // that asked for enforcement is refused rather than downgraded.
+        //
+        // A run that only inherited the default is downgraded instead. Enforcement is
+        // on everywhere now, and a plain `hipdnn_integration_tests` has never needed an
+        // engine; turning that into an error would fail runs that are not doing
+        // anything wrong. Nothing is lost by the downgrade: with no engine to check
+        // against, no claim is observed in either mode, and the summary header then
+        // reports the mode the run is actually in.
+        if(opts.enforceSupportClaims && !opts.engineName.has_value())
+        {
+            if(enforceAsked)
+            {
+                std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
+                             "engine to\n"
+                             "       check sidecar claims against.\n";
+                return 1;
+            }
+            opts.enforceSupportClaims = false;
         }
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
@@ -429,31 +478,6 @@ int main(int argc, char** argv) noexcept
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()
                       << "' is not loaded. Check the plugin path.\n";
             return 1;
-        }
-
-        // Enforcement checks a sidecar against a named engine. Without one there
-        // is nothing to check, and silently degrading to "enforced nothing, exit 0"
-        // is the exact failure --enforce-support-claims exists to prevent.
-        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
-           && !hipdnn_integration_tests::TestConfig::get().hasEngineName())
-        {
-            std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
-                         "engine to\n"
-                         "       check sidecar claims against.\n";
-            return 1;
-        }
-
-        // Same missing prerequisite, deliberately not fatal. Report mode's contract
-        // is that it leaves the exit code alone, so it warns and prints an empty
-        // summary rather than turning a run red over its own diagnostic. Enforcement
-        // returned above, so reaching here means report mode only.
-        if(hipdnn_integration_tests::TestConfig::get().reportSupportClaims()
-           && !hipdnn_integration_tests::TestConfig::get().hasEngineName())
-        {
-            std::cerr << "Warning: --report-support-claims without --test-engine; there is no "
-                         "engine to\n"
-                         "         check sidecar claims against, so the support claim summary "
-                         "will be empty.\n";
         }
 
         // Enumerated before any test records support data (see setEngineNames); the

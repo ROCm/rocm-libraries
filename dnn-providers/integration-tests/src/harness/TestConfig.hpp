@@ -138,8 +138,11 @@ struct TestConfigOptions
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
     std::optional<std::filesystem::path> captureDir;
+    // Off here, on at the command line: main.cpp resolves --enforce-support-claims
+    // (default true) and its opt-out into this field before initializing. In-process
+    // callers get the inert value, so a test that never mentions claims cannot be
+    // failed by one.
     bool enforceSupportClaims = false;
-    bool reportSupportClaims = false;
     bool writeSupportClaims = false;
 };
 
@@ -208,7 +211,6 @@ public:
         }
 
         instance._enforceSupportClaims = opts.enforceSupportClaims;
-        instance._reportSupportClaims = opts.reportSupportClaims;
         instance._writeSupportClaims = opts.writeSupportClaims;
 
         // Golden bundle configuration — default is ON; env var can override.
@@ -430,22 +432,13 @@ public:
         return _verificationMode.value_or(VerificationMode::AUTO);
     }
 
+    /// Query every claim-bearing bundle against the engine under test, print the
+    /// summary, and fail the test on a broken claim. One flag for all three: whether
+    /// the sidecar is read and whether a break is fatal are the same decision.
     bool enforceSupportClaims() const
     {
         throwIfNotInitialized();
         return _enforceSupportClaims;
-    }
-
-    /// Observe claims and print the summary, but never fail a test over one.
-    ///
-    /// Enforcement is a superset of this, so it implies it: a run given both flags
-    /// enforces. Kept as a separate query from enforceSupportClaims() because the
-    /// two gate different things -- this one gates whether the query happens at
-    /// all, that one gates whether a broken claim is fatal.
-    bool reportSupportClaims() const
-    {
-        throwIfNotInitialized();
-        return _reportSupportClaims || _enforceSupportClaims;
     }
 
     bool writeSupportClaims() const
@@ -496,7 +489,6 @@ private:
     bool _skipGraphValidation = false;
     bool _allowBundles = false;
     bool _enforceSupportClaims = false;
-    bool _reportSupportClaims = false;
     bool _writeSupportClaims = false;
     bool _initialized = false;
 };
