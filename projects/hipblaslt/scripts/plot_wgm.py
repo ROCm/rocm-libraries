@@ -55,7 +55,13 @@ MAGIC = 0x57474D44  # 'WGMD'
 
 
 def read_dump(path):
-    """Read the binary D dump and return a (N, ldd) uint32 array (raw bits)."""
+    """Read the binary D dump and return (raw_bytes, m, n, ldd, bpe).
+
+    Data-type agnostic: the WGM instrumentation emits a dedicated raw 16-byte
+    (dwordx4) store to each tile's top-left element, so the 4 diagnostic dwords
+    are the first 16 bytes at that element's byte offset regardless of the
+    output element size (bpe).
+    """
     with open(path, "rb") as f:
         header = f.read(20)
         if len(header) < 20:
@@ -64,32 +70,21 @@ def read_dump(path):
         if magic != MAGIC:
             sys.exit(
                 f"{path}: bad magic 0x{magic:08X} (expected 0x{MAGIC:08X}); "
-                "was this produced by a --debug-wgm build with HIPBLASLT_DEBUG_WGM_DUMP set?"
-            )
-        if bpe != 4:
-            sys.exit(
-                f"{path}: bytesPerElement={bpe}, but WGM visualization only supports "
-                "4-byte (f32_r) output. Rerun the GEMM with --precision f32_r."
+                "was this produced by an EnableWGMDebug build with HIPBLASLT_DEBUG_WGM_DUMP set?"
             )
         raw = f.read(ldd * n * bpe)
-
-    # D is column-major MxN with leading dimension ldd. Interpreting the raw
-    # bytes as uint32 and reshaping to (N, ldd) gives grid[n][m] == element(m, n)
-    # (the same orientation the original WriteTensor-based tool used: one text
-    # "row" per N index, columns walking M).
-    grid = np.frombuffer(raw, dtype=np.uint32)
-    if grid.size < ldd * n:
-        sys.exit(f"{path}: truncated payload ({grid.size} < {ldd * n} words)")
-    grid = grid[: ldd * n].reshape(n, ldd)
-    return grid, m, n, ldd
+    if len(raw) < ldd * n * bpe:
+        sys.exit(f"{path}: truncated payload ({len(raw)} < {ldd * n * bpe} bytes)")
+    return raw, m, n, ldd, bpe
 
 
-def build_lattice(grid, m, n, mt0, mt1):
-    """Decode the per-workgroup WGM diagnostics from the tile top-left elements.
+def build_lattice(raw, m, n, ldd, bpe, mt0, mt1):
+    """Decode the per-workgroup WGM diagnostics from each tile's top-left element.
 
-    Returns lattice[wgN][wgM] = (orig_wg, (new_wg1, new_wg0), xcc), the XCC grid,
-    the packed WGM value (should be identical across all tiles), and the walk
-    order indexed by original WG id.
+    D is column-major MxN (leading dim ldd, in elements). Element (row=m, col=n)
+    starts at byte (col*ldd + row)*bpe. The instrumentation wrote 16 contiguous
+    bytes (4 uint32) there. Returns lattice[wgN][wgM] = (orig_wg, (new_wg1,
+    new_wg0), xcc), the XCC grid, the packed WGM value, and the walk order.
     """
     n_wg_m = math.ceil(m / mt0)
     n_wg_n = math.ceil(n / mt1)
@@ -99,18 +94,16 @@ def build_lattice(grid, m, n, mt0, mt1):
     xcc_grid = np.zeros((n_wg_n, n_wg_m), dtype=int)
     wgm_value = None
 
-    # grid[n][m]: n over columns (N, step mt1), m over rows (M, step mt0).
+    def read4(row, col):
+        off = (col * ldd + row) * bpe
+        return struct.unpack("<4I", raw[off:off + 16])
+
     for wg_n, col in enumerate(range(0, n, mt1)):
         for wg_m, row in enumerate(range(0, m, mt0)):
-            orig_wg = int(grid[col][row + 0])
+            orig_wg, packed_new, xcc, wgm = read4(row, col)
 
-            packed_new = int(grid[col][row + 1])
             new_wg0 = (packed_new >> 16) & 0xFFFF
             new_wg1 = packed_new & 0xFFFF
-
-            xcc = int(grid[col][row + 2])
-
-            wgm = int(grid[col][row + 3])
             if wgm == 0xDEADBEEF or wgm == 0xBEEFBEEF:
                 sys.exit(
                     "Sentinel value found in WGM slot -- the instrumented store path "
@@ -193,11 +186,11 @@ def main():
                         help="output image path (default: <dump>_wgm.jpg)")
     args = parser.parse_args()
 
-    grid, m, n, ldd = read_dump(args.dump)
-    print(f"D output: {m}x{n} (ldd={ldd})")
+    raw, m, n, ldd, bpe = read_dump(args.dump)
+    print(f"D output: {m}x{n} (ldd={ldd}, {bpe}B/elem)")
 
     lattice, lattice_str, xcc_grid, wgm_value, order, (n_wg_m, n_wg_n) = build_lattice(
-        grid, m, n, args.mt0, args.mt1
+        raw, m, n, ldd, bpe, args.mt0, args.mt1
     )
     print(f"Workgroup grid: {n_wg_m} x {n_wg_n} (MT {args.mt0}x{args.mt1})")
     if wgm_value is not None:

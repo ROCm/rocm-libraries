@@ -680,33 +680,71 @@ class KernelWriterAssembly(KernelWriter):
       self.setSgprToFreeState(s)
     return ret
 
-  def wgmDebugStoreValues(self, kernel, sumIdx):
-    """Debug-only WGM instrumentation (writes into the fp32 store-source VGPRs).
+  def wgmDebugRawStore(self, kernel, addrCalc):
+    """Debug-only WGM instrumentation (data-type-agnostic).
 
-    Overwrites the four dwords starting at absolute VGPR sumIdx with WG-mapping
-    diagnostics so the top-left element of each workgroup's output tile encodes:
-      dword0: original pre-WGM 1D workgroup id
+    Emits a dedicated raw 16-byte (buffer_store_dwordx4) write to the top-left
+    element of each workgroup's output tile in D, independent of DestDataType.
+    Unlike overwriting the typed store-source VGPRs (which only survives when
+    gwvw*bytesPerElem >= 16, i.e. fp32), this raw store lands 16 contiguous
+    bytes at the tile origin for ANY output dtype (bf16/fp16/fp8/int8/fp32/...).
+
+    Layout written (4 dwords = 16 bytes, decoded by scripts/plot_wgm.py):
+      dword0: original pre-WGM 1D workgroup id (snapshot in prologue)
       dword1: packed post-WGM (WorkGroup0 << 16) | WorkGroup1
       dword2: XCC id (HW_REG_XCC_ID)
-      dword3: 0 (WGM sgpr not live at epilogue; WGM value is in the kernel name)
-    Uses a single temp sgpr (these kernels are sgpr-tight). Replaces the real
-    GEMM result; only meant for visualization.
+      dword3: 0 (reserved; WGM value is encoded in the kernel name)
+
+    The payload is broadcast to all lanes; lane 0 writes the tile origin (which
+    the decoder reads). Must be emitted where addrCalc.addrDVgpr / globalOffset
+    are valid for the first element (elementIdx==0), i.e. right after addStore.
+    Produces INCORRECT GEMM results; visualization only.
     """
-    module = Module("DebugWGM store values")
-    module.addComment1("@DebugWGM: overwrite store data with WG-mapping info (origWG, packedNewWG, XCC)")
-    with self.allocTmpSgpr(1, tag="wgmDebugStoreValues") as tmpSgprRes:
+    module = Module("DebugWGM raw store")
+    module.addComment1("@DebugWGM: raw 16B store of WG-mapping info to tile origin (all dtypes)")
+    wave64 = (kernel["WavefrontSize"] == 64)
+    payload = self.vgprPool.checkOutAligned(4, 4, "wgmDebugPayload")
+    with self.allocTmpSgpr(1, tag="wgmDebugRawStore") as tmpSgprRes:
       tmp = tmpSgprRes.idx
-      module.add(SGetRegB32(dst=sgpr(tmp), src="hwreg(HW_REG_XCC_ID)",
-                            comment="DebugWGM: read XCC id"))
-      module.add(VMovB32(dst=vgpr(sumIdx+2), src=sgpr(tmp), comment="DebugWGM: XCC id"))
+      # dword0: original 1D workgroup id (pre-WGM snapshot)
+      module.add(VMovB32(dst=vgpr(payload+0), src=sgpr("WGMDebugOrigWG0"),
+                         comment="DebugWGM: original 1D workgroup id"))
+      # dword1: packed post-WGM (WorkGroup0 << 16) | WorkGroup1
       module.add(SLShiftLeftB32(dst=sgpr(tmp), shiftHex=16, src=sgpr("WorkGroup0"),
                                 comment="DebugWGM: post-WGM WorkGroup0 << 16"))
       module.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WorkGroup1"),
                          comment="DebugWGM: | post-WGM WorkGroup1"))
-      module.add(VMovB32(dst=vgpr(sumIdx+1), src=sgpr(tmp), comment="DebugWGM: packed (newWG0<<16)|newWG1"))
-      module.add(VMovB32(dst=vgpr(sumIdx+0), src=sgpr("WGMDebugOrigWG0"),
-                         comment="DebugWGM: original 1D workgroup id"))
-      module.add(VMovB32(dst=vgpr(sumIdx+3), src=0, comment="DebugWGM: WGM slot unused (see kernel name)"))
+      module.add(VMovB32(dst=vgpr(payload+1), src=sgpr(tmp), comment="DebugWGM: packed (newWG0<<16)|newWG1"))
+      # dword2: XCC id
+      module.add(SGetRegB32(dst=sgpr(tmp), src="hwreg(HW_REG_XCC_ID)", comment="DebugWGM: read XCC id"))
+      module.add(VMovB32(dst=vgpr(payload+2), src=sgpr(tmp), comment="DebugWGM: XCC id"))
+      # dword3: reserved
+      module.add(VMovB32(dst=vgpr(payload+3), src=0, comment="DebugWGM: reserved (WGM in kernel name)"))
+    # Restrict the 16B store to lane 0 only: for sub-16-byte output element types
+    # neighboring lanes' 16B writes would overlap/race at the tile origin. Lane 0
+    # (elementIdx==0) maps to the tile's top-left element, which the decoder reads.
+    with self.allocTmpSgpr(2 if wave64 else 1, alignment=(2 if wave64 else 1),
+                           tag="wgmDebugExecSave") as execRes:
+      esave = execRes.idx
+      if wave64:
+        module.add(SMovB64(dst=sgpr(esave, 2), src=EXEC(), comment="DebugWGM: save exec"))
+        module.add(SMovB64(dst=EXEC(), src=1, comment="DebugWGM: exec = lane 0 only"))
+      else:
+        module.add(SMovB32(dst=sgpr(esave), src=EXEC(), comment="DebugWGM: save exec"))
+        module.add(SMovB32(dst=EXEC(), src=1, comment="DebugWGM: exec = lane 0 only"))
+      # Raw 16B store to the element's D address (tile origin), any dtype.
+      module.add(BufferStoreB128(src=vgpr(payload, 4),
+                                 vaddr=vgpr(addrCalc.addrDVgpr),
+                                 saddr=sgpr("SrdD", 4),
+                                 soffset=0,
+                                 mubuf=MUBUFModifiers(offen=True, offset12=addrCalc.globalOffset,
+                                                      glc=True, slc=True),
+                                 comment="DebugWGM: raw dwordx4 store of WG-mapping info to tile origin"))
+      if wave64:
+        module.add(SMovB64(dst=EXEC(), src=sgpr(esave, 2), comment="DebugWGM: restore exec"))
+      else:
+        module.add(SMovB32(dst=EXEC(), src=sgpr(esave), comment="DebugWGM: restore exec"))
+    self.vgprPool.checkIn(payload)
     return module
 
   def defineMultiSgprIndex(self, names: List[str], numSgprs: List[int], align=1):
