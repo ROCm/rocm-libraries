@@ -51,8 +51,9 @@ LDD := $(ROCM_PATH)/bin/amdclang++
 WAVE ?= 64
 WAVEFRONTSIZE ?= $(if $(WAVE:32=),-mwavefrontsize64, -mno-wavefrontsize64)
 
+# Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
 TRUE16_FEATURE :=
-ifneq ($(filter gfx1250,$(TARGET_ARCH)),)
+ifneq ($(filter gfx11% gfx12%,$(TARGET_ARCH)),)
 	TRUE16_FEATURE += -Xclangas -target-feature -Xclangas +real-true16
 endif
 
