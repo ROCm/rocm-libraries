@@ -35,6 +35,14 @@ set(HIPDNN_CUDNN_SAMPLES_CORPUS_DIR "" CACHE PATH
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# Sidecars are per-configure state. A TU whose tier changed since the last configure (an
+# SDPA toggle, a manifest edit) would otherwise leave its previous outcome next to the new
+# one, and the report would count both. Cleared before the skip gate so a build directory
+# that once had the shim on cannot report it after the shim goes off.
+set(REPORT_DIR "${CMAKE_BINARY_DIR}/cudnn_samples_report")
+file(REMOVE_RECURSE "${REPORT_DIR}")
+file(MAKE_DIRECTORY "${REPORT_DIR}")
+
 # ---------------------------------------------------------------------------------------
 # Is the shim installed at all?
 # ---------------------------------------------------------------------------------------
@@ -59,8 +67,6 @@ if(NOT hipdnn_frontend_cudnn_compatibility_FOUND)
     return()
 endif()
 
-set(REPORT_DIR "${CMAKE_BINARY_DIR}/cudnn_samples_report")
-file(MAKE_DIRECTORY "${REPORT_DIR}")
 set(PROBE "${CMAKE_CURRENT_SOURCE_DIR}/sample_probe.py")
 
 # ---------------------------------------------------------------------------------------
@@ -243,6 +249,10 @@ foreach(i RANGE 0 ${LAST_SAMPLE} 1)
 
     string(MAKE_C_IDENTIFIER "${tu}" tu_id)
     set(target "tu_${tu_id}")
+    # The only place a sidecar path is derived; the probe is handed it whole. A second
+    # derivation could file a configure-time EXCLUDED sidecar and a run-time one for the
+    # same TU under different names, and the report would count both.
+    set(sidecar "${REPORT_DIR}/${tu_id}.json")
 
     # ---- EXCLUDED: no target, but the reason is re-checked rather than trusted.
     if(tier STREQUAL "EXCLUDED")
@@ -280,7 +290,7 @@ foreach(i RANGE 0 ${LAST_SAMPLE} 1)
         endif()
         # Static outcome, so the sidecar is written now: there is no ctest case to write it
         # later, and the report must still account for every manifest entry.
-        file(WRITE "${REPORT_DIR}/${tu_id}.json"
+        file(WRITE "${sidecar}"
              "{\n  \"tu\": \"${tu}\",\n  \"tier\": \"EXCLUDED\",\n  \"outcome\": \"excluded\",\n  \"reason\": \"${reason}\"\n}\n")
         continue()
     endif()
@@ -318,7 +328,7 @@ foreach(i RANGE 0 ${LAST_SAMPLE} 1)
     # would report nothing about the other 55 samples, which is the most likely failure.
     add_test(NAME compile_${tu_id}
              COMMAND ${Python3_EXECUTABLE} "${PROBE}"
-                     --mode compile --tu "${tu}" --tier "${tier}" --report-dir "${REPORT_DIR}"
+                     --mode compile --tu "${tu}" --tier "${tier}" --sidecar "${sidecar}"
                      -- ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target ${target})
     set_tests_properties(compile_${tu_id} PROPERTIES FIXTURES_SETUP fx_${tu_id})
 
@@ -339,7 +349,7 @@ foreach(i RANGE 0 ${LAST_SAMPLE} 1)
         # predicates keep many of them closed.
         add_test(NAME run_${tu_id}
                  COMMAND ${Python3_EXECUTABLE} "${PROBE}"
-                         --mode run --tu "${tu}" --tier "${tier}" --report-dir "${REPORT_DIR}"
+                         --mode run --tu "${tu}" --tier "${tier}" --sidecar "${sidecar}"
                          -- $<TARGET_FILE:${target}> --allow-running-no-tests)
         # A sample that wedges on the GPU must fail its own case rather than hang the job
         # until the workflow-level timeout kills it and reports nothing about anything.
