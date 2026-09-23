@@ -19,7 +19,7 @@
 #
 # Coverage:
 #   - data tensors A and B (non-MX), TLU and non-TLU layouts
-#   - MX scale tensors MXSA / MXSB (mxUnit = MatrixInstK / MXBlock)
+#   - MX scale tensors MXSA / MXSB (MX1xK and MX128xK layouts)
 #   - FP8 (bpe=1) and FP4 (bpe=0.5) element sizes, including mixed A/B dtypes
 #   - ClusterDim != [1,1]: gl2-prefetch is emitted whenever PrefetchGL2 is set,
 #     but the cooperative fan-out only engages for a real cluster, so every config
@@ -167,6 +167,7 @@ class GL2Config:
                               # cluster exercises A and B cooperatively at once.
     matrix_inst_k: int = 128
     mx_block: int = 32
+    mx_block_free: int = 1
     size_i: int = None        # free-dim size (M) override for A-type; None => clean M*MT
     size_j: int = None        # free-dim size (N) override for B-type; None => clean N*MT
     pgr: int = 2              # PrefetchGlobalRead: skipPGR advances the start
@@ -272,7 +273,8 @@ def tensor_dims(spec, cfg):
         # DepthU/_DepthU{A,B}; bpe is always 1 (already byte-granular)
         coal, perp = (spec.mt * M, cfg.depth_u_metadata) if spec.tlu else (cfg.depth_u_metadata, spec.mt * M)
     elif spec.is_mx:
-        coal = spec.mt * M * cfg.matrix_inst_k // cfg.mx_block
+        mx_unit = cfg.matrix_inst_k // cfg.mx_block
+        coal = ((spec.mt * M + cfg.mx_block_free - 1) // cfg.mx_block_free) * mx_unit
         perp = cfg.depth_u // cfg.matrix_inst_k
     else:
         du = data_depth_u(spec, cfg)
@@ -538,6 +540,15 @@ CONFIGS = [
     # so the skip must not run and stage 0 is the raw start address.
     GL2Config("pgr2_guard_taken", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
               loop_counter=2),
+    # MX1x128 with GSU and a [4,4] cooperative cluster.
+    GL2Config("gsu2_mx1x128_cluster", [_A(True, 128), _B(True, 64), _MXSA(128), _MXSB(64)],
+              depth_u=512, mx_block=128, mx_block_free=1, cluster=(4, 4),
+              gsu=2, gsuc=True, k_iters=14),
+    # MX128x128 with asymmetric MT and cluster shapes for MXSA and MXSB.
+    GL2Config("gsu2_mx128x128_cluster", [_A(True, 64), _B(True, 192), _MXSA(64), _MXSB(192)],
+              depth_u=512, mx_block=128, mx_block_free=128, cluster=(4, 2),
+              gsu=2, gsuc=True, k_iters=14),
+
 ]
 
 
@@ -576,6 +587,8 @@ def _make_kernel(cfg):
             "UseInitialStridesAB": True,
             "MXBlockA": cfg.mx_block if has_mxa else 0,
             "MXBlockB": cfg.mx_block if has_mxb else 0,
+            "MXBlockFreeA": cfg.mx_block_free if has_mxa else 1,
+            "MXBlockFreeB": cfg.mx_block_free if has_mxb else 1,
             "TLUA": _subtc_attr(cfg, "A", "tlu", True),
             "TLUB": _subtc_attr(cfg, "B", "tlu", True),
             "Sparse": cfg.sparse,
@@ -965,7 +978,7 @@ def inc_bytes(spec, cfg):
     """Per-iteration K (summation) address increment in bytes, matching
     GL2Prefetch.setIncrement. Advancing the prefetch by one iteration moves a
     full DepthU along the summation axis; in bytes this is:
-      - MX:       SizeFree * (DepthU // MXBlock)              (* bpe == 1)
+      - MX:       SizeFree * (DepthU // MXBlock) / MXBlockFree (* bpe == 1)
       - Metadata: StrideMetadataL(=coal_m) * DepthUMetadata if TLUMetadata,
                   else DepthUMetadata                          (bpe == 1)
       - TLU:      StrideUnroll(=coal) * (_DepthU{A,B} * bpe)
@@ -973,7 +986,8 @@ def inc_bytes(spec, cfg):
     """
     bpe = spec.bpe
     if spec.is_mx:
-        return free_dim_size(cfg, spec.subtc) * round(cfg.depth_u // cfg.mx_block * bpe)
+        return (free_dim_size(cfg, spec.subtc)
+                * round(cfg.depth_u // cfg.mx_block * bpe)) // cfg.mx_block_free
     if spec.is_m:
         coal, _, _, _ = tensor_dims(spec, cfg)
         return round(coal * cfg.depth_u_metadata) if spec.tlu else round(cfg.depth_u_metadata)
@@ -1035,18 +1049,24 @@ def _footprint_geometry(spec, cfg, stage, batch, group):
     coal, perp, _, _ = tensor_dims(spec, cfg)
     size_free = free_dim_size(cfg, spec.subtc)
     # One free-dim index spans `unit` coalesced elements: mxUnit scale groups for
-    # MX, a single element otherwise.
+    # MX, a single element otherwise. 2D MX indexes scale rows
+    # ceil(SizeFree / MXBlockFree); MXBlockFree == 1 collapses to SizeFree.
     unit = cfg.matrix_inst_k // cfg.mx_block if spec.is_mx else 1
+    if spec.is_mx:
+        scale_rows = (size_free + cfg.mx_block_free - 1) // cfg.mx_block_free
+        perp_stride = scale_rows * unit
+        edge = (scale_rows - 1) * unit
+    else:
+        # StrideAL (TLU) / StrideAI (nTLU): the folded leading dim.
+        perp_stride = coal
+        edge = size_free - 1
     k_iter = gsu_start_iter(cfg, group) + (cfg.skip_iters + stage) * gsu_iter_stride(cfg)
     shift = k_iter * inc_bytes(spec, cfg)
     if cfg.batched:
         shift += batch * round(batch_stride_elems(spec, cfg) * spec.bpe)
     return SimpleNamespace(
         bpe=spec.bpe, coal=coal, perp=perp, size_free=size_free, unit=unit,
-        # StrideAL (TLU) / StrideAI (nTLU) is the folded leading dim; MX derives
-        # its stride in-kernel from SizeFree.
-        perp_stride=size_free * unit if spec.is_mx else coal,
-        edge=(size_free - 1) * unit,
+        perp_stride=perp_stride, edge=edge,
         coal_to_mt=spec.is_mx or spec.tlu,   # MT offset & clamp land in coal (else perp)
         shift=shift)
 
@@ -1056,13 +1076,14 @@ def uncovered_bytes(offsets, spec, cfg, stage=0, batch=0, group=0):
 
     Independent of the chunk count the implementation picks: each tile row must
     lie inside the union of the [offset, offset + GlobalPrefetchSize) windows.
-    A row holds min(coal, SizeFree * unit) valid elements when the tile dim is
-    coalesced (TLU/MX), and there are min(perp, SizeFree) valid rows when it is
-    perpendicular (non-TLU). Rows are measured from their own start, so this
+    A row holds min(coal, edge + unit) valid elements when the tile dim is
+    coalesced (TLU/MX) — SizeFree elements, or ceil(SizeFree / MXBlockFree)
+    scale rows for 2D MX — and there are min(perp, SizeFree) valid rows when it
+    is perpendicular (non-TLU). Rows are measured from their own start, so this
     does not model cache-line alignment of a row that starts mid-line."""
     g = _footprint_geometry(spec, cfg, stage, batch, group)
     if g.coal_to_mt:
-        rows, row_elems = g.perp, min(g.coal, g.size_free * g.unit)
+        rows, row_elems = g.perp, min(g.coal, g.edge + g.unit)
     else:
         rows, row_elems = min(g.perp, g.size_free), g.coal
     row_bytes = round(row_elems * g.bpe)
