@@ -73,10 +73,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   GlobalStoreB8, GlobalStoreB16, GlobalStoreB32, GlobalStoreB64, GlobalStoreB128, GlobalStoreD16HIB16
 
 from .Component import Component, TensorDataMover, GL2Prefetch
-from .Components.TensorDataMover import TensorDataMoverLoad
-from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM, \
-  mxLraFreeShift
-from .Components.LraTileAssignment import mx2dFreeOffset
+from .Components.TensorDataMover import TensorDataMoverLoad, TensorDataMoverStore
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
@@ -17070,9 +17067,10 @@ class KernelWriterAssembly(KernelWriter):
       # tile. vc1 alone is the within-round row: thread base + vc1 exactly fills the
       # MatrixInstN*MIWaveGroup[1] rows.
       # MUST match the ldsPad used for the LDS stride in storeRemapComputeStoreVgprs
-      # (v_mov_b32 vX, MT0+PAD). Using 0 here makes the write row stride MT0 while the read
-      # stride stays MT0+ldsPad, so every row past the first lands in the wrong column block.
-      ldsPad = max(kernel["StoreRemapVectorWidth"], kernel["MIOutputVectorWidth"])
+      # (v_mov_b32 vX, MT0+PAD) and, on the tensor_store path, the row stride the DMA walks.
+      # A mismatch makes the write row stride disagree with the read stride, so every row
+      # past the first lands in the wrong column block -- hence the shared helper.
+      ldsPad = self.storeRemapLdsPad(kernel)
       offset += vc1 * (kernel["MacroTile0"] + ldsPad) * self.states.bpeCexternal
       assert offset < 65536, \
         "storeRemap + SourceSwap: ds offset %u exceeds the 16-bit DS offset field" % offset
@@ -17103,7 +17101,165 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Store Remap: Local Read and Global Write
   ##############################################################################
+  def storeRemapTensorStoreKernel(self, kernel):
+    """Does this kernel flush ANY storeRemap round with tensor_store_from_lds?
+
+    storeRemapUseTensorStore adds the per-batch `edge` test on top of this. The LDS layout
+    has to be decided per KERNEL, not per batch, because the edge fallback reads back the
+    same staging tile -- hence this split.
+    """
+    if not kernel["StoreRemapVectorWidth"]:
+      return False
+    # StoreRemapTensorStore: -1 auto, 0 off, 1 forced. A forced 1 that cannot be honoured is
+    # rejected in Solution.py for the statically-decidable conditions, so reaching here with 1
+    # and failing a check means a codegen-time condition (the GSU f32 workspace) -- fall back
+    # rather than emit a DMA that would store the wrong element size.
+    if kernel.get("StoreRemapTensorStore", -1) == 0:
+      return False
+    return (self.states.asmCaps.get("HasTDM", False)
+            and self.states.bpeCexternal == self.states.bpeCexternalGSU1
+            and kernel["BufferStore"]
+            and kernel["WavefrontSize"] == 32
+            and kernel["MatrixInstN"] % kernel["MIWaveGroup"][0] == 0)
+
+  def storeRemapLdsPad(self, kernel):
+    """Row pad of the storeRemap LDS tile, in elements.
+
+    Normally max(StoreRemapVectorWidth, MIOutputVectorWidth) to spread ds_read banks. Zero
+    when the round is flushed by tensor_store_from_lds: the DMA walks the tile as a plain
+    tile_dim0 x tile_dim1 image and does NOT honour the descriptor's padding field on the
+    store path, so a padded tile is read with the wrong row stride -- LDS row 0 lands at
+    offset 0 either way and is correct, every row past it is displaced by the pad. The DMA
+    replaces the ds_read the pad existed for, so dropping it costs nothing on that path.
+    """
+    if self.storeRemapTensorStoreKernel(kernel):
+      return 0
+    return max(kernel["StoreRemapVectorWidth"], kernel["MIOutputVectorWidth"])
+
+  def storeRemapUseTensorStore(self, kernel, edge):
+    """Can this storeRemap flush be a tensor_store_from_lds instead of ds_load + buffer_store?
+
+    Exactly storeRemapTensorStoreKernel plus the per-batch edge test -- deliberately NOT a
+    second copy of those conditions. The two must agree: storeRemapLdsPad flattens the LDS
+    tile for any kernel storeRemapTensorStoreKernel accepts, so a flush that disagreed would
+    read a padded tile as contiguous (or vice versa) and corrupt every row past the first.
+
+    Edge batches fall back because they need the per-element bounds masking the DMA does not
+    do here; the tile they read back is the same flattened one, which is fine -- the pad only
+    ever existed to spread ds_read banks.
+    """
+    return (not edge) and self.storeRemapTensorStoreKernel(kernel)
+
+  def storeRemapAddStoreTensorStore(self, kernel):
+    """Flush one storeRemap LDS round to D with a single per-wave tensor_store_from_lds.
+
+    Replaces the nElements/gwvw ds_loads plus their buffer_stores. The LDS tile is unchanged
+    (coord0-major, row stride MT0 + ldsPad); the pad is described to the DMA via setPadding
+    rather than flattened, so the staging layout and every LdsOffsetBias derived from
+    ldsNumBytesRemapC stay exactly as they are.
+
+    Wave w owns tile rows [w*rowsPerWave, (w+1)*rowsPerWave) -- the same slice the ds_load path
+    gives it via waveCoord1 = (MatrixInstN // MIWaveGroup[0]) * (Serial / WavefrontSize) -- so
+    the per-wave descriptor maps 1:1 onto the loads it replaces and the slices stay disjoint.
+
+        tile_dim0 = tensor_dim0 = MacroTile0      tensor_dim0_stride = StrideD (elements)
+        tile_dim1 = tensor_dim1 = rowsPerWave
+        lds_addr    = w * rowsPerWave * (MT0 + ldsPad) * bpe   (storeRemap LDS base is 0)
+        global_addr = SrdD + wg0*MT0*bpe + w*rowsPerWave*StrideD*bpe
+
+    SrdD carries the N/batch base including wg1*MT1 but not wg0*MT0, and globalWriteBatch
+    advances it one round after each flush, so the round offset needs no encoding here.
+    """
+    module = Module("storeRemapAddStoreTensorStore")
+
+    bpe         = self.states.bpeCexternal
+    mt0         = kernel["MacroTile0"]
+    ldsPad      = self.storeRemapLdsPad(kernel)   # 0 on this path -- see storeRemapLdsPad
+    rowsPerWave = kernel["MatrixInstN"] // kernel["MIWaveGroup"][0]
+    ldsRowBytes = (mt0 + ldsPad) * bpe
+    packedD1    = kernel["PackedC1IndicesX"]
+    strideD1    = "StrideD%s" % (self.states.indexChars[packedD1[0]])
+
+    module.addComment1("storeRemap: flush the LDS round with one tensor_store_from_lds per wave "
+                       "(rowsPerWave=%u, tile %ux%u)" % (rowsPerWave, mt0, rowsPerWave))
+
+    # The wave's slice was written by OTHER waves too, so the barrier is unconditional here --
+    # unlike the ds_load path, which only needs it when MIWaveGroup[0] > 1.
+    module.add(SWaitCnt(dscnt=0, comment="wait for all LDS writes before the barrier [stinky-keep]"))
+    module.add(self._syncThreads(kernel, "storeRemap: all waves finished staging this round"))
+
+    tdm = TensorDataMoverStore()
+    tdm.setMemToken([self.states.memTokenLdsBuffer0])
+    # tensor_store_from_lds takes s[group0:+4] and s[group1:+8], and the assembler enforces
+    # natural alignment on both ("invalid register alignment" otherwise). Allocating 12 with
+    # alignment 8 and putting the 8-register group1 FIRST makes the base 8-aligned and leaves
+    # group0 at base+8, which is 8- and therefore 4-aligned. The reverse order does not work:
+    # group1 would land at base+4.
+    with self.allocTmpSgpr(12, alignment=8, tag="storeRemapTensorStoreDesc") as descRes:
+      g1 = descRes.idx
+      g0 = descRes.idx + 8
+      module.add(tdm.initOperands(g0, g1))
+      module.add(tdm.setDataType(kernel["ProblemType"]["DestDataType"], g1))
+      # ldsPad is 0 on this path, so this emits nothing (setPadding no-ops on a zero pad).
+      # Kept as the call rather than a bare 0,0 so it starts describing the pad again if
+      # storeRemapLdsPad ever stops flattening it.
+      module.add(tdm.setPadding(g1, mt0 * bpe, ldsPad * bpe))
+      with self.allocTmpSgpr(2, tag="storeRemapTensorStoreAddr") as addrRes:
+        tmp = addrRes.idx
+        wId = addrRes.idx + 1
+        module.add(VReadfirstlaneB32(sgpr(wId), vgpr("Serial"), comment="first tId of this wave"))
+        module.add(SLShiftRightB32(dst=sgpr(wId), shiftHex=int(log2(kernel["WavefrontSize"])),
+                                   src=sgpr(wId), comment="waveId = fTid >> log2(WavefrontSize)"))
+        # LDS: the wave's row slice. Rows are ldsRowBytes apart *including* the pad, which is
+        # what the hardware walk reproduces from setPadding above.
+        if kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1] > 1:
+          module.add(SMulI32(dst=sgpr(tmp), src0=sgpr(wId), src1=rowsPerWave * ldsRowBytes,
+                             comment="ldsBase = waveId*rowsPerWave*(MT0+ldsPad)*bpe"))
+          module.add(tdm.setLdsAddr(g0, sgpr(tmp)))
+        else:
+          module.add(SMovB32(dst=sgpr(tmp), src=0, comment="storeRemap LDS base"))
+          module.add(tdm.setLdsAddr(g0, sgpr(tmp)))
+        with self.allocTmpSgpr(1, tag="storeRemapTensorStoreDim") as dimRes:
+          module.add(SMovB32(dst=sgpr(dimRes.idx), src=mt0, comment="tensor_dim0 = tile_dim0 = MT0"))
+          module.add(tdm.setTensorDim0(g1, dimRes.idx, self))
+          module.add(SMovB32(dst=sgpr(dimRes.idx), src=rowsPerWave, comment="tensor_dim1 = tile_dim1 = rowsPerWave"))
+          module.add(tdm.setTensorDim1(g1, dimRes.idx, self))
+        module.add(tdm.setTensorTile0(g1, mt0))
+        module.add(tdm.setTensorTile1(g1, rowsPerWave))
+        module.add(tdm.setTensorStride0(g1, strideD1))
+        # global_addr = SrdD (+wg1*MT1, +this round) + wg0*MT0*bpe + the wave's N-slice offset.
+        #
+        # Accumulate the whole byte offset in 32 bits and apply it with ONE s_add_u64, the way
+        # the TDM load path bumps its descriptor address. An s_add_u32 / s_addc_u32 pair here
+        # would put an open SCC chain in the same scheduling region as this region's barrier,
+        # and the CDNA5 DAG scheduler aborts ("open SCC chain but only barriers are ready")
+        # when the barrier is the only thing left to issue inside that chain. The lone
+        # s_add_u32 below writes SCC but nothing reads it, so it opens no chain.
+        module.add(tdm.setGlobalAddr(g0, "SrdD"))
+        with self.allocTmpSgpr(2, alignment=2, tag="storeRemapTensorStoreOff") as offRes:
+          off = offRes.idx
+          module.add(SMulI32(dst=sgpr(off), src0=sgpr("WorkGroup0"), src1=mt0 * bpe,
+                             comment="wgM byte = wg0*MT0*bpe"))
+          if kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1] > 1:
+            module.add(SMulI32(dst=sgpr(tmp), src0=sgpr(wId), src1=rowsPerWave,
+                               comment="waveN row = waveId*rowsPerWave"))
+            module.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(strideD1), comment="* StrideD"))
+            if bpe > 1:
+              module.add(SLShiftLeftB32(dst=sgpr(tmp), shiftHex=int(log2(bpe)), src=sgpr(tmp), comment="* bpe"))
+            module.add(SAddU32(dst=sgpr(off), src0=sgpr(off), src1=sgpr(tmp), comment="+ waveN byte"))
+          module.add(SMovB32(dst=sgpr(off + 1), src=0, comment="offset hi = 0"))
+          # g0 is 8-aligned (see the descriptor allocation above), so g0+2 is 2-aligned and
+          # can be the 64-bit destination directly.
+          module.add(SAddU64(dst=sgpr(g0 + 2, 2), src0=sgpr(g0 + 2, 2), src1=sgpr(off, 2),
+                             comment="global_addr += wgM + waveN"))
+      module.add(tdm.issueStore(g0, g1))
+
+    return module, 1
+
   def storeRemapAddStore(self, kernel, tmpVgpr, tmpS01, edge, StoreRemapLastBatch):
+    if self.storeRemapUseTensorStore(kernel, edge):
+      return self.storeRemapAddStoreTensorStore(kernel)
+
     module = Module("storeRemapAddStore")
 
     module.add(SWaitCnt(dscnt=0, comment="wait for LDS write"))
@@ -17296,7 +17452,9 @@ class KernelWriterAssembly(KernelWriter):
       waveCoord1 = tmpV0+4
 
       gwvw = gwvwOverride if gwvwOverride is not None else kernel["StoreRemapVectorWidth"]
-      ldsPad = max(kernel["StoreRemapVectorWidth"],kernel["MIOutputVectorWidth"])
+      # Sets the LDS row stride (MT0 + ldsPad) for BOTH the staging write and the read back,
+      # so it has to agree with storeRemapAddLocalWrite and the tensor_store row stride.
+      ldsPad = self.storeRemapLdsPad(kernel)
 
       #calculate local write Address: v[vgprLocalWriteAddrC]
       module.add(VMovB32(dst=vgpr(ldsStride), src=hex(kernel["MacroTile0"]+ldsPad), \

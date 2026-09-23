@@ -1611,12 +1611,17 @@ class GlobalWriteBatchWriter:
           _bpeD = self.parentWriter.states.bpeCexternal
           packedC1 = self.kernel["PackedC1IndicesX"]
           _strideD1 = "StrideD%s" % (self.parentWriter.states.indexChars[packedC1[0]])
-          module.add(SMulI32(dst=sgpr(self.tmpS01), src0=sgpr(_strideD1), src1=_tileRows * _bpeD,
-                             comment="storeRemap: next LDS round = %u rows" % _tileRows))
-          module.add(SAddU32(dst=sgpr("SrdD+0"), src0=sgpr("SrdD+0"), src1=sgpr(self.tmpS01),
-                             comment="storeRemap: SrdD += one LDS round"))
-          module.add(SAddCU32(dst=sgpr("SrdD+1"), src0=sgpr("SrdD+1"), src1=0,
-                              comment="storeRemap: SrdD carry"))
+          # One s_add_u64 rather than s_add_u32 + s_addc_u32: the tensor_store flush puts a
+          # barrier in this same scheduling region, and the CDNA5 DAG scheduler aborts
+          # ("open SCC chain but only barriers are ready") if a barrier is all that is left to
+          # issue between a carry producer and its reader.
+          with self.parentWriter.allocTmpSgpr(2, alignment=2, tag="srSrdDAdv") as _advRes:
+            _adv = _advRes.idx
+            module.add(SMulI32(dst=sgpr(_adv), src0=sgpr(_strideD1), src1=_tileRows * _bpeD,
+                               comment="storeRemap: next LDS round = %u rows" % _tileRows))
+            module.add(SMovB32(dst=sgpr(_adv + 1), src=0, comment="storeRemap: advance hi = 0"))
+            module.add(SAddU64(dst=sgpr("SrdD", 2), src0=sgpr("SrdD", 2), src1=sgpr(_adv, 2),
+                               comment="storeRemap: SrdD += one LDS round"))
           module.add(VMovB32(vgpr(self.tmpVgpr), _tileRows, comment="storeRemap: rows per LDS round"))
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1),
                              vgpr(self.parentWriter.vgprs.storeRemapCoord1),
@@ -1756,12 +1761,17 @@ class GlobalWriteBatchWriter:
           _bpeD = self.parentWriter.states.bpeCexternal
           packedC1 = self.kernel["PackedC1IndicesX"]
           _strideD1 = "StrideD%s" % (self.parentWriter.states.indexChars[packedC1[0]])
-          module.add(SMulI32(dst=sgpr(self.tmpS01), src0=sgpr(_strideD1), src1=_tileRows * _bpeD,
-                             comment="storeRemap: next LDS round = %u rows" % _tileRows))
-          module.add(SAddU32(dst=sgpr("SrdD+0"), src0=sgpr("SrdD+0"), src1=sgpr(self.tmpS01),
-                             comment="storeRemap: SrdD += one LDS round"))
-          module.add(SAddCU32(dst=sgpr("SrdD+1"), src0=sgpr("SrdD+1"), src1=0,
-                              comment="storeRemap: SrdD carry"))
+          # One s_add_u64 rather than s_add_u32 + s_addc_u32: the tensor_store flush puts a
+          # barrier in this same scheduling region, and the CDNA5 DAG scheduler aborts
+          # ("open SCC chain but only barriers are ready") if a barrier is all that is left to
+          # issue between a carry producer and its reader.
+          with self.parentWriter.allocTmpSgpr(2, alignment=2, tag="srSrdDAdv") as _advRes:
+            _adv = _advRes.idx
+            module.add(SMulI32(dst=sgpr(_adv), src0=sgpr(_strideD1), src1=_tileRows * _bpeD,
+                               comment="storeRemap: next LDS round = %u rows" % _tileRows))
+            module.add(SMovB32(dst=sgpr(_adv + 1), src=0, comment="storeRemap: advance hi = 0"))
+            module.add(SAddU64(dst=sgpr("SrdD", 2), src0=sgpr("SrdD", 2), src1=sgpr(_adv, 2),
+                               comment="storeRemap: SrdD += one LDS round"))
           module.add(VMovB32(vgpr(self.tmpVgpr), _tileRows, comment="storeRemap: rows per LDS round"))
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1),
                              vgpr(self.parentWriter.vgprs.storeRemapCoord1),
