@@ -5333,6 +5333,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Start of post-loop code
     if 1:
+      foldStoreInNLL = bool(kernel.get("SubtileStoreInNLL", 0))
       module.addComment0(" =============================================================== ")
       module.addComment0(" =================== Start of post-loop code =================== ")
       module.addComment0(" =============================================================== ")
@@ -5351,7 +5352,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not self.states.doShadowInit:
         self.removeSgprVarFromPool("SrdWS")
       module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
-      if not self.states.doShadowInit:
+      if not self.states.doShadowInit and not foldStoreInNLL:
         self.removeSgprVarFromPool("SrdD")
         self.removeSgprVarFromPool("SrdC")
         module.add(self.globalWriteWorkGroupInit(kernel))
@@ -5360,15 +5361,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # NOT LocalSplitU
       ####################################
 
-      # global write indices
-      module.addComment1("not-LocalSplitU: global write indices")
-      module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
+      if foldStoreInNLL:
+        from Tensile.Components.Subtile.StoreInNLL import cleanupSubtileStoreInNLL
+        module.addComment1("SubtileStoreInNLL: D already stored in NLL")
+        self.cleanupGlobalWrite(kernel)
+        cleanupSubtileStoreInNLL(self)
+      else:
+        # global write indices
+        module.addComment1("not-LocalSplitU: global write indices")
+        module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
 
-      # global write
-      #module.addComment1("not-LocalSplitU: global write")
-      module.add(self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB))
+        # global write
+        module.add(self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB))
 
-      self.vgprPool.checkIn(self.states.c.startVgprValu)
+      if not foldStoreInNLL and not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
+        self.vgprPool.checkIn(self.states.c.startVgprValu)
 
     # Deallocate registers used for C/D tiles after store code instructions are emitted
     dtileInfo.deallocVgprTileRegisters(self, kernel)
@@ -5628,6 +5635,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
 
+    if kernel.get("SubtileStoreInNLL", 0):
+      # SourceSwap (ss1) pre-loop store-in-NLL setup: hoist D coordinates and SRD before
+      # the main loop. SubtileStoreInNLL implies SourceSwap (see Solution.py validation),
+      # so this block is mutually exclusive with the PostLoopStoreInNll / PLSIN path below.
+      from Tensile.Components.Subtile.StoreInNLL import emitSubtileStoreInNLLAddressInit
+      self.states.storeAlign8 = False
+      if not self.states.doShadowInit:
+        self.removeSgprVarFromPool("SrdD")
+        module.add(RegSet("s", "sgprSrdD", self.sgprs["SrdD"]))
+        module.add(SMovB64(dst=sgpr("SrdD", 2), src=sgpr("AddressD", 2),
+                          comment="folded-store SRD base = AddressD (GSU=1, batch=1)"))
+        module.add(SMovB32(dst=sgpr("SrdD+2"), src="BufferOOB",
+                          comment="folded-store SRD limit"))
+        module.add(SMovB32(dst=sgpr("SrdD+3"), src="Srd127_96",
+                          comment="folded-store SRD format"))
+      module.addComment0("SubtileStoreInNLL: hoist D coordinates before NLL")
+      module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
+      module.add(emitSubtileStoreInNLLAddressInit(self, kernel))
+
     # PostLoopStoreInNll: compute the loop-invariant tail guard SGPR before the
     # main loop. calculateLoopNumIter(-1) only materializes the tail counter AFTER
     # emitMainAndExitLoops, but the fused-store front guard (emitted at the top of
@@ -5701,24 +5727,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(RegSet("s", "sgprSubtileNGuard", self.states.subtileN16ValidBlocksSgpr))
       self.states.nonPostLoopSgpr.append("SubtileMGuard")
       self.states.nonPostLoopSgpr.append("SubtileNGuard")
-      self.states.storeAlign8 = True
+      # storeAlign8 selects the SourceSwap=0 paired-subtile store scheme: M/N guards
+      # carried in units of 8 rows, exec-masked partial blocks, and a dwordx4 rebuilt
+      # across lane pairs. Under SourceSwap the interleaved local-read map gives each
+      # lane its own run of 8, the store takes the generic path, and the guard
+      # arithmetic has to stay in generic units to match it.
+      self.states.storeAlign8 = not kernel["SourceSwap"]
 
     # Start of post-loop code
     if 1:
+      foldStoreInNLL = bool(kernel.get("SubtileStoreInNLL", 0))
       module.addComment0(" =============================================================== ")
       module.addComment0(" =================== Start of post-loop code =================== ")
       module.addComment0(" =============================================================== ")
 
       # ValuC aliases D-tile VGPRs on MIArchVgpr (see _subtileDtileBaseVgpr)
-      if kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
+      if foldStoreInNLL:
+        self.states.c.startVgprValu = 0
+      elif kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
         self.states.c.startVgprValu = self._subtileDtileBaseVgpr
       else:
         self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4, tag="postLoop_startVgprValu")
 
-      module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
-                             "serializedStore enabled" if self.states.serializedStore else ""))
-      module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
-      self.states.serializedStore = True
+      if not foldStoreInNLL:
+        module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
+                               "serializedStore enabled" if self.states.serializedStore else ""))
+        module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
+        self.states.serializedStore = True
 
 
       # SrdWS must be removed from the free pool before endSummation so that
@@ -5770,35 +5805,56 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(dedupBranch)
         module.add(doPostLoopStoreLabel)
 
-      # Post-loop store-init (SrdC/SrdD address math). Emitted AFTER the dedup guard so
-      # a fused owner skips it (see tail-reduction note above). For non-PostLoopStoreInNll
-      # builds no guard was emitted, so this runs inline exactly as before.
-      # Step 4b-2: if SrdD's value was already hoisted before the main loop, the
-      # post-loop copy must compute only SrdC (channels=["C"]) — SrdD is already
-      # valid and re-emitting its SRD-init would duplicate the D labels. When the
-      # hoist did not run (non-fused, doShadowInit, or SrdD pre-defined) fall back
-      # to the full C+D init (channels=None), byte-identical to the legacy path.
-      if not self.states.doShadowInit:
-        self.removeSgprVarFromPool("SrdD")
-        self.removeSgprVarFromPool("SrdC")
-        module.add(self.buildSubtileStoreInitModule(
-          kernel,
-          channels=["C"] if self.states.postLoopSrdDHoisted else None))
+      if kernel.get("SourceSwap", False):
+        # SourceSwap (ss1) post-loop store. foldStoreInNLL (SubtileStoreInNLL) skips D
+        # because it was already written inside the NLL. Without SubtileStoreInNLL the
+        # SourceSwap solution takes the normal not-LocalSplitU store path below, but
+        # must NOT enter the PLSIN dedup/store-init path (which is non-SourceSwap only).
+        if foldStoreInNLL:
+          from Tensile.Components.Subtile.StoreInNLL import cleanupSubtileStoreInNLL
+          deferredGSU0 = None
+          module.addComment1("SubtileStoreInNLL: D already stored in NLL")
+          self.cleanupGlobalWrite(kernel)
+          cleanupSubtileStoreInNLL(self)
+        else:
+          if not self.states.doShadowInit:
+            self.removeSgprVarFromPool("SrdD")
+            self.removeSgprVarFromPool("SrdC")
+            module.add(self.globalWriteWorkGroupInit(kernel))
+          module.addComment1("not-LocalSplitU: global write indices")
+          module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
+          storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
+          module.add(storeModule)
+      else:
+        # Post-loop store-init (SrdC/SrdD address math). Emitted AFTER the dedup guard so
+        # a fused owner skips it (see tail-reduction note above). For non-PostLoopStoreInNll
+        # builds no guard was emitted, so this runs inline exactly as before.
+        # Step 4b-2: if SrdD's value was already hoisted before the main loop, the
+        # post-loop copy must compute only SrdC (channels=["C"]) — SrdD is already
+        # valid and re-emitting its SRD-init would duplicate the D labels. When the
+        # hoist did not run (non-fused, doShadowInit, or SrdD pre-defined) fall back
+        # to the full C+D init (channels=None), byte-identical to the legacy path.
+        if not self.states.doShadowInit:
+          self.removeSgprVarFromPool("SrdD")
+          self.removeSgprVarFromPool("SrdC")
+          module.add(self.buildSubtileStoreInitModule(
+            kernel,
+            channels=["C"] if self.states.postLoopSrdDHoisted else None))
 
-      # global write indices
-      module.addComment1("not-LocalSplitU: global write indices")
-      module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
+        # global write indices
+        module.addComment1("not-LocalSplitU: global write indices")
+        module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
 
-      # global write
-      #module.addComment1("not-LocalSplitU: global write")
-      storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
-      module.add(storeModule)
-      if postLoopStoreDedupLabel is not None:
-        module.add(postLoopStoreDedupLabel)
-        # module now ends at the branch target, so the placeholder-to-end
-        # instruction count that updateBranchPlaceHolder measures is the real span.
-        self.updateBranchPlaceHolder(module, ["postLoopStoreDedup_placeholder"],
-                                     [postLoopStoreDedupLabel.label], ["SBranch"])
+        # global write
+        #module.addComment1("not-LocalSplitU: global write")
+        storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
+        module.add(storeModule)
+        if postLoopStoreDedupLabel is not None:
+          module.add(postLoopStoreDedupLabel)
+          # module now ends at the branch target, so the placeholder-to-end
+          # instruction count that updateBranchPlaceHolder measures is the real span.
+          self.updateBranchPlaceHolder(module, ["postLoopStoreDedup_placeholder"],
+                                       [postLoopStoreDedupLabel.label], ["SBranch"])
 
       if not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
         self.vgprPool.checkIn(self.states.c.startVgprValu)
@@ -7644,7 +7700,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     )
     # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
     # gfx1250 TDM uses a different LDS layout without swizzling).
-    self.states.subtileLdsSwizzle = kernel.get("UseSubtileImpl", False) and isgfx950
+    # The swizzle rotates each LDS row's K columns by the row index and the local read
+    # undoes it per lane; only valid while a lane sits at the same row-within-tile for
+    # every tile (the blocked map, row = 16j + a). The SourceSwap interleaved map
+    # (row = 8a + j) uses plain rows + LDS padding instead, so disable the swizzle there.
+    self.states.subtileLdsSwizzle = (kernel.get("UseSubtileImpl", False) and isgfx950
+                                     and not kernel.get("SourceSwap", False))
     # Subtile iterate mode: DepthU * bpeGR > 1024B pad_interval limit.
     for tc in ("A", "B"):
       setattr(self.states, "subtileIterateMode%s" % tc, isSubtileIterateMode(kernel, tc))
@@ -7751,6 +7812,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       mtB = kernel["MacroTile1"]
       padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
       padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
+      # Block padding grows each region by one pad per block of tile data.
+      padA += ldsBlockPadDelta(aTileInfo, numASubtiles * aTileInfo.subtileSize)
+      padB += ldsBlockPadDelta(bTileInfo, numBSubtiles * bTileInfo.subtileSize)
       sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
       sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
       self.ldsStartOffsetB = sizeA
@@ -10237,7 +10301,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # and the FUSED NLL store defines a *transient* SrdD from the drain-era pool
     # (buildSubtileFusedStore). Only doShadowInit (never set for subtile) reserves
     # SrdD/SrdC early.
-    earlyStoreSrd = self.states.doShadowInit
+    # SubtileStoreInNLL (SourceSwap, ss1) also reserves SrdD/SrdC early. The term
+    # self-partitions — SubtileStoreInNLL implies SourceSwap — so for the non-SourceSwap
+    # PLSIN path this reduces to `earlyStoreSrd = doShadowInit` (fold behavior unchanged).
+    earlyStoreSrd = self.states.doShadowInit or bool(kernel.get("SubtileStoreInNLL", 0))
     if earlyStoreSrd and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)

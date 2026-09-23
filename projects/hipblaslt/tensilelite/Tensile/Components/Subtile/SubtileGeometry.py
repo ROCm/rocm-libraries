@@ -7,12 +7,113 @@ Contains layout classes, abstract geometry base classes, and pre-defined instanc
 No emit logic lives here — concrete shape classes with emit implementations are in
 Kernel.py.
 """
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import Optional, Tuple
 
 from rocisa.container import vgpr, sgpr, accvgpr
 from rocisa.enum import RegisterType
+
+
+################################################################################
+# LDS block padding
+################################################################################
+
+# Bytes of LDS between successive pad insertions. Chosen to equal one subtile
+# DirectToLds load (a wave's buffer_load_dwordx4 = 64 lanes * 16 B), so a load
+# never straddles a pad boundary. That is what lets the pad be folded into the
+# m0 increments: DTL generates lane addresses in hardware and exposes no
+# per-lane address register to pad, the way the non-subtile ds_write path does.
+SUBTILE_LDS_BLOCK_BYTES = 1024
+
+# Stage 5 sweep knob. 32 B is what the non-subtile SourceSwap kernel uses.
+_LDS_BLOCK_PAD_ENV = "TENSILE_SUBTILE_LDS_BLOCK_PAD"
+
+
+def subtileInterleaveVW(kernel, tc: str) -> int:
+  """Local-read tile->row interleave factor for one tensor.
+
+  VectorWidth<tc> under SourceSwap, 1 otherwise. Mirrors TileInfo.lrInterleaveVW,
+  for the call sites that only have a kernel dict.
+  """
+  if not kernel.get("SourceSwap", False):
+    return 1
+  return int(kernel.get("VectorWidth%s" % tc, 1))
+
+
+def subtileLdsBlockPadFolds(kernel, ldsRowStride: int) -> bool:
+  """True when a lane's LDS row base spans a whole number of pad blocks.
+
+  A lane's base is `lane16 * ldsRowStride * VectorWidth`, because under the
+  interleaved map each lane owns a group of VectorWidth consecutive M rows. The
+  pad is folded into that one stride constant, which is exact only if the group
+  is a whole number of SUBTILE_LDS_BLOCK_BYTES blocks. VectorWidth is what
+  decides that -- not whether the map is two-level -- so a repeat factor above 1
+  keeps the de-conflict as long as its VectorWidth is still wide enough.
+  """
+  vws = [subtileInterleaveVW(kernel, tc) for tc in ('A', 'B')]
+  return all((int(ldsRowStride) * vw) % SUBTILE_LDS_BLOCK_BYTES == 0 for vw in vws)
+
+
+def subtileLdsBlockPadBytes(kernel, ldsRowStride=None) -> int:
+  """Bytes of padding inserted per SUBTILE_LDS_BLOCK_BYTES of LDS; 0 = disabled.
+
+  Only the interleaved (SourceSwap) local-read map needs this. That map puts
+  every lane's base at a multiple of SUBTILE_LDS_BLOCK_BYTES, which on a 256 B
+  bank period lands every lane on the same bank. The blocked map does not have
+  the problem, so it keeps its existing layout untouched.
+
+  `ldsRowStride` is the LDS bytes per M row. When it is given and the fold does
+  not hold (see subtileLdsBlockPadFolds), the de-conflict is dropped rather than
+  approximated -- the map is what has to stay exact. The lane row stride assert
+  in SubtileLREmit._emitLaneRowBase is the backstop: it fires if a configuration
+  ever reaches the fold with a stride that does not divide.
+  """
+  if not kernel.get("SourceSwap", False):
+    return 0
+  if ldsRowStride is not None and not subtileLdsBlockPadFolds(kernel, ldsRowStride):
+    return 0
+  pad = int(os.environ.get(_LDS_BLOCK_PAD_ENV, 32))
+  if pad == 0:
+    return 0
+  # ds_read_b128 requires 16 B alignment, so the pad must preserve it.
+  assert pad % 16 == 0 and pad < SUBTILE_LDS_BLOCK_BYTES, \
+    "%s=%d must be a nonzero multiple of 16 below %d" % (_LDS_BLOCK_PAD_ENV, pad, SUBTILE_LDS_BLOCK_BYTES)
+  return pad
+
+
+def ldsBlockPadDelta(tileInfo, offset: int) -> int:
+  """Extra bytes that block padding inserts before `offset`."""
+  padBytes = int(getattr(tileInfo, "ldsBlockPadBytes", 0))
+  if not padBytes:
+    return 0
+  return (int(offset) // SUBTILE_LDS_BLOCK_BYTES) * padBytes
+
+
+def ldsBlockPadOffset(tileInfo, offset: int) -> int:
+  """Map an unpadded LDS byte offset to its padded position."""
+  return int(offset) + ldsBlockPadDelta(tileInfo, offset)
+
+
+def assertLdsBlockPadSeparable(tileInfo, baseResidueMax: int, offset: int):
+  """Guard the pad(a + b) == pad(a) + pad(b) split used by the GR m0 and LR reads.
+
+  Both sides pad a runtime base and a compile-time immediate independently, which
+  is exact only when the two cannot carry across a block boundary.
+  `baseResidueMax` is the largest amount the runtime base can contribute below a
+  block. If that plus the immediate's own residue can reach a full block, the
+  split silently drops a pad and the access lands in the wrong row -- so fail
+  loudly here rather than produce a subtly wrong kernel.
+  """
+  padBytes = int(getattr(tileInfo, "ldsBlockPadBytes", 0))
+  if not padBytes:
+    return
+  residue = int(offset) % SUBTILE_LDS_BLOCK_BYTES
+  assert residue + int(baseResidueMax) < SUBTILE_LDS_BLOCK_BYTES, \
+    ("subtile LDS block pad: offset %d (residue %d) plus max base residue %d reaches a %d B "
+     "block boundary, so the padded base/immediate split is not exact"
+     % (offset, residue, baseResidueMax, SUBTILE_LDS_BLOCK_BYTES))
 
 
 ################################################################################

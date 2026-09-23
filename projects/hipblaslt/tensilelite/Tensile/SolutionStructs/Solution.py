@@ -32,6 +32,7 @@ from typing import List, Dict, Literal, Tuple
 from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Activation import ActivationType
 from Tensile.AsmStoreState import VectorDataTypes
+from Tensile.Components.Subtile.StoreInNLL import subtileStoreInNLLRejectionReason
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
@@ -68,6 +69,21 @@ from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from Tensile.Common.Utilities import plsinDebugEnv
+
+
+def subtileSourceSwapWidthSupported(miWaveTile, vectorWidthA, vectorWidthB):
+  """Return whether subtile SourceSwap can use conflict-free wide stores.
+
+  The profitable gfx950 mapping requires eight contiguous output rows per lane
+  and eight-wide local reads for both operands.  ``-1`` means derive the width;
+  it derives to eight exactly when the corresponding wave-tile dimension is a
+  multiple of eight.
+  """
+  return (len(miWaveTile) == 2
+          and miWaveTile[0] == 8
+          and miWaveTile[1] % 8 == 0
+          and vectorWidthA in (-1, 8)
+          and vectorWidthB in (-1, 8))
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -1076,9 +1092,23 @@ class Solution(collections.abc.Mapping):
     state["UseSubtileImpl"] = state["UseSubtileImpl"] and state["ISA"] == IsaVersion(9,5,0)
 
     if state["UseSubtileImpl"]:
-      state["VectorWidthA"] = 1
-      state["VectorWidthB"] = 1
-      state["SourceSwap"] = False
+      # SourceSwap (ss1) uses the interleaved local-read map and needs VectorWidth to
+      # derive (8 for the eligible bf16 / MX-FP4 shapes); the non-SourceSwap fold path
+      # uses the blocked map with VW=1. Only force VW=1 / SourceSwap=False when the
+      # solution is not an eligible SourceSwap candidate, so ss1's SS1 solutions keep
+      # SourceSwap while fold's DPP path is byte-identical. Ineligible shapes downgrade
+      # to SS0 here (rather than reject) so a tuning sweep keeps the candidate.
+      miwt = state.get("MIWaveTile", [])
+      inputOK = (state["ProblemType"]["DataTypeA"].numBytes() == 2
+                 or state["ProblemType"]["DataTypeA"].isFloat4())
+      ssSupported = (inputOK
+                     and state["ProblemType"]["DestDataType"].numBytes() == 2
+                     and subtileSourceSwapWidthSupported(
+                       miwt, state["VectorWidthA"], state["VectorWidthB"]))
+      if not (state["SourceSwap"] and ssSupported):
+        state["VectorWidthA"] = 1
+        state["VectorWidthB"] = 1
+        state["SourceSwap"] = False
       # Force BufferStore=1: UseSubtileImpl optimized storeD path is only implemented
       # for buffer stores for now.
       state["BufferStore"] = 1
@@ -1124,9 +1154,53 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
     if state["UseSubtileImpl"]:
-      state["VectorWidthA"] = 1
-      state["VectorWidthB"] = 1
-      state["SourceSwap"] = False
+      # SourceSwap requires the interleaved local-read tile->row map, and VectorWidth is
+      # the name of that map rather than an independent knob: subtile row j owns M rows
+      # congruent to j modulo VectorWidth. Leaving VectorWidthA/B alone lets the generic
+      # derivation below pick them (8 for bf16), which is what the interleaved map needs.
+      #
+      # The 16-bit and MX-FP4 paths implement that map. FP8 does not: it takes a separate
+      # local-read assignment that still emits the blocked map, so enabling SourceSwap
+      # there would pair an interleaved epilogue with a blocked main loop, which is
+      # silently wrong rather than rejected.
+      #
+      # MX is admitted because its scale path now follows the same interleaved map as the
+      # data (see SubtileScaleEmit.scaleRemapEnabled). Before that it addressed the blocked
+      # row 16j+a while the data used 8a+j, so every lane scaled by the wrong row.
+      #
+      # Two further conditions are what makes SourceSwap a win rather than merely legal,
+      # and both are hard bounds rather than current limitations:
+      #
+      #   Store width. SS0 stores MIOutputVectorWidth (=4) elements whatever MIWaveTile
+      #   is; SS1 stores VectorWidthA. So SS1 only widens the store when VectorWidthA > 4.
+      #   VectorWidthA is the largest power-of-two divisor of MIWaveTile[0] capped at
+      #   4 // regPerElem = 8, and a buffer_store tops out at 16 bytes = 8 two-byte
+      #   elements. Floor and ceiling meet at 8, so MIWaveTile[0] must be exactly 8:
+      #   at 4 SS1 ties SS0 while paying for LDS padding and a disabled swizzle, and at
+      #   2 it stores half as wide.
+      #
+      #   B local-read width. Measurements show that narrower B interleaves turn every
+      #   local read into a 7x LDS-bank-conflicted access. Require the derived/explicit
+      #   width to be 8; the auto case derives to 8 exactly when MIWaveTile[1] is a
+      #   multiple of 8. Other shapes downgrade to SS0 instead of losing the candidate.
+      #
+      #   Destination size. With a 4-byte destination SS0's 4 elements already fill the
+      #   16-byte store, so there is nothing left for SS1 to widen.
+      #
+      # Anything else is downgraded to SS0 here rather than rejected, so a tuning sweep
+      # over SourceSwap keeps the candidate instead of losing it. The asserts downstream
+      # in Components/Subtile then describe states this gate makes unreachable.
+      miwt = state.get("MIWaveTile", [])
+      inputOK = (state["ProblemType"]["DataTypeA"].numBytes() == 2
+                 or state["ProblemType"]["DataTypeA"].isFloat4())
+      ssSupported = (inputOK
+                     and state["ProblemType"]["DestDataType"].numBytes() == 2
+                     and subtileSourceSwapWidthSupported(
+                       miwt, state["VectorWidthA"], state["VectorWidthB"]))
+      if not (state["SourceSwap"] and ssSupported):
+        state["VectorWidthA"] = 1
+        state["VectorWidthB"] = 1
+        state["SourceSwap"] = False
       # Force BufferStore=True: UseSubtileImpl optimized storeD path is only implemented
       # for buffer stores for now.
       state["BufferStore"] = True
@@ -1213,6 +1287,10 @@ class Solution(collections.abc.Mapping):
     if state["ClusterDim"] in ([16, 1], [1, 16]):
       reject(state, printRejectionReason,
               "Currently ClusterDim = 16x1 and 1x16 are not supported")
+
+    storeInNLLReason = subtileStoreInNLLRejectionReason(state)
+    if storeInNLLReason is not None:
+      reject(state, printRejectionReason, storeInNLLReason)
 
     # Multicast uses a mask fixed to the physical cluster position, but Stream-K remaps
     # each WG's tile per iteration, so the broadcast would target the wrong partner.

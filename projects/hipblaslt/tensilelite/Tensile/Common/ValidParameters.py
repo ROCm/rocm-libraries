@@ -515,6 +515,9 @@ validParameters = { # we need to make sure this matches develop
     # 1 = interleave one stores after required macs have completed execution
     # 2 = interleave two stores after required macs have completed execution
     "OptNoLoadLoop": [0, 1, 2],
+    # Experimental subtile-only D-store overlap. This remains fail-closed in
+    # Solution validation until SrdD and D coordinates are safely live in NLL.
+    "SubtileStoreInNLL": [0, 1],
     "BufferLoad": [False, True],
     "BufferStore": [False, True],
     # CompactLoopStore default (opt-in, off by default). When enabled, the

@@ -86,8 +86,9 @@ def reject(state: dict, printSolutionRejectionReason: bool = True, *args) -> boo
       solutionNameMin = state["SolutionNameMin"] if ("SolutionNameMin" in state) else None
       # if we don't have SolutionNameMin, we simply use the problemTypeName
       solutionNameMin = str(state["ProblemType"]) if (solutionNameMin == None) else solutionNameMin
-      raise Exception("!! Warning: Any rejection of a LibraryLogic is not expected, please check. \
-        SolutionIndex: %d (or SolutionName/ProblemType: %s)"%(solutionIndex, solutionNameMin))
+      raise Exception("!! Warning: Any rejection of a LibraryLogic is not expected, please check. "
+        "Reason: %s. SolutionIndex: %d (or SolutionName/ProblemType: %s)"
+        % (" ".join(str(a) for a in args), solutionIndex, solutionNameMin))
   if state != None:
     state["Valid"] = False
     return True

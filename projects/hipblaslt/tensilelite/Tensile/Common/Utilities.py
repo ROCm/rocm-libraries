@@ -102,6 +102,20 @@ def plsinDebugEnv(name: str, default=None):
     """
     return _parsePlsinDebugEnv().get(name, default)
 
+
+def preloopCoverInterleaveEnabled() -> bool:
+    """True when the preloop cover-interleave prototype is active."""
+    return os.environ.get("TENSILE_PRELOOP_COVER_INTERLEAVE", "0") != "0"
+
+
+def preloopCoverInterleaveLevel() -> int:
+    """Granularity of preloop cover-interleave prototype (0=off, 1=coarse, 2=per-load)."""
+    raw = os.environ.get("TENSILE_PRELOOP_COVER_INTERLEAVE", "0")
+    try:
+        return int(raw)
+    except ValueError:
+        return 1 if raw != "0" else 0
+
 # Global
 _global_ti = rocIsa.getInstance()
 

@@ -67,6 +67,8 @@ from .SubtileGeometry import (
   LoadShape,
   MMALayout,
   MMAScaleLayout,
+  ldsBlockPadDelta,
+  subtileLdsBlockPadBytes,
   MFMA_16x16_1B_4K_4V,
   MFMA_16x16_1B_4K_8V,
   MFMA_16x16_1B_4N_4V,
@@ -477,7 +479,43 @@ class TileInfo:
       # TDM path. We apply 16 Bytes padding to each row.
       # TDM only exists on gfx1250, which is never swizzled (gfx950-only).
       isTDM = kernel.get("enableTDM%s" % tc, False)
-      self.ldsRowPadBytes = 16 if isTDM else 0
+      # Block padding de-conflicts the interleaved local-read map on the gfx950
+      # DirectToLds path. It replaces row padding rather than stacking with it,
+      # matching every non-subtile call site (`LdsPad if LdsBlockSizePerPad == 0`).
+      # TDM pads through its own descriptor fields, so that path keeps row padding.
+      # The LDS M-row stride is depthUBytes here: SourceSwap turns the swizzle off,
+      # so a row is one contiguous DepthU, and row padding is mutually exclusive
+      # with block padding.
+      self.ldsBlockPadBytes = 0 if isTDM else subtileLdsBlockPadBytes(kernel, self.depthUBytes)
+      self.ldsRowPadBytes = 0 if self.ldsBlockPadBytes else (16 if isTDM else 0)
+
+      # Local-read tile->row interleave factor.
+      #   1  = blocked:     subtile row j covers M rows [instM*j, instM*j + instM)
+      #   VW = interleaved: subtile row j covers M rows congruent to j modulo VW
+      # SourceSwap gives up the intra-tile run of consecutive M values, so the store
+      # can only reassemble a run of 8 if consecutive subtile rows are adjacent M rows.
+      # That is what the interleaved map provides. See LAYOUT_MODEL.md sections 4 and 8.
+      self.lrInterleaveVW = int(kernel.get("VectorWidth%s" % tc, 1)) if kernel.get("SourceSwap", False) else 1
+      # Interleave groups per wave: VW consecutive rows per lane covers instM*VW of
+      # the wave's rows in one pass, so MIWaveTile/VW passes cover them all. 1 is the
+      # exact-tiling case (MIWaveTile == VW); above that the local read uses the
+      # two-level map in SubtileLREmit.emitSingleDsRead.
+      self.lrInterleaveRepeat = 1
+      if self.lrInterleaveVW > 1:
+        # The interleave partitions the row space only when it divides the subtile row
+        # count; a leftover would make two subtile rows claim one M row and silently
+        # permute the output rather than fail.
+        miWaveTile = int(kernel["MIWaveTile"][0 if tc == 'A' else 1])
+        assert miWaveTile % self.lrInterleaveVW == 0, (
+          "subtile SourceSwap: MIWaveTile[%d](%d) must be a multiple of VectorWidth%s(%d)"
+          % (0 if tc == 'A' else 1, miWaveTile, tc, self.lrInterleaveVW))
+        # The row/dword/byte split of the two-level map is derived from bit slices of
+        # the interleave factor (see the scale map in SubtileScaleEmit), so it has to
+        # be a power of two.
+        assert self.lrInterleaveVW & (self.lrInterleaveVW - 1) == 0, (
+          "subtile SourceSwap: VectorWidth%s(%d) must be a power of two"
+          % (tc, self.lrInterleaveVW))
+        self.lrInterleaveRepeat = miWaveTile // self.lrInterleaveVW
 
       # Convenience counts for scheduler / diagram
       self.mmaTileLocalTotalCount = self.localMMATileGrid[0] * self.localMMATileGrid[1]
@@ -689,6 +727,12 @@ class TileInfo:
       self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
       self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
       self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
+      # Under SourceSwap the scale byte a lane needs sits at a lane-dependent position
+      # in the dword, which the MFMA's compile-time byte select cannot express. The
+      # scale ds_read becomes a b64 and a v_perm with this per-lane selector packs the
+      # four bytes into the layout the existing select already uses.
+      if kernel.get("SourceSwap", False) and int(kernel.get("VectorWidthA", 1)) > 1:
+        self._sharedVgprScalePermSel = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprScalePermSel")]
 
   def allocVgprTileRegisters_legacy(self, writer, kernel):
     """Allocate data tile registers for A/B/D MMA operands.
@@ -702,6 +746,12 @@ class TileInfo:
     if isinstance(self.geometry, MXScaleTilePair):
       numMMATilesPerReg = 4
     numDword = int(math.ceil(self.mmaTileRegCount))
+    # The interleaved map splits a scale group's two M-adjacent tiles across adjacent
+    # dwords, so the group is read as a b64 and packed back into the low register with
+    # a v_perm; that needs an aligned pair. Condition mirrors lrInterleaveVW above.
+    if isinstance(self.geometry, MXScaleTilePair) \
+       and kernel.get("SourceSwap", False) and int(kernel.get("VectorWidthA", 1)) > 1:
+      numDword = 2
 
     isDTile = isinstance(self.geometry, CDTileGeometry)
     maxAgpr = writer.states.regCaps["PhysicalMaxVgpr"] - writer.states.regCaps["MaxVgpr"] if isDTile else 0
@@ -730,7 +780,8 @@ class TileInfo:
     if self.lr is not None:
       self.lr.deallocOffsetRegisters(self, writer, kernel)
     # MXScaleTilePair dealloc
-    for attr in ('_sharedVgprGROffset', '_sharedVgprLROffset', '_sharedVgprLROffsetSwap'):
+    for attr in ('_sharedVgprGROffset', '_sharedVgprLROffset', '_sharedVgprLROffsetSwap',
+                 '_sharedVgprScalePermSel'):
       for v in getattr(self, attr, []):
         writer.vgprPool.checkIn(v)
       if hasattr(self, attr):
@@ -817,6 +868,10 @@ class TileInfo:
   def sharedVgprLROffsetSwap(self):
     if self.lr: return self.lr.sharedVgprLROffsetSwap
     return getattr(self, '_sharedVgprLROffsetSwap', [])
+
+  @property
+  def sharedVgprScalePermSel(self):
+    return getattr(self, '_sharedVgprScalePermSel', [])
 
   def grOffsetVgpr(self, idx: int) -> int:
     """VGPR holding per-lane GR byte offset for load `idx` within a subtile."""
@@ -1110,6 +1165,14 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
   aOperand = vgpr(vgprBStart,opBSize) if kernel["SourceSwap"] else vgpr(vgprAStart,opASize)
   bOperand = vgpr(vgprAStart,opASize) if kernel["SourceSwap"] else vgpr(vgprBStart,opBSize)
 
+  # mxsa/mxsb and their op_sel selectors address the A/B *operand positions*, so
+  # they must follow whichever operand now occupies each position. Swapping the
+  # data without the scales scales every MX block by its counterpart's exponent,
+  # which assembles and runs but is silently wrong. The generic path swaps both
+  # together (KernelWriterAssembly.py:9825).
+  aScaleVgpr, bScaleVgpr = (scaleBVgpr, scaleAVgpr) if kernel["SourceSwap"] else (scaleAVgpr, scaleBVgpr)
+  aScaleSel,  bScaleSel  = (scaleBsel,  scaleAsel)  if kernel["SourceSwap"] else (scaleAsel,  scaleBsel)
+
   miK = kernel["MatrixInstK"]
 
   if miK == 128:
@@ -1122,8 +1185,8 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    a=aOperand, \
                                    b=bOperand, \
                                    acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
+                                   mxsa=vgpr(aScaleVgpr), mxsb=vgpr(bScaleVgpr), \
+                                   vop3=VOP3PModifiers(op_sel=[aScaleSel%2, bScaleSel%2], op_sel_hi=[(aScaleSel>>1)%2, (bScaleSel>>1)%2]), \
                                    comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
@@ -1416,11 +1479,11 @@ def mainLoop(writer, kernel):
       scheduler = LogicalScheduler(cfg)
       scheduler.build()
 
-      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB, kernel=kernel)
       if vgprUsed + numVgpr <= vgprBudget:
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
-                           scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+                           scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB, kernel=kernel)
   dtileInfo = writer.states.d.tileInfo
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize

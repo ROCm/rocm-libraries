@@ -123,6 +123,14 @@ PARTIAL_CASES = [
     (_128x256,  17,  23),   # non-aligned in both
 ]
 
+SS1_CONFIG = TileConfig(mt_a=256, mt_b=256, depth_u=256)
+SS1_CASES = [
+    (256, 256),  # full tile
+    (248, 256),  # 8-aligned partial M keeps the wide masked path
+    (256, 240),  # ragged N must route to the edge path
+    (248, 240),  # both dimensions partial
+]
+
 
 def _mock_f32_dtype():
     """Mock DataType that reports 4 bytes and isSingle()=True, isHalf()=False."""
@@ -154,7 +162,7 @@ def _mock_bf16_dtype():
     return m
 
 
-def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
+def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False, source_swap=False):
     """Build kernel dict for the store-D test.
 
     Extends the minimal kernel from create_writer with all fields needed by
@@ -211,7 +219,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["CompactLoopStore"] = False
     kernel["LocalSplitU"] = 1
     kernel["StoreRemapVectorWidth"] = 0
-    kernel["SourceSwap"] = False
+    kernel["SourceSwap"] = source_swap
     kernel["EnableMatrixInstruction"] = True
     kernel["AdaptiveGemm"] = 0
     kernel["AdaptiveGemmGSUA"] = 0
@@ -220,8 +228,8 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["KernelLanguage"] = "Assembly"
     kernel["NumThreads"] = NUM_THREADS
 
-    kernel["VectorWidthA"] = 1
-    kernel["VectorWidthB"] = 1
+    kernel["VectorWidthA"] = 8 if source_swap else 1
+    kernel["VectorWidthB"] = 8 if source_swap else 1
 
     # Target the widest store instruction possible for both dtypes, given VWA=VWB=1.
     # With VWA=VWB=1 and MIOutputVW=4, vectorWidth0 = VWA * MIOutputVW = 4.
@@ -233,7 +241,8 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     #   bf16 dest (2 B/elem): SVW = min(16/2, 4) = 4 → buffer_store_dwordx2  (8 bytes) ✓
     bpe = int(dest_dtype.numBytes())
     mi_output_vw = kernel["MIOutputVectorWidth"]
-    kernel["StoreVectorWidth"] = min(16 // bpe, mi_output_vw)
+    store_elements = kernel["VectorWidthA"] if source_swap else mi_output_vw
+    kernel["StoreVectorWidth"] = min(16 // bpe, store_elements)
     kernel["_VectorStore"] = True
 
     # PackedC1IndicesX: [1] means the J-dim index is index 1
@@ -253,7 +262,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["PackedC0IndicesX"] = [0]
     kernel["NumWaveSplitK"] = 1
     kernel["GroupLoadStore"] = False
-    kernel["GlobalWriteVectorWidth"] = min(16 // bpe, mi_output_vw)
+    kernel["GlobalWriteVectorWidth"] = min(16 // bpe, store_elements)
     kernel["NonTemporalD"] = 0
     kernel["NonTemporalC"] = 0
     kernel["NonTemporalE"] = 0
@@ -1096,7 +1105,8 @@ def _inject_bf16_permute(store_asm: str, perm_addr_reg: int, perm_tmp_regs: tupl
 
 def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
                 num_threads=None, dump_asm=False, dump_store_insts=False,
-                asm_output_dir=None, use_bf16=False, init_mode="matrix"):
+                asm_output_dir=None, use_bf16=False, init_mode="matrix",
+                source_swap=False):
     """Assemble and run the store-D roundtrip for the given tile and wave configuration.
 
     Args:
@@ -1117,7 +1127,9 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     if num_threads is None:
         num_threads = NUM_THREADS
 
-    kernel = _build_store_kernel(cfg, mi_wave_group=mi_wave_group, use_bf16=use_bf16)
+    kernel = _build_store_kernel(
+        cfg, mi_wave_group=mi_wave_group, use_bf16=use_bf16,
+        source_swap=source_swap)
     kernel["NumThreads"] = num_threads
     kernel["UseSubtileImpl"] = True
 
@@ -1150,7 +1162,20 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     round_mt1 = ((size_j + cfg.mt_b - 1) // cfg.mt_b) * cfg.mt_b
     stride_d = round_mt0
 
-    if init_mode == "wave_id":
+    if init_mode == "constant":
+        prologue = _build_prologue(sgprs, len(agpr_indices), cfg.mt_a, cfg.mt_b,
+                                   stride_d=stride_d, use_input_buf=False)
+        init_mod = _build_accvgpr_init_constant_asm(
+            agpr_indices, tmp_v, 0x3F800000)
+        args = [
+            ("output",   8, "global_buffer", "u8"),
+            ("size_i",   4, "by_value",      "u32"),
+            ("size_j",   4, "by_value",      "u32"),
+            ("stride_d", 4, "by_value",      "u32"),
+        ]
+        run_inputs = ()
+        expected_set = None
+    elif init_mode == "wave_id":
         prologue = _build_prologue(sgprs, len(agpr_indices), cfg.mt_a, cfg.mt_b,
                                    stride_d=stride_d, use_input_buf=False)
         init_mod = _build_accvgpr_init_wave_id_asm(agpr_indices, tmp_v)
@@ -1324,6 +1349,24 @@ def test_storeD_partial_tile(cfg, size_i, size_j, use_bf16, tmp_path):
         _verify_bf16_random_matrix_positions(out, ref_arr, round_mt0, round_mt1, size_i, size_j)
     else:
         _verify_random_matrix_positions(out, ref_arr, round_mt0, round_mt1)
+
+
+@pytest.mark.parametrize(
+    "size_i,size_j", SS1_CASES,
+    ids=[f"m{m}n{n}" for m, n in SS1_CASES],
+)
+def test_storeD_sourceswap_bf16(size_i, size_j, tmp_path):
+    """SS1 writes every valid BF16 element and leaves partial-tile OOB intact."""
+    init_rocisa()
+    out, _, _, round_mt0, round_mt1 = _run_storeD(
+        SS1_CONFIG, tmp_path, size_i, size_j, init_mode="constant",
+        use_bf16=True, source_swap=True,
+    )
+    D = np.array(out, dtype=np.float32).reshape(
+        round_mt0, round_mt1, order="F")
+    assert np.all(D[:size_i, :size_j] == np.float32(1.0))
+    _verify_oob_sentinel(
+        out, round_mt0, round_mt1, size_i, size_j, label="bf16-ss1")
 
 
 def _verify_bf16_positions(out, round_mt0, round_mt1, kernel, check_ncol=True, check_wave=True):
@@ -1509,6 +1552,15 @@ def _build_accvgpr_init_wave_id_asm(agpr_indices, tmp_v):
         f"  v_lshrrev_b32 v{tmp_v}, {log2_ws}, v0  // wave_id = tid >> {log2_ws}\n"
         f"  v_cvt_f32_u32 v{tmp_v}, v{tmp_v}        // float(wave_id)\n"
     ))
+    for agpr in agpr_indices:
+        m.add(TextBlock(f"  v_accvgpr_write_b32 a{agpr}, v{tmp_v}\n"))
+    return m
+
+
+def _build_accvgpr_init_constant_asm(agpr_indices, tmp_v, value_bits):
+    """Initialize every accumulator to one f32 bit pattern."""
+    m = Module("accvgpr_init_constant")
+    m.add(TextBlock(f"  v_mov_b32 v{tmp_v}, 0x{value_bits:08x}\n"))
     for agpr in agpr_indices:
         m.add(TextBlock(f"  v_accvgpr_write_b32 a{agpr}, v{tmp_v}\n"))
     return m

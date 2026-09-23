@@ -119,7 +119,7 @@ globalParameters["ExitOnFails"] = (
     1  # 1: Exit after benchmark run if failures detected.  2: Exit during benchmark run.
 )
 globalParameters["CpuThreads"] = (
-    -1
+    4
 )  # How many CPU threads to use for kernel generation.  0=no threading, -1 == nproc, N=min(nproc,N).  TODO - 0 sometimes fails with a kernel name error?  0 does not check error codes correctly
 # If True: after each kernel is assembled, verify that StinkyTofu's total instruction encoding
 # size (sum of each instruction's encoded byte length from the Stinky pass pipeline) matches the
@@ -504,6 +504,7 @@ defaultBenchmarkCommonParameters = [
     {"LocalWritePerMfma": [-1]},
     {"InterleaveAlpha": [0]},
     {"OptNoLoadLoop": [1]},
+    {"SubtileStoreInNLL": [0]},
     {"BufferLoad": [True]},
     {"BufferStore": [True]},
     {"CompactLoopStore": [False]},
