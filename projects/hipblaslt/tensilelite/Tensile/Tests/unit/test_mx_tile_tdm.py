@@ -4,6 +4,8 @@
 # MXBlockFree=1 is the 1xK layout (one scale per M/N row). 128 is 128x128.
 ################################################################################
 
+from types import SimpleNamespace
+
 import pytest
 
 from Tensile.Common.MxScaleLayout import (
@@ -23,6 +25,7 @@ from Tensile.Common.MxScaleLayout import (
     mxGl2TileOffset,
     mxTileSpanPartnerDelta,
 )
+from Tensile.Components.GL2Prefetch import GL2PrefetchLoad
 
 
 def _kernel(mxBlockFreeA=1, mxBlockFreeB=1, mxBlockA=128, mxBlockB=128):
@@ -94,6 +97,33 @@ def test_mx_gl2_2d_rounds_the_whole_cluster_span():
     # Four MT64 B tiles cover two MXBlockFree128 rows.
     assert mxGl2CoalescedDim(64, 4, 1, mxTile=128) == 2
     assert mxGl2CoalescedDim(64, 4, 4, mxTile=128) == 8
+
+
+def test_mx_gl2_ncc_includes_partial_prefetch_chunk():
+    # MX1x128/MXSB has a 384-byte coalesced range.
+    # Two 256-byte prefetch chunks cover this range.
+    writer = SimpleNamespace(
+        states=SimpleNamespace(regCaps={"GlobalPrefetchSize": 256})
+    )
+    kernel = {
+        "ClusterDim": [4, 2],
+        "NumThreads": 128,
+        "MacroTileB": 192,
+        "MatrixInstK": 128,
+        "DepthU": 512,
+        "ProblemType": {
+            "MXBlockB": 128,
+            "MXBlockFreeB": 1,
+        },
+    }
+    tp = {"tensorChar": "MXSB", "idx": 1, "bpeGR": 1}
+
+    GL2PrefetchLoad().init(writer, kernel, tp)
+
+    assert tp["gl2ncp"] == 4
+    assert tp["gl2ncc"] == 2
+    assert tp["gl2nc"] == 8
+    assert tp["gl2nl"] == 1
 
 
 def test_mx_gl2_2d_tile_offset_uses_original_free_coordinate():
