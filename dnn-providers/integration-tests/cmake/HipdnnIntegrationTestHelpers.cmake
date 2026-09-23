@@ -87,19 +87,20 @@
 #   Support-claim mode is not a per-target keyword. Every lane this module
 #   registers gets the same flag; see the constant below.
 
-# Support-claim mode for every lane registered by this module.
+# Support-claim flag for every lane registered by this module.
 #
-# Report only: the sidecar is queried, every verdict is printed in the summary, and a
-# broken claim never fails the test. That is what produces the day-one claim-failure
-# count these lanes exist to measure, and it keeps a local `ctest` run from going red
-# over a claim the developer did not author.
+# Every lane enforces: the sidecar is queried against the engine under test, every
+# verdict is printed in the summary, and a broken claim fails that bundle's test.
 #
-# Enforcement is the deliberate follow-up. It lands with the `dvc pull` that gives the
-# superbuild lanes real bundles to check; until then flipping this would enforce over an
-# empty set. Either mode is available when running the binary directly:
-#   hipdnn_integration_tests --test-article <plugin>.so --test-engine <ENGINE> \
-#       --enforce-support-claims
-set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--report-support-claims"
+# A claim only applies to the arch and platform the run is on, and a runner with no
+# device reports no arch, so no claim applies and nothing is enforced. That makes this
+# inert on today's GPU-less lanes rather than a new source of red -- and live the day a
+# GPU lane exists, which is the point. Measured locally on gfx942 against MIOPEN_ENGINE
+# before flipping it: 5504 claim-bearing graphs queried, 0 broken, 0 errored.
+#
+# Sidecars are git-tracked, so this does not wait on `dvc pull`; DVC carries the tensor
+# payloads, which claim checking never reads.
+set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--enforce-support-claims"
     CACHE INTERNAL "Support-claim flag passed to every registered integration lane"
 )
 
@@ -109,8 +110,8 @@ set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--report-support-claims"
 #   out_var - Variable to receive the command list
 # ~~~
 macro(_build_external_integration_command out_var)
-    # --report-support-claims, so the lane prints the support-claim summary without
-    # failing on a broken claim. See the constant's definition above.
+    # --enforce-support-claims, so a bundle whose sidecar promises support this engine
+    # no longer delivers fails the lane. See the constant's definition above.
     set(${out_var}
         $<TARGET_FILE:hipdnn_integration_tests>
         --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>

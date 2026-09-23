@@ -8,16 +8,22 @@ This document covers what a claim asserts, how one graph's claims are checked,
 and the lifecycle inside `TestBody()` that decides when a claim is checked and when
 it is published.
 
-> **Under `ctest`, claims are reported, not enforced.** Every lane registered by
-> `add_external_integration_test_target()` passes `--report-support-claims`: the same
-> sidecar questions and the same summary, but a broken claim never fails a test. That
-> is what yields the day-one claim-failure count without turning lanes red over a
-> claim the developer did not author. Enforcement lands as a follow-up.
+> **Under `ctest`, claims are enforced.** Every lane registered by
+> `add_external_integration_test_target()` passes `--enforce-support-claims`: the
+> sidecar is queried against the engine under test, every verdict is printed in the
+> summary, and a broken claim fails that bundle's test.
 >
-> Running the binary by hand, neither flag is on unless you pass it, and
-> `--enforce-support-claims` is available there today. Enforcement requires
-> `--test-engine`: a run with `--enforce-support-claims` and no engine named exits 1
-> rather than degrading to "enforced nothing, exit 0".
+> A claim only applies to the arch and platform the run is on, so a runner with no
+> device has no claim to enforce and nothing goes red on its account.
+>
+> Running the binary by hand behaves the same way -- enforcement is the default.
+> `--no-enforce-support-claims` opts out: the sidecar is still queried and the summary
+> still printed, but a broken claim no longer fails the test.
+>
+> Enforcement requires `--test-engine`. Typing `--enforce-support-claims` with no
+> engine named exits 1 rather than degrading to "enforced nothing, exit 0"; inheriting
+> the default with no engine named quietly reports instead, since nothing was asked
+> for that cannot be delivered.
 
 ---
 
@@ -357,21 +363,12 @@ cannot see.
     --test-engine MIOPEN_ENGINE \
     --enforce-support-claims \
     --gtest_filter='quick_*'
-
-# Same queries, same verdicts, same summary -- but a broken claim prints instead of
-# failing. --report-support-claims never changes the exit code.
-./bin/hipdnn_integration_tests \
-    --test-article /path/to/libmiopen_plugin.so \
-    --test-engine MIOPEN_ENGINE \
-    --report-support-claims \
-    --gtest_filter='quick_*'
 ```
 
-The `ctest` lanes pass `--report-support-claims`, so they print this summary and
-never fail on a claim. To enforce, run the binary by hand with
-`--enforce-support-claims` as above. There is no build option that flips the
-registered lanes, and no environment variable that changes the mode behind your
-back: the flag on each lane is whatever
+The `ctest` lanes pass `--enforce-support-claims`, so they print this summary and
+fail on a broken claim. There is no build option that flips the registered lanes,
+and no environment variable that changes the mode behind your back: the flag on
+each lane is whatever
 `HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG` is set to in
 `cmake/HipdnnIntegrationTestHelpers.cmake`.
 
