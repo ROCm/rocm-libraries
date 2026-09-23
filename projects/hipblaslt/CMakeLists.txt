@@ -114,6 +114,12 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
 set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE CACHE BOOL "Use link path for RPATH")
 
+# Holds the vendored libnuma/libdrm pulled in as direct DT_NEEDED entries by
+# the static libhsakmt that SDMA links.
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
+    list(APPEND CMAKE_INSTALL_RPATH "$ORIGIN/../lib/rocm_sysdeps/lib")
+endif()
+
 mark_as_advanced(CMAKE_SKIP_BUILD_RPATH)
 mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH)
