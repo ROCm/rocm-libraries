@@ -1,0 +1,45 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Native gfx1250 WMMA/Wave32 split-K with a separate conversion helper.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 0
+  PrintSolutionRejectionReason: true
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: true
+      TransposeA: false
+      TransposeB: false
+      UseBeta: true
+      UseBias: 0
+      Batched: true
+      StridedBatched: true
+      Activation: false
+      ActivationType: none
+    - BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - WavefrontSize: [32]
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 2, 1, 4, 1]]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [false]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [4]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - SourceSwap: [false]
+        - StoreVectorWidth: [8]
+        - AdaptiveGemm: [0]
+        - AdaptiveGemmGSUA: [0]
+        - StreamK: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 128, 1, 512]

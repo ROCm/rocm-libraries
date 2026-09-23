@@ -122,6 +122,36 @@ class TestHalfUniformCrossover:
         # math.ceil(4/2) = 2 matings → 2 pairs
         assert len(pairs) == 2
 
+    def test_reroll_when_first_mask_has_too_few_swaps(self, monkeypatch):
+        """op() re-draws the mask until it yields at least ``swaps`` set bits.
+
+        Covers the ``while mask.sum() < swaps`` re-roll body, whose execution is
+        otherwise nondeterministic because the mask comes from unseeded
+        ``np.random.random``. Four differing genes give ``swaps == 2``; the first
+        draw is all-False (0 swaps, forces the re-roll) and the second is all-True
+        (4 swaps, satisfies the loop).
+        """
+        from Tensile.ductile.core import crossover as crossover_mod
+
+        pa = Individual({"DepthU": 0, "SourceSwap": 0, "A": 0, "B": 0}, F=1.0)
+        pb = Individual({"DepthU": 1, "SourceSwap": 1, "A": 1, "B": 1}, F=2.0)
+        assert len(pa.diff(pb)) == 4
+
+        draws = iter([np.zeros(4), np.ones(4)])
+        calls = {"n": 0}
+
+        def fake_random(n):
+            calls["n"] += 1
+            return next(draws)
+
+        monkeypatch.setattr(crossover_mod.np.random, "random", fake_random)
+        cx = Crossover.get("hux", prob=1.0, mode="random")
+        a, b = cx.op(pa, pb)
+
+        assert calls["n"] == 2
+        assert set(a.names) == set(pa.names)
+        assert set(b.names) == set(pb.names)
+
 
 # ---------------------------------------------------------------------------
 # SinglePoint crossover (spx)

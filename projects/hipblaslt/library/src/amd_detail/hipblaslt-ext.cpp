@@ -27,7 +27,8 @@
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
 #include "hipblaslt_internal.hpp"
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
+#ifdef HIPBLASLT_ENABLE_JIT
 #include "hipblaslt-jit-gemm-tag.hpp"
 #endif
 #include <Debug.hpp>
@@ -1487,7 +1488,7 @@ namespace hipblaslt_ext
 
     int getIndexFromAlgo(hipblasLtMatmulAlgo_t& algo)
     {
-#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+#ifdef HIPBLASLT_ENABLE_JIT
         if(experimental::detail::isJitAlgo(
                *reinterpret_cast<const rocblaslt_matmul_algo*>(&algo)))
             return -1;
@@ -1594,29 +1595,55 @@ namespace hipblaslt_ext
         }
         return HIPBLAS_STATUS_SUCCESS;
     }
-#ifndef HIPBLASLT_ENABLE_JIT_GEMM
-    namespace experimental
+#ifndef HIPBLASLT_ENABLE_JIT
+    namespace experimental::jit
     {
-        hipblasStatus_t getJitGemmAlgo(hipblasLtHandle_t,
-                                       hipblasLtMatmulDesc_t,
-                                       const void*,
-                                       const void*,
-                                       hipblasLtMatrixLayout_t,
-                                       const void*,
-                                       hipblasLtMatrixLayout_t,
-                                       const void*,
-                                       const void*,
-                                       hipblasLtMatrixLayout_t,
-                                       void*,
-                                       hipblasLtMatrixLayout_t,
-                                       const GenerateOptions&,
-                                       size_t,
-                                       hipblasLtMatmulHeuristicResult_t& result,
-                                       JitGemmInfo&                      info)
+        hipblasStatus_t getJitAlgo(int,
+                                   const Request&,
+                                   const Backend&,
+                                   size_t,
+                                   Solution&    solution,
+                                   Diagnostics& diagnostics)
         {
-            result     = {};
-            info       = {};
-            info.error = "JIT GEMM requires HIPBLASLT_ENABLE_JIT_GEMM=ON";
+            solution    = {};
+            diagnostics = {"", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+        hipblasStatus_t makeGemmRequest(hipblasLtHandle_t,
+                                        hipblasLtMatmulDesc_t,
+                                        const void*,
+                                        const void*,
+                                        hipblasLtMatrixLayout_t,
+                                        const void*,
+                                        hipblasLtMatrixLayout_t,
+                                        const void*,
+                                        const void*,
+                                        hipblasLtMatrixLayout_t,
+                                        void*,
+                                        hipblasLtMatrixLayout_t,
+                                        Request&     request,
+                                        Diagnostics& diagnostics)
+        {
+            request     = {};
+            diagnostics = {"", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+        hipblasStatus_t getGemmAlgo(const Solution&,
+                                    hipblasLtMatmulHeuristicResult_t& result,
+                                    Diagnostics&                      diagnostics)
+        {
+            result       = {};
+            result.state = HIPBLAS_STATUS_NOT_SUPPORTED;
+            diagnostics  = {"", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
+    namespace experimental::jit::tensilelite
+    {
+        hipblasStatus_t createBackend(const Options&, Backend& backend, Diagnostics& diagnostics)
+        {
+            backend     = {};
+            diagnostics = {"TensileLite", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
     }

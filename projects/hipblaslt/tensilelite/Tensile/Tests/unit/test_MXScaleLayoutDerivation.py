@@ -74,6 +74,18 @@ def _run(state, asmCaps=None, archCaps=None):
     return _deriveAndValidateMXScaleLayoutAndTransport(state, asm, arch, False)
 
 
+def test_gfx950_buffer_load_rejects_natural_mx_scales():
+    state = _make_state(isa=ISA_GFX950, mxLoadInst="BufferLoad", mxScaleFormat="NoSwizzle")
+    assert _run(state) is False
+    assert state["Valid"] is False
+
+
+def test_gfx950_unscaled_buffer_load_allows_natural_layout():
+    state = _make_state(isa=ISA_GFX950, mxLoadInst="BufferLoad", mxScaleFormat="NoSwizzle",
+                        mxBlockA=0, mxBlockB=0)
+    assert _run(state) is True
+
+
 # ---------------------------------------------------------------------------
 # "Auto" defaulting
 # ---------------------------------------------------------------------------

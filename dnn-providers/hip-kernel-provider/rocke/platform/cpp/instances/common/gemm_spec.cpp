@@ -415,7 +415,8 @@ static const rocke_type_t*
                                          "fp32",
                                          t->warp_tile_m,
                                          t->warp_tile_n,
-                                         t->warp_tile_k);
+                                         t->warp_tile_k,
+                                         nullptr);
 }
 
 /* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure ints/bools. */

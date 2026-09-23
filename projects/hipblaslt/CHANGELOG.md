@@ -6,7 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* Added an opt-in experimental API to generate GEMM algorithms from explicit TensileLite YAML recipes, with a private reusable sample owner.
+* Added an opt-in experimental JIT API that requests kernel bundles from a configured backend. TensileLite is the first provider; GEMM request and algorithm adapters use existing hipBLASLt execution APIs.
 
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.

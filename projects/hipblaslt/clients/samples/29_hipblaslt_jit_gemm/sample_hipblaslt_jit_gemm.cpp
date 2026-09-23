@@ -1,7 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "hipblaslt-jit-gemm.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -10,13 +9,13 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <vector>
 
-using hipblaslt_ext::experimental::GenerateOptions;
-using hipblaslt_ext::experimental::JitGemm;
+using TensileLiteOptions = hipblaslt_ext::experimental::jit::tensilelite::Options;
 
 namespace
 {
@@ -29,11 +28,6 @@ namespace
     {
         if(status != HIPBLAS_STATUS_SUCCESS)
             throw std::runtime_error(std::string(what) + ": status " + std::to_string(status));
-    }
-    void check(hipblasStatus_t status, const JitGemm& gemm, const char* what)
-    {
-        if(status != HIPBLAS_STATUS_SUCCESS)
-            throw std::runtime_error(std::string(what) + ": " + gemm.lastError());
     }
     void require(bool condition, const char* what)
     {
@@ -153,13 +147,6 @@ namespace
                 hipMemcpyAsync(
                     a, hostA.data(), hostA.size() * sizeof(__half), hipMemcpyHostToDevice, stream),
                 "Change A between runs");
-        }
-        void bind(JitGemm& gemm)
-        {
-            check(gemm.setProblem(
-                      desc, &alpha, a, aLayout, b, bLayout, &beta, c, cLayout, d, dLayout),
-                  gemm,
-                  "Bind problem");
         }
         void reset()
         {
@@ -289,13 +276,18 @@ namespace
             }
         }
     };
-    void runNormal(Problem& p, const GenerateOptions& options)
+    void runPublicGemm(Problem& p, const TensileLiteOptions& options)
     {
         using namespace hipblaslt_ext;
-        experimental::JitGemmInfo        info;
+        experimental::jit::Diagnostics   info;
         hipblasLtMatmulHeuristicResult_t selected;
-        auto                             select = [&](const GenerateOptions& generation) {
-            const auto status = experimental::getJitGemmAlgo(p.handle,
+        auto                             select = [&](const TensileLiteOptions& generation) {
+            experimental::jit::Backend backend;
+            require(experimental::jit::tensilelite::createBackend(generation, backend, info)
+                        == HIPBLAS_STATUS_SUCCESS,
+                    info.message.c_str());
+            experimental::jit::Request request;
+            auto                       status = experimental::jit::makeGemmRequest(p.handle,
                                                              p.desc,
                                                              &p.alpha,
                                                              p.a,
@@ -307,23 +299,30 @@ namespace
                                                              p.cLayout,
                                                              p.d,
                                                              p.dLayout,
-                                                             generation,
-                                                             std::numeric_limits<size_t>::max(),
-                                                             selected,
+                                                             request,
                                                              info);
-            require(status == HIPBLAS_STATUS_SUCCESS, ("JIT selection: " + info.error).c_str());
+            require(status == HIPBLAS_STATUS_SUCCESS, info.message.c_str());
+            int device;
+            check(hipGetDevice(&device), "Get current device");
+            experimental::jit::Solution solution;
+            status = experimental::jit::getJitAlgo(
+                device, request, backend, std::numeric_limits<size_t>::max(), solution, info);
+            require(status == HIPBLAS_STATUS_SUCCESS, info.message.c_str());
+            status = experimental::jit::getGemmAlgo(solution, selected, info);
+            require(status == HIPBLAS_STATUS_SUCCESS, ("JIT selection: " + info.message).c_str());
         };
         select(options);
-        std::cout << "Normal API manifest: " << info.manifestPath << '\n';
+        std::cout << "Public GEMM API manifest: " << (options.outputPath + "/bundle/manifest.json")
+                  << '\n';
         hipblasLtMatmulAlgo_t algo;
         std::memcpy(&algo, &selected.algo, sizeof(algo));
         require(getIndexFromAlgo(algo) == -1, "JIT algorithm exposed a prebuilt index");
-        require(getKernelNameFromAlgo(p.handle, algo) == info.kernelName,
+        require(!getKernelNameFromAlgo(p.handle, algo).empty(),
                 "JIT algorithm kernel name mismatch");
         require(!getSolutionNameFromAlgo(p.handle, algo).empty(), "JIT solution name missing");
         const auto workspaceBytes = selected.workspaceSize;
         if(workspaceBytes)
-            check(hipMalloc(&p.workspace, workspaceBytes), "Allocate normal workspace");
+            check(hipMalloc(&p.workspace, workspaceBytes), "Allocate GEMM workspace");
         auto runC = [&](const hipblasLtMatmulAlgo_t& chosen, size_t bytes) {
             return hipblasLtMatmul(p.handle,
                                    p.desc,
@@ -356,20 +355,19 @@ namespace
             const auto status = runC(algo, workspaceBytes - 1);
             if(allowWorkspaceFallback)
             {
-                check(status, "Normal workspace fallback");
-                p.verify("Normal workspace fallback");
+                check(status, "GEMM workspace fallback");
+                p.verify("GEMM workspace fallback");
             }
             else
-                require(status != HIPBLAS_STATUS_SUCCESS,
-                        "Normal C accepted insufficient workspace");
+                require(status != HIPBLAS_STATUS_SUCCESS, "C API accepted insufficient workspace");
         }
         for(int run = 0; run < 2; ++run)
         {
             if(run)
                 p.changeInputs();
             p.reset();
-            check(runC(algo, workspaceBytes), "Normal C matmul");
-            p.verify(run ? "Normal C copied algorithm repeat" : "Normal C copied algorithm");
+            check(runC(algo, workspaceBytes), "C API matmul");
+            p.verify(run ? "C API copied algorithm repeat" : "C API copied algorithm");
         }
         Gemm   gemm(p.handle,
                   p.desc,
@@ -384,21 +382,21 @@ namespace
                   p.d,
                   p.dLayout);
         size_t required = 0;
-        check(gemm.isAlgoSupported(algo, required), "Normal extension support");
-        require(required == workspaceBytes, "Normal workspace queries disagree");
+        check(gemm.isAlgoSupported(algo, required), "C++ Gemm support");
+        require(required == workspaceBytes, "GEMM workspace queries disagree");
         require(gemm.isAlgoSupported(invalid, required) != HIPBLAS_STATUS_SUCCESS,
                 "Unknown JIT algorithm passed extension support");
         gemm.setMaxWorkspaceBytes(workspaceBytes);
-        check(gemm.initialize(algo, p.workspace, false, p.stream), "Normal extension initialize");
+        check(gemm.initialize(algo, p.workspace, false, p.stream), "C++ Gemm initialize");
         require(!gemm.getKernelName().empty() && !gemm.getSolutionName().empty(),
-                "Normal extension lost JIT names");
+                "C++ Gemm lost JIT names");
         for(int run = 0; run < 2; ++run)
         {
             if(run)
                 p.changeInputs();
             p.reset();
-            check(gemm.run(p.stream), "Normal extension run");
-            p.verify(run ? "Normal extension repeat" : "Normal extension");
+            check(gemm.run(p.stream), "C++ Gemm run");
+            p.verify(run ? "C++ Gemm repeat" : "C++ Gemm");
         }
         // Fresh bundles use the same symbols and basenames. The first retained
         // algorithm must remain runnable after a second private adapter is loaded.
@@ -444,7 +442,7 @@ namespace
             check(hipMemsetAsync(p.workspace, 0xa5, workspaceBytes, p.stream),
                   "Set workspace sentinel");
             require(runC(selected.algo, workspaceBytes) != HIPBLAS_STATUS_SUCCESS,
-                    "Normal C accepted a missing later helper");
+                    "C API accepted a missing later helper");
             unchanged();
             const auto previousName = gemm.getKernelName();
             require(gemm.initialize(selected.algo, p.workspace, false, p.stream)
@@ -458,7 +456,7 @@ namespace
             check(gemm.run(p.stream), "Retained extension after helper failure");
             p.verify("Retained extension after helper failure");
             std::cout
-                << "Normal C/extension missing-helper preflight left D/workspace unchanged PASS\n";
+                << "C API/extension missing-helper preflight left D/workspace unchanged PASS\n";
             return;
         }
         p.reset();
@@ -503,30 +501,21 @@ int main(int argc, char** argv)
     {
         std::cerr << "Usage: " << argv[0]
                   << " PYTHON TENSILE_SOURCE PYTHONPATH YAML FRESH_OUTPUT ARCH COMPILER "
-                     "[--m M --n N --k K --trans-b N|T --amax 0|1] [--normal-api both] "
-                     "[--expect-kernels N "
-                     "--expect-min-gsu N] "
-                     "[--expect-configured-gsu N --expect-accumulation MODE --min-workspace BYTES] "
-                     "[--expect-prepare-failure|--expect-initialize-failure|--expect-unsupported "
-                     "ERROR_SUBSTRING]\n";
+                     "[--m M --n N --k K --trans-b N|T --amax 0|1]\n";
         return 2;
     }
     try
     {
-        GenerateOptions options;
+        TensileLiteOptions options;
         options.pythonExecutable       = argv[1];
         options.tensileSourceDirectory = argv[2];
         options.pythonPath             = argv[3];
         options.configPath             = argv[4];
-        require(options.configPath != "-", "This sample requires an explicit YAML recipe");
         options.outputPath             = argv[5];
         options.architecture           = argv[6];
         options.cxxCompiler            = argv[7];
-        std::string failureMode, failureDiagnostic, expectedAccumulation;
-        bool        normalApi       = false;
-        int         expectedKernels = -1, expectedMinGsu = 0, expectedConfiguredGsu = -2;
-        size_t      minimumWorkspace = 0;
-        auto        integer          = [](const std::string& value) {
+        require(options.configPath != "-", "This sample requires an explicit YAML recipe");
+        auto integer = [](const std::string& value) {
             size_t consumed = 0;
             int    result   = std::stoi(value, &consumed);
             require(consumed == value.size(), "Expected integer option value");
@@ -536,12 +525,7 @@ int main(int argc, char** argv)
         {
             require(i + 1 < argc, "Option requires a value");
             std::string key(argv[i]), value(argv[i + 1]);
-            if(key == "--normal-api")
-            {
-                require(value == "both", "--normal-api requires both");
-                normalApi = true;
-            }
-            else if(key == "--workspace-fallback")
+            if(key == "--workspace-fallback")
                 allowWorkspaceFallback = integer(value) != 0;
             else if(key == "--second-yaml")
                 secondConfig = value;
@@ -562,22 +546,6 @@ int main(int argc, char** argv)
                 N = integer(value);
             else if(key == "--k")
                 K = integer(value);
-            else if(key == "--expect-kernels")
-                expectedKernels = integer(value);
-            else if(key == "--expect-min-gsu")
-                expectedMinGsu = integer(value);
-            else if(key == "--expect-configured-gsu")
-                expectedConfiguredGsu = integer(value);
-            else if(key == "--expect-accumulation")
-                expectedAccumulation = value;
-            else if(key == "--min-workspace")
-                minimumWorkspace = std::stoull(value);
-            else if(key == "--expect-prepare-failure" || key == "--expect-initialize-failure"
-                    || key == "--expect-unsupported")
-            {
-                failureMode       = key;
-                failureDiagnostic = value;
-            }
             else
                 throw std::runtime_error("Unknown option: " + key);
         }
@@ -585,232 +553,7 @@ int main(int argc, char** argv)
                 "Sample dimensions must satisfy 0<M,N<=1024 and 0<K<=8192");
         Problem problem;
         problem.create();
-        if(normalApi)
-        {
-            require(failureMode.empty(), "Normal API mode cannot use standalone failure options");
-            runNormal(problem, options);
-            return 0;
-        }
-        if(!failureMode.empty())
-        {
-            if(failureMode == "--expect-unsupported")
-            {
-                hipblasOperation_t transpose = HIPBLAS_OP_T;
-                check(
-                    hipblasLtMatmulDescSetAttribute(
-                        problem.desc, HIPBLASLT_MATMUL_DESC_TRANSA, &transpose, sizeof(transpose)),
-                    "Set incompatible transpose");
-                check(hipblasLtMatrixLayoutDestroy(problem.aLayout), "Replace A layout");
-                problem.aLayout = nullptr;
-                check(hipblasLtMatrixLayoutCreate(&problem.aLayout, HIP_R_16F, K, M, K),
-                      "Create transposed A layout");
-            }
-            {
-                JitGemm failure(problem.handle);
-                problem.bind(failure);
-                size_t unused = 0;
-                if(failureMode == "--expect-initialize-failure")
-                {
-                    check(failure.prepare(options, unused),
-                          failure,
-                          "Prepare for initialization failure");
-                    if(unused)
-                        check(hipMalloc(&problem.workspace, unused),
-                              "Allocate negative-test workspace");
-                    require(failure.initialize(problem.workspace, unused, problem.stream)
-                                != HIPBLAS_STATUS_SUCCESS,
-                            "Invalid helper symbol unexpectedly accepted");
-                }
-                else
-                    require(failure.prepare(options, unused) != HIPBLAS_STATUS_SUCCESS,
-                            "Invalid bundle/problem unexpectedly accepted");
-                require(failure.lastError().find(failureDiagnostic) != std::string::npos,
-                        ("Unexpected preparation error: " + failure.lastError()).c_str());
-                std::cout << "Expected pre-launch failure PASS: " << failure.lastError() << '\n';
-                if(failureMode != "--expect-initialize-failure")
-                    require(failure.initialize(nullptr, 0, problem.stream)
-                                != HIPBLAS_STATUS_SUCCESS,
-                            "Failed preparation allowed initialization");
-                require(failure.run(problem.stream) != HIPBLAS_STATUS_SUCCESS,
-                        "Failed preparation allowed launch");
-            }
-            problem.close();
-            return 0;
-        }
-        {
-            JitGemm gemm(problem.handle);
-            problem.bind(gemm);
-            size_t workspaceBytes = 0;
-            check(gemm.prepare(options, workspaceBytes), gemm, "Generate and prepare");
-            std::cout << "Manifest: " << gemm.manifestPath() << "\nKernel: " << gemm.kernelName()
-                      << "\nWorkspace bytes: " << workspaceBytes << '\n';
-            require(workspaceBytes >= minimumWorkspace,
-                    "Required workspace below test expectation");
-            if(workspaceBytes)
-            {
-                require(gemm.initialize(nullptr, workspaceBytes - 1, problem.stream)
-                            != HIPBLAS_STATUS_SUCCESS,
-                        "Insufficient workspace unexpectedly accepted");
-                check(hipMalloc(&problem.workspace, workspaceBytes), "Allocate workspace");
-            }
-            else
-                std::cout << "Workspace insufficiency case skipped: solution requires zero bytes\n";
-            check(gemm.initialize(problem.workspace, workspaceBytes, problem.stream),
-                  gemm,
-                  "Initialize");
-            const auto& dispatch = gemm.dispatchInfo();
-            std::cout << "Dispatch: configured GSU=" << dispatch.configuredGlobalSplitU
-                      << ", resolved GSU=" << dispatch.globalSplitU
-                      << ", accumulation=" << dispatch.accumulation
-                      << ", invocations=" << dispatch.kernelNames.size() << '\n';
-            for(size_t i = 0; i < dispatch.kernelNames.size(); ++i)
-                std::cout << "Invocation " << i << ": " << dispatch.kernelNames[i] << '\n';
-            require(expectedKernels < 0 || dispatch.kernelNames.size() == size_t(expectedKernels),
-                    "Unexpected invocation count");
-            require(dispatch.globalSplitU >= size_t(expectedMinGsu),
-                    "Resolved GSU below test expectation");
-            require(expectedConfiguredGsu == -2
-                        || dispatch.configuredGlobalSplitU == expectedConfiguredGsu,
-                    "Unexpected configured GSU");
-            require(expectedAccumulation.empty() || dispatch.accumulation == expectedAccumulation,
-                    "Unexpected accumulation strategy");
-            if(workspaceBytes)
-            {
-                require(gemm.initialize(problem.workspace, workspaceBytes - 1, problem.stream)
-                            != HIPBLAS_STATUS_SUCCESS,
-                        "Insufficient workspace rebind unexpectedly accepted");
-                require(gemm.run(problem.stream) != HIPBLAS_STATUS_SUCCESS,
-                        "Insufficient workspace rebind left stale arguments runnable");
-                check(gemm.initialize(problem.workspace, workspaceBytes, problem.stream),
-                      gemm,
-                      "Reinitialize with sufficient workspace");
-                std::cout << "Nonzero workspace insufficiency and readiness invalidation PASS\n";
-            }
-            require(gemm.run(nullptr) != HIPBLAS_STATUS_SUCCESS,
-                    "Wrong stream unexpectedly accepted");
-            for(int run = 0; run < 2; ++run)
-            {
-                if(run)
-                    problem.changeInputs();
-                problem.reset();
-                check(gemm.run(problem.stream), gemm, "Run");
-                problem.verify(run == 0 ? "First run" : "Repeated run");
-            }
-            require(gemm.generationCount() == 1, "Repeated run regenerated the kernel");
-            std::cout << "Generation count after two runs: " << gemm.generationCount() << '\n';
-            // A failed reinitialization must invalidate the previous packed arguments.
-            check(hipStreamBeginCapture(problem.stream, hipStreamCaptureModeGlobal),
-                  "Begin capture");
-            require(gemm.initialize(problem.workspace, workspaceBytes, problem.stream)
-                        != HIPBLAS_STATUS_SUCCESS,
-                    "Captured stream unexpectedly accepted");
-            hipGraph_t graph = nullptr;
-            check(hipStreamEndCapture(problem.stream, &graph), "End capture");
-            if(graph)
-                check(hipGraphDestroy(graph), "Destroy empty capture graph");
-            require(gemm.run(problem.stream) != HIPBLAS_STATUS_SUCCESS,
-                    "Failed reinitialization left stale arguments runnable");
-            check(gemm.initialize(problem.workspace, workspaceBytes, problem.stream),
-                  gemm,
-                  "Reinitialize after rejected capture");
-
-            int deviceCount = 0, originalDevice = 0;
-            check(hipGetDeviceCount(&deviceCount), "Count devices");
-            check(hipGetDevice(&originalDevice), "Get original device");
-            if(deviceCount > 1)
-            {
-                const int otherDevice = (originalDevice + 1) % deviceCount;
-                check(hipSetDevice(otherDevice), "Select other device");
-                hipStream_t foreignStream = nullptr;
-                check(hipStreamCreate(&foreignStream), "Create foreign stream");
-                check(hipSetDevice(originalDevice), "Restore original device");
-                require(gemm.initialize(problem.workspace, workspaceBytes, foreignStream)
-                            != HIPBLAS_STATUS_SUCCESS,
-                        "Foreign-device stream unexpectedly accepted");
-                require(gemm.run(problem.stream) != HIPBLAS_STATUS_SUCCESS,
-                        "Foreign-stream rejection left stale arguments runnable");
-                check(hipSetDevice(otherDevice), "Select foreign stream device");
-                check(hipStreamDestroy(foreignStream), "Destroy foreign stream");
-                check(hipSetDevice(originalDevice), "Restore original device");
-                check(gemm.initialize(problem.workspace, workspaceBytes, problem.stream),
-                      gemm,
-                      "Reinitialize after rejected foreign stream");
-                std::cout << "Foreign-device stream rejection PASS\n";
-            }
-            else
-                std::cout << "Foreign-device stream test skipped: one visible device\n";
-            std::cout << "Capture rejection and failed-reinitialization invalidation PASS\n";
-
-            // Two streams and distinct data/workspace share one handle. Each JIT
-            // owner must keep its own modules and MBSK synchronization storage.
-            Problem other;
-            other.seed = 1;
-            other.create(problem.handle);
-            {
-                JitGemm second(problem.handle);
-                other.bind(second);
-                auto secondOptions = options;
-                secondOptions.outputPath += "-second";
-                size_t secondWorkspace = 0;
-                check(second.prepare(secondOptions, secondWorkspace),
-                      second,
-                      "Prepare second private adapter");
-                require(secondWorkspace == workspaceBytes
-                            && second.kernelName() == gemm.kernelName(),
-                        "Repeated generation changed fixture identity");
-                if(secondWorkspace)
-                    check(hipMalloc(&other.workspace, secondWorkspace),
-                          "Allocate second workspace");
-                check(second.initialize(other.workspace, secondWorkspace, other.stream),
-                      second,
-                      "Initialize second adapter");
-                require(second.dispatchInfo().kernelNames == gemm.dispatchInfo().kernelNames,
-                        "Repeated solution changed invocation sequence");
-                problem.reset();
-                other.reset();
-                check(gemm.run(problem.stream), gemm, "Run first owner concurrently");
-                check(second.run(other.stream),
-                      second,
-                      "Run second owner before immediate destruction");
-            }
-            other.verify("Second stream / immediate destruction");
-            problem.verify("First stream / shared handle isolation");
-            other.close();
-            problem.reset();
-            check(gemm.run(problem.stream), gemm, "Run first adapter after second destroyed");
-            problem.verify("First adapter remains valid");
-
-            // These calls must fail before a runnable owner is produced.
-            JitGemm failure(problem.handle);
-            problem.bind(failure);
-            size_t unused = 0;
-            require(failure.prepare(options, unused) != HIPBLAS_STATUS_SUCCESS,
-                    "Existing output unexpectedly accepted");
-            require(failure.run(problem.stream) != HIPBLAS_STATUS_SUCCESS,
-                    "Failed owner became runnable");
-            auto bad = options;
-            bad.outputPath += "-invalid-yaml";
-            bad.configPath = bad.outputPath + ".yaml";
-            {
-                std::ofstream yaml(bad.configPath);
-                yaml << "BenchmarkProblems: [\n";
-                require(bool(yaml), "Write invalid YAML");
-            }
-            require(failure.prepare(bad, unused) != HIPBLAS_STATUS_SUCCESS,
-                    "Invalid YAML unexpectedly accepted");
-            require(!std::filesystem::exists(std::filesystem::path(bad.outputPath) / "bundle"),
-                    "Invalid YAML published a bundle");
-            bad = options;
-            bad.outputPath += "-invalid-compiler";
-            bad.cxxCompiler = "/nonexistent/amdclang++";
-            require(failure.prepare(bad, unused) != HIPBLAS_STATUS_SUCCESS,
-                    "Missing compiler unexpectedly accepted");
-            require(!std::filesystem::exists(std::filesystem::path(bad.outputPath) / "bundle"),
-                    "Missing compiler published a bundle");
-            std::cout
-                << "Existing output, invalid YAML, unavailable compiler, unprepared run PASS\n";
-        }
-        problem.close();
+        runPublicGemm(problem, options);
         return 0;
     }
     catch(const std::exception& e)
