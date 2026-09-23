@@ -30,8 +30,10 @@ Include the hipThreads headers in your code:
 
 If hipThreads was installed in its default location under the ROCm installation, make sure that your ``ROCM_PATH`` environment variable is pointing to your ROCm root directory before building your application.
 
-If hipThreads wasn't installed in the default location, build with the ``CMAKE_PREFIX_PATH`` CMake option pointing to the hipThreads root directory. The GPU architecture of the consumer project must match the architecture hipThreads was built or packaged for. Set the ``CMAKE_HIP_ARCHITECTURES`` CMake option in the consumer project to that architecture. A mismatch produces undefined device-symbol errors at runtime.
+If hipThreads wasn't installed in the default location, build with the ``CMAKE_PREFIX_PATH`` CMake option pointing to the hipThreads root directory.
+
+The GPU architecture of the consumer project must match the architecture hipThreads was built or packaged for. A mismatch produces undefined device-symbol errors at runtime.
 
 On Windows, CMake doesn't auto-detect the GPU architecture. You must set ``CMAKE_HIP_ARCHITECTURES`` explicitly.
 
-On Linux, CMake auto-detects the GPU on the local machine. That detection doesn't guarantee a match with a prebuilt ``amdrocm-threads`` package. Package names can include an ``llvm_target`` suffix such as ``gfx942``. See :doc:`../install/source-build`.
+On Linux, CMake auto-detects the GPU on the local machine. That detection doesn't guarantee a match with a prebuilt ``amdrocm-threads`` package. Package names can include an ``llvm_target`` suffix such as ``gfx942``.
