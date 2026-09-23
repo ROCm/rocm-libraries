@@ -1415,7 +1415,7 @@ __device__ I laed4_alt(I n,
     S tau, eta = S(0.), dltlb, dltub;
     S psi, dpsi, phi, dphi, rhoinv, midpt;
     S del, a, b, c, w, erretm, erretm2, temp, dw, temp1, prew;
-    I ii, niter, iter, orgati, iim1, iip1;
+    I ii, niter, orgati, iim1, iip1;
     bool swtch3, swtch;
 
     S d1 = DELTA(1);
@@ -1625,8 +1625,7 @@ __device__ I laed4_alt(I n,
         //
         //        Main loop to update the values of the array DELTA
         //
-        iter = niter + 1;
-        for(niter = iter; niter <= MAXIT; ++niter)
+        for(niter = niter + 1; niter <= MAXIT; ++niter)
         {
             //
             //           Test for convergence
@@ -2057,8 +2056,7 @@ __device__ I laed4_alt(I n,
         //
         //        Main loop to update the values of the array   DELTA
         //
-        iter = niter + 1;
-        for(niter = iter; niter < MAXIT; ++niter)
+        for(niter = niter + 1; niter < MAXIT; ++niter)
         {
             //
             //           Test for convergence
@@ -3174,22 +3172,10 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                     tempgemm, splits, eps, ssfmin, ssfmax);
 #else
             const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
-            if((props != nullptr) && (props->warpSize == 64))
-            {
-                constexpr rocblas_int WarpSize = 64;
-                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>), dim3(n, batch_count),
-                                        dim3(WarpSize), 0, stream, k, n, D + shiftD, strideD,
-                                        E + shiftE, strideE, tmpz, tempgemm, splits, eps, ssfmin,
-                                        ssfmax);
-            }
-            else
-            {
-                constexpr rocblas_int WarpSize = 32;
-                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>), dim3(n, batch_count),
-                                        dim3(WarpSize), 0, stream, k, n, D + shiftD, strideD,
-                                        E + shiftE, strideE, tmpz, tempgemm, splits, eps, ssfmin,
-                                        ssfmax);
-            }
+            ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>), dim3(n, batch_count),
+                    dim3(props->warpSize), 0, stream, k, n, D + shiftD, strideD,
+                    E + shiftE, strideE, tmpz, tempgemm, splits, eps, ssfmin,
+                    ssfmax);
 #endif
 
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Rescale_kernel<S>), dim3(n, batch_count),
