@@ -1678,8 +1678,8 @@ def cases():
             epilogue="cshuffle",
         ),
     )
-    # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
-    # block-diagonal dW IR against silent drift. MFMA-only, so gfx942/gfx950.
+    # Grouped wgrad, grid-per-group (groups=4, cpg=kpg=16). Guards the per-group
+    # dW IR against silent drift. MFMA-only, so gfx942/gfx950.
     add(
         "conv_wgrad",
         "conv_wgrad/gfx942/n1h8c64k64r3_g4",
