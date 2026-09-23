@@ -23,29 +23,26 @@
  * and the graph's dimensions, testable on any machine, with no HIP context and nothing
  * to mock.
  *
- * TWO DIFFERENCES FROM THE gfx942 TWIN, each verified against the source rather
- * than assumed from the sibling:
+ * THE DIFFERENCE FROM THE gfx942 TWIN, verified against the source rather than
+ * assumed from the sibling:
  *
- *  1. **block_m is a per-candidate KMD field, not a module constant.** The gfx942 twin
- *     carries a module-level `_BLOCK_M` (kernels/gfx942/attention_dense.py:211-213).
- *     gfx950 reads the value off the spec: `attention_dense_grid` divides by
- *     `spec.block_m` and `attention_dense_block` is `(spec.num_waves * 64, 1, 1)` with
- *     `num_waves = block_m // 32` (kernels/gfx950/attention_dense.py:2046-2059,
- *     kernels/common/attention_dense_spec.py:213-214). The catalog ships more than one
- *     block_m, so the engine reads the candidate's completed `block_m` metadata and
- *     passes it here; a binary launched with another candidate's block_m runs the wrong
- *     number of lanes over the wrong number of query blocks. `block_n` changes which
- *     graphs a candidate can serve (Skv % block_n) but not the launch, so it is an
- *     applicability input only and has no parameter below.
+ *  **block_m is a per-candidate KMD field, not a module constant.** The gfx942 twin
+ *  carries a module-level `_BLOCK_M` (kernels/gfx942/attention_dense.py:211-213).
+ *  gfx950 reads the value off the spec: `attention_dense_grid` divides by
+ *  `spec.block_m` and `attention_dense_block` is `(spec.num_waves * 64, 1, 1)` with
+ *  `num_waves = block_m // 32` (kernels/gfx950/attention_dense.py:2046-2059,
+ *  kernels/common/attention_dense_spec.py:213-214). The catalog ships more than one
+ *  block_m, so the engine reads the candidate's completed `block_m` metadata and
+ *  passes it here; a binary launched with another candidate's block_m runs the wrong
+ *  number of lanes over the wrong number of query blocks. `block_n` changes which
+ *  graphs a candidate can serve (Skv % block_n) but not the launch, so it is an
+ *  applicability input only and has no parameter below.
  *
- *  2. **The ceiling is LIVE, not defensive.** On gfx942 `Sq % block_m == 0` is
- *     enforced by the predicate, so the ceil is exact and written only for
- *     term-by-term comparison with the Python. gfx950 serves RAGGED shapes, where
- *     `seqlen_q % block_m != 0` is legal and the last query block is partial. The
- *     Python carries the same ceil wherever it counts query blocks -- the spec's own
- *     block accounting (attention_dense.py:153, :170, :191) and `attention_dense_grid`
- *     (:2046-2055). Truncating here would drop the final block: the tail rows are
- *     never written, and nothing reports it.
+ * The query-block count is a CEILING, as in the Python (`attention_dense_grid`,
+ * :2046-2055). kernel_match only serves graphs with `Sq % block_m == 0`, where the
+ * ceiling equals the quotient; it is kept so the two halves diff term for term, and so
+ * a call outside that contract launches every row rather than silently dropping the
+ * last partial block.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -164,14 +161,14 @@ struct Gfx950AttentionDenseGeometry
  *
  * Mirrors `attention_dense_grid` (kernels/gfx950/attention_dense.py:2046-2055):
  *
- *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m  # ceil: ragged tail
+ *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
  *     return (nqb, spec.num_query_heads, spec.batch)
  *
  * and `attention_dense_block` (:2057-2059), `(spec.num_waves * 64, 1, 1)`.
  *
  * @p blockM is the selected candidate's own completed `block_m`; @p seqLenQ,
- * @p numQueryHeads and @p batch are the graph's, since an aligned binary takes its
- * shape at runtime and its metadata carries only canonical build inputs.
+ * @p numQueryHeads and @p batch are the graph's, since the binary takes its shape at
+ * runtime and its metadata carries only canonical build inputs.
  *
  * Every shipped variant is non-persistent, so only the `else` arm above is mirrored
  * here; the Python's persistent arm -- `(spec.num_persistent, 1, 1)` -- has no
@@ -214,8 +211,8 @@ inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t blockM,
     // Written as the same expression the Python evaluates, so the two halves can be
     // diffed term for term: 256 lanes at block_m 128, 512 at block_m 256.
     geometry.blockX = static_cast<unsigned>(blockM / GFX950_ROWS_PER_WAVE * GFX950_WAVE_LANES);
-    // CEIL, and it is load-bearing here: a ragged shape has a partial final query
-    // block, and truncating drops it.
+    // CEIL, as the Python writes it. Exact for every graph kernel_match serves
+    // (Sq % block_m == 0); on any other input it keeps the partial final block.
     geometry.gridX = static_cast<unsigned>((seqLenQ + blockM - 1) / blockM);
     geometry.gridY = static_cast<unsigned>(numQueryHeads);
     geometry.gridZ = static_cast<unsigned>(batch);
