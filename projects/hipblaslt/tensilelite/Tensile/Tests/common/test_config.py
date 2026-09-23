@@ -53,9 +53,11 @@ here.
 
 import contextlib
 import os
+import signal
 import shutil
 import subprocess
 import sys
+import time
 
 import py
 import pytest
@@ -64,6 +66,131 @@ from artifact_helpers import artifact_name_for_config
 from config_helpers import materializeConfig
 
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROCESS_TERMINATION_GRACE_SECONDS = 5.0
+
+
+def _terminate_direct_process(process: subprocess.Popen) -> None:
+    """Terminate and reap one process when process groups are unavailable."""
+    try:
+        process.terminate()
+    except OSError:
+        pass
+
+    try:
+        process.wait(timeout=_PROCESS_TERMINATION_GRACE_SECONDS)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError:
+        return
+
+    try:
+        process.kill()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=_PROCESS_TERMINATION_GRACE_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _reap_direct_process(process: subprocess.Popen) -> None:
+    """Reap the group leader without allowing cleanup to mask an exception."""
+    if process.poll() is not None:
+        return
+    try:
+        process.wait(timeout=_PROCESS_TERMINATION_GRACE_SECONDS)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError:
+        return
+
+    try:
+        process.kill()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=_PROCESS_TERMINATION_GRACE_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _signal_process_group(process: subprocess.Popen, sig: int) -> bool:
+    """Signal a POSIX helper process group; return False if unavailable."""
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _process_tree_is_alive(process: subprocess.Popen) -> bool:
+    """Whether the helper or another member of its process group is alive."""
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    return process.poll() is None
+
+
+def _wait_for_process_tree(
+    process: subprocess.Popen, timeout: float
+) -> bool:
+    """Wait up to ``timeout`` seconds for the helper process group to exit."""
+    deadline = time.monotonic() + timeout
+    while _process_tree_is_alive(process):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        if process.poll() is None:
+            try:
+                process.wait(timeout=min(0.05, remaining))
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            # The group leader can exit before one of its descendants.
+            time.sleep(min(0.05, remaining))
+    return True
+
+
+def _terminate_process_tree(process: subprocess.Popen) -> None:
+    """Terminate a helper tree, escalate after a grace period, and reap it."""
+    if os.name != "posix" or not _signal_process_group(process, signal.SIGTERM):
+        _terminate_direct_process(process)
+        return
+
+    if not _wait_for_process_tree(process, _PROCESS_TERMINATION_GRACE_SECONDS):
+        _signal_process_group(process, getattr(signal, "SIGKILL"))
+        _wait_for_process_tree(process, _PROCESS_TERMINATION_GRACE_SECONDS)
+
+    # Reap the direct child even when one of its descendants outlives the
+    # bounded SIGKILL wait.
+    _reap_direct_process(process)
+
+
+def _run_in_process_group(command: list[str], env: dict[str, str]) -> None:
+    """Run ``command`` and tear down all descendants if it does not succeed."""
+    popenArgs = {"env": env}
+    if os.name == "posix":
+        popenArgs["start_new_session"] = True
+    elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+        popenArgs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
+    process = subprocess.Popen(command, **popenArgs)
+    try:
+        returnCode = process.wait()
+        if returnCode:
+            raise subprocess.CalledProcessError(returnCode, command)
+    except BaseException:
+        _terminate_process_tree(process)
+        raise
 
 
 def _call_helper_in_subprocess(
@@ -88,7 +215,7 @@ def _call_helper_in_subprocess(
         f"artifact_name=sys.argv[4])"
     )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
-    subprocess.run(
+    _run_in_process_group(
         [
             sys.executable,
             "-c",
@@ -99,8 +226,7 @@ def _call_helper_in_subprocess(
             artifact_name,
             *tensile_args,
         ],
-        check=True,
-        env=env,
+        env,
     )
 
 

@@ -205,14 +205,46 @@ def configForSpec(spec):
     return result
 
 
+def _availableCpuCount():
+    """Return the CPUs available to this process, respecting affinity."""
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        return max(1, os.cpu_count() or 1)
+
+
+def _shardCpuThreadBudget():
+    """Return one shard worker's fair share of the available host CPUs."""
+    try:
+        workerCount = int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1"))
+    except ValueError:
+        workerCount = 1
+    workerCount = max(1, workerCount)
+    return max(1, _availableCpuCount() // workerCount)
+
+
+def _capShardCpuThreads(doc):
+    """Bound nested Tensile workers without increasing an explicit setting."""
+    globalParameters = doc.setdefault("GlobalParameters", {})
+    configured = globalParameters.get("CpuThreads", -1)
+    if not isinstance(configured, int) or isinstance(configured, bool):
+        return
+
+    budget = _shardCpuThreadBudget()
+    if configured == -1 or configured > budget:
+        globalParameters["CpuThreads"] = budget
+
+
 def materializeConfig(spec, outputDir):
     """Return a runnable YAML path, writing an opted-in shard when needed."""
     if not spec.is_sharded:
         return spec.source_path
 
     outputPath = os.path.join(str(outputDir), spec.shard_label + ".yaml")
+    config = configForSpec(spec)
+    _capShardCpuThreads(config)
     with open(outputPath, "w") as f:
-        yaml.safe_dump(configForSpec(spec), f, sort_keys=False)
+        yaml.safe_dump(config, f, sort_keys=False)
     return outputPath
 
 

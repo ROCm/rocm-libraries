@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from Tensile.Tests.common import config_helpers
 from Tensile.Tests.common.artifact_helpers import artifact_name_for_config
 from Tensile.Tests.common.config_helpers import (
     ConfigSpec,
@@ -115,15 +116,106 @@ def test_shard_ids_and_artifact_names_are_unique(relative_path, _):
     assert len(artifacts) == len(set(artifacts))
 
 
-def test_materialize_config_writes_only_the_selected_shard(tmp_path):
+def test_materialize_config_writes_only_the_selected_shard(
+    tmp_path, monkeypatch
+):
     path = _COMMON_DIR / "gemm/gfx12/subtile_bf16_gfx1250_bench.yaml"
     spec = configSpecs(str(path))[5]
+    monkeypatch.setattr(config_helpers, "_shardCpuThreadBudget", lambda: 3)
 
     materialized = materializeConfig(spec, tmp_path)
 
     assert Path(materialized).parent == tmp_path
     assert Path(materialized).name == spec.shard_label + ".yaml"
-    assert _load(materialized) == configForSpec(spec)
+    expected = configForSpec(spec)
+    expected["GlobalParameters"]["CpuThreads"] = 3
+    assert _load(materialized) == expected
+
+
+@pytest.mark.parametrize(
+    "configured, expected",
+    (
+        (-1, 3),
+        (-2, -2),
+        (0, 0),
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        (8, 3),
+    ),
+)
+def test_materialized_shard_caps_nested_cpu_threads(
+    tmp_path, monkeypatch, configured, expected
+):
+    path = tmp_path / "sharded.yaml"
+    with open(path, "w") as f:
+        yaml.safe_dump(
+            {
+                "TestParameters": {"shard_by": ["Axis"]},
+                "GlobalParameters": {"CpuThreads": configured},
+                "BenchmarkProblems": [[
+                    {"OperationType": "GEMM", "DataType": "s"},
+                    {
+                        "ForkParameters": [{"Axis": [1, 2]}],
+                        "BenchmarkFinalParameters": [
+                            {"ProblemSizes": [[1, 1, 1]]}
+                        ],
+                    },
+                ]],
+            },
+            f,
+        )
+    monkeypatch.setattr(config_helpers, "_shardCpuThreadBudget", lambda: 3)
+
+    materialized = materializeConfig(configSpecs(str(path))[0], tmp_path)
+
+    assert _load(materialized)["GlobalParameters"]["CpuThreads"] == expected
+
+
+def test_shard_cpu_thread_budget_uses_affinity_and_xdist_workers(monkeypatch):
+    monkeypatch.setattr(config_helpers, "_availableCpuCount", lambda: 14)
+    monkeypatch.setenv("PYTEST_XDIST_WORKER_COUNT", "4")
+
+    assert config_helpers._shardCpuThreadBudget() == 3
+
+
+@pytest.mark.parametrize("worker_count", (None, "", "0", "-2", "invalid"))
+def test_shard_cpu_thread_budget_handles_invalid_worker_count(
+    monkeypatch, worker_count
+):
+    monkeypatch.setattr(config_helpers, "_availableCpuCount", lambda: 14)
+    if worker_count is None:
+        monkeypatch.delenv("PYTEST_XDIST_WORKER_COUNT", raising=False)
+    else:
+        monkeypatch.setenv("PYTEST_XDIST_WORKER_COUNT", worker_count)
+
+    assert config_helpers._shardCpuThreadBudget() == 14
+
+
+def test_materialized_shard_caps_missing_cpu_threads(tmp_path, monkeypatch):
+    path = tmp_path / "sharded.yaml"
+    with open(path, "w") as f:
+        yaml.safe_dump(
+            {
+                "TestParameters": {"shard_by": ["Axis"]},
+                "GlobalParameters": {},
+                "BenchmarkProblems": [[
+                    {"OperationType": "GEMM", "DataType": "s"},
+                    {
+                        "ForkParameters": [{"Axis": [1, 2]}],
+                        "BenchmarkFinalParameters": [
+                            {"ProblemSizes": [[1, 1, 1]]}
+                        ],
+                    },
+                ]],
+            },
+            f,
+        )
+    monkeypatch.setattr(config_helpers, "_shardCpuThreadBudget", lambda: 3)
+
+    materialized = materializeConfig(configSpecs(str(path))[0], tmp_path)
+
+    assert _load(materialized)["GlobalParameters"]["CpuThreads"] == 3
 
 
 def test_config_without_shard_metadata_keeps_its_source_path(tmp_path):
