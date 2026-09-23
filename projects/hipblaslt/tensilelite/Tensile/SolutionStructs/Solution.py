@@ -4675,6 +4675,18 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "MFMA non-SourceSwap mode doesn't support miovw(%u) with svw(%u)" % (state["VectorWidthA"]*state["MIOutputVectorWidth"], state["StoreVectorWidth"]))
           return
 
+    # WaveTransposeStoreTDM stages exactly one MIOutputVectorWidth-wide (8-M) block per (tt0,tt1) tile
+    # and fires the tensor_store flush on the LAST tile, which assumes ONE store-element per tile, i.e.
+    # StoreVectorWidth == MIOutputVectorWidth. With SVW < MIOVW there are >1 elements per tile: the
+    # per-tile staging collides and the flush triggers prematurely -> silent wrong results (this was the
+    # real cause of the MIWaveTile[4,2]/[4,4] MX failures, NOT a scale-read bug). It already requires
+    # VW=1 and SourceSwap=False, so pin SVW too — reject non-compliant configs.
+    if state.get("WaveTransposeStoreTDM", 0) and state["StoreVectorWidth"] != state["MIOutputVectorWidth"]:
+      reject(state, printRejectionReason,
+             "WaveTransposeStoreTDM requires StoreVectorWidth(%u) == MIOutputVectorWidth(%u)"
+             % (state["StoreVectorWidth"], state["MIOutputVectorWidth"]))
+      return
+
     # LocalSplitU too large?
     # dot2: every NumWaveSplitK threads compute the same element.
     numElementsPerWorkGroup = state["MacroTile0"]*state["MacroTile1"]*state["NumWaveSplitK"]
