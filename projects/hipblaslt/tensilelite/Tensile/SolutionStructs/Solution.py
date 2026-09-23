@@ -2632,7 +2632,7 @@ class Solution(collections.abc.Mapping):
               and state["WavefrontSize"] == 32 and dtypeOK
               and state["ProblemType"]["HighPrecisionAccumulate"]
               and isaInfoMap[isa].asmCaps.get("HasTDM", False)):
-        state["WaveTransposeStoreTDM"] = 0
+        state["WaveTransposeStoreTDM"] = False
 
     # Safety net: if the requested wave-contiguous store was disabled by its OWN extra check
     # (T-divisibility for WaveTransposeStore>0, HasTDM for TDM), the kernel falls back to a normal
@@ -6088,9 +6088,14 @@ class Solution(collections.abc.Mapping):
     # (M,N) position), so it is MX-scale-agnostic. Gated here where the tile geometry / GSU / LDS budget
     # are all final. v1: non-edge only, GSU==1, whole MT must fit LDS, MT1 divisible by numWaves (each
     # wave's tensor_store owns a disjoint N-slice); mutually exclusive with StoreRemap /
-    # WaveContiguousOutput / WaveTransposeStore(TDM). If any check fails, disable (fall back to the
-    # normal store) rather than reject the kernel.
+    # WaveContiguousOutput / WaveTransposeStore(TDM). A failed PRECONDITION disables (falls back to the
+    # normal store); a CONFLICT with another store re-layout is an explicit reject (only one at a time).
     if state.get("TensorStore", False):
+      # Only ONE store re-layout may be enabled: reject TensorStore + WaveTransposeStore/TDM.
+      if state.get("WaveTransposeStore", 0) != 0 or state.get("WaveTransposeStoreTDM", 0):
+        reject(state, printRejectionReason,
+               "TensorStore is mutually exclusive with WaveTransposeStore / WaveTransposeStoreTDM")
+        return
       dtype    = state["ProblemType"]["DestDataType"]
       dtypeOK  = dtype.is8bitFloat() or dtype.isBFloat16() or dtype.isHalf()
       numWaves = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
@@ -6106,8 +6111,6 @@ class Solution(collections.abc.Mapping):
             and not state["UseSubtileImpl"]
             and state["GlobalSplitU"] == 1
             and state.get("StoreRemapVectorWidth", 0) == 0
-            and state.get("WaveTransposeStore", 0) == 0
-            and not state.get("WaveTransposeStoreTDM", 0)
             and not state["WaveContiguousOutput"]
             and (mt1 % numWaves == 0)
             and (ldsNumBytes + fullMTBytes <= state["MaxLDS"]))

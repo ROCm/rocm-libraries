@@ -858,7 +858,7 @@ validParameters = { # we need to make sure this matches develop
     # WaveTransposeStore>0 plus asmCaps["HasTDM"]. Writes the wave's contiguous M-block linearly into
     # LDS then one TDM store scatters it to D via descriptor strides (tile_dim0=M, dim0_stride=StrideD).
     # 0=off. Mutually exclusive with WaveTransposeStore (both set -> reject).
-    "WaveTransposeStoreTDM": [0, 1],
+    "WaveTransposeStoreTDM": [False, True],
     # TensorStore: StoreRemap-style epilogue flushed by tensor_store_from_lds (TDM reverse DMA).
     # Writes the whole MacroTile into LDS at each element's true (M,N) position (column-major, no pad),
     # then one tensor_store_from_lds per wave DMAs a disjoint N-slice (MT1//numWaves cols) LDS->global.
