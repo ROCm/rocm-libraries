@@ -200,7 +200,10 @@ def make_cmd():
           make_options.append( "--verbose" )
         make_options.append( "--target all" )
         if args.install:
-          make_options.append( "--target package --target install" )
+          # NOTE(hipccl2): "--target package" dropped - standalone packaging
+          # is intentionally disabled for this hipccl2 copy (see the Package
+          # section of CMakeLists.txt), so no "package" CMake target exists.
+          make_options.append( "--target install" )
     else:
         nproc = OS_info["NUM_PROC"]
         make_executable = f"make -j{nproc}"

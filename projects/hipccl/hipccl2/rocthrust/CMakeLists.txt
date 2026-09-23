@@ -8,7 +8,17 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.7.0")
+# NOTE(hipccl2): guarded so the hipccl2 root CMakeLists.txt can force
+# VERSION_STRING via a CACHE variable before add_subdirectory(rocthrust). The
+# fallback below is also hipccl-flavored (matching hipccl2's/hipccl3's root
+# HIPCCL_VERSION placeholder, currently 0.1.0) rather than rocThrust's own
+# 4.7.0, so a fully standalone build of this copy still reports a
+# hipccl-consistent version. Duplicates the version number in multiple
+# places - keep them in sync manually until real unified-versioning infra
+# exists.
+if(NOT DEFINED VERSION_STRING)
+  set(VERSION_STRING "0.1.0")
+endif()
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required rocRAND version
@@ -23,6 +33,16 @@ if(WIN32)
 else()
   set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 endif()
+
+# NOTE(hipccl2): defaults the header install directory to the unified hipccl
+# layout even for a fully standalone build of this copy. Set before
+# project()/GNUInstallDirs claim the cache variable with the plain "include"
+# default, so this wins first - matching the CMAKE_INSTALL_PREFIX pattern
+# above. hipccl2's root CMakeLists.txt also forces this same value
+# (CACHE ... FORCE) before add_subdirectory(rocthrust); through the
+# superbuild, that FORCE already claimed it, so this line is a harmless no-op
+# there.
+set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH "Install path for headers, relative to CMAKE_INSTALL_PREFIX")
 
 # Thrust project
 # Note: C is required here for dependencies
@@ -319,32 +339,21 @@ set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
 set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 
 # Package
-set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
-
-rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
-rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
-set(CPACK_DEBIAN_PACKAGE_CONFLICTS "hip-thrust, thrust")
-set(CPACK_RPM_PACKAGE_CONFLICTS "hip-thrust, thrust")
-set(CPACK_DEBIAN_DEVEL_PACKAGE_PROVIDES "hipstdpar")
-set(CPACK_RPM_DEVEL_PACKAGE_PROVIDES "hipstdpar")
-
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-set(CPACK_RPM_PACKAGE_LICENSE "ASL 2.0")
-
-# if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-#   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-# endif()
-
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
-
-if(ROCTHRUST_PROJECT_IS_TOP_LEVEL)
-  rocm_create_package(
-    NAME rocthrust
-    DESCRIPTION "rocThrust is a ROCm port of the Thrust library, written in HIP"
-    MAINTAINER "rocthrust-maintainer@amd.com"
-    HEADER_ONLY
-  )
-endif()
+# NOTE(hipccl2): standalone packaging (rocm_create_package(), which triggers
+# include(CPack), and the rocprim-dev/rocprim-devel cross-dependency that
+# only makes sense alongside it) is intentionally disabled for this hipccl2
+# copy of rocthrust, unconditionally - not just when nested under the
+# hipccl2 superbuild. A standalone "rocthrust" package built from inside
+# hipccl2/rocthrust would be a different, differently-named artifact than the
+# unified "hipccl" package hipccl2's root CMakeLists.txt produces, installable
+# side-by-side by a package manager that has no idea they overlap - risking
+# duplicate/conflicting installs of the same headers. Build through hipccl2's
+# root CMakeLists.txt (which calls rocm_create_package() once, unconditionally)
+# to get a real distributable package; this copy only supports
+# configure/build/`cmake --install`, matching hipccl3's own copy of
+# rocThrust. The original (pre-guard) logic is preserved in git history if
+# ever needed. rocm-libraries' own projects/rocthrust is untouched and still
+# packages standalone exactly as before.
 
 # Print configuration summary
 include(cmake/Summary.cmake)
