@@ -170,6 +170,16 @@ scale_t = graph.tensor_like(scale, "scale")  # runtime pass-by-value
 graph.execute(handle, {x_t: x, scale_t: scale, y_t: y}, workspace)
 ```
 
+The value rules match cuDNN, but the method signatures follow the hipDNN C++
+API, not `cudnn.pygraph`:
+
+- `execute` and `execute_plan_at_index` take the handle first:
+  `execute(handle, variant_pack, workspace)`, not
+  `execute(tensor_dict, workspace, handle)`.
+- Variant-pack keys cannot be tensor name strings.
+- `tensor_like` has no `is_virtual` argument; call `set_is_virtual(True)` on the
+  result instead.
+
 ## Running the Samples
 
 Sample scripts are source-tree utilities and are not included in the wheel.
