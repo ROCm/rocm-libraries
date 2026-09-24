@@ -1,8 +1,7 @@
-# Select problem groups by content
+# ADR 0024: Select problem groups by content
 
-## Status
-
-Accepted
+Status:  Superseded by adr/0027
+Defect:  none — behavior is intended
 
 ## Context
 

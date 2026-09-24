@@ -54,6 +54,7 @@ import os
 import pytest
 
 from config_harness import emit_kernels_from_config
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
@@ -72,8 +73,9 @@ def _pin_rocisa_gfx950():
     """
     from codegen_harness import _init_rocisa_for
 
-    _init_rocisa_for({"ISA": (9, 5, 0), "WavefrontSize": 64})
-    yield
+    with preserve_rocisa_kernel_state():
+        _init_rocisa_for({"ISA": (9, 5, 0), "WavefrontSize": 64})
+        yield
 
 _CONFIG = os.path.join(
     os.path.dirname(__file__),

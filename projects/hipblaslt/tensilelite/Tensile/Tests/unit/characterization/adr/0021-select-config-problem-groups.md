@@ -1,8 +1,7 @@
-# Select config problem groups explicitly
+# ADR 0021: Select config problem groups explicitly
 
-## Status
-
-Superseded by [ADR 0024](0024-select-problem-groups-by-content.md)
+Status:  Superseded by adr/0024
+Defect:  none — behavior is intended
 
 ## Context
 

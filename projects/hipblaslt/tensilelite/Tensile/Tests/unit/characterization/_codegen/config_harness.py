@@ -19,7 +19,7 @@ pair. The ``ForkParameters`` block is a cartesian product of single-element
 value lists, so each fork permutation yields exactly one ``Solution`` (CPU-only;
 no GPU, no benchmarking, no compile). We then hand the resulting ``Solution``
 objects to the *same* emit path :mod:`codegen_harness` uses, so the emitted
-assembly is canonicalized and warm-state-stable in exactly the same way.
+assembly is canonicalized in exactly the same way.
 
 Unlike a logic file (which pins its own ``ISA``/architecture), a benchmark
 config under ``Tests/common`` is arch-agnostic: ``_generate_single_solution``
@@ -51,7 +51,7 @@ import pytest
 from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
-# canonicalize/warm-state emit, global-state isolation, and per-kernel rocisa
+# canonicalized emit, global-state isolation, and per-kernel rocisa
 # init. Everything below only adds the *config -> solutions* front end.
 import codegen_harness as _ch
 from char_paths import resolve_tensile_path
@@ -121,10 +121,37 @@ def _load_config(config_path):
     return LibraryIO.read(str(resolve_tensile_path(config_path)))
 
 
+def _benchmark_problem_selection(problem):
+    """Return the fields that determine solution generation for one entry.
+
+    ``BenchmarkFinalParameters`` contains runtime problem sizes and benchmark
+    arguments. Those values do not participate in solution derivation or kernel
+    emission, so they must not invalidate a set-cover selector.
+    """
+    problem_type, problem_size_group = problem[:2]
+    generation_parameters = {
+        key: value
+        for key, value in problem_size_group.items()
+        if key != "BenchmarkFinalParameters"
+    }
+    return [problem_type, generation_parameters]
+
+
 def benchmark_problem_fingerprint(problem):
-    """Return a short, stable identifier for one BenchmarkProblems entry."""
-    encoded = json.dumps(problem, sort_keys=True, separators=(",", ":")).encode()
+    """Return a short identifier for an entry's solution-generation inputs."""
+    encoded = json.dumps(
+        _benchmark_problem_selection(problem), sort_keys=True, separators=(",", ":")
+    ).encode()
     return hashlib.sha256(encoded).hexdigest()[:12]
+
+
+def benchmark_problem_fingerprints(config_path):
+    """Return ``(index, fingerprint)`` pairs for every problem group."""
+    config = _load_config(config_path)
+    return [
+        (index, benchmark_problem_fingerprint(problem))
+        for index, problem in enumerate(config.get("BenchmarkProblems", []))
+    ]
 
 
 def _select_benchmark_problem(benchmark_problems, config_path, problem_index, fingerprint):
@@ -158,6 +185,7 @@ def _solutions_from_config_unguarded(
     limit_solutions=None,
     problem_index=0,
     problem_fingerprint=None,
+    expected_fork_count=None,
 ):
     """Build ``Solution`` objects from one selected BenchmarkProblems entry.
 
@@ -169,7 +197,8 @@ def _solutions_from_config_unguarded(
     ``limit_solutions`` caps the number of fork permutations fed to solution
     generation (keeps the rocisa per-process footprint bounded for big sweeps).
     ``problem_fingerprint`` selects an entry by content and takes precedence
-    over ``problem_index``.
+    over ``problem_index``. ``expected_fork_count`` checks the complete
+    permutation count before the cap is applied.
     """
     from Tensile.BenchmarkProblems import _generateForkedSolutions
     from Tensile.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
@@ -197,6 +226,12 @@ def _solutions_from_config_unguarded(
     else:
         perms = []
 
+    if expected_fork_count is not None:
+        assert len(perms) == expected_fork_count, (
+            f"expected {expected_fork_count} fork permutations for {config_path}, "
+            f"got {len(perms)}"
+        )
+
     if limit_solutions is not None:
         perms = perms[:limit_solutions]
 
@@ -217,6 +252,7 @@ def solutions_from_config(
     limit_solutions=None,
     problem_index=0,
     problem_fingerprint=None,
+    expected_fork_count=None,
 ):
     """Return fully-derived ``Solution`` objects for ``config_path`` (CPU-only).
 
@@ -231,12 +267,13 @@ def solutions_from_config(
             limit_solutions,
             problem_index,
             problem_fingerprint,
+            expected_fork_count,
         )
 
 
 def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True,
                              splitGSU=False, cluster_dim=None, problem_index=0,
-                             problem_fingerprint=None):
+                             problem_fingerprint=None, expected_fork_count=None):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
@@ -248,6 +285,9 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     ``err`` is the emitter return code (0 == ok). ``limit`` bounds both the
     number of fork permutations turned into solutions *and* the number of
     emitted kernels, so the rocisa per-process footprint stays small.
+
+    ``expected_fork_count`` checks the full selected search size before
+    ``limit`` is applied.
 
     ``cluster_dim``, when given, keeps only the kernels of that ClusterDim. A
     config that sweeps several cluster shapes can then be pinned one shape at a
@@ -273,6 +313,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
             limit_solutions=limit,
             problem_index=problem_index,
             problem_fingerprint=problem_fingerprint,
+            expected_fork_count=expected_fork_count,
         )
         kernels = generateKernelObjectsFromSolutions(sols)
         if cluster_dim is not None:
@@ -282,16 +323,6 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
         if limit is not None:
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(assembler, DebugConfig())
-
-        # Steady-state warm-up (see codegen_harness for the rationale): the very
-        # first emit in a process accumulates process-global scheduler state, so
-        # emit one throwaway kernel before recording results. This warm-up runs
-        # per call (not once per process): the warmed state is keyed to *this*
-        # config's kernels, so a test recorded in isolation and the same test run
-        # after others in a shared xdist worker both emit the identical
-        # self-warmed steady state -- goldens stay order-invariant.
-        if kernels:
-            _emit_one(kwa, kernels[0], splitGSU, canonical)
 
         for kernel in kernels:
             results.append(_emit_one(kwa, kernel, splitGSU, canonical))
@@ -393,24 +424,33 @@ def derive_states(config_path, arch=_DEFAULT_ARCH, limit_solutions=8):
     return [s._state if hasattr(s, "_state") else s for s in sols]
 
 
+def _assert_real_kernels(results, arch, *, require_all_ok=True):
+    """Check that successful results contain non-trivial target assembly."""
+    assert results, "expected at least one emitted kernel"
+    errors = [(base, err) for base, _source, err in results if err != 0]
+    if require_all_ok:
+        assert not errors, f"expected all kernels to emit successfully, got {errors}"
+    for base, src, err in results:
+        if err != 0:
+            continue
+        if isinstance(src, (bytes, bytearray)):
+            src = src.decode(errors="replace")
+        src = src or ""
+        assert len(src.splitlines()) > 50, f"kernel {base!r}: suspiciously short assembly"
+        assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
+        assert arch in src, f"kernel {base!r}: wrong arch in assembly"
+        assert base.startswith("Cijk_"), f"kernel {base!r}: unexpected prefix"
+    return results
+
+
 def assert_real_gfx1250_kernels(results):
-    """Shared preamble check for the gfx1250 StreamK cluster char drivers.
+    """Shared source check for the gfx1250 StreamK cluster drivers.
 
     Every emitted kernel must be real gfx1250 assembly: >=1 kernel, all err==0, a
     non-trivial body (>50 lines), the gfx1250 target directive, and the ``Cijk_``
     kernel-name prefix. Returns ``results`` for further per-file dispatch.
     """
-    assert len(results) >= 1, f"Expected >=1 kernel, got {len(results)}"
-    bad = [(b, e) for (b, _s, e) in results if e != 0]
-    assert not bad, f"Expected all err==0, got: {bad}"
-    for base, src, _err in results:
-        assert src and len(src.splitlines()) > 50, (
-            f"Kernel {base!r} emitted suspiciously short source"
-        )
-        assert ".amdgcn_target" in src, f"Kernel {base!r} missing .amdgcn_target"
-        assert "gfx1250" in src, f"Kernel {base!r} missing gfx1250 target"
-        assert base.startswith("Cijk_"), f"Kernel {base!r} has unexpected prefix"
-    return results
+    return _assert_real_kernels(results, "gfx1250")
 
 
 def golden_digest(results):
@@ -426,11 +466,11 @@ def assert_config_emits(
     arch,
     *,
     limit=8,
-    all_ok=True,
     validate_source=False,
     problem_index=0,
     problem_fingerprint=None,
-    expected_count=None,
+    expected_fork_count=None,
+    expected_statuses=None,
     required_source_patterns=(),
 ):
     """Emit one configuration once and check its declared observable behavior.
@@ -439,6 +479,9 @@ def assert_config_emits(
     Each expression must occur in at least one successfully emitted kernel. This
     lets a test name the instruction or source structure it exists to protect
     without recording the complete compiler-dependent assembly.
+
+    ``expected_statuses`` is an exact ``{return_code: count}`` mapping for the
+    bounded emitted sample. If omitted, every emitted kernel must succeed.
     """
     results = emit_kernels_from_config(
         config_path,
@@ -446,16 +489,18 @@ def assert_config_emits(
         arch=arch,
         problem_index=problem_index,
         problem_fingerprint=problem_fingerprint,
+        expected_fork_count=expected_fork_count,
     )
     assert results, f"expected >=1 kernel, got {len(results)}"
-    if expected_count is not None:
-        assert len(results) == expected_count, (
-            f"expected {expected_count} kernels, got {len(results)}"
-        )
-
-    if all_ok:
+    actual_statuses = Counter(err for _base, _source, err in results)
+    if expected_statuses is None:
         errors = [(base, err) for base, _src, err in results if err != 0]
         assert not errors, f"expected all kernels to emit successfully, got {errors}"
+    else:
+        assert actual_statuses == Counter(expected_statuses), (
+            f"expected emitter statuses {dict(Counter(expected_statuses))}, "
+            f"got {dict(actual_statuses)}"
+        )
 
     successful_sources = []
     for base, src, err in results:
@@ -465,11 +510,8 @@ def assert_config_emits(
             src = src.decode(errors="replace")
         src = src or ""
         successful_sources.append(src)
-        if validate_source:
-            assert len(src.splitlines()) > 50, f"kernel {base!r}: suspiciously short assembly"
-            assert base.startswith("Cijk_")
-            assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
-            assert arch in src, f"kernel {base!r}: wrong arch in assembly"
+    if validate_source:
+        _assert_real_kernels(results, arch, require_all_ok=False)
 
     combined_source = "\n".join(successful_sources)
     for description, pattern in required_source_patterns:
@@ -479,69 +521,10 @@ def assert_config_emits(
     return results
 
 
-def assert_config_emits_golden(
-    config_path,
-    arch,
-    snapshot,
-    *,
-    limit=8,
-    all_ok=True,
-    validate_source=False,
-    problem_index=0,
-    problem_fingerprint=None,
-    expected_count=None,
-    required_source_patterns=(),
-):
-    """Check emitted behavior, then record kernel identity and status."""
-    results = assert_config_emits(
-        config_path,
-        arch,
-        limit=limit,
-        all_ok=all_ok,
-        validate_source=validate_source,
-        problem_index=problem_index,
-        problem_fingerprint=problem_fingerprint,
-        expected_count=expected_count,
-        required_source_patterns=required_source_patterns,
-    )
-    assert golden_digest(results) == snapshot
-    return results
-
-
-def assert_config_derives_golden(config_path, arch, snapshot, *, expect_solutions):
-    """Derive one configuration once and check its saved solution-count result."""
-    solutions = solutions_from_config(config_path, arch=arch)
-    if expect_solutions:
-        assert solutions, f"expected >=1 surviving solution, got {len(solutions)}"
-    else:
-        assert not solutions, f"expected 0 surviving solutions, got {len(solutions)}"
-    assert len(solutions) == snapshot
-    return solutions
-
-
-def assert_config_rejects(config_path, arch, monkeypatch, capsys, expected_rejections):
-    """Derive a configuration serially and check its exact rejection multiset."""
-    import Tensile.BenchmarkProblems as benchmark_problems
-
-    def serial_map(function, objects, *_args, **_kwargs):
-        return [function(*args) for args in objects]
-
-    monkeypatch.setattr(benchmark_problems, "ParallelMap2", serial_map)
-    solutions = solutions_from_config(config_path, arch=arch)
-    rejection_counts = Counter(
-        line.strip()
-        for line in capsys.readouterr().out.splitlines()
-        if line.startswith("reject:")
-    )
-    assert not solutions, f"expected 0 surviving solutions, got {len(solutions)}"
-    assert rejection_counts == Counter(expected_rejections)
-
-
 _TARGET_RE = re.compile(r'^\.amdgcn_target\s+"amdgcn-amd-amdhsa--(\S+?)"', re.M)
 _WAVE32_RE = re.compile(r"^\s*\.amdhsa_wavefront_size32\s+1", re.M)
 
 
-@functools.lru_cache(maxsize=1)
 @functools.lru_cache(maxsize=1)
 def _guard_assembler():
     """Assembler for :func:`assert_assembles`, built with a real code-object version.

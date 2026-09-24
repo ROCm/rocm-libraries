@@ -519,8 +519,32 @@ reduction/fixup paths in GSU and StreamK.
 **ADR:** [`adr/0026-remove-setcover-basename-snapshots.md`](adr/0026-remove-setcover-basename-snapshots.md)
 
 **Decision:** Remove the three basename-only set-cover saved-result files.
-Preserve each selected problem group's exact kernel count and expected emitter
-status directly, capture derivation rejection reasons, and use focused source
-patterns for representative MX-fp6, dot2, and swizzled-addressing behavior.
-Self-warm both assembly harnesses per call so their output is independent of
-test order. ADR 0014 remains as superseded history of the intermediate refresh.
+Keep the 75 selected configuration cases as bounded generation checks, capture
+derivation rejection reasons, and use focused source patterns where final
+assembly exposes a stable behavior. Superseded by D32, which defines exact
+observables for the bounded sample.
+
+## D30 — Select set-cover problem groups by complete content
+
+**ADR:** [`adr/0024-select-problem-groups-by-content.md`](adr/0024-select-problem-groups-by-content.md)
+
+**Decision:** Replace positional `BenchmarkProblems` indexes with fingerprints
+of complete entries. Superseded by D31 because complete entries include runtime
+problem sizes that do not affect solution generation.
+
+## D31 — Select problem groups by solution-generation inputs
+
+**ADR:** [`adr/0027-select-problem-groups-by-generation-inputs.md`](adr/0027-select-problem-groups-by-generation-inputs.md)
+
+**Decision:** Fingerprint the problem type and generation parameters while
+excluding `BenchmarkFinalParameters`. Use `list_config_fingerprints.py` to list
+the selectors after an intentional generation-input change.
+
+## D32 — Strengthen bounded set-cover observables
+
+**ADR:** [`adr/0028-strengthen-bounded-set-cover-observables.md`](adr/0028-strengthen-bounded-set-cover-observables.md)
+
+**Decision:** Record each selected group's complete fork-permutation count and
+the exact emitter-status multiset for its bounded sample. Remove throwaway
+warm-up emits because canonicalization already removes the known scheduler-state
+difference.

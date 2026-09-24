@@ -1,8 +1,7 @@
-# Remove set-cover basename snapshots
+# ADR 0026: Remove set-cover basename snapshots
 
-## Status
-
-Accepted
+Status:  Superseded by adr/0028
+Defect:  none — behavior is intended
 
 ## Context
 

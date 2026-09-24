@@ -150,10 +150,6 @@ def _emit_with_reg_state(config_path, arch, limit):
         kernels = generateKernelObjectsFromSolutions(solutions)
         kernels = sorted(kernels, key=lambda k: getKernelFileBase(False, k))[:limit]
         kwa = KernelWriterAssembly(assembler, DebugConfig())
-        # Match the shared emit harness: self-warm each call so this result does
-        # not depend on which characterization test ran first in the worker.
-        if kernels:
-            _cfgh._emit_one(kwa, kernels[0], False, True)
         for kernel in kernels:
             ri = _ch._init_rocisa_for(kernel)
             base = _ch._prepare_kernel(kernel, False)

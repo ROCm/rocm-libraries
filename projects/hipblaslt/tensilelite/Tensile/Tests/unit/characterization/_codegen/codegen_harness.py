@@ -222,13 +222,6 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(asm, DebugConfig())
 
-        # Self-warm every call. The emitter accumulates scheduler state while a
-        # kernel is generated, so a process-global one-time warm-up makes output
-        # depend on which test ran first. Warming with this call's first kernel
-        # makes isolated and shared-worker runs observe the same steady state.
-        if kernels:
-            _emit(kwa, kernels[0])
-
         for kernel in kernels:
             results.append(_emit(kwa, kernel))
 

@@ -25,6 +25,7 @@ from config_harness import (
     _select_benchmark_problem,
     assert_config_emits,
     benchmark_problem_fingerprint,
+    benchmark_problem_fingerprints,
     emit_kernels_from_config,
     golden_digest,
 )
@@ -51,6 +52,7 @@ _CONFIG = os.path.join(
     "gfx950",
     "subtile3_gr_variants.yaml",
 )
+
 
 def _pin_rocisa(arch, wavefront):
     from rocisa import rocIsa
@@ -82,6 +84,13 @@ def test_emit_is_deterministic():
     b = emit_kernels_from_logic(_LOGIC)
     assert [t[0] for t in a] == [t[0] for t in b]
     assert [t[1] for t in a] == [t[1] for t in b]
+
+
+def test_config_emit_is_deterministic():
+    """Config-driven emits are stable without a throwaway warm-up."""
+    a = emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")
+    b = emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")
+    assert a == b
 
 
 @pytest.mark.parametrize(
@@ -161,27 +170,38 @@ def test_config_source_patterns_reject_missing_instruction(monkeypatch):
         )
 
 
-def test_config_emit_smoke_can_allow_known_errors(monkeypatch):
+def test_config_emit_smoke_accepts_expected_statuses(monkeypatch):
     results = [("kernel-ok", "", 0), ("kernel-error", "", -2)]
     monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
 
-    assert_config_emits("unused.yaml", "gfx942", all_ok=False)
+    assert_config_emits("unused.yaml", "gfx942", expected_statuses={0: 1, -2: 1})
 
 
 def test_config_emit_smoke_rejects_unexpected_error(monkeypatch):
     results = [("kernel-ok", "", 0), ("kernel-error", "", -2)]
     monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
 
-    with pytest.raises(AssertionError, match="kernel-error"):
-        assert_config_emits("unused.yaml", "gfx942")
+    with pytest.raises(AssertionError, match="emitter statuses"):
+        assert_config_emits("unused.yaml", "gfx942", expected_statuses={0: 2})
 
 
 def test_config_emit_smoke_rejects_wrong_kernel_count(monkeypatch):
     results = [("kernel-a", "", 0), ("kernel-b", "", 0)]
     monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
 
-    with pytest.raises(AssertionError, match="expected 1 kernels, got 2"):
-        assert_config_emits("unused.yaml", "gfx942", expected_count=1)
+    with pytest.raises(AssertionError, match="emitter statuses"):
+        assert_config_emits("unused.yaml", "gfx942", expected_statuses={0: 1})
+
+
+def test_config_emit_forwards_expected_fork_count(monkeypatch):
+    def emit(*_args, **kwargs):
+        assert kwargs["expected_fork_count"] == 12
+        return [("kernel", "", 0)]
+
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", emit)
+    assert_config_emits(
+        "unused.yaml", "gfx942", expected_fork_count=12, expected_statuses={0: 1}
+    )
 
 
 def test_config_harness_selects_problem_entry():
@@ -201,6 +221,45 @@ def test_problem_fingerprint_selection_survives_reordering():
     assert _select_benchmark_problem([selected, first], "config.yaml", 0, fingerprint) == selected
 
 
+def test_problem_fingerprint_ignores_runtime_problem_sizes():
+    first = [
+        {"OperationType": "GEMM", "DataType": "S"},
+        {
+            "ForkParameters": [{"DepthU": [32]}],
+            "BenchmarkFinalParameters": [{"ProblemSizes": [{"Exact": [64, 64, 1, 64]}]}],
+        },
+    ]
+    second = [
+        first[0],
+        {
+            "ForkParameters": [{"DepthU": [32]}],
+            "BenchmarkFinalParameters": [{"ProblemSizes": [{"Exact": [128, 64, 1, 64]}]}],
+        },
+    ]
+
+    assert benchmark_problem_fingerprint(first) == benchmark_problem_fingerprint(second)
+
+
+def test_problem_fingerprint_observes_solution_generation_inputs():
+    first = [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": [{"DepthU": [32]}]}]
+    second = [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": [{"DepthU": [64]}]}]
+
+    assert benchmark_problem_fingerprint(first) != benchmark_problem_fingerprint(second)
+
+
+def test_benchmark_problem_fingerprints_lists_indexes(monkeypatch):
+    entries = [
+        [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}],
+        [{"OperationType": "GEMM", "DataType": "H"}, {"ForkParameters": []}],
+    ]
+    monkeypatch.setattr("config_harness._load_config", lambda _path: {"BenchmarkProblems": entries})
+
+    assert benchmark_problem_fingerprints("config.yaml") == [
+        (0, benchmark_problem_fingerprint(entries[0])),
+        (1, benchmark_problem_fingerprint(entries[1])),
+    ]
+
+
 def test_problem_fingerprint_selection_rejects_missing_group():
     entries = [[{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}]]
     available = benchmark_problem_fingerprint(entries[0])
@@ -212,8 +271,7 @@ def test_problem_fingerprint_selection_rejects_missing_group():
 def test_emit_golden_digest(snapshot):
     """Pin the order-invariant golden (kernel identity + emit success).
 
-    The full assembly text is not hashed (it is order-coupled via the emitter's
-    process-global MMA-scheduler state); coverage comes from running the emit.
+    The full assembly text is not hashed; coverage comes from running the emit.
     """
     results = emit_kernels_from_logic(_LOGIC)
     assert golden_digest(results) == snapshot

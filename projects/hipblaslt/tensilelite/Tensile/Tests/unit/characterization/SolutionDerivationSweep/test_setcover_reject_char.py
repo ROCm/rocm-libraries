@@ -13,8 +13,7 @@ one maximal-violation config trips several independent rejects in a single pass.
 Trip-cases and their target guards were verified line-by-line under
 ``sys.settrace`` before authoring (work/mutcov-evidence/sol_reject_probe.py):
 every case flips its intended currently-missing Solution.py lines. The golden
-pins the ordered rejection reasons together with the deterministic derivation
-outcome (Valid plus a few derived scalars, or the exception type) per case;
+pins the ordered rejection reasons together with deterministic derived state;
 every case asserts ``Valid is False`` since these configs are genuinely invalid.
 
 Runs under global-state isolation (derivation mutates globalParameters /
@@ -22,42 +21,12 @@ validParameters) so it does not leak into other suites.
 """
 
 import copy
-import importlib
-import os
-
 import pytest
 
 from codegen_harness import _isolated_globals  # shared isolation context
-
-import Tensile.LibraryIO as LibraryIO
-from Tensile.SolutionStructs.Solution import Solution as _Solution
-from Tensile.SolutionStructs.Utilities import reject as _reject
-
-_solution_module = importlib.import_module("Tensile.SolutionStructs.Solution")
+from reject_harness import apply_overrides, derive_with_rejections
 
 pytestmark = pytest.mark.unit
-
-# Bases loaded locally (NOT via the shared base_states fixture) so this suite
-# does not perturb the parameter-sweep goldens that iterate over base_states.
-_DATA = os.path.join(os.path.dirname(__file__), "..", "_codegen", "data")
-_BASES = {
-    "gfx950_SK": "gfx950/StreamK_F8F8S.yaml",
-    "gfx942_BBS": "gfx942/BBS_BH_Bias_Act.yaml",
-}
-
-
-@pytest.fixture(scope="module")
-def reject_bases(assembler, isa_info_map):
-    out = {}
-    for label, rel in _BASES.items():
-        path = os.path.join(_DATA, rel)
-        logic = LibraryIO.parseLibraryLogicFile(
-            path, assembler, False, False, False, isa_info_map, False
-        )
-        sols = logic.solutions
-        sol0 = (list(sols.values()) if isinstance(sols, dict) else list(sols))[0]
-        out[label] = copy.deepcopy(sol0._state)
-    return out
 
 # (case_id, base_label, {overrides}) -- overrides support dotted keys for
 # nested ProblemType.* fields. Base labels resolve via the base_states fixture.
@@ -94,37 +63,6 @@ _KEYS = [
 ]
 
 
-def _apply(state, overrides):
-    for k, v in overrides.items():
-        if "." in k:
-            top, sub = k.split(".", 1)
-            state[top][sub] = v
-        else:
-            state[k] = v
-
-
-def _derive(state, isa_info_map, rocm, monkeypatch):
-    state = copy.deepcopy(state)
-    state["AssignedDerivedParameters"] = False
-    state["AssignedProblemIndependentDerivedParameters"] = False
-    rejection_reasons = []
-
-    def record_reject(rejected_state, _print_reason=True, *args):
-        rejection_reasons.append(" ".join(str(arg) for arg in args))
-        return _reject(rejected_state, False, *args)
-
-    monkeypatch.setattr(_solution_module, "reject", record_reject)
-    try:
-        _Solution.assignDerivedParameters(
-            state, False, False, False, isa_info_map, rocm
-        )
-        result = {k: state.get(k) for k in _KEYS}
-        result["rejections"] = rejection_reasons
-        return result
-    except Exception as exc:  # rejection-by-exception is real covered behaviour
-        return {"exception": type(exc).__name__, "rejections": rejection_reasons}
-
-
 @pytest.mark.parametrize("case", sorted(_TRIPS.keys()))
 def test_setcover_reject(case, reject_bases, isa_info_map, assembler, monkeypatch, snapshot):
     label, overrides = _TRIPS[case]
@@ -132,8 +70,8 @@ def test_setcover_reject(case, reject_bases, isa_info_map, assembler, monkeypatc
     rocm = assembler.rocm_version
     with _isolated_globals():
         s = copy.deepcopy(base)
-        _apply(s, overrides)
-        out = _derive(s, isa_info_map, rocm, monkeypatch)
+        apply_overrides(s, overrides)
+        out = derive_with_rejections(s, isa_info_map, rocm, monkeypatch, _KEYS)
     assert out.get("Valid") is False
     assert out["rejections"]
     assert out == snapshot
