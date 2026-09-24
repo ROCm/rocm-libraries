@@ -62,6 +62,8 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     
     executor.run();
 
+    {% block get_time %}
     return (1000 * primbench::GiB) / executor.get_last_bytes_per_second();
+    {% endblock %}
 }
 {% endblock %}

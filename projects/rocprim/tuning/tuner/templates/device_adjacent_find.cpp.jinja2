@@ -1,10 +1,30 @@
 {% extends "common/base.cpp.jinja2" %}
 {% block config_constructor -%}
-rocprim::adjacent_find_config<{{ config.block_size_x }}, {{ config.ipt }}>
+    rocprim::adjacent_find_config<{{ config.block_size_x }}, {{ config.ipt }}>
 {%- endblock %}
+
 {% block benchmark_type %}
-using benchmark_type = device_adjacent_find_benchmark<input_type, {{config.FAPD}} ,config>;
 {% endblock %}
+
 {% block type_definitions %}
-using input_type = {{ input_type }};
+    using input_type = {{ input_type }};
+{% endblock %}
+
+
+{% block benchmark_queue %}
+    executor.queue<device_adjacent_find_benchmark<input_type, 1 , config>>();
+    executor.queue<device_adjacent_find_benchmark<input_type, 5 , config>>();
+    executor.queue<device_adjacent_find_benchmark<input_type, 9 , config>>();
+{% endblock %}
+
+{% block get_time %}
+    double sum = 0;
+    double n = 0;
+
+    for(const double & x : executor.get_all_bytes_per_second()){
+        sum += (1000.0 * primbench::GiB) / x;
+        n++;
+    }
+
+    return sum / n;
 {% endblock %}

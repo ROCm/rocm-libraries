@@ -20,6 +20,86 @@ Definitions:
     - { transA: T, transB: T }
 
 Tests:
+- name: matmul_pointer_array_distinct_c_d_layout_smoke
+  category: smoke
+  function:
+    matmul: *single_precision
+  M: 128
+  N: 128
+  K: 128
+  lda: 128
+  ldb: 128
+  # Cover both layout directions, including a source larger than D's allocation.
+  ldc: [160, 384]
+  ldd: [160, 384]
+  batch_mode: 1
+  batch_count: 3
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 2
+  c_equal_d: false
+  unit_check: 1
+
+- name: matmul_distinct_c_d_layout_smoke
+  category: smoke
+  function:
+    matmul: *single_precision
+  M: 37
+  N: 29
+  K: 16
+  lda: 40
+  ldb: 20
+  ldc: 43
+  ldd: 47
+  stride_a: 704
+  stride_b: 640
+  stride_c: 1312
+  stride_d: 1440
+  batch_count: [1, 3]
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 2
+  c_equal_d: false
+  activation_type: [none, relu]
+  unit_check: 1
+
+# Exercise typed scalar dispatch through Gemm::isAlgoSupported.
+- name: matmul_ext_i8_dst_i32_support_smoke
+  category: smoke
+  function:
+    matmul: *i8_precision_dst_i32
+  matrix_size:
+    - { M: 128, N: 128, K: 128 }
+  transA: N
+  transB: N
+  alpha: 2
+  beta: -1
+  use_ext: true
+  use_ext_setproblem: true
+  algo_method: 1
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Preserve conjugation independently for A and B during extension setup.
+- name: matmul_ext_complex_support_smoke
+  category: smoke
+  function:
+    matmul: *complex_precisions
+  matrix_size:
+    - { M: 128, N: 128, K: 128 }
+  transA_transB:
+    - { transA: N, transB: N }
+    - { transA: C, transB: N }
+    - { transA: N, transB: C }
+  alpha_beta: *alpha_beta_range_small
+  use_ext: true
+  use_ext_setproblem: true
+  algo_method: 1
+  unit_check: 1
+  gpu_arch: '9(42|50)|1250'
+
 - name: matmul_smoke
   category: smoke
   function:

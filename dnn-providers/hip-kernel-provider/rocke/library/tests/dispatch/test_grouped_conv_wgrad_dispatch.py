@@ -21,6 +21,7 @@ import unittest
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
+    _block,
     _problem,
     conv_grouped_candidates,
     dispatch_conv_grouped,
@@ -73,6 +74,8 @@ def _expected_grid(req, spec):
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=spec.arch,
+            groups=p.groups,
+            block_size=_block(spec)[0],
         ).split_k
     return (gx, gy, p.groups * split_k)
 
@@ -139,12 +142,13 @@ class TestGroupedWgradDispatch(unittest.TestCase):
 class TestGroupedConvDirectionSurface(unittest.TestCase):
     """The grouped-conv directions handled here are reachable from one module.
 
-    ``dispatch.grouped_convolution`` covers forward and backward-weight (wgrad);
-    both share a single ``ConvGroupedRequest`` import surface.
+    ``dispatch.grouped_convolution`` covers forward, backward-weight (wgrad) and
+    backward-data (dgrad); all three share a single ``ConvGroupedRequest``
+    import surface.
     """
 
     def test_each_direction_returns_candidates(self):
-        for direction in ("fwd", "wgrad"):
+        for direction in ("fwd", "wgrad", "dgrad"):
             self.assertGreater(len(conv_grouped_candidates(direction)), 0, direction)
 
 
@@ -185,7 +189,7 @@ class TestTwoStageGridShape(unittest.TestCase):
     def test_stage2_grid_z_is_groups(self):
         # Stage 2 (workspace-reduce) uses grid z = groups: block_id_z is the
         # group index, one CTA per group covering wg_M x wg_N output elements.
-        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+        from kernels.common.conv_wgrad_workspace_reduce import (
             WgradReduceSpec,
             wgrad_reduce_grid,
         )
@@ -200,6 +204,215 @@ class TestTwoStageGridShape(unittest.TestCase):
             )
             grid = wgrad_reduce_grid(s2_spec)
             self.assertEqual(grid[2], r.request.G, "Stage 2 grid z must equal groups")
+
+
+def _dgrad(arch="gfx950", **kw):
+    base = dict(
+        N=2,
+        C=64,
+        K=64,
+        Hi=14,
+        Wi=14,
+        Y=3,
+        X=3,
+        pad_h=1,
+        pad_w=1,
+        arch=arch,
+        direction="dgrad",
+    )
+    base.update(kw)
+    return ConvGroupedRequest(**base)
+
+
+class TestGroupedDgradDispatch(unittest.TestCase):
+    """Selection + grid + K-outer policy for the gfx950 dgrad candidate.
+
+    The grid contract differs from wgrad's: dgrad's M-tile count is not a closed
+    form over the problem dims, because stride > 1 splits the convolution into
+    ``y_tilde * x_tilde`` sub-GEMMs of differing sizes. The x extent is the
+    cumulative tile count of the last sub-GEMM, and the group rides ``blockIdx.y``
+    rather than sharing z with the K-slice.
+    """
+
+    def _select(self, req):
+        cands = [c for c in conv_grouped_candidates("dgrad") if c.admits(req)[0]]
+        self.assertEqual(len(cands), 1, f"expected exactly one candidate: {cands}")
+        return cands[0], cands[0].select_spec(req)
+
+    def test_admitted_and_grid_matches_sub_gemm_tiling(self):
+        req = _dgrad()
+        cand, spec = self._select(req)
+        p = _problem(req)
+        # Independent re-derivation: stride 1 is a single sub-GEMM, so the flat
+        # tile count is just the M/N tiling of that one GEMM.
+        gemm_m = p.N * p.Hi * p.Wi
+        expected_x = math.ceil(gemm_m / spec.tile_m) * math.ceil(
+            (p.C // p.groups) / spec.tile_n
+        )
+        self.assertEqual(cand.grid(spec, req), (expected_x, 1, 1))
+
+    def test_strided_grid_uses_tilde_decomposition(self):
+        # stride 2 gives y_tilde = x_tilde = 2: four sub-GEMMs over a quarter of
+        # the rows each. The flat tile count must therefore differ from the
+        # stride-1 count rather than reusing a single-GEMM formula.
+        strided = _dgrad(stride_h=2, stride_w=2)
+        cand, spec = self._select(strided)
+        gx_strided = cand.grid(spec, strided)[0]
+
+        plain = _dgrad()
+        cand1, spec1 = self._select(plain)
+        gx_plain = cand1.grid(spec1, plain)[0]
+
+        self.assertNotEqual(gx_strided, gx_plain)
+        self.assertGreater(gx_strided, 0)
+
+    def test_group_rides_block_id_y(self):
+        req = _dgrad(C=64, K=64, G=4)
+        cand, spec = self._select(req)
+        self.assertEqual(cand.grid(spec, req)[1], 4)
+
+    def test_k_outer_selected_on_even_channel_run(self):
+        _cand, spec = self._select(_dgrad())
+        self.assertTrue(spec.lds_k_outer)
+        self.assertEqual(spec.direction, "dgrad")
+
+    def test_k_outer_declined_on_odd_channel_run(self):
+        # cpg = 48 / 16 = 3. The B load width collapses to 1, axis_b is already
+        # "col", and there is no transpose-on-store left to remove -- K-outer
+        # would only add the read-side cost. The predicate must decline.
+        _cand, spec = self._select(_dgrad(C=48, G=16))
+        self.assertFalse(spec.lds_k_outer)
+
+    def test_dgrad_candidate_rejects_other_directions(self):
+        cand = conv_grouped_candidates("dgrad")[0]
+        for direction in ("fwd", "wgrad"):
+            ok, why = cand.admits(_dgrad(direction=direction))
+            self.assertFalse(ok, direction)
+            self.assertIn("dgrad", why)
+
+    def test_epilogue_follows_store_vector_width(self):
+        # dX's last dim is C, so a wide store vector needs cshuffle's LDS
+        # staging; the direct-store 'default' path writes scalars. Pinning
+        # 'default' unconditionally is silently valid -- vector_size_c is left
+        # unset, so the validator rule never fires -- and costs store bandwidth
+        # on every non-grouped shape. Derive it instead.
+        _cand, wide = self._select(_dgrad(C=128, K=128, Hi=32, Wi=32))
+        self.assertEqual(wide.epilogue, "cshuffle")
+
+        # cpg = 3: no legal width > 1, so the scalar direct store is correct.
+        _cand, narrow = self._select(_dgrad(C=48, G=16))
+        self.assertEqual(narrow.epilogue, "default")
+
+    def test_vec_size_c_uses_the_dgrad_formula(self):
+        # Each direction has its own default_vector_sizes and they are not
+        # interchangeable: dgrad's takes the per-group runs (cpg, kpg), so a
+        # fallthrough to the forward formula sizes off the wrong extent once
+        # groups > 1.
+        from dispatch.grouped_convolution import _vec_size_c
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
+        req = _dgrad(C=48, G=16)
+        p = _problem(req)
+        _va, _vb, expected = DgradConvSpec.default_vector_sizes(
+            p.cpg, p.kpg, req.dtype.lower()
+        )
+        self.assertEqual(_vec_size_c(req), expected)
+
+    def test_spec_round_trips_to_instance_spec(self):
+        req = _dgrad()
+        _cand, spec = self._select(req)
+        inst = spec.to_dgrad_spec(_problem(req))
+        # The dispatcher's K-outer decision must survive into the instance spec;
+        # a spec that silently reverts to M-outer would still run and still be
+        # correct, so nothing else would catch it.
+        self.assertEqual(inst.lds_k_outer, spec.lds_k_outer)
+        self.assertEqual(inst.tile_m, spec.tile_m)
+        self.assertEqual(inst.warp_tile_n, spec.warp_tile_mn)
+        inst.validate()
+
+
+class TestGfx1250WgradKOuterReachable(unittest.TestCase):
+    """The gfx1250 wgrad candidate must actually enable the K-outer layout.
+
+    ``WgradConvSpec.default_lds_k_outer`` returns True for every fp16/bf16
+    gfx1250 wgrad request (wave32, 16x16 atom edge), but the candidate used to
+    never ask -- so the headline transpose-read path was unreachable through
+    library dispatch and was exercised only by the sweep driver and the
+    direct-build tests.
+    """
+
+    def _spec(self, dtype="fp16"):
+        return dispatch_conv_grouped(_wgrad("gfx1250", G=4, dtype=dtype)).spec
+
+    def test_dispatch_spec_enables_k_outer(self):
+        for dtype in ("fp16", "bf16"):
+            self.assertTrue(
+                self._spec(dtype).lds_k_outer,
+                f"gfx1250 wgrad dispatch must enable lds_k_outer for {dtype}",
+            )
+
+    def test_decision_survives_into_the_instance_spec(self):
+        r = dispatch_conv_grouped(_wgrad("gfx1250", G=4))
+        inst = r.spec.to_wgrad_spec(_problem(r.request))
+        self.assertTrue(inst.lds_k_outer)
+        inst.validate()
+
+    def test_agrees_with_the_selection_policy(self):
+        # Dispatch must not hand-roll the gate; it must match the one policy
+        # function the sweep driver also calls.
+        from rocke.core.arch import ArchTarget
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        spec = self._spec()
+        self.assertEqual(
+            spec.lds_k_outer,
+            WgradConvSpec.default_lds_k_outer(
+                arch="gfx1250",
+                dtype_a="fp16",
+                dtype_b="fp16",
+                warp_tile_m=spec.warp_tile_mn,
+                warp_tile_n=spec.warp_tile_mn,
+                wave_size=ArchTarget.from_gfx("gfx1250").wave_size,
+            ),
+        )
+
+
+class TestGroupedSpecKernelNameDistinguishesBody(unittest.TestCase):
+    """Dispatch kernel names must separate specs that emit different bodies.
+
+    This is the layer whose names key the host-side compile cache, so two specs
+    that lower differently sharing one name is a cache-collision bug, not a
+    cosmetic one.
+    """
+
+    def test_k_outer_changes_the_name(self):
+        from dispatch.grouped_convolution import ConvGroupedSpec
+
+        base = dispatch_conv_grouped(_wgrad("gfx950", G=4)).spec
+        from dataclasses import replace
+
+        on = replace(base, lds_k_outer=True)
+        off = replace(base, lds_k_outer=False)
+        self.assertNotEqual(
+            on.kernel_name(),
+            off.kernel_name(),
+            "lds_k_outer changes the LDS tile shape and operand fetch",
+        )
+        self.assertIn("kouter", on.kernel_name())
+        assert isinstance(base, ConvGroupedSpec)
+
+    def test_force_deterministic_changes_the_name(self):
+        from dataclasses import replace
+
+        base = dispatch_conv_grouped(_wgrad("gfx942", G=4)).spec
+        det = replace(base, force_deterministic=True)
+        plain = replace(base, force_deterministic=False)
+        self.assertNotEqual(
+            det.kernel_name(),
+            plain.kernel_name(),
+            "force_deterministic promotes to two_stage, which adds the `ws` "
+            "workspace pointer to the signature -- an ABI change",
+        )
 
 
 if __name__ == "__main__":

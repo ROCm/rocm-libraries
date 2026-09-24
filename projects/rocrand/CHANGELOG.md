@@ -6,12 +6,17 @@ Documentation for rocRAND is available at
 ## rocRAND 5.1.0 for ROCm 10.1.0
 
 ### Optimized
- 
+
 * Added tuning configurations for gfx950 across rocRAND generators.
- 
+* Improved host API performance for discrete distributions through optimization changes for some generators.
+
 ### Resolved Issues
- 
+
 * Fixed pure C compilation of the public rocrand/rocrand.h header, which could previously fail with an undefined __half type error or a uint4 typedef redefinition when included before <hip/hip_runtime.h>.
+
+### Changed
+
+* Added a sync barrier and `__restrict__` qualifiers to the device API benchmark, enabling better compiler optimization.
 
 ## rocRAND 5.0.0 for ROCm 10.0.0
 

@@ -26,12 +26,8 @@
 #include <rocsparse/rocsparse-config.h>
 
 // clang-format off
-#ifdef ROCSPARSE_WITH_ILDLT0
 #define ROCSPARSE_FOREACH_ROUTINE_ILDLT0    \
 ROCSPARSE_DO_ROUTINE(spildlt0)
-#else
-#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0
-#endif
 
 #ifdef ROCSPARSE_WITH_ELL_TRSV
 #define ROCSPARSE_FOREACH_ROUTINE_ELL_TRSV    \

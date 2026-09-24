@@ -18,3 +18,12 @@ In order to build the plugin standalone, you will need to have installed hipDNN 
 1. Make a build directory, `mkdir build && cd build`.
 1. Run `cmake -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..` to configure the build.
 1. Run `ninja` to build the plugin.
+
+## Project policies
+
+This plugin is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
+
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)

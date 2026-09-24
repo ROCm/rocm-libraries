@@ -27,10 +27,17 @@ rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
   slab-padded K/V layouts. IGLP-1 owns this loop schedule and K-major PV traversal
   keeps the 256-VGPR kernel spill-free.
 
-Shape (batch / seqlen / heads / head_dim / causal / dtype) is baked at build time
-(dense, statically-sized ABI). Tile/resource knobs are `block_n`, `waves_per_eu`,
-and `lds_k_group_pad`; persistent scheduling knobs are `num_persistent`,
-`persist_decode`, `interleave`, and `wide_lds_dma`.
+Heads / head_dim / causal / dtype are baked at build time. On the aligned path
+`batch`, `seqlen_q`, and `seqlen_kv` are **runtime kernel params** — the spec
+declares them in `runtime_param_fields`, the launcher cache key excludes them, and
+one compiled binary therefore serves every shape (see
+[runtime param field](../../../../../platform/dsl_docs/instances/attention.md#runtime-param-fields)).
+Sub-modes that still bake seqlen into the body — persistent, ragged, varlen,
+paged, sliding-window — keep per-shape identity and a statically-sized ABI.
+
+Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
+persistent scheduling knobs are `num_persistent`, `persist_decode`, `interleave`,
+and `wide_lds_dma`.
 
 ## Persistent (grid-stride) mode
 

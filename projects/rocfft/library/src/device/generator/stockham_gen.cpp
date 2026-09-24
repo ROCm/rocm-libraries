@@ -854,14 +854,26 @@ int main()
             if(direct_to_from_reg.size() != 2)
                 throw std::runtime_error("CS_3D_PP requires two direct_to_from_reg configuration");
 
-            StockhamGeneratorSpecs specs1(
-                factors1, {}, precision, gcn_arch_name, workgroup_size[0], scheme, transform_type);
+            StockhamGeneratorSpecs specs1(KIntType::U32,
+                                          factors1,
+                                          {},
+                                          precision,
+                                          gcn_arch_name,
+                                          workgroup_size[0],
+                                          scheme,
+                                          transform_type);
             specs1.direct_to_from_reg    = direct_to_from_reg[0];
             specs1.threads_per_transform = threads_per_transform[0];
             specs1.wgs_is_derived        = true;
 
-            StockhamGeneratorSpecs specs2(
-                factors2, {}, precision, gcn_arch_name, workgroup_size[1], scheme, transform_type);
+            StockhamGeneratorSpecs specs2(KIntType::U32,
+                                          factors2,
+                                          {},
+                                          precision,
+                                          gcn_arch_name,
+                                          workgroup_size[1],
+                                          scheme,
+                                          transform_type);
             specs2.direct_to_from_reg    = direct_to_from_reg[1];
             specs2.threads_per_transform = threads_per_transform[1];
             specs2.wgs_is_derived        = true;
@@ -900,7 +912,8 @@ int main()
             ++arg;
             factors = parse_uints_csv(*arg);
 
-            StockhamGeneratorSpecs specs(factors,
+            StockhamGeneratorSpecs specs(KIntType::U32,
+                                         factors,
                                          factors2d,
                                          precision,
                                          gcn_arch_name,
@@ -915,7 +928,8 @@ int main()
             specs.threads_per_transform = threads_per_transform.front();
 
             // second dimension for 2D_SINGLE
-            StockhamGeneratorSpecs specs2d(factors2d,
+            StockhamGeneratorSpecs specs2d(KIntType::U32,
+                                           factors2d,
                                            factors,
                                            precision,
                                            gcn_arch_name,

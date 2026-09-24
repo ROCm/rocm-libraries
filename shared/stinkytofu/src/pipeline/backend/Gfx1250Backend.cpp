@@ -70,6 +70,7 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
+#include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -154,6 +155,17 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // Both the DAG scheduler (O3) and waitcnt insertion need the region-scoped
         // CFG, so they share one region adaptor. Either gate is enough to enter
         // this block.
+        // Resolve unset scheduling knobs from main-loop IR stats (or static
+        // defaults when the main loop is missing/degenerate). User-set options
+        // always win per knob. Shared by the DAG scheduler and cluster-barrier.
+        const SchedulingFeatures schedulingFeatures = schedulingFeaturesFromModule(module);
+        const HeuristicSchedulingKnobPolicy schedulingKnobPolicy;
+        const ResolvedSchedulingKnobs resolvedKnobs = resolveSchedulingKnobs(
+            schedulingFeatures, schedulingKnobOverridesFromModuleOptions(moduleOptions),
+            schedulingKnobPolicy);
+        // PASS_DEBUG gated: StinkyTofuDebugPass: "SchedulingKnobHeuristics"
+        logResolvedSchedulingKnobsIfDebug(module.getName(), schedulingFeatures, resolvedKnobs);
+
         if (runScheduler || moduleOptions.EnableWaitCntInsertion) {
             PassFeatureConfig passFeatureConfig;
             if (runScheduler) {
@@ -162,8 +174,6 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.distributeGlobalRead = true;
                 passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
                 passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
-                passFeatureConfig.dagFeatures.dsReadThrottleLatency =
-                    moduleOptions.DsReadThrottleLatency;
                 passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
                     moduleOptions.DsReadThrottleTransitionFactor;
                 passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
@@ -177,8 +187,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // Same option as InsertClusterBarrierPass below (see
                 // cluster-barrier.md).
                 passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
-                if (moduleOptions.DsReadPerWmma >= 0)
-                    passFeatureConfig.dagFeatures.dsReadPerWmma = moduleOptions.DsReadPerWmma;
+                applyResolvedSchedulingKnobs(passFeatureConfig, resolvedKnobs);
                 if (moduleOptions.DsReadOrder >= 0)
                     passFeatureConfig.dagFeatures.dsReadOrder =
                         static_cast<PassFeatureConfig::DsReadOrder>(moduleOptions.DsReadOrder);
@@ -234,7 +243,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 /*streamKMulticast=*/moduleOptions.StreamKMulticast,
                 /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
                 /*rule3SignalLeadCycles=*/
-                moduleOptions.ClusterBarrierRule3SignalLeadCycles));
+                resolvedKnobs.clusterBarrierRule3SignalLeadCycles));
         }
 
         // Build the CFG after the flat region splice-backs so RegionClonePass can

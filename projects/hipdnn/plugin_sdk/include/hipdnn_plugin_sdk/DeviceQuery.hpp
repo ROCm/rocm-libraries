@@ -22,18 +22,35 @@
 namespace hipdnn_plugin_sdk
 {
 
+/// @brief Whether a stream token is relative to the calling thread's current device.
+inline bool isDefaultStream(hipStream_t stream)
+{
+    return stream == nullptr || stream == hipStreamLegacy || stream == hipStreamPerThread;
+}
+
+/// @brief Query the live current device for default tokens, or a concrete stream's owner.
+/// Returns the HIP query status without changing the caller's output policy.
+inline hipError_t getDeviceFromStream(hipStream_t stream, hipDevice_t* deviceId)
+{
+    if(isDefaultStream(stream))
+    {
+        return hipGetDevice(deviceId);
+    }
+    return hipStreamGetDevice(stream, deviceId);
+}
+
 /// @brief Raw gcnArchName (suffix intact) of the device backing the given HIP
-/// stream. Correct under HIP_VISIBLE_DEVICES and multi-stream use because it
-/// resolves the stream's own device rather than the current one. Match the
-/// result with archMatches(). @throws HipdnnPluginException on HIP failure.
+/// stream. Default tokens resolve the calling thread's live current device;
+/// concrete streams resolve their owning device. Match the result with archMatches().
+/// @throws HipdnnPluginException on HIP failure.
 inline std::string getDeviceArch(hipStream_t stream)
 {
     hipDevice_t deviceId = -1;
-    auto status = hipStreamGetDevice(stream, &deviceId);
+    auto status = getDeviceFromStream(stream, &deviceId);
     if(status != hipSuccess)
     {
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                    "hipStreamGetDevice failed: " + std::to_string(status));
+                                    "Stream device query failed: " + std::to_string(status));
     }
     hipDeviceProp_t props;
     status = hipGetDeviceProperties(&props, deviceId);

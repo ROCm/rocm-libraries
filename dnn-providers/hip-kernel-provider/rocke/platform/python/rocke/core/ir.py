@@ -29,6 +29,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .arch import target as _arch
 
 # ----------------------------- Types --------------------------------------
 
@@ -72,9 +73,8 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # Both are read from the arch SSOT (``core/arch/target``): fragment lengths from
 # ``_MMA_FRAGMENT_INFO`` and the accumulator dtype from the JSON catalog. ir.py
 # keeps *no* private copy of that data — an ``MmaOp`` object supplies both fields
-# directly, and a bare op_id string is resolved through the lazy helpers below.
-# The arch package is imported lazily (inside the helpers) so ir.py stays
-# importable without eagerly loading the arch tree.
+# directly, and a bare op_id string is resolved through the helpers below.
+# The arch module loads its JSON catalog lazily when a lookup needs it.
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. This is
 # purely ir-side SSA naming (not arch data), kept here so the emitted value
@@ -103,15 +103,41 @@ def _check_u16(op: str, field: str, value: int) -> int:
     return v
 
 
+def _check_u32(op: str, field: str, value: int) -> int:
+    """Range-check an immediate carried by an LLVM ``i32``."""
+    v = int(value)
+    if not 0 <= v <= 0xFFFFFFFF:
+        raise ValueError(
+            f"{op} {field} must fit an unsigned i32 (0..4294967295), got {v}"
+        )
+    return v
+
+
+def _check_i32(op: str, field: str, value: int) -> int:
+    """Range-check a signed byte offset carried by an LLVM ``i32``."""
+    v = int(value)
+    if not -(1 << 31) <= v < (1 << 31):
+        raise ValueError(
+            f"{op} {field} must fit a signed i32 (-2147483648..2147483647), got {v}"
+        )
+    return v
+
+
+def _check_cachepolicy(op: str, value: int) -> int:
+    """Validate the gfx12+ five-bit cache-policy immediate."""
+    v = int(value)
+    if not 0 <= v <= 0x1F:
+        raise ValueError(f"{op} cachepolicy must be in 0..31, got {v}")
+    return v
+
+
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
+    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
     the strictness callers relied on.
     """
-    from rocke.core.arch import target as _arch
-
     frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
         raise ValueError(
@@ -125,11 +151,9 @@ def _mma_c_is_int(op_id: str) -> bool:
     """True when ``op_id`` accumulates in i32 (integer WMMA).
 
     Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
-    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
+    Op_ids absent from the catalog default to the f32 accumulator.
     """
-    from rocke.core.arch import target as _arch
-
     return _arch._op_id_c_dtype().get(op_id) == "i32"
 
 
@@ -787,6 +811,14 @@ class IRBuilder:
         return self._op("math.rsqrt", [a], [a.type], result_name_hint="rsq").result
 
     def tanh(self, a: Value) -> Value:
+        """Return the f32 hyperbolic tangent of ``a``.
+
+        Narrow activation users must promote to f32 explicitly and cast the
+        result back. Keeping the core operation f32-only prevents an invalid
+        narrow intrinsic from reaching the AMDGPU lowerer.
+        """
+        if a.type != F32:
+            raise ValueError(f"math.tanh requires f32 operand, got {a.type.name}")
         return self._op("math.tanh", [a], [a.type], result_name_hint="tanh").result
 
     def land(self, a: Value, b: Value) -> Value:
@@ -1830,7 +1862,11 @@ class IRBuilder:
         c_dtype = getattr(op, "c_dtype", None)
         is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
         c_elem = I32 if is_int_acc else F32
-        hint = _MMA_RESULT_HINT.get(op_id, "acc")
+        hint = (
+            "mxacc"
+            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            else _MMA_RESULT_HINT.get(op_id, "acc")
+        )
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
@@ -2122,6 +2158,37 @@ class IRBuilder:
             result_name_hint=result_name_hint,
         )
         return list(op.results)
+
+    def _gfx1250_scalar_control(self, mnemonic: str, imm: int) -> None:
+        """Emit a gfx1250-only raw-u16 scalar control through ``tile.inline_asm``."""
+        value = _check_u16(mnemonic, "imm", imm)
+        self._op(
+            "tile.inline_asm",
+            attrs={
+                "template": f"{mnemonic} {value}",
+                "constraints": "",
+                "sideeffect": True,
+                "convergent": False,
+                "required_arch": "gfx1250",
+                "required_llvm_flavor": "llvm23",
+            },
+        )
+
+    def s_delay_alu(self, imm: int) -> None:
+        """Emit gfx1250 ``s_delay_alu`` with its raw unsigned 16-bit encoding."""
+        self._gfx1250_scalar_control("s_delay_alu", imm)
+
+    def s_wait_alu(self, imm: int) -> None:
+        """Emit gfx1250 ``s_wait_alu`` with its raw unsigned 16-bit encoding."""
+        self._gfx1250_scalar_control("s_wait_alu", imm)
+
+    def s_clause(self, imm: int) -> None:
+        """Emit gfx1250 ``s_clause`` with its raw unsigned 16-bit encoding."""
+        self._gfx1250_scalar_control("s_clause", imm)
+
+    def s_wait_xcnt(self, imm: int) -> None:
+        """Emit gfx1250 ``s_wait_xcnt`` with its raw unsigned 16-bit encoding."""
+        self._gfx1250_scalar_control("s_wait_xcnt", imm)
 
     def mfma_scale_f32_16x16x128_f8f6f4(
         self,
@@ -2753,6 +2820,64 @@ class IRBuilder:
             result_name_hint="dppx",
         ).result
 
+    def quad_perm(self, data: Value, perm) -> Value:
+        """Intra-quad ``v_mov_b32_dpp`` permutation on the VALU.
+
+        Lane ``4q + i`` reads ``data`` from lane ``4q + perm[i]``.
+        ``perm`` is encoded in the low eight bits of the DPP control word.
+
+        **Wave size.** The mapping is wave-size-independent: the same
+        control word applies within every four-lane group, and four
+        divides both 32 and 64, so a lane never addresses outside its own
+        quad. Wave size changes only the *number* of quads (8 in wave32,
+        16 in wave64), never the permutation a quad performs. Contrast
+        :meth:`warp_shuffle_xor`, whose ``lane_xor = 32`` partner is a
+        real lane in wave64 and does not exist in wave32.
+
+        That is a property of the quad, not a claim about every target:
+        the op still requires DPP-capable hardware. Base-DPP
+        ``quad_perm`` is available on CDNA, where the RDNA-only
+        ``row_xmask`` of :meth:`dpp_xor` is not.
+
+        The op carries no lane targeting -- the control word is broadcast
+        to every quad in the wave, with row and bank masks fixed at
+        ``15, 15`` (all enabled) by the lowerers. Selecting a subset of
+        quads is the caller's job.
+        """
+        perm = list(perm)
+        if len(perm) != 4 or any(not (0 <= p <= 3) for p in perm):
+            raise ValueError(f"quad_perm perm must be 4 values in 0..3, got {perm}")
+        if data.type.name != "i32":
+            raise ValueError("quad_perm requires i32 data")
+        ctrl = perm[0] | (perm[1] << 2) | (perm[2] << 4) | (perm[3] << 6)
+        return self._op(
+            "tile.quad_perm",
+            [data],
+            [I32],
+            attrs={"ctrl": int(ctrl)},
+            result_name_hint="qperm",
+        ).result
+
+    def warp_shuffle_xor_quad(self, v: Value, xor_mask: int) -> Value:
+        """XOR shuffle within a four-lane quad.
+
+        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. Larger
+        masks require :meth:`warp_shuffle_xor`, which uses ``ds_swizzle``.
+        """
+        if xor_mask == 1:
+            perm = [1, 0, 3, 2]
+        elif xor_mask == 2:
+            perm = [2, 3, 0, 1]
+        else:
+            raise ValueError(
+                f"warp_shuffle_xor_quad supports xor_mask 1 or 2, got {xor_mask}"
+            )
+        if v.type.name == "f32":
+            return self.bitcast(self.quad_perm(self.bitcast(v, I32), perm), F32)
+        if v.type.name == "i32":
+            return self.quad_perm(v, perm)
+        raise ValueError(f"warp_shuffle_xor_quad: unsupported type {v.type.name}")
+
     def ds_bpermute_b64(self, addr: Value, data: Value) -> Value:
         """Packed 64-bit ``ds_bpermute`` — single LDS op for paired
         ``(val, idx)`` cross-lane shuffles (gfx9+).
@@ -3329,6 +3454,82 @@ class IRBuilder:
             attrs={"n": _check_u16("s_wait_asynccnt", "n", n)},
         )
 
+    def s_wait_tensorcnt(self, n: int = 0) -> None:
+        """Wait until at most ``n`` gfx1250 tensor operations remain outstanding."""
+        self._op(
+            "tile.s_wait_tensorcnt",
+            attrs={"n": _check_u16("s_wait_tensorcnt", "n", n)},
+        )
+
+    def s_barrier_signal(self, barrier_type: int) -> None:
+        """Signal the gfx1250 non-named split barrier selected by ``barrier_type``."""
+        self._op(
+            "tile.s_barrier_signal",
+            attrs={
+                "barrier_type": _check_u32(
+                    "s_barrier_signal", "barrier_type", barrier_type
+                )
+            },
+        )
+
+    def s_barrier_wait(self, barrier_type: int) -> None:
+        """Wait on a gfx1250 non-named split barrier."""
+        self._op(
+            "tile.s_barrier_wait",
+            attrs={
+                "barrier_type": _check_u16(
+                    "s_barrier_wait", "barrier_type", barrier_type
+                )
+            },
+        )
+
+    def _check_local_ptr(self, op: str, ptr: Value) -> None:
+        ty = ptr.type
+        if ty is I64:
+            return
+        if isinstance(ty, PtrType) and ty.space == "local":
+            return
+        raise TypeError(
+            f"{op} local pointer must be i64 from smem_addr_of or ptr<...,local>, got {ty}"
+        )
+
+    def _check_i32_value(self, op: str, field: str, value: Value) -> None:
+        if value.type is not I32:
+            raise TypeError(f"{op} {field} must be i32, got {value.type}")
+
+    def s_barrier_init(self, barrier: Value, member_count: Value) -> None:
+        """Initialize a gfx1250 named barrier in LDS."""
+        self._check_local_ptr("s_barrier_init", barrier)
+        self._check_i32_value("s_barrier_init", "member_count", member_count)
+        self._op("tile.s_barrier_init", [barrier, member_count])
+
+    def s_barrier_signal_var(self, barrier: Value, member_count: Value) -> None:
+        """Signal a gfx1250 named barrier, optionally replacing its member count."""
+        self._check_local_ptr("s_barrier_signal_var", barrier)
+        self._check_i32_value("s_barrier_signal_var", "member_count", member_count)
+        self._op("tile.s_barrier_signal_var", [barrier, member_count])
+
+    def s_barrier_join(self, barrier: Value) -> None:
+        """Join the gfx1250 named barrier stored at ``barrier``."""
+        self._check_local_ptr("s_barrier_join", barrier)
+        self._op("tile.s_barrier_join", [barrier])
+
+    def s_wakeup_barrier(self, barrier: Value) -> None:
+        """Wake waves waiting on the gfx1250 named barrier at ``barrier``."""
+        self._check_local_ptr("s_wakeup_barrier", barrier)
+        self._op("tile.s_wakeup_barrier", [barrier])
+
+    def s_barrier_leave(self, barrier_type: int) -> None:
+        """Leave a gfx1250 non-named barrier."""
+        self._op(
+            "tile.s_barrier_leave",
+            attrs={
+                "barrier_type": _check_u16(
+                    "s_barrier_leave", "barrier_type", barrier_type
+                )
+            },
+        )
+
     def global_load_async_to_lds(
         self,
         src_ptr: Value,
@@ -3369,6 +3570,116 @@ class IRBuilder:
                 "cpol": int(coherency),
                 "offset_bytes": int(offset_bytes),
             },
+        )
+
+    def global_store_async_from_lds(
+        self,
+        dst_ptr: Value,
+        lds_ptr: Value,
+        *,
+        width_bytes: int,
+        offset_bytes: int = 0,
+        cachepolicy: int = 0,
+    ) -> None:
+        """Issue a gfx1250 asynchronous LDS-to-global store."""
+        if width_bytes not in (1, 4, 8, 16):
+            raise ValueError(
+                "global_store_async_from_lds width_bytes must be 1, 4, 8, or 16 "
+                f"(got {width_bytes})"
+            )
+        if not isinstance(dst_ptr.type, PtrType) or dst_ptr.type.space != "global":
+            raise TypeError(
+                "global_store_async_from_lds dst_ptr must be a global pointer, "
+                f"got {dst_ptr.type}"
+            )
+        self._check_local_ptr("global_store_async_from_lds", lds_ptr)
+        self._op(
+            "tile.global_store_async_from_lds",
+            [dst_ptr, lds_ptr],
+            attrs={
+                "width_bytes": int(width_bytes),
+                "offset_bytes": _check_i32(
+                    "global_store_async_from_lds", "offset_bytes", offset_bytes
+                ),
+                "cachepolicy": _check_cachepolicy(
+                    "global_store_async_from_lds", cachepolicy
+                ),
+            },
+        )
+
+    def global_load_tr16_b128(self, src_ptr: Value, *, dtype: Type = F16) -> Value:
+        """Load one gfx1250 transposed 128-bit global-memory fragment."""
+        if dtype not in (F16, BF16, I16):
+            raise TypeError(
+                f"global_load_tr16_b128 dtype must be f16/bf16/i16, got {dtype}"
+            )
+        if not isinstance(src_ptr.type, PtrType) or src_ptr.type.space != "global":
+            raise TypeError(
+                f"global_load_tr16_b128 src_ptr must be a global pointer, got {src_ptr.type}"
+            )
+        return self._op(
+            "tile.global_load_tr16_b128",
+            [src_ptr],
+            [VectorType(dtype, 8)],
+            attrs={"dtype": dtype.name},
+            result_name_hint="gtr",
+        ).result
+
+    def _check_tensor_descriptor_group(
+        self, op: str, field: str, value: Value, lanes: int
+    ) -> None:
+        ty = value.type
+        if not isinstance(ty, VectorType) or ty.elem is not I32 or ty.count != lanes:
+            raise TypeError(f"{op} {field} must be vec<i32x{lanes}>, got {ty}")
+
+    def _tensor_lds_transfer(
+        self,
+        op_name: str,
+        d0: Value,
+        d1: Value,
+        d2: Value,
+        d3: Value,
+        d4: Value,
+        cachepolicy: int,
+    ) -> None:
+        groups = ((d0, 4), (d1, 8), (d2, 4), (d3, 4), (d4, 8))
+        short_name = op_name.removeprefix("tile.")
+        for index, (value, lanes) in enumerate(groups):
+            self._check_tensor_descriptor_group(short_name, f"d{index}", value, lanes)
+        self._op(
+            op_name,
+            [d0, d1, d2, d3, d4],
+            attrs={"cachepolicy": _check_cachepolicy(short_name, cachepolicy)},
+        )
+
+    def tensor_load_to_lds(
+        self,
+        d0: Value,
+        d1: Value,
+        d2: Value,
+        d3: Value,
+        d4: Value,
+        *,
+        cachepolicy: int = 0,
+    ) -> None:
+        """Issue the low-level gfx1250 TDM tensor load using five D# groups."""
+        self._tensor_lds_transfer(
+            "tile.tensor_load_to_lds", d0, d1, d2, d3, d4, cachepolicy
+        )
+
+    def tensor_store_from_lds(
+        self,
+        d0: Value,
+        d1: Value,
+        d2: Value,
+        d3: Value,
+        d4: Value,
+        *,
+        cachepolicy: int = 0,
+    ) -> None:
+        """Issue the low-level gfx1250 TDM tensor store using five D# groups."""
+        self._tensor_lds_transfer(
+            "tile.tensor_store_from_lds", d0, d1, d2, d3, d4, cachepolicy
         )
 
     def iglp_opt(self, level: int = 0) -> None:
@@ -4199,6 +4510,7 @@ PURE_OP_NAMES = {
     "tile.ds_swizzle_xor",
     "tile.ds_swizzle",
     "tile.mov_dpp8",
+    "tile.quad_perm",
     "tile.wave_reduce",
     "tile.readlane",
     "tile.writelane",

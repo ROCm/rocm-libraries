@@ -1070,6 +1070,46 @@ static void ll_check_u16(rocke_lower_t* L, const char* op, const char* field, in
     }
 }
 
+static void ll_require_gfx1250_llvm23(rocke_lower_t* L, const char* op)
+{
+    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires gfx1250, got %s",
+                      op,
+                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
+    }
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires LLVM flavor llvm23, got %s",
+                      op,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+}
+
+static const char*
+    ll_named_barrier_ptr(rocke_lower_t* L, const char* op, const rocke_value_t* value)
+{
+    const char* type = rocke_ll_llvm_type(L, value->type);
+    if(strcmp(type, "ptr addrspace(3)") == 0)
+        return rocke_ll_operand(L, value);
+    if(strcmp(type, "i64") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s local pointer must be i64 or ptr addrspace(3), got %s",
+                      op,
+                      type);
+    }
+    const char* ptr = rocke_ll_fresh(L, "lds_ptr");
+    rocke_ll_emitf(
+        L, "  %s = inttoptr i64 %s to ptr addrspace(3)", ptr, rocke_ll_operand(L, value));
+    return ptr;
+}
+
 static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
 {
     int64_t n = 0;
@@ -1082,6 +1122,105 @@ static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
     ll_check_u16(L, "s_wait_asynccnt", "n", n);
     rocke_ll_need(L, "s.wait.asynccnt");
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.asynccnt(i16 %lld)", (long long)n);
+}
+
+static void _op_tile_s_wait_tensorcnt(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t n = 0;
+    ll_require_gfx1250_llvm23(L, "s_wait_tensorcnt");
+    rocke_attr_get_int(&op->attrs, "n", &n);
+    ll_check_u16(L, "s_wait_tensorcnt", "n", n);
+    rocke_ll_need(L, "s.wait.tensorcnt");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.tensorcnt(i16 %lld)", (long long)n);
+}
+
+static void _op_tile_s_barrier_signal(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t barrier_type = 0;
+    ll_require_gfx1250_llvm23(L, "s_barrier_signal");
+    rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
+    if(barrier_type < 0 || (uint64_t)barrier_type > UINT32_MAX)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "s_barrier_signal barrier_type must fit unsigned i32");
+    rocke_ll_need(L, "s.barrier.signal");
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.s.barrier.signal(i32 %llu)",
+                   (unsigned long long)(uint64_t)barrier_type);
+}
+
+static void _op_tile_s_barrier_wait(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t barrier_type = 0;
+    ll_require_gfx1250_llvm23(L, "s_barrier_wait");
+    rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
+    ll_check_u16(L, "s_barrier_wait", "barrier_type", barrier_type);
+    rocke_ll_need(L, "s.barrier.wait");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.barrier.wait(i16 %lld)", (long long)barrier_type);
+}
+
+static void ll_named_barrier_count(rocke_lower_t* L,
+                                   const rocke_op_t* op,
+                                   const char* short_name,
+                                   const char* intrinsic)
+{
+    if(op->num_operands != 2)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects barrier and member_count", short_name);
+    const rocke_value_t* barrier = op->operands[0];
+    const rocke_value_t* count = op->operands[1];
+    if(!count->type || count->type->kind != ROCKE_TYPE_SCALAR
+       || count->type->scalar != ROCKE_SCALAR_I32)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s member_count must be i32", short_name);
+    ll_require_gfx1250_llvm23(L, short_name);
+    const char* ptr = ll_named_barrier_ptr(L, short_name, barrier);
+    rocke_ll_need(L, intrinsic);
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.%s(ptr addrspace(3) %s, i32 %s)",
+                   intrinsic,
+                   ptr,
+                   rocke_ll_operand(L, count));
+}
+
+static void _op_tile_s_barrier_init(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_named_barrier_count(L, op, "s_barrier_init", "s.barrier.init");
+}
+
+static void _op_tile_s_barrier_signal_var(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_named_barrier_count(L, op, "s_barrier_signal_var", "s.barrier.signal.var");
+}
+
+static void ll_named_barrier_one(rocke_lower_t* L,
+                                 const rocke_op_t* op,
+                                 const char* short_name,
+                                 const char* intrinsic)
+{
+    if(op->num_operands != 1)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects one barrier pointer", short_name);
+    ll_require_gfx1250_llvm23(L, short_name);
+    const char* ptr = ll_named_barrier_ptr(L, short_name, op->operands[0]);
+    rocke_ll_need(L, intrinsic);
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.%s(ptr addrspace(3) %s)", intrinsic, ptr);
+}
+
+static void _op_tile_s_barrier_join(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_named_barrier_one(L, op, "s_barrier_join", "s.barrier.join");
+}
+
+static void _op_tile_s_wakeup_barrier(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_named_barrier_one(L, op, "s_wakeup_barrier", "s.wakeup.barrier");
+}
+
+static void _op_tile_s_barrier_leave(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t barrier_type = 0;
+    ll_require_gfx1250_llvm23(L, "s_barrier_leave");
+    rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
+    ll_check_u16(L, "s_barrier_leave", "barrier_type", barrier_type);
+    rocke_ll_need(L, "s.barrier.leave");
+    rocke_ll_emitf(
+        L, "  call void @llvm.amdgcn.s.barrier.leave(i16 %lld)", (long long)barrier_type);
 }
 
 static void _op_tile_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
@@ -1201,6 +1340,37 @@ static void _op_tile_s_setprio(rocke_lower_t* L, const rocke_op_t* op)
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
 
+/* Validate counts before either lowering path emits or unrolls the body. */
+static int64_t ll_validate_iter_counts(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t num_iter = 0;
+    rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
+    if(num_iter < 0 || op->num_operands - 3 != num_iter || op->num_results != num_iter)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "scf.for declares %lld iter_args but has %d init operands and %d results",
+                      (long long)num_iter,
+                      op->num_operands - 3,
+                      op->num_results);
+    }
+    const rocke_attr_value_t* meta = rocke_attr_get(&op->attrs, "iter_args");
+    if(meta && meta->kind != ROCKE_ATTR_LIST)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_args metadata must be a list");
+    }
+    const int num_meta = meta ? meta->u.list.count : 0;
+    if(num_meta != num_iter)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "scf.for declares %lld iter_args but has %d metadata entries",
+                      (long long)num_iter,
+                      num_meta);
+    }
+    return num_iter;
+}
+
 /* Fetch the i-th iter_args metadata map's "name"/"type" string fields. The
  * Python iter_meta is op.attrs["iter_args"], a list of {"name","type"} dicts;
  * here it is a ROCKE_ATTR_LIST whose items are small attr maps. Returns false if
@@ -1228,6 +1398,81 @@ static bool ll_iter_meta(const rocke_op_t* op, int i, const char** out_name, con
     return true;
 }
 
+/* Validate the serialized metadata against the typed operands/results, then
+ * delegate rendering to the canonical recursive type renderer. */
+static const char*
+    ll_iter_llvm_type(rocke_lower_t* L, const rocke_op_t* op, int i, const char** out_name)
+{
+    const char *name = NULL, *type_name = NULL;
+    if(!ll_iter_meta(op, i, &name, &type_name) || !name || !*name || !type_name)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_arg %d has incomplete metadata", i);
+    }
+    if(3 + i >= op->num_operands)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_arg %d has no init operand", i);
+    }
+    if(i >= op->num_results)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_arg %s has no result", name);
+    }
+
+    const rocke_type_t* type = op->operands[3 + i]->type;
+    if(!type || !type->name)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_arg %s has no init type", name);
+    }
+    if(strcmp(type_name, type->name) != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "scf.for iter_arg %s metadata type '%s' does not match init type '%s'",
+                      name,
+                      type_name,
+                      type->name);
+    }
+    if(!rocke_type_eq(op->results[i]->type, type))
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "scf.for result type '%s' does not match iter_arg %s type '%s'",
+                      op->results[i]->type ? op->results[i]->type->name : "(null)",
+                      name,
+                      type->name);
+    }
+    if(type->kind == ROCKE_TYPE_VECTOR)
+    {
+        if(type->count <= 0)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "scf.for loop-carried vector type '%s' must have a positive width",
+                          type->name);
+        }
+        if(!type->elem || type->elem->kind != ROCKE_TYPE_SCALAR)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_NOTIMPL,
+                          "scf.for loop-carried type '%s' is unsupported; expected a scalar or "
+                          "vector of scalar values",
+                          type->name);
+        }
+    }
+    else if(type->kind != ROCKE_TYPE_SCALAR)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "scf.for loop-carried type '%s' is unsupported; expected a scalar or "
+                      "vector of scalar values",
+                      type->name);
+    }
+    if(out_name)
+    {
+        *out_name = name;
+    }
+    return rocke_ll_llvm_type(L, type);
+}
+
 /* Python _lower_normal_for: header / body / latch / exit CFG with phi nodes.
  *
  *     num_iter = int(attrs.get("num_iter_args", 0))
@@ -1239,8 +1484,7 @@ static bool ll_iter_meta(const rocke_op_t* op, int i, const char** out_name, con
  *     self._blocks[-2].emit(f"  br label %{header.label}"); blocks[-2].terminated = True
  *     header.emit(f"  {iv_name} = phi {iv_ty} [ {lower}, %{pred_block} ], "
  *                 f"[ %iv.next.{header.label}, %FOR_LATCH ]")
- *     for meta, init in zip(iter_meta, iter_inits):
- *         ll_ty = _llvm_type_from_name(meta["type"])
+ *     for meta, init, ll_ty in zip(iter_meta, iter_inits, iter_llvm_types):
  *         header.emit(f"  {meta['name']} = phi {ll_ty} [ {init}, %{pred_block} ], "
  *                     f"[ {meta['name']}.next.{header.label}, %FOR_LATCH ]")
  *     cmp = fresh("cmp")
@@ -1254,14 +1498,12 @@ static bool ll_iter_meta(const rocke_op_t* op, int i, const char** out_name, con
  *     yielded = self._yield_stack.pop()  # len must == num_iter
  *     iv_next = f"%iv.next.{header.label}"
  *     latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {step}")
- *     for meta, yld in zip(iter_meta, yielded):
- *         ll_ty = _llvm_type_from_name(meta["type"])
+ *     for meta, yld, ll_ty in zip(iter_meta, yielded, iter_llvm_types):
  *         latch.emit(f"  {meta['name']}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}")
  *     latch.emit(f"  br label %{header.label}"); latch.terminated = True
  *     exit_blk = self._new_block("for.exit")
  *     for line in header.lines: replace %FOR_LATCH->%latch ; %FOR_EXIT->%exit
- *     for meta, result in zip(iter_meta, op.results):
- *         ll_ty = _llvm_type_from_name(meta["type"])
+ *     for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
  *         exit_blk.emit(f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}")
  */
 void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
@@ -1270,8 +1512,7 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    int64_t num_iter = 0;
-    rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
+    const int64_t num_iter = ll_validate_iter_counts(L, op);
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
@@ -1305,13 +1546,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
                          header->label);
     for(int i = 0; i < (int)num_iter; i++)
     {
-        const char *mname = NULL, *mtype = NULL;
-        if(!ll_iter_meta(op, i, &mname, &mtype) || !mname || !mtype)
-        {
-            break;
-        }
+        const char* mname = NULL;
         const rocke_value_t* init = op->operands[3 + i];
-        const char* ll_ty = rocke_ll_llvm_type_from_name(L, mtype);
+        const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
         rocke_ll_block_emitf(L,
                              header,
                              "  %s = phi %s [ %s, %%%s ], "
@@ -1367,12 +1604,8 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
                          rocke_ll_operand(L, step));
     for(int i = 0; i < (int)num_iter; i++)
     {
-        const char *mname = NULL, *mtype = NULL;
-        if(!ll_iter_meta(op, i, &mname, &mtype) || !mname || !mtype)
-        {
-            break;
-        }
-        const char* ll_ty = rocke_ll_llvm_type_from_name(L, mtype);
+        const char* mname = NULL;
+        const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
         rocke_ll_block_emitf(L,
                              latch,
                              "  %s.next.%s = bitcast %s %s to %s",
@@ -1394,12 +1627,8 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         ll_block_replace(L, header, "%FOR_EXIT", exit_repl);
         for(int i = 0; i < (int)num_iter && i < op->num_results; i++)
         {
-            const char *mname = NULL, *mtype = NULL;
-            if(!ll_iter_meta(op, i, &mname, &mtype) || !mname || !mtype)
-            {
-                break;
-            }
-            const char* ll_ty = rocke_ll_llvm_type_from_name(L, mtype);
+            const char* mname = NULL;
+            const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
             const rocke_value_t* result = op->results[i];
             rocke_ll_block_emitf(
                 L, exit_blk, "  %s = bitcast %s %s to %s", result->name, ll_ty, mname, ll_ty);
@@ -1438,8 +1667,7 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    int64_t num_iter = 0;
-    rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
+    const int64_t num_iter = ll_validate_iter_counts(L, op);
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
@@ -1639,12 +1867,8 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
 
     for(int i = 0; i < (int)num_iter && i < op->num_results; i++)
     {
-        const char *mname = NULL, *mtype = NULL;
-        if(!ll_iter_meta(op, i, &mname, &mtype) || !mtype)
-        {
-            break;
-        }
-        const char* ll_ty = rocke_ll_llvm_type_from_name(L, mtype);
+        const char* mname = NULL;
+        const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
         const rocke_value_t* result = op->results[i];
         rocke_ll_emitf(
             L, "  %s = bitcast %s %s to %s", result->name, ll_ty, current_iter_values[i], ll_ty);
@@ -1977,6 +2201,14 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_BARE, _op_tile_s_barrier_bare);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAITCNT, _op_tile_s_waitcnt);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_ASYNCCNT, _op_tile_s_wait_asynccnt);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_TENSORCNT, _op_tile_s_wait_tensorcnt);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_SIGNAL, _op_tile_s_barrier_signal);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_WAIT, _op_tile_s_barrier_wait);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_INIT, _op_tile_s_barrier_init);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_SIGNAL_VAR, _op_tile_s_barrier_signal_var);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_JOIN, _op_tile_s_barrier_join);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAKEUP_BARRIER, _op_tile_s_wakeup_barrier);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_LEAVE, _op_tile_s_barrier_leave);
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNCMARK, _op_tile_asyncmark);
     rocke_ll_set_handler(ROCKE_OP_TILE_WAIT_ASYNCMARK, _op_tile_wait_asyncmark);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_EVENT, _op_tile_s_wait_event);
