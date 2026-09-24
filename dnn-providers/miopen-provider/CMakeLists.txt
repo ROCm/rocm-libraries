@@ -136,6 +136,7 @@ include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
 include(Sanitizers)
+include(WindowsDllStaging)
 
 include(Dependencies)
 if(NOT MIOPENPROVIDER_SKIP_TESTS)

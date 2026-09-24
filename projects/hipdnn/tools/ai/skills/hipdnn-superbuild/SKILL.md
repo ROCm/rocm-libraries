@@ -137,5 +137,6 @@ Summarize:
 
 - `scripts/windows_rocm_setup.py` and `scripts/stage_shadowed_dlls.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is available for interactive users.
 - `stage_shadowed_dlls.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` and `amdhip64_<N>.dll` app-local and emits a diagnostic for each one also present in `C:\Windows\System32` (those copies shadow PATH and are why the app-local copies are needed).
+- The build's `stage_shadowed_rocm_dlls` target (`projects/hipdnn/cmake/WindowsDllStaging.cmake` and `dnn-providers/cmake/WindowsDllStaging.cmake`) is the primary mechanism for app-local staging. `stage_shadowed_dlls.py` is kept on purpose rather than as a leftover: it covers build trees configured before that target existed, and a newly discovered System32-shadowed DLL can be added to the script right away, ahead of the matching CMake change. When you add a DLL to one, add it to the other.
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.

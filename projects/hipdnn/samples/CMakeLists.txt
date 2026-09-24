@@ -16,6 +16,7 @@ set(CMAKE_CXX_STANDARD 17)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Sanitizers.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/WindowsDllStaging.cmake)
 
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 if(NOT ENABLE_CLANG_TIDY)
