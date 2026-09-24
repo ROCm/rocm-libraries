@@ -152,6 +152,7 @@ class RowColQuantKernelConfig:
         """Produce the JSON config dict consumed by unified_gemm_rowcolquant_codegen.py."""
         self.validate_target()
         return {
+            "gfx_arch": self.gfx_arch,
             "variant_keys": [self.variant_key],
             "layouts": [self.layout],
             "pipeline": self.pipeline,

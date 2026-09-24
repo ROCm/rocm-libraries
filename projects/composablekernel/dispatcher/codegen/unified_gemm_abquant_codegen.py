@@ -59,6 +59,7 @@ from codegen_common import (
     make_gemm_abquant_kernel_name,
     normalize_gfx_arch,
     run_codegen_cli,
+    validate_abquant_eight_waves_target,
     validate_quant_codegen_target,
 )
 
@@ -538,6 +539,8 @@ def _validate_target_config(config: dict, gfx_arch: str) -> None:
         config, gfx_arch, _build_specs, bridge="ABQuant",
         supported_archs=("gfx942", "gfx950", "gfx1250"),
     )
+    for spec in _build_specs(config):
+        validate_abquant_eight_waves_target(spec.pipeline, spec.eight_waves, gfx_arch)
 
 
 def main() -> int:

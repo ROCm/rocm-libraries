@@ -1100,6 +1100,21 @@ def validate_gfx1250_quant_warp_tile(
         )
 
 
+def validate_abquant_eight_waves_target(pipeline, eight_waves, gfx_arch, *, bridge="ABQuant"):
+    """Reject the ABQuant EightWaves pipeline on any target other than gfx950.
+
+    ABQuantGemmPipelineAgBgCrEightWaves is only available under ``__gfx950__``;
+    elsewhere its device body compiles to nothing, so the kernel launches and
+    leaves C untouched. CompV3 with eight warps is a different pipeline and is
+    not affected. An empty target is left to the caller's arch resolution.
+    """
+    target = normalize_gfx_arch(gfx_arch or "")
+    if target and target != "gfx950" and (pipeline == "eightwaves" or eight_waves):
+        raise ValueError(
+            f"{bridge}: the EightWaves pipeline requires gfx950; got {gfx_arch!r}."
+        )
+
+
 def validate_quant_codegen_target(
     config, gfx_arch, build_specs, *, bridge, supported_archs,
     gfx1250_unsupported_variants=(), gfx950_only_variants=(),

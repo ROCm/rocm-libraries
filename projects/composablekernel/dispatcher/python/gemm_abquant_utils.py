@@ -76,6 +76,7 @@ if _codegen_dir not in sys.path:
 from codegen_common import (  # noqa: E402
     abquant_uses_column_major_aq,
     make_gemm_abquant_kernel_name,
+    validate_abquant_eight_waves_target,
     validate_gfx1250_quant_warp_tile,
 )
 
@@ -164,6 +165,7 @@ class ABQuantKernelConfig:
         validate_gfx1250_quant_warp_tile(
             self.warp_tile_m, self.warp_tile_n, self.warp_tile_k, arch, bridge="ABQuant"
         )
+        validate_abquant_eight_waves_target(self.pipeline, self.eight_waves, arch)
 
     @property
     def name(self) -> str:
@@ -189,6 +191,7 @@ class ABQuantKernelConfig:
         """Produce the JSON config dict consumed by unified_gemm_abquant_codegen.py."""
         self.validate_target()
         return {
+            "gfx_arch": self.gfx_arch,
             "variant_keys": [self.variant_key],
             "layouts": [self.layout],
             "pipeline": self.pipeline,

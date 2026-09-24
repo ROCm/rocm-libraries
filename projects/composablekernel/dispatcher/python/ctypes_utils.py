@@ -1090,9 +1090,14 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
 
     Used by setup_multiple_gemm_dispatchers for per-config parallel codegen.
     Returns (success, header_path_or_None, error_msg).
+
+    Codegen writes into a private directory first. The shared output directory
+    can already hold headers that differ only in fields the glob leaves open
+    (padding), so the header returned must be the one this call emitted.
     """
     import subprocess
     import json
+    import shutil
     import tempfile
     import os
     from pathlib import Path
@@ -1106,36 +1111,46 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
             json.dump(args["tile_config_json"], f)
             config_file = f.name
 
-        cmd = [
-            args["python"],
-            str(args["codegen_script"]),
-            "--output-dir",
-            str(out_dir),
-            "--datatype",
-            args["dtype"],
-            "--layout",
-            args["layout"],
-            "--gpu-target",
-            args["gpu_target"],
-            "--config",
-            config_file,
-            "--variants",
-            args.get("variant", "standard"),
-        ]
+        gen_dir = Path(tempfile.mkdtemp(prefix=".gen_", dir=out_dir))
+        try:
+            cmd = [
+                args["python"],
+                str(args["codegen_script"]),
+                "--output-dir",
+                str(gen_dir),
+                "--datatype",
+                args["dtype"],
+                "--layout",
+                args["layout"],
+                "--gpu-target",
+                args["gpu_target"],
+                "--config",
+                config_file,
+                "--variants",
+                args.get("variant", "standard"),
+            ]
 
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        os.unlink(config_file)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            os.unlink(config_file)
 
-        if res.returncode != 0:
-            return False, None, f"Codegen failed: {res.stderr[:200]}"
+            if res.returncode != 0:
+                return False, None, f"Codegen failed: {res.stderr[:200]}"
 
-        # Find the generated .hpp using the expected name pattern
-        pattern = args["hpp_glob_pattern"]
-        matches = sorted(out_dir.glob(pattern))
-        if matches:
-            return True, str(matches[0]), ""
-        else:
-            return False, None, f"No .hpp matching {pattern} after codegen"
+            # Only this call's output is in gen_dir, so the match is exact.
+            pattern = args["hpp_glob_pattern"]
+            matches = sorted(gen_dir.glob(pattern))
+            if len(matches) != 1:
+                return False, None, (
+                    f"Expected one .hpp matching {pattern} after codegen, "
+                    f"got {len(matches)}"
+                )
+            # The name encodes every generated field, so replacing an existing
+            # file of the same name keeps identical content.
+            header = out_dir / matches[0].name
+            os.replace(matches[0], header)
+            return True, str(header), ""
+        finally:
+            shutil.rmtree(gen_dir, ignore_errors=True)
 
     except Exception as e:
         return False, None, str(e)
@@ -2731,6 +2746,14 @@ def setup_multiple_gemm_dispatchers(
             if ok and hdr_str:
                 headers[idx] = Path(hdr_str)
                 results[idx].kernel_header = Path(hdr_str)
+                # Codegen may adjust padding; the cache name must describe the
+                # header that is compiled, not the request.
+                meta = _parse_gemm_header_metadata(Path(hdr_str))
+                if meta is not None:
+                    valid_configs[idx].pad_m = bool(meta["pad_m"])
+                    valid_configs[idx].pad_n = bool(meta["pad_n"])
+                    valid_configs[idx].pad_k = bool(meta["pad_k"])
+                    results[idx].config = valid_configs[idx]
                 if verbose:
                     print(
                         f"  OK [{idx}] {valid_configs[idx].tile_str}: {Path(hdr_str).name}"

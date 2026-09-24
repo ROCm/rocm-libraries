@@ -364,7 +364,8 @@ foreach(_quant_test
         test_quant_default_arch_resolution
         test_quant_gfx1250_default_configs
         test_quant_layout_regressions
-        test_quant_review_regressions)
+        test_quant_review_regressions
+        test_quant_target_header_regressions)
     add_test(
         NAME dispatcher_${_quant_test}
         COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_test}.py -v
