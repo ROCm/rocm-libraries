@@ -26,6 +26,16 @@ _METADATA_ATTRIBUTES = (
 )
 
 
+def _alias_loaded_modules(alias: str, canonical: str) -> None:
+    """Register aliases for canonical modules that are already loaded."""
+    for name, module in tuple(sys.modules.items()):
+        if module is None:
+            continue
+        if name == canonical or name.startswith(f"{canonical}."):
+            alias_name = alias + name[len(canonical):]
+            sys.modules[alias_name] = module
+
+
 class _AliasLoader(importlib.abc.InspectLoader):
     """Return a canonical module for a compatibility import name."""
 
@@ -57,7 +67,7 @@ class _AliasLoader(importlib.abc.InspectLoader):
                 module.__dict__.pop(attribute, None)
             else:
                 setattr(module, attribute, value)
-        sys.modules[self._alias_name] = module
+        _alias_loaded_modules(self._alias_name, self._canonical_name)
 
     def get_code(self, fullname: str):
         get_code = getattr(self._canonical_spec.loader, "get_code", None)
@@ -126,12 +136,7 @@ def install_alias(*, alias: str, canonical: str) -> ModuleType:
     if finder is None:
         sys.meta_path.insert(0, _AliasFinder(alias, canonical))
 
-    for name, module in tuple(sys.modules.items()):
-        if module is None:
-            continue
-        if name == canonical or name.startswith(f"{canonical}."):
-            alias_name = alias + name[len(canonical):]
-            sys.modules[alias_name] = module
+    _alias_loaded_modules(alias, canonical)
 
     return canonical_root
 
