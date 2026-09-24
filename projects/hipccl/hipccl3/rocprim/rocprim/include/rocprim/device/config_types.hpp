@@ -869,7 +869,7 @@ hipError_t visit_config(const hipStream_t stream, Visitor visitor)
     const target target_current = target(stream);
 
     // The target that most closely resembles our current hardware target.
-    // This target will be the one useed to select the config.
+    // This target will be the one used to select the config.
     const target config_target = most_common_config<Targets>(target_current);
 
     // Convert 'config_target' to constexpr by unrolling 'Targets' and selecting the one that matches.
