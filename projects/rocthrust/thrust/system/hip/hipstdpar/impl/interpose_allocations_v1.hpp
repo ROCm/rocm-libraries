@@ -131,11 +131,8 @@ extern "C" {
     inline __attribute__((used)) void* __hipstdpar_aligned_alloc(std::size_t a,
                                                                  std::size_t n)
     {
-        if (a == 0 || (a & (a - 1)) != 0) {
-            errno = EINVAL;
-            return nullptr;
-        }
-
+        // memalign and aligned_alloc are both routed here; alignment checks are
+        // left to libc memalign, which accepts values aligned_alloc rejects.
         auto r = __hipstdpar_hidden_memalign(a, n);
 
         // hipMemAdvise rejects zero-length ranges; nothing to advise.

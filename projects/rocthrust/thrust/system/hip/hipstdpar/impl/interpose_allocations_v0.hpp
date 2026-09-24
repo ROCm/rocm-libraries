@@ -102,10 +102,21 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_aligned_alloc(std::siz
   constexpr auto header_size          = sizeof(hipstd::Header);
   constexpr auto allocation_alignment = alignof(hipstd::Header);
 
-  if (a == 0 || (a & (a - 1)) != 0)
+  // memalign and aligned_alloc are both routed here. Like glibc memalign, round
+  // an alignment that is not a power of two up rather than rejecting it.
+  if (a > max_size / 2 + 1)
   {
     errno = EINVAL;
     return nullptr;
+  }
+  if (a == 0 || (a & (a - 1)) != 0)
+  {
+    std::size_t rounded = alignof(std::max_align_t);
+    while (rounded < a)
+    {
+      rounded <<= 1;
+    }
+    a = rounded;
   }
 
   const auto padding = a - 1;
