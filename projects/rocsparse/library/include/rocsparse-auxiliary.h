@@ -1486,6 +1486,65 @@ ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
 
 /*! \ingroup aux_module
+*  \brief Sparse matrix SpSort routine descriptor creation.
+*
+*  \details
+*  \p rocsparse_create_spsort_descr creates the descriptor of the \ref rocsparse_spsort_buffer_size and
+*  \ref rocsparse_spsort routines.
+*
+*  @param[out]
+*  descr        pointer to the descriptor of the SpSort routine.
+*
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_spsort_descr(rocsparse_spsort_descr* descr);
+
+/*! \ingroup aux_module
+*  \brief Destroy a sparse matrix SpSort descriptor.
+*
+*  \details
+*  \p rocsparse_destroy_spsort_descr destroys the descriptor of the \ref rocsparse_spsort_buffer_size and
+*  \ref rocsparse_spsort routines.
+*
+*  @param[in]
+*  descr        descriptor of the SpSort routine.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_destroy_spsort_descr(rocsparse_spsort_descr descr);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_spsort_input data in the SpSort descriptor.
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the SpSort descriptor.
+ *  @param[in]
+ *  input       one of the values from \ref rocsparse_spsort_input.
+ *  @param[in]
+ *  data        input data.
+ *  @param[in]
+ *  data_size_in_bytes   input data size.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spsort_set_input(rocsparse_handle       handle,
+                                            rocsparse_spsort_descr descr,
+                                            rocsparse_spsort_input input,
+                                            const void*            data,
+                                            size_t                 data_size_in_bytes,
+                                            rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
 *  \brief Sparse matrix SpGEAM routine descriptor creation.
 *
 *  \details

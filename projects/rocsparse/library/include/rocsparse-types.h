@@ -294,6 +294,14 @@ typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
  */
 typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
 
+/*! \ingroup types_module
+ * \brief \p rocsparse_spsort_descr is a structure holding the rocSPARSE spsort
+ * descriptor data. It must be initialized using
+ * the rocsparse_create_spsort_descr() routine. It should be destroyed at the
+ * end using rocsparse_destroy_spsort_descr().
+ */
+typedef struct _rocsparse_spsort_descr* rocsparse_spsort_descr;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1385,6 +1393,43 @@ typedef enum rocsparse_spgeam_alg_
 {
     rocsparse_spgeam_alg_default = 0 /**< Default SpGEAM algorithm for the given format. */
 } rocsparse_spgeam_alg;
+
+/*! \ingroup types_module
+ *  \brief List of SpSort algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_spsort_alg types that are used to sort a sparse
+ *  matrix.
+ */
+typedef enum rocsparse_spsort_alg_
+{
+    rocsparse_spsort_alg_default = 0, /**< Default SpSort algorithm for the given format. */
+} rocsparse_spsort_alg;
+
+/*! \ingroup types_module
+  *  \brief List of inputs to the SpSort descriptor.
+  *
+  *  \details
+  *  This is a list of possible inputs to the SpSort descriptor.
+  */
+typedef enum rocsparse_spsort_input_
+{
+    rocsparse_spsort_input_alg, /**< Select algorithm for input on a SpSort descriptor. */
+    rocsparse_spsort_input_direction, /**< Select sorting direction for input on a SpSort descriptor. */
+} rocsparse_spsort_input;
+
+/*! \ingroup types_module
+  *  \brief List of SpSort stages.
+  *
+  *  \details
+  *  This is a list of possible stages during SpSort computation. The stages must be executed
+  *  in the order \ref rocsparse_spsort_stage_analysis, then \ref rocsparse_spsort_stage_compute.
+  */
+typedef enum rocsparse_spsort_stage_
+{
+    rocsparse_spsort_stage_analysis, /**< Analysis of the data. */
+    rocsparse_spsort_stage_compute /**< Performs the actual SpSort computation. */
+} rocsparse_spsort_stage;
 
 /*! \ingroup types_module
  *  \brief List of gpsv algorithms.

@@ -352,6 +352,21 @@ rocsparse_spgeam_set_input
 
 .. doxygenfunction:: rocsparse_spgeam_set_input
 
+rocsparse_create_spsort_descr
+-----------------------------
+
+.. doxygenfunction:: rocsparse_create_spsort_descr
+
+rocsparse_destroy_spsort_descr
+------------------------------
+
+.. doxygenfunction:: rocsparse_destroy_spsort_descr
+
+rocsparse_spsort_set_input
+--------------------------
+
+.. doxygenfunction:: rocsparse_spsort_set_input
+
 rocsparse_spgeam_get_output
 ---------------------------
 

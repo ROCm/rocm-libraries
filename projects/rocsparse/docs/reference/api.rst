@@ -210,6 +210,12 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam_get_output`              |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_spsort_descr`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_destroy_spsort_descr`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spsort_set_input`               |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_spmv_descr`              |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_spmv_descr`             |
@@ -663,6 +669,10 @@ documentation for details about the supported data types and compute types.
 |:cpp:func:`rocsparse_spgeam_buffer_size()`           |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam()`                       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spsort_buffer_size()`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spsort()`                       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_scale()`                  |
 +-----------------------------------------------------+
