@@ -21,28 +21,6 @@
 #
 # #############################################################################
 
-# HIP
-if( NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-  if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
-    if( WIN32 )
-      find_package( HIP CONFIG REQUIRED )
-    else()
-      find_package( HIP REQUIRED )
-    endif()
-    list( APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include" )
-  endif()
-else()
-  if( BUILD_WITH_LIB STREQUAL "CUDA" )
-    set(HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
-  else()
-    if( WIN32 )
-      find_package( HIP CONFIG REQUIRED )
-    else()
-      find_package( HIP REQUIRED )
-    endif()
-  endif()
-endif()
-  
 # Either rocfft or cufft is required
 if(NOT BUILD_WITH_LIB STREQUAL "CUDA")
   if( HIPFFT_MPI_ENABLE )

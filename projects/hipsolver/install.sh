@@ -625,8 +625,12 @@ fi
     cmake_common_options+=("-DCMAKE_BUILD_TYPE=Debug")
   fi
 
-  # cuda — USE_CUDA=ON is passed to CMake via rmake.py when build_cuda is true;
-  # HIP_PLATFORM env var is no longer used (hipcc/hipconfig removed).
+  # cuda — HIP_PLATFORM env var is no longer used (hipcc/hipconfig removed).
+  # When invoked via rmake.py, USE_CUDA=ON is passed through that script.
+  # When invoked directly via install.sh --cuda, we must pass it here.
+  if [[ "${build_cuda}" == true ]]; then
+    cmake_common_options+=("-DUSE_CUDA=ON")
+  fi
 
   # clients
   if [[ "${build_clients}" == true ]]; then
