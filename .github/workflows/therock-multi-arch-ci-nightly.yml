@@ -104,7 +104,7 @@ jobs:
     with:
       baseline_run_id: ${{ github.run_id }}
       baseline_repository: "ROCm/rocm-libraries"
-      baseline_release_type: "nightly"
+      baseline_release_type: "ci"
       amdgpu_families: "gfx94X-dcgpu"
       projects_to_test: >-
         hipblas,hipdnn
