@@ -155,12 +155,15 @@ int main()
       }
     }
     {
+      // A zero-sized request may yield either nullptr or a unique pointer, but
+      // must store one of them.
       int sentinel{};
       void* p = &sentinel;
-      if (posix_memalign(&p, alignof(std::max_align_t), 0) != 0 || p != nullptr)
+      if (posix_memalign(&p, alignof(std::max_align_t), 0) != 0 || p == &sentinel)
       {
         return EXIT_FAILURE;
       }
+      std::free(p);
     }
     {
       int sentinel{};
