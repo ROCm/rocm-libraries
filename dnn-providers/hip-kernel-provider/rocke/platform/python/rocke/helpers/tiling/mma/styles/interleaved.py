@@ -71,16 +71,24 @@ class InterleavedStyle(LayoutStyle):
             base.reorder_registers(perm(("d", "ka", "j"))),
         )
 
-    def operand_desc(
+    def lds_bridge(
         self, traits: MmaTraits, *, role: str, free_sub: int, k_sub: int
-    ) -> TileDesc:
+    ) -> tuple[TileDesc, TileDesc]:
+        """The ``(lds_read_landing_desc, mma_ready_desc)`` bridge pair -- interleaved STAGES the operand
+        through LDS. ``role`` selects the operand's free axis (A -> M, B -> N)."""
         if role == "A":
             free_lanes = traits.m
         elif role == "B":
             free_lanes = traits.n
         else:
             raise ValueError(f"operand role must be 'A' or 'B' -- got {role!r}")
-        return self.operand_descs(traits, free_sub=free_sub, k_sub=k_sub, free_lanes=free_lanes)[1]
+        return self.operand_descs(traits, free_sub=free_sub, k_sub=k_sub, free_lanes=free_lanes)
+
+    def operand_desc(
+        self, traits: MmaTraits, *, role: str, free_sub: int, k_sub: int
+    ) -> TileDesc:
+        """The MMA-ready descriptor -- the second half of the LDS bridge (:meth:`lds_bridge`)."""
+        return self.lds_bridge(traits, role=role, free_sub=free_sub, k_sub=k_sub)[1]
 
     def accumulator_desc(self, traits: MmaTraits, *, m_sub: int, n_sub: int) -> TileDesc:
         """The DERIVED accumulator -- what the interleaved A/B produce through the fixed MFMA coupling.

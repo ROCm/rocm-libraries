@@ -84,5 +84,16 @@ class LayoutStyle:
         atom-derived (never style-supplied data)."""
         raise NotImplementedError
 
+    def lds_bridge(
+        self, traits: MmaTraits, *, role: str, free_sub: int, k_sub: int
+    ) -> "tuple[TileDesc, TileDesc] | None":
+        """OPTIONAL declared extension point for a style that STAGES the operand THROUGH LDS. Returns the
+        memory-bridge pair ``(lds_read_landing_desc, mma_ready_desc)`` for ``role`` in {"A", "B"}: the
+        kernel loads the wide LDS read with the first descriptor, then applies the in-register reorder to
+        reach the second (which equals :meth:`operand_desc`). Returns ``None`` for a NON-staging style
+        (e.g. canonical loads MMA-ready directly, no LDS landing). A new LDS-staging style overrides this
+        so the bridge is on the protocol, not exposed ad-hoc off a concrete subclass."""
+        return None
+
     def __repr__(self) -> str:
         return f"{type(self).__name__}()"

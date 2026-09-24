@@ -90,10 +90,20 @@ implements the protocol. The rules a new style MUST honor -- so it stays correct
   calculators); it must not re-implement memory addressing. A style is writable by an author entirely
   from the public surface -- if it needs a private copy of a primitive, the primitive is missing a
   home (fix that, don't copy).
+- **Stage through LDS via the protocol, not an ad-hoc method.** A style that lands its operand in LDS
+  before the MMA exposes the bridge through the base protocol's `lds_bridge(traits, *, role, free_sub,
+  k_sub)` -- it returns `(lds_read_landing_desc, mma_ready_desc)`, or `None` for a non-staging style
+  (canonical loads MMA-ready directly). It is a declared extension point on `LayoutStyle`, so the kernel
+  composes it off the protocol, never off a concrete subclass.
 - **The seam owns the correctness envelope, not the style.** The style never sizes the LDS allocation
   (the seam derives it from `desc_extents`), never masks an LDS access (the LDS verbs have no
   `bounds=`), never re-implements predication (that lives in the style-agnostic emit layer). These are
-  structurally unreachable from a style -- a new style cannot violate them.
+  structurally unreachable from a style -- a new style cannot violate them. *Corollary (clipping x LDS
+  staging): because masking an LDS access is signature-unreachable and the allocation is full-tile, the
+  Principle-4 property "OOB zeros from a masked global load flow through a FULL-width, unmasked LDS
+  store/read and contribute nothing to the MAC" holds by CONSTRUCTION. This is enforced structurally
+  (the no-`bounds=` verb signature is locked by test); an isolated empirical probe of clipped LDS
+  contents is deferred -- no shipped kernel both clips and stages through LDS yet.*
 - **Operands only; C is always derived.** A style influences the accumulator ONLY through the
   K-distribution its operands present to the atom; it must not supply a C descriptor. The runtime
   C-oracle (`_c_native_desc == derive_c_distribution(...)`) catches a style whose C geometry the

@@ -146,20 +146,36 @@ def _address(b: Any, window: TensorWindow, positions: list[Any]) -> Any:
         address = term if address is None else b.add(address, term)
     return address
 
+def _origin_misaligned(origin: Any, extent: int) -> bool:
+    """True when `origin` is a COMPILE-TIME int NOT on the tile grid (`origin % extent != 0`): a tile
+    placed there straddles a tile boundary and can overhang the tensor's far edge even when the extent
+    is a tile multiple. A runtime (SSA) origin is TRUSTED grid-aligned -- every current caller positions
+    tiles at ``block_id * tile``. PARTIAL GUARD: an SSA mid-tile origin (attention's sliding window) is
+    NOT caught here; full mid-tile-origin handling is DEFERRED with attention support."""
+    return isinstance(origin, int) and origin % extent != 0
+
+def _loads_as_operand(tensor: Any) -> bool:
+    """True when `tensor` is loaded as a TYPED MMA OPERAND -- it declares axis roles AND carries a
+    CONTRACTION axis. A positional tensor (no roles) or an OUTPUT tensor whose roles are all `free`
+    (a C reload, (M, N)) is NOT an operand, so the rank-2 (free, contraction) gate must not fire for it."""
+    return tensor.axis_roles is not None and "contraction" in tensor.axis_roles
+
 def _clip_mask(
     b: Any, window: TensorWindow, positions: list[Any], tile_shape: tuple[int, ...]
 ) -> Any:
     """In-bounds predicate (i1) for an element at `positions`, or `None` when no axis needs a
     compare. The per-axis upper bound defaults to ``window.tensor.lengths`` and is overridden by
     ``window.bounds`` (a `None` entry keeps the length). Predicate = AND over checked axes of
-    ``position < bound``. A tile-aligned compile-time bound can NEVER overhang, so it is SKIPPED
-    at build time -- an aligned kernel emits no compare and stays byte-identical to no-clip."""
+    ``position < bound``. A tile-aligned compile-time bound AT a grid-aligned origin can NEVER overhang,
+    so it is SKIPPED at build time -- an aligned kernel emits no compare and stays byte-identical to
+    no-clip; a compile-time MID-TILE origin is NOT skipped (it could straddle the boundary)."""
     mask: Any = None
     for axis, position in enumerate(positions):
         bound = window.bounds[axis] if window.bounds is not None else None
         if bound is None:
             bound = window.tensor.lengths[axis]
-        if isinstance(bound, int) and bound % tile_shape[axis] == 0:
+        if isinstance(bound, int) and bound % tile_shape[axis] == 0 \
+                and not _origin_misaligned(window.origin[axis], tile_shape[axis]):
             continue
         in_axis = b.cmp_lt(position, _as_value(b, bound))
         mask = in_axis if mask is None else b.land(mask, in_axis)
@@ -202,9 +218,11 @@ def _contiguous_run(
         # OOB M row (odd M, aligned K) is just as out of bounds as an overhanging run. So EVERY axis's
         # effective clip must be a compile-time multiple of the tile extent on that axis; otherwise
         # some tile overhangs and the unmasked read faults -> scalarize (the masked path is safe).
-        # PRECONDITION: tile origins are on the tile grid. This gate proves the tensor EXTENT is a tile
-        # multiple; combined with grid-aligned origins (every caller: block_id*tile), no tile overhangs.
-        # A mid-tile origin (attention) can overhang even an aligned tensor -- gate that when it lands.
+        # Every axis's effective clip must be a compile-time tile multiple AND the tile origin must be on
+        # the tile grid: a COMPILE-TIME mid-tile origin is caught (it could straddle the boundary and
+        # overhang); a runtime (SSA) origin is TRUSTED grid-aligned (every caller: block_id*tile). This
+        # is a PARTIAL guard -- an SSA mid-tile origin (attention) is not caught; that is DEFERRED with
+        # attention support (see _origin_misaligned).
         if len(tile_desc.shape) != len(window.tensor.lengths):
             raise ValueError(
                 f"tile rank {len(tile_desc.shape)} != tensor rank {len(window.tensor.lengths)} -- "
@@ -214,6 +232,8 @@ def _contiguous_run(
             clip = window.bounds[ax] if window.bounds is not None and window.bounds[ax] is not None \
                 else window.tensor.lengths[ax]
             if not (isinstance(clip, int) and clip % tile_desc.shape[ax] == 0):
+                return 1
+            if _origin_misaligned(window.origin[ax], tile_desc.shape[ax]):
                 return 1
     length = layout.bucket_length(majors[-1], minors[-1])
     max_vw = 16 // _BYTE_WIDTH[dtype.name]   # one load = dwordx4 = 16 bytes; longer runs -> N loads
@@ -288,11 +308,11 @@ def load_fragment(
     `coherency` reserved.
     """
     dtype = window.tensor.dtype
-    # N-D boundary gate: a tensor that DECLARES axis_roles is being loaded as a typed MMA operand, so
-    # it must be the rank-2 one-free-one-contraction (EITHER order -- A is (M,K), B is (K,N)) an
-    # operand requires -- reduce batch axes (at_index / squeeze) BEFORE loading. A positional rank-2
-    # tensor (no roles) is unaffected.
-    if window.tensor.axis_roles is not None:
+    # N-D boundary gate: a tensor loaded as a typed MMA OPERAND must be the rank-2 one-free-one-
+    # contraction (EITHER order -- A is (M,K), B is (K,N)) an operand requires -- reduce batch axes
+    # (at_index / squeeze) BEFORE loading. A positional rank-2 tensor (no roles) and an OUTPUT tensor
+    # (roles all "free", a C reload) are NOT operands, so the gate does not fire for them.
+    if _loads_as_operand(window.tensor):
         window.tensor.assert_mma_operand()
     align = _align_of(dtype)
     lds = _is_lds(ptr)
