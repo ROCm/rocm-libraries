@@ -154,15 +154,23 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
 
 
 class TestGfx942DensePersistent(unittest.TestCase):
-    def test_auto_persistent_turns_on_for_large_sq(self):
-        """Post-P4 (ledger row 16): 'auto' turns the persistent grid-stride variant
-        ON once there is enough work to fill the grid -- the large-Sq prefill
-        regime -- and the request is accepted."""
+    def test_auto_prefers_non_persistent_until_large_batch(self):
+        """'auto' now keys on BATCH, not on total work.
+
+        The old rule turned the persistent grid on once there was enough work to
+        fill it -- which measurement showed is close to backwards on gfx942,
+        where the reordered non-persistent path wins at every batch size except
+        the largest. Scored against the per-config best of either path it landed
+        at -4.12% geomean and was optimal on 26 of 173 shapes; keying on batch is
+        -0.38%. Long sequences alone no longer flip it."""
         with _Gfx942Arch():
             req = _req(seqlen_q=8192, seqlen_k=8192, dense_persistent="auto")
             ok, why = _candidate().admits(req)
             self.assertTrue(ok, why)
-            self.assertTrue(_dense_spec(req).persistent)
+            self.assertFalse(_dense_spec(req).persistent)
+            big = _req(seqlen_q=8192, seqlen_k=8192, batch=32,
+                       dense_persistent="auto")
+            self.assertTrue(_dense_spec(big).persistent)
 
     def test_explicit_persistent_on_is_accepted_and_builds_persistent(self):
         """Post-P4 the persistent variant ships, so an explicit 'on' is accepted
@@ -175,16 +183,43 @@ class TestGfx942DensePersistent(unittest.TestCase):
             self.assertTrue(_dense_spec(req).persistent)
 
 
+def _ir_text(kernel):
+    return kernel.to_ir() if hasattr(kernel, "to_ir") else str(kernel.body)
+
+
 class TestGfx942DenseSpecIdentity(unittest.TestCase):
-    def test_kernel_name_override_is_batch_unique(self):
-        """The kernel bakes batch into the buffer extents; the dispatched identity
-        must disambiguate it or a name-keyed cache serves the B=1 binary."""
+    def test_kernel_name_override_disambiguates_batch_iff_batch_is_baked(self):
+        """A name-keyed cache must not serve the B=1 binary for B=4 -- but what
+        that requires depends on whether the body BAKES batch.
+
+        This used to assert the name is always batch-unique, which was true when
+        every gfx942 body baked the whole shape. It no longer is: a
+        ``runtime_shape`` body reads batch as a kernarg, so ONE binary correctly
+        serves every batch and the name drops ``b{batch}`` on purpose -- that is
+        the AOT instance collapse, not a collision. The invariant that actually
+        matters is the biconditional, so assert that instead of the old
+        one-directional claim, and assert the IR agrees either way."""
         with _Gfx942Arch():
             names = {
                 dispatch_attention(_req(batch=b)).spec.kernel_name_override
                 for b in (1, 2, 4)
             }
-            self.assertEqual(len(names), 3, names)
+            # dispatch_attention yields the generic AttentionSpec; the dense spec
+            # is what knows whether the body bakes the shape.
+            specs = [_dense_spec(_req(batch=b)) for b in (1, 2, 4)]
+            if specs[0].runtime_shape:
+                # one binary for all batches -- names MUST match, and the IR must
+                # genuinely be identical or this would be the collision the old
+                # assertion was guarding against.
+                self.assertEqual(len(names), 1, names)
+                irs = {
+                    _ir_text(build_attention_dense(s, arch="gfx942"))
+                    for s in specs
+                }
+                self.assertEqual(len(irs), 1, "runtime_shape body must not "
+                                              "bake batch")
+            else:
+                self.assertEqual(len(names), 3, names)
 
     def test_support_implies_the_dispatched_spec_builds(self):
         """The dispatch-level half of the supports/build contract: the spec the

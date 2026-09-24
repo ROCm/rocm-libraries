@@ -46,6 +46,10 @@ _DENSE_BLOCK_N = 64
 # count; gfx942's largest part has 304. Applied only when the caller left the
 # field at that shared default, so an explicit request value is still respected.
 _GFX942_NUM_PERSISTENT = 304
+
+# Batch at which `auto` switches back to the persistent path. See the
+# rationale at the `auto` branch below.
+_PERSISTENT_MIN_BATCH = 16
 _SHARED_NUM_PERSISTENT_DEFAULT = 256
 
 
@@ -193,7 +197,24 @@ def _dense_spec(req: OperatorRequest):
     elif mode == "off":
         persistent = False
     elif mode == "auto":
-        persistent = work >= np  # enough work to fill the persistent grid
+        # Prefer the NON-persistent path. The old rule -- persistent once there
+        # is enough work to fill the grid -- is close to backwards on this arch:
+        # scored against the per-config best of either path, with each path on
+        # the variant it ships, it lands at -4.12% geomean and is optimal on only
+        # 26 of 173 shapes. Always-non-persistent is -0.43%; deferring to
+        # persistent only at large batch is -0.38% and also trims the tail
+        # (-5.70% vs -7.11% worst case).
+        #
+        # Non-persistent wins at every batch size measured except the largest:
+        # +3.4% at B=1, +7.0% at B=2, +4.3% at B=4, +3.4% at B=8, and -1.2% at
+        # B=32. Valid to decide here because gfx942 emits BOTH paths from one
+        # body -- on gfx950 the persistent body additionally has wide_lds_dma and
+        # iglp_opt, so the same comparison there would measure an implementation
+        # gap rather than the mapping.
+        #
+        # CAVEAT: the B>=16 threshold rests on 7 configs at B=32 and none at
+        # B=16; the grid jumps 8 -> 32. Treat the exact crossover as provisional.
+        persistent = int(req.batch) >= _PERSISTENT_MIN_BATCH
     else:
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"

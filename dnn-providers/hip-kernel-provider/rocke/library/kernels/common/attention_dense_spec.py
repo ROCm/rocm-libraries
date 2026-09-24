@@ -29,7 +29,11 @@ DENSE_TILE_GEOMETRIES = MappingProxyType(
 DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 
 _COMMON_PERSIST_DECODES = frozenset(
-    {"auto", "qb_major", "hkv_major", "hkv_minor"}
+    # bt_hkv_minor is the digit order BVGQ -- batch fastest, then kv head, gqa
+    # lane, query block -- carrying the same causal fold as hkv_minor. It is
+    # deliberately the SAME NAME as the non-persistent grid order of the same
+    # digit order: one mapping, named once, reached two ways.
+    {"auto", "qb_major", "hkv_major", "hkv_minor", "bt_hkv_minor"}
 )
 
 # XCD count every CDNA3/CDNA4 part this spec targets exposes. Only ``hkv_minor``
@@ -444,12 +448,36 @@ class AttentionDenseSpec:
         """
         if self.persist_decode != "auto":
             return self.persist_decode
-        gqa = self.num_queries_per_kv
-        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
-        per_hkv = gqa * nqb * self.batch
-        if (gqa > 1 and per_hkv >= 2 * self.num_persistent
-                and xcd_partitionable(self.num_kv_heads)):
-            return "hkv_major"
+        # ARCH-DEPENDENT, and deliberately not chosen here. bt_hkv_minor wins on
+        # gfx942 (+7.6% geomean vs qb_major in the shipped configuration) but
+        # LOSES on gfx950 (-1.5%), where the hand-written qb_major decode is
+        # fastest. The gfx942 subclass overrides this; the base stays on the
+        # conservative choice so a new arch does not inherit a gfx942 result.
+        #
+        # Why the sweep did not catch it: qb_major is the digit order BGVQ with
+        # the ASCENDING traversal, and `asc` was pruned after the screen -- so
+        # the shipped decode's exact configuration was never in the full sweep,
+        # and no persistent qb_major reference column was carried to catch the
+        # omission. The prune was sound for the generic decode path it was
+        # measured on; it did not transfer to a hand-written decode that skips
+        # the fold entirely.
+        #
+        # Gated on ALIGNED DENSE CAUSAL, which is exactly the envelope the sweep
+        # covered. causal, because the decode carries the causal fold: with every
+        # query block costing the same there is nothing to balance and the
+        # reordering is pure churn. The rest -- ragged / varlen / paged /
+        # sliding-window -- were never measured, and each changes either the
+        # per-item cost profile the fold assumes (sliding window bounds the k
+        # range, so cost stops being triangular) or the work-item space itself.
+        # Selecting a new decode for them would be extrapolation, so they keep
+        # the previous fallback.
+        if (self.causal and not self.ragged and not self.varlen
+                and not self.paged and self.sliding_window == 0):
+            return self._aligned_causal_auto_decode()
+        return "qb_major"
+
+    def _aligned_causal_auto_decode(self) -> str:
+        """Auto decode for aligned dense causal. Overridden per arch."""
         return "qb_major"
 
     @property
@@ -510,6 +538,7 @@ class AttentionDenseSpec:
         return {
             "hkv_major": "hkvmaj",
             "hkv_minor": "hkvmin",
+            "bt_hkv_minor": "bthkvmin",
         }.get(self.resolved_persist_decode, "")
 
     def kernel_name(self) -> str:

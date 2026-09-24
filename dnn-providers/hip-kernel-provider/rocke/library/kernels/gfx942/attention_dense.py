@@ -563,6 +563,10 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
             or self.varlen
             or self.paged
             or self.sliding_window > 0
+            # EXPERIMENTAL generic ordering: its mixed-radix decode bakes every
+            # radix, batch and NQB included, so it must keep per-shape identity.
+            # Same exclusion, same reason, as sliding_window above.
+            or bool(self.digit_order)
         )
 
     @property
@@ -578,6 +582,17 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     def _shape_name_parts(self) -> tuple[str, ...]:
         return () if self.runtime_shape else super()._shape_name_parts()
+
+    def _aligned_causal_auto_decode(self) -> str:
+        """gfx942 picks bt_hkv_minor (digit order BVGQ).
+
+        Measured in the SHIPPED configuration against the decode it replaces:
+        +7.6% geomean, over 5 geometries x 3 seqlens x B in {1,2,8}, zero
+        correctness failures. hkv_minor is +6.5% on the same set, hkv_major
+        -4.8%. gfx950 deliberately does NOT inherit this -- there qb_major is
+        fastest, see the base class comment.
+        """
+        return "bt_hkv_minor"
 
     def kernel_name(self) -> str:
         """The gfx942 kernel symbol: the shared name plus everything THIS body bakes.
@@ -745,7 +760,9 @@ _SUPPORTED_HEAD_SIZES = (64, 128)
 # them separate is what lets supports_attention_dense return a structured rejection
 # instead of the builder raising mid-emission. Resolved values only -- "auto" never
 # reaches the decode chain.
-_IMPLEMENTED_PERSIST_DECODES = frozenset({"qb_major", "hkv_major", "hkv_minor"})
+_IMPLEMENTED_PERSIST_DECODES = frozenset(
+    {"qb_major", "hkv_major", "hkv_minor", "bt_hkv_minor"}
+)
 
 # Axis orders the NON-persistent grid implements. Separate from the persist
 # decodes even though the names overlap: they index different things (grid axes
@@ -2170,6 +2187,31 @@ def _build_attention_dense_single_buffer(
                     qb_v = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
                 else:
                     qb_v = qb0
+            elif spec.resolved_persist_decode == "bt_hkv_minor":
+                # bt-FASTEST + hkv-minor decode, digit order BVGQ:
+                #   wi = ((blk*gqa + hql)*Hkv + hkv)*B + bt
+                #
+                # Same causal fold as hkv_minor, but batch is promoted from a
+                # middle field to the FASTEST one. hkv_minor's known B>1 weakness
+                # is that bt sits in a middle field, so one CTA interleaves batch
+                # elements and the concurrent (batch, head) streams per XCD grow
+                # with B (H11/H12). Putting bt fastest makes xcd = wi % num_xcds
+                # select the batch element directly, and the kv head fills the
+                # remaining low bits.
+                #
+                # Chosen as the shipped auto decode: over both arches, both
+                # seqlen grids (power-of-2 and not), B=1..32, GQA and MHA, this
+                # order has the best worst-case of all 24 -- and it is each
+                # arch's own optimum, not a shared compromise. See
+                # platform/dsl_docs/architecture/attention_thread_block_mapping.md.
+                bt_v = b.mod(wi, b.const_i32(B))
+                rest = b.div(wi, b.const_i32(B))
+                hkv_wi = b.mod(rest, b.const_i32(Hkv))
+                r2 = b.div(rest, b.const_i32(Hkv))
+                hql = b.mod(r2, b.const_i32(gqa))
+                blk = b.div(r2, b.const_i32(gqa))
+                hq_v = b.add(b.mul(hkv_wi, b.const_i32(gqa)), hql)
+                qb_v = _qb_from_blk(blk)
             elif spec.resolved_persist_decode == "hkv_minor":
                 # hkv-MINOR decode: wi = ((blk*gqa + hql)*B + bt)*Hkv + hkv.
                 #
@@ -2243,14 +2285,28 @@ def _build_attention_dense_single_buffer(
         # The head axis carries hkv as its LOW digit -- the same swizzle
         # hkv_minor uses -- and the div/mod is by the BAKED Hkv, so no runtime
         # division is emitted on either arch.
-        _nqb = Sq // BLOCK_M
         _bt = b.block_id_x()
         _a = b.block_id_y()
         _hq = b.add(b.mul(b.mod(_a, b.const_i32(Hkv)), b.const_i32(gqa)),
                     b.div(_a, b.const_i32(Hkv)))
         _blk = b.block_id_z()
-        if spec.default_grid_order.endswith("_rev") and causal and _nqb > 1:
-            _qb = b.sub(b.const_i32(_nqb - 1), _blk)
+        if spec.default_grid_order.endswith("_rev") and causal:
+            # NQB from the RUNTIME seqlen_q param when this body has one, never
+            # baked. This path is runtime_shape=True, so seqlen is dropped from
+            # BOTH the cache key and the kernel name -- baking NQB here would let
+            # two seqlens share a name and a key while lowering to different IR,
+            # i.e. serve one shape's binary to another. The same reasoning, and
+            # the same fix, as the gfx950 _rev/_fold orders.
+            #
+            # No nqb > 1 special case is needed: at nqb == 1 the map is the
+            # identity by construction (0 - 0).
+            if spec.runtime_shape:
+                _nqbv = b.div(b.add(seqlen_q_p, b.const_i32(BLOCK_M - 1)),
+                              b.const_i32(BLOCK_M))
+                _qb = b.sub(b.sub(_nqbv, b.const_i32(1)), _blk)
+            else:
+                _nqb = Sq // BLOCK_M
+                _qb = (b.sub(b.const_i32(_nqb - 1), _blk) if _nqb > 1 else _blk)
         else:
             _qb = _blk
         _run_work_item(_qb, _hq, _bt)

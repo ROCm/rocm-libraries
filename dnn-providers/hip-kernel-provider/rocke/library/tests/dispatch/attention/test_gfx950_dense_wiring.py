@@ -234,7 +234,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
         self.assertFalse(spec.wide_lds_dma)
 
-    def test_mha_falls_back_to_qb_major(self):
+    def test_mha_falls_back_to_qb_major_not_gqa_pair(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -247,6 +247,14 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             dense_persistent="on",
         )
         spec = dense_spec_for_request(req)
+        # qb_major, but for a better reason than before. It used to be a
+        # FALLTHROUGH -- the old auto policy required gqa > 1, so MHA reached
+        # qb_major by construction rather than by measurement. It is now the
+        # measured choice on gfx950: in the shipped configuration qb_major is
+        # +1.5% over bt_hkv_minor and +1.8% over hkv_minor there, the opposite
+        # of gfx942. What this test has always really guarded is unchanged: MHA
+        # must never reach a gqa_pair decode, which needs gqa >= 2 and is
+        # nonsense at gqa == 1.
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
         self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())

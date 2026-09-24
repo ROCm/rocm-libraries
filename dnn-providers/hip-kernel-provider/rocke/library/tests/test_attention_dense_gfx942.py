@@ -279,6 +279,21 @@ _INJECTIVITY_BASES = {
         seqlen_kv=4096,
         num_query_heads=32,
     ),
+    # qb_major persistent base. `interleave` is read ONLY by the qb_major
+    # decode, and the persistent base above leaves persist_decode at "auto",
+    # which now resolves to bt_hkv_minor -- so without this base interleave is
+    # unreachable and its injectivity coverage silently becomes vacuous. It is
+    # not a name-only field; it is a field with one live decode.
+    "persistent_qbmajor_d128_fp16": dict(
+        head_size=128,
+        dtype="fp16",
+        persistent=True,
+        num_persistent=228,
+        persist_decode="qb_major",
+        seqlen_q=4096,
+        seqlen_kv=4096,
+        num_query_heads=32,
+    ),
     # Generalized-ordering base. Without a base that already sets digit_order,
     # perturbing qb_traversal would move only the NAME -- the decode reads the
     # traversal solely on the experimental path -- and its injectivity coverage
@@ -662,8 +677,12 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
         num_persistent=304,
         persist_decode="auto",
     )
-    assert spec.resolved_persist_decode == "hkv_major"
-    assert "hkvmaj" in spec.kernel_name()
+    # The auto policy now resolves to bt_hkv_minor for aligned dense causal --
+    # it beat hkv_major by ~12 points on gfx942. What this test guards is
+    # unchanged and is the point of its name: gfx942 implements no gqa_pair
+    # decode, so auto must never produce one.
+    assert spec.resolved_persist_decode == "bt_hkv_minor"
+    assert "bthkvmin" in spec.kernel_name()
     assert "gqapair" not in spec.kernel_name()
 
 
@@ -1575,9 +1594,11 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
 
     # gfx942 num_persistent defaulted to the 304-CU part's CU count.
     assert _dense_spec(_req(8192, "gfx942")).num_persistent == 304
-    # auto: on for large Sq (nqb*Hq = 32*16 = 512 >= 304), off for small.
-    assert _dense_spec(_req(8192, "gfx942")).persistent is True
-    assert _dense_spec(_req(2048, "gfx942")).persistent is False  # 8*16 = 128 < 304
+    # auto keys on BATCH now, not on total work: the reordered non-persistent
+    # path wins at every batch size except the largest, so long sequences alone
+    # no longer turn the persistent grid on. Both of these are batch=1.
+    assert _dense_spec(_req(8192, "gfx942")).persistent is False
+    assert _dense_spec(_req(2048, "gfx942")).persistent is False
     # explicit modes honored.
     assert _dense_spec(_req(8192, "gfx942", "off")).persistent is False
     assert _dense_spec(_req(256, "gfx942", "on")).persistent is True

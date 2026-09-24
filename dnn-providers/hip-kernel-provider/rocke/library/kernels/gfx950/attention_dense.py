@@ -1596,6 +1596,20 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             hkv = b.div(r2, b.const_i32(NQB))
             hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
             qb = _qb_from_blk(blk)
+        elif spec.resolved_persist_decode == "bt_hkv_minor":
+            # Digit order BVGQ: wi = ((blk*gqa + hql)*Hkv + hkv)*B + bt.
+            # Same causal fold as hkv_minor with batch promoted from a middle
+            # field to the FASTEST one, so xcd = wi % num_xcds selects the batch
+            # element and the kv head fills the remaining low bits. The epilogue
+            # below MUST mirror this. See the gfx942 sibling for the measurement.
+            bt = b.mod(wi, b.const_i32(B))
+            rest = b.div(wi, b.const_i32(B))
+            hkv = b.mod(rest, b.const_i32(Hkv))
+            r2 = b.div(rest, b.const_i32(Hkv))
+            hql = b.mod(r2, b.const_i32(gqa))
+            blk = b.div(r2, b.const_i32(gqa))
+            hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
+            qb = _qb_from_blk(blk)
         elif spec.resolved_persist_decode == "hkv_minor":
             # hkv-MINOR: wi = ((blk*gqa + hql)*B + bt)*Hkv + hkv.
             # The INVERSE of hkv_major's field order, and the two target
@@ -2324,6 +2338,17 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             rem_e = b.div(wi, b.const_i32(B))
             hql_e = b.mod(rem_e, b.const_i32(gqa))
             hkv_e = b.div(b.div(rem_e, b.const_i32(gqa)), b.const_i32(NQB))
+            hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
+        elif spec.resolved_persist_decode == "bt_hkv_minor":
+            # MUST mirror the bt_hkv_minor branch at site 1 exactly -- digit
+            # order BVGQ. A decode added to one site and not the other computes
+            # the right tile and stores it to the wrong rows, which no shape
+            # check catches; only a numeric test does.
+            bt_e = b.mod(wi, b.const_i32(B))
+            rest_e = b.div(wi, b.const_i32(B))
+            hkv_e = b.mod(rest_e, b.const_i32(Hkv))
+            r2_e = b.div(rest_e, b.const_i32(Hkv))
+            hql_e = b.mod(r2_e, b.const_i32(gqa))
             hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
         elif spec.resolved_persist_decode == "hkv_minor":
             # MUST mirror site 1 exactly. This body decodes the work item TWICE
