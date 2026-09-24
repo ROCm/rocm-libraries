@@ -124,9 +124,17 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 fs::absolute(fs::u8path(options.tensileSourceDirectory)).u8string()
                     + (options.pythonPath.empty() ? "" : separator + options.pythonPath));
             const auto result = hipblaslt_jit::process::run(request);
-            require(result.succeeded(),
-                    "TensileLite generator: " + result.error + "; see "
-                        + request.logPath.u8string());
+            if(!result.succeeded())
+            {
+                std::ifstream log(request.logPath);
+                std::string   line, detail = result.error;
+                while(std::getline(log, line))
+                    if(line.find("JIT GEMM build failed:") == 0
+                       || line.find("Single-solution build failed:") == 0)
+                        detail = line.substr(0, 8192);
+                throw std::runtime_error("TensileLite generator: " + detail + "; see "
+                                         + request.logPath.u8string());
+            }
         }
     }
 
@@ -209,7 +217,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                                     const jit::detail::Target&           target,
                                     size_t                               workspaceLimit,
                                     std::shared_ptr<const jit::detail::KernelBundle>& bundle,
-                                    Diagnostics& diagnostics) const override
+                                    jit::Diagnostics& diagnostics) const override
             {
                 bundle.reset();
                 diagnostics.backend = "TensileLite";
@@ -254,7 +262,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
     }
 
     hipblasStatus_t
-        createBackend(const Options& options, jit::Backend& backend, Diagnostics& diagnostics)
+        createBackend(const Options& options, jit::Backend& backend, jit::Diagnostics& diagnostics)
     {
         backend     = {};
         diagnostics = {"TensileLite", ""};

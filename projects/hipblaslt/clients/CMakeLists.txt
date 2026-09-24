@@ -233,6 +233,15 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
 
     add_subdirectory(tests)
 endif()
+if(HIPBLASLT_ENABLE_JIT)
+    add_executable(hipblaslt-jit-gemm
+        samples/29_hipblaslt_jit_gemm/sample_hipblaslt_jit_gemm.cpp)
+    target_link_libraries(hipblaslt-jit-gemm PRIVATE hipblaslt hip::device)
+    target_compile_features(hipblaslt-jit-gemm PRIVATE cxx_std_17)
+    set_target_properties(hipblaslt-jit-gemm PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging")
+endif()
+
 if(HIPBLASLT_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()
