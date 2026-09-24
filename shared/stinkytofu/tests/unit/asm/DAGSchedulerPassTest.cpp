@@ -820,14 +820,17 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsSplitBarrierGroupOnce) {
 }
 
 // ---------------------------------------------------------------------------
-// The ds issue pipe is shared between waves (HWModel::Lds::wavesPerDsIssuePipe),
-// so a ds_load's ISA issue cost of 1 only holds at one wave. With more waves
-// resident the cost doubles, and fewer ds_loads fit in a WMMA's co-issue window.
+// HWModel::Lds::wavesPerDsIssuePipe (the ds issue pipe shared between waves)
+// is TEMPORARILY DISABLED -- see HWModel.cpp -- after real hardware measured
+// it costing f8_tn_medium/mxf4_tn_medium real throughput. With it disabled,
+// NumWaves has no effect on ds issue cost end-to-end; the sharing math itself
+// stays covered at the unit level, re-enabled on a local HWModel copy
+// (HWModelDsIssue.FourWavesRunAsPairsSoTheCostDoubles and neighbors).
 //
 // The rule (4) cap is held inert here (perCap well above the ds_load count) so
 // what is measured is the window filling up, not the cap.
 // ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
+TEST_F(DAGSchedulerPassTest, DsIssueCostIsUnaffectedByWaveCountWhilePipeSharingIsDisabled) {
     auto dsInFirstWmmaWindow = [this](uint32_t numWaves) {
         SetUp();  // fresh block per run
         createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
@@ -855,15 +858,10 @@ TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
     const int twoWaves = dsInFirstWmmaWindow(2);
     const int fourWaves = dsInFirstWmmaWindow(4);
 
-    EXPECT_GT(oneWave, fourWaves)
-        << "a shared issue pipe must fit fewer ds_loads per window once more "
-           "than one wave contends for it";
-    EXPECT_EQ(twoWaves, fourWaves)
-        << "contention saturates at wavesPerDsIssuePipe: 4 waves run as 2-2 "
-           "pairs, so a wave contends with one partner either way. NOTE the "
-           "2-wave case is unverified on hardware -- if waves turn out to land "
-           "on separate pipes instead, twoWaves should equal oneWave and this "
-           "is the assertion to flip";
+    EXPECT_EQ(oneWave, fourWaves)
+        << "pipe sharing is disabled, so NumWaves must not change how many "
+           "ds_loads fit in a WMMA's co-issue window (see HWModel.cpp)";
+    EXPECT_EQ(twoWaves, fourWaves);
 }
 
 // A non-positive dsReadPerCap is not a cap anyone can mean. It used to fall

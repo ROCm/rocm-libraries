@@ -33,7 +33,14 @@ constexpr HWModel kGfx1250Model = {
             // at 1 wave, but 4 waves run as 2-2 pairs and each wave's issues
             // cost 2. Independent of dagFeatures.dsReadPerCap, which stays a
             // separately tuned ceiling.
-            .wavesPerDsIssuePipe = 2,
+            //
+            // TEMPORARILY DISABLED (set to 1, i.e. no sharing): measured on
+            // real gfx1250 hardware to cost f8_tn_medium ~17.5% and
+            // mxf4_tn_medium ~12.3% real throughput, both fully recovered by
+            // this single-line revert -- see PR discussion. The model itself
+            // is believed correct in principle; needs re-validation against
+            // hardware before it goes back to 2.
+            .wavesPerDsIssuePipe = 1,
         },
     .barrier =
         {
