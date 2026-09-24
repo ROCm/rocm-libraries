@@ -251,6 +251,7 @@ class SchedulerConfig:
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
     directToVgprB: bool = False  # Host-pre-swizzled B loads directly into MFMA VGPRs
+    blockSched: bool = False  # Tile is scoped for block scheduling (see plsinBlockSchedTile)
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -866,23 +867,16 @@ class LogicalScheduler:
         silent clobber that has kept SPAN_NGLL off. So this deliberately ignores
         the emission-side nll_ft condition: it is the conservative direction.
 
-        The flag takes "1" for every kernel, or an MFMA-tile filter like
-        "8x8" for one geometry. The filter exists because the merge costs a
-        few VGPRs and several library tiles already sit within single digits
-        of the 256 cap -- and an overflow here is a hard build failure, not a
-        silent drop. Until the merge pays for itself the filter keeps it on
-        the one geometry being measured.
+        Follows the tile scope the rest of block scheduling uses rather than
+        matching on MFMA-tile counts, so a tile outside that scope cannot be
+        dragged in by happening to share an 8x8 grid. That matters beyond
+        tidiness: the merge costs a few VGPRs and several library tiles already
+        sit within single digits of the 256 cap, where an overflow is a hard
+        build failure rather than a silent drop.
         """
-        if self.config.pgr < 2:
+        if self.config.pgr < 2 or not self.config.blockSched:
             return False
-        flag = plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "0")
-        if flag == "0":
-            return False
-        if flag == "1":
-            return True
-        cfg = self.config
-        want = {s.strip() for s in flag.split(',')}
-        return f"{cfg.numMFMATilesM}x{cfg.numMFMATilesN}" in want
+        return plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "1") != "0"
 
     def _lr_tile_set_count(self, num_k_groups: int = 1,
                            tensor: Optional[str] = None) -> int:

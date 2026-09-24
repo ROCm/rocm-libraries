@@ -123,11 +123,32 @@ def plsinEarlyStoreTile(kernel) -> bool:
     return kernel["MacroTile0"] <= 256 and kernel["MacroTile1"] <= 256
 
 
+def plsinBlockSchedTile(kernel) -> bool:
+    """Whether block scheduling may be built for this tile.
+
+    Block scheduling is the partitioned K reduction, the staged fused store and
+    the NGLL/NLL merge taken together: the tile is cut into N blocks, each block
+    runs its whole K reduction and then stores while the next block's MFMAs are
+    already issuing.
+
+    Scoped to MT256x256, the single geometry it has been measured on. Every
+    other tile keeps its shipped schedule, which is what lets this ride
+    alongside tiles that are being tuned separately. The scope is deliberately
+    an equality rather than a bound -- MT192x256 also satisfies
+    ``plsinEarlyStoreTile`` and would otherwise be dragged in untested.
+    """
+    if not plsinEarlyStoreTile(kernel):
+        return False
+    if plsinDebugEnv("TENSILE_PLSIN_ALL_TILES", "0") != "0":
+        return True
+    return kernel["MacroTile0"] == 256 and kernel["MacroTile1"] == 256
+
+
 def plsinStagingEligible(kernel) -> bool:
     """Whether the per-partition staged store may be built for this kernel."""
-    if plsinDebugEnv("TENSILE_PLSIN_STAGED_STORE", "0") == "0":
+    if not plsinBlockSchedTile(kernel):
         return False
-    return plsinEarlyStoreTile(kernel)
+    return plsinDebugEnv("TENSILE_PLSIN_STAGED_STORE", "1") != "0"
 
 # Global
 _global_ti = rocIsa.getInstance()

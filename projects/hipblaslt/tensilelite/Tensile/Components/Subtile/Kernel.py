@@ -1400,7 +1400,10 @@ def mainLoop(writer, kernel):
   # pushed off its full-size candidate onto an uneven N split, which breaks the
   # lending weave. Only candidates staging can actually cut on are kept -- an
   # N-only split (sizeM == M) into equal groups (N % sizeN == 0).
-  minParts = max(1, int(plsinDebugEnv("TENSILE_PLSIN_MIN_PARTITIONS", "1")))
+  # Block-scheduling tiles want the split for its own sake, so they ask for four
+  # blocks rather than accepting the one-partition candidate that always fits.
+  minParts = max(1, int(plsinDebugEnv(
+      "TENSILE_PLSIN_MIN_PARTITIONS", "4" if plsinStagingEligible(kernel) else "1")))
   if minParts > 1 and pgr != 0 and plsinStagingEligible(kernel):
     def _stageable(sizeM, sizeN):
       return sizeM == M and N % sizeN == 0 and ceilDivide(N, sizeN) >= minParts
@@ -1429,6 +1432,7 @@ def mainLoop(writer, kernel):
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
           directToVgprB=directToVgprB,
+          blockSched=plsinStagingEligible(kernel),
       )
 
       scheduler = LogicalScheduler(cfg)
