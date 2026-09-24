@@ -16,6 +16,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/AsmTargetRegisters.hpp"
+#include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
@@ -142,9 +143,9 @@ namespace {
 /// it: `s_cmov_b32 d, s` is `if (SCC) d = s`, so on the untaken path d keeps
 /// what it already held. Give d and that source different registers and the
 /// untaken path yields whatever happened to be in d, not the value the IR says
-/// it should. HwInstDesc marks the field, and AsmVerifierPass already requires
-/// the register to appear on both sides; this is what makes the allocator keep
-/// it that way.
+/// it should. `readsDestination` names those destinations, and AsmVerifierPass
+/// already requires the register to appear on both sides; this is what makes the
+/// allocator keep it that way.
 ///
 /// \p execMasked says the same thing about a different destination. Under a
 /// narrow exec mask a vector write covers only the active lanes and the rest of
@@ -177,7 +178,7 @@ void collectReadWriteTies(const StinkyInstruction& instruction, const OperandGro
         // it and a masked scalar write really is a total definition. Tying one
         // would only cost a register.
         const bool maskedVectorWrite = execMasked && reg.isRegister() && reg.reg.type == RegType::V;
-        if (!field.isReadWrite && !maskedVectorWrite) continue;
+        if (!readsDestination(instruction, destSlot) && !maskedVectorWrite) continue;
 
         for (size_t source = 0; source < srcRegs.size() && source < srcGroups.size(); ++source) {
             if (!(srcRegs[source] == reg)) continue;
@@ -193,6 +194,56 @@ void collectReadWriteTies(const StinkyInstruction& instruction, const OperandGro
                 sets.push_back(std::move(set));
             }
             break;
+        }
+    }
+}
+
+/// One lifted DWORD, which is what "the whole register" means to the allocator:
+/// a field declaring fewer bits than this writes part of one and leaves the rest.
+constexpr uint16_t kLiftedUnitBits = 32;
+
+/// Record each value written through a narrow (sub-32-bit) destination that
+/// nothing reads.
+///
+/// A narrow write changes part of a register and keeps the rest, so the value
+/// already in the register is one of its inputs. `readsDestination` is what says
+/// so, and collectReadWriteTies then holds the old and new values in one
+/// register. Should that answer ever be wrong, the input is invisible: the
+/// earlier value has no reader, looks dead the moment it is written, and the
+/// allocator gives its register away, losing the part the next write meant to
+/// keep.
+///
+/// Every narrow write is checked, read-write or not, because a result with no
+/// reader is the trace that mistake leaves. A pack whose first write names no
+/// half reads as a whole-register write, so the second write inherits a register
+/// nothing established -- and the first result is then the one nobody reads.
+///
+/// This is a warning, not an error: a narrow write that really is dead is legal.
+/// A wrong answer, though, is silent wrong code no later pass can catch, because
+/// op_sel is not a register, so it is worth reporting.
+void collectUnreadPartialWrites(const StinkyInstruction& instruction, const RegClassSet& classes,
+                                std::vector<SSAValueID>& unread) {
+    const HwInstDesc* desc = instruction.getHwInstDesc();
+    if (desc == nullptr || desc->operandFields.empty()) return;
+
+    const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
+    size_t destIdx = 0;
+    size_t cursor = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t destSlot = destIdx++;
+        if (destSlot >= destRegs.size()) break;
+
+        const size_t units = liftedSSAUnits(destRegs[destSlot], classes);
+        const size_t first = cursor;
+        cursor += units;
+        if (units == 0) continue;
+        if (field.fieldSizeBits == 0 || field.fieldSizeBits >= kLiftedUnitBits) continue;
+
+        for (size_t unit = 0; unit < units && first + unit < instruction.getNumSSAResults();
+             ++unit) {
+            const StinkySSAValue* value = instruction.getSSAResult(first + unit);
+            if (value != nullptr && value->useEmpty()) unread.push_back(value->valueId());
         }
     }
 }
@@ -372,6 +423,8 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
             const OperandGroups groups = operandGroupsOf(*instruction, liftedClasses);
             collectReadWriteTies(*instruction, groups, execMasked.count(instruction) != 0,
                                  constraints.affinitySets_);
+            collectUnreadPartialWrites(*instruction, liftedClasses,
+                                       constraints.unreadPartialWrites_);
             collectBankReachableCeilings(*instruction, groups, constraints.maxIndexByValue_);
 
             // Soft pairings and producer pins, per instruction because that is
