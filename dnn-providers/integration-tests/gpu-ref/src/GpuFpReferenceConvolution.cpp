@@ -3,13 +3,11 @@
 
 #include <hipdnn-gpu-ref/GpuFpReferenceConvolution.hpp>
 
-#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
 #include <cstdint>
 #include <hip/hip_runtime.h>
-#include <limits>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -50,39 +48,6 @@ Strides5 toStrides5(const std::vector<int64_t>& strides)
         result.s[i] = static_cast<long long>(strides[i]);
     }
     return result;
-}
-
-void launchKernel(hipFunction_t function, int64_t totalElements, void* argsPtr, size_t argsSize)
-{
-    const int64_t blockSize = 256;
-    auto gridSize = (totalElements + blockSize - 1) / blockSize;
-
-    if(gridSize > static_cast<int64_t>(std::numeric_limits<unsigned int>::max()))
-    {
-        throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");
-    }
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    detail::throwOnHipError(hipModuleLaunchKernel(function,
-                                                  static_cast<unsigned int>(gridSize),
-                                                  1,
-                                                  1,
-                                                  static_cast<unsigned int>(blockSize),
-                                                  1,
-                                                  1,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr,
-                                                  config),
-                            "hipModuleLaunchKernel failed");
-
-    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
 }
 
 } // namespace
@@ -131,7 +96,7 @@ void GpuFpReferenceConvolution::launchFprop1d(const void* xPtr,
     args.beta = beta;
 
     auto totalElements = xDims[0] * wDims[0] * yDims[2];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 // --- 2D kernel launcher ---
@@ -184,7 +149,7 @@ void GpuFpReferenceConvolution::launchFprop2d(const void* xPtr,
     args.beta = beta;
 
     auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 // --- 3D kernel launcher ---
@@ -243,7 +208,7 @@ void GpuFpReferenceConvolution::launchFprop3d(const void* xPtr,
     args.beta = beta;
 
     auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3] * yDims[4];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 // --- 1D dgrad kernel launcher ---
@@ -290,7 +255,7 @@ void GpuFpReferenceConvolution::launchDgrad1d(void* dxPtr,
     args.beta = beta;
 
     auto totalElements = dxDims[0] * dxDims[1] * dxDims[2];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 // --- 2D dgrad kernel launcher ---
@@ -343,7 +308,7 @@ void GpuFpReferenceConvolution::launchDgrad2d(void* dxPtr,
     args.beta = beta;
 
     auto totalElements = dxDims[0] * dxDims[1] * dxDims[2] * dxDims[3];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 // --- 3D dgrad kernel launcher ---
@@ -402,7 +367,7 @@ void GpuFpReferenceConvolution::launchDgrad3d(void* dxPtr,
     args.beta = beta;
 
     auto totalElements = dxDims[0] * dxDims[1] * dxDims[2] * dxDims[3] * dxDims[4];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 // --- 1D wgrad kernel launcher ---
@@ -449,7 +414,7 @@ void GpuFpReferenceConvolution::launchWgrad1d(const void* xPtr,
     args.beta = beta;
 
     auto totalElements = dwDims[0] * dwDims[1] * dwDims[2];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 // --- 2D wgrad kernel launcher ---
@@ -502,7 +467,7 @@ void GpuFpReferenceConvolution::launchWgrad2d(const void* xPtr,
     args.beta = beta;
 
     auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 // --- 3D wgrad kernel launcher ---
@@ -561,7 +526,7 @@ void GpuFpReferenceConvolution::launchWgrad3d(const void* xPtr,
     args.beta = beta;
 
     auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3] * dwDims[4];
-    launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref
