@@ -88,13 +88,14 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
             scale_b_host.SetZero();
         }
 
-#if defined(CK_USE_GFX1250)
         if constexpr(SelectedKernel::Preshuffle)
         {
-            if(gemm_problem.n_ % SelectedKernel::WarpTileN != 0)
-                throw std::runtime_error("MX weight preshuffle requires complete N warp tiles");
+            if(gemm_problem.n_ % SelectedKernel::WarpTileN != 0 ||
+               gemm_problem.k_ % SelectedKernel::TileK != 0)
+                throw std::runtime_error(
+                    "MX weight preshuffle requires complete N warp tiles and K divisible by TileK");
         }
-        if(gemm_problem.split_k_ != 1)
+#if defined(CK_USE_GFX1250)
             throw std::runtime_error("gfx1250 MX GEMM supports only split_k=1");
         if(gemm_problem.k_ % 128 != 0 || gemm_problem.k_ % SelectedKernel::TileK != 0)
             throw std::runtime_error("gfx1250 MX GEMM requires K divisible by 128 and TileK");
