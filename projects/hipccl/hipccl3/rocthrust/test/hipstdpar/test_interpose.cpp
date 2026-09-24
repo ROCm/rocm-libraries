@@ -31,6 +31,8 @@
 #include <malloc.h>
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
 #  include <sys/mman.h>
+#  include <sys/syscall.h>
+#  include <unistd.h>
 #endif
 
 extern "C" void* __libc_calloc(std::size_t, std::size_t);
@@ -292,6 +294,26 @@ int main()
     if (munmap(mapping, 4096) != 0)
     {
       return EXIT_FAILURE;
+    }
+
+    // A MAP_FIXED mapping that the interposer rejects must leave the range
+    // mapped. The reservation bypasses interposition through the raw syscall,
+    // and is large enough that hipMemAdvise may refuse to advise it.
+    constexpr std::size_t reservation_size = std::size_t{64} << 30;
+    const auto reservation                 = reinterpret_cast<void*>(
+      syscall(SYS_mmap, nullptr, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
+    if (reservation != MAP_FAILED)
+    {
+      if (mmap(reservation, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0)
+          == MAP_FAILED)
+      {
+        unsigned char residency{};
+        if (mincore(reservation, 4096, &residency) != 0)
+        {
+          return EXIT_FAILURE;
+        }
+      }
+      munmap(reservation, reservation_size);
     }
 #endif
 

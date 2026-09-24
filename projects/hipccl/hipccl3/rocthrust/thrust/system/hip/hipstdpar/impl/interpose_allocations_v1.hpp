@@ -322,7 +322,9 @@ extern "C" {
             hipDevice_t d{};
             if (hipGetDevice(&d) != hipSuccess ||
                 hipMemAdvise(r, n, hipMemAdviseSetAccessedBy, d) != hipSuccess) {
-                __hipstdpar_hidden_munmap(r, n);
+                // MAP_FIXED has already replaced whatever was mapped there;
+                // unmapping would leave a hole inside a range the caller owns.
+                if (!(f & MAP_FIXED)) __hipstdpar_hidden_munmap(r, n);
                 errno = ENOMEM;
                 return MAP_FAILED;
             }
