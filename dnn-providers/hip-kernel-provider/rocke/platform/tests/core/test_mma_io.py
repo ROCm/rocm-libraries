@@ -150,6 +150,45 @@ def test_reject_partial_fragment_and_wrong_pointer():
         )
 
 
+@pytest.mark.parametrize("dtype", ["fp4", "fp6", "fp8", "f16", "bf16"])
+@pytest.mark.parametrize("shape", [(0, 128), (16, 0), (0, 0), (16, 128)])
+def test_fragment_load_requires_nonempty_storage(dtype, shape):
+    storage = TensorStorage(dtype, shape)
+    typed = dtype in ("f16", "bf16")
+    unit = storage_ir_type(dtype)
+    layout = (
+        MatrixFragmentLayout(FragmentPacking(BitPacking(16), 32, 16, 32), 16, 2, 16)
+        if typed
+        else scaled_matrix_layout(dtype, 16)
+    )
+    b = IRBuilder("empty_storage")
+    ptr = b.param("A", PtrType(unit, "global"))
+    zero = b.const_i32(0)
+    before = serialize(b.kernel)
+
+    def load():
+        return load_matrix_fragment(
+            b,
+            ptr,
+            zero,
+            zero,
+            0,
+            storage=storage,
+            layout=layout,
+            carrier_type=unit if typed else I32,
+        )
+
+    if 0 in shape:
+        assert storage.byte_size == 0
+        with pytest.raises(ValueError, match="nonempty tensor storage"):
+            load()
+        assert serialize(b.kernel) == before
+    else:
+        assert storage.byte_size > 0
+        assert load() is not None
+        assert "memref.global_load" in serialize(b.kernel)
+
+
 def test_hip_declares_only_encountered_missing_vector_widths():
     source = lower_kernel_to_hip(build_transport("fp6"), arch="gfx1250")
     for name in ("i8x24", "i8x40", "i32x12"):

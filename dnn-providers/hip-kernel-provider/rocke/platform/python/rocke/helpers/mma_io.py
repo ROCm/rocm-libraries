@@ -47,6 +47,8 @@ def load_matrix_fragment(
     lane_group is derived from the atom's
     lane mapping by the caller. Partial chunks and nonzero bit origins reject.
     """
+    if storage.byte_size == 0:
+        raise ValueError("matrix fragment requires nonempty tensor storage")
     packing = layout.fragment
     if not (0 < packing.count <= 0x7FFFFFFF and packing.carrier_count <= 0x7FFFFFFF):
         raise ValueError("invalid matrix fragment chunk layout")

@@ -213,6 +213,54 @@ static int test_storage_validation()
     return 0;
 }
 
+static int test_empty_storage_load()
+{
+    for(const char* dtype : {"fp4", "fp6", "fp8", "f16", "bf16"})
+    {
+        const auto* unit = rocke_storage_ir_type(dtype);
+        const bool typed = strcmp(dtype, "f16") == 0 || strcmp(dtype, "bf16") == 0;
+        for(int shape = 0; shape < 4; ++shape)
+        {
+            const uint64_t rows = shape == 0 || shape == 2 ? 0 : 16;
+            const uint64_t cols = shape == 1 || shape == 2 ? 0 : 128;
+            rocke_tensor_storage_t storage;
+            CHECK(rocke_tensor_storage_init(&storage, dtype, rows, cols, UINT64_MAX, 0, 0, 1));
+            uint64_t bytes;
+            CHECK(rocke_tensor_storage_bytes(&storage, &bytes));
+            CHECK((bytes == 0) == (shape != 3));
+            rocke_matrix_fragment_layout_t layout;
+            if(typed)
+            {
+                rocke_fragment_packing_t fragment;
+                CHECK(rocke_fragment_packing_init(&fragment, &storage.packing, 32, 16, 32));
+                CHECK(rocke_matrix_fragment_layout_init(&layout, &fragment, 16, 2, 16));
+            }
+            else
+                layout = rocke_scaled_matrix_layout(dtype, 16);
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "empty_storage") == ROCKE_OK);
+            auto* ptr = rocke_b_param(&b, "A", rocke_ptr_type(&b, unit, "global"), NULL);
+            auto* zero = rocke_b_const_i32(&b, 0);
+            const int before = b.kernel->body->num_ops;
+            auto* value = rocke_h_load_matrix_fragment(
+                &b, ptr, zero, zero, 0, &storage, &layout, typed ? unit : rocke_i32());
+            if(bytes == 0)
+            {
+                CHECK(!value && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
+                CHECK(strstr(rocke_ir_builder_error(&b), "nonempty tensor storage"));
+                CHECK(b.kernel->body->num_ops == before);
+            }
+            else
+            {
+                CHECK(value && rocke_ir_builder_ok(&b));
+                CHECK(b.kernel->body->num_ops > before);
+            }
+            rocke_ir_builder_free(&b);
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--emit") == 0)
@@ -250,6 +298,7 @@ int main(int argc, char** argv)
         return 0;
     }
     CHECK(test_storage_validation() == 0);
+    CHECK(test_empty_storage_load() == 0);
     CHECK(rocke_dtype_info("e4m3") == rocke_dtype_info("fp8e4m3"));
     CHECK(rocke_dtype_to_ir_type("e4m3") == rocke_fp8e4m3());
     CHECK(rocke_storage_ir_type("e4m3") == rocke_fp8e4m3());

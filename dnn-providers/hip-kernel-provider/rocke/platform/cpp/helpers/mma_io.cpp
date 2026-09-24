@@ -47,6 +47,8 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
         uint64_t storage_bytes;
         if(!rocke_tensor_storage_bytes(storage, &storage_bytes))
             ckc::raise_status(ROCKE_ERR_VALUE, "invalid tensor storage descriptor");
+        if(storage_bytes == 0)
+            ckc::raise_status(ROCKE_ERR_VALUE, "matrix fragment requires nonempty tensor storage");
         const auto& packing = layout->fragment;
         rocke_matrix_fragment_layout_t checked;
         if(!rocke_matrix_fragment_layout_init(&checked,
