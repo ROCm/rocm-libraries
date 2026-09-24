@@ -799,9 +799,9 @@ namespace TensileLite
         bool workspaceDPFallbackFired = false;
         // available: getSKGridImpl out-param (24-bit tree-fixup bounds -> grid=tiles).
         bool treeBoundsFallbackFired  = false;
-        // available: getSKGridImpl out-param -- the StreamKForceDPOnly cluster-multicast
-        // clamp (SK3 + streamKForceDPOnly + clusterDim.x*clusterDim.y > 1 -> grid=tiles,
-        // one workgroup per output tile). Applied after the tree-bounds fallback.
+        // DataParallel cluster prefetch clamp: PrefetchAcrossPersistent uses one
+        // cluster per padded tile block so prefetch cannot overwrite a peer's LDS.
+        // Ordinary persistent clusters keep the selected grid in whole clusters.
         bool clusterDPGridClamped     = false;
         // available: getSKGridImpl out-param (AMDGPU persistentFixedGrid override applied).
         bool fixedGridUsed            = false;
