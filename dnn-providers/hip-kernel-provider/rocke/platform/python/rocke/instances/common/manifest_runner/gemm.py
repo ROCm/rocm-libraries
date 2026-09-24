@@ -36,11 +36,11 @@ def run_gemm_manifest_problem(
     A_f32 = None  # float32 inputs for bf16 reference, set when is_bf16
     B_f32 = None
     if is_bf16:
-        # bf16 = upper 16 bits of fp32. For small integers (-5..5) the lower
-        # 16 bits of fp32 are zero, so truncation is exact (no rounding).
+        # Small integers (-5..5) are exactly representable in bf16; their fp32
+        # lower 16 bits are zero so truncation == RNE for the inputs.
         A_f32 = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float32)
         B_f32 = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
-        # Encode as bf16 raw bytes and store behind a float16 view for transfer
+        # Encode as bf16 raw bytes stored behind a float16 view for device transfer.
         A = (A_f32.view(np.uint32) >> 16).astype(np.uint16).view(np.float16)
         B = (B_f32.view(np.uint32) >> 16).astype(np.uint16).view(np.float16)
     else:
@@ -74,11 +74,14 @@ def run_gemm_manifest_problem(
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
         if is_bf16:
-            # fp32 accumulation is exact for small-integer inputs; cast result
-            # to bf16 by taking upper 16 bits (same truncation the kernel does).
-            ref_raw = (A_f32 @ B_f32.T).view(np.uint32) >> 16
-            ref_f32 = ref_raw.astype(np.uint16).view(np.float16).astype(np.float32)
-            out_f32 = C.view(np.uint16).view(np.float16).astype(np.float32)
+            from ....dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+
+            # Reference: fp32 accumulation (exact for small-integer inputs),
+            # then round-to-nearest-even to bf16 matching the kernel's fptrunc.
+            ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)
+            ref_f32 = _f32_from_bf16(np, ref_u16)
+            # Decode raw output bytes as bf16, not fp16.
+            out_f32 = _f32_from_bf16(np, C.view(np.uint16))
         else:
             ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
             ref_f32 = ref.astype(np.float32)
