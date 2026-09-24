@@ -106,9 +106,8 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
-/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): identical to
- * the LLVM22 set for the declares rocke emits today; split entries here if an
- * LLVM 23 host proves drift. */
+/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): the LLVM22
+ * set plus declarations whose ABI changed again. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 

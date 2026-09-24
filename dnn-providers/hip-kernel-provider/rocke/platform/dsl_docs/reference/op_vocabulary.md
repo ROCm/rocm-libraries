@@ -48,7 +48,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `math.exp2`    | `exp2`       | `llvm.exp2.f32`                 |
 | `math.sqrt`    | `sqrt`       | `llvm.sqrt.f32`                 |
 | `math.rsqrt`   | `rsqrt`      | `llvm.amdgcn.rsq.f32`           |
-| `math.tanh`    | `tanh`       | `llvm.tanh.f32`                 |
+| `math.tanh`    | `tanh`       | piecewise f32 expansion: OCML polynomial for `abs(x) < 0.625`, otherwise `exp2` + reciprocal; bitwise sign restoration |
 | `math.rcp`     | `rcp`        | `1.0 / v` (hardware reciprocal) |
 
 `clamp_f32(v, lo, hi)` is `fmin(hi, fmax(lo, v))` — folds to `v_med3_f32`.
