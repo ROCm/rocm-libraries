@@ -68,6 +68,11 @@
 # jointly enumerate this footprint (the host aggregates across all cx*cy). It
 # tolerates the benign replication of the whole-cluster scheme (overlapping
 # cooperative-thread slices, and nc < cooperative threads, e.g. MX scales).
+# That footprint mirrors the implementation's chunk count, so a second check
+# is derived from the tile alone: every valid byte of every tile row must fall
+# inside some [offset, offset + GlobalPrefetchSize) window. An undercounted
+# gl2ncc that leaves a row tail unprefetched fails there even if the footprint
+# model undercounts the same way.
 #
 # test_gl2_prefetch_codegen runs without a device: it only generates and
 # assembles each config's kernel, so CPU-only runners (including the coverage
@@ -85,6 +90,7 @@ import sys
 import struct
 import tempfile
 import types
+from bisect import bisect_right
 from dataclasses import dataclass
 from math import ceil
 from types import SimpleNamespace
@@ -271,7 +277,7 @@ def tensor_dims(spec, cfg):
     else:
         du = data_depth_u(spec, cfg)
         coal, perp = (spec.mt * M, du) if spec.tlu else (du, spec.mt * M)
-    ncc = max(1, round(coal * spec.bpe) // GLOBAL_PREFETCH_SIZE)
+    ncc = max(1, ceil(coal * spec.bpe / GLOBAL_PREFETCH_SIZE))
     return coal, perp, ncc, perp * ncc
 
 
@@ -1000,27 +1006,14 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
     fan-out, inactive-bit shifts, per-thread load counts): those are an
     implementation detail. Any allocation that yields the same footprint passes;
     only a coverage bug (a missing/extra/out-of-bounds address) fails."""
-    GPS = GLOBAL_PREFETCH_SIZE
-    bpe = spec.bpe
-    coal, perp, ncc, _ = tensor_dims(spec, cfg)   # tile dim folded over the cluster
-    size_free = free_dim_size(cfg, spec.subtc)
-    if spec.is_mx:
-        mx_unit = cfg.matrix_inst_k // cfg.mx_block
-        perp_stride = size_free * mx_unit
-        edge = (size_free - 1) * mx_unit
-    else:
-        perp_stride = coal            # StrideAL (TLU) / StrideAI (nTLU): the folded leading dim
-        edge = size_free - 1
-    coal_to_mt = (spec.is_mx or spec.tlu)    # MT offset & clamp land in coal (else perp)
-    gps_elems = round(GPS / bpe)
-    k_iter = gsu_start_iter(cfg, group) + (cfg.skip_iters + stage) * gsu_iter_stride(cfg)
-    shift = k_iter * inc_bytes(spec, cfg)
-    if cfg.batched:
-        shift += batch * round(batch_stride_elems(spec, cfg) * bpe)
+    g = _footprint_geometry(spec, cfg, stage, batch, group)
+    bpe, edge, perp_stride, shift = g.bpe, g.edge, g.perp_stride, g.shift
+    ncc = tensor_dims(spec, cfg)[2]
+    gps_elems = round(GLOBAL_PREFETCH_SIZE / bpe)
     out = set()
     for c in range(ncc):
-        for p in range(perp):
-            if coal_to_mt:
+        for p in range(g.perp):
+            if g.coal_to_mt:
                 coal_idx = min(c * gps_elems, edge)
                 perp_idx = p
             else:
@@ -1028,6 +1021,63 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
                 coal_idx = c * gps_elems
             out.add(round((perp_idx * perp_stride + coal_idx) * bpe) + shift)
     return out
+
+
+def _footprint_geometry(spec, cfg, stage, batch, group):
+    """Layout of one tensor's prefetched block: the tile dim is folded over the
+    cluster (tensor_dims), rows are `perp` apart by `perp_stride` elements, the
+    edge clamp is `edge`, and `shift` is the K/batch translation in bytes."""
+    coal, perp, _, _ = tensor_dims(spec, cfg)
+    size_free = free_dim_size(cfg, spec.subtc)
+    # One free-dim index spans `unit` coalesced elements: mxUnit scale groups for
+    # MX, a single element otherwise.
+    unit = cfg.matrix_inst_k // cfg.mx_block if spec.is_mx else 1
+    k_iter = gsu_start_iter(cfg, group) + (cfg.skip_iters + stage) * gsu_iter_stride(cfg)
+    shift = k_iter * inc_bytes(spec, cfg)
+    if cfg.batched:
+        shift += batch * round(batch_stride_elems(spec, cfg) * spec.bpe)
+    return SimpleNamespace(
+        bpe=spec.bpe, coal=coal, perp=perp, size_free=size_free, unit=unit,
+        # StrideAL (TLU) / StrideAI (nTLU) is the folded leading dim; MX derives
+        # its stride in-kernel from SizeFree.
+        perp_stride=size_free * unit if spec.is_mx else coal,
+        edge=(size_free - 1) * unit,
+        coal_to_mt=spec.is_mx or spec.tlu,   # MT offset & clamp land in coal (else perp)
+        shift=shift)
+
+
+def uncovered_bytes(offsets, spec, cfg, stage=0, batch=0, group=0):
+    """Byte ranges of the tile that no prefetch reaches.
+
+    Independent of the chunk count the implementation picks: each tile row must
+    lie inside the union of the [offset, offset + GlobalPrefetchSize) windows.
+    A row holds min(coal, SizeFree * unit) valid elements when the tile dim is
+    coalesced (TLU/MX), and there are min(perp, SizeFree) valid rows when it is
+    perpendicular (non-TLU). Rows are measured from their own start, so this
+    does not model cache-line alignment of a row that starts mid-line."""
+    g = _footprint_geometry(spec, cfg, stage, batch, group)
+    if g.coal_to_mt:
+        rows, row_elems = g.perp, min(g.coal, g.size_free * g.unit)
+    else:
+        rows, row_elems = min(g.perp, g.size_free), g.coal
+    row_bytes = round(row_elems * g.bpe)
+
+    merged = []
+    for o in sorted(set(offsets)):
+        if merged and o <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], o + GLOBAL_PREFETCH_SIZE)
+        else:
+            merged.append([o, o + GLOBAL_PREFETCH_SIZE])
+    starts = [m[0] for m in merged]
+
+    gaps = []
+    for p in range(rows):
+        lo = round(p * g.perp_stride * g.bpe) + g.shift
+        hi = lo + row_bytes
+        i = bisect_right(starts, lo) - 1
+        if i < 0 or merged[i][1] < hi:
+            gaps.append((lo, hi))
+    return gaps
 
 
 def verify_tensor(offsets, spec, cfg, stage, batch=0, group=0, debug=False):
@@ -1045,6 +1095,9 @@ def verify_tensor(offsets, spec, cfg, stage, batch=0, group=0, debug=False):
         errors.append(f"{tag}: missing {missing[:6]}")
     if extra:
         errors.append(f"{tag}: unexpected {extra[:6]}")
+    gaps = uncovered_bytes(got, spec, cfg, stage, batch, group)
+    if gaps:
+        errors.append(f"{tag}: tile rows not fully prefetched {gaps[:4]}")
     if debug:
         _, _, ncc, nc = tensor_dims(spec, cfg)
         M = mt_tiles(spec, cfg)
