@@ -1,8 +1,8 @@
 {
     "format_version": 1,
     "generator": "generate_sdpa_fwd_golden.py",
-    "generator_sha256": "9bec373ee4e0969189e0108a8dc899166d7149dad9aa270d86d1f3dbcb832ed0",
-    "generated_at": "2026-09-18T23:42:01Z",
+    "generator_sha256": "ed5c41655ac85fbf121e1056635c8a4532d43e0b72f41d4f85084170e160f561",
+    "generated_at": "2026-09-24T22:41:52Z",
     "reference_source": "PyTorch 2.13.0+rocm7.2",
     "reference_backend": "pytorch_math_backend",
     "rocm_version": "7.2",
@@ -17,10 +17,10 @@
     "deterministic": true,
     "config": {
         "batch": 3,
-        "num_heads_q": 4,
-        "num_heads_kv": 4,
-        "seq_q": 512,
-        "seq_kv": 512,
+        "num_heads_q": 2,
+        "num_heads_kv": 2,
+        "seq_q": 256,
+        "seq_kv": 256,
         "head_dim_qk": 128,
         "head_dim_v": 128,
         "dtype": "bf16",
@@ -37,14 +37,14 @@
         "ragged": true,
         "ragged_physical_lens": {
             "q": [
-                512,
-                512,
-                512
+                256,
+                256,
+                256
             ],
             "kv": [
-                512,
-                512,
-                512
+                256,
+                256,
+                256
             ]
         }
     }

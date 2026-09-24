@@ -23,30 +23,13 @@ using NodeAttributes = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 inline constexpr std::string_view K_UNREADABLE_GRAPH = "<unreadable graph>";
 inline constexpr std::string_view K_RAGGED_TENSORS = "<ragged tensors>";
 inline constexpr std::string_view K_FP8_TENSORS = "<fp8 tensors>";
+inline constexpr std::string_view K_SEQ_LEN_TENSORS = "<seq-len tensors>";
 inline constexpr std::string_view K_NO_NODES = "<no nodes>";
 
-/// The ops each reference executor is *required* to handle.
-///
-/// This is a commitment, not a description. A bundle whose every node type appears
-/// in a reference's set is registered for validation against that reference and
-/// must pass — the reference harness has no skip path, because "the reference
-/// could not run this" is a gap in the reference, not a property of the bundle.
-///
-/// That inverts the previous arrangement, where a reference that could not handle a
-/// graph produced a silent skip and the bundle went unverified. Here the set is the
-/// contract: adding an op obliges someone to implement it for that reference;
-/// leaving it out means bundles using it are simply not validated by that
-/// reference, visibly, by their absence from the registered suite.
-///
-/// Keyed on the flatbuffer node type rather than the bundle's optional `operation`
-/// metadata string, because that is what both executors actually dispatch on and it
-/// cannot drift from the graph.
-///
-/// The limit of that choice is that a node type says nothing about the tensors the
-/// node reads, so this set alone cannot express a feature the reference does not
-/// handle. The commitment is therefore "op set *and* feature set": see
-/// exclusionReasons(), which folds this set together with the graph-feature queries
-/// below.
+/// The node types each reference executor is required to handle. This is a contract:
+/// covered bundles are registered with no skip path, so adding an op obliges implementing
+/// it. Keyed on the flatbuffer node type, which is what the executors dispatch on.
+/// Graph features (ragged, FP8, seq-len) are gated separately by exclusionReasons().
 const std::set<NodeAttributes>& referenceSupportedOps(ReferenceExecutorType type);
 
 /// Node types this graph uses, or nullopt when the buffer cannot be walked.
@@ -56,40 +39,23 @@ const std::set<NodeAttributes>& referenceSupportedOps(ReferenceExecutorType type
 /// none. Collapsing both onto an empty set loses that distinction.
 std::optional<std::set<NodeAttributes>> graphNodeTypes(const void* graphBuffer, size_t size);
 
-/// Whether the graph declares a ragged tensor, or nullopt when it cannot be walked.
-///
-/// Ragged lives on TensorAttributes (`ragged_offset_tensor_uid`), not on the node
-/// type, so referenceSupportedOps() structurally cannot see it: a ragged SDPA graph
-/// and a dense one are both SdpaAttributes. That is why the gate needs this second
-/// axis at all.
-///
-/// Deliberately not parameterized on ReferenceExecutorType: no reference plan
-/// builder, CPU or GPU, reads ragged offsets, so a per-reference answer would be two
-/// copies of the same `false`. When one op on one reference gains ragged support it
-/// gains that parameter, and the reason list already carries the result.
+/// Whether any tensor in the graph is ragged, or nullopt when it cannot be walked.
+/// No reference executor, CPU or GPU, supports ragged tensors.
 std::optional<bool> graphUsesRaggedTensors(const void* graphBuffer, size_t size);
 
-/// Whether any tensor in the graph is an FP8 type, or nullopt when it cannot be
-/// walked. Same tensor-not-node argument as graphUsesRaggedTensors(); unlike ragged,
-/// only the GPU reference is excluded on it (see exclusionReasons()).
+/// Whether any tensor in the graph is an FP8 type, or nullopt when it cannot be walked.
 std::optional<bool> graphUsesFp8Tensors(const void* graphBuffer, size_t size);
 
-/// Every reason this reference is not required to run this graph, for diagnostics;
-/// empty means it is. Reasons compose: an unsupported op and a ragged tensor both
-/// appear rather than the first one short-circuiting.
-///
-/// An unreadable graph yields a single sentinel entry rather than nothing, so a
-/// caller printing this never reports an exclusion with no reason attached.
+/// Whether any SDPA node sets a seq_len_q/kv tensor, or nullopt when it cannot be walked.
+/// No reference executor, CPU or GPU, supports per-batch sequence lengths.
+std::optional<bool> graphUsesSeqLenTensors(const void* graphBuffer, size_t size);
+
+/// Every reason this reference is not required to run this graph; empty means it is.
+/// An unreadable graph yields a single sentinel entry rather than nothing.
 std::vector<std::string>
     exclusionReasons(ReferenceExecutorType type, const void* graphBuffer, size_t size);
 
-/// True iff exclusionReasons() is empty -- defined in terms of it rather than
-/// recomputed, so verdict and reason cannot disagree.
-///
-/// They previously could: the two were independent implementations of one rule, and
-/// had already diverged on a zero-node graph, which referenceCoversGraph() called
-/// "not covered" while uncoveredNodeTypes() returned {}. That is how the
-/// registration summary could report an exclusion with no reason attached.
+/// True iff exclusionReasons() is empty.
 bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, size_t size);
 
 /// The parenthesised reason list appended to the registration summary, or "" when

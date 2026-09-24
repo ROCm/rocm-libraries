@@ -203,7 +203,6 @@ inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
         std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedOffset)
 {
-
     auto dims
         = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
     auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(

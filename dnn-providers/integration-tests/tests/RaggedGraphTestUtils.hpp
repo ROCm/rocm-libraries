@@ -11,14 +11,8 @@
 namespace hipdnn_integration_tests::test_utils
 {
 
-// Re-serializes a graph with its first non-virtual tensor marked ragged, so any
-// graph builder in these tests can produce a ragged variant of itself without
-// growing a parameter. The GPU-side twin of makeGraphWithRaggedTensor() in
-// TestCpuReferenceRaggedRejection.cpp.
-//
-// Both the applicability check and the registration gate key only on
-// ragged_offset_tensor_uid being *set*, so no real offset tensor is needed; the uid
-// points at another existing tensor to keep the value plausible.
+// Re-serializes a graph with its first non-virtual tensor marked ragged; the offset uid
+// points at an arbitrary tensor since the gates only check that it is set.
 inline flatbuffers::DetachedBuffer markFirstTensorRagged(const void* graphBuffer)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;

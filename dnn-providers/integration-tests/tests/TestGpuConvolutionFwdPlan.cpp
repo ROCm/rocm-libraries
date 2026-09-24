@@ -119,9 +119,7 @@ TEST(TestGpuConvolutionFwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }
 
-// Only SDPA has ragged golden-data bundles today, but the ragged check is in every
-// GPU plan builder: each would otherwise produce a silently wrong oracle the first
-// time a ragged bundle for its op appears. This pins that as deliberate.
+// No GPU plan builder reads ragged offsets, so each rejects ragged tensors, not only SDPA.
 TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
     constexpr int64_t X_UID = 10;

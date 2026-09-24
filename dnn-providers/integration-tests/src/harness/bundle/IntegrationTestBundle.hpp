@@ -315,11 +315,8 @@ inline std::optional<LoadError> loadTensorDataIfPresent(IntegrationTestBundle& b
         attrByUid[attributes->uid()] = attributes;
     }
 
-    // Ragged tensors (those carrying a ragged_offset_tensor_uid) are packed per
-    // their offset tensor and must be constructed with it, so the offset has to
-    // be loaded first. Load non-ragged tensors, then ragged ones — mirroring
-    // loadGraphAndTensors(). Offset tensors are always inputs, so an output's
-    // offset is already resolved by the time outputs load.
+    // Ragged tensors are constructed from their offset tensor, so they load last.
+    // Offset tensors are always inputs, so an output's offset is already loaded.
     const auto loadUids = [&](const std::vector<int64_t>& uids, TensorMap& into) {
         std::vector<int64_t> raggedUids;
         for(const int64_t uid : uids)
@@ -342,7 +339,7 @@ inline std::optional<LoadError> loadTensorDataIfPresent(IntegrationTestBundle& b
             const auto* attributes = attrByUid.at(uid);
             const int64_t offsetUid = attributes->ragged_offset_tensor_uid().value();
             into[uid] = hipdnn_test_sdk::utilities::raggedTensorFromFileAndAttributes(
-                blobPathForUid(uid), *attributes, into[offsetUid]);
+                blobPathForUid(uid), *attributes, into.at(offsetUid));
         }
     };
 

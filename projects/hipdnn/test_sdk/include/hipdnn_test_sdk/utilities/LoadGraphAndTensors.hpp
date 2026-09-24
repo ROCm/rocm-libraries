@@ -232,10 +232,17 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
     for(auto attributes : raggedTensors)
     {
         auto raggedOffsetId = attributes->ragged_offset_tensor_uid().value();
+        auto offsetIt = tensorMap.find(raggedOffsetId);
+        if(offsetIt == tensorMap.end())
+        {
+            throw std::runtime_error(
+                "Error in loadGraphAndTensors(): ragged tensor " + std::to_string(attributes->uid())
+                + " references missing offset tensor " + std::to_string(raggedOffsetId));
+        }
         auto tensorPath
             = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
         tensorMap[attributes->uid()]
-            = raggedTensorFromFileAndAttributes(tensorPath, *attributes, tensorMap[raggedOffsetId]);
+            = raggedTensorFromFileAndAttributes(tensorPath, *attributes, offsetIt->second);
     }
 
     return {graphBuilder.Release(), std::move(tensorMap), outputTensorUids};

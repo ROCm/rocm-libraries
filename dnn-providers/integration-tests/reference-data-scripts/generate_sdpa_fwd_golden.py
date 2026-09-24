@@ -88,10 +88,8 @@ UID_SEQ_LEN_KV = 6
 UID_DESCALE_Q = 7
 UID_DESCALE_K = 8
 UID_DESCALE_V = 9
-UID_RAGGED_OFFSET_Q = 10
-UID_RAGGED_OFFSET_K = 11
-UID_RAGGED_OFFSET_V = 12
-UID_RAGGED_OFFSET_O = 13
+UID_RAGGED_OFFSET_QO = 10
+UID_RAGGED_OFFSET_KV = 11
 
 # Physical stride order per memory layout. The value at position i is the rank of
 # dim i (0 = fastest-varying/unit stride). Logical dims stay [B, H, S, D]; only
@@ -100,8 +98,8 @@ LAYOUT_STRIDE_ORDER = {"bhsd": [3, 2, 1, 0], "bshd": [3, 1, 2, 0]}
 
 # Extra trailing sequence rows added to each ragged block beyond its valid
 # seq_len (capped at S_max). This makes ragged_offset spacing differ from
-# seq_lens * H * D so a bundle can catch a kernel that derives lengths from the
-# offsets instead of reading the seq_len tensor (RFC 0014 §149-154 padding).
+# seq_lens so a bundle can catch a kernel that derives lengths from the offsets
+# instead of reading the seq_len tensor (RFC 0014 §2.3 padding).
 RAGGED_PAD_ROWS = 8
 
 
@@ -303,10 +301,10 @@ def build_graph_json(
 
     tensors = []
     primaries = [
-        (UID_Q, "Q", q_dims, qkv_dtype, UID_RAGGED_OFFSET_Q),
-        (UID_K, "K", k_dims, qkv_dtype, UID_RAGGED_OFFSET_K),
-        (UID_V, "V", v_dims, qkv_dtype, UID_RAGGED_OFFSET_K),
-        (UID_O, "O", o_dims, o_dtype, UID_RAGGED_OFFSET_Q),
+        (UID_Q, "Q", q_dims, qkv_dtype, UID_RAGGED_OFFSET_QO),
+        (UID_K, "K", k_dims, qkv_dtype, UID_RAGGED_OFFSET_KV),
+        (UID_V, "V", v_dims, qkv_dtype, UID_RAGGED_OFFSET_KV),
+        (UID_O, "O", o_dims, o_dtype, UID_RAGGED_OFFSET_QO),
     ]
     for uid, name, dims, dt, ragged_offset_uid in primaries:
         # Ragged primaries declare padded BSHD dims [B, S_max, H, D] (seqAxis=1)
@@ -375,8 +373,8 @@ def build_graph_json(
 
     if ragged:
         for uid, name in [
-            (UID_RAGGED_OFFSET_Q, "RaggedOffsetQ"),
-            (UID_RAGGED_OFFSET_K, "RaggedOffsetK"),
+            (UID_RAGGED_OFFSET_QO, "RaggedOffsetQ"),
+            (UID_RAGGED_OFFSET_KV, "RaggedOffsetK"),
         ]:
             tensors.append(
                 {
@@ -870,7 +868,7 @@ def generate_forward_bundle(
         print(
             "  WARNING: no batch received ragged padding (every seq_len == S_max "
             "after the +RAGGED_PAD_ROWS cap); ragged_offset spacing equals "
-            "seq_lens*H*D, so a length-from-offsets regression cannot be caught. "
+            "seq_lens, so a length-from-offsets regression cannot be caught. "
             "Use a config with headroom (max seq_len < S_max) to exercise padding."
         )
 
@@ -916,8 +914,8 @@ def generate_forward_bundle(
         )
     if ragged:
         for name, uid, physical_lens in [
-            ("RaggedOffsetQ", UID_RAGGED_OFFSET_Q, physical_q),
-            ("RaggedOffsetK", UID_RAGGED_OFFSET_K, physical_kv),
+            ("RaggedOffsetQ", UID_RAGGED_OFFSET_QO, physical_q),
+            ("RaggedOffsetK", UID_RAGGED_OFFSET_KV, physical_kv),
         ]:
             offsets = ragged_offsets(physical_lens)
             tensor_list.append((name, offsets, uid, list(offsets.shape)))
@@ -993,7 +991,7 @@ def generate_forward_bundle(
         if has_seq_lens or is_fp8 or ragged:
             print(
                 "  Validation: SKIPPED (AITER cross-check only covers dense float "
-                "BATCH mode; GROUP/FP8/ragged are validated by the CPU reference)"
+                "BATCH mode)"
             )
         else:
             ok = validate_against_aiter(

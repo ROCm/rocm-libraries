@@ -689,10 +689,7 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseIsApplicable)
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
-// No GPU plan builder reads ragged offsets, so a ragged graph must be rejected at
-// dispatch rather than executed against misread dims. This covers GpuPointwisePlan,
-// which has no dedicated test file, and mirrors what TestCpuReferenceRaggedRejection
-// pins for the CPU reference.
+// Covers GpuPointwisePlan, which has no dedicated test file.
 TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRaggedGraph)
 {
     SKIP_IF_NO_DEVICES();

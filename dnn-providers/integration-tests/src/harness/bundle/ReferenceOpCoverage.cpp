@@ -137,16 +137,43 @@ std::optional<bool> graphUsesFp8Tensors(const void* graphBuffer, size_t size)
     return false;
 }
 
+std::optional<bool> graphUsesSeqLenTensors(const void* graphBuffer, size_t size)
+{
+    try
+    {
+        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+            graphBuffer, size);
+        const auto setsSeqLen = [](const auto* attributes) {
+            return attributes != nullptr
+                   && (attributes->seq_len_q_tensor_uid().has_value()
+                       || attributes->seq_len_kv_tensor_uid().has_value());
+        };
+        for(uint32_t i = 0; i < graph.nodeCount(); ++i)
+        {
+            const auto& node = graph.getNode(i);
+            if(setsSeqLen(node.attributes_as_SdpaAttributes())
+               || setsSeqLen(node.attributes_as_SdpaBackwardAttributes()))
+            {
+                return true;
+            }
+        }
+    }
+    catch(const std::exception&)
+    {
+        return std::nullopt;
+    }
+    return false;
+}
+
 std::vector<std::string>
     exclusionReasons(ReferenceExecutorType type, const void* graphBuffer, size_t size)
 {
-    // Three walks of the same buffer, at registration time only.  Folding them into
-    // one pass would mean hand-rolling the node and tensor traversals here instead of
-    // reusing the queries the tests pin individually.
+    // Repeated walks of the same buffer; runs only at registration time.
     const auto types = graphNodeTypes(graphBuffer, size);
     const auto ragged = graphUsesRaggedTensors(graphBuffer, size);
     const auto fp8 = graphUsesFp8Tensors(graphBuffer, size);
-    if(!types.has_value() || !ragged.has_value() || !fp8.has_value())
+    const auto seqLen = graphUsesSeqLenTensors(graphBuffer, size);
+    if(!types.has_value() || !ragged.has_value() || !fp8.has_value() || !seqLen.has_value())
     {
         return {std::string(K_UNREADABLE_GRAPH)};
     }
@@ -171,11 +198,11 @@ std::vector<std::string>
     {
         reasons.emplace_back(K_RAGGED_TENSORS);
     }
-    // FP8 is GPU-only: no GPU plan builder registers an FP8 signature, and
-    // GpuFpReferenceSdpa::fprop() takes no descale parameters at all, so FP8 is a
-    // missing feature in the reference kernel rather than a missing registry line.
-    // The CPU reference has BlockScaleDequantizePlan and may legitimately handle FP8
-    // for ops in its own set, so excluding it there would over-reject.
+    if(*seqLen)
+    {
+        reasons.emplace_back(K_SEQ_LEN_TENSORS);
+    }
+    // The GPU reference does not support FP8; the CPU reference may.
     if(*fp8 && type == ReferenceExecutorType::GPU)
     {
         reasons.emplace_back(K_FP8_TENSORS);

@@ -202,17 +202,8 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
     }
 }
 
-// Registers one validation test per bundle this reference is *required* to handle
-// and for which golden data exists. Both conditions are checked here rather than in
-// the body precisely so the harness has no skip path: if a test exists, it must run
-// and pass.
-//
-// A test exists only where the reference is required to handle both the op and every
-// graph feature the bundle uses -- ragged offsets and FP8 live on the tensors, not on
-// the node type, so the op set alone cannot express them. A bundle excluded for
-// either is absent from the suite and named in the summary, never
-// registered-and-failed, and the count is logged so the gap is visible rather than
-// silent.
+// Registers a test only for bundles with golden data that this reference is required to
+// handle, so the harness has no skip path; exclusion reasons for the rest are logged.
 inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
                                              ReferenceExecutorType referenceType)
 {
@@ -234,10 +225,6 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
                referenceType, bundle.bundle->graphBuffer.data(), bundle.bundle->graphBuffer.size()))
         {
             excluded++;
-            // Name what is responsible, not just the tally. The op set is a
-            // commitment (see ReferenceOpCoverage.hpp): "7 bundles excluded" says a
-            // gap exists, "7 excluded: ConvolutionBwdData, Reduction" says which one
-            // to close.
             for(auto& reason : exclusionReasons(referenceType,
                                                 bundle.bundle->graphBuffer.data(),
                                                 bundle.bundle->graphBuffer.size()))

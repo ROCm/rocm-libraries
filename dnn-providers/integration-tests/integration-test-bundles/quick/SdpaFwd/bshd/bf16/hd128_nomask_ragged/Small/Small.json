@@ -59,80 +59,80 @@
             "name": "Q",
             "dims": [
                 3,
-                512,
-                4,
+                256,
+                2,
                 128
             ],
             "strides": [
-                262144,
-                512,
+                65536,
+                256,
                 128,
                 1
             ],
             "data_type": "bfloat16",
             "virtual": false,
             "ragged_offset_tensor_uid": 10,
-            "ragged_offset_multiplier": 512
+            "ragged_offset_multiplier": 256
         },
         {
             "uid": 1,
             "name": "K",
             "dims": [
                 3,
-                512,
-                4,
+                256,
+                2,
                 128
             ],
             "strides": [
-                262144,
-                512,
+                65536,
+                256,
                 128,
                 1
             ],
             "data_type": "bfloat16",
             "virtual": false,
             "ragged_offset_tensor_uid": 11,
-            "ragged_offset_multiplier": 512
+            "ragged_offset_multiplier": 256
         },
         {
             "uid": 2,
             "name": "V",
             "dims": [
                 3,
-                512,
-                4,
+                256,
+                2,
                 128
             ],
             "strides": [
-                262144,
-                512,
+                65536,
+                256,
                 128,
                 1
             ],
             "data_type": "bfloat16",
             "virtual": false,
             "ragged_offset_tensor_uid": 11,
-            "ragged_offset_multiplier": 512
+            "ragged_offset_multiplier": 256
         },
         {
             "uid": 3,
             "name": "O",
             "dims": [
                 3,
-                512,
-                4,
+                256,
+                2,
                 128
             ],
             "strides": [
-                262144,
-                512,
+                65536,
+                256,
                 128,
                 1
             ],
             "data_type": "bfloat16",
             "virtual": false,
             "ragged_offset_tensor_uid": 10,
-            "ragged_offset_multiplier": 512
+            "ragged_offset_multiplier": 256
         },
         {
             "uid": 10,
