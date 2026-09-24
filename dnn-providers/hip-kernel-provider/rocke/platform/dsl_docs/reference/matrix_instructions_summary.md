@@ -454,15 +454,13 @@ per-block **scale** operands. **No native XF32/TF32 or F64 matrix instruction.**
 | F16 in | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | BF16 in | ✅ | ✅ (1K) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | INT8 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| INT4 | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❓ |
+| INT4 | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ |
 | FP64 | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **XF32 / TF32** | ❌ | ❌ | **✅** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | FP8/BF8 | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
 | F8F6F4 / FP4 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | Block scaling (MX) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | Sparse (SMFMAC/SWMMAC) | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
-
-`❓` = not located in the source document's opcode table; see the per-section note.
 
 **XF32 note:** `V_MFMA_F32_16X16X8_XF32` (opcode 62) and
 `V_MFMA_F32_32X32X4_XF32` (opcode 63) are present on gfx942, a supported rocKE
