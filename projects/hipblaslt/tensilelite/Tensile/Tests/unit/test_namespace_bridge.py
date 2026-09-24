@@ -72,3 +72,25 @@ else:
     raise AssertionError("missing compatibility module unexpectedly imported")
 """
     _run_script(script)
+
+
+def test_missing_canonical_package_does_not_install_finder():
+    script = f"""
+import sys
+
+from Tensile._namespace_bridge import install_alias
+
+alias = {_ALIAS!r}
+meta_path = tuple(sys.meta_path)
+
+try:
+    install_alias(alias=alias, canonical="_canonical_package_that_does_not_exist")
+except ModuleNotFoundError as error:
+    assert error.name == "_canonical_package_that_does_not_exist"
+else:
+    raise AssertionError("missing canonical package unexpectedly imported")
+
+assert tuple(sys.meta_path) == meta_path
+assert not any(name == alias or name.startswith(f"{{alias}}.") for name in sys.modules)
+"""
+    _run_script(script)
