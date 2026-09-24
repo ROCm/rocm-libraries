@@ -10,7 +10,7 @@ with pluggable scheduling rules.
 from typing import List, Tuple, Optional
 from rocisa.code import Module
 from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstruction, \
-    LocalReadInstruction, GlobalReadInstruction, CommonInstruction
+    LocalReadInstruction, GlobalReadInstruction, GlobalWriteInstruction, CommonInstruction
 
 
 class _SlotPlacer:
@@ -193,6 +193,7 @@ _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250 = 8
 
 _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
+_isBufferStore = lambda x: isinstance(x, GlobalWriteInstruction)
 _isWaitCnt = lambda x: isinstance(x, SWaitCnt)
 _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') and hasattr(x.dst, 'regType') and x.dst.regType == 'm'
 # Typed op detection (see SWaitCntEx.isWaitGr / SBarrier) rather than matching
@@ -544,3 +545,46 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
                 inst.vlcnt += bufLoadCount
 
     return scheduled
+
+
+def relaxWaitGrForOutstandingStores(module):
+    """Stop the wait_gr waits from draining the fused epilogue's D stores.
+
+    vmcnt is a single in-order counter over every VMEM op, loads and stores
+    alike, so a count sized for the global reads also forces every store issued
+    after them to retire. A wait_gr exists to order the global reads against
+    the local reads that follow the barrier; it has no reason to wait on a
+    store, and waiting on one costs the full trip to memory.
+
+    The post-pass in instructionSchedule cannot see this. It runs per subIterK,
+    while the staged drain is woven into the partition afterwards, so at that
+    point the stores do not exist yet. Hence a second pass here, against the
+    final order.
+
+    Only the trailing stores can be spared. The counter retires in order, so a
+    store issued before the last outstanding load is drained either way and
+    nothing can be done about it; the stores after it are pure cost. Loads are
+    still fully drained, which is the whole point of the wait.
+
+    Left the split NGLL/NLL schedule alone in practice, since there the global
+    reads in flight at each seam already pushed the count past the stores --
+    protection that was accidental, and that disappeared once the four-deep
+    tail stopped issuing global reads of its own.
+    """
+    outstanding = []                      # 'l' / 's', oldest first
+    for inst in module.flatitems():
+        if _isBufferLoad(inst):
+            outstanding.append('l')
+        elif _isBufferStore(inst):
+            outstanding.append('s')
+        elif _isWaitCnt(inst) and inst.vlcnt >= 0:
+            if _isWaitGr(inst):
+                trailing = 0
+                for kind in reversed(outstanding):
+                    if kind != 's':
+                        break
+                    trailing += 1
+                inst.vlcnt += trailing
+            keep = min(inst.vlcnt, len(outstanding))
+            del outstanding[:len(outstanding) - keep]
+    return module

@@ -4060,6 +4060,7 @@ class LogicalScheduler:
         """
         from Tensile.Components.Subtile.InstructionScheduler import (
             instructionSchedule,
+            relaxWaitGrForOutstandingStores,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
@@ -4162,6 +4163,10 @@ class LogicalScheduler:
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
+        # The staged drain is woven in above, after each subIterK was scheduled,
+        # so this is the first point at which the D stores and the wait_gr counts
+        # are visible together.
+        module = relaxWaitGrForOutstandingStores(module)
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
