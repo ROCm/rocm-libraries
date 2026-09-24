@@ -445,8 +445,11 @@ def _computeLROffset(module, tileInfo, colOffset, rowOffset, swizzled):
     module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId-1]), src1=hex(colsPerRead), comment="%s: colOffset for read %u"%(tc, vgprId)))
     module.add(VAndB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=hex(blockSize-1), comment="%s: colOffset = colOffset %% block_size"%tc))
 
+  # Preshuffled dense layout: a K-group (lane16Group) spans one M_outer block of MiM rows,
+  # so its byte stride is MiM*loadWidth (256B), not loadWidth (16B).
+  colStride = int(tileInfo.mmaTileShape[0]) * loadWidth if tileInfo.isPreShuffled else loadWidth
   for vgprId in range(0, len(tileInfo.sharedVgprLROffset)):
-    module.add(VLShiftLeftB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(tileInfo.sharedVgprLROffset[vgprId]), comment="%s: colOffset*loadWidth"%tc))
+    module.add(VLShiftLeftB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), shiftHex=hex(colStride.bit_length()-1), src=vgpr(tileInfo.sharedVgprLROffset[vgprId]), comment="%s: colOffset*%d"%(tc, colStride)))
     module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(rowOffset), comment="%s: row + col"%tc))
 
 
@@ -463,6 +466,82 @@ def _computeLROffsetLinear(module, kernel, writer, tileInfo):
                        src1=vgpr(laneId),
                        comment="%s: linear pre-shuffled LR offset %u" % (tileInfo.tc, i)))
   writer.vgprPool.checkIn(laneId)
+
+
+def _computeLROffsetLinearInterleaved(module, kernel, writer, tileInfo):
+  """Interleaved (SourceSwap VW) linear read of a host-preshuffled tile.
+
+  SourceSwap feeds the preshuffled tile into the MFMA's swapped operand slot,
+  which expects each lane to own VW *consecutive* M-rows (logical row VW*lane16 +
+  sId0) instead of the stride-MiM rows of the blocked read. The consecutive rows
+  come from the same preshuffled block layout gathered per lane:
+    byte = (lane16 // (MiM/VW)) * (MiM*depthUBytes)     # M_outer block (2048 stride)
+         + (lane16 %  (MiM/VW)) * (VW*loadWidth)        # within-block VW-row half
+         + lane16Group * (MiM*loadWidth)               # K group (256 stride)
+         + i * mmaTileSize                             # per-read K, as in the blocked path
+  The per-tile sId0 delta (VW*loadWidth granularity) rides on emitSingleDsRead.
+  """
+  tc = tileInfo.tc
+  ws = kernel["WavefrontSize"]
+  mi_m = int(tileInfo.mmaTileShape[0])
+  loadWidth = int(tileInfo.loadWidthLR)
+  vw = int(getattr(tileInfo, "lrInterleaveVW", 1))
+  depthUBytes = int(tileInfo.depthUBytes)
+  mOuterStride = mi_m * depthUBytes
+  groupsPerBlk = max(mi_m // vw, 1)
+  # Bank-spread within-block layout: put the within-block lane variation (dense
+  # half h, K group g) on the LOW (bank) address bits so the 8 lanes of each
+  # ds_read hit 8 distinct banks; sId0 rides on the high bits (see emitSingleDsRead).
+  # The DTL write matches this via _preShuffleBankSwizzleLane in SubtileGREmit.
+  kGroupStride = groupsPerBlk * loadWidth   # g -> stride groupsPerBlk*loadWidth
+  denseSpan = loadWidth                      # h -> stride loadWidth (bank bit)
+  # Block padding de-conflicts banks: each M_outer block spans a whole number of
+  # SUBTILE_LDS_BLOCK_BYTES, so its padded stride is mOuterStride + its pad delta.
+  # The within-block terms (K group, dense half) stay < one block so they need no
+  # pad. Matches _padM0Offset on the DTL write.
+  mOuterStridePadded = mOuterStride + ldsBlockPadDelta(tileInfo, mOuterStride)
+
+  lane16 = writer.vgprPool.checkOut(1, tag="_computeLROffsetLinearInterleaved_lane16")
+  kGroup = writer.vgprPool.checkOut(1, tag="_computeLROffsetLinearInterleaved_kGroup")
+  base = writer.vgprPool.checkOut(1, tag="_computeLROffsetLinearInterleaved_base")
+  tmp = writer.vgprPool.checkOut(1, tag="_computeLROffsetLinearInterleaved_tmp")
+  module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=hex(mi_m - 1),
+                     comment="%s: lane16" % tc))
+  module.add(VAndB32(dst=vgpr(kGroup), src0=vgpr("Serial"), src1=hex(ws - 1),
+                     comment="%s: laneId" % tc))
+  module.add(VLShiftRightB32(dst=vgpr(kGroup), shiftHex=hex(mi_m.bit_length() - 1),
+                             src=vgpr(kGroup), comment="%s: lane16Group (K)" % tc))
+  module.add(VLShiftRightB32(dst=vgpr(base), shiftHex=hex(groupsPerBlk.bit_length() - 1),
+                             src=vgpr(lane16), comment="%s: M_outer block idx" % tc))
+  if mOuterStridePadded & (mOuterStridePadded - 1) == 0:
+    module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(mOuterStridePadded.bit_length() - 1),
+                              src=vgpr(base), comment="%s: * %dB M_outer stride" % (tc, mOuterStridePadded)))
+  else:
+    sMOuter = writer.sgprPool.checkOut(1, tag="_computeLROffsetLinearInterleaved_sMOuter", preventOverflow=False)
+    module.add(SMovB32(dst=sgpr(sMOuter), src=hex(mOuterStridePadded), comment="padded M_outer stride %d" % mOuterStridePadded))
+    module.add(VMulLOU32(dst=vgpr(base), src0=sgpr(sMOuter), src1=vgpr(base),
+                         comment="%s: * %dB padded M_outer stride" % (tc, mOuterStridePadded)))
+    writer.sgprPool.checkIn(sMOuter)
+  module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(lane16), src1=hex(groupsPerBlk - 1),
+                     comment="%s: within-block half" % tc))
+  module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(denseSpan.bit_length() - 1),
+                            src=vgpr(tmp), comment="%s: * %dB dense rows" % (tc, denseSpan)))
+  module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(tmp),
+                     comment="%s: interleaved M base" % tc))
+  module.add(VLShiftLeftB32(dst=vgpr(kGroup), shiftHex=hex(kGroupStride.bit_length() - 1),
+                            src=vgpr(kGroup), comment="%s: * %dB K group" % (tc, kGroupStride)))
+  module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(kGroup),
+                     comment="%s: + K group" % tc))
+  for i, lrOffset in enumerate(tileInfo.sharedVgprLROffset):
+    # Each per-read K slice is mmaTileSize == one block, so pad it too.
+    padded = ldsBlockPadOffset(tileInfo, i * tileInfo.mmaTileSize)
+    module.add(VAddU32(dst=vgpr(lrOffset), src0=hex(padded),
+                       src1=vgpr(base),
+                       comment="%s: interleaved pre-shuffled LR offset %u" % (tc, i)))
+  writer.vgprPool.checkIn(lane16)
+  writer.vgprPool.checkIn(kGroup)
+  writer.vgprPool.checkIn(base)
+  writer.vgprPool.checkIn(tmp)
 
 
 def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
@@ -674,13 +753,26 @@ def _lraTileAssignment_legacy(writer, kernel):
     # factors agree.
     vwA = int(getattr(tileInfoA, "lrInterleaveVW", 1))
     vwB = int(getattr(tileInfoB, "lrInterleaveVW", 1))
-    _emitLaneRowBase(module, writer, tileInfoA, ldsRowStride, vwA, lane16, rowOffset)
+    # A host-preshuffled tile is already in MFMA-native layout: each MFMA M-tile is a
+    # contiguous 16-row block (m_outer, stride MiM*depthUBytes). The VW interleave
+    # reorders individual rows, which contradicts that block granularity, so a
+    # preshuffled tile keeps the blocked read (identical to the non-SourceSwap path)
+    # and only non-preshuffled tiles take the interleaved lane base. VW-store
+    # coalescing is a lane-level property and is unaffected by the blocked read.
+    def _emitRowBase(tInfo, vw, dst):
+      if tInfo.isPreShuffled:
+        return  # preshuffled tiles use _computeLROffsetLinear below
+      _emitLaneRowBase(module, writer, tInfo, ldsRowStride, vw, lane16, dst)
+    _emitRowBase(tileInfoA, vwA, rowOffset)
     rowOffsetB = rowOffset
-    if vwB != vwA:
+    if vwB != vwA or (tileInfoA.isPreShuffled != tileInfoB.isPreShuffled):
       rowOffsetB = tmpVgpr + 5
-      _emitLaneRowBase(module, writer, tileInfoB, ldsRowStride, vwB, lane16, rowOffsetB)
-    _computeLROffset(module, tileInfoA, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
-    _computeLROffset(module, tileInfoB, colOffset, rowOffsetB, writer.states.subtileLdsSwizzle)
+      _emitRowBase(tileInfoB, vwB, rowOffsetB)
+    for tInfo, roff in ((tileInfoA, rowOffset), (tileInfoB, rowOffsetB)):
+      if tInfo.isPreShuffled:
+        _computeLROffsetLinearInterleaved(module, kernel, writer, tInfo)
+      else:
+        _computeLROffset(module, tInfo, colOffset, roff, writer.states.subtileLdsSwizzle)
   else:
     # Non-SourceSwap fold path unchanged.
     # TDM pad adds 16B per row, breaking pow2; fall back to VMul when padded.
@@ -768,12 +860,28 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
       rowIdx = (sId0 % vw) + (instM * vw) * (sId0 // vw)
     else:
       rowIdx = sId0 * subtileShapeM * instM
-    offset = rowIdx * rowStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)
-    # These immediates cross block boundaries (unlike the non-subtile path, whose
-    # reads all sit inside one block), so they need the pad applied too. The base
-    # they are added to contributes at most one K-row below a block boundary.
-    assertLdsBlockPadSeparable(tileInfo, rowStride - int(tileInfo.loadWidthLR), offset)
-    offset = ldsBlockPadOffset(tileInfo, offset)
+    if tileInfo.isPreShuffled:
+      # Preshuffle dense layout: subtile row -> M-row delta rowIdx maps to
+      #   M_outer*mOuterStride + M_inner*loadWidth  (dense M_inner at loadWidth, M_outer at MiM*depthU)
+      # The block-level parts (M_outer, K) are pad-shifted to match _padM0Offset on
+      # the DTL write; M_inner stays within one block so it rides dense on top.
+      mOuterStride = instM * depthUBytes
+      m_outer = rowIdx // instM
+      m_inner = rowIdx % instM
+      # Bank-spread layout: sId0 (m_inner) rides on the HIGH within-block bits, past
+      # the (h,g) bank bits. Its stride is the byte span of the (h,g) group =
+      # numHG*loadWidth, numHG = waveSize//vw (matches _computeLROffsetLinearInterleaved).
+      vwLR = int(getattr(tileInfo, "lrInterleaveVW", 1))
+      sId0Stride = (int(tileInfo.waveSize) // max(vwLR, 1)) * int(tileInfo.loadWidthLR)
+      blockPart = m_outer * mOuterStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)
+      offset = ldsBlockPadOffset(tileInfo, blockPart) + m_inner * sId0Stride
+    else:
+      offset = rowIdx * rowStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)
+      # These immediates cross block boundaries (unlike the non-subtile path, whose
+      # reads all sit inside one block), so they need the pad applied too. The base
+      # they are added to contributes at most one K-row below a block boundary.
+      assertLdsBlockPadSeparable(tileInfo, rowStride - int(tileInfo.loadWidthLR), offset)
+      offset = ldsBlockPadOffset(tileInfo, offset)
 
   dstVgpr = dstTile.regList.indices[0]
   numRegs = len(dstTile.regList.indices)

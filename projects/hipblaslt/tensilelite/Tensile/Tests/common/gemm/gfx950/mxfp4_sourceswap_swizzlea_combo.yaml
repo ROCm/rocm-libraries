@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: MIT
+# F4BS TN + SourceSwap (SS1) + SwizzleTensorA (preshuffle A) combo kernel generation.
+# Proves the combo derives/codegens (kernel name carries _SS1_ and _STA_, VWA8/SVW8).
+# Run via bin/Tensile with GenerateSourcesAndExit to inspect the combined local read.
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  PrintSolutionRejectionReason: True
+  GenerateSourcesAndExit: True
+  KeepBuildTmp: True
+  CMakeBuildType: Release
+  NumElementsToValidate: 0
+  Device: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+
+BenchmarkProblems:
+  -
+    - # ProblemType — F4BS TN, bf16 out, SwizzleTensorA ON (minimal, no epilogue)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      SwizzleTensorA: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256, MIWaveTile [8,8]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - SourceSwap: [true]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

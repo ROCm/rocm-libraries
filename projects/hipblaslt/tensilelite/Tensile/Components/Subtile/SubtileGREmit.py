@@ -1058,10 +1058,36 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
     if not tileInfoA.isPreShuffled or not tileInfoB.isPreShuffled:
       _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPerLDSBanks,
                               laneId, colIdA, colIdB, waveId)
+  # Bank-spread the preshuffled A DTL write to match the LR bank-spread read
+  # (_computeLROffsetLinearInterleaved). The read remaps the within-block slot from
+  # old (sId0 low, h/g high) to new (h/g low = bank bits, sId0 high). The DTL write
+  # position (m0 + lane*16) is hardware-fixed, so feed the inverse-permuted lane to
+  # the existing global-offset computation: lane j (= new slot) loads the element
+  # that old-slot pi^{-1}(j) = ((j>>3)&7) | ((j&1)<<3) | (((j>>1)&3)<<4) mapped to.
+  rowIdA = rowId
+  if kernel.get("SourceSwap", False) and tileInfoA.isPreShuffled:
+    shuf = writer.vgprPool.checkOut(2, tag="_preShuffleBankSwizzleLane")
+    shufLane = shuf
+    shufTmp = shuf + 1
+    rowIdA = writer.vgprPool.checkOut(1, tag="_preShuffleBankSwizzle_rowIdA")
+    module.add(VLShiftRightB32(dst=vgpr(shufLane), shiftHex=hex(3), src=vgpr(laneId), comment="A bank-swz: sId0 = lane>>3"))
+    module.add(VAndB32(dst=vgpr(shufLane), src0=vgpr(shufLane), src1=hex(7), comment="A bank-swz: sId0 & 7 -> bits[2:0]"))
+    module.add(VAndB32(dst=vgpr(shufTmp), src0=vgpr(laneId), src1=hex(1), comment="A bank-swz: h = lane & 1"))
+    module.add(VLShiftLeftB32(dst=vgpr(shufTmp), shiftHex=hex(3), src=vgpr(shufTmp), comment="A bank-swz: h << 3"))
+    module.add(VAddU32(dst=vgpr(shufLane), src0=vgpr(shufLane), src1=vgpr(shufTmp), comment="A bank-swz: | h"))
+    module.add(VLShiftRightB32(dst=vgpr(shufTmp), shiftHex=hex(1), src=vgpr(laneId), comment="A bank-swz: lane>>1"))
+    module.add(VAndB32(dst=vgpr(shufTmp), src0=vgpr(shufTmp), src1=hex(3), comment="A bank-swz: g = (lane>>1) & 3"))
+    module.add(VLShiftLeftB32(dst=vgpr(shufTmp), shiftHex=hex(4), src=vgpr(shufTmp), comment="A bank-swz: g << 4"))
+    module.add(VAddU32(dst=vgpr(shufLane), src0=vgpr(shufLane), src1=vgpr(shufTmp), comment="A bank-swz: | g -> old-slot lane"))
+    module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr(shufLane), src1=hex(blockSize-1), comment="A bank-swz: colIdA from shuffled lane"))
+    module.add(VLShiftRightB32(dst=vgpr(rowIdA), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(shufLane), comment="A bank-swz: rowIdA from shuffled lane"))
+    writer.vgprPool.checkIn(shuf)
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoA, waveId, rowOffsetA)
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoB, waveId, rowOffsetB)
-  _grComputeAllOffsets_legacy(module, writer, tileInfoA, colIdA, rowId, rowOffsetA)
+  _grComputeAllOffsets_legacy(module, writer, tileInfoA, colIdA, rowIdA, rowOffsetA)
   _grComputeAllOffsets_legacy(module, writer, tileInfoB, colIdB, rowId, rowOffsetB)
+  if rowIdA != rowId:
+    writer.vgprPool.checkIn(rowIdA)
 
   for tile, rowOff in ((tileInfoA, rowOffsetA), (tileInfoB, rowOffsetB)):
     if tile.isPreShuffled:

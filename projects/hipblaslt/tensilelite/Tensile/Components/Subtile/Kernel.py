@@ -486,6 +486,11 @@ class TileInfo:
       # The LDS M-row stride is depthUBytes here: SourceSwap turns the swizzle off,
       # so a row is one contiguous DepthU, and row padding is mutually exclusive
       # with block padding.
+      # Preshuffle + SourceSwap: each MFMA M-outer block (MiM*depthUBytes) is a whole
+      # number of SUBTILE_LDS_BLOCK_BYTES blocks written at a pad-able DTL m0, and the
+      # interleaved read crosses those blocks via lane16, so block padding de-conflicts
+      # the banks here too. The read (SubtileLREmit._computeLROffsetLinearInterleaved /
+      # emitSingleDsRead) pads its M-outer and per-read strides to match _padM0Offset.
       self.ldsBlockPadBytes = 0 if isTDM else subtileLdsBlockPadBytes(kernel, self.depthUBytes)
       self.ldsRowPadBytes = 0 if self.ldsBlockPadBytes else (16 if isTDM else 0)
 
