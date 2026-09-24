@@ -178,8 +178,12 @@
         {"family": "wmma", "a": "bf8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_fp8"},
         {"family": "wmma", "a": "bf8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_bf8"},
         {"family": "wmma_scaled", "a": "fp8", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32"},
+        {"family": "wmma_scaled", "a": "fp6", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32"},
+        {"family": "wmma_scaled", "a": "bf6", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k32"},
         {"family": "wmma_scaled", "a": "bf8", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32"},
         {"family": "wmma_scaled", "a": "fp8", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16"},
+        {"family": "wmma_scaled", "a": "fp6", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k16"},
+        {"family": "wmma_scaled", "a": "bf6", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k16"},
         {"family": "wmma_scaled", "a": "bf8", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16"}
       ]
     },

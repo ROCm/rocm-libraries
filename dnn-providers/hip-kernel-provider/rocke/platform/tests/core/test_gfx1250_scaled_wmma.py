@@ -335,14 +335,14 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
             M=16,
             N=16,
             K=128,
-            dtype_b="bf8",
+            dtype_b="fp16",
             scale_dtype="e8m0",
             block_k=32,
             matrix_path="wmma_scale",
         )
         ok, why = is_valid_spec(bad_dtype)
         self.assertFalse(ok)
-        self.assertIn("requested operand and scale contract", why)
+        self.assertIn("A/B must be", why)
 
         bad_block = BlockScaledGemmSpec(
             name="bad_block",

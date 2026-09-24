@@ -25,7 +25,7 @@ class ScaleAssociation:
 def scaled_matrix_layout(dtype: str, abi_words: int) -> MatrixFragmentLayout:
     """gfx1250 scaled operand layout, independent of atom availability.
 
-    FP6 describes the transport contract for future catalog integration.
+    Matrix formats share storage mechanics but retain their atom-selected layout.
     """
     info = dtype_info(dtype)
     chunks = {"fp8e4m3": 16, "bf8e5m2": 16, "fp6e2m3": 32, "fp6e3m2": 32, "fp4e2m1": 32}
@@ -143,7 +143,7 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     atom = ArchTarget.from_gfx("gfx1250").mma.by_op_id(op_id.removeprefix("tile."))
     if atom is None or atom.family != "wmma_scaled":
         return None
-    formats = {"fp8e4m3": 0, "bf8e5m2": 1}
+    formats = {"fp8e4m3": 0, "bf8e5m2": 1, "fp6e2m3": 2, "fp6e3m2": 3}
     # The current backend supports E8M0 for both inputs and a shared K-group size.
     # Keep these restrictions here, independently of the catalog query model.
     if (

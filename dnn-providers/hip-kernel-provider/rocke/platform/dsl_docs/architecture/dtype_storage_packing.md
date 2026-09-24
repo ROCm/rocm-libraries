@@ -92,8 +92,9 @@ A/B layouts. Existing `a_frag_len`/`b_frag_len` retain their ABI-vector meaning.
 
 The current gfx1250 scaled matrix layouts have 64 elements per lane and sixteen
 i32 carriers. FP8 occupies all sixteen words. FP4 occupies eight and pads eight.
-The FP6 transport descriptor occupies twelve and pads four, without enabling
-FP6 catalog entries or numerical conversions.
+FP6 occupies twelve and pads four. The FP6 consumer adds homogeneous E2M3 and
+E3M2 catalog entries with E8M0 scales; the packing descriptor alone does not
+enable an instruction or numerical conversion.
 
 `ScaleAssociation` records `block_k`: how many source K elements share one
 scale. This is separate from the bit layout. Existing `ScalePacking(count,
@@ -113,10 +114,11 @@ FP4/FP6/FP8 matrix payloads, and scale word packing. Existing GEMM signatures
 remain compatible. HIP emits declarations for any encountered vector widths
 absent from its fixed compatibility prologue.
 
-The shared descriptor/helper changes can be consumed by both FP4 and FP6
-branches. FP4/FP8 builder migration can use them directly. Future FP6 numerical
-integration should consume the six-bit storage and fragment descriptors and
-retain separate target and conversion validation.
+The [FP6 GEMM builder](../../python/rocke/instances/gfx1250/block_scaled_gemm.py)
+consumes the shared tensor storage, matrix-fragment loader, and scale bit packer.
+Its E2M3/E3M2 numerical support is specific to the selected gfx1250 atoms.
+FP4 is an independent consumer of the same foundation; it is not a prerequisite
+for FP6. Target-independent storage does not establish gfx950 numerical support.
 
 First-class tensor-view/fragment IR nodes, arbitrary packed axes, masked partial
 tiles, concurrent packed stores, and scalar low-bit conversions are separate
