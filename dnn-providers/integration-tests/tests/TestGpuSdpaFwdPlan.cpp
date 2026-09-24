@@ -16,6 +16,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "RaggedGraphTestUtils.hpp"
 #include "SdpaFwdGraphTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuSdpaFwdPlan.hpp"
 
@@ -86,6 +87,24 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicable)
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(K_UID);
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
+}
+
+// Sdpa forward with ragged tensors are currently not supported by the GPU Sdpa reference
+// TODO: Remove this test once it is supported
+TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto graphBuilder = makeGraph();
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
