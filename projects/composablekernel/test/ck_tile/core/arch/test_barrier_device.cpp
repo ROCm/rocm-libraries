@@ -25,6 +25,184 @@ static_assert(kNumSteps % kNumSlots == 0,
 
 using ring_pipe = ck_tile::named_barrier_pipeline<ck_tile::ring_spec<kNumSlots, 1, 1>>;
 
+class Gfx125Device : public ::testing::Test
+{
+    protected:
+    void SetUp() override
+    {
+        if(!ck_tile::is_gfx125_supported())
+        {
+            // CTest reports a skip as PASS, so on a runner that is meant to be gfx1250 this
+            // would be indistinguishable from having run. Set CK_TILE_REQUIRE_GFX125=1 there
+            // to make it a failure instead.
+            const char* required = std::getenv("CK_TILE_REQUIRE_GFX125");
+            if(required != nullptr && required[0] == '1')
+            {
+                FAIL() << "CK_TILE_REQUIRE_GFX125=1 but the device reports '"
+                       << ck_tile::get_device_name() << "'";
+            }
+            GTEST_SKIP() << "hardware named barriers require gfx1250; device reports '"
+                         << ck_tile::get_device_name() << "'";
+        }
+    }
+};
+
+// Suites run in registration order, so the assumption every other test rests on runs first.
+using NamedBarrierAssumptionDevice = Gfx125Device;
+using NamedBarrierSlotRingDevice   = Gfx125Device;
+using NamedBarrierRingRunDevice    = Gfx125Device;
+
+// Isolates the one semantic every handshake rests on and nothing has confirmed: a signal from a
+// wave that never joined still counts toward the generation. Wave 0 only signals; wave 1 joins,
+// signals and waits on a barrier whose member count needs both. If the assumption is false,
+// wave 1 never wakes and the kernel hangs. The closing workgroup barrier keeps wave 0 from
+// exiting straight after its signal, so that a hang here can only mean the assumption.
+template <typename Pipe>
+struct signal_without_join_kernel
+{
+    using barrier_pipeline = Pipe;
+    using ring             = typename Pipe::template ring<0>;
+
+    static constexpr ck_tile::index_t kBlockSize = 2 * kWaveSize;
+
+    CK_TILE_DEVICE void operator()(int32_t* __restrict__ out) const
+    {
+        if constexpr(ring::kIsSupported)
+        {
+            const auto bar = Pipe::template init<signal_without_join_kernel>();
+            if(ck_tile::get_warp_id() == 0)
+            {
+                ring::template producer<0>::template prime<0>(bar);
+            }
+            else
+            {
+                ring::consumer::template wait<0>(bar);
+            }
+            __syncthreads();
+            out[threadIdx.x] = 1;
+        }
+        else
+        {
+            ck_tile::ignore = out;
+        }
+    }
+};
+
+// Never zero, and distinct per (step, producer, lane), so an unwritten output, a stale slot and
+// the other producer's half are all told apart from a correctly delivered value.
+constexpr int32_t fan_out_value(ck_tile::index_t step, int producer, int lane)
+{
+    return (step + 1) * 100000 + (producer + 1) * 1000 + lane + 1;
+}
+
+// Two producers feed two consumers through run(), the path the GEMM pipeline takes: a DATA
+// generation needs both producers' signals, and every release fans out to each producer's own
+// FREE barrier. Each producer owns one half of every slot, as the GEMM's A and B loaders do.
+// Consumers come first so that, as in the GEMM, they occupy waves [0, kNumConsumers).
+template <typename Pipe, ck_tile::index_t Lag>
+struct fan_out_ring_kernel
+{
+    using barrier_pipeline = Pipe;
+    using ring             = typename Pipe::template ring<0>;
+
+    static constexpr int kSlots     = ring::kNumSlots;
+    static constexpr int kProducers = ring::kNumProducerWaves;
+    static constexpr int kConsumers = ring::kNumConsumerWaves;
+
+    static constexpr ck_tile::index_t kBlockSize = (kProducers + kConsumers) * kWaveSize;
+
+    CK_TILE_DEVICE void operator()(int32_t* __restrict__ out, ck_tile::index_t num_steps) const
+    {
+        if constexpr(ring::kIsSupported)
+        {
+            static_assert(!ring::kIsSupported || ck_tile::get_warp_size() == kWaveSize,
+                          "one slot element per lane assumes wave32");
+
+            __shared__ int32_t slots[kSlots][kProducers][kWaveSize];
+
+            const int lane                 = static_cast<int>(threadIdx.x) % kWaveSize;
+            const ck_tile::index_t wave_id = ck_tile::get_warp_id();
+            const auto bar                 = Pipe::template init<fan_out_ring_kernel>();
+
+            if(wave_id < kConsumers)
+            {
+                ring::consumer::run(bar, num_steps, [&](auto slot, ck_tile::index_t step) {
+                    for(int p = 0; p < kProducers; ++p)
+                    {
+                        out[((wave_id * num_steps + step) * kProducers + p) * kWaveSize + lane] =
+                            slots[slot][p][lane];
+                    }
+                    __threadfence_block();
+                });
+            }
+            else
+            {
+                ck_tile::static_for<0, kProducers, 1>{}([&](auto p) {
+                    constexpr int kProducer = decltype(p)::value;
+                    if(wave_id == kConsumers + kProducer)
+                    {
+                        ring::template producer<kProducer>::template run<Lag>(
+                            bar,
+                            num_steps,
+                            [&](auto slot, ck_tile::index_t step) {
+                                slots[slot][kProducer][lane] = fan_out_value(step, kProducer, lane);
+                            },
+                            [](auto) { __threadfence_block(); });
+                    }
+                });
+            }
+        }
+        else
+        {
+            ck_tile::ignore = out;
+            ck_tile::ignore = num_steps;
+        }
+    }
+};
+
+// Launches one configuration and checks every consumer saw every step from both producers.
+template <typename Pipe, ck_tile::index_t Lag>
+void expect_fan_out_delivers(ck_tile::index_t num_steps)
+{
+    using kernel = fan_out_ring_kernel<Pipe, Lag>;
+    const int out_elems =
+        kernel::kConsumers * static_cast<int>(num_steps) * kernel::kProducers * kWaveSize;
+
+    ck_tile::DeviceMem out_buf(out_elems * sizeof(int32_t));
+    out_buf.SetBytePattern(0xFF);
+
+    ck_tile::launch_and_check(ck_tile::stream_config{},
+                              ck_tile::make_kernel(kernel{},
+                                                   dim3(1),
+                                                   dim3(kernel::kBlockSize),
+                                                   0,
+                                                   static_cast<int32_t*>(out_buf.GetDeviceBuffer()),
+                                                   num_steps));
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess) << "kernel did not complete";
+
+    std::vector<int32_t> out(out_elems);
+    out_buf.FromDevice(out.data());
+
+    for(int c = 0; c < kernel::kConsumers; ++c)
+    {
+        for(int step = 0; step < num_steps; ++step)
+        {
+            for(int p = 0; p < kernel::kProducers; ++p)
+            {
+                for(int lane = 0; lane < kWaveSize; ++lane)
+                {
+                    const int i =
+                        ((c * num_steps + step) * kernel::kProducers + p) * kWaveSize + lane;
+                    ASSERT_EQ(out[i], fan_out_value(step, p, lane))
+                        << "slots " << kernel::kSlots << ", lag " << Lag << ", steps " << num_steps
+                        << ": consumer " << c << " step " << step << " producer " << p << " lane "
+                        << lane;
+                }
+            }
+        }
+    }
+}
+
 // Never zero, so an unwritten output element and an undrained slot both stay distinguishable
 // from a legitimately delivered value.
 constexpr int32_t slot_value(int step, int lane) { return (step + 1) * 1000 + lane + 1; }
@@ -127,23 +305,32 @@ struct slot_ring_kernel
 
 } // namespace
 
-TEST(NamedBarrierSlotRingDevice, ProducerConsumerHandshakeOrdersEveryStep)
+TEST_F(NamedBarrierAssumptionDevice, SignalWithoutJoinCountsTowardTheGeneration)
 {
-    if(!ck_tile::is_gfx125_supported())
-    {
-        // CTest reports a skip as PASS, so on a runner that is meant to be gfx1250 this would
-        // be indistinguishable from having run. Set CK_TILE_REQUIRE_GFX125=1 there to make it
-        // a failure instead.
-        const char* required = std::getenv("CK_TILE_REQUIRE_GFX125");
-        if(required != nullptr && required[0] == '1')
-        {
-            FAIL() << "CK_TILE_REQUIRE_GFX125=1 but the device reports '"
-                   << ck_tile::get_device_name() << "'";
-        }
-        GTEST_SKIP() << "hardware named barriers require gfx1250; device reports '"
-                     << ck_tile::get_device_name() << "'";
-    }
+    using kernel = signal_without_join_kernel<ring_pipe>;
 
+    ck_tile::DeviceMem out_buf(kernel::kBlockSize * sizeof(int32_t));
+    out_buf.SetZero();
+
+    ck_tile::launch_and_check(
+        ck_tile::stream_config{},
+        ck_tile::make_kernel(kernel{},
+                             dim3(1),
+                             dim3(kernel::kBlockSize),
+                             0,
+                             static_cast<int32_t*>(out_buf.GetDeviceBuffer())));
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess) << "kernel did not complete";
+
+    std::vector<int32_t> out(kernel::kBlockSize);
+    out_buf.FromDevice(out.data());
+    for(int i = 0; i < kernel::kBlockSize; ++i)
+    {
+        ASSERT_EQ(out[i], 1) << "thread " << i << " never got past the barrier";
+    }
+}
+
+TEST_F(NamedBarrierSlotRingDevice, ProducerConsumerHandshakeOrdersEveryStep)
+{
     constexpr int kOutElems = kNumSteps * kWaveSize;
 
     ck_tile::DeviceMem out_buf(kOutElems * sizeof(int32_t));
@@ -180,4 +367,19 @@ TEST(NamedBarrierSlotRingDevice, ProducerConsumerHandshakeOrdersEveryStep)
                              << (first % kWaveSize) << ": expected "
                              << slot_value(first / kWaveSize, first % kWaveSize) << ", got "
                              << out[first];
+}
+
+TEST_F(NamedBarrierRingRunDevice, TwoProducersFeedEveryConsumerForAnyStepCount)
+{
+    using two_slots   = ck_tile::named_barrier_pipeline<ck_tile::ring_spec<2, 2, 2>>;
+    using three_slots = ck_tile::named_barrier_pipeline<ck_tile::ring_spec<3, 2, 2>>;
+
+    // Fewer steps than slots, exactly a slot's worth, and ragged tails past the first trip.
+    for(ck_tile::index_t num_steps : {1, 2, 3, 7, 12})
+    {
+        expect_fan_out_delivers<two_slots, 0>(num_steps);
+        expect_fan_out_delivers<two_slots, 1>(num_steps);
+        expect_fan_out_delivers<three_slots, 0>(num_steps);
+        expect_fan_out_delivers<three_slots, 2>(num_steps);
+    }
 }
