@@ -110,7 +110,7 @@ def assign_gpu_to_worker(worker_id):
     Worker IDs are in format 'gw0', 'gw1', 'gw2', etc.
     Sets HIP_VISIBLE_DEVICES to isolate GPU access per worker.
 
-    If you have N GPUs and M workers:
+    If N GPUs are visible to this process and there are M workers:
     - Worker 0 -> GPU 0, Worker 1 -> GPU 1, ..., Worker N-1 -> GPU N-1
     - Worker N -> GPU 0, Worker N+1 -> GPU 1, etc. (wraps around)
     """
@@ -118,8 +118,7 @@ def assign_gpu_to_worker(worker_id):
         # Single worker or master process - use all GPUs
         return
 
-    import re
-    from Tensile.ParallelExecution import detectAvailableGpus
+    from Tensile.Tests.gpu_detection import worker_gpu_index
 
     base_memfile = os.environ.get("HSA_MODEL_MEMFILE", "")
     if base_memfile:
@@ -127,14 +126,10 @@ def assign_gpu_to_worker(worker_id):
         print(f"Worker {worker_id}: HSA_MODEL_MEMFILE={os.environ['HSA_MODEL_MEMFILE']}")
         return
 
-    num_gpus = detectAvailableGpus()
-    # Extract numeric ID from worker_id (e.g., 'gw0' -> 0, 'gw1' -> 1)
-    match = re.search(r'\d+', worker_id)
-    if match:
-        worker_num = int(match.group())
-        gpu_id = worker_num % num_gpus  # Use modulo to wrap around available GPUs
+    gpu_id = worker_gpu_index(worker_id)
+    if gpu_id is not None:
         os.environ['HIP_VISIBLE_DEVICES'] = str(gpu_id)
-        print(f"Worker {worker_id} assigned to GPU {gpu_id} (total GPUs: {num_gpus})")
+        print(f"Worker {worker_id} assigned to GPU {gpu_id}")
     else:
         print(f"Warning: Could not parse worker_id '{worker_id}' for GPU assignment")
 
@@ -191,24 +186,6 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
 
     return rv
 
-def visibleDeviceCount():
-    """
-    Number of devices HIP will expose to this process.
-
-    detectAvailableGpus() reports the physical count and ignores both variables.
-    """
-    counts = [
-        len([d for d in value.split(",") if d.strip()])
-        for value in (os.environ.get("ROCR_VISIBLE_DEVICES"),
-                      os.environ.get("HIP_VISIBLE_DEVICES"))
-        if value is not None
-    ]
-    if counts:
-        return min(counts)
-
-    from Tensile.ParallelExecution import detectAvailableGpus
-    return detectAvailableGpus()
-
 def commSkipMark(config):
     """Mark to apply to `comm` tests, or None when they can run here."""
     if config.getoption("--build-only", default=False):
@@ -219,7 +196,8 @@ def commSkipMark(config):
             reason="comm tests need 2+ devices; assign_gpu_to_worker pins each "
                    "xdist worker to one")
 
-    count = visibleDeviceCount()
+    from Tensile.Tests.gpu_detection import visible_device_count
+    count = visible_device_count()
     if count < 2:
         return pytest.mark.skip(
             reason=f"comm tests need 2+ visible HIP devices, found {count}")
