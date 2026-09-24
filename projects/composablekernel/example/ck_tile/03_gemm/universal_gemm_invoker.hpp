@@ -8,6 +8,10 @@
 #include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/host/device_memory.hpp"
 
+// TEMPORARY CI PROBE - remove before review.
+// Verifies the selective-test filter maps a header change to
+// tile_example_gemm_universal. No semantic effect.
+
 struct UniversalInvoker
 {
     template <typename GemmConfig,
