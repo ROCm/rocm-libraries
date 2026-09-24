@@ -21,21 +21,15 @@ struct BaseGemmPipelineAgBgCrCompV3
     static constexpr index_t GlobalBufferNum  = 1;
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
 
-    // The NumWarps==8 special-cased hot-loop/tail schedule below was written for
-    // wave64 512-thread blocks (gfx9xx / MFMA). On gfx1250 (WMMA, wave32) an
-    // 8-warp block is only 256 threads -- the same thread count as a 4-warp
-    // wave64 block -- so ordinary comp_v3 uses the standard schedule. Using
-    // the wave64 8-warp schedule there miscomputes has_hot_loop / tail_number and
-    // makes the intrawave RUN path execute an extra block_gemm on a non-existent
-    // K-tile, producing wrong results (ROCm/rocm-libraries#11161). Disable the
-    // implicit 8-warp special case on gfx1250. The dedicated eight-wave async
-    // pipeline explicitly opts in through Force8WarpSchedule because its
-    // ping/pong implementation requires all five tail cases on both targets.
-    // NOTE: all users of these functions are CK_TILE_DEVICE (the pipeline
-    // operator() and the grouped/persistent kernel launchers), and TailHandler's
-    // scenarios[] compiles in the same device pass, so this __gfx125__/__GFX12__
-    // guard is host/device consistent.
-#if defined(__gfx125__) || defined(__GFX12__)
+    // The special eight-warp schedule was written for wave64 512-thread blocks.
+    // Ordinary comp_v3 on wave32 WMMA targets (gfx11/gfx12) must use the standard
+    // schedule: the wave64 path executes an extra block_gemm on a nonexistent
+    // K-tile (ROCm/rocm-libraries#11161). The dedicated eight-wave async pipeline
+    // opts in through Force8WarpSchedule because its ping/pong implementation
+    // requires all five tail cases on both gfx950 and gfx1250.
+    // core/config.hpp defines the lowercase family guards; __gfx12__ includes
+    // gfx1250. Do not use the nonexistent uppercase __GFX12__ guard.
+#if defined(__gfx11__) || defined(__gfx12__)
     static constexpr bool Use8WarpSchedule = Force8WarpSchedule;
 #else
     static constexpr bool Use8WarpSchedule =
