@@ -82,10 +82,10 @@ owns its datatype, instruction and scale-layout restrictions. The library
 propagates provider support failures, including a mismatch between the supplied
 physical MX scale layout and the compiled solution.
 
-`../clients/tests/jit/test_helper_failures.py` removes helper modules or symbols from a
+`clients/tests/jit/test_helper_failures.py` removes helper modules or symbols from a
 valid split-K bundle, checks that C/extension paths leave D and workspace
 untouched, and verifies that failed reinitialization preserves the previous
-extension algorithm. `../clients/tests/jit/test_bundle_failures.py` checks malformed
+extension algorithm. `clients/tests/jit/test_bundle_failures.py` checks malformed
 envelopes, missing code, mismatched solution identity and unsupported problems
 through the same public API. Both scripts run in the shared JIT workflow.
 
