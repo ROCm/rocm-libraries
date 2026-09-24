@@ -75,6 +75,11 @@ inline Error executeWithPlan(hipdnnHandle_t handle,
 //
 // Failure cleanup releases and drains before the next candidate can run. The Error
 // is constructed before cleanup, preserving the original backend diagnostic.
+//
+// A finite negative elapsed reading is an invalid measurement, not a backend failure: this
+// returns ErrorCode::OK with `timing` left at its default INVALID/empty/timedOut=false, and
+// does not replay. A non-finite (NaN/Inf) reading is a genuine backend error and returns a
+// bad Error, same as any other failed step above.
 inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                   const ScopedHipdnnBackendDescriptor& execPlan,
                                   const ScopedHipdnnBackendDescriptor& variantPackDesc,
@@ -187,10 +192,18 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
         timing.timedOut = true;
         return {ErrorCode::OK, ""};
     }
-    if(!std::isfinite(elapsedMs) || elapsedMs < 0.0f)
+    if(!std::isfinite(elapsedMs))
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                "Backend reported a non-finite or negative profiling elapsed time"};
+                "Backend reported a non-finite profiling elapsed time"};
+    }
+    if(elapsedMs < 0.0f)
+    {
+        // A finite negative elapsed time is a bad reading, not a backend failure: leave
+        // `timing` at its default INVALID quality / empty elapsedMs / timedOut=false (set
+        // above) and report success. The caller decides whether/how to retry; this
+        // function never replays the measurement itself.
+        return {ErrorCode::OK, ""};
     }
     timing.quality = stallUsed ? TimingQuality::DEVICE_ONLY : TimingQuality::UNSTALLED;
     timing.elapsedMs = elapsedMs;

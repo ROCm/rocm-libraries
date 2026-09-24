@@ -8497,8 +8497,11 @@ TEST_F(TestGraph, TimedExecuteAcceptsZeroElapsed)
     EXPECT_FLOAT_EQ(*timing.elapsedMs, 0.0f);
 }
 
-TEST_F(TestGraph, TimedExecuteRejectsNegativeElapsed)
+TEST_F(TestGraph, TimedExecuteReportsInvalidOnNegativeElapsedWithExactlyOneExecution)
 {
+    // A finite negative elapsed time is a bad reading, not a backend failure: the call still
+    // succeeds, executes exactly once, and does not replay -- unlike autotuneImpl()'s
+    // ranked-loop retry policy (see TestAutotune's transient-negative-elapsed tests).
     ::testing::FLAGS_gmock_verbose = "error";
     GraphTestUtils graph;
     graph.injectValidCompiledPlan(1, 0, false);
@@ -8512,9 +8515,10 @@ TEST_F(TestGraph, TimedExecuteRejectsNegativeElapsed)
     ExecutionTiming timing;
     auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
-    EXPECT_FALSE(result.is_good());
+    EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(timing.quality, TimingQuality::INVALID);
     EXPECT_FALSE(timing.elapsedMs.has_value());
+    EXPECT_FALSE(timing.timedOut);
 }
 
 TEST_F(TestGraph, TimedExecuteRejectsNaNElapsed)

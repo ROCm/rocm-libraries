@@ -174,6 +174,11 @@ protected:
 
     void TearDown() override
     {
+        if(_timingScratch != nullptr)
+        {
+            EXPECT_EQ(hipFree(_timingScratch), hipSuccess);
+            _timingScratch = nullptr;
+        }
         _mockHandle.reset();
         if(_testStream != nullptr)
         {
@@ -181,6 +186,23 @@ protected:
             _testStream = nullptr;
         }
         TestProfilingControlDescriptor::TearDown();
+    }
+
+    // A successful timed span needs enough same-stream device work to clear the
+    // event timer's resolution. Allocate before arming: hipMalloc can synchronize.
+    static constexpr size_t TIMED_WORK_BYTES = size_t{4} * 1024 * 1024;
+    void prepareTimedWork()
+    {
+        if(_timingScratch == nullptr)
+        {
+            ASSERT_EQ(hipMalloc(&_timingScratch, TIMED_WORK_BYTES), hipSuccess);
+        }
+    }
+
+    void enqueueTimedWork()
+    {
+        ASSERT_NE(_timingScratch, nullptr);
+        ASSERT_EQ(hipMemsetAsync(_timingScratch, 0, TIMED_WORK_BYTES, _testStream), hipSuccess);
     }
 
     // Sets the handle on the descriptor, which creates the device events.
@@ -246,30 +268,36 @@ protected:
 
     std::unique_ptr<NiceMock<MockHandle>> _mockHandle = nullptr;
     hipStream_t _testStream = nullptr;
+    void* _timingScratch = nullptr;
 };
 
 TEST_F(TestGpuProfilingControlDescriptor, HappyPathCompletesLifecycle)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
 
     // getAttribute(ELAPSED_MS) round-trips: no throw, one element written.
-    // The elapsed value itself is driver-provided and not asserted.
+    // With real device work in the measured span, the elapsed value is valid.
     float elapsed = -1.0f;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
     EXPECT_EQ(elementCount, 1);
+    EXPECT_GE(elapsed, 0.0f);
 }
 
 TEST_F(TestGpuProfilingControlDescriptor, RebindingCannotChangeTheTimingContext)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
     ASSERT_NO_THROW(resetContext(desc));
@@ -289,6 +317,7 @@ TEST_F(TestGpuProfilingControlDescriptor, RebindingCannotChangeTheTimingContext)
     ON_CALL(*_mockHandle, getStream()).WillByDefault(Return(_testStream));
     ASSERT_NO_THROW(resetContext(desc));
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
     EXPECT_TRUE(desc->isFinalized());
@@ -331,7 +360,9 @@ TEST_F(TestGpuProfilingControlDescriptor, SetAttributeAfterFinalizeThrows)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
     bool value = true;
@@ -344,7 +375,9 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeAlreadyFinalizedThrows)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -370,7 +403,9 @@ TEST_F(TestGpuProfilingControlDescriptor, GetAttributeUnsupportedNameThrows)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
 
@@ -389,8 +424,8 @@ TEST_F(TestGpuProfilingControlDescriptor, GetAttributeUnsupportedNameThrows)
 // inside the measured span. The sleep stands in for descriptor validation, dispatch,
 // and logging, which is host work of the same shape but not a fixed duration.
 //
-// Both runs measure the same trivial device work, so the elapsed difference is the
-// host delay and nothing else.
+// Both runs enqueue the same above-resolution GPU work. Only the unstalled run
+// can include the host delay in its elapsed time.
 TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
 {
     if(!stallGateAvailable())
@@ -399,7 +434,12 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
     }
 
     constexpr auto HOST_DELAY = std::chrono::milliseconds(20);
-    constexpr size_t BUFFER_BYTES = 256;
+    // 256 B of memset work is small enough that its device duration can round to zero
+    // or even slip negative against ~1 us timer resolution, masking whatever the
+    // stall gate does or does not exclude. 4 MiB clears that floor with margin while
+    // still finishing well under the <5 ms stalled bound below (see
+    // TestAutotunePlugin's identical TIMING_SCRATCH_SIZE precedent).
+    constexpr size_t BUFFER_BYTES = size_t{4} * 1024 * 1024;
 
     void* buffer = nullptr;
     ASSERT_EQ(hipMalloc(&buffer, BUFFER_BYTES), hipSuccess);
@@ -441,6 +481,8 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
     // Reported unconditionally: a timing bound that flakes in CI is not diagnosable
     // without the two numbers that produced it.
     GTEST_LOG_(INFO) << "unstalled=" << unstalledMs << " ms, stalled=" << stalledMs << " ms";
+    EXPECT_GE(unstalledMs, 0.0f) << "unstalled timing returned an invalid elapsed value";
+    EXPECT_GE(stalledMs, 0.0f) << "stalled timing returned an invalid elapsed value";
 
 #if !defined(_WIN32)
     // The 20 ms host sleep lands inside the unstalled span on Linux. Windows/PAL
@@ -569,8 +611,10 @@ TEST_F(TestGpuProfilingControlDescriptor, TimedOutAttributeIsFalseForAHealthyMea
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(armStall(desc));
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(releaseStall(desc));
     ASSERT_NO_THROW(desc->finalize());
@@ -599,8 +643,10 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesUnreleasedStall)
 
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(armStall(desc));
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
 
@@ -643,7 +689,9 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesArmedStallBeforePrecon
     // gate, this blocks until the watchdog and the timed-out flag below exposes it.
     ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
 
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
     bool timedOut = true;
@@ -718,8 +766,10 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueWhenArmSucceeds)
 
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(armStall(desc));
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(releaseStall(desc));
     ASSERT_NO_THROW(desc->finalize());
@@ -738,7 +788,9 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWithoutArm)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
 
@@ -800,7 +852,9 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterSuccessfulMeasurementAllowsR
     auto desc = getDescriptor();
     ASSERT_NO_THROW(resetContext(desc));
     ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
     ASSERT_TRUE(desc->isFinalized());
@@ -810,6 +864,7 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterSuccessfulMeasurementAllowsR
 
     // Start/stop are not stuck "already recorded" from the first pass.
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
 
@@ -852,7 +907,9 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterTimeoutThenUnstalledThenStal
 
     // Reuse unstalled: reset, then a full lifecycle with no STALL_ARM_EXT at all.
     ASSERT_NO_THROW(resetContext(desc));
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
 
@@ -874,6 +931,7 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterTimeoutThenUnstalledThenStal
     ASSERT_NO_THROW(resetContext(desc));
     ASSERT_NO_THROW(armStall(desc));
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(releaseStall(desc));
     ASSERT_NO_THROW(desc->finalize());
@@ -921,8 +979,10 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterPartialMeasurementReleasesTh
         << "reset waited for the watchdog instead of releasing the gate";
     EXPECT_EQ(hipEventQuery(retired), hipSuccess) << "reset did not retire the queued work";
 
+    ASSERT_NO_FATAL_FAILURE(prepareTimedWork());
     ASSERT_NO_THROW(armStall(desc));
     ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_FATAL_FAILURE(enqueueTimedWork());
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(releaseStall(desc));
     ASSERT_NO_THROW(desc->finalize());

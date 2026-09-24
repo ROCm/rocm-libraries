@@ -306,24 +306,66 @@ TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
 }
 
 // ============================================================================
-// Malformed elapsed-time rejection: a non-finite or negative sample from the
-// timing callback must fail the benchmark rather than enter the timings
-// vector, the CoV convergence check, or averaging. Zero is a valid sample.
+// Negative/non-finite elapsed-time handling.
+//
+// A non-finite (NaN/Inf) sample is a real failure: it must fail the benchmark rather than
+// enter the timings vector, the CoV convergence check, or averaging. Zero is a valid sample.
+//
+// A finite negative sample is not a failure: it is a transient invalid reading that gets
+// replaced with a fresh measurement, up to two extra attempts per candidate. A negative
+// sample therefore never enters timings; the third such reading for this candidate
+// exhausts its retry budget even if valid readings occurred between negatives.
 // ============================================================================
 
-TEST(TestAutotune, RunUntilStableRejectsNegativeElapsed)
+TEST(TestAutotune, RunUntilStableReplacesSingleTransientNegativeElapsed)
 {
-    ScriptedTimer timer{{10.0f, 10.0f, -1.0f}, -1, 0};
+    // The 3rd call reports a negative reading; it is retried and the sequence cycles back to
+    // a valid 10.0 on the 4th call, so the window still converges on exactly 3 valid samples.
+    ScriptedTimer timer{{10.0f, 10.0f, -1.0f, 10.0f}, -1, 0};
     auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
                                                     WINDOW_SIZE,
                                                     STABILITY_THRESHOLD,
                                                     /*stalled=*/true,
                                                     timer,
                                                     noopRunUntilStableLog);
+    EXPECT_TRUE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_EQ(outcome.timings, (std::vector<float>{10.0f, 10.0f, 10.0f}));
+    // 3 recorded samples plus the one retried-away negative reading.
+    EXPECT_EQ(timer.callCount, 4);
+}
+
+TEST(TestAutotune, RunFixedAverageFailsAfterThirdConsecutiveNegativeElapsed)
+{
+    // 2 retries are spent on the first two negatives; the 3rd negative exhausts the budget
+    // and fails immediately -- the 4th (valid) scripted value is never reached, proving the
+    // candidate cannot spin forever waiting for a clean reading.
+    ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, 5.0f}, -1, 0};
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/3, /*stalled=*/true, timer, noopFixedAverageLog);
+
     EXPECT_FALSE(outcome.converged);
     EXPECT_TRUE(outcome.benchmarkFailed);
-    EXPECT_EQ(static_cast<int>(outcome.timings.size()), 2);
     EXPECT_FALSE(outcome.restartUnstalled);
+    EXPECT_TRUE(outcome.timings.empty());
+    EXPECT_EQ(timer.callCount, 3);
+}
+
+TEST(TestAutotune, RunFixedAverageKeepsExactRequestedCountAfterTransientRetry)
+{
+    // A negative reading mid-run is replaced in place; the output vector still has exactly
+    // the requested count, in order, with no negative sample among them.
+    ScriptedTimer timer{{4.0f, -1.0f, 5.0f, 6.0f}, -1, 0};
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/3, /*stalled=*/true, timer, noopFixedAverageLog);
+
+    EXPECT_TRUE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    ASSERT_EQ(outcome.timings.size(), 3u);
+    EXPECT_FLOAT_EQ(outcome.timings[0], 4.0f);
+    EXPECT_FLOAT_EQ(outcome.timings[1], 5.0f);
+    EXPECT_FLOAT_EQ(outcome.timings[2], 6.0f);
+    EXPECT_EQ(outcome.finalQuality, TimingQuality::DEVICE_ONLY);
 }
 
 TEST(TestAutotune, RunUntilStableAcceptsZeroElapsed)

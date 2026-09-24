@@ -4794,6 +4794,10 @@ public:
      *   measurement despite a timeout should invoke this method again. autotune() applies
      *   its own unstalled-restart policy internally; that policy is not shared with this
      *   public entry point.
+     * - TimingQuality::INVALID with timedOut=false and an OK Error: the backend reported a
+     *   finite negative elapsed time. This is a bad reading, not a failure -- execution
+     *   still ran exactly once, and this call does not retry or replay it. A non-finite
+     *   (NaN/Inf) reading is instead reported as a bad Error.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers

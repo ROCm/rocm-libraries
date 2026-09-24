@@ -1774,8 +1774,9 @@ enum class TimingQuality
     UNSTALLED, ///< Stalling was not used. This can be a requested unstalled pass or an
     ///< unavailable gate. Host submission may or may not be included, depending on
     ///< the runtime and engine. Do not rank against DEVICE_ONLY measurements.
-    INVALID ///< No usable measurement: the stall watchdog fired, or execution did not
-    ///< complete successfully.
+    INVALID ///< No usable measurement: the stall watchdog fired, the backend reported a
+    ///< finite negative elapsed time (an invalid reading, not itself a failure), or
+    ///< execution did not complete successfully.
 };
 
 /**
@@ -1783,7 +1784,9 @@ enum class TimingQuality
  * @brief Device-time measurement produced by execute_timed_ext()
  *
  * @c elapsedMs is empty whenever @c quality is TimingQuality::INVALID, and whenever the
- * owning call returned a bad Error.
+ * owning call returned a bad Error. A finite negative elapsed reading from the backend is
+ * one such INVALID case: the call still returns an OK Error, executes exactly once, and
+ * does not replay the measurement; only a non-finite (NaN/Inf) reading is a bad Error.
  *
  * Introduced in hipdnn_frontend 0.4.0.
  *

@@ -35,10 +35,16 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Sampling counts, matching MIOpen's EvaluateInvokers: one untimed warmup followed by
-/// up to eight total runs per candidate.
+/// Sampling counts: one untimed warmup and seven valid timed runs per candidate,
+/// matching MIOpen's EvaluateInvokers before replacement attempts.
 constexpr int BENCHMARK_WARMUP_RUNS = 1;
 constexpr int BENCHMARK_ITERATIONS = 7;
+
+/// A finite negative elapsed time is a known artifact of HIP event timing near the
+/// clock's resolution floor, not proof a candidate is broken: sampleCandidate() discards
+/// it and re-measures the same slot, using at most this many extra attempts for the
+/// whole candidate. NaN, Inf, and a backend timing error are never retried this way.
+constexpr int MAX_NEGATIVE_SAMPLE_RETRIES = 2;
 
 // A zero iteration count would leave sampleCandidate()'s reduction at its DBL_MAX seed
 // and report that as a real measurement, which reads as a successful benchmark rather
@@ -444,8 +450,15 @@ private:
     /// BENCHMARK_WARMUP_RUNS untimed ones. Any timed iteration that could not actually be
     /// measured stalled while @p stalled was requested -- a watchdog timeout, or a valid
     /// sample the timer reports as unstalled -- returns immediately with restartUnstalled
-    /// set; the two populations must never be averaged together. Any other failure to
-    /// time (or a malformed sample) scores the candidate unusable.
+    /// set; the two populations must never be averaged together. Both checks run before
+    /// the sign check below, so a negative sample can never hide a restart the comparison
+    /// actually needs. A backend error (no elapsed time at all) or a non-finite sample
+    /// (NaN/Inf) scores the candidate unusable immediately, with no retry. A finite
+    /// negative sample is instead treated as a transient HIP-event-timing artifact: it is
+    /// discarded and the same slot re-measured, using at most MAX_NEGATIVE_SAMPLE_RETRIES
+    /// extra attempts for the whole candidate; exhausting that budget scores the
+    /// candidate unusable without the malformed value ever reaching the reduction,
+    /// ranking, or cache.
     ///
     /// Samples are reduced with robustMean() rather than by taking the fastest: a kernel
     /// that is usually slower but occasionally lucky would win on its best sample and then
@@ -479,7 +492,8 @@ private:
 
             std::vector<double> samples;
             samples.reserve(BENCHMARK_ITERATIONS);
-            for(int iteration = 0; iteration < BENCHMARK_ITERATIONS; ++iteration)
+            int negativeSampleRetriesLeft = MAX_NEGATIVE_SAMPLE_RETRIES;
+            for(int iteration = 0; iteration < BENCHMARK_ITERATIONS;)
             {
                 const TimingResult sample = _timer ? TimingResult{_timer(*candidate.plan,
                                                                          handle,
@@ -510,26 +524,15 @@ private:
                                            << "' failed to time a launch; scored unusable");
                     return {std::nullopt, false};
                 }
-                // A malformed sample from either the default HIP-event timer or an
-                // injected one must not enter the reduction, ranking, or cache: dropping
-                // the whole candidate scores it unusable rather than letting a bogus
-                // negative/NaN/infinite value win or corrupt robustMean(). Zero is a
-                // valid sample (an unmeasurably fast launch).
-                if(!std::isfinite(*sample.elapsedMs) || *sample.elapsedMs < 0.0)
-                {
-                    HIPDNN_PLUGIN_LOG_WARN(
-                        "ingestor: benchmarking candidate '"
-                        << toString(candidate.kernelId)
-                        << "' reported a non-finite or negative elapsed time; scored unusable");
-                    return {std::nullopt, false};
-                }
-                if(stalled && !sample.stallUsed && sample.elapsedMs.has_value())
+                if(stalled && !sample.stallUsed)
                 {
                     // A genuine measurement, but not a stalled one (unsupported device, a
                     // transient arm failure, ...). Mixing it into a pass whose earlier
                     // samples were actually stalled would rank two incomparable
                     // populations exactly like a watchdog timeout, so it gets the same
-                    // whole-comparison restart rather than being accepted here.
+                    // whole-comparison restart rather than being accepted here. Checked
+                    // before the sign check below: a negative elapsed time must never
+                    // mask this restart behind a per-sample retry.
                     HIPDNN_PLUGIN_LOG_WARN(
                         "ingestor: benchmarking candidate '"
                         << toString(candidate.kernelId)
@@ -537,7 +540,44 @@ private:
                            "whole comparison will restart unstalled");
                     return {std::nullopt, true};
                 }
+                if(!std::isfinite(*sample.elapsedMs))
+                {
+                    // NaN/Inf is never a transient timing artifact -- it means the event
+                    // pair itself is broken -- so it is scored unusable immediately, with
+                    // no retry, exactly like the backend error above.
+                    HIPDNN_PLUGIN_LOG_WARN(
+                        "ingestor: benchmarking candidate '"
+                        << toString(candidate.kernelId)
+                        << "' reported a non-finite elapsed time; scored unusable");
+                    return {std::nullopt, false};
+                }
+                if(*sample.elapsedMs < 0.0)
+                {
+                    // A finite negative elapsed time is a known HIP-event-timing artifact
+                    // near the clock's resolution floor, not proof the candidate is
+                    // broken: discard it and re-measure the same slot rather than
+                    // condemning the whole candidate on one bad reading. A persistently
+                    // negative candidate still exhausts the retry budget and falls
+                    // through to the unusable return below, never entering the
+                    // reduction, ranking, or cache.
+                    if(negativeSampleRetriesLeft > 0)
+                    {
+                        --negativeSampleRetriesLeft;
+                        HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
+                                               << toString(candidate.kernelId)
+                                               << "' reported a negative elapsed time; "
+                                                  "discarding it and re-measuring");
+                        continue;
+                    }
+                    HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
+                                           << toString(candidate.kernelId)
+                                           << "' reported a negative elapsed time after exhausting "
+                                           << MAX_NEGATIVE_SAMPLE_RETRIES
+                                           << " retries; scored unusable");
+                    return {std::nullopt, false};
+                }
                 samples.push_back(*sample.elapsedMs);
+                ++iteration;
             }
             return {hipdnn_data_sdk::utilities::detail::robustMean(samples), false};
         }

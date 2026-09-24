@@ -240,16 +240,34 @@ struct BenchmarkTestHandle
     }
 };
 
+/// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(). 4 MiB
+/// clears hipEventElapsedTime's ~1 us resolution floor on every supported GPU with
+/// margin, so bracketing this work with real HIP events cannot report a sub-resolution
+/// or negative duration purely from having nothing to measure.
+constexpr size_t GPU_WORK_SCRATCH_BYTES = size_t{4} * 1024 * 1024;
+
 /// A minimal IPlan double recording every execute() call's arguments and count.
 /// Throws on the first @p throwForCalls invocations (default 0, never throws), then
-/// succeeds and counts a "launch".
+/// succeeds and counts a "launch". @p enqueueGpuWork additionally memsets a same-stream
+/// scratch buffer on every execute(): the real-HIP-timer tests need actual device work
+/// between the timer's start and stop events, or hipEventElapsedTime has nothing to
+/// measure and can report a sub-resolution or negative duration.
 class FakePlan : public hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>
 {
 public:
-    explicit FakePlan(size_t workspaceSize = 0, int throwForCalls = 0)
+    explicit FakePlan(size_t workspaceSize = 0, int throwForCalls = 0, bool enqueueGpuWork = false)
         : _workspaceSize(workspaceSize)
         , _throwForCalls(throwForCalls)
     {
+        if(enqueueGpuWork)
+        {
+            void* raw = nullptr;
+            if(hipMalloc(&raw, GPU_WORK_SCRATCH_BYTES) != hipSuccess || raw == nullptr)
+            {
+                throw std::runtime_error("FakePlan: GPU scratch allocation failed");
+            }
+            _gpuScratch = {raw, [](void* ptr) { static_cast<void>(hipFree(ptr)); }};
+        }
     }
 
     size_t getWorkspaceSize(const BenchmarkTestHandle& /*handle*/) const override
@@ -257,7 +275,7 @@ public:
         return _workspaceSize;
     }
 
-    void execute(const BenchmarkTestHandle& /*handle*/,
+    void execute(const BenchmarkTestHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override
@@ -266,6 +284,12 @@ public:
         _lastDeviceBuffers = deviceBuffers;
         _lastNumDeviceBuffers = numDeviceBuffers;
         _lastWorkspace = workspace;
+        if(!_gpuScratch.isEmpty()
+           && hipMemsetAsync(_gpuScratch.get(), 0, GPU_WORK_SCRATCH_BYTES, handle.getStream())
+                  != hipSuccess)
+        {
+            throw std::runtime_error("FakePlan: GPU work enqueue failed");
+        }
         if(_callCount <= _throwForCalls)
         {
             throw std::runtime_error("FakePlan: simulated failure");
@@ -296,6 +320,7 @@ public:
 private:
     size_t _workspaceSize;
     int _throwForCalls;
+    hipdnn_data_sdk::utilities::ScopedResource<void*> _gpuScratch;
     mutable int _callCount = 0;
     mutable int _launchCount = 0;
     mutable const hipdnnPluginDeviceBuffer_t* _lastDeviceBuffers = nullptr;
@@ -303,24 +328,28 @@ private:
     mutable void* _lastWorkspace = nullptr;
 };
 
-/// Blocks the host on the handle's own stream from inside execute(). With the stall gate
-/// armed the stream cannot drain until the host releases, and the host is stuck here, so
-/// only the watchdog ends it. This is the exact shape of caller code the watchdog exists
-/// for: a plugin free to synchronize inside the region hipDNN is timing.
-class StreamSyncingPlan : public hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>
+/// Blocks the host on the handle's own stream from inside execute(). The GPU work
+/// stays behind the stall gate until release; synchronizing it before the caller's
+/// release still requires the watchdog. The same work gives the unstalled rerun a
+/// meaningful interval to time.
+class StreamSyncingPlan : public FakePlan
 {
 public:
-    size_t getWorkspaceSize(const BenchmarkTestHandle& /*handle*/) const override
+    StreamSyncingPlan()
+        : FakePlan(/*workspaceSize=*/0, /*throwForCalls=*/0, /*enqueueGpuWork=*/true)
     {
-        return 0;
     }
 
     void execute(const BenchmarkTestHandle& handle,
-                 const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
-                 uint32_t /*numDeviceBuffers*/,
-                 void* /*workspace*/ = nullptr) const override
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 void* workspace = nullptr) const override
     {
-        static_cast<void>(hipStreamSynchronize(handle.getStream()));
+        FakePlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace);
+        if(hipStreamSynchronize(handle.getStream()) != hipSuccess)
+        {
+            throw std::runtime_error("StreamSyncingPlan: stream synchronization failed");
+        }
     }
 };
 
@@ -536,10 +565,9 @@ TEST(TestIngestorBenchmarkPlan, AnUntimeableCandidateIsScoredUnusableAndLosesToA
     EXPECT_EQ(timedRaw->launchCount(), SAMPLING_LAUNCHES + 1);
 }
 
-/// The only case exercising the DEFAULT timer: no timer argument, so makeHipEventTimer()
-/// runs for real against HIP. Every other case here injects a fake, which would let a
-/// regression in event creation, event reuse across samples, the record/synchronize
-/// pair, or the elapsed-time read pass unnoticed.
+/// The default timer runs against real HIP events and same-stream GPU work.
+/// This case verifies event creation, reuse, recording, synchronization, and elapsed
+/// readback without an injected timer; the watchdog and fault tests cover recovery.
 ///
 /// Asserting the exact count is what makes it meaningful: the timer must have returned a
 /// duration on all BENCHMARK_ITERATIONS samples. A single nullopt would score the
@@ -550,7 +578,7 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
 
     // Unsupported stream-wait devices must use ordinary event timing from the
     // first sample, without an extra discarded pass.
-    auto sub = std::make_unique<FakePlan>(64);
+    auto sub = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
     const auto* subRaw = sub.get();
 
     std::vector<TestBenchmarkPlan::Candidate> candidates;
@@ -621,8 +649,8 @@ TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutAbortsThePassImmediatelyAndRerun
             rawStream, [](hipStream_t s) { static_cast<void>(hipStreamDestroy(s)); });
         const BenchmarkTestHandle handle{stream.get()};
 
-        auto before = std::make_unique<FakePlan>(64);
-        auto after = std::make_unique<FakePlan>(64);
+        auto before = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+        auto after = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
         const auto* beforeRaw = before.get();
         const auto* afterRaw = after.get();
 
@@ -650,8 +678,7 @@ TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutAbortsThePassImmediatelyAndRerun
     // plan.execute() samples every candidate and then delegates once more to whichever
     // one the ranking crowned the winner, so that candidate's launch count is one higher
     // than a pure sampling count. Compare against the actual winner rather than assuming
-    // one, since real HIP timing decides it and any of the three trivial candidates could
-    // win.
+    // one: real HIP timing decides which candidate wins.
     const auto delegatedBonus
         = [](const std::vector<RankedEntry>& recorded, DescriptorId id) -> int {
         return !recorded.empty() && recorded.front().kernelId == id ? 1 : 0;
@@ -721,7 +748,8 @@ TEST_F(TestIngestorHipTimerFaults, ArmErrorRestartsTheWholeComparisonUnstalled)
     std::vector<TestBenchmarkPlan::Candidate> candidates;
     for(size_t index = 0; index < plans.size(); ++index)
     {
-        auto candidate = std::make_unique<FakePlan>(64);
+        auto candidate
+            = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
         plans[index] = candidate.get();
         candidates.push_back({testId(static_cast<uint8_t>(index + 1)), std::move(candidate)});
     }
@@ -753,7 +781,7 @@ TEST_F(TestIngestorHipTimerFaults, ArmErrorRestartsTheWholeComparisonUnstalled)
 TEST_F(TestIngestorHipTimerFaults, UnsupportedDeviceStartsUnstalledWithoutDiscardingSamples)
 {
     gStreamWaitFaults.unsupported = true;
-    auto candidate = std::make_unique<FakePlan>(64);
+    auto candidate = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
     const auto* candidatePtr = candidate.get();
     std::vector<TestBenchmarkPlan::Candidate> candidates;
     candidates.push_back({testId(1), std::move(candidate)});
@@ -972,26 +1000,45 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedSamplingNeverAppearsInTheRan
     }
 }
 
-/// A malformed sample (negative, NaN, or infinite) from the timer must score the
-/// candidate unusable exactly like a nullopt return, not enter robustMean() or the
-/// ranking. Zero is a valid sample and stays in the ranking.
+/// A malformed sample from the timer must never enter robustMean() or the ranking. NaN
+/// and infinite samples score the candidate unusable immediately, with no retry. A
+/// negative sample is instead retried in place, so a candidate that is persistently
+/// negative -- this deterministic timer keeps returning the same malformed value on
+/// every retry -- still exhausts MAX_NEGATIVE_SAMPLE_RETRIES and ends up scored unusable
+/// exactly like a nullopt return, just after paying the retry budget first rather than
+/// on the very first sample. Zero is a valid sample and stays in the ranking.
 TEST(TestIngestorBenchmarkPlan, MalformedTimerSamplesScoreTheCandidateUnusable)
 {
     constexpr double NEGATIVE = -1.0;
     const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
 
-    for(const double malformed : {NEGATIVE, nan})
+    for(const double malformed : {NEGATIVE, nan, inf})
     {
         std::vector<RankedEntry> recorded;
         const BenchmarkTestHandle handle;
-        // Candidate 1 reports a malformed sample; it must be omitted like a nullopt.
-        const auto plan = makeDeterministicPlan(
-            threeCandidates(),
+        auto candidates = threeCandidates();
+        const auto* malformedCandidate = candidates[1].plan.get();
+        auto timer = makeDeterministicTimer(candidates, {5.0, malformed, 3.0});
+        int malformedCalls = 0;
+        const TestBenchmarkPlan plan(
+            std::move(candidates),
             handle,
-            {5.0, malformed, 3.0},
+            [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& subPlan,
+                const BenchmarkTestHandle& planHandle,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* workspace) {
+                if(&subPlan == malformedCandidate)
+                {
+                    ++malformedCalls;
+                }
+                return timer(subPlan, planHandle, deviceBuffers, numDeviceBuffers, workspace);
+            },
             [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
 
         plan.execute(handle, nullptr, 0U, nullptr);
+        EXPECT_EQ(malformedCalls, malformed < 0.0 ? MAX_NEGATIVE_SAMPLE_RETRIES + 1 : 1);
 
         ASSERT_EQ(recorded.size(), 2U);
         for(const auto& entry : recorded)
@@ -1001,6 +1048,64 @@ TEST(TestIngestorBenchmarkPlan, MalformedTimerSamplesScoreTheCandidateUnusable)
                    "the normal ranked path on a later run";
         }
     }
+}
+
+/// A single transient negative sample must not disqualify the candidate: sampleCandidate()
+/// discards it and re-measures the same slot, so a candidate that only stumbles once
+/// still accrues its full BENCHMARK_ITERATIONS valid samples and can win the sweep. This
+/// is the case a naive "any negative sample means unusable" check would defeat.
+TEST(TestIngestorBenchmarkPlan, ATransientNegativeSampleIsReplacedAndTheCandidateCanStillWin)
+{
+    auto flaky = std::make_unique<FakePlan>(64);
+    auto steady = std::make_unique<FakePlan>(64);
+    const auto* flakyRaw = flaky.get();
+    const auto* steadyRaw = steady.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(flaky)});
+    candidates.push_back({testId(0x02), std::move(steady)});
+
+    constexpr double FLAKY_SAMPLE = 1.0;
+    constexpr double STEADY_SAMPLE = 10.0;
+
+    // Only the very first timed sample is negative; every retry after it is a real,
+    // valid measurement.
+    int flakyCallIndex = 0;
+    const TestBenchmarkPlan::Timer timer
+        = [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+              const BenchmarkTestHandle& planHandle,
+              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+              uint32_t numDeviceBuffers,
+              void* workspace) -> std::optional<double> {
+        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
+        if(&plan == steadyRaw)
+        {
+            return STEADY_SAMPLE;
+        }
+        return flakyCallIndex++ == 0 ? -1.0 : FLAKY_SAMPLE;
+    };
+
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates), handle, timer, [&recorded](auto ranking) {
+        recorded = std::move(ranking);
+    });
+
+    plan.execute(handle, nullptr, 0, nullptr);
+
+    ASSERT_EQ(recorded.size(), 2U) << "the transient negative must not drop the candidate";
+    EXPECT_EQ(recorded.front().kernelId, testId(0x01))
+        << "the candidate that recovered from a transient negative must still win on its "
+           "real, faster time";
+    EXPECT_EQ(recorded.front().timeMs, FLAKY_SAMPLE)
+        << "a full set of BENCHMARK_ITERATIONS valid samples, all equal to FLAKY_SAMPLE, "
+           "must reduce to exactly that value: the discarded negative sample never enters "
+           "the reduction";
+
+    // One retry beyond the normal sampling launches for the recovered candidate, plus
+    // the delegated winner execute.
+    EXPECT_EQ(flakyRaw->launchCount(), SAMPLING_LAUNCHES + 1 + 1);
+    EXPECT_EQ(steadyRaw->launchCount(), SAMPLING_LAUNCHES);
 }
 
 /// Zero is a valid measurement (an unmeasurably fast launch): it must win and be cached

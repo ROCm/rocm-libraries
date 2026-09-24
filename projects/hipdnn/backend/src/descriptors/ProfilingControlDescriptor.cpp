@@ -128,12 +128,15 @@ void ProfilingControlDescriptor::finalize()
     _timedOut = _stallUsed && _stallGate.has_value() && _stallGate->timedOut();
     // A watchdog-broken span is already explicitly invalid and remains readable only so
     // callers can inspect STALL_TIMED_OUT_EXT. For a healthy measurement, HIP success
-    // does not guarantee a sane value: reject NaN, Inf, and negative spans before the
-    // descriptor becomes finalized. Zero is valid for back-to-back events.
-    THROW_IF_TRUE(!_timedOut && (!std::isfinite(_elapsedMs) || _elapsedMs < 0.0F),
+    // does not guarantee a sane value: NaN or Inf has no finite sentinel to carry it, so
+    // that case is a hard backend error. A finite negative span is not thrown here --
+    // it passes finalization as a raw invalid-measurement sentinel a C caller detects
+    // by sign, without hipDNN inventing a wrapper type. Zero is valid for back-to-back
+    // events; only a genuinely non-finite result is rejected.
+    THROW_IF_TRUE(!_timedOut && !std::isfinite(_elapsedMs),
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "ProfilingControlDescriptor::finalize() failed: "
-                  "hipEventElapsedTime returned a non-finite or negative value.");
+                  "hipEventElapsedTime returned a non-finite value.");
 
     if(_timedOut)
     {

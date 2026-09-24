@@ -1458,7 +1458,11 @@ typedef enum
     /** @brief Trigger: record stop event on the stream (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_STOP_EXT = 60402,
 
-    /** @brief Elapsed time in milliseconds between start and stop events (HIPDNN_TYPE_FLOAT, read-only) */
+    /** @brief Elapsed time in milliseconds between start and stop events. Zero is a
+     *  valid back-to-back-event span; a finite negative value is a raw
+     *  invalid-measurement sentinel a caller must check for (never thrown, never
+     *  ranked as a real timing). STALL_TIMED_OUT_EXT true takes precedence and marks
+     *  the value invalid regardless of sign (HIPDNN_TYPE_FLOAT, read-only) */
     HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT = 60403,
 
     /** @brief Trigger: call hipDeviceSynchronize before benchmarking (HIPDNN_TYPE_BOOLEAN, write-only) */
