@@ -122,11 +122,26 @@ PYCODE
 The [gfx1250 validation report](mx_gemm_validation.md) records the full pipeline
 matrix, reference comparisons, architecture regression checks and their scope.
 
-CPU tests cover architecture selection, invalid configurations, scale/packing
-codecs, the CI configuration, and exact generated-header parity with Tile Engine:
+CPU tests cover architecture selection and target suffixes, invalid configurations,
+LDS boundaries, scale/packing codecs, standalone Tile Engine entry points, the CI
+configuration, and exact generated-header parity with Tile Engine:
 
 ```bash
 python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_bridge.py -v
+```
+
+The CMake tests check MX target selection and effective compiler definitions.
+They require CMake and a host C++ compiler, and skip when either is unavailable;
+no GPU or HIP compiler is needed:
+
+```bash
+python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_cmake.py -v
+```
+
+Both suites are registered with CTest when dispatcher tests are enabled:
+
+```bash
+ctest --test-dir build -R '^dispatcher_test_mx_gemm_(bridge|cmake)$' --output-on-failure
 ```
 
 The GPU suite builds all 16 gfx1250 TDM CI configurations, four larger TDM

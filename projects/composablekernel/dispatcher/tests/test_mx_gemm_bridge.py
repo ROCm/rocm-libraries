@@ -7,18 +7,29 @@
 
 Locks the config name format, the codegen-JSON projection, the dtype/layout/warp-tile
 validity gate, the e8m0 scale codec, the fp8/fp4 quantization round-trips, and the numpy
-microscaled reference. No GPU, no hipcc, no Old-TE builder import required.
+microscaled reference. Also covers build entry points, target normalization, and
+Tile Engine configuration validation. No GPU or hipcc is required.
 """
 
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
 _DISP = Path(__file__).resolve().parent.parent
+_CK = _DISP.parent
 sys.path.insert(0, str(_DISP / "python"))
 sys.path.insert(0, str(_DISP / "codegen"))
+
+import mx_gemm_utils as mx  # noqa: E402
+import unified_mx_gemm_codegen as codegen  # noqa: E402
+from dispatcher_common import arch_feature_defines, unified_framework_flags  # noqa: E402
 
 from mx_gemm_utils import (  # noqa: E402
     SCALE_BLOCK,
@@ -329,6 +340,28 @@ class TestGfx1250MxEnablement(unittest.TestCase):
 
 
 class TestMxArchitectureKernels(unittest.TestCase):
+    def test_gfx1250_filters_persistent_and_k_padding(self):
+        config = _CK / "tile_engine/ops/gemm/mx_gemm/configs/default_config.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            for arch in ("gfx950", "gfx1250", "gfx1250:xnack-"):
+                builder = codegen._load_mx_builder()(
+                    "mx_gemm", tmp, arch, "fp8", "rcr", str(config)
+                )
+                builder.config["trait_config"]["pad_k"]["values"] = [False, True]
+                traits = builder._generate_trait_combinations()
+                with self.subTest(arch=arch):
+                    self.assertEqual(
+                        {t[0] for t in traits},
+                        {"comp_async", "comp_async_eight_waves", "weight_preshuffle"},
+                    )
+                    flags = {(t[5], t[6]) for t in traits}
+                    self.assertEqual(
+                        flags,
+                        {(False, False), (False, True), (True, False), (True, True)}
+                        if arch == "gfx950"
+                        else {(False, False)},
+                    )
+
     def test_build_arch_matches_config(self):
         from unittest.mock import patch
         from mx_gemm_utils import setup_multiple_mx_gemm_dispatchers
@@ -486,7 +519,11 @@ class TestMxArchitectureKernels(unittest.TestCase):
         import contextlib
         import io
         from dataclasses import replace
-        from unified_mx_gemm_codegen import _generate, _make_builder, _trait_combo_from_cfg
+        from unified_mx_gemm_codegen import (
+            _generate,
+            _make_builder,
+            _trait_combo_from_cfg,
+        )
 
         for pipeline in ("comp_tdm", "comp_tdm_v2"):
             for make_config, warp_n in (
@@ -510,13 +547,20 @@ class TestMxArchitectureKernels(unittest.TestCase):
                             builder.config["trait_config"] = {
                                 key: {"values": [config[key]]}
                                 for key in (
-                                    "pipeline", "epilogue", "scheduler",
-                                    "pad_m", "pad_n", "pad_k", "persistent",
+                                    "pipeline",
+                                    "epilogue",
+                                    "scheduler",
+                                    "pad_m",
+                                    "pad_n",
+                                    "pad_k",
+                                    "persistent",
                                 )
                             }
                             sampled = builder._get_sampled_kernel_list()
                             self.assertEqual(len(sampled), 1)
-                            self.assertEqual(sampled[0]["tile_config"], config["tile_config"])
+                            self.assertEqual(
+                                sampled[0]["tile_config"], config["tile_config"]
+                            )
                             native = builder._generate_kernel_instance(
                                 config["tile_config"], _trait_combo_from_cfg(config)
                             )
@@ -531,14 +575,20 @@ class TestMxArchitectureKernels(unittest.TestCase):
         from unified_mx_gemm_codegen import _validate
 
         for arch in ("gfx950", "gfx1250"):
-            for pipeline in ("comp_async", "comp_async_eight_waves", "weight_preshuffle"):
+            for pipeline in (
+                "comp_async",
+                "comp_async_eight_waves",
+                "weight_preshuffle",
+            ):
                 for make_config in (default_fp4_config, default_fp8_config):
                     cfg = replace(
                         make_config(arch, pipeline), warp_tile_m=32, warp_tile_n=32
                     )
                     with self.subTest(arch=arch, pipeline=pipeline, dtype=cfg.datatype):
                         self.assertFalse(cfg.is_valid())
-                        diagnostic = "gfx950:.*16, 16, 128" if arch == "gfx950" else arch
+                        diagnostic = (
+                            "gfx950:.*16, 16, 128" if arch == "gfx950" else arch
+                        )
                         with self.assertRaisesRegex(ValueError, diagnostic):
                             _validate(cfg.to_codegen_config())
 
@@ -646,6 +696,21 @@ class TestMxArchitectureKernels(unittest.TestCase):
 
 
 class TestMxLdsCapacity(unittest.TestCase):
+    def test_tdm_output_lds_boundary(self):
+        for pipeline in ("comp_tdm", "comp_tdm_v2"):
+            for factory in (mx.default_fp4_config, mx.default_fp8_config):
+                for n, expected in ((320, True), (352, False), (512, False)):
+                    cfg = replace(
+                        factory("gfx1250", pipeline), tile_m=512, tile_n=n, tile_k=128
+                    )
+                    with self.subTest(pipeline=pipeline, dtype=cfg.datatype, n=n):
+                        self.assertEqual(cfg.is_valid(), expected)
+                        if expected:
+                            codegen._validate(cfg.to_codegen_config())
+                        else:
+                            with self.assertRaises(ValueError):
+                                codegen._validate(cfg.to_codegen_config())
+
     def test_tile_engine_capacity_matches_dispatcher(self):
         from unified_mx_gemm_codegen import _load_mx_builder
         from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH
@@ -783,6 +848,132 @@ class TestMxLdsCapacity(unittest.TestCase):
                             arch,
                         )
                         self.assertEqual(valid, expected, error)
+
+
+class TestMxBuildEntryPoints(unittest.TestCase):
+    def test_direct_tile_engine_listing_without_pythonpath(self):
+        mx_dir = _CK / "tile_engine/ops/gemm/mx_gemm"
+        env = dict(os.environ)
+        env.pop("PYTHONPATH", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            for cwd in (mx_dir, Path(tmp)):
+                with self.subTest(cwd=cwd):
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(mx_dir / "mx_gemm_instance_builder.py"),
+                            "--working_path",
+                            tmp,
+                            "--gpu_target",
+                            "gfx1250:xnack-",
+                            "--datatype",
+                            "fp8",
+                            "--layout",
+                            "rcr",
+                            "--list_kernels",
+                            "--config_json",
+                            str(mx_dir / "configs/default_ci_config_gfx1250.json"),
+                        ],
+                        cwd=cwd,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    self.assertEqual(
+                        result.returncode, 0, result.stdout + result.stderr
+                    )
+                    self.assertEqual(
+                        (Path(tmp) / "mx_gemm_kernel_count.txt").read_text(), "8"
+                    )
+
+    def test_suffixed_targets_match_bare_codegen_and_defaults(self):
+        for arch, target in (
+            ("gfx950", "gfx950:sramecc+:xnack-"),
+            ("gfx1250", "gfx1250:xnack-"),
+        ):
+            for pipeline in (
+                None,
+                "comp_async",
+                "comp_async_eight_waves",
+                "weight_preshuffle",
+            ):
+                with self.subTest(arch=arch, pipeline=pipeline):
+                    bare = mx.default_fp8_config(arch, pipeline)
+                    suffixed = mx.default_fp8_config(target, pipeline)
+                    self.assertEqual(
+                        bare.to_codegen_config(), suffixed.to_codegen_config()
+                    )
+                    # Bypass factory normalization to exercise direct config/codegen callers.
+                    raw_config = replace(bare, gpu_target=target)
+                    self.assertEqual(raw_config._fallback_name(), bare._fallback_name())
+                    raw = bare.to_codegen_config()
+                    raw["gpu_target"] = target
+                    self.assertEqual(
+                        codegen._generate(raw),
+                        codegen._generate(bare.to_codegen_config()),
+                    )
+                    self.assertEqual(codegen.kernel_name(raw), bare.name)
+                    self.assertEqual(raw["gpu_target"], target)
+
+    def test_detection_and_setup_normalize_target_suffixes(self):
+        for arch, target in (
+            ("gfx950", "gfx950:sramecc+:xnack-"),
+            ("gfx1250", "gfx1250:xnack-"),
+        ):
+            with self.subTest(arch=arch):
+                with patch(
+                    "mx_gemm_utils.subprocess.check_output",
+                    return_value=f"Name: {target}\n",
+                ):
+                    self.assertEqual(mx._get_arch(), arch)
+                for explicit in (None, target):
+                    configs = [
+                        replace(mx.default_fp8_config(arch), gpu_target=target),
+                        mx.default_fp8_config(arch),
+                    ]
+                    with (
+                        tempfile.TemporaryDirectory() as tmp,
+                        patch(
+                            "mx_gemm_utils._compile_kernel", return_value=True
+                        ) as compile_kernel,
+                    ):
+                        results = mx.setup_multiple_mx_gemm_dispatchers(
+                            configs, Path(tmp), gfx_arch=explicit, parallel=False
+                        )
+                        self.assertEqual(results[0], results[1])
+                        self.assertIsNotNone(results[0])
+                        self.assertEqual(compile_kernel.call_count, 1)
+                        self.assertEqual(compile_kernel.call_args.args[2], arch)
+                        self.assertTrue(all(cfg.gpu_target == arch for cfg in configs))
+        with self.assertRaisesRegex(ValueError, "one architecture"):
+            mx.setup_multiple_mx_gemm_dispatchers(
+                [
+                    replace(
+                        mx.default_fp8_config("gfx950"), gpu_target="gfx950:xnack-"
+                    ),
+                    replace(
+                        mx.default_fp8_config("gfx1250"), gpu_target="gfx1250:xnack-"
+                    ),
+                ]
+            )
+
+    def test_standalone_compiler_uses_arch_feature_definitions(self):
+        for arch in ("gfx950", "gfx1250"):
+            with (
+                self.subTest(arch=arch),
+                patch("mx_gemm_utils._mx_codegen_flags", return_value=()),
+                patch("mx_gemm_utils.subprocess.run") as run,
+            ):
+                run.return_value.returncode = 0
+                self.assertTrue(
+                    mx._compile_kernel(Path("kernel.hpp"), Path("kernel.so"), arch)
+                )
+                command = run.call_args.args[0]
+                for flag in arch_feature_defines(arch) + unified_framework_flags(arch):
+                    self.assertIn(flag, command)
+                self.assertIn(f"--offload-arch={arch}", command)
+                self.assertIn(f'-DGFX_ARCH="{arch}"', command)
 
 
 if __name__ == "__main__":
