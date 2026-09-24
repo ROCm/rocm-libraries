@@ -19,6 +19,8 @@
 #         PLUGIN_TARGET <target>
 #         ENGINE_NAME   <engine>
 #         [INSTALL_SUBDIR <subdir>]
+#         [INSTALL_DESTINATION <prefix-relative dir>]
+#         [INSTALL_STAGING_KEY <key>]
 #         [TEST_CATEGORIES_YAML <path>]
 #         [INSTALL_TEST_FILE <path>]
 #         [TEST_NAME_PREFIX <prefix>]
@@ -116,16 +118,24 @@ macro(_stage_external_integration_install_test)
     set(_install_plugin "")
     set(_install_config "")
     if(ARG_INSTALL_SUBDIR)
+        # Where the entry, its config and its CTest file land. Everything below derives
+        # from it, so the offsets follow the destination rather than needing correction
+        # for it. The header says why an engine-pinned test must not take the default.
+        set(_install_dest "${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}")
+        if(ARG_INSTALL_DESTINATION)
+            set(_install_dest "${ARG_INSTALL_DESTINATION}")
+        endif()
+
         if(ARG_TEST_CONFIG)
             get_filename_component(_install_config "${ARG_TEST_CONFIG}" NAME)
             install(FILES "${ARG_TEST_CONFIG}"
-                DESTINATION "${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
+                DESTINATION "${_install_dest}"
             )
         endif()
 
         set(_synthetic_root "/__hipdnn_install_root__")
         set(_install_cwd_abs
-            "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
+            "${_synthetic_root}/${_install_dest}"
         )
         set(_bin_abs
             "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}"
@@ -164,8 +174,14 @@ macro(_stage_external_integration_install_test)
                 "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES ${_install_properties})\n"
             )
 
+            # An entry with its own destination needs its own accumulator, or it drains
+            # into the common file and undoes that destination.
+            set(_staging_key "${ARG_INSTALL_SUBDIR}")
+            if(ARG_INSTALL_STAGING_KEY)
+                set(_staging_key "${ARG_INSTALL_STAGING_KEY}")
+            endif()
             set_property(GLOBAL APPEND_STRING
-                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${ARG_INSTALL_SUBDIR}"
+                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${_staging_key}"
                 "${_install_cmd}"
             )
         endif()
@@ -197,7 +213,7 @@ macro(_add_external_integration_category_suites)
         set(_apply_category_args
             TEST_NAME_PREFIX "${_category_prefix}"
             COMMAND_ARGS ${_category_command_args}
-            ADDITIONAL_LABELS "integration_test" "slow" "external_integration_test" "${ARG_ENGINE_NAME}"
+            ADDITIONAL_LABELS "integration_test" "slow" "external_integration_test" "${_engine_label}"
         )
         if(ARG_ENVIRONMENT)
             list(APPEND _apply_category_args ENVIRONMENT ${ARG_ENVIRONMENT})
@@ -240,6 +256,20 @@ endmacro()
 
 # Adds a custom target and optional CTest entries for an external integration test.
 #
+# INSTALL_DESTINATION (optional, default <bindir>/<INSTALL_SUBDIR>) places the installed
+# entry, its TEST_CONFIG and its CTest file, relative to the install prefix. Every offset
+# the entry carries is computed from it.
+#
+# Pass a destination inside an architecture's own content directory whenever the test is
+# pinned to an engine only that architecture ships. The default is arch-neutral, so
+# pruning an artifact to another architecture leaves the entry behind to run against an
+# engine the package no longer carries.
+#
+# INSTALL_STAGING_KEY (optional, default INSTALL_SUBDIR) selects the
+# EXTERNAL_TEST_INSTALL_STAGING_<key> accumulator. Pass one alongside INSTALL_DESTINATION
+# for an uncategorized entry, or it drains into the common file and undoes the
+# destination. Categorized suites route through INSTALL_TEST_FILE instead.
+#
 # When TEST_CATEGORIES_YAML is provided, the base target stays CMake-only and
 # category-specific GTest-filtered suites cover the CTest surface.
 # ~~~
@@ -247,7 +277,7 @@ function(add_external_integration_test_target)
     cmake_parse_arguments(
         ARG
         ""
-        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX"
+        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX;INSTALL_DESTINATION;INSTALL_STAGING_KEY"
         "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
         ${ARGN}
     )
@@ -261,6 +291,14 @@ function(add_external_integration_test_target)
     if(NOT ARG_ENGINE_NAME)
         message(FATAL_ERROR "add_external_integration_test_target: ENGINE_NAME is required")
     endif()
+
+    # CTest labels carry the engine name so suites can be filtered by engine, but
+    # an engine name is free-form and may hold characters a label may not.
+    # parse_test_categories.py accepts only [A-Za-z0-9_.-], and rejecting a label
+    # makes apply_test_category_labels warn and register nothing, so map the
+    # remaining characters to underscores. Names already within that set are
+    # unchanged.
+    string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_" _engine_label "${ARG_ENGINE_NAME}")
 
     _build_external_integration_command(_CMD)
 
@@ -288,7 +326,7 @@ function(add_external_integration_test_target)
     # project's build subdir. Labels mirror add_integration_test_target so the
     # test is selected the same way as the provider's own integration tests,
     # plus an `external_integration_test` label and the engine name for filtering.
-    set(_LABELS "integration_test;slow;external_integration_test;${ARG_ENGINE_NAME}")
+    set(_LABELS "integration_test;slow;external_integration_test;${_engine_label}")
     if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
         add_test(NAME ${ARG_TARGET_NAME} COMMAND ${_CMD})
         set_tests_properties(${ARG_TARGET_NAME} PROPERTIES LABELS "${_LABELS}")

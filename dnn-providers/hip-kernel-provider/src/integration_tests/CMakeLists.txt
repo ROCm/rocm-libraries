@@ -182,11 +182,28 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
    AND HIPKERNELPROVIDER_ENABLE_ROCKE
    AND _hkp_gfx950_attention_dense
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    # Routed into the gfx950 shard, not the common arch-neutral directory: the handler
+    # prunes by the first gfx directory in the path, so the entry goes when the engine
+    # does. Left in the common file it survives into a gfx942-only package, where the
+    # engine ranks nothing, every case declines and the entry reports success having run
+    # nothing. An engine present but ranking nothing produces that same shape, measured
+    # on gfx90a as 8 registered, 0 run, 8 skipped and a green entry.
+    #
+    # hkp_finalize_census_install() folds the accumulator into that shard's CTest file,
+    # in both YAML modes: src/ hands it whichever common entrypoint that configuration
+    # produced, and the discovery stub goes there, so a sharded entry is reachable
+    # whether or not categorization is on.
+    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+    set(_gfx950_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx950)
+
     add_external_integration_test_target(
         TARGET_NAME hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests
         PLUGIN_TARGET hip_kernel_provider
         ENGINE_NAME   "hipkernel:Gfx950AttentionDense"
         INSTALL_SUBDIR hip_kernel_provider
+        ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER
             "quick_SdpaFwdRuntimeScale_bshd_*:standard_SdpaFwdRuntimeScale_bshd_*"
