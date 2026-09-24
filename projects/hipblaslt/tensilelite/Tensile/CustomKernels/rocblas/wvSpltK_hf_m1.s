@@ -541,17 +541,17 @@ wvSpltK_hf_m1:                          ; @wvSpltK_hf_m1
 	.set amdgpu.max_num_agpr, 0
 	.set amdgpu.max_num_sgpr, 0
 	.text
-	.type	__hip_cuid_7f087a8aad3cbe5d,@object ; @__hip_cuid_7f087a8aad3cbe5d
+	.type	__hip_cuid_e9797186894e033f,@object ; @__hip_cuid_e9797186894e033f
 	.section	.bss,"aw",@nobits
-	.globl	__hip_cuid_7f087a8aad3cbe5d
-__hip_cuid_7f087a8aad3cbe5d:
+	.globl	__hip_cuid_e9797186894e033f
+__hip_cuid_e9797186894e033f:
 	.byte	0                               ; 0x0
-	.size	__hip_cuid_7f087a8aad3cbe5d, 1
+	.size	__hip_cuid_e9797186894e033f, 1
 
 	.ident	"AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.4 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
-	.addrsig_sym __hip_cuid_7f087a8aad3cbe5d
+	.addrsig_sym __hip_cuid_e9797186894e033f
 	.amdgpu_metadata
 ---
 custom.config:
@@ -599,6 +599,10 @@ custom.config:
   AssertSummationElementMultiple: 8
   AssertSizeEqual: { 0: 1, 2: 1 }
   AssertSizeGreaterThan: { 1: 8 }
+  AssertStrideAEqual: { 0: 1, 1: 1 }
+  AssertStrideBEqual: { 0: 1 }
+  AssertStrideCEqual: { 0: 1, 1: 1 }
+  AssertStrideDEqual: { 0: 1, 1: 1 }
   StaggerU: 0
   WavefrontSize: 64
 amdhsa.kernels:

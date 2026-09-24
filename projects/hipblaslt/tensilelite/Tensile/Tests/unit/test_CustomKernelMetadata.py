@@ -38,9 +38,9 @@ from Tensile.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from Tensile.Contractions import ASSERT_SIZE_MAP_PREDICATES, ProblemPredicate
+from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
 from Tensile.Common.ValidParameters import (
-    ASSERT_SIZE_MAP_PARAMETERS,
+    ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
     validParameters,
 )
@@ -335,11 +335,11 @@ def test_problem_predicate_rejects_non_dict_assert_size_equal():
         ProblemPredicate.FromOriginalKeyPair(("AssertSizeGreaterThan", 1))
 
 
-def test_assert_size_map_registries_agree():
-    """A key validated as an {index: size} map must also emit a predicate, or a
+def test_assert_dim_map_registries_agree():
+    """A key validated as an {index: value} map must also emit a predicate, or a
     custom.config would accept it and then silently drop the constraint."""
-    assert set(ASSERT_SIZE_MAP_PARAMETERS) == set(ASSERT_SIZE_MAP_PREDICATES)
-    assert set(ASSERT_SIZE_MAP_PARAMETERS) <= set(validParameters)
+    assert set(ASSERT_DIM_MAP_PARAMETERS) == set(ASSERT_DIM_MAP_PREDICATES)
+    assert set(ASSERT_DIM_MAP_PARAMETERS) <= set(validParameters)
 
 
 def test_problem_predicate_emits_size_greater_than():
@@ -1108,6 +1108,12 @@ def test_wvspltk_shipped_family_predicates(name, rows, maxK):
     else:
         assert config["AssertSizeLessThan"] == {3: maxK}
         assert (maxK - 1) * rows == 32768
+
+    # A, C and D are indexed with no stride argument: unit stride, and a leading
+    # dimension equal to the M this kernel pins. ldb == K stays undeclared.
+    for key in ("AssertStrideAEqual", "AssertStrideCEqual", "AssertStrideDEqual"):
+        assert config[key] == {0: 1, 1: rows}, key
+    assert config["AssertStrideBEqual"] == {0: 1}
 
 
 def test_wvspltk_hf_m1_shipped_config():

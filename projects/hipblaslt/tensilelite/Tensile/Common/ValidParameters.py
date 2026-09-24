@@ -670,6 +670,15 @@ validParameters = { # we need to make sure this matches develop
     # A kernel that stages an operand in LDS declares the first size that no
     # longer fits. Fork YAML: AssertSizeLessThan: [{3: 16385}]  # K <= 16384
     "AssertSizeLessThan": -1,
+    # Exact stride per tensor, same {index: value} form. Index 0 is the unit
+    # stride and index 1 the leading dimension, so for a column-major NN GEMM
+    # {0: 1, 1: 2} reads "elements contiguous, lda == 2". A kernel that indexes
+    # an operand with no stride argument declares the layout it hardcodes;
+    # strides that must equal a runtime size cannot be expressed this way.
+    "AssertStrideAEqual": -1,
+    "AssertStrideBEqual": -1,
+    "AssertStrideCEqual": -1,
+    "AssertStrideDEqual": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1386,16 +1395,20 @@ _skipTypeCheck = {
 }
 
 
-# Assert* parameters whose value is an {index: size} map instead of a scalar.
-ASSERT_SIZE_MAP_PARAMETERS = (
+# Assert* parameters whose value is an {index: value} map instead of a scalar.
+ASSERT_DIM_MAP_PARAMETERS = (
     "AssertSizeEqual",
     "AssertSizeGreaterThan",
     "AssertSizeLessThan",
+    "AssertStrideAEqual",
+    "AssertStrideBEqual",
+    "AssertStrideCEqual",
+    "AssertStrideDEqual",
 )
 
 
 def checkAssertSizeMapIsValid(name, value):
-    """AssertSize* is a dict of {index: size}; both keys and values are int."""
+    """AssertSize*/AssertStride* is a dict of {index: value}; both are int."""
     if type(value) is not dict:
         msgBase = "Invalid parameter value: {} = {}\nMust be a dict of {{index: size}}"
         raise Exception(msgBase.format(name, value))
@@ -1499,7 +1512,7 @@ def checkParametersAreValid(
                 else ""
             )
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
-        elif name in ASSERT_SIZE_MAP_PARAMETERS:
+        elif name in ASSERT_DIM_MAP_PARAMETERS:
             checkAssertSizeMapIsValid(name, value)
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)

@@ -58,7 +58,7 @@ import sys
 
 from Tensile.Common.Utilities import deriveWaveParams
 from Tensile.Common.ValidParameters import (
-    ASSERT_SIZE_MAP_PARAMETERS,
+    ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
     validParameters,
 )
@@ -76,7 +76,7 @@ PREDICATE_FORK_PARAMETER_KEYS = (
     "AssertFree0ElementMultiple",
     "AssertFree1ElementMultiple",
     "AssertSummationElementMultiple",
-) + ASSERT_SIZE_MAP_PARAMETERS
+) + ASSERT_DIM_MAP_PARAMETERS
 
 # Single-valued ForkParameters frozen into custom.config. Predicates select
 # the solution; StaggerU is a solution knob (handwritten kernels declare 0

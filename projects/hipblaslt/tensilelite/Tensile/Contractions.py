@@ -439,10 +439,14 @@ class ProblemType:
         return predicates
 
 # Dict-valued Assert* keys and the runtime predicate each one emits per index.
-ASSERT_SIZE_MAP_PREDICATES = {
+ASSERT_DIM_MAP_PREDICATES = {
     "AssertSizeEqual": "SizeEqual",
     "AssertSizeGreaterThan": "SizeGreaterThan",
     "AssertSizeLessThan": "SizeLessThan",
+    "AssertStrideAEqual": "StrideAEqual",
+    "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideCEqual": "StrideCEqual",
+    "AssertStrideDEqual": "StrideDEqual",
 }
 
 def extractDimPredicate(cls, key, value, predicateName):
@@ -494,12 +498,12 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
-        if key in ASSERT_SIZE_MAP_PREDICATES:
+        if key in ASSERT_DIM_MAP_PREDICATES:
             if not isinstance(value, dict):
                 raise RuntimeError(
-                    "{} must be a dict of {{index: size}}, got {!r}".format(key, value)
+                    "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
-            return extractDimPredicate(cls, key, value, ASSERT_SIZE_MAP_PREDICATES[key])
+            return extractDimPredicate(cls, key, value, ASSERT_DIM_MAP_PREDICATES[key])
 
         if key.endswith('Multiple'):
             if value == 1:

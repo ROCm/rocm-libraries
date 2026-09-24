@@ -1422,6 +1422,10 @@ custom.config:
   AssertSizeEqual: { 0: 4, 2: 1 }
   AssertSizeGreaterThan: { 1: 8 }
   AssertSizeLessThan: { 3: 8193 }
+  AssertStrideAEqual: { 0: 1, 1: 4 }
+  AssertStrideBEqual: { 0: 1 }
+  AssertStrideCEqual: { 0: 1, 1: 4 }
+  AssertStrideDEqual: { 0: 1, 1: 4 }
   StaggerU: 0
   WavefrontSize: 64
 amdhsa.kernels:

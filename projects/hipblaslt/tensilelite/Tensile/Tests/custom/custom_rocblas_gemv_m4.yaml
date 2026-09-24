@@ -65,6 +65,14 @@ BenchmarkProblems:
         # K <= 8192, i.e. M*K <= 32768 halves: A is only read from LDS, so the
         # whole activation matrix has to fit the 64 KB staging buffer.
         - AssertSizeLessThan: [{3: 8193}]
+        # Packed layout: the kernel indexes A, C and D with no stride argument,
+        # so index 0 (unit stride) and index 1 (leading dimension) are fixed.
+        # lda == ldc == ldd == M == 4 here. ldb == K is the one constraint left
+        # undeclared: a stride cannot be compared against a runtime size.
+        - AssertStrideAEqual: [{0: 1, 1: 4}]
+        - AssertStrideBEqual: [{0: 1}]
+        - AssertStrideCEqual: [{0: 1, 1: 4}]
+        - AssertStrideDEqual: [{0: 1, 1: 4}]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

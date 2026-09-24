@@ -61,6 +61,14 @@ BenchmarkProblems:
         - AssertSizeEqual: [{0: 1, 2: 1}]
         # N > 8: with fewer columns than the wave tile the tail fixup underflows.
         - AssertSizeGreaterThan: [{1: 8}]
+        # Packed layout: the kernel indexes A, C and D with no stride argument,
+        # so index 0 (unit stride) and index 1 (leading dimension) are fixed.
+        # lda == ldc == ldd == M == 1 here. ldb == K is the one constraint left
+        # undeclared: a stride cannot be compared against a runtime size.
+        - AssertStrideAEqual: [{0: 1, 1: 1}]
+        - AssertStrideBEqual: [{0: 1}]
+        - AssertStrideCEqual: [{0: 1, 1: 1}]
+        - AssertStrideDEqual: [{0: 1, 1: 1}]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
