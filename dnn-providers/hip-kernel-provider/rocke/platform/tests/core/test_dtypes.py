@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Core dtype names are independent of target support and retain public aliases."""
 
+import ast
+
 import pytest
 
 from rocke.core.dtypes import normalize_dtype
@@ -11,7 +13,12 @@ from rocke.core.ir import FP8E4M3, I8, IRBuilder, dtype_to_ir_type
 from rocke.core.storage import TensorStorage
 from rocke.helpers.mma_io import storage_ir_type
 from rocke.core.ir_serialize import parse, serialize
-from rocke.helpers.quant import quant_ir_type, ir_to_qdtype, dequantize_scalar_to_f32
+from rocke.helpers.quant import (
+    quant_ir_type,
+    ir_to_qdtype,
+    dequantize_scalar_to_f32,
+    quant_max_abs,
+)
 
 
 @pytest.mark.parametrize(
@@ -110,3 +117,37 @@ def test_scale_role_remains_independent_of_encoding_aliases():
     assert dtype_to_ir_type("e5m3") != dtype_to_ir_type("bf8e5m2")
     with pytest.raises(ValueError):
         MmaScaleDType("bf8e5m2")
+
+
+def test_quant_type_diagnostic_lists_every_accepted_spelling():
+    expected = {
+        "i8",
+        "int8",
+        "fp8",
+        "fp8e4m3",
+        "fp8_e4m3",
+        "e4m3",
+        "bf8",
+        "bf8e5m2",
+        "fp8_e5m2",
+        "fp4",
+        "fp4e2m1",
+        "fp6",
+        "fp6e2m3",
+        "bf6",
+        "fp6e3m2",
+    }
+    with pytest.raises(ValueError) as error:
+        quant_ir_type("invalid")
+    accepted = ast.literal_eval(str(error.value).split("expected one of ")[1])
+    assert accepted == sorted(expected)
+    assert all(quant_ir_type(name) is not None for name in accepted)
+
+
+@pytest.mark.parametrize(
+    "dtype", ["fp4", "fp4e2m1", "fp6", "fp6e2m3", "bf6", "fp6e3m2"]
+)
+def test_type_alias_does_not_enable_scalar_quantization(dtype):
+    assert quant_ir_type(dtype) is not None
+    with pytest.raises(ValueError, match="unsupported quant dtype"):
+        quant_max_abs(dtype)

@@ -97,6 +97,17 @@ _QDTYPE_ALIAS = {
 }
 
 
+# Type recognition includes formats without scalar quantization support.
+_QUANT_TYPE_ALIAS = _QDTYPE_ALIAS | {
+    "fp4": "fp4e2m1",
+    "fp4e2m1": "fp4e2m1",
+    "fp6": "fp6e2m3",
+    "fp6e2m3": "fp6e2m3",
+    "bf6": "fp6e3m2",
+    "fp6e3m2": "fp6e3m2",
+}
+
+
 _IR_TO_QDTYPE = {
     "i8": "i8",
     "fp8e4m3": "fp8e4m3",
@@ -123,10 +134,12 @@ def quant_ir_type(qdtype: str) -> Type:
     the common dtype resolver. Type recognition does not enable scalar
     quantization or dequantization for the low-bit formats.
     """
-    # Type recognition includes low-bit formats before scalar conversions exist.
-    if qdtype in ("fp4", "fp4e2m1", "fp6", "fp6e2m3", "bf6", "fp6e3m2"):
-        return dtype_to_ir_type(qdtype)
-    return dtype_to_ir_type(_canon(qdtype))
+    if qdtype not in _QUANT_TYPE_ALIAS:
+        raise ValueError(
+            f"unsupported quant dtype {qdtype!r}; expected one of "
+            f"{sorted(_QUANT_TYPE_ALIAS)}"
+        )
+    return dtype_to_ir_type(_QUANT_TYPE_ALIAS[qdtype])
 
 
 def quant_max_abs(qdtype: str) -> float:

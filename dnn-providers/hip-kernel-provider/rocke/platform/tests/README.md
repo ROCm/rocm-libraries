@@ -104,3 +104,16 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 - EXCLUDED from rocKE: `test_gen_instances.py` (imports `ck4inductor`, a separate
   package) and `test_rocke_examples.py` (drives the external `example/ck_tile/dsl`
   tree, not part of rocKE) stay in `composablekernel/python/test`.
+
+### Native storage parity in the standard runner
+
+`run_all.py --build-root <build>` builds the `rocke_storage` target in a configured
+build and obtains its executable path from CTest. Both pytest passes receive that
+path, so storage IR/HIP parity and serialization tests run automatically.
+`--config` selects the native test configuration (default `Release`). A build or
+fixture-discovery failure stops the runner instead of silently skipping coverage.
+
+An explicit `ROCKE_STORAGE_TEST` overrides discovery and must name an existing
+executable. With no configured build or explicit override, the runner reports
+native storage parity as skipped; direct pytest invocations can use the same
+override.

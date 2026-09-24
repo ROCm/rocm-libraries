@@ -262,3 +262,20 @@ def test_e4m3_alias_serialization_matches_native():
         [executable, "--parse", alias], check=True, capture_output=True, text=True
     )
     assert result.stdout == canonical
+
+
+def test_quant_type_diagnostic_matches_native():
+    from rocke.helpers.quant import quant_ir_type
+
+    executable = os.environ.get("ROCKE_STORAGE_TEST")
+    if not executable:
+        pytest.skip("set ROCKE_STORAGE_TEST to the built native storage test")
+    with pytest.raises(ValueError) as error:
+        quant_ir_type("invalid")
+    result = subprocess.run(
+        [executable, "--quant-error", "invalid"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout == str(error.value)

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/error.hpp"
 #include "rocke/helper_rocke.helpers.mma_io.h"
 #include "rocke/helper_rocke.helpers.quant.h"
 #include "rocke/ir_serialize.h"
@@ -228,6 +229,23 @@ int main(int argc, char** argv)
         CHECK(rocke_ir_serialize(kernel, &text) == ROCKE_OK);
         fputs(text, stdout);
         free(text);
+        rocke_ir_builder_free(&b);
+        return 0;
+    }
+    if(argc == 3 && strcmp(argv[1], "--quant-error") == 0)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "quant_error") == ROCKE_OK);
+        try
+        {
+            rocke_b_quant_ir_type(&b, argv[2]);
+            CHECK(false);
+        }
+        catch(const ckc::Error& error)
+        {
+            CHECK(error.code() == ROCKE_ERR_VALUE);
+            fputs(error.what(), stdout);
+        }
         rocke_ir_builder_free(&b);
         return 0;
     }
