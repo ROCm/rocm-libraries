@@ -160,7 +160,6 @@ __device__ void run_syevj(const rocblas_int dimx,
                 for(j = n - 1; j > i; j--)
                 {
                     aij = A[i + j * lda];
-                    local_res += 2 * std::norm(aij);
                     Acpy[i + j * n] = aij;
                     Acpy[j + i * n] = conj(aij);
 
@@ -185,7 +184,6 @@ __device__ void run_syevj(const rocblas_int dimx,
                 for(j = 0; j < i; j++)
                 {
                     aij = A[i + j * lda];
-                    local_res += 2 * std::norm(aij);
                     Acpy[i + j * n] = aij;
                     Acpy[j + i * n] = conj(aij);
 
@@ -197,7 +195,6 @@ __device__ void run_syevj(const rocblas_int dimx,
                 }
             }
         }
-        cosines_res[tix] = local_res;
 
         // initialize top/bottom pairs
         for(i = tix; i < half_n; i += dimx)
@@ -208,22 +205,28 @@ __device__ void run_syevj(const rocblas_int dimx,
     }
     __syncthreads();
 
-    local_res = 0;
-    for(i = 0; i < dimx; i++)
-        local_res += cosines_res[i];
     S small_num = get_safemin<S>() / eps;
 
     // convergence is measured per off-diagonal pair, against that pair's own diagonal entries
-    S local_exceed = 0;
-    __syncthreads();
+    S res_t = 0;
+    rocblas_int exceed_t = 0;
     if(tiy == 0)
     {
-        S res_t;
-        rocblas_int exceed_t;
         syevj_offd_measure(n, tix, dimx, Acpy, abstol, eps, &res_t, &exceed_t);
-        cosines_res[tix] = exceed_t;
+        cosines_res[tix] = res_t;
     }
     __syncthreads();
+
+    local_res = 0;
+    for(i = 0; i < dimx; i++)
+        local_res += cosines_res[i];
+    __syncthreads();
+
+    if(tiy == 0)
+        cosines_res[tix] = exceed_t;
+    __syncthreads();
+
+    S local_exceed = 0;
     for(i = 0; i < dimx; i++)
         local_exceed += cosines_res[i];
     __syncthreads();
