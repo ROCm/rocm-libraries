@@ -284,8 +284,8 @@ jobs:
     with:
       therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
       build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
-      amdgpu_families: gfx94X-dcgpu
-      amdgpu_targets: gfx942
+      amdgpu_families: gfx950-dcgpu
+      amdgpu_targets: gfx950
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
       # Restore gfx950 when TheRock multi-arch presubmit publishes its artifact.
 
