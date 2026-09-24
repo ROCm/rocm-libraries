@@ -284,6 +284,66 @@ TEST(TestTensorAttributes, RaggedOffsetMethodChainingReturnsThis)
     const TensorAttributes& ref2 = tensor.set_alignment(32);
     EXPECT_EQ(&ref2, &tensor);
 }
+
+TEST(TestTensorAttributes, SetAndGetRaggedOffsetMultiplier)
+{
+    TensorAttributes tensor;
+    EXPECT_EQ(tensor.get_ragged_offset_multiplier(), 1);
+    EXPECT_FALSE(tensor.has_ragged_offset_multiplier());
+
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.get_ragged_offset_multiplier(), 512);
+    EXPECT_TRUE(tensor.has_ragged_offset_multiplier());
+
+    tensor.set_ragged_offset_multiplier(1);
+    EXPECT_FALSE(tensor.has_ragged_offset_multiplier());
+
+    const TensorAttributes& ref = tensor.set_ragged_offset_multiplier(64);
+    EXPECT_EQ(&ref, &tensor);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnRaggedOffsetMultiplierBelowOne)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    auto aux = std::make_shared<TensorAttributes>();
+    tensor.set_ragged_offset(aux);
+    tensor.set_ragged_offset_multiplier(0);
+    EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnMultiplierWithoutRaggedOffset)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithMultiplierAndRaggedOffset)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    auto aux = std::make_shared<TensorAttributes>();
+    tensor.set_ragged_offset(aux);
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithDefaultRaggedOffsetMultiplier)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
 TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeWithDefaultTensor)
 {
     // flag true + value present; set_value seeded dims/strides/data_type.

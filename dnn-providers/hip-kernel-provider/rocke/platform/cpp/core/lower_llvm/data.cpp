@@ -9,6 +9,8 @@
  *   - ROCKE_LL_INTRINSIC_DECLS[]   (+ _COUNT)      (Python _INTRINSIC_DECLS)
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM22_OVERRIDES)
+ *   - ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[]  (+ _COUNT)
+ *                                                (Python ..._LLVM23_OVERRIDES)
  *
  * The decl table is INSERTION-ORDERED exactly like the Python dict; that order
  * drives finalize()'s emit order. Transcribed verbatim from
@@ -147,7 +149,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sqrt.f32", "declare float @llvm.sqrt.f32(float)"},
     {"rsqrt.f32", "declare float @llvm.amdgcn.rsq.f32(float)"},
     {"rcp.f32", "declare float @llvm.amdgcn.rcp.f32(float)"},
-    {"tanh.f32", "declare float @llvm.tanh.f32(float)"},
     {"maxnum.f32", "declare float @llvm.maxnum.f32(float, float)"},
     {"maxnum.f16", "declare half @llvm.maxnum.f16(half, half)"},
     {"maxnum.bf16", "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)"},
@@ -213,11 +214,11 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"wmma.gfx1250.f32.16x16x64.bf8.bf8",
      "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
      "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.scale.gfx1250.f32.16x16x128.fp8.fp8",
+    {"wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
      "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32(i32 "
      "immarg, <16 x i32>, i32 immarg, <16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, "
      "i32, i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"},
-    {"wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8",
+    {"wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
      "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32(i32 "
      "immarg, <16 x i32>, i32 immarg, <16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, "
      "i64, i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"},
@@ -473,8 +474,7 @@ const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
 
 /* ---------------------------------------------------------------------- */
 /* LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES)            */
-/* Identical to the LLVM22 set for the declares rocke emits today; split  */
-/* entries here if an LLVM 23 host proves drift.                          */
+/* Inherits the LLVM22 entries plus declarations whose ABI changed again. */
 /* ---------------------------------------------------------------------- */
 
 const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
@@ -493,6 +493,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
+    {"mfma.scale.f32.16x16x128.f8f6f4",
+     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
+     "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT
