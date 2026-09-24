@@ -1,5 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 # Fixed-Point Emulation (FP32/FP64) via Ozaki Scheme II (INT8 tensor cores + CRT).
 #

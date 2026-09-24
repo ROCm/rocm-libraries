@@ -1,5 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 add_executable(hipblaslt-bench)
 add_library(hipblaslt-clients-common STATIC)
