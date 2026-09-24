@@ -42,6 +42,10 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuReductionPlan.cpp
     TestGpuRMSNormSignatureKey.cpp
     TestGpuRMSNormPlan.cpp
+    TestGpuBatchnormFwdInfSignatureKey.cpp
+    TestGpuBatchnormFwdInfPlan.cpp
+    TestGpuBatchnormFwdInfVarianceSignatureKey.cpp
+    TestGpuBatchnormFwdInfVariancePlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
@@ -103,6 +107,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceReduction.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
+    gpu-ref/TestGpuFpReferenceRmsValidation.cpp
     gpu-ref/TestGpuFpReferenceValidation.cpp
     gpu-ref/TestGpuRefHipError.cpp
     gpu-ref/TestGpuRefKernelCompiler.cpp
@@ -111,6 +116,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceCommon.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInfWithVariance.cpp
+    gpu-ref/TestGpuFpReferenceBatchnormFwdTrain.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests

@@ -37,6 +37,7 @@ add_library(
     src/GpuFpReferenceReduction.cpp
     src/GpuFpReferenceRMSNorm.cpp
     src/GpuFpReferenceBatchnorm.cpp
+    src/GpuFpReferenceRmsValidation.cpp
     src/GpuFpReferenceValidation.cpp
     src/GpuIntReferenceValidation.cpp
     src/GpuReferenceValidationFactory.cpp
