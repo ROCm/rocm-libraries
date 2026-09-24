@@ -33,7 +33,11 @@ struct BaseGemmPipelineAgBgCrCompV3
     // NOTE: all users of these functions are CK_TILE_DEVICE (the pipeline
     // operator() and the grouped/persistent kernel launchers), and TailHandler's
     // scenarios[] compiles in the same device pass, so this __gfx11__/__gfx12__
-    // guard is host/device consistent.
+    // guard is host/device consistent. Both are defined in core/config.hpp
+    // (__gfx12__ already covers gfx1250, gfx1200, gfx1201, gfx12_generic;
+    // __gfx11__ covers gfx1100/1101/1102/1103/1150/1151/1152/1153/gfx11_generic)
+    // -- do not use the nonexistent __GFX12__ (uppercase), which silently never
+    // activates and leaves every wave32 WMMA target on the buggy path.
 #if defined(__gfx11__) || defined(__gfx12__)
     static constexpr bool Use8WarpSchedule = false;
 #else

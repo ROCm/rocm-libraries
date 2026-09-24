@@ -1757,6 +1757,41 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
             comgr_mod.resolved_lib_rocm_version = orig_ver
             comgr_mod.resolved_lib_path = orig_path
 
+    def test_comgr_load_failure_names_every_candidate(self):
+        """A failed comgr load reports every candidate, not just the last.
+
+        Resolution walks a candidate list and falls through on OSError, so when
+        it ends in failure the only way to tell which library was meant to load,
+        and why it did not, is for each candidate to appear in the error.
+        """
+        from rocke.runtime import comgr as comgr_mod
+
+        candidates = ["/first/libamd_comgr.so", "/second/libamd_comgr.so"]
+        with patch.object(
+            comgr_mod, "_candidate_lib_paths", return_value=candidates
+        ), patch.object(comgr_mod, "_add_dll_dir"), patch.object(
+            comgr_mod.ctypes, "CDLL", side_effect=OSError("cannot open shared object")
+        ):
+            with self.assertRaises(comgr_mod.ComgrError) as cm:
+                comgr_mod._load_lib()
+        message = str(cm.exception)
+        for path in candidates:
+            self.assertIn(path, message)
+        self.assertIn("cannot open shared object", message)
+
+    def test_comgr_load_with_no_candidates_is_distinguishable(self):
+        """No candidate produced is a different fault from every candidate failing.
+
+        The two want different fixes -- nothing to try versus tried and failed --
+        so they must not share a message.
+        """
+        from rocke.runtime import comgr as comgr_mod
+
+        with patch.object(comgr_mod, "_candidate_lib_paths", return_value=[]):
+            with self.assertRaises(comgr_mod.ComgrError) as cm:
+                comgr_mod._load_lib()
+        self.assertIn("no candidate path", str(cm.exception))
+
     def test_no_hand_rolled_flavor_membership_lists(self):
         """Flavor membership must go through :data:`LLVM_FLAVORS`.
 

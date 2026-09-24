@@ -499,11 +499,17 @@ ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& proble
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
+ * @param non_temporal_a_available Whether a candidate reads operand A
+ * non-temporally. Defaults to keeping the filter on.
+ * @param non_temporal_b_available Whether a candidate reads operand B
+ * non-temporally. Defaults to keeping the filter on.
  * @return double Latency in cycles.
  */
 ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
-                             const config_t& config);
+                             const config_t& config,
+                             bool non_temporal_a_available = true,
+                             bool non_temporal_b_available = true);
 
 }  // namespace gemm
 }  // namespace origami

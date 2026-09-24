@@ -135,6 +135,53 @@ set_tests_properties(dispatcher_test_arch_filter_constraints PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# codegen_common shared-infrastructure regression test. Covers normalize_gfx_arch()
+# and the EXACT-gfx1250 RowColQuant/TensorQuant tile selector: a family-wide match
+# there would hand gfx1200/gfx1201 a tile that compiles cleanly and returns garbage,
+# which no downstream check catches.
+add_test(
+    NAME dispatcher_test_codegen_common
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_codegen_common.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_codegen_common PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Arch-string handling in tile_engine's gemm_validation_utils, which seven GEMM
+# instance builders and the dispatcher's own warp gate all share. Registered on the
+# dispatcher side because the bridge/Old-TE instance-set parity that depends on it
+# is a dispatcher property; tile_engine has no CTest registration of its own.
+add_test(
+    NAME dispatcher_test_gemm_validation_arch_normalization
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_validation_arch_normalization.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_validation_arch_normalization PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Arch-gate predicate used by the RowColQuant/TensorQuant GPU tests. CPU-only: it
+# exercises the string predicate, not a device. Worth its own registration because
+# the failure mode it guards is a SKIP -- CI stays green while covering nothing.
+add_test(
+    NAME dispatcher_test_gpu_test_arch_gate
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gpu_test_arch_gate.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gpu_test_arch_gate PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # dispatcher_common unit tests: path helpers, validators, and -- since this is
 # the only place they are covered -- the fp8-encoding arch predicates
 # (fp8_uses_ocp / ocp_arch_defines / arch_feature_defines). Those decide whether
@@ -148,6 +195,11 @@ add_test(
 )
 
 set_tests_properties(dispatcher_test_dispatcher_common PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Architecture-aware LDS staging budget regression test
 add_test(
     NAME dispatcher_test_lds_capacity_arch_aware
@@ -296,7 +348,8 @@ set_tests_properties(dispatcher_test_search_space_sampling PROPERTIES
 # =============================================================================
 foreach(_quant_test
         test_grouped_gemm_rowcolquant_utils
-        test_grouped_gemm_tensorquant_utils)
+        test_grouped_gemm_tensorquant_utils
+        test_quant_review_regressions)
     add_test(
         NAME dispatcher_${_quant_test}
         COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_test}.py -v
@@ -383,6 +436,18 @@ add_test(
 
 set_tests_properties(dispatcher_test_arch_support PROPERTIES
     LABELS "dispatcher;python;arch"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+add_test(
+    NAME dispatcher_test_fmha_utils
+    COMMAND ${Python3_EXECUTABLE} -m unittest test_fmha_utils -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_fmha_utils PROPERTIES
+    LABELS "dispatcher;python;fmha;validation"
     TIMEOUT 60
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
@@ -811,6 +876,37 @@ set_tests_properties(dispatcher_test_gemm_rowcolquant_gpu_correctness PROPERTIES
     SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
+
+# Same shape, for the NON-GROUPED gemm_{a,ab,b}quant bridges. The GROUPED
+# counterparts are registered above in the _quant_gpu_test foreach as
+# dispatcher_test_{a,ab,b}quant_gpu_correctness -- distinct tests, distinct
+# files, distinct bridges. The names differ by one token; deleting a
+# "duplicate-looking" entry here silently drops a whole operator.
+#
+# No --gfx argument, deliberately: ctest must autodetect via rocminfo so the
+# JIT build matches the physical GPU (see the note above the C++ GPU tests).
+# --gfx is for the Jenkins lane only, where the arch is known from the node
+# label. Each script self-skips with 77 on an unsupported arch -- gfx942/gfx950
+# for aquant and abquant, gfx950 only for bquant.
+foreach(_gemm_quant_gpu_test
+        test_gemm_aquant_gpu_correctness
+        test_gemm_abquant_gpu_correctness
+        test_gemm_bquant_gpu_correctness)
+    add_test(
+        NAME dispatcher_${_gemm_quant_gpu_test}
+        # Run the script directly rather than under pytest: pytest exits 0 when
+        # every test skips, so a CPU-only or non-fp8 runner would report a green
+        # PASS for work that never reached the GPU. main() exits 77 instead.
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/${_gemm_quant_gpu_test}.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(dispatcher_${_gemm_quant_gpu_test} PROPERTIES
+        LABELS "dispatcher;python;bridge;gpu"
+        TIMEOUT 600
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+    )
+endforeach()
 
 # =============================================================================
 # Block-scale quant bridge tests (per-op unit tests + self-tests)

@@ -27,76 +27,107 @@ class TestGemmUnalignedK : public ::testing::Test
     using AccDataType = std::tuple_element_t<2, Tuple>;
     using CDataType   = std::tuple_element_t<3, Tuple>;
 
+    static constexpr bool check_data_type()
+    {
+#if defined(ARCH_GFX12)
+#if defined(CK_USE_GFX1250)
+        using DeviceIp = ck_tile::gfx125_t;
+#else
+        using DeviceIp = ck_tile::gfx120_t;
+#endif
+#elif defined(ARCH_GFX11)
+        using DeviceIp = ck_tile::gfx11_t;
+#else
+#error "Unsupported architecture for WMMA"
+#endif
+        using Config = KPaddingConfig<ADataType, CDataType>;
+        return ck_tile::has_wmma_traits_v<DeviceIp,
+                                          ADataType,
+                                          BDataType,
+                                          AccDataType,
+                                          Config::M_Warp_Tile,
+                                          Config::N_Warp_Tile,
+                                          Config::K_Warp_Tile>;
+    }
+
     void RunAndVerify(int K, int k_batch = 1)
     {
-        constexpr int M = 128;
-        constexpr int N = 128;
+        if constexpr(!check_data_type())
+        {
+            GTEST_SKIP() << "Unsupported data type combination for this architecture.";
+        }
+        else
+        {
+            constexpr int M = 128;
+            constexpr int N = 128;
 
-        const ck_tile::index_t stride_A = K;
-        const ck_tile::index_t stride_B = K;
-        const ck_tile::index_t stride_C = N;
+            const ck_tile::index_t stride_A = K;
+            const ck_tile::index_t stride_B = K;
+            const ck_tile::index_t stride_C = N;
 
-        // Host tensors
-        ck_tile::HostTensor<ADataType> a_m_k(
-            ck_tile::host_tensor_descriptor(M, K, stride_A, ck_tile::bool_constant<true>{}));
-        ck_tile::HostTensor<BDataType> b_k_n(
-            ck_tile::host_tensor_descriptor(K, N, stride_B, ck_tile::bool_constant<false>{}));
-        ck_tile::HostTensor<CDataType> gpu_result(
-            ck_tile::host_tensor_descriptor(M, N, stride_C, ck_tile::bool_constant<true>{}));
+            // Host tensors
+            ck_tile::HostTensor<ADataType> a_m_k(
+                ck_tile::host_tensor_descriptor(M, K, stride_A, ck_tile::bool_constant<true>{}));
+            ck_tile::HostTensor<BDataType> b_k_n(
+                ck_tile::host_tensor_descriptor(K, N, stride_B, ck_tile::bool_constant<false>{}));
+            ck_tile::HostTensor<CDataType> gpu_result(
+                ck_tile::host_tensor_descriptor(M, N, stride_C, ck_tile::bool_constant<true>{}));
 
-        ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5, 11939}(a_m_k);
-        ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5, 11940}(b_k_n);
+            ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5, 11939}(a_m_k);
+            ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5, 11940}(b_k_n);
 
-        // Device buffers
-        ck_tile::DeviceMem a_buf(a_m_k.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem b_buf(b_k_n.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem c_buf(gpu_result.get_element_space_size_in_bytes());
-        a_buf.ToDevice(a_m_k.data());
-        b_buf.ToDevice(b_k_n.data());
-        c_buf.SetZero();
+            // Device buffers
+            ck_tile::DeviceMem a_buf(a_m_k.get_element_space_size_in_bytes());
+            ck_tile::DeviceMem b_buf(b_k_n.get_element_space_size_in_bytes());
+            ck_tile::DeviceMem c_buf(gpu_result.get_element_space_size_in_bytes());
+            a_buf.ToDevice(a_m_k.data());
+            b_buf.ToDevice(b_k_n.data());
+            c_buf.SetZero();
 
-        ck_tile::GemmHostArgs args = {a_buf.GetDeviceBuffer(),
-                                      b_buf.GetDeviceBuffer(),
-                                      c_buf.GetDeviceBuffer(),
-                                      k_batch,
-                                      M,
-                                      N,
-                                      K,
-                                      stride_A,
-                                      stride_B,
-                                      stride_C};
+            ck_tile::GemmHostArgs args = {a_buf.GetDeviceBuffer(),
+                                          b_buf.GetDeviceBuffer(),
+                                          c_buf.GetDeviceBuffer(),
+                                          k_batch,
+                                          M,
+                                          N,
+                                          K,
+                                          stride_A,
+                                          stride_B,
+                                          stride_C};
 
-        // Run UniversalInvoker::gemm()
-        UniversalInvoker::gemm<KPaddingConfig<ADataType, CDataType>,
-                               ADataType,
-                               BDataType,
-                               ck_tile::tuple<>,
-                               AccDataType,
-                               CDataType,
-                               Row,
-                               Col,
-                               ck_tile::tuple<>,
-                               Row,
-                               /*Persistent=*/false,
-                               ck_tile::element_wise::PassThrough>(
-            args, ck_tile::stream_config{nullptr, false});
+            // Run UniversalInvoker::gemm()
+            UniversalInvoker::gemm<KPaddingConfig<ADataType, CDataType>,
+                                   ADataType,
+                                   BDataType,
+                                   ck_tile::tuple<>,
+                                   AccDataType,
+                                   CDataType,
+                                   Row,
+                                   Col,
+                                   ck_tile::tuple<>,
+                                   Row,
+                                   /*Persistent=*/false,
+                                   ck_tile::element_wise::PassThrough>(
+                args, ck_tile::stream_config{nullptr, false});
 
-        c_buf.FromDevice(gpu_result.data());
+            c_buf.FromDevice(gpu_result.data());
 
-        ck_tile::HostTensor<CDataType> host_reference(
-            ck_tile::host_tensor_descriptor(M, N, stride_C, ck_tile::bool_constant<true>{}));
-        host_reference.SetZero();
-        ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
-            a_m_k, b_k_n, host_reference);
+            ck_tile::HostTensor<CDataType> host_reference(
+                ck_tile::host_tensor_descriptor(M, N, stride_C, ck_tile::bool_constant<true>{}));
+            host_reference.SetZero();
+            ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
+                a_m_k, b_k_n, host_reference);
 
-        const float max_accumulated_value =
-            *std::max_element(host_reference.mData.begin(), host_reference.mData.end());
-        const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
-            K, k_batch, max_accumulated_value);
+            const float max_accumulated_value =
+                *std::max_element(host_reference.mData.begin(), host_reference.mData.end());
+            const auto rtol_atol =
+                calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
+                    K, k_batch, max_accumulated_value);
 
-        // Compare both results
-        EXPECT_TRUE(do_verify(gpu_result, host_reference, rtol_atol, "GPU"))
-            << "K=" << K << ", k_batch=" << k_batch;
+            // Compare both results
+            EXPECT_TRUE(do_verify(gpu_result, host_reference, rtol_atol, "GPU"))
+                << "K=" << K << ", k_batch=" << k_batch;
+        }
     }
 };
 

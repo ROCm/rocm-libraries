@@ -122,12 +122,20 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             ${PROJECT_SOURCE_DIR}/example/ck_tile
             ${PROJECT_SOURCE_DIR}/example/ck_tile/03_gemm)
 
+        # Test GEMM with K not a multiple of the A/B load vector width
+        add_gtest_executable(test_gemm_unaligned_k test_gemm_unaligned_k.cpp)
+        target_include_directories(test_gemm_unaligned_k PRIVATE
+            ${PROJECT_SOURCE_DIR}/example/ck_tile
+            ${CMAKE_SOURCE_DIR}/example/ck_tile/03_gemm)
+        target_compile_options(test_gemm_unaligned_k PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+
         list(APPEND CK_TILE_GEMM_TEST_TARGETS
             test_ck_tile_gemm_pipeline_mem_wmma
             test_ck_tile_gemm_pipeline_compv3_wmma
             test_ck_tile_gemm_pipeline_compv4_wmma
             test_ck_tile_gemm_pipeline_persistent_wmma
             test_ck_tile_gemm_unaligned_mnk_wmma
+            test_gemm_unaligned_k
         )
 
         if(GPU_TARGETS MATCHES "gfx125")

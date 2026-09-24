@@ -154,6 +154,7 @@ from kernels.common.conv_implicit_gemm import (
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
+    wgrad_atomic_epilogue_available as _wgrad_atomic_epilogue_available,
 )
 from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
@@ -556,7 +557,9 @@ class ConvGroupedSpec:
             warp_tile_k=self.warp_tile_k,
             wave_size=target.wave_size,
             pipeline=self.pipeline,
-            epilogue=self.epilogue,
+            # two_stage writes one f32 per element via workspace store; cshuffle
+            # is not used and would produce an invalid spec (validator rejects it).
+            epilogue="default" if two_stage else self.epilogue,
             split_k=resolved_split_k,
             two_stage=two_stage,
             force_deterministic=self.force_deterministic,
@@ -614,6 +617,12 @@ def _fwd_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, in
 # overflow the argument.
 _MAX_WGRAD_WS_BYTES = (1 << 31) - 4  # 2 GiB - 4
 
+# hipDeviceAttributeMaxGridDimZ. Unlike x, the z extent is a 16-bit field in the
+# dispatch packet on every arch rocke targets, so this is an architectural limit
+# rather than a per-device one and is safe as a constant. Grouped wgrad puts
+# groups*split_k on z, which is the only rocke launch that can reach it.
+_MAX_GRID_DIM_Z = 65535
+
 
 def _resolve_wgrad_split_k(
     spec: ConvGroupedSpec, p: "ConvProblem"
@@ -632,6 +641,24 @@ def _resolve_wgrad_split_k(
     requesting force_deterministic still get a correct result. Shared by
     ``to_wgrad_spec`` and ``_wgrad_grid`` so the spec and the launch grid can
     never disagree on split_k.
+
+    Two further constraints, both of which only bite once ``groups`` is large
+    (they are no-ops at groups == 1):
+
+    * **gridDim.z.** The group and the K-slice share the z axis, so the launch
+      needs ``groups * split_k`` blocks there. The CK formula sizes split_k
+      from the *per-group* GEMM and never sees the groups factor, so on a
+      depthwise problem (groups == C, per-group GEMM 1 x Y*X) it happily asks
+      for a degree that overflows the z limit and the launch fails with
+      ``hipErrorInvalidValue``. Clamp here, in the one resolver both the spec
+      and the grid go through, so they cannot desynchronise.
+    * **Atomic availability.** The packed ``<2 x dtype>`` atomic the split-K
+      epilogue emits for a 16-bit dW needs an even dW row length
+      ``wg_N = Y*X*cpg``. When that fails there is no 16-bit atomic to fall
+      back on (gfx9 has no scalar 16-bit atomic add), so the choice is
+      split_k=1 or the two-stage f32-workspace path. Promote to two-stage and
+      keep the parallelism -- collapsing the reduction axis of a wgrad whose
+      K_wg is N*Ho*Wo is the expensive way out.
     """
     spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
     wg_M = p.K // p.groups
@@ -649,9 +676,21 @@ def _resolve_wgrad_split_k(
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=spec.arch,
+            groups=p.groups,
+            block_size=_block(spec)[0],
         ).split_k
-    split_k = requested
-    two_stage = spec.force_deterministic and split_k > 1
+    # The helper already keeps groups*split_k inside the z limit on the auto
+    # path; this clamp still has to run for an explicitly requested split_k.
+    split_k = max(1, min(requested, _MAX_GRID_DIM_Z // max(1, p.groups)))
+    # When the packed-atomic epilogue cannot represent this problem, two-stage
+    # is the only way to keep split_k > 1. Delegate rather than re-deriving the
+    # rule: a local copy is exactly how the dispatcher came to hand the builder
+    # a spec the builder then rejected. force_deterministic asks for the same
+    # path for a different reason (bitwise reproducibility).
+    # vector_size_c is None here by construction: to_wgrad_spec never sets it,
+    # so the epilogue derives the store width from the channel dims.
+    _atomic_ok, _ = _wgrad_atomic_epilogue_available(p, spec.dtype.lower(), None)
+    two_stage = (spec.force_deterministic or not _atomic_ok) and split_k > 1
     if two_stage and p.groups * split_k * wg_M * wg_N * 4 > _MAX_WGRAD_WS_BYTES:
         two_stage = False
         split_k = 1
@@ -1423,9 +1462,12 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
 
     gfx1250's only fp16/bf16 atom is 16x16x32 (there is no 16x16x16). WMMA wgrad
     requires split_k=1 and the direct-store ('default') epilogue, so both are
-    forced here regardless of the request. Grouped Gm=1 is supported (the kernel
-    is validated dual-engine by test_gfx1250_grouped_wgrad_dual_engine); group
-    merging (Gm>1) is MFMA-only and is rejected by is_valid_wgrad_spec.
+    forced here regardless of the request. Grouped convolution is supported and
+    runs grid-per-group (the kernel is validated dual-engine by
+    test_gfx1250_grouped_wgrad_dual_engine). Group merging (``group_merge > 1``)
+    is MFMA-only and additionally needs split_k > 1 on the two-stage path, so it
+    is unreachable here on both counts: is_valid_wgrad_spec rejects it for
+    wave32 and for the split_k=1 this candidate forces.
     """
     name = "implicit_gemm_conv_wgrad_gfx1250"
     spec_id = "igemm_conv_wgrad_gfx1250_32x32"
