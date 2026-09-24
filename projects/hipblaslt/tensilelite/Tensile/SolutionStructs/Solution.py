@@ -1829,6 +1829,19 @@ class Solution(collections.abc.Mapping):
     state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
     state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
 
+    # Nothing else computes a handwritten kernel's workspace, and the host reads
+    # the decision off the CustomKernel block alone (requiredWorkspaceSize only
+    # consults sizeMapping for generated kernels).  A non-atomic Stream-K kernel
+    # that declares none would launch against a zero-byte buffer and fault on its
+    # first partial-tile store.  Derive it from the accumulation mode chosen
+    # above, sized like assignDerivedParameters' computeBytes.  custom.config's
+    # own ProblemType is advisory -- LibraryIO overwrites it with the logic
+    # file's -- so read the type from state.  An explicit declaration wins.
+    if ck.get("workspaceType", "None") == "None" \
+       and state["_GlobalAccumulation"] == 'PartialsBuffer':
+      ck["workspaceType"]          = "StreamKWithReduction"
+      ck["workspaceSizePerElemC"]  = int(state["ProblemType"]["ComputeDataType"].numBytes())
+
     state["_WorkspaceSizePerElemC"] = ck.get("workspaceSizePerElemC", 0)
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
@@ -1850,9 +1863,19 @@ class Solution(collections.abc.Mapping):
       state["MIWaveGroup"] = [0, 0]
 
     state["LocalSplitU"] = 1
-    state["GlobalReadVectorWidthA"] = 1
-    state["GlobalReadVectorWidthB"] = 1
-    state["StoreVectorWidth"] = 1
+    # custom.config (via LibraryIO overlay) and the logic YAML already carry
+    # these widths.  Do not clobber them: SizeMapping serializes them, and
+    # handwritten kernels never reach assignDerivedParameters to recover a
+    # declared 4 from the Tensile -1 auto sentinel.  Default to 1 only when
+    # the key is missing or still at that sentinel.
+    def _positiveOrDefault(key, default=1):
+      v = state.get(key, default)
+      if v is None or v < 1:
+        v = default
+      state[key] = v
+    _positiveOrDefault("GlobalReadVectorWidthA")
+    _positiveOrDefault("GlobalReadVectorWidthB")
+    _positiveOrDefault("StoreVectorWidth")
 
   ########################################
   # assign all derived parameters

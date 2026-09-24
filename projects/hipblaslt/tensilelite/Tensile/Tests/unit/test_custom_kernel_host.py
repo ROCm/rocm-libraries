@@ -35,7 +35,13 @@ def _ck_state(**over):
     }
     problem_type.update(over.pop("ProblemType", {}))
     state = {
-        "CustomKernel": {"name": "k", "macrotile": [128, 256, 64], "threads": [256, 1, 1]},
+        # Workspace keys mirror the setdefaults getCustomKernelConfig applies.
+        "CustomKernel": {
+            "name": "k", "macrotile": [128, 256, 64], "threads": [256, 1, 1],
+            "workspaceType": "None",
+            "workspaceSizePerElemC": 0,
+            "workspaceSizePerElemBias": 0,
+        },
         "StreamK": 0,
         "StreamKAtomic": 0,
         "GlobalSplitUAlgorithm": "",
@@ -62,10 +68,33 @@ def test_assign_custom_kernel_params_basic_derivation():
     assert state["PackedC0IndicesX"] == []
     assert state["ThreadTile0"] == 0 and state["ThreadTile1"] == 0
     assert state["LocalSplitU"] == 1
+    # No widths on state: fall back to 1 so SizeMapping.FromOriginalState
+    # still finds the keys.
     assert state["GlobalReadVectorWidthA"] == 1
     assert state["GlobalReadVectorWidthB"] == 1
     assert state["StoreVectorWidth"] == 1
     assert state["_GlobalAccumulation"] is None  # GlobalSplitUAlgorithm == ""
+
+
+@pytest.mark.parametrize("grvwA,grvwB,svw,expectA,expectB,expectS", [
+    (4, 4, 4, 4, 4, 4),
+    (-1, -1, -1, 1, 1, 1),
+    (None, 8, -2, 1, 8, 1),
+])
+def test_assign_custom_kernel_params_preserves_vector_widths(
+    grvwA, grvwB, svw, expectA, expectB, expectS
+):
+    over = {}
+    if grvwA is not None:
+        over["GlobalReadVectorWidthA"] = grvwA
+    if grvwB is not None:
+        over["GlobalReadVectorWidthB"] = grvwB
+    over["StoreVectorWidth"] = svw
+    state = _ck_state(**over)
+    Solution._assignCustomKernelParameters(state)
+    assert state["GlobalReadVectorWidthA"] == expectA
+    assert state["GlobalReadVectorWidthB"] == expectB
+    assert state["StoreVectorWidth"] == expectS
 
 
 def test_assign_custom_kernel_params_enable_mi_sets_wave_params():
@@ -103,6 +132,46 @@ def test_assign_custom_kernel_params_streamk_partials_accumulation():
     state = _ck_state(StreamK=2, StreamKAtomic=0)
     Solution._assignCustomKernelParameters(state)
     assert state["_GlobalAccumulation"] == "PartialsBuffer"
+
+
+def test_assign_custom_kernel_params_derives_streamk_workspace():
+    # Non-atomic Stream-K reduces partial tiles through the workspace, so a
+    # block that declares none must be sized from the compute type.
+    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamKWithReduction"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 4
+    assert state["_WorkspaceSizePerElemC"] == 4
+
+
+def test_assign_custom_kernel_params_derives_streamk_workspace_from_compute_type():
+    state = _ck_state(
+        StreamK=2,
+        StreamKAtomic=0,
+        ProblemType={"ComputeDataType": DataType("d"), "DestDataType": DataType("d")},
+    )
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 8
+
+
+def test_assign_custom_kernel_params_keeps_declared_workspace():
+    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state["CustomKernel"]["workspaceType"] = "StreamK"
+    state["CustomKernel"]["workspaceSizePerElemC"] = 2
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamK"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 2
+
+
+@pytest.mark.parametrize("over", [
+    {},                                # not Stream-K at all
+    {"StreamK": 2, "StreamKAtomic": 1},  # atomic Stream-K needs no reduction buffer
+])
+def test_assign_custom_kernel_params_no_workspace_without_partials(over):
+    state = _ck_state(**over)
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "None"
+    assert state["_WorkspaceSizePerElemC"] == 0
 
 
 def test_assign_custom_kernel_params_single_buffer_accumulation():
