@@ -1042,7 +1042,7 @@ namespace TensileLite
                                                    uint32_t grid)
         {
             // Prebuilt DP layout v0: six u32 slots, no workspace/flag pointer.
-            // Native whole-tile execution never uses these scheduling fields.
+            // DataParallel argument layout v1 never uses these scheduling fields.
             uint32_t magicShift = 0;
             const uint32_t magic = solution.magicNumber(2, itersPerTile, &magicShift);
             if(solution.internalArgsSupport.perTileExtraIters
@@ -2843,7 +2843,7 @@ namespace TensileLite
 
         const uint32_t itersPerTile = launch.grid > 0
             ? static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping))) : 0;
-        // Legacy/custom scheduling adapter. Native DP descriptors use only
+        // Legacy/custom scheduling adapter. DataParallel version-1 descriptors use only
         // ItersPerTile and PersistentGrid and never compute iteration splits.
         uint32_t skTotalIters              = 0;
         uint32_t skMagicNumberItersPerTile = 0;
@@ -2957,7 +2957,7 @@ namespace TensileLite
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
         if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
         {
-            // Native DP cluster kernels decode spatial workgroup coordinates.
+            // DataParallel version-1 cluster kernels decode spatial workgroup coordinates.
             // Match the generated-kernel launch, including padded boundary peers.
             rv.numWorkGroups.x = RoundUpToMultiple(tiles.x, sizeMapping.clusterDim.x);
             rv.numWorkGroups.y = RoundUpToMultiple(tiles.y, sizeMapping.clusterDim.y);
@@ -3008,11 +3008,11 @@ namespace TensileLite
             = sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel;
         bool useWSStride = gsuWSStride || skWSStride;
         size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
-        const bool nativePersistent = internalArgsSupport.persistentLoopArgsVersion == 1;
-        const size_t descriptorStrideAB = nativePersistent && problemType.useInitialStridesAB ? 0 : 1;
-        const size_t descriptorStrideCD = nativePersistent ? startStrideCD : 1;
-        auto const& descriptorA = nativePersistent && problemType.sparse == 1 ? problem.compressed() : problem.a();
-        auto const& descriptorB = nativePersistent && problemType.sparse == 2 ? problem.compressed() : problem.b();
+        const bool usesDataParallelArgsV1 = internalArgsSupport.persistentLoopArgsVersion == 1;
+        const size_t descriptorStrideAB = usesDataParallelArgsV1 && problemType.useInitialStridesAB ? 0 : 1;
+        const size_t descriptorStrideCD = usesDataParallelArgsV1 ? startStrideCD : 1;
+        auto const& descriptorA = usesDataParallelArgsV1 && problemType.sparse == 1 ? problem.compressed() : problem.a();
+        auto const& descriptorB = usesDataParallelArgsV1 && problemType.sparse == 2 ? problem.compressed() : problem.b();
         const bool pointerArrayBatch
             = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
 
@@ -3138,7 +3138,7 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleA1:
                 {
-                    size_t batchStride = nativePersistent ? problem.mxsa().strides()[descriptorStrideAB + 1]
+                    size_t batchStride = usesDataParallelArgsV1 ? problem.mxsa().strides()[descriptorStrideAB + 1]
                         : preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1");
                     rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                     break;
@@ -3151,7 +3151,7 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB1:
                 {
-                    size_t batchStride = nativePersistent ? problem.mxsb().strides()[descriptorStrideAB + 1]
+                    size_t batchStride = usesDataParallelArgsV1 ? problem.mxsb().strides()[descriptorStrideAB + 1]
                         : preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1");
                     rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                     break;
@@ -3249,7 +3249,7 @@ namespace TensileLite
                 case CustomArgSemantic::AddressA:
                     rv.args.template append<void const*>(
                         "AddressA",
-                        nativePersistent
+                        usesDataParallelArgsV1
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchA)
                                    ? static_cast<void const*>(inputs.batchA)
                                    : problemType.sparse == 1 ? inputs.compressed : inputs.a)
@@ -3258,7 +3258,7 @@ namespace TensileLite
                 case CustomArgSemantic::AddressB:
                     rv.args.template append<void const*>(
                         "AddressB",
-                        nativePersistent
+                        usesDataParallelArgsV1
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchB)
                                    ? static_cast<void const*>(inputs.batchB)
                                    : problemType.sparse == 2 ? inputs.compressed : inputs.b)
@@ -3284,7 +3284,7 @@ namespace TensileLite
                     else
                         rv.args.template append<void const*>(
                             "AddressC",
-                            nativePersistent && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchC))
+                            usesDataParallelArgsV1 && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchC))
                                 ? static_cast<void const*>(inputs.batchC) : inputs.c);
                     break;
                 }
@@ -3308,7 +3308,7 @@ namespace TensileLite
                     else
                         rv.args.template append<void const*>(
                             "AddressD",
-                            nativePersistent && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchD))
+                            usesDataParallelArgsV1 && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchD))
                                 ? static_cast<void const*>(inputs.batchD) : inputs.d);
                     break;
                 }
@@ -3362,7 +3362,7 @@ namespace TensileLite
                     else
                         rv.args.template append<void const*>(
                             "AddressBias",
-                            nativePersistent && !problemType.stridedBatched
+                            usesDataParallelArgsV1 && !problemType.stridedBatched
                                 ? static_cast<void const*>(inputs.batchBias) : inputs.bias);
                     break;
                 case CustomArgSemantic::AddressGateResidual:
@@ -3459,7 +3459,7 @@ namespace TensileLite
                         rv.args.appendCustomType("NumWorkGroups", getNumWorkGroups(rv), arg.type);
                     break; // handled by InternalArgs via kernelArgs when present
 
-                // ---- Native persistent scheduling args ----
+                // ---- DataParallel scheduling args ----
                 case CustomArgSemantic::ItersPerTile:
                     rv.args.template append<uint32_t>("ItersPerTile", itersPerTile);
                     break;
@@ -4911,11 +4911,11 @@ namespace TensileLite
         if(version < 0 || version > 1 || (version == 1 && !sizeMapping.isDataParallel()))
             throw std::runtime_error("Invalid persistent loop argument layout for execution policy");
         if(version == 1 && outerVersion != 3)
-            throw std::runtime_error("Native DataParallel requires kernel argument protocol version 3");
+            throw std::runtime_error("DataParallel argument layout version 1 requires KernArgsVersion=3");
         if(customKernel.name.empty())
             return;
 
-        const std::array<CustomArgSemantic, 2> native{
+        const std::array<CustomArgSemantic, 2> dataParallelArgSemantics{
             CustomArgSemantic::ItersPerTile, CustomArgSemantic::PersistentGrid};
         size_t count = 0, previous = 0;
         for(size_t i = 0; i < customKernel.args.size(); ++i)
@@ -4940,13 +4940,13 @@ namespace TensileLite
             case CustomArgSemantic::AddressSynchronizer:
             case CustomArgSemantic::Synchronizer:
             case CustomArgSemantic::GSUSync:
-                throw std::runtime_error("Native DataParallel descriptor contains legacy scheduling or workspace arguments");
+                throw std::runtime_error("DataParallel version-1 descriptor contains legacy scheduling or workspace arguments");
             case CustomArgSemantic::ItersPerTile:
             case CustomArgSemantic::PersistentGrid:
-                if(count >= native.size() || arg.semantic != native[count]
+                if(count >= dataParallelArgSemantics.size() || arg.semantic != dataParallelArgSemantics[count]
                    || arg.type != CustomArgType::uint32 || arg.padding != 0
                    || (count != 0 && i != previous + 1))
-                    throw std::runtime_error("Invalid native DataParallel scheduling arguments");
+                    throw std::runtime_error("Invalid DataParallel version-1 scheduling arguments");
                 previous = i;
                 ++count;
                 break;
@@ -4955,9 +4955,9 @@ namespace TensileLite
             }
         }
         if(version == 1
-           && (count != native.size() || customKernel.workspaceType != CustomWorkspaceType::None
+           && (count != dataParallelArgSemantics.size() || customKernel.workspaceType != CustomWorkspaceType::None
                || customKernel.workspaceSizePerElemC != 0 || customKernel.workspaceSizePerElemBias != 0))
-            throw std::runtime_error("Native DataParallel descriptor requires two scheduling arguments and no partial workspace");
+            throw std::runtime_error("DataParallel version-1 descriptor requires two scheduling arguments and no partial workspace");
     }
 
     PersistentLaunchSettings ContractionSolution::resolvePersistentSettings(

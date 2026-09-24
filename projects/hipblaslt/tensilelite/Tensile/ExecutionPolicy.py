@@ -277,7 +277,7 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     if version == 1 and outer_version != 3 and (not regenerate or handwritten):
         raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
     if regenerate and not handwritten:
-        # Native whole-tile scheduling and the verified outer protocol are
+        # DataParallel tile traversal and its argument layout are
         # generator capabilities. Regenerating known older logic upgrades both;
         # handwritten/prebuilt artifacts retain the layout they declare.
         support["PersistentLoopArgsVersion"] = 1 if policy.data_parallel else 0
