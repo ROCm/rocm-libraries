@@ -1244,13 +1244,22 @@ bwd_result fmha_bwd_run(mode_enum mode,
                 const bool neutral = (h % 2 == 0);
                 const double gpu   = ck_tile::type_convert<double>(d_sink_host(h));
 
-                if(neutral && std::abs(gpu) > 0)
+                // Tested first: every comparison below is false for a NaN, so a NaN on an even
+                // head would read as "exactly 0" and pass. That is the shape a -inf sink meeting
+                // a fully masked row produces, so without this the check is blind to it.
+                if(!std::isfinite(gpu))
+                {
+                    identity_pass = false;
+                    std::cerr << "Error: head " << h << " has a non-finite d_sink (" << gpu
+                              << "). exp(sink - lse) went indeterminate\n";
+                }
+                else if(neutral && std::abs(gpu) > 0)
                 {
                     identity_pass = false;
                     std::cerr << "Error: head " << h << " has sink -inf so d_sink must be exactly "
                               << "0, got " << gpu << ". The kernel read some other sink element\n";
                 }
-                if(!neutral && !(std::abs(gpu) > 0))
+                else if(!neutral && !(std::abs(gpu) > 0))
                 {
                     identity_pass = false;
                     std::cerr << "Error: head " << h << " has a finite sink so d_sink must be "
