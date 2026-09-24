@@ -115,10 +115,8 @@ namespace TensileLite
          *
          * Only for tests, which run every mode in one process and so cannot
          * rely on the latch. Mirrors Debug::reloadDebugBitsForTest().
-         * asPrivileged reads it the way a set-user-ID process would, since a
-         * test cannot become one.
          */
-        void reloadForTest(bool asPrivileged = false);
+        void reloadForTest();
 
         bool reads() const { return m_config.reads(); }
         bool writes() const { return m_config.writes(); }
@@ -126,7 +124,7 @@ namespace TensileLite
     private:
         TuningModeSingleton();
 
-        void load(bool isPrivileged);
+        void load();
 
         TuningModeConfig m_config;
     };

@@ -41,20 +41,10 @@
 #include <unistd.h>
 #endif
 
-extern "C" void hipblaslt_tuning_reset_for_test();
-extern "C" void hipblaslt_tuning_counters_for_test(uint64_t* loaded,
-                                                   uint64_t* hits,
-                                                   uint64_t* misses,
-                                                   uint64_t* invalidated,
-                                                   uint64_t* tuned,
-                                                   uint64_t* skipped);
-extern "C" void hipblaslt_tuning_lookup_tally_for_test(uint64_t* shapes,
-                                                       uint64_t* matched,
-                                                       uint64_t* fellback,
-                                                       uint64_t* tuned);
-extern "C" int      hipblaslt_tuning_last_launch_for_test();
-extern "C" uint64_t hipblaslt_tuning_attempts_for_test();
-extern "C" void     hipblaslt_tuning_inject_failure_for_test(int stage);
+extern "C" void   hipblaslt_tuning_reset_for_test();
+extern "C" int    hipblaslt_tuning_last_launch_for_test();
+extern "C" void   hipblaslt_tuning_inject_failure_for_test(int stage);
+extern "C" size_t hipblaslt_tuning_stats_for_test(uint64_t* values, size_t count);
 
 #ifdef WIN32
 static int setenv(const char* name, const char* value, int overwrite)
@@ -75,16 +65,37 @@ namespace
         return hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
     }
 
+    /**
+     * The library's tallies, in the order hipblaslt_tuning_stats_for_test
+     * documents. The counters count lookups; attempts counts searches that
+     * reached tuning-start; the last four count distinct shapes, the way the
+     * summary line does.
+     */
     struct Counters
     {
         uint64_t loaded = 0, hits = 0, misses = 0, invalidated = 0, tuned = 0, skipped = 0;
+        uint64_t attempts = 0;
+        uint64_t shapes = 0, matched = 0, fellback = 0, tunedShapes = 0;
     };
 
     Counters counters()
     {
+        uint64_t     v[11] = {};
+        const size_t known = hipblaslt_tuning_stats_for_test(v, 11);
+        EXPECT_EQ(known, 11u) << "the library reports a different list of tallies than this reads";
+
         Counters c;
-        hipblaslt_tuning_counters_for_test(
-            &c.loaded, &c.hits, &c.misses, &c.invalidated, &c.tuned, &c.skipped);
+        c.loaded      = v[0];
+        c.hits        = v[1];
+        c.misses      = v[2];
+        c.invalidated = v[3];
+        c.tuned       = v[4];
+        c.skipped     = v[5];
+        c.attempts    = v[6];
+        c.shapes      = v[7];
+        c.matched     = v[8];
+        c.fellback    = v[9];
+        c.tunedShapes = v[10];
         return c;
     }
 
@@ -1559,13 +1570,12 @@ namespace
 
         ASSERT_TRUE(runGemm(256, 256, 256));
 
-        uint64_t shapes = 0, matched = 0, fellback = 0, tuned = 0;
-        hipblaslt_tuning_lookup_tally_for_test(&shapes, &matched, &fellback, &tuned);
+        const auto tally = counters();
 
-        EXPECT_EQ(shapes, 1u);
-        EXPECT_EQ(matched, 0u);
-        EXPECT_EQ(fellback, 1u);
-        EXPECT_EQ(tuned, 0u);
+        EXPECT_EQ(tally.shapes, 1u);
+        EXPECT_EQ(tally.matched, 0u);
+        EXPECT_EQ(tally.fellback, 1u);
+        EXPECT_EQ(tally.tunedShapes, 0u);
     }
 
     // The summary is read against loaded=N, so it counts problems rather than
@@ -1580,12 +1590,11 @@ namespace
         for(int i = 0; i < 4; i++)
             ASSERT_TRUE(runGemm(256, 256, 256));
 
-        uint64_t shapes = 0, matched = 0, fellback = 0, tuned = 0;
-        hipblaslt_tuning_lookup_tally_for_test(&shapes, &matched, &fellback, &tuned);
+        const auto tally = counters();
 
-        EXPECT_EQ(shapes, 1u);
-        EXPECT_EQ(matched, 1u);
-        EXPECT_EQ(fellback, 0u);
+        EXPECT_EQ(tally.shapes, 1u);
+        EXPECT_EQ(tally.matched, 1u);
+        EXPECT_EQ(tally.fellback, 0u);
     }
 
     // A winner that could not be written was still tuned: it is in the in-memory
@@ -1600,10 +1609,9 @@ namespace
         enterModeForLogging("tune", unwritable);
         ASSERT_TRUE(runGemm(256, 256, 256));
 
-        uint64_t shapes = 0, matched = 0, fellback = 0, tuned = 0;
-        hipblaslt_tuning_lookup_tally_for_test(&shapes, &matched, &fellback, &tuned);
+        const auto tally = counters();
 
-        EXPECT_EQ(tuned, 1u) << "a successful tune vanished from the summary because the "
+        EXPECT_EQ(tally.tunedShapes, 1u) << "a successful tune vanished from the summary because the "
                                 "winner could not be written";
 
         // The persist-only counter is what stayed at zero, and that is the
@@ -1912,7 +1920,7 @@ namespace
             for(int call = 0; call < 3; call++)
                 ASSERT_TRUE(runGemm(256, 256, 256)) << "a failed search failed the matmul";
 
-            EXPECT_EQ(hipblaslt_tuning_attempts_for_test(), 1u);
+            EXPECT_EQ(counters().attempts, 1u);
             EXPECT_EQ(valueRowCount(m_path), 0u);
         }
     }
@@ -1928,17 +1936,13 @@ namespace
         int launched = -1;
         ASSERT_TRUE(runGemmWith(256, 256, 256, AlgoFrom::Null, -1, &launched))
             << "a failed search failed the matmul";
-        EXPECT_EQ(hipblaslt_tuning_attempts_for_test(), 1u);
+        EXPECT_EQ(counters().attempts, 1u);
 
         const auto c = counters();
         EXPECT_EQ(c.hits, 0u);
         EXPECT_EQ(c.misses, 1u);
-
-        uint64_t shapes = 0, matched = 0, fellback = 0, tuned = 0;
-        hipblaslt_tuning_lookup_tally_for_test(&shapes, &matched, &fellback, &tuned);
-
-        EXPECT_EQ(shapes, 1u);
-        EXPECT_EQ(fellback, 1u);
+        EXPECT_EQ(c.shapes, 1u);
+        EXPECT_EQ(c.fellback, 1u);
     }
 
     // A search the budget stops keeps its best candidate only once the kernel
@@ -2044,7 +2048,7 @@ namespace
         ASSERT_EQ(winners.size(), 1u) << "the shape was not tuned exactly once";
         EXPECT_EQ(launched[0], std::stoi(winners[0]));
         EXPECT_EQ(launched[1], std::stoi(winners[0]));
-        EXPECT_EQ(hipblaslt_tuning_attempts_for_test(), 1u);
+        EXPECT_EQ(counters().attempts, 1u);
 
         const auto c = counters();
         EXPECT_EQ(c.hits, 1u);

@@ -390,10 +390,10 @@ if(HIPBLASLT_ENABLE_HOST)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
     if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
-        # The tuning cache's test hooks: reset, counters, the launched index and
-        # failure injection. Only the client tests call them, so they are built
-        # exactly when those tests are, and a build without tests keeps them
-        # out of the library's ABI.
+        # The tuning cache's test hooks: reset, stats, the launched index and
+        # failure injection. Only the GPU client tests call them, so they are
+        # built exactly when those tests are, and a build without tests keeps
+        # them out of the library's ABI.
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_TUNING_TEST_HOOKS)
     endif()
     if(NOT HIPBLASLT_ENABLE_YAML)

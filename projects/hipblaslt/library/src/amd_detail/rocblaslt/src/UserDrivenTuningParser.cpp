@@ -54,17 +54,17 @@ namespace TensileLite
 
     TuningModeSingleton::TuningModeSingleton()
     {
-        load(rocblaslt_process_is_privileged());
+        load();
     }
 
-    void TuningModeSingleton::reloadForTest(bool asPrivileged)
+    void TuningModeSingleton::reloadForTest()
     {
-        load(asPrivileged || rocblaslt_process_is_privileged());
+        load();
     }
 
-    void TuningModeSingleton::load(bool isPrivileged)
+    void TuningModeSingleton::load()
     {
-        m_config = TuningModeConfig::fromEnvironment(isPrivileged);
+        m_config = TuningModeConfig::fromEnvironment(rocblaslt_process_is_privileged());
 
         if(m_config.suppressedForSecurity)
         {

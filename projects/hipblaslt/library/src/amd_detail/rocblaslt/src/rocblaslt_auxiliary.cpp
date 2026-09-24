@@ -3181,28 +3181,12 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     static_cast<void>(tuningLastLaunchedIndexForTest());
 }
 
-// reset_for_test, then re-read the tuning variables the way a process in a
-// secure execution context does. A test binary cannot become set-user-ID, so
-// this is how the suppression is exercised.
-extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_as_privileged_for_test()
-{
-    hipblaslt_tuning_reset_for_test();
-    TensileLite::TuningModeSingleton::getInstance().reloadForTest(true);
-}
-
 // Which solution the calling thread's last hipblasLtMatmul launched, cleared by
 // reading. The counters say that a lookup matched; only this says which kernel
 // ran, which is what an explicit-algo or algo == nullptr call has to prove.
 extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
 {
     return tuningLastLaunchedIndexForTest();
-}
-
-// Searches that reached tuning-start, successful or not. Lifecycle lines are
-// bounded per shape at the default log level, so they cannot show a retry.
-extern "C" HIPBLASLT_EXPORT uint64_t hipblaslt_tuning_attempts_for_test()
-{
-    return TensileLite::TuningCounters::instance().attempts.load();
 }
 
 // Make later tuning attempts fail at a chosen stage, so a test can prove each
@@ -3213,49 +3197,42 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_inject_failure_for_test(int st
     tuningInjectFailureForTest(stage);
 }
 
-// Lets a test assert on hit / miss / invalidated / tuned directly instead of
-// scraping log output for them.
-extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_counters_for_test(uint64_t* loaded,
-                                                                    uint64_t* hits,
-                                                                    uint64_t* misses,
-                                                                    uint64_t* invalidated,
-                                                                    uint64_t* tuned,
-                                                                    uint64_t* skipped)
+// Every tally a test asserts on, so it need not scrape log output for them:
+//
+//   0 loaded, 1 hits, 2 misses, 3 invalidated, 4 tuned, 5 skipped
+//       The counters, which count lookups.
+//   6 attempts
+//       Searches that reached tuning-start, successful or not. Lifecycle lines
+//       are bounded per shape at the default log level, so they cannot show a
+//       retry.
+//   7 shapes, 8 matched, 9 fell back, 10 tuned shapes
+//       The distinct-shape tally behind the summary line, which is written
+//       during static destruction, long after any in-process stderr capture a
+//       test could install.
+//
+// Fills up to count values in that order and returns how many there are, so a
+// test reading a different list notices instead of misreading one.
+extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* values, size_t count)
 {
-    const auto& c = TensileLite::TuningCounters::instance();
-    if(loaded)
-        *loaded = c.entriesLoaded.load();
-    if(hits)
-        *hits = c.hits.load();
-    if(misses)
-        *misses = c.misses.load();
-    if(invalidated)
-        *invalidated = c.invalidated.load();
-    if(tuned)
-        *tuned = c.tuned.load();
-    if(skipped)
-        *skipped = c.skipped.load();
-}
+    const auto& c      = TensileLite::TuningCounters::instance();
+    uint64_t    shapes = 0, matched = 0, fellback = 0, tunedShapes = 0;
+    TensileLite::tuningLookupTallyForTest(&shapes, &matched, &fellback, &tunedShapes);
 
-// The distinct-shape tally behind the summary line. Separate from the counters
-// above because those count lookups while this counts problems, and because the
-// summary itself is written during static destruction, long after any in-process
-// stderr capture a test could install.
-extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_lookup_tally_for_test(uint64_t* shapes,
-                                                                        uint64_t* matched,
-                                                                        uint64_t* fellback,
-                                                                        uint64_t* tuned)
-{
-    uint64_t localShapes = 0, localMatched = 0, localFellback = 0, localTuned = 0;
-    TensileLite::tuningLookupTallyForTest(&localShapes, &localMatched, &localFellback, &localTuned);
+    const uint64_t all[] = {c.entriesLoaded.load(),
+                            c.hits.load(),
+                            c.misses.load(),
+                            c.invalidated.load(),
+                            c.tuned.load(),
+                            c.skipped.load(),
+                            c.attempts.load(),
+                            shapes,
+                            matched,
+                            fellback,
+                            tunedShapes};
 
-    if(shapes)
-        *shapes = localShapes;
-    if(matched)
-        *matched = localMatched;
-    if(fellback)
-        *fellback = localFellback;
-    if(tuned)
-        *tuned = localTuned;
+    constexpr size_t known = sizeof(all) / sizeof(all[0]);
+    for(size_t i = 0; values && i < count && i < known; i++)
+        values[i] = all[i];
+    return known;
 }
 #endif // HIPBLASLT_ENABLE_TUNING_TEST_HOOKS
