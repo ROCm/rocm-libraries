@@ -409,9 +409,9 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
 }
 
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
-// Declared for the execution-path hook in tensile_host.cpp, which must know
-// whether a key still has a usable entry rather than merely any entry.
-bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
+// Declared for the execution path in tensile_host.cpp, which must know which
+// entry is usable rather than merely whether any entry exists.
+int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
@@ -477,7 +477,7 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
            && required <= max_workspace_bytes)
         {
             record.matched = true;
-            return true;
+            return entry.solutionIndex;
         }
 
         // Mirror replay's XF32 fallback, but keep this a pure probe. The
@@ -495,12 +495,12 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                && required <= max_workspace_bytes)
             {
                 record.matched = true;
-                return true;
+                return entry.solutionIndex;
             }
         }
     }
 
-    return false;
+    return -1;
 }
 #endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
@@ -3203,6 +3203,33 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     counters.invalidated   = 0;
     counters.tuned         = 0;
     counters.skipped       = 0;
+    counters.attempts      = 0;
+
+    tuningInjectFailureForTest(0);
+    static_cast<void>(tuningLastLaunchedIndexForTest());
+}
+
+// Which solution the calling thread's last hipblasLtMatmul launched, cleared by
+// reading. The counters say that a lookup matched; only this says which kernel
+// ran, which is what an explicit-algo or algo == nullptr call has to prove.
+extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
+{
+    return tuningLastLaunchedIndexForTest();
+}
+
+// Searches that reached tuning-start, successful or not. Lifecycle lines are
+// bounded per shape at the default log level, so they cannot show a retry.
+extern "C" HIPBLASLT_EXPORT uint64_t hipblaslt_tuning_attempts_for_test()
+{
+    return TensileLite::TuningCounters::instance().attempts.load();
+}
+
+// Make later tuning attempts fail at a chosen stage, so a test can prove each
+// failure is latched rather than repeated on every matmul. See
+// tuningInjectFailureForTest for the stages; reset_for_test clears it.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_inject_failure_for_test(int stage)
+{
+    tuningInjectFailureForTest(stage);
 }
 
 // Lets a test assert on hit / miss / invalidated / tuned directly instead of

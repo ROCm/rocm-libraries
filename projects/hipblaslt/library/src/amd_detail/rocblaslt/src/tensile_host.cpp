@@ -4286,10 +4286,14 @@ namespace
     }
 
     /**
-     * Serialises tuning within this process. try_lock rather than lock so a
-     * second thread reaching an untuned shape runs normally instead of stalling
-     * behind a benchmark, and so the process-owned scratch has exactly one
-     * writer.
+     * Serialises tuning within this process, so the process-owned scratch has
+     * exactly one writer. A thread that reaches an untuned shape while another
+     * is tuning waits for it rather than skipping its own shape: what tune mode
+     * records must not depend on how the threads happened to be scheduled.
+     *
+     * Work that other threads or streams submit to the device while a search
+     * runs still shares the GPU with it and can shift the timings, so tune in a
+     * process whose GPU work is quiet enough to measure.
      *
      * Process-local by construction, and sufficient for what it guards: the
      * scratch buffer belongs to this process, so a separate process tuning at
@@ -4303,6 +4307,24 @@ namespace
     {
         static std::mutex gLock;
         return gLock;
+    }
+
+    // Tests only: the index the last launch on this thread used, and the stage
+    // at which later tuning attempts fail on purpose (see TuningFailureStage).
+    thread_local int t_lastLaunchedIndex = -1;
+    std::atomic<int> g_injectedTuningFailure{0};
+
+    enum class TuningFailureStage : int
+    {
+        None        = 0,
+        Setup       = 1,
+        Enumeration = 2,
+        MidSearch   = 3,
+    };
+
+    bool tuningFailureInjected(TuningFailureStage stage)
+    {
+        return g_injectedTuningFailure.load(std::memory_order_relaxed) == static_cast<int>(stage);
     }
 
     bool streamIsCapturing(hipStream_t stream)
@@ -4321,6 +4343,11 @@ namespace
      *
      * Nothing here touches the caller's buffers. The winner is launched once by
      * the normal path afterwards, on the real ones.
+     *
+     * baselineIndex is the kernel the call launches if tuning finds nothing
+     * faster. It is measured first, and a search the budget stops is recorded
+     * only when it was measured, so a partial winner can never be slower than
+     * what the caller would have run untuned.
      */
     TensileLite::TuningAttempt benchmarkAndSelectWinner(
         rocblaslt_handle                    handle,
@@ -4331,6 +4358,7 @@ namespace
                                                 library,
         std::shared_ptr<TensileLite::Hardware>& hardware,
         TensileLite::hip::SolutionAdapter*      adapter,
+        int                                     baselineIndex,
         TensileLite::TunedEntry&                winnerOut,
         int&                                    winnerIndexOut)
     {
@@ -4401,6 +4429,7 @@ namespace
         // getAllSolutions over a thousand-odd candidates is itself part of that
         // wait, so saying it afterwards would explain a pause only once it was
         // nearly over.
+        TensileLite::TuningCounters::instance().attempts++;
         if(TensileLite::shouldLogTuningStart(key))
         {
             std::ostringstream msg;
@@ -4447,7 +4476,8 @@ namespace
         // allocator handed back, where a denormal pattern changes the timing of
         // the very thing being measured and a NaN or Inf can change it a great
         // deal. Zero is uniform, cheap and cannot denormal.
-        if(hipMemsetAsync(bytes, 0, layout.total, prob.stream) != hipSuccess)
+        if(tuningFailureInjected(TuningFailureStage::Setup)
+           || hipMemsetAsync(bytes, 0, layout.total, prob.stream) != hipSuccess)
         {
             static_cast<void>(hipGetLastError());
             return TuningAttempt::FallbackSetup;
@@ -4504,16 +4534,6 @@ namespace
             }
         }
 
-        // Default selection's pick, needed whichever way candidates are
-        // enumerated. With the ranked prefix it is simply the first entry, but
-        // an unranked enumeration has no such entry, so ask for it separately
-        // and measure it first, which keeps the recorded baseline comparable to
-        // the winner rather than depending on where it landed in the order.
-        int  baselineIndex = -1;
-        auto ranked        = getBestRawSolutions(prob, handle, gemmData, 1, prob.workspaceSize);
-        if(!ranked.empty())
-            baselineIndex = ranked.front()->index;
-
         // Candidate indexes. All-kernel enumeration reuses the public
         // getAllSolutions, which already dedups repeated indexes and drops
         // custom kernels that cannot run pointer-array batch.
@@ -4532,6 +4552,12 @@ namespace
             candidateIndexes.reserve(all.size());
             for(const auto& result : all)
                 candidateIndexes.push_back(*(int*)result.algo.data);
+
+            // getAllSolutions returns them in the order of a set of pointers,
+            // which differs from one process to the next. Sorted, a search the
+            // budget stops covers the same prefix in every process, which is
+            // what lets a rerun under the same ceiling be skipped.
+            std::sort(candidateIndexes.begin(), candidateIndexes.end());
         }
         else
         {
@@ -4542,11 +4568,16 @@ namespace
                 candidateIndexes.push_back(solution->index);
         }
 
+        if(tuningFailureInjected(TuningFailureStage::Enumeration))
+            return TuningAttempt::FallbackEnumeration;
+
+        // Moved to the front with the rest left in order, so it is measured
+        // first whichever way the candidates were enumerated.
         if(baselineIndex >= 0)
         {
             auto at = std::find(candidateIndexes.begin(), candidateIndexes.end(), baselineIndex);
             if(at != candidateIndexes.end())
-                std::iter_swap(candidateIndexes.begin(), at);
+                std::rotate(candidateIndexes.begin(), at, at + 1);
             else
                 candidateIndexes.insert(candidateIndexes.begin(), baselineIndex);
         }
@@ -4771,9 +4802,10 @@ namespace
         // ranking round to drop a candidate before it has been measured
         // properly, which is what a shortlist did: on a large shape the eventual
         // winner screened 396th of 1025 and never reached the decision round.
-        size_t measured  = 0;
-        size_t attempted = 0;
-        bool   truncated = false;
+        size_t measured         = 0;
+        size_t attempted        = 0;
+        bool   truncated        = false;
+        bool   baselineMeasured = false;
 
         // Time-based rather than every N candidates: a heartbeat tied to the
         // candidate count fires hundreds of times on a shape whose kernels are
@@ -4816,8 +4848,14 @@ namespace
             }
             measured++;
 
+            if(measured == 1 && tuningFailureInjected(TuningFailureStage::MidSearch))
+                throw std::runtime_error("tuning failure injected for a test");
+
             if(solution->index == baselineIndex)
+            {
                 winnerOut.baselineTimeUs = us;
+                baselineMeasured         = true;
+            }
 
             if(us < bestUs)
             {
@@ -4847,7 +4885,11 @@ namespace
         // Nothing measured leaves nothing to record, whichever way the loop
         // ended. A budget that expires before the first candidate is timed is
         // the common way to reach this with truncated set.
-        if(bestIndex < 0)
+        //
+        // A truncated search whose baseline was not measured is treated the
+        // same way. Its best candidate was compared against nothing the caller
+        // would otherwise run, so recording it could make the shape slower.
+        if(bestIndex < 0 || (truncated && !baselineMeasured))
         {
             if(truncated)
             {
@@ -4857,9 +4899,7 @@ namespace
             return TuningAttempt::FallbackNoWinner;
         }
 
-        // The first candidate is what default selection would have returned, so
-        // recording it costs nothing and cannot be reconstructed later.
-        winnerOut.baselineIndex = candidates.front()->index;
+        winnerOut.baselineIndex = baselineIndex;
 
         // Fastest measured candidate wins outright, which is what
         // hipblaslt-bench does: its selection is a plain
@@ -4880,12 +4920,12 @@ namespace
         // A search the budget stopped is recorded as incomplete rather than
         // discarded. The prefix it managed to measure is an arbitrary subset of
         // the candidate list, so its best member is very likely not the shape's
-        // best kernel -- but default selection's own pick is forced to the front
-        // of that list and is therefore always measured first, so the best of
-        // any prefix is no slower than what this shape runs untuned. Keeping it
-        // hands the caller that much now; the flag is what stops it from
-        // becoming permanent, since tune mode revisits an incomplete entry in a
-        // later process whose budget can finish the search.
+        // best kernel -- but the kernel this call would launch untuned is forced
+        // to the front of that list and a truncated search is only recorded once
+        // it was measured, so the best of the prefix is no slower than what this
+        // call runs untuned. Keeping it hands the caller that much now; the flag
+        // is what stops it from becoming permanent, since tune mode revisits an
+        // incomplete entry in a later process whose budget can finish the search.
         // Recorded on every row, so a later run reading an incomplete one can
         // tell whether it is able to get any further than this run did. Rounded
         // down from the microsecond budget the loop actually used; zero means
@@ -4901,6 +4941,20 @@ namespace
     }
 #endif // HIPBLASLT_ENABLE_TUNING_CACHE
 } // namespace
+
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+int tuningLastLaunchedIndexForTest()
+{
+    const int index     = t_lastLaunchedIndex;
+    t_lastLaunchedIndex = -1;
+    return index;
+}
+
+void tuningInjectFailureForTest(int stage)
+{
+    g_injectedTuningFailure.store(stage, std::memory_order_relaxed);
+}
+#endif
 
 // Points inputs.Synchronizer at the region the chosen solution actually wants.
 //
@@ -4968,11 +5022,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             data->problem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
 
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
-        // Noted before algo is filled in below, because it decides whether this
-        // call can be served by the cache at all. A caller that supplies an algo
-        // got it from the heuristic entry point, which already applied any
-        // cached winner; a caller that does not is launched with default
-        // selection no matter what the cache holds.
+        // Noted before algo is filled in below. An explicit algo is launched as
+        // given, whatever the cache holds or tuning finds; the cache and the
+        // tuner choose the kernel only when the caller leaves that choice to the
+        // library by passing no algo.
         const bool callerSuppliedAlgo = (algo != nullptr);
 #endif
 
@@ -4997,16 +5050,18 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int* solutionIndex = (int*)algo->data;
 
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
-        // Online tuning.
+        // Cache lookup and tune mode.
         //
-        // This decides for itself rather than acting on a flag the heuristic
-        // set, because hipblasLtMatmul accepts algo == nullptr and then runs its
-        // own getBestSolutions above without ever entering
+        // Decided here rather than by a flag the heuristic set, because
+        // hipblasLtMatmul accepts algo == nullptr and then runs its own
+        // getBestSolutions above without ever entering
         // hipblasLtMatmulAlgoGetHeuristic. A shape reaching execution that way
-        // would otherwise never be tuned.
+        // would otherwise never be served from the cache or tuned.
         //
-        // The winner is kept in a local. The caller's algo is const and must not
-        // be rewritten; only the index used for this launch changes.
+        // The caller's algo is const and must not be rewritten. When the cache
+        // or the tuner picks the kernel only the index used for this launch
+        // changes, and only for a caller that passed no algo.
+        int  launchIndex = -1;
         int  tunedIndex  = -1;
         bool benchmarked = false;
 
@@ -5080,11 +5135,14 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         {
             const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
 
-            const bool eligible = tuning.writes() && !prob.grouped_gemm
-                                  && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
-                                  && !streamIsCapturing(prob.stream);
+            const bool keyed = tuning.reads() && !prob.grouped_gemm
+                               && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+            const bool eligible = keyed && tuning.writes() && !streamIsCapturing(prob.stream);
 
-            if(eligible)
+            // A caller with its own algo needs the key only for the tune-mode
+            // gate. In cache mode that algo launches as given, and the lookup
+            // would be work for nothing on every call.
+            if(keyed && (!callerSuppliedAlgo || eligible))
             {
                 // The file has to be on disk-to-memory before deciding anything:
                 // a matmul-only caller never enters the heuristic entry point,
@@ -5100,19 +5158,21 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // validation after a rebuild stay in the map, and testing for
                 // mere presence made them permanently un-retunable.
                 //
-                // Counted as a cache lookup only when this call could actually
-                // be served by one. With algo == nullptr the probe is purely a
-                // "does this still need tuning" gate: the launch below uses
-                // default selection unless tuning produces a winner here, so
-                // recording a hit would have the summary claim the cache served
-                // a shape it never touched.
+                // Counted as a cache lookup only when it decides this launch,
+                // which is when the caller passed no algo. An explicit algo was
+                // counted at the heuristic query it came from, if it came from
+                // one, and it launches as given whatever this finds.
                 //
                 // The lookup runs first either way, so a shape the tuner has
                 // given up on is still counted as the fallback it is. Only then
                 // is the search itself declined, because a winnerless search
                 // records nothing and repeating it would spend the same minutes
                 // on every matmul of that shape.
-                //
+                const int cachedIndex = tuning_cache_find_valid_entry(
+                    handle, key, prob, gemmData, prob.workspaceSize, !callerSuppliedAlgo);
+                if(!callerSuppliedAlgo && cachedIndex >= 0)
+                    launchIndex = cachedIndex;
+
                 // An entry the budget cut short is usable but not final, so it
                 // does not necessarily close the gate. needsFinishing decides,
                 // and it says yes only when this run's ceiling beats the one
@@ -5123,30 +5183,33 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // Rounded to milliseconds the same way the benchmarker records
                 // it, so the two are compared on equal terms.
                 const int64_t currentBudgetMs
-                    = static_cast<int64_t>(TuningPolicy::perShapeBudgetUs() / 1000.0);
+                    = eligible ? static_cast<int64_t>(TuningPolicy::perShapeBudgetUs() / 1000.0)
+                               : 0;
 
-                const bool haveUsableEntry = tuning_cache_has_valid_entry(
-                    handle, key, prob, gemmData, prob.workspaceSize, callerSuppliedAlgo);
-
-                if((!haveUsableEntry || cache.needsFinishing(key, currentBudgetMs))
+                if(eligible && (cachedIndex < 0 || cache.needsFinishing(key, currentBudgetMs))
                    && !TensileLite::tuningAlreadyAttempted(key))
                 {
-                    // try_lock, not lock: a second thread meeting an untuned
-                    // shape runs normally rather than stalling behind a
-                    // benchmark, and the shared scratch keeps one writer.
-                    std::unique_lock<std::mutex> guard(tuningLock(), std::try_to_lock);
+                    // Waits rather than skipping: tune mode was asked for, so
+                    // every shape it meets is tuned whatever the thread timing,
+                    // and the shared scratch keeps one writer.
+                    std::unique_lock<std::mutex> guard(tuningLock());
 
-                    // The latch is re-read under the lock as well as before it.
-                    // A thread that passed the gate while another was still
-                    // benchmarking this shape would otherwise inherit the lock
-                    // and repeat the search that just finished.
-                    if(guard.owns_lock() && !TensileLite::tuningAlreadyAttempted(key)
-                       && (!tuning_cache_has_valid_entry(
+                    // The latch and the entry are re-read under the lock as well
+                    // as before it. A thread that waited while another tuned this
+                    // shape would otherwise repeat the search that just finished.
+                    if(!TensileLite::tuningAlreadyAttempted(key)
+                       && (tuning_cache_find_valid_entry(
                                handle, key, prob, gemmData, prob.workspaceSize, false)
+                               < 0
                            || cache.needsFinishing(key, currentBudgetMs)))
                     {
                         TensileLite::TunedEntry winner;
                         benchmarked = true;
+
+                        // What this call launches if tuning finds nothing
+                        // faster: the caller's algo, else the cached entry, else
+                        // default selection's pick.
+                        const int untunedIndex = launchIndex >= 0 ? launchIndex : *solutionIndex;
 
                         // Timed out here rather than inside, because the
                         // benchmarker's own clock is not returned and because
@@ -5165,6 +5228,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                        library,
                                                        hardware,
                                                        adapter,
+                                                       untunedIndex,
                                                        winner,
                                                        tunedIndex);
 
@@ -5182,7 +5246,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                             // solution object; re-deriving it from the index
                             // here is what previously recorded the wrong kernel.
                             winner.schemaVersion = TensileLite::TuningSchemaVersion::Current;
-                            winner.source        = TensileLite::TuningEntrySource::OnlineTuning;
+                            winner.source        = TensileLite::TuningEntrySource::TuneMode;
                             winner.buildStamp    = TensileLite::currentBuildStamp();
 
                             // Replace rather than add: any rows still here
@@ -5220,21 +5284,25 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                             }
                         }
 
-                        // Latched for the outcomes that spent the search and
-                        // left the shape wanting another one. A winnerless or
-                        // budget-stopped attempt would stall the next matmul
-                        // exactly as long for exactly nothing, and a partial
-                        // winner would re-measure the same prefix under the same
-                        // ceiling and arrive at the same answer.
+                        // Latched for every outcome that got as far as
+                        // announcing tuning-start and left the shape wanting
+                        // another search. A failed, winnerless or budget-stopped
+                        // attempt would stall the next matmul as long again, and
+                        // at the default log level it would do so silently, since
+                        // a shape's start and failure are each reported once. A
+                        // partial winner would re-measure the same prefix under
+                        // the same ceiling and arrive at the same answer.
                         //
                         // A complete tune needs no latch: its entry closes the
-                        // gate on its own. The early declines are deliberately
-                        // left unlatched, because they cost microseconds and
-                        // retrying lets a shape recover if the condition that
-                        // caused them was transient.
-                        if(result == TensileLite::TuningAttempt::SkippedBudget
-                           || result == TensileLite::TuningAttempt::FallbackNoWinner
-                           || result == TensileLite::TuningAttempt::TunedPartial)
+                        // gate on its own. The declines made before tuning-start
+                        // are deliberately left unlatched, because they cost
+                        // microseconds and retrying lets a shape recover if the
+                        // condition that caused them was transient.
+                        if(result == TensileLite::TuningAttempt::TunedPartial
+                           || result == TensileLite::TuningAttempt::SkippedBudget
+                           || result == TensileLite::TuningAttempt::FallbackSetup
+                           || result == TensileLite::TuningAttempt::FallbackEnumeration
+                           || result == TensileLite::TuningAttempt::FallbackNoWinner)
                             TensileLite::recordTuningAttempt(key);
 
                         reportAttempt(key, result, elapsedSeconds, tunedIndex, persisted);
@@ -5259,13 +5327,15 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
             // Only when an attempt was actually announced. An exception from the
             // lookup or the file load never reached the benchmarker, so calling
-            // it a failed tuning attempt would be wrong.
+            // it a failed tuning attempt would be wrong. An announced one is
+            // latched like any other failure that reached tuning-start.
             if(attemptKey)
             {
                 const double elapsedSeconds
                     = std::chrono::duration<double>(std::chrono::steady_clock::now() - attemptStart)
                           .count();
 
+                TensileLite::recordTuningAttempt(*attemptKey);
                 reportAttempt(*attemptKey,
                               TensileLite::TuningAttempt::FallbackException,
                               elapsedSeconds,
@@ -5284,8 +5354,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             updateTensileProblem(prob, data->problem);
         }
 
-        if(tunedIndex >= 0)
-            solutionIndex = &tunedIndex;
+        if(!callerSuppliedAlgo && tunedIndex >= 0)
+            launchIndex = tunedIndex;
+        if(launchIndex >= 0)
+            solutionIndex = &launchIndex;
 #endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
         data->algoIndex    = *solutionIndex;
@@ -5458,6 +5530,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+            t_lastLaunchedIndex = solution->index;
+#endif
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
             if(rocblaslt::Debug::Instance().printLogAsMarker())

@@ -171,6 +171,9 @@ namespace TensileLite
         std::atomic<uint64_t> tuned{0};
         std::atomic<uint64_t> skipped{0};
 
+        // Searches that got as far as tuning-start, whatever their outcome.
+        std::atomic<uint64_t> attempts{0};
+
         std::string summary() const
         {
             return "loaded=" + std::to_string(entriesLoaded.load())
@@ -226,7 +229,7 @@ namespace TensileLite
     {
         LegacyOverrideFile = 0,
         ManagedCacheFile   = 1,
-        OnlineTuning       = 2,
+        TuneMode           = 2,
     };
 
     /**
@@ -778,8 +781,8 @@ namespace TensileLite
          * Returns values rather than iterators on purpose. The previous
          * signature returned an equal_range pair after its shared_lock had gone
          * out of scope, so every caller walked the multimap unlocked. That was
-         * survivable while the map was written once at load; online tuning
-         * inserts entries throughout the run, which turns it into a live race.
+         * survivable while the map was written once at load; tune mode inserts
+         * entries throughout the run, which turns it into a live race.
          *
          * The order is precedence, not insertion. Callers replay the first entry
          * that still validates, so this decides which winner runs. The file is

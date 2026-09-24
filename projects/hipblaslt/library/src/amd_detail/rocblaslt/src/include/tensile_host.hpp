@@ -311,26 +311,40 @@ TensileLite::ProblemOverride
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
 
 /**
- * Whether this key still has an entry that resolves to its recorded kernel.
+ * The solution index of the first entry for this key that still resolves to its
+ * recorded kernel and supports this problem, or -1 when there is none.
  *
- * The execution-path tuning hook needs "is there a usable entry", not "is there
- * any entry": a shape whose rows all failed validation after a rebuild must be
- * eligible for re-tuning.
+ * The execution path needs "is there a usable entry", not "is there any entry":
+ * a shape whose rows all failed validation after a rebuild must be eligible for
+ * re-tuning, and a matmul given no algorithm may only launch an entry that can
+ * run it.
  *
- * countLookup false suppresses the hit/miss and summary accounting, for the two
- * cases where a probe is not a cache lookup on the caller's behalf: the re-check
- * the hook performs after taking the tuning lock, which asks the same question
- * about the same key within one call and would otherwise report two or three
- * misses for a single matmul, and a hipblasLtMatmul given no algorithm, which is
- * launched with default selection whatever the cache holds.
+ * countLookup false suppresses the hit/miss and summary accounting, for probes
+ * that do not decide which kernel the call launches: the tune-mode gate for a
+ * caller that passed its own algorithm, whose lookup was counted by the
+ * heuristic query it came from, and the re-check made after taking the tuning
+ * lock, which would otherwise count one matmul twice.
  */
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
-bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
+int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
                                   size_t                              max_workspace_bytes,
-                                  bool                                countLookup = true);
+                                  bool                                countLookup);
+
+/**
+ * The solution index this thread last launched through runContractionProblem,
+ * or -1, clearing it. Tests only.
+ */
+int tuningLastLaunchedIndexForTest();
+
+/**
+ * Make later tuning attempts fail at one stage: 1 setup, 2 enumeration, 3 an
+ * exception after the first measured candidate; 0 restores normal behaviour.
+ * Tests only.
+ */
+void tuningInjectFailureForTest(int stage);
 #endif
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);

@@ -20,6 +20,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -31,6 +32,7 @@
 #include <sstream>
 #include <streambuf>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -51,6 +53,9 @@ extern "C" void hipblaslt_tuning_lookup_tally_for_test(uint64_t* shapes,
                                                        uint64_t* matched,
                                                        uint64_t* fellback,
                                                        uint64_t* tuned);
+extern "C" int      hipblaslt_tuning_last_launch_for_test();
+extern "C" uint64_t hipblaslt_tuning_attempts_for_test();
+extern "C" void     hipblaslt_tuning_inject_failure_for_test(int stage);
 
 #ifdef WIN32
 static int setenv(const char* name, const char* value, int overwrite)
@@ -297,6 +302,181 @@ namespace
                         ok = out[i] == expected;
                 }
             }
+        }
+
+        if(pref)
+            hipblasLtMatmulPreferenceDestroy(pref);
+        if(desc)
+            hipblasLtMatmulDescDestroy(desc);
+        if(layoutC)
+            hipblasLtMatrixLayoutDestroy(layoutC);
+        if(layoutB)
+            hipblasLtMatrixLayoutDestroy(layoutB);
+        if(layoutA)
+            hipblasLtMatrixLayoutDestroy(layoutA);
+        static_cast<void>(hipFree(dWs));
+        static_cast<void>(hipFree(dD));
+        static_cast<void>(hipFree(dC));
+        static_cast<void>(hipFree(dB));
+        static_cast<void>(hipFree(dA));
+        hipblasLtDestroy(handle);
+
+        return ok;
+    }
+
+    /** Where runGemmWith takes the algo it hands hipblasLtMatmul from. */
+    enum class AlgoFrom
+    {
+        Heuristic, // the top heuristic result, queried just before the call
+        Index, // a given solution index, the way a caller reuses one algo
+        Null, // no algo, which leaves the choice to the library
+    };
+
+    /**
+     * One fp16 GEMM with separate C and D, reporting the solution index the
+     * library actually launched.
+     *
+     * The heuristic's answer and the counters only say which kernel the cache
+     * offered. What reaches dispatch is what an explicit algo or a null one has
+     * to be judged on.
+     *
+     * verifyProduct fills A and B with ones and checks every element of D is k,
+     * which is what proves the launched kernel ran on the caller's buffers.
+     */
+    bool runGemmWith(int64_t  m,
+                     int64_t  n,
+                     int64_t  k,
+                     AlgoFrom from,
+                     int      index,
+                     int*     launched,
+                     bool     verifyProduct = false)
+    {
+        *launched = -1;
+
+        hipblasLtHandle_t handle = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+            return false;
+
+        void*        dA      = nullptr;
+        void*        dB      = nullptr;
+        void*        dC      = nullptr;
+        void*        dD      = nullptr;
+        void*        dWs     = nullptr;
+        const size_t wsBytes = 32 * 1024 * 1024;
+
+        bool ok = hipMalloc(&dA, m * k * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dB, k * n * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dC, m * n * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dD, m * n * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dWs, wsBytes) == hipSuccess;
+
+        if(ok)
+        {
+            const uint16_t              fill = verifyProduct ? halfBits(1.0f) : 0;
+            const std::vector<uint16_t> a(static_cast<size_t>(m * k), fill);
+            const std::vector<uint16_t> b(static_cast<size_t>(k * n), fill);
+            ok = hipMemcpy(dA, a.data(), a.size() * sizeof(uint16_t), hipMemcpyHostToDevice)
+                     == hipSuccess
+                 && hipMemcpy(dB, b.data(), b.size() * sizeof(uint16_t), hipMemcpyHostToDevice)
+                        == hipSuccess
+                 && hipMemset(dC, 0, m * n * sizeof(uint16_t)) == hipSuccess
+                 && hipMemset(dD, 0, m * n * sizeof(uint16_t)) == hipSuccess;
+        }
+
+        hipblasLtMatrixLayout_t     layoutA = nullptr, layoutB = nullptr, layoutC = nullptr;
+        hipblasLtMatmulDesc_t       desc = nullptr;
+        hipblasLtMatmulPreference_t pref = nullptr;
+
+        if(ok)
+        {
+            const uint64_t maxWs = wsBytes;
+            ok = hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, m, k, m) == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_16F, k, n, k)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_16F, m, n, m)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulPreferenceSetAttribute(
+                        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        const float                  alpha   = 1.0f;
+        const float                  beta    = 0.0f;
+        hipblasLtMatmulAlgo_t        algo    = {};
+        const hipblasLtMatmulAlgo_t* algoPtr = nullptr;
+
+        if(ok && from == AlgoFrom::Heuristic)
+        {
+            hipblasLtMatmulHeuristicResult_t heuristic[1];
+            int                              returned = 0;
+            ok = hipblasLtMatmulAlgoGetHeuristic(
+                     handle, desc, layoutA, layoutB, layoutC, layoutC, pref, 1, heuristic, &returned)
+                     == HIPBLAS_STATUS_SUCCESS
+                 && returned > 0;
+            algo    = heuristic[0].algo;
+            algoPtr = &algo;
+        }
+        else if(ok && from == AlgoFrom::Index)
+        {
+            std::vector<int>                              indexes{index};
+            std::vector<hipblasLtMatmulHeuristicResult_t> results;
+            size_t                                        required = 0;
+            ok = hipblaslt_ext::getAlgosFromIndex(handle, indexes, results) == HIPBLAS_STATUS_SUCCESS
+                 && !results.empty()
+                 && hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                         desc,
+                                                         &alpha,
+                                                         layoutA,
+                                                         layoutB,
+                                                         &beta,
+                                                         layoutC,
+                                                         layoutC,
+                                                         results[0].algo,
+                                                         required)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && required <= wsBytes;
+            if(ok)
+            {
+                algo    = results[0].algo;
+                algoPtr = &algo;
+            }
+        }
+
+        if(ok)
+        {
+            ok = hipblasLtMatmul(handle,
+                                 desc,
+                                 &alpha,
+                                 dA,
+                                 layoutA,
+                                 dB,
+                                 layoutB,
+                                 &beta,
+                                 dC,
+                                 layoutC,
+                                 dD,
+                                 layoutC,
+                                 algoPtr,
+                                 dWs,
+                                 wsBytes,
+                                 nullptr)
+                     == HIPBLAS_STATUS_SUCCESS
+                 && hipDeviceSynchronize() == hipSuccess;
+            *launched = hipblaslt_tuning_last_launch_for_test();
+        }
+
+        if(ok && verifyProduct)
+        {
+            std::vector<uint16_t> out(static_cast<size_t>(m * n), 0);
+            ok = hipMemcpy(out.data(), dD, out.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+                 == hipSuccess;
+
+            const uint16_t expected = halfBits(static_cast<float>(k));
+            for(size_t i = 0; ok && i < out.size(); i++)
+                ok = out[i] == expected;
         }
 
         if(pref)
@@ -1750,5 +1930,185 @@ namespace
 
         EXPECT_FALSE(created) << "the lifecycle router created " << logPath
                               << " even though no log level was set";
+    }
+
+    // A caller that passes an algo gets that algo, whatever the cache holds. The
+    // cache chooses only when asked to, through the heuristic query or by a
+    // matmul given no algo.
+    TEST_F(TuningCache, ExplicitAlgoLaunchesAsGivenInCacheMode)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+
+        const auto& given  = identities[0];
+        const auto& cached = identities[1];
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+        ASSERT_TRUE(rewriteColumn(m_path, "solution_index", std::to_string(cached.first)));
+        ASSERT_TRUE(rewriteColumn(m_path, "kernel_name", cached.second));
+
+        enterMode("cache", m_path);
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given.first, &launched));
+        EXPECT_EQ(launched, given.first)
+            << "the cache replaced the caller's algo with " << cached.first;
+        EXPECT_EQ(counters().hits, 0u) << "a hit was counted for a launch the cache did not choose";
+    }
+
+    // A matmul given no algo leaves the choice to the library, so a usable cache
+    // entry is what it launches.
+    TEST_F(TuningCache, NullAlgoLaunchesTheCachedKernel)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+
+        const auto& cached = identities[1];
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+        ASSERT_TRUE(rewriteColumn(m_path, "solution_index", std::to_string(cached.first)));
+        ASSERT_TRUE(rewriteColumn(m_path, "kernel_name", cached.second));
+
+        enterMode("cache", m_path);
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched, true));
+        EXPECT_EQ(launched, cached.first) << "a matmul with no algo ignored the cached entry";
+        EXPECT_EQ(counters().hits, 1u);
+    }
+
+    // With no usable entry a null algo still runs, on default selection's pick,
+    // and the lookup is counted as the fallback it is.
+    TEST_F(TuningCache, NullAlgoWithoutAnEntryLaunchesDefaultSelection)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 1);
+        ASSERT_FALSE(identities.empty());
+
+        enterMode("cache", m_path);
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched, true));
+        EXPECT_EQ(launched, identities[0].first);
+
+        const auto c = counters();
+        EXPECT_EQ(c.hits, 0u);
+        EXPECT_GE(c.misses, 1u);
+    }
+
+    // Query once and reuse the algo, the pattern the API documents. Tuning on the
+    // first call records a winner for later lookups, but must not change what
+    // that algo launches, on the tuning call or any after it.
+    TEST_F(TuningCache, ReusedAlgoKeepsLaunchingItsOwnKernel)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 1);
+        ASSERT_FALSE(identities.empty());
+        const int given = identities[0].first;
+
+        enterMode("tune", m_path);
+        for(int call = 0; call < 2; call++)
+        {
+            int launched = -1;
+            ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given, &launched, true));
+            EXPECT_EQ(launched, given) << "call " << call << " did not launch the caller's algo";
+        }
+
+        EXPECT_EQ(valueRowCount(m_path), 1u) << "the first call did not tune";
+        EXPECT_EQ(counters().hits, 0u);
+    }
+
+    // With no algo, the call that tunes is the one that gets to use the winner,
+    // on the caller's buffers.
+    TEST_F(TuningCache, NullAlgoLaunchesTheWinnerOnTheTuningCall)
+    {
+        enterMode("tune", m_path);
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(128, 128, 128, AlgoFrom::Null, -1, &launched, true));
+
+        const auto winners = columnValues(m_path, "solution_index");
+        ASSERT_EQ(winners.size(), 1u) << "tune mode recorded nothing";
+        EXPECT_EQ(launched, std::stoi(winners[0]));
+    }
+
+    // A search that announced itself and then failed is not started again in
+    // this process. At the default log level a repeat would be a silent stall,
+    // since a shape's start and its failure are each reported once.
+    TEST_F(TuningCache, FailedSearchIsNotRepeated)
+    {
+        // Setup, enumeration, and an exception after one candidate was measured.
+        for(int stage = 1; stage <= 3; stage++)
+        {
+            SCOPED_TRACE("failure stage " + std::to_string(stage));
+            std::remove(m_path.c_str());
+            enterMode("tune", m_path);
+            hipblaslt_tuning_inject_failure_for_test(stage);
+
+            for(int call = 0; call < 3; call++)
+                ASSERT_TRUE(runGemm(256, 256, 256)) << "a failed search failed the matmul";
+
+            EXPECT_EQ(hipblaslt_tuning_attempts_for_test(), 1u);
+            EXPECT_EQ(valueRowCount(m_path), 0u);
+        }
+    }
+
+    // Two threads that meet two untuned shapes at the same time both get them
+    // tuned. Tune mode was asked for, so what it records must not depend on
+    // which thread reached the tuning lock first.
+    TEST_F(TuningCache, ConcurrentShapesAreAllTuned)
+    {
+        enterMode("tune", m_path);
+
+        std::atomic<int> arrived{0};
+        bool             ok[2] = {false, false};
+        auto             run   = [&](int slot, int64_t m) {
+            arrived++;
+            while(arrived.load() < 2)
+                std::this_thread::yield();
+            ok[slot] = runGemm(m, 256, 128);
+        };
+
+        std::thread first(run, 0, 320);
+        std::thread second(run, 1, 384);
+        first.join();
+        second.join();
+
+        ASSERT_TRUE(ok[0] && ok[1]);
+        EXPECT_EQ(valueRowCount(m_path), 2u)
+            << "a shape went untuned because another thread held the tuning lock";
+    }
+
+    // Among rows that are all partial, the newest runs, whatever ceilings they
+    // were written under. In the normal workflow a later partial row exists only
+    // because a later run had a more generous ceiling, so the newest is also the
+    // most thorough; the older row's larger ceiling here pins the rule itself.
+    TEST_F(TuningCache, NewestPartialRowWinsAmongPartialRows)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+
+        const auto& older = identities[0];
+        const auto& newer = identities[1];
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+
+        ASSERT_TRUE(writeTwoRowsFromFirst(m_path,
+                                          {{"solution_index", std::to_string(older.first)},
+                                           {"kernel_name", older.second},
+                                           {"complete", "0"},
+                                           {"budget_ms", "60000"}},
+                                          {{"solution_index", std::to_string(newer.first)},
+                                           {"kernel_name", newer.second},
+                                           {"complete", "0"},
+                                           {"budget_ms", "1000"}}));
+
+        enterMode("cache", m_path);
+        int replayed = -1;
+        ASSERT_TRUE(runGemm(1024, 512, 1024, 0.0f, true, false, false, &replayed));
+        EXPECT_EQ(replayed, newer.first) << "replay used the older partial row " << older.first;
     }
 } // namespace
