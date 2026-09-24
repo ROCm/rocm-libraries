@@ -38,15 +38,16 @@ Use the existing `.venv` at the repository root and the configured
 branch/document-only consolidation. The original untracked `.venv/` and
 `SESSION_HANDOFF.md` remain untouched and uncommitted.
 
-Only `origin`, pointing to `git@github.com:ROCm/rocm-libraries.git`, was configured
-at consolidation. No personal/downstream remote was configured. This branch
-has not been pushed upstream and no replacement PR was created. A future
-publication requires an explicitly selected downstream repository.
+The downstream working branch has a remote copy at
+[`origin/downstream/hipblaslt-jit`](https://github.com/ROCm/rocm-libraries/tree/downstream/hipblaslt-jit).
+Here, downstream means continued development on a branch without an associated
+PR. The existing `origin` points to `git@github.com:ROCm/rocm-libraries.git`;
+no replacement PR or separate fork was created.
 
 An incremental Git bundle is retained locally under
-`build/downstream-backup/hipblaslt-jit-20260924.bundle` relative to this project.
+`build/downstream-backup/hipblaslt-jit-20260924-remote.bundle` relative to this project.
 It contains the downstream branch and its commits beyond the common upstream
-base; `git bundle verify` identifies the prerequisite commit. This supplements
+base; `git bundle verify` identifies the prerequisite commits. This supplements
 the preserved local branch refs. It is a generated backup, not tracked source.
 
 ## Reusable design material
