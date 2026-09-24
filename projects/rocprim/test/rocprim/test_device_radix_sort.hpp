@@ -1159,7 +1159,7 @@ void sort_keys_over_4g()
     constexpr size_t       size                    = (1ull << 32) + 32;
     constexpr size_t       number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
     hipStream_t            stream                  = 0;
-    if(UseGraphs)
+    if constexpr(UseGraphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1204,6 +1204,11 @@ void sort_keys_over_4g()
     size_t total_storage_bytes = key_type_storage_bytes + temporary_storage_bytes;
     if(total_storage_bytes > (static_cast<size_t>(prop.totalGlobalMem * 0.90)))
     {
+        if constexpr(UseGraphs)
+        {
+            HIP_CHECK(hipStreamDestroy(stream));
+        }
+
         GTEST_SKIP() << "Test case device memory requirement (" << total_storage_bytes
                      << " bytes) exceeds available memory on current device ("
                      << prop.totalGlobalMem << " bytes). Skipping test";
@@ -1212,7 +1217,7 @@ void sort_keys_over_4g()
     common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
     test_utils::GraphHelper gHelper;
-    if(UseGraphs)
+    if constexpr(UseGraphs)
     {
         gHelper.startStreamCapture(stream);
     }
@@ -1227,7 +1232,7 @@ void sort_keys_over_4g()
                                        stream,
                                        debug_synchronous));
 
-    if(UseGraphs)
+    if constexpr(UseGraphs)
     {
         gHelper.createAndLaunchGraph(stream);
     }
@@ -1245,7 +1250,7 @@ void sort_keys_over_4g()
     }
     ASSERT_EQ(counter, size);
 
-    if(UseGraphs)
+    if constexpr(UseGraphs)
     {
         gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
