@@ -1,8 +1,13 @@
 # Request and execute JIT solutions
 
-The [direct TensileLite API](jit-tensilelite.md) accepts an explicit YAML recipe
+This is a source guide for contributors and integration developers, maintained
+under the existing hipBLASLt code/documentation reviewer rules. See the
+[roadmap](JIT_ROADMAP.md) for ownership, source publication and deferred release
+documentation integration.
+
+The [direct TensileLite API](JIT_TENSILELITE.md) accepts an explicit YAML recipe
 and returns a GEMM algorithm in one call. That API and the
-[direct sample](../clients/samples/29_hipblaslt_jit_gemm/README.md) remain available.
+[direct sample](clients/samples/29_hipblaslt_jit_gemm/README.md) remain available.
 This guide describes the optional generic interface layered above that path.
 Both interfaces share one provider implementation and algorithm registry.
 The direct entry point always requires a recipe and explicitly selects TensileLite.
@@ -89,7 +94,7 @@ validators. Output-amax currently requires one batch, GlobalSplitU=1 and
 StreamK=0. Generation never benchmarks recipes or substitutes another recipe
 when the supplied one fails.
 
-The [single-solution documentation](../tensilelite/docs/single-solution.md)
+The [single-solution documentation](tensilelite/SINGLE_SOLUTION.md)
 describes the recipe, bundle, and Python builder contracts.
 
 The private provider loader reads `loader.bin`, a bounded, versioned envelope
@@ -103,4 +108,4 @@ algorithms in one process; it does not search a JIT collection or reuse code fro
 an earlier program invocation.
 
 
-The [component roadmap](../tensilelite/docs/jit-roadmap.md) describes the complete flow and remaining planning, search and cache work.
+The [component roadmap](JIT_ROADMAP.md) describes the complete flow and remaining planning, search and cache work.

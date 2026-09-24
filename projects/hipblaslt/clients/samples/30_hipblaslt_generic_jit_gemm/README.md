@@ -13,9 +13,9 @@ The application follows five steps:
 4. Adapt the solution to a GEMM algorithm with `jit::getGemmAlgo`.
 5. Allocate the reported workspace and execute through the C and C++ APIs.
 
-The [JIT API guide](../../../docs/jit.md) explains backend settings, build
+The [JIT API guide](../../../JIT.md) explains backend settings, build
 requirements, concurrency, lifetime and failure behavior. The
-[component roadmap](../../../tensilelite/docs/jit-roadmap.md) places the sample
+[component roadmap](../../../JIT_ROADMAP.md) places the sample
 in the full request, prediction, compilation and execution flow.
 
 ## Build and run

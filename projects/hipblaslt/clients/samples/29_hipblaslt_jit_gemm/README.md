@@ -15,7 +15,7 @@ The application follows four steps:
    existing C and C++ APIs.
 4. Compare the output with the CPU reference and synchronize before cleanup.
 
-The [direct API guide](../../../docs/jit-tensilelite.md) explains the build
+The [direct API guide](../../../JIT_TENSILELITE.md) explains the build
 requirements, generation options, failure diagnostics and lifetime rules.
 
 ## Build and use

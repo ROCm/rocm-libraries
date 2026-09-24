@@ -1,5 +1,25 @@
 # JIT implementation roadmap
 
+This roadmap is source-level guidance for hipBLASLt/TensileLite contributors
+and integration developers. It separates current review-stack behavior from
+planned work; it is not a released API/support statement or a commitment to
+ROCm release-document publication. Markdown changes follow the existing
+@ROCm/hipblaslt-reviewers and @ROCm/hipblaslt-docs-reviewers rules in the
+monorepo [.github/CODEOWNERS](../../.github/CODEOWNERS). Documentation changes
+accompany the code/API changes they describe. The Confluence copy is a
+discussion view of the versioned source; release-document integration is TBD.
+
+## Builder and application integration
+
+The standalone Python/CLI builder in [#12459](https://github.com/ROCm/rocm-libraries/pull/12459)
+compiles a supplied recipe into a bundle. It does not call hipBLASLt or execute
+GPU work. In the later direct integration [#12564](https://github.com/ROCm/rocm-libraries/pull/12564),
+`tensilelite::getGemmAlgo` invokes the builder, loads the main kernel and helpers,
+checks support, and returns an algorithm. The application then passes that
+algorithm to `hipblasLtMatmul` or `Gemm.initialize/run`. Calling matmul alone
+does not initiate compilation. The generic API is a separate layer above this
+explicit-recipe flow.
+
 Just-in-time (JIT) compilation lets an application generate GPU code for its
 operation when it runs. The first reviewable stack accepts an explicit YAML
 recipe through the direct TensileLite API, compiles and loads the complete
@@ -54,11 +74,11 @@ these components without turning every request into a TensileLite recipe.
 
 ## Where to start
 
-The [single-solution guide](single-solution.md) explains how to compile a supplied
+The [single-solution guide](tensilelite/SINGLE_SOLUTION.md) explains how to compile a supplied
 recipe and inspect its complete bundle.
 Its ranked-selection section describes candidate validation and rejection diagnostics.
-The [direct API guide](../../docs/jit-tensilelite.md) covers the basic path and its sample.
-The [JIT API guide](../../docs/jit.md) explains backend configuration, request ownership, GEMM adapters and execution lifetime.
+The [direct API guide](JIT_TENSILELITE.md) covers the basic path and its sample.
+The [JIT API guide](JIT.md) explains backend configuration, request ownership, GEMM adapters and execution lifetime.
 
 ## Review stack and evidence
 

@@ -25,13 +25,13 @@ The components interact in this order:
 
 The benchmark does not own prediction policy or launch generated code directly.
 The request, backend, solution, and operation adapter are described in the
-[JIT API guide](../../docs/jit.md).
+[JIT API guide](../../JIT.md).
 
 ## Build and run
 
 JIT GEMM is a build-time opt-in feature enabled by
 `HIPBLASLT_ENABLE_JIT=ON`. Building `hipblaslt-bench` also requires
-`HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT API build instructions](../../docs/jit.md#build)
+`HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT API build instructions](../../JIT.md#build)
 describe the required host library, Python dependencies, and compiler setup.
 The JIT path does not require a prebuilt hipBLASLt device library.
 
@@ -173,5 +173,5 @@ only after a cache miss. A searchable JIT solution library and persistent cache
 are also TBD; today the caller explicitly retains one algorithm in one process.
 Exact epilogue specialization and stored tuning blueprints are future inputs to
 selection, not promises that the initial model covers those costs or parameters.
-See the [component roadmap](../../tensilelite/docs/jit-roadmap.md) for their
+See the [component roadmap](../../JIT_ROADMAP.md) for their
 inputs, outputs, and planned interaction.
