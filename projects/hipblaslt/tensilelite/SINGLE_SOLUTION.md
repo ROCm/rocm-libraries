@@ -1,5 +1,11 @@
 # Generate and build one GEMM solution
 
+This source guide is for TensileLite contributors and hipBLASLt integration
+developers. Its ownership and publication scope follow the
+[contributor roadmap](../JIT_ROADMAP.md). The builder supplies the compilation
+step used by the later direct hipBLASLt integration; it does not make ordinary
+matmul calls compile code.
+
 `Tensile.SingleSolution.generateAndBuildSingleSolution` compiles one GEMM
 solution from a TensileLite YAML recipe. A solution includes the main assembly
 kernel, any helper kernels and support code, and the metadata needed by the
@@ -9,7 +15,7 @@ performance.
 The YAML supplies an exact recipe using the existing problem and parameter
 schema. `SingleSolution` uses TensileLite's full target and solution validators.
 
-The [component roadmap](jit-roadmap.md) explains how this builder connects to
+The [component roadmap](../JIT_ROADMAP.md) explains how this builder connects to
 ranked selection, a generic JIT API, and application execution.
 
 ## Python and command-line use
