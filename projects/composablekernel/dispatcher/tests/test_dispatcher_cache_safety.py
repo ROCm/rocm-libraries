@@ -60,10 +60,11 @@ def test_no_rebuild_uses_only_config_specific_cache(monkeypatch, tmp_path, cache
 
 @pytest.mark.parametrize("configured", [False, True])
 def test_existing_static_archive_still_runs_build(monkeypatch, tmp_path, configured):
-    spec = importlib.util.spec_from_file_location("dependency_fixture", ROOT / "tests/conftest.py")
+    # conftest's fixture and the script-style GPU tests share this helper.
+    spec = importlib.util.spec_from_file_location("dependency_build", ROOT / "tests/dispatcher_build.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.setattr(module, "__file__", str(tmp_path / "tests/conftest.py"))
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "tests/dispatcher_build.py"))
     build = tmp_path / "build"
     build.mkdir()
     archive = build / "libck_tile_dispatcher.a"
@@ -77,7 +78,7 @@ def test_existing_static_archive_still_runs_build(monkeypatch, tmp_path, configu
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(module.subprocess, "run", run)
-    assert module.dispatcher_static_lib.__wrapped__(True) == archive
+    assert module.ensure_dispatcher_static_lib() == archive
     assert commands[-1] == [
         "cmake", "--build", str(build), "--target", "ck_tile_dispatcher", "-j4"
     ]

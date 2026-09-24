@@ -4,20 +4,27 @@
 """Regressions for the multi-wave AQuant memory-pipeline tail on gfx1250."""
 
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gemm_aquant_utils import (
+from conftest import detect_gpu_arch, gpu_available, ml_dtypes_available  # noqa: E402
+
+from gemm_aquant_utils import (  # noqa: E402
     AQuantGemmProblem,
     AQuantGpuGemmRunner,
     AQuantKernelConfig,
     setup_multiple_aquant_dispatchers,
 )
 
+
+# ctest SKIP_RETURN_CODE: main() returns this when the box cannot run the test.
+SKIP_EXIT = 77
 
 # Each first shape/seed reproduced a wrong answer in the default-config sweep.
 # The additional three/four-tile shapes exercise the same build's hot-loop path.
@@ -31,12 +38,12 @@ CASES = [
     ("rrr", "default", (64, 128, 256), (1, 4), 128,
      (256, 128, 512), 1060679394),
 ]
+CASE_IDS = ["ccr-cshuffle-4wave", "ccr-default-8wave",
+            "rrr-cshuffle-8wave", "rrr-default-4wave"]
 
 
 @pytest.mark.parametrize(
-    "layout,epilogue,tile,warps,warp_k,shape,seed", CASES,
-    ids=["ccr-cshuffle-4wave", "ccr-default-8wave",
-         "rrr-cshuffle-8wave", "rrr-default-4wave"],
+    "layout,epilogue,tile,warps,warp_k,shape,seed", CASES, ids=CASE_IDS,
 )
 def test_aquant_mem_tail(
     layout, epilogue, tile, warps, warp_k, shape, seed,
@@ -44,6 +51,10 @@ def test_aquant_mem_tail(
 ):
     if gpu_arch != "gfx1250":
         pytest.skip("regression configurations use gfx1250 WMMA tiles")
+    _run_case(layout, epilogue, tile, warps, warp_k, shape, seed, gpu_arch, tmp_path)
+
+
+def _run_case(layout, epilogue, tile, warps, warp_k, shape, seed, gpu_arch, tmp_path):
     import ml_dtypes
 
     config = AQuantKernelConfig(
@@ -75,3 +86,34 @@ def test_aquant_mem_tail(
         assert np.isfinite(output).all(), f"nonfinite output with {k_tiles} K tiles"
         error = np.max(np.abs(output - reference)) / (np.max(np.abs(reference)) + 1e-6)
         assert error <= 0.05, f"{k_tiles} K tiles: normalized error {error}"
+
+
+def main() -> int:
+    # ctest runs this file as a script: `-m pytest` exits 0 when every case
+    # skips, which would report a green PASS on a box that never ran the kernel.
+    if not gpu_available():
+        print("SKIP: no ROCm GPU / hipcc detected")
+        return SKIP_EXIT
+    arch = detect_gpu_arch(default="")
+    if arch != "gfx1250":
+        print(f"SKIP: regression configurations use gfx1250 WMMA tiles; got {arch or 'none'}")
+        return SKIP_EXIT
+    if not ml_dtypes_available():
+        print("SKIP: ml_dtypes not installed")
+        return SKIP_EXIT
+
+    failed = 0
+    for case_id, case in zip(CASE_IDS, CASES):
+        with tempfile.TemporaryDirectory() as out_dir:
+            try:
+                _run_case(*case, arch, Path(out_dir))
+                print(f"  [PASS] {case_id}")
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                print(f"  [FAIL] {case_id}: {exc}")
+    print(f"\n{len(CASES) - failed}/{len(CASES)} passed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

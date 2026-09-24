@@ -151,7 +151,7 @@ class ABQuantKernelConfig:
     pad_k: bool              = False
     k_block_per_cu: int      = 1
 
-    gfx_arch: str = "gfx950"
+    gfx_arch: Optional[str] = None
 
     def __post_init__(self):
         self.validate_target()
@@ -775,7 +775,7 @@ def setup_multiple_abquant_dispatchers(
 
 def expand_abquant_sweep(
     config_path: str,
-    gfx_arch: str = "gfx950",
+    gfx_arch: Optional[str] = None,
 ) -> List["ABQuantKernelConfig"]:
     """Expand an ABQuant JSON sweep config into a list of ABQuantKernelConfig objects.
 
@@ -786,7 +786,8 @@ def expand_abquant_sweep(
     """
     import itertools
 
-    _validate_arch(gfx_arch)
+    if gfx_arch is not None:
+        _validate_arch(gfx_arch)
     with open(config_path) as f:
         cfg = json.load(f)
 

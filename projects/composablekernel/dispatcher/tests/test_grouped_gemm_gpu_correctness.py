@@ -72,14 +72,6 @@ def _detect_arch():
     return None
 
 
-def _static_lib_present():
-    try:
-        import ctypes_utils as _cu
-        return (_cu.get_build_dir() / "libck_tile_dispatcher.a").exists()
-    except Exception:
-        return False
-
-
 def _max_rel_err(got: np.ndarray, ref: np.ndarray) -> float:
     g = got.astype(np.float32)
     r = ref.astype(np.float32)
@@ -95,13 +87,17 @@ class TestGroupedGemmGpu(unittest.TestCase):
     def setUp(self):
         if self.ARCH is None:
             self.skipTest("no GPU / rocminfo not available")
-        if not _static_lib_present():
-            self.skipTest(
-                "dispatcher static lib (libck_tile_dispatcher.a) not built; "
-                "grouped is registry-routed and needs it"
-            )
         if shutil.which("hipcc") is None and not Path("/opt/rocm/bin/hipcc").exists():
             self.skipTest("hipcc not found")
+        # grouped is registry-routed and links libck_tile_dispatcher.a. Build it
+        # here too: ctest runs this module through run_unittest_77.py, where the
+        # pytest dispatcher_static_lib fixture never fires.
+        from dispatcher_build import ensure_dispatcher_static_lib
+
+        try:
+            ensure_dispatcher_static_lib()
+        except RuntimeError as exc:
+            self.fail(str(exc))
 
     def _run_dtype(self, dtype: str):
         from arch_specs_generated import get_warp_tile_combos

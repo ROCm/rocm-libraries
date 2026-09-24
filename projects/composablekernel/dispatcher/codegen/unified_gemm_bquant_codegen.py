@@ -62,6 +62,7 @@ from codegen_common import (
     make_bquant_kernel_name,
     quant_decode_default_config,
     run_codegen_cli,
+    validate_quant_codegen_target,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -448,17 +449,14 @@ using SelectedKernel = {struct};
 # =============================================================================
 
 
-def _default_config() -> dict:
+def _default_config(gfx_arch: str = "gfx950") -> dict:
     """Default sweep config matching GemmConfigQuantDecode tile defaults.
 
-    NOTE: this built-in header-enumeration sweep is gfx950-only, hence the
-    literal arch below. Arch-correct warp_tile_k (gfx942 fp8/bf8 -> 32) is
-    produced by the bridge via gemm_bquant_utils._warp_tile_k_for(); a gfx942
-    sweep must pass a config with warp_tile_k=32 (128 silently outputs
-    all-zeros on gfx942).
+    WarpTileK is arch-derived from ``--gfx-arch`` (default gfx950): 128 on
+    gfx950/gfx1250, 32 on gfx942 (128 silently outputs all-zeros on gfx942).
     """
     return quant_decode_default_config(
-        warp_tile_k=fp8_warp_tile_k_for_arch("gfx950"),
+        warp_tile_k=fp8_warp_tile_k_for_arch(gfx_arch),
         quant_groups=[
             {"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128},
         ],
@@ -517,6 +515,15 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
 # =============================================================================
 
 
+def _validate_target_config(config: dict, gfx_arch: str) -> None:
+    validate_quant_codegen_target(
+        config, gfx_arch, _build_specs, bridge="BQuant",
+        supported_archs=("gfx90a", "gfx942", "gfx950", "gfx1250"),
+        gfx1250_unsupported_variants=("fp8i4", "bf8i4"),
+        gfx950_only_variants=tuple(MX_VARIANTS),
+    )
+
+
 def main() -> int:
     return run_codegen_cli(
         description="non-grouped gemm_bquant (block-scale) GEMM kernel header generator",
@@ -524,6 +531,9 @@ def main() -> int:
         make_generator=BQuantKernelHeaderGenerator,
         build_specs=_build_specs,
         default_config=_default_config,
+        arch_aware=True,
+        default_gfx_arch="gfx950",
+        validate_target_config=_validate_target_config,
     )
 
 

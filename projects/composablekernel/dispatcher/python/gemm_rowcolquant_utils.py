@@ -78,9 +78,6 @@ if str(Path(__file__).parent) not in sys.path:
 from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
 # --- end Tile-Engine perf flags ---
 
-_DEFAULT_GFX_ARCH = "gfx950"
-
-
 def _validate_arch(arch: str) -> str:
     """Retain the full target after checking this bridge's supported devices."""
     if not arch:
@@ -123,7 +120,7 @@ class RowColQuantKernelConfig:
     double_smem_buffer: bool = False
     k_block_per_cu: int      = 1
 
-    gfx_arch: str = _DEFAULT_GFX_ARCH
+    gfx_arch: Optional[str] = None
 
     def __post_init__(self):
         self.validate_target()
@@ -677,7 +674,7 @@ def setup_multiple_rowcolquant_dispatchers(
 
 def expand_rowcolquant_sweep(
     config_path: str,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
+    gfx_arch: Optional[str] = None,
 ) -> List["RowColQuantKernelConfig"]:
     """Expand a RowColQuant JSON sweep config into RowColQuantKernelConfig objects.
 

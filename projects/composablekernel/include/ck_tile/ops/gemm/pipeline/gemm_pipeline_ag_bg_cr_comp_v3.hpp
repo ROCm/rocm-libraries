@@ -38,6 +38,12 @@ struct BaseGemmPipelineAgBgCrCompV3
     static constexpr bool Use8WarpSchedule = false;
 #else
     static constexpr bool Use8WarpSchedule = (Problem::BlockGemmShape::NumWarps == 8);
+#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx11__) || defined(__gfx12__))
+    // A wave32 target built without CK_TILE_USE_WMMA (e.g. outside the CK CMake)
+    // would silently take the wave64 8-warp schedule above; fail loudly instead.
+    static_assert(Problem::BlockGemmShape::NumWarps != 8,
+                  "wave32 8-warp CompV3 requires -DCK_TILE_USE_WMMA=1 on host and device");
+#endif
 #endif
 
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)

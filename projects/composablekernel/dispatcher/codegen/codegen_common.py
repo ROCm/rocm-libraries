@@ -1100,6 +1100,44 @@ def validate_gfx1250_quant_warp_tile(
         )
 
 
+def validate_quant_codegen_target(
+    config, gfx_arch, build_specs, *, bridge, supported_archs,
+    gfx1250_unsupported_variants=(), gfx950_only_variants=(),
+):
+    """Target check for a block-scale quant codegen CLI before any header is written.
+
+    The codegen CLIs are a second entry point next to the Python bridges, so
+    they re-run the same op-local rules: a supported target, no conflicting
+    recorded ``gfx_arch``, variants the target can run, and the gfx1250 WMMA
+    warp-tile boundary. gfx9 targets are only checked for support, which keeps
+    their previous output unchanged.
+    """
+    target = normalize_gfx_arch(gfx_arch or "")
+    if target not in supported_archs:
+        raise ValueError(
+            f"{bridge}: unsupported GPU architecture {gfx_arch!r}; "
+            f"supported: {', '.join(supported_archs)}."
+        )
+    recorded = config.get("gfx_arch")
+    if recorded and normalize_gfx_arch(recorded) != target:
+        raise ValueError(
+            f"{bridge}: config gfx_arch {recorded!r} does not match target {gfx_arch!r}."
+        )
+    for spec in build_specs(config):
+        if target == "gfx1250" and spec.variant_key in gfx1250_unsupported_variants:
+            raise ValueError(
+                f"{bridge} variant {spec.variant_key!r} is not supported on gfx1250."
+            )
+        if target != "gfx950" and spec.variant_key in gfx950_only_variants:
+            raise ValueError(
+                f"{bridge} variant {spec.variant_key!r} requires gfx950; got {gfx_arch!r}."
+            )
+        validate_gfx1250_quant_warp_tile(
+            spec.tile.warp_tile_m, spec.tile.warp_tile_n, spec.tile.warp_tile_k,
+            target, bridge=bridge,
+        )
+
+
 def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str, *, require_explicit: bool = False) -> str:
     """Normalize and check a caller-supplied gfx target; return the bare target.
 

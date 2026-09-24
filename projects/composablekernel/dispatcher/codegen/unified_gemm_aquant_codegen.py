@@ -51,7 +51,9 @@ from codegen_common import (
     fp8_warp_tile_k_for_arch,
     iter_quant_axes,
     make_gemm_aquant_kernel_name,
+    normalize_gfx_arch,
     run_codegen_cli,
+    validate_quant_codegen_target,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -405,8 +407,12 @@ def _default_config(gfx_arch: str = "gfx950") -> dict:
     WarpTileK is arch-derived (get_k_warp_tile<fp8/bf8_t, 16>() = 128 on gfx950,
     32 on gfx942 for the decode path).
     """
+    # pk_int4 variants return NaN on gfx1250, so its default sweep omits them.
+    variant_keys = ["fp8", "bf8", "fp8i4", "bf8i4"]
+    if normalize_gfx_arch(gfx_arch or "") == "gfx1250":
+        variant_keys = ["fp8", "bf8"]
     return {
-        "variant_keys": ["fp8", "bf8", "fp8i4", "bf8i4"],
+        "variant_keys": variant_keys,
         "layouts": ["rcr", "rrr", "crr", "ccr"],
         "epilogues": ["cshuffle", "default"],
         # Old-TE never emits an interwave mem/decode kernel: gemm_validation_utils
@@ -511,6 +517,14 @@ def _build_specs(config: dict) -> List[AQuantKernelSpec]:
 # =============================================================================
 
 
+def _validate_target_config(config: dict, gfx_arch: str) -> None:
+    validate_quant_codegen_target(
+        config, gfx_arch, _build_specs, bridge="AQuant",
+        supported_archs=("gfx90a", "gfx942", "gfx950", "gfx1250"),
+        gfx1250_unsupported_variants=("fp8i4", "bf8i4"),
+    )
+
+
 def main() -> int:
     return run_codegen_cli(
         description="AQuant (A-only quantized) GEMM kernel header generator",
@@ -520,6 +534,7 @@ def main() -> int:
         default_config=_default_config,
         arch_aware=True,
         default_gfx_arch="gfx950",
+        validate_target_config=_validate_target_config,
     )
 
 

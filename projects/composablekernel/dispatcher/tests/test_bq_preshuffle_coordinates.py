@@ -19,6 +19,8 @@ import subprocess
 
 import pytest
 
+from header_scrape import between, find, read_header, rfind
+
 
 CK = Path(__file__).resolve().parents[2]
 QUANT = CK / "include/ck_tile/ops/gemm_quant"
@@ -204,41 +206,51 @@ int __lane_id() { return thread_lane; }
 """
 
 
-def between(text, begin, end):
-    start = text.index(begin)
-    return text[start:text.index(end, start)]
+def policy_method(path, name):
+    """The member template of a policy struct that declares ``name``."""
+    text = read_header(path)
+    where = path.name
+    decl = find(text, name, where=where)
+    start = rfind(text, "    template <", decl, where=where)
+    return text[start:find(text, "    template <", decl, where=where)]
 
 
 def probe_source():
-    utility = (QUANT / "pipeline/gemm_group_quant_utils.hpp").read_text()
-    encoding = between(utility, "// TODO:: might need to update", "template <typename GroupSizes>")
-    policy = (QUANT / "pipeline/gemm_bquant_pipeline_ag_bg_cr_policy.hpp").read_text()
-    start = policy.rfind("    template <", 0, policy.index("static constexpr auto MakeBQDramTileDistribution"))
-    policy = policy[start:policy.index("    template <", policy.index("static constexpr auto MakeBQDramTileDistribution"))]
-    ab_policy = (QUANT / "pipeline/gemm_abquant_pipeline_ag_bg_cr_policy.hpp").read_text()
-    start = ab_policy.rfind("    template <", 0, ab_policy.index("static constexpr auto MakeBQDramTileDistribution"))
-    ab_policy = ab_policy[start:ab_policy.index("    template <", ab_policy.index("static constexpr auto MakeBQDramTileDistribution"))]
-    base = (QUANT / "pipeline/gemm_bquant_pipeline_ag_bg_cr_base.hpp").read_text()
-    call = between(base, "Policy::template MakeBQDramTileDistribution", ");")
-    kernel = (QUANT / "kernel/gemm_quant_kernel.hpp").read_text()
-    descriptor = between(kernel, "    template <index_t KPerBlockBQ,", "    public:\n    struct SplitKBatchOffset")
+    utility = read_header(QUANT / "pipeline/gemm_group_quant_utils.hpp")
+    encoding = between(utility, "// TODO:: might need to update", "template <typename GroupSizes>",
+                       where="gemm_group_quant_utils.hpp")
+    policy = policy_method(QUANT / "pipeline/gemm_bquant_pipeline_ag_bg_cr_policy.hpp",
+                           "static constexpr auto MakeBQDramTileDistribution")
+    ab_policy = policy_method(QUANT / "pipeline/gemm_abquant_pipeline_ag_bg_cr_policy.hpp",
+                              "static constexpr auto MakeBQDramTileDistribution")
+    base = read_header(QUANT / "pipeline/gemm_bquant_pipeline_ag_bg_cr_base.hpp")
+    call = between(base, "Policy::template MakeBQDramTileDistribution", ");",
+                   where="gemm_bquant_pipeline_ag_bg_cr_base.hpp")
+    kernel = read_header(QUANT / "kernel/gemm_quant_kernel.hpp")
+    descriptor = between(kernel, "    template <index_t KPerBlockBQ,", "    public:\n    struct SplitKBatchOffset",
+                         where="gemm_quant_kernel.hpp")
     source = PRELUDE + encoding + "\nstruct BPolicy {\n" + policy + "};\n"
     source += "using GemmBQuantPipelineAgBgCrDefaultPolicy=BPolicy;\nstruct ABPolicy {\n" + ab_policy + "};\n"
     source += "struct Kernel { static int get_padding_size(int n,int a) { return ck_tile::integer_least_multiple(n,a)-n; }\n" + descriptor + "};\n"
-    loader = between(base, "    template <typename BQDramBlockWindowTmp>", "\n};")
+    loader = between(base, "    template <typename BQDramBlockWindowTmp>", "\n};",
+                     where="gemm_bquant_pipeline_ag_bg_cr_base.hpp")
     source += "template<class Problem> struct Loader { using Policy=BPolicy; using BQLayout=typename Problem::BQLayout;\n"
     source += "static constexpr int NPerBlock=Problem::BlockGemmShape::kN,NPerBlockBQ=(NPerBlock>=Problem::BQuantGroupSize::kN?NPerBlock/Problem::BQuantGroupSize::kN:1),KPerBlockBQ=Problem::BlockGemmShape::kK/128;\n"
     source += loader + "};\n"
     for op, filename in enumerate(("block_universal_gemm_as_bs_bquant_cr.hpp", "block_universal_gemm_as_aquant_bs_bquant_cr.hpp")):
-        block = (QUANT / "block" / filename).read_text()
-        reg = between(block, "                        constexpr index_t reg_offset =", "                        auto& scale_reg")
+        block = read_header(QUANT / "block" / filename)
+        # The preshuffled-BQ branch is the reg_offset block that gathers via pull_from_lane.
+        pull = find(block, "auto pull_from_lane", where=filename)
+        start = rfind(block, "constexpr index_t reg_offset =", pull, where=filename)
+        reg = block[start:find(block, "auto& scale_reg", pull, where=filename)]
         source += f"template<class P,int NI,int Q> int reg{op}(int lane,int* pull) {{\n"
         source += "using GemmTraits=P; using WarpGemm=WarpGemmDispatcher<int,int,int,16,16,64,false>;\n"
         source += "constexpr int NWarp=P::BlockGemmShape::BlockWarps::at(1),nIter=NI,kQScale=Q;\n"
         source += "struct Traits { enum { NPerBlock=P::BlockGemmShape::kN,KQPerBlock=P::BlockGemmShape::kK/128 }; };\n"
         source += "thread_lane=lane;\n" + reg + "*pull=pull_from_lane; return reg_offset; }\n"
-        pipe = (QUANT / "pipeline" / ("gemm_" + ("bquant" if op == 0 else "abquant") + "_pipeline_ag_bg_cr_v3.hpp")).read_text()
-        step = between(pipe, "            const BQDramTileWindowStep bq_dram_tile_window_step =", ";") + ";\n"
+        pipe_name = "gemm_" + ("bquant" if op == 0 else "abquant") + "_pipeline_ag_bg_cr_v3.hpp"
+        pipe = read_header(QUANT / "pipeline" / pipe_name)
+        step = between(pipe, "const BQDramTileWindowStep bq_dram_tile_window_step =", ";", where=pipe_name) + ";\n"
         source += f"template<class P> int step{op}(int n) {{\n"
         source += "using BlockGemmShape=typename P::BlockGemmShape; using BQuantGroupSize=typename P::BQuantGroupSize; using BQDramTileWindowStep=std::array<int,2>;\n"
         source += "constexpr bool BPreshuffleQuant=true,is_bq_row_major=false; constexpr int NPerBlock=BlockGemmShape::kN,NPerBlockBQ=(NPerBlock>=BQuantGroupSize::kN?NPerBlock/BQuantGroupSize::kN:1),KPerBlockBQ=BlockGemmShape::kK/128;\n"

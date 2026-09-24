@@ -34,7 +34,7 @@ import json
 import logging
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -80,7 +80,6 @@ if str(Path(__file__).parent) not in sys.path:
 from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
 # --- end Tile-Engine perf flags ---
 
-_DEFAULT_GFX_ARCH = "gfx950"
 
 
 # =============================================================================
@@ -117,7 +116,7 @@ class TensorQuantKernelConfig:
     double_smem_buffer: bool = False
     k_block_per_cu: int      = 1
 
-    gfx_arch: str = _DEFAULT_GFX_ARCH
+    gfx_arch: Optional[str] = None
 
     def __post_init__(self):
         self.validate_target()
@@ -549,6 +548,9 @@ def setup_multiple_tensor_quant_dispatchers(
     arch = _validate_arch(gfx_arch if gfx_arch is not None else _detect_gpu_arch())
     configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "TensorQuant")
+    # The codegen requires an explicit target for custom tiles; bind configs
+    # that left gfx_arch unset to this build's target (copies, not the caller's).
+    configs = [c if c.gfx_arch else replace(c, gfx_arch=arch) for c in configs]
     for config in configs:
         config.validate_target(arch)
 
@@ -578,7 +580,7 @@ def setup_multiple_tensor_quant_dispatchers(
 
 def expand_tensor_quant_sweep(
     config_path: str,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
+    gfx_arch: Optional[str] = None,
 ) -> List["TensorQuantKernelConfig"]:
     """Expand a TensorQuant JSON sweep config into TensorQuantKernelConfig objects.
 

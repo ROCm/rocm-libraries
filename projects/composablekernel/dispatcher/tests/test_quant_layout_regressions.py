@@ -25,6 +25,7 @@ DISPATCHER = Path(__file__).resolve().parents[1]
 CK = DISPATCHER.parent
 sys.path[:0] = [str(DISPATCHER / "python"), str(DISPATCHER / "codegen")]
 import gemm_bquant_utils as bq
+from header_scrape import between, find, read_header
 
 LAYOUTS = ("rcr", "ccr", "rrr", "crr")
 
@@ -46,12 +47,12 @@ def compile_cpp(tmp_path, source, shared=False):
 @pytest.fixture(params=LAYOUTS)
 def packed_guard(request, tmp_path):
     layout = request.param
-    bridge = (DISPATCHER / "bindings/ctypes/gemm_bquant_ctypes_lib.cpp").read_text()
-    prefix = bridge[bridge.index("int dispatcher_run_bquant_gemm("):
-                    bridge.index("    const BDataType* B_host")]
-    common = (DISPATCHER / "bindings/ctypes/quant_bridge_common.hpp").read_text()
-    groups = common[common.index("inline bool check_quant_group_count("):
-                    common.index("// The identical tail")]
+    bridge = read_header(DISPATCHER / "bindings/ctypes/gemm_bquant_ctypes_lib.cpp")
+    prefix = between(bridge, "int dispatcher_run_bquant_gemm(", "    const BDataType* B_host",
+                     where="gemm_bquant_ctypes_lib.cpp")
+    common = read_header(DISPATCHER / "bindings/ctypes/quant_bridge_common.hpp")
+    groups = between(common, "inline bool check_quant_group_count(", "// The identical tail",
+                     where="quant_bridge_common.hpp")
     source = """#include <cstdint>
 #include <iostream>
 #include <type_traits>
@@ -150,15 +151,18 @@ def test_bquant_layout_metadata_fails_closed():
 
 @pytest.mark.parametrize("arch,warp_size", [("gfx125", 32), ("gfx950", 64), ("gfx942", 64)])
 def test_abquant_production_selector_and_wmma_distribution(arch, warp_size, tmp_path):
-    policy = (CK / "include/ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_policy.hpp").read_text()
+    policy_name = "gemm_abquant_pipeline_ag_bg_cr_policy.hpp"
+    policy = read_header(CK / "include/ck_tile/ops/gemm_quant/pipeline" / policy_name)
     begin = policy.find("#if defined(__gfx125__)")
     if begin < 0:
-        begin = policy.index("        constexpr index_t vector_size =")
-    selector = policy[begin:policy.index("        using WarpGemm =", begin)]
-    enum_header = (CK / "include/ck_tile/ops/gemm/warp/warp_gemm_attribute_mfma.hpp").read_text()
-    enum = enum_header[enum_header.index("enum class WGAttrNumAccessEnum"):enum_header.index("template <WGAttrNumAccessEnum")]
-    wmma_header = (CK / "include/ck_tile/ops/gemm/warp/warp_gemm_attribute_wmma.hpp").read_text()
-    traits = wmma_header[wmma_header.index("template <typename Impl"):wmma_header.index("template <typename Impl>\nstruct CWarp")]
+        begin = find(policy, "        constexpr index_t vector_size =", where=policy_name)
+    selector = policy[begin:find(policy, "        using WarpGemm =", begin, where=policy_name)]
+    enum_header = read_header(CK / "include/ck_tile/ops/gemm/warp/warp_gemm_attribute_mfma.hpp")
+    enum = between(enum_header, "enum class WGAttrNumAccessEnum", "template <WGAttrNumAccessEnum",
+                   where="warp_gemm_attribute_mfma.hpp")
+    wmma_header = read_header(CK / "include/ck_tile/ops/gemm/warp/warp_gemm_attribute_wmma.hpp")
+    traits = between(wmma_header, "template <typename Impl", "template <typename Impl>\nstruct CWarp",
+                     where="warp_gemm_attribute_wmma.hpp")
     source = f"#define __{arch}__\n#include <type_traits>\n#include <tuple>\nusing index_t=int;\n{enum}\n"
     source += """
 template<int... X> struct sequence { static constexpr bool valid=((X>0)&&...); };
@@ -174,9 +178,9 @@ struct Base { template<class P> static constexpr bool is_a_load_tr=P::tr; templa
 template<int K, bool Tr> constexpr auto access() {
 using Problem=ProblemT<K,Tr>; using WarpTile=Tile<K>; constexpr int I1=1,I2=2;
 """ + selector + "return wg_attr_num_access;\n}\n"
-    layout_header = (CK / "include/ck_tile/ops/gemm/warp/warp_gemm_attribute_wmma_impl_base_traits.hpp").read_text()
-    native_layout = layout_header[layout_header.index("template <typename DataType, index_t K>\n"):
-                                  layout_header.index("template <typename Arch,")]
+    layout_header = read_header(CK / "include/ck_tile/ops/gemm/warp/warp_gemm_attribute_wmma_impl_base_traits.hpp")
+    native_layout = between(layout_header, "template <typename DataType, index_t K>\n", "template <typename Arch,",
+                            where="warp_gemm_attribute_wmma_impl_base_traits.hpp")
     source += "using fp32_t=float; using fp64_t=double; template<class,int,bool> struct LayoutFromDataType;\n" + native_layout
     source += """
 template<int K> struct Impl {
@@ -209,9 +213,9 @@ using kABYs2RHsMajor=sequence<1,2,2>; using kABYs2RHsMinor=sequence<0,0,2>;
 
 @pytest.fixture(scope="module")
 def aq_coordinates(tmp_path_factory):
-    header = (CK / "include/ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_base.hpp").read_text()
-    begin = header.index("template <typename AQDramBlockWindowTmp>")
-    method = header[begin:header.index("    template <typename BQDramBlockWindowTmp>", begin)]
+    header = read_header(CK / "include/ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_base.hpp")
+    method = between(header, "template <typename AQDramBlockWindowTmp>", "    template <typename BQDramBlockWindowTmp>",
+                     where="gemm_abquant_pipeline_ag_bg_cr_base.hpp")
     source = """#include <array>
 #include <tuple>
 #include <type_traits>

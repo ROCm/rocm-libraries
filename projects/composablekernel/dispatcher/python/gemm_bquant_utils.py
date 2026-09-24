@@ -70,10 +70,6 @@ from codegen_common import make_bquant_kernel_name, validate_gfx1250_quant_warp_
 
 _DEFAULT_HIPCC = "hipcc"
 
-# The direct dataclass and explicit JSON sweeps retain their historical target.
-# Untargeted convenience factories use a naming preview, then setup resolves
-# their architecture-dependent defaults for the explicit or detected target.
-_NAME_ONLY_GFX_ARCH = "gfx950"
 _SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
 
@@ -239,7 +235,7 @@ class BQuantKernelConfig:
     double_smem_buffer: bool = False
     k_block_per_cu: int      = 1
 
-    gfx_arch: str = _NAME_ONLY_GFX_ARCH
+    gfx_arch: Optional[str] = None
 
 
     def __post_init__(self):
@@ -1075,7 +1071,7 @@ def setup_multiple_bquant_dispatchers(
 
 def expand_bquant_sweep(
     config_path: str,
-    gfx_arch: str = _NAME_ONLY_GFX_ARCH,
+    gfx_arch: Optional[str] = None,
 ) -> List["BQuantKernelConfig"]:
     """Expand a BQuant JSON sweep config into a list of BQuantKernelConfig objects.
 

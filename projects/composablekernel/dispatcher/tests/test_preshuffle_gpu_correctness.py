@@ -190,6 +190,16 @@ def main() -> int:
         return SKIP_EXIT
     log.info("Running preshuffle GEMM GPU correctness on %s", gfx)
 
+    # Build the prerequisite the pytest entry point gets from the
+    # dispatcher_static_lib fixture; ctest runs this script directly.
+    from dispatcher_build import ensure_dispatcher_static_lib
+
+    try:
+        ensure_dispatcher_static_lib()
+    except RuntimeError as exc:
+        print(f"FAIL: could not build the dispatcher static lib: {exc}")
+        return 1
+
     try:
         status, detail = _run_preshuffle_fp16(gfx)
     except FileNotFoundError as exc:

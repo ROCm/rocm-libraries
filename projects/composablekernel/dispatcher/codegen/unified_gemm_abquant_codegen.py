@@ -57,7 +57,9 @@ from codegen_common import (
     fp8_warp_tile_k_for_arch,
     iter_quant_axes,
     make_gemm_abquant_kernel_name,
+    normalize_gfx_arch,
     run_codegen_cli,
+    validate_quant_codegen_target,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -437,16 +439,17 @@ using SelectedKernel = {struct};
 # =============================================================================
 
 
-def _default_config() -> dict:
+def _default_config(gfx_arch: str = "") -> dict:
     """Default sweep config matching GemmConfigABQuantPrefill tile defaults.
 
     fp8/bf8 non-preshuffle, 1x1x128 A-quant / 1x1x128 B-quant, prefill tile
     128x128x128 (GemmConfigQuantPrefill), warp 1x4x1, warp_tile 16x16x<K>.
 
-    WarpTileK is arch-derived (see ``fp8_warp_tile_k_for_arch``); this entry
-    point takes no ``gfx_arch``, so it pins the gfx942 value it has always
-    used rather than guessing.
+    WarpTileK is arch-derived (see ``fp8_warp_tile_k_for_arch``) on gfx1250,
+    whose WMMA path rejects K=32; every other target keeps the gfx942 value
+    this sweep has always used.
     """
+    wtk_arch = "gfx1250" if normalize_gfx_arch(gfx_arch or "") == "gfx1250" else "gfx942"
     return {
         "variant_keys": ["fp8", "bf8"],
         "layouts": ["rcr"],
@@ -457,7 +460,7 @@ def _default_config() -> dict:
             {"tile_m": 128, "tile_n": 128, "tile_k": 128,
              "warp_m": 1, "warp_n": 4, "warp_k": 1,
              "warp_tile_m": 16, "warp_tile_n": 16,
-             "warp_tile_k": fp8_warp_tile_k_for_arch("gfx942")},
+             "warp_tile_k": fp8_warp_tile_k_for_arch(wtk_arch)},
         ],
         "aquant_group_k": 128,
         "bquant_groups": [
@@ -530,6 +533,13 @@ def _build_specs(config: dict) -> List[ABQuantKernelSpec]:
 # =============================================================================
 
 
+def _validate_target_config(config: dict, gfx_arch: str) -> None:
+    validate_quant_codegen_target(
+        config, gfx_arch, _build_specs, bridge="ABQuant",
+        supported_archs=("gfx942", "gfx950", "gfx1250"),
+    )
+
+
 def main() -> int:
     return run_codegen_cli(
         description="ABQuant (A+B block-scale) GEMM kernel header generator",
@@ -537,6 +547,9 @@ def main() -> int:
         make_generator=ABQuantKernelHeaderGenerator,
         build_specs=_build_specs,
         default_config=_default_config,
+        arch_aware=True,
+        default_gfx_arch="gfx950",
+        validate_target_config=_validate_target_config,
     )
 
 

@@ -159,7 +159,7 @@ def test_missing_detected_arch_never_uses_preview_target(op, monkeypatch):
 @pytest.mark.parametrize("arch", ("gfx1250", "gfx1250:xnack-"))
 def test_aquant_rejects_unsafe_explicit_warp_override(variant, suffix, arch):
     factory = getattr(MODULES["aquant"], f"default_{variant}{suffix}_config")
-    with pytest.raises(ValueError, match="warp_tile_k=128"):
+    with pytest.raises(ValueError, match=r"warp_tile_k in \(64, 128\)"):
         factory(gfx_arch=arch, warp_tile_k=32)
     assert factory(gfx_arch=arch, warp_tile_k=64).warp_tile_k == 64
     assert factory(gfx_arch=arch, warp_tile_k=128).warp_tile_k == 128
@@ -169,7 +169,7 @@ def test_aquant_deferred_override_is_preserved_and_validated(monkeypatch):
     module = MODULES["aquant"]
     calls = capture_build(monkeypatch, module)
     config = module.default_fp8_config(warp_tile_k=32, quant_group_n=2)
-    with pytest.raises(ValueError, match="warp_tile_k=128"):
+    with pytest.raises(ValueError, match=r"warp_tile_k in \(64, 128\)"):
         module.setup_multiple_aquant_dispatchers([config], gfx_arch="gfx1250")
     assert calls == []
     module.setup_multiple_aquant_dispatchers([config], gfx_arch="gfx942")
@@ -183,15 +183,15 @@ def test_aquant_direct_config_and_mutations_are_validated(monkeypatch):
     calls = capture_build(monkeypatch, module)
     config = module.default_fp8_config(gfx_arch="gfx1250")
     arguments = {**asdict(config), "warp_tile_k": 32}
-    with pytest.raises(ValueError, match="warp_tile_k=128"):
+    with pytest.raises(ValueError, match=r"warp_tile_k in \(64, 128\)"):
         module.AQuantKernelConfig(**arguments)
     config.warp_tile_k = 32
-    with pytest.raises(ValueError, match="warp_tile_k=128"):
+    with pytest.raises(ValueError, match=r"warp_tile_k in \(64, 128\)"):
         config.to_codegen_config()
-    with pytest.raises(ValueError, match="warp_tile_k=128"):
+    with pytest.raises(ValueError, match=r"warp_tile_k in \(64, 128\)"):
         module.setup_multiple_aquant_dispatchers([config], gfx_arch="gfx1250")
     config.gfx_arch = None
-    with pytest.raises(ValueError, match="warp_tile_k=128"):
+    with pytest.raises(ValueError, match=r"warp_tile_k in \(64, 128\)"):
         module.setup_multiple_aquant_dispatchers([config], gfx_arch="gfx1250")
     assert calls == []
 
@@ -216,7 +216,7 @@ def test_aquant_sweep_rejects_unsafe_explicit_tile(tmp_path):
     sweep = module.default_fp8_config(gfx_arch="gfx950", warp_tile_k=32).to_codegen_config()
     path = tmp_path / "unsafe.json"
     path.write_text(json.dumps(sweep))
-    with pytest.raises(ValueError, match="warp_tile_k=128"):
+    with pytest.raises(ValueError, match=r"warp_tile_k in \(64, 128\)"):
         module.expand_aquant_sweep(str(path), gfx_arch="gfx1250")
 
 

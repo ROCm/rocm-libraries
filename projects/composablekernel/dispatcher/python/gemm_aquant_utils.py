@@ -59,7 +59,7 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_a
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_gemm_aquant_kernel_name  # noqa: E402
+from codegen_common import make_gemm_aquant_kernel_name, validate_gfx1250_quant_warp_tile  # noqa: E402
 
 # NEVER default to gfx942 -- arch must be detected or explicitly supplied.
 _DEFAULT_HIPCC = "hipcc"
@@ -201,9 +201,10 @@ class AQuantKernelConfig:
     # ctypes .so name lines up with the generated header (and the matched Old-TE stem).
     epilogue: str = "cshuffle"
 
-    # Custom configs record their target. Untargeted default_* factories keep a
-    # naming preview that setup resolves separately for the actual build target.
-    gfx_arch: str = "gfx950"
+    # Custom configs record their target when one is given. None means "resolve
+    # at build time": setup validates the config against the explicit or detected
+    # target, so an omitted arch never pins a gfx950 target onto a gfx942 build.
+    gfx_arch: Optional[str] = None
 
 
     def __post_init__(self):
@@ -217,16 +218,9 @@ class AQuantKernelConfig:
         if arch:
             _validate_arch(arch)
         _reject_i4_on_gfx1250(self.variant_key, arch)
-        if (_is_gfx1250(arch)
-                and self.variant_key in ("fp8", "bf8")
-                and (self.warp_tile_m, self.warp_tile_n) == (16, 16)
-                and self.warp_tile_k not in (64, 128)):
-            raise ValueError(
-                f"AQuant {self.variant_key} on {arch!r} supports "
-                "warp_tile_k=64 or warp_tile_k=128 for the 16x16 WMMA tile; "
-                f"got warp_tile_k={self.warp_tile_k}. The gfx1250 default "
-                "uses the GPU-validated WMMA fragment."
-            )
+        validate_gfx1250_quant_warp_tile(
+            self.warp_tile_m, self.warp_tile_n, self.warp_tile_k, arch, bridge="AQuant"
+        )
 
     @property
     def pipeline_key(self) -> str:
@@ -651,7 +645,7 @@ def setup_multiple_aquant_dispatchers(
     if not configs:
         return []
 
-    arch = _validate_arch(gfx_arch) if gfx_arch else _detect_gpu_arch()
+    arch = _validate_arch(gfx_arch if gfx_arch is not None else _detect_gpu_arch())
     configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "AQuant")
     for config in configs:
@@ -683,7 +677,7 @@ def setup_multiple_aquant_dispatchers(
 
 def expand_aquant_sweep(
     config_path: str,
-    gfx_arch: str = "gfx950",
+    gfx_arch: Optional[str] = None,
 ) -> List["AQuantKernelConfig"]:
     """Expand an AQuant JSON sweep config into a list of AQuantKernelConfig objects.
 
