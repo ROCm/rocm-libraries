@@ -29,6 +29,7 @@
 
 #include "lib_host_helpers.hpp"
 #include "lib_macros.hpp"
+#include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
