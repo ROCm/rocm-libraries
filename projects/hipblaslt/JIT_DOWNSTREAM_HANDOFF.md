@@ -1,8 +1,8 @@
 # hipBLASLt JIT downstream handoff
 
-Development continues on `downstream/hipblaslt-jit` from the complete upstream
-review-stack tip `d742375dbbef5ef44e9890e199741de70d573f14`. The full JIT
-implementation and existing names are preserved: the explicit TensileLite API,
+Development continues on `users/jolabega/downstream-hipblaslt-jit-develop` from
+the complete upstream review-stack tip `d742375dbbef5ef44e9890e199741de70d573f14`.
+The full JIT implementation and existing names are preserved: the explicit TensileLite API,
 its sample, the optional generic API and separate sample, provider prediction,
 benchmark integration, validation driver and workflow.
 
@@ -39,16 +39,17 @@ branch/document-only consolidation. The original untracked `.venv/` and
 `SESSION_HANDOFF.md` remain untouched and uncommitted.
 
 The downstream working branch has a remote copy at
-[`origin/downstream/hipblaslt-jit`](https://github.com/ROCm/rocm-libraries/tree/downstream/hipblaslt-jit).
+[`origin/users/jolabega/downstream-hipblaslt-jit-develop`](https://github.com/ROCm/rocm-libraries/tree/users/jolabega/downstream-hipblaslt-jit-develop).
 Here, downstream means continued development on a branch without an associated
 PR. The existing `origin` points to `git@github.com:ROCm/rocm-libraries.git`;
 no replacement PR or separate fork was created.
 
 An incremental Git bundle is retained locally under
 `build/downstream-backup/hipblaslt-jit-20260924-remote.bundle` relative to this project.
-It contains the downstream branch and its commits beyond the common upstream
-base; `git bundle verify` identifies the prerequisite commits. This supplements
-the preserved local branch refs. It is a generated backup, not tracked source.
+It records the consolidated branch before its rename from `downstream/hipblaslt-jit`
+and its commits beyond the common upstream base; `git bundle verify` identifies
+the prerequisite commits. This supplements the preserved local branch refs.
+It is a generated backup, not tracked source.
 
 ## Reusable design material
 

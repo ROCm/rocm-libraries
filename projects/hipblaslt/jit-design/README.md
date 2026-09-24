@@ -1,6 +1,7 @@
 # Downstream JIT design notes
 
-These contributor design notes are preserved with `downstream/hipblaslt-jit`.
+These contributor design notes are preserved with
+`users/jolabega/downstream-hipblaslt-jit-develop`.
 The current implementation and API names are retained. The notes describe
 future work; copying them here does not implement timing, progress, KFA
 convergence, persistent caching or a new publication workflow.

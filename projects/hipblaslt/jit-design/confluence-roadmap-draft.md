@@ -1,9 +1,9 @@
 # hipBLASLt JIT: direct TensileLite workflow and roadmap
 
 > Preserved discussion draft from the upstream review phase. Development now
-> continues on `downstream/hipblaslt-jit`; PR links and review-state statements
-> below identify the historical source snapshot. This page has not been published
-> to Confluence.
+> continues on `users/jolabega/downstream-hipblaslt-jit-develop`; PR links and
+> review-state statements below identify the historical source snapshot. This
+> page has not been published to Confluence.
 
 **Review basis:** Published basic tip #12565 (`b2510705`) and dependent generic/prediction/documentation tip #12430 (`d742375d`), verified September 24, 2026. Their executable and test source matches the validated implementation; subsequent changes relocate and clarify contributor documentation. “Implemented” below means present in this review stack, not merged, released or approved as product naming.
 
