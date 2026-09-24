@@ -56,7 +56,7 @@ import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .catalog import require_rankable
-from .evaluate import add_evaluate_arguments, run_evaluate
+from .evaluate import BENCHMARK_COLUMN, Grouping, add_evaluate_arguments, run_evaluate
 from .corpus_io import read_corpus_frame
 from .coverage import device_field_coverage, enforce_device_coverage
 from .knobs import add_knob_arguments, run_knobs
@@ -517,10 +517,25 @@ def _run_train(args: argparse.Namespace) -> int:
             # already destroyed. `generate` checks the same thing earlier and at greater
             # value, before a GPU sweep rather than after; this catches the corpus handed
             # to `train` directly, which is the route a re-train off collected data takes.
-            density = require_rankable(df, engine=args.engine)
-            thin = density.near_deterministic_warning()
-            if thin:
-                logger.warning("%s", thin)
+            #
+            # Problems are identified exactly as training groups them below: `--group-by`
+            # when given, else `benchmark` (plus `device`). A corpus with neither has no
+            # problem identity, so there is nothing to census -- training has always
+            # accepted such a corpus, ungrouped, and the census must not refuse it.
+            census_grouping = None
+            if args.group_by is not None:
+                census_grouping = Grouping(
+                    columns=tuple(args.group_by), degraded=False, detail="--group-by")
+            if census_grouping is not None or BENCHMARK_COLUMN in df.columns:
+                density = require_rankable(df, engine=args.engine, grouping=census_grouping)
+                thin = density.near_deterministic_warning()
+                if thin:
+                    logger.warning("%s", thin)
+            else:
+                logger.info(
+                    "catalog census skipped: the corpus has no %r column and no --group-by, "
+                    "so rows carry no problem identity to count candidates over",
+                    BENCHMARK_COLUMN)
         signature = (
             json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
             if args.feature_signature else build_features_signature(args.features)
