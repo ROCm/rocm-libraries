@@ -58,15 +58,26 @@ struct StagingLayout
     __device__ static int offset(int k, int c) { return k * cols + (c ^ (4 * (k % rotations))); }
 };
 
-// A rendezvous between the waves sharing a channel tile, and nothing where a wave owns it alone.
+// The ordering point on the staging tile: a rendezvous where the partitions share one, fences
+// where a wave owns it alone.
 //
-// phase_barrier rather than __syncthreads, which would lower to a vmcnt(0) over the atomics this
-// loop is issuing. The caller supplies the s_wait_lgkmcnt.
+// Either form stops the compiler handing the lanes that skip the drain a path straight to the next
+// filter position's stores, which would overwrite words the draining lanes still need.
+// phase_barrier is convergent, so that path cannot be formed across it; the fences are scoped to
+// LDS, so unlike __syncthreads they carry no vmcnt(0) over the atomics the drain is issuing. See
+// docs/algorithms/direct/direct-wgrad-epilogue-lds-ordering.md.
 template <Config cfg>
 __device__ inline void partition_barrier()
 {
     if constexpr(cfg.waves_q > 1)
+    {
         phase_barrier();
+    }
+    else
+    {
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+    }
 }
 
 // Add this workgroup's partial gradient into dW.
