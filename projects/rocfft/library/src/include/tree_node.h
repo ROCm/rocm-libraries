@@ -1535,6 +1535,203 @@ private:
     const rocfft_array_type   arrayType;
     std::vector<Transfer>     transfers;
 };
+
+// RCCL gather: uniform ncclGather into a rank-ordered recv buffer on
+// root, then local copies into destOffset. Dummy ranks still enter
+// the collective (NCCL rule) with a count-sized send buffer.
+struct CommRCCLGather : public MultiPlanItem
+{
+    struct agent_t
+    {
+        BufferPtr          sendBuffer;
+        size_t             sendOffset = 0;
+        bool               is_direct  = false;
+        hipEvent_wrapper_t event;
+    };
+
+    struct Op
+    {
+        rocfft_location_t srcLocation;
+        BufferPtr         srcPtr;
+        size_t            srcOffset   = 0;
+        size_t            destOffset  = 0;
+        size_t            numElems    = 0;
+        int               nccl_rank   = 0;
+        size_t            slot_offset = 0;
+    };
+
+    CommRCCLGather(const rocfft_rccl_comm_t& _rccl,
+                   rocfft_precision          _precision,
+                   rocfft_array_type         _arrayType,
+                   rocfft_location_t         _destLocation,
+                   BufferPtr                 _destPtr,
+                   size_t                    _count_per_rank,
+                   std::vector<agent_t>      _agents,
+                   BufferPtr                 _recvBuffer,
+                   std::vector<Op>           _ops)
+        : rccl(_rccl)
+        , precision(_precision)
+        , arrayType(_arrayType)
+        , destLocation(_destLocation)
+        , destPtr(_destPtr)
+        , count_per_rank(_count_per_rank)
+        , agents(std::move(_agents))
+        , recvBuffer(_recvBuffer)
+        , ops(std::move(_ops))
+    {
+        local_comm_rank = 0;
+
+        const auto nranks = rccl.num_ranks();
+        if(agents.size() != nranks)
+            throw std::invalid_argument(
+                "CommRCCLGather: agents.size() (" + std::to_string(agents.size())
+                + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
+
+        const auto devices = rccl.get_devices();
+        for(size_t r = 0; r < devices.size(); ++r)
+        {
+            rocfft_scoped_device scoped(devices[r]);
+            agents[r].event.alloc();
+        }
+    }
+
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx) override;
+    void Wait() override;
+    void Print(rocfft_ostream& os, const int indent) const override;
+
+    bool WritesToBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == destPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& op : ops)
+        {
+            if(ptr == op.srcPtr)
+                return true;
+        }
+        return false;
+    }
+
+    bool ExecutesOnRank(int comm_rank) const override
+    {
+        return comm_rank == local_comm_rank;
+    }
+
+private:
+    const rocfft_rccl_comm_t& rccl;
+    const rocfft_precision    precision;
+    const rocfft_array_type   arrayType;
+    const rocfft_location_t   destLocation;
+    const BufferPtr           destPtr;
+    const size_t              count_per_rank;
+    std::vector<agent_t>      agents;
+    const BufferPtr           recvBuffer;
+    std::vector<Op>           ops;
+};
+
+// RCCL scatter: local copies into a rank-ordered send buffer on
+// root, then uniform ncclScatter. Dummy ranks still recv `count`.
+struct CommRCCLScatter : public MultiPlanItem
+{
+    struct agent_t
+    {
+        BufferPtr          recvBuffer;
+        size_t             recvOffset = 0;
+        bool               is_direct  = false;
+        hipEvent_wrapper_t event;
+    };
+
+    struct Op
+    {
+        rocfft_location_t destLocation;
+        BufferPtr         destPtr;
+        size_t            srcOffset   = 0;
+        size_t            destOffset  = 0;
+        size_t            numElems    = 0;
+        int               nccl_rank   = 0;
+        size_t            slot_offset = 0;
+    };
+
+    CommRCCLScatter(const rocfft_rccl_comm_t& _rccl,
+                    rocfft_precision          _precision,
+                    rocfft_array_type         _arrayType,
+                    rocfft_location_t         _srcLocation,
+                    BufferPtr                 _srcPtr,
+                    size_t                    _count_per_rank,
+                    std::vector<agent_t>      _agents,
+                    BufferPtr                 _sendBuffer,
+                    std::vector<Op>           _ops)
+        : rccl(_rccl)
+        , precision(_precision)
+        , arrayType(_arrayType)
+        , srcLocation(_srcLocation)
+        , srcPtr(_srcPtr)
+        , count_per_rank(_count_per_rank)
+        , agents(std::move(_agents))
+        , sendBuffer(_sendBuffer)
+        , ops(std::move(_ops))
+    {
+        local_comm_rank = 0;
+
+        const auto nranks = rccl.num_ranks();
+        if(agents.size() != nranks)
+            throw std::invalid_argument(
+                "CommRCCLScatter: agents.size() (" + std::to_string(agents.size())
+                + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
+
+        const auto devices = rccl.get_devices();
+        for(size_t r = 0; r < devices.size(); ++r)
+        {
+            rocfft_scoped_device scoped(devices[r]);
+            agents[r].event.alloc();
+        }
+    }
+
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx) override;
+    void Wait() override;
+    void Print(rocfft_ostream& os, const int indent) const override;
+
+    bool WritesToBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& op : ops)
+        {
+            if(ptr == op.destPtr)
+                return true;
+        }
+        return false;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == srcPtr;
+    }
+
+    bool ExecutesOnRank(int comm_rank) const override
+    {
+        return comm_rank == local_comm_rank;
+    }
+
+private:
+    const rocfft_rccl_comm_t& rccl;
+    const rocfft_precision    precision;
+    const rocfft_array_type   arrayType;
+    const rocfft_location_t   srcLocation;
+    const BufferPtr           srcPtr;
+    const size_t              count_per_rank;
+    std::vector<agent_t>      agents;
+    const BufferPtr           sendBuffer;
+    std::vector<Op>           ops;
+};
 #endif // ROCFFT_RCCL_ENABLE
 
 // This struct has a vector of ranks to scatter to.  Executing can

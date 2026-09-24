@@ -903,6 +903,274 @@ void CommRCCLGrouped::Print(rocfft_ostream& os, const int indent) const
     }
     os << std::endl;
 }
+
+void CommRCCLGather::ExecuteAsync(const rocfft_plan                     plan,
+                                  void*                                 in_buffer[],
+                                  void*                                 out_buffer[],
+                                  const rocfft_execution_info_internal& info,
+                                  size_t                                multiPlanIdx)
+{
+    const auto devices = rccl.get_devices();
+
+    if(LOG_PLAN_ENABLED())
+    {
+        log_plan("CommRCCLGather: count_per_rank=" + std::to_string(count_per_rank) + ", ndevices="
+                 + std::to_string(devices.size()) + ", nops=" + std::to_string(ops.size()) + ", "
+                 + precision_name(precision) + " " + PrintArrayType(arrayType) + "\n");
+    }
+
+    const auto elem_bytes = element_size(precision, arrayType);
+
+    // concatenate multiple pieces (or dummy ranks) into each rank's
+    // send buffer on that rank's comm stream, before the collective.
+    for(const auto& op : ops)
+    {
+        auto& agent = agents[static_cast<size_t>(op.nccl_rank)];
+        if(agent.is_direct)
+            continue;
+        rocfft_scoped_device dev(op.srcLocation.device);
+        auto src = ptr_offset(op.srcPtr.get(in_buffer, out_buffer, local_comm_rank, info),
+                              op.srcOffset,
+                              precision,
+                              arrayType);
+        auto dst = ptr_offset(agent.sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info),
+                              agent.sendOffset + op.slot_offset,
+                              precision,
+                              arrayType);
+        if(hipMemcpyAsync(dst,
+                          src,
+                          op.numElems * elem_bytes,
+                          hipMemcpyDeviceToDevice,
+                          rccl.get_stream(op.srcLocation.device))
+           != hipSuccess)
+            throw std::runtime_error("hipMemcpyAsync failed packing RCCL gather on device "
+                                     + std::to_string(op.srcLocation.device));
+    }
+
+    std::vector<const void*> send_ptrs(agents.size(), nullptr);
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        send_ptrs[r]
+            = ptr_offset(agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info),
+                         agents[r].sendOffset,
+                         precision,
+                         arrayType);
+    }
+
+    void* recv_ptr = recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
+    rccl.gather(send_ptrs, recv_ptr, count_per_rank, destLocation.device, precision, arrayType);
+
+    // rank-ordered recv -> destOffset on the root comm stream (ordered
+    // after ncclGather on that stream).
+    for(const auto& op : ops)
+    {
+        rocfft_scoped_device dev(destLocation.device);
+        auto                 src = ptr_offset(recv_ptr,
+                              static_cast<size_t>(op.nccl_rank) * count_per_rank + op.slot_offset,
+                              precision,
+                              arrayType);
+        auto dst = ptr_offset(destPtr.get(in_buffer, out_buffer, local_comm_rank, info),
+                              op.destOffset,
+                              precision,
+                              arrayType);
+        if(hipMemcpyAsync(dst,
+                          src,
+                          op.numElems * elem_bytes,
+                          hipMemcpyDeviceToDevice,
+                          rccl.get_stream(destLocation.device))
+           != hipSuccess)
+            throw std::runtime_error("hipMemcpyAsync failed unpacking RCCL gather on device "
+                                     + std::to_string(destLocation.device));
+    }
+
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        if(agents[r].event
+           && hipEventRecord(agents[r].event, rccl.get_stream(devices[r])) != hipSuccess)
+            throw std::runtime_error("hipEventRecord failed for RCCL Gather on device "
+                                     + std::to_string(devices[r]));
+    }
+}
+
+void CommRCCLGather::Wait()
+{
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        if(!agents[r].event)
+            continue;
+
+        hipError_t status;
+        while((status = hipEventQuery(agents[r].event)) == hipErrorNotReady)
+            std::this_thread::yield();
+        if(status != hipSuccess)
+            throw std::runtime_error("hipEventQuery failed for RCCL Gather");
+    }
+}
+
+void CommRCCLGather::Print(rocfft_ostream& os, const int indent) const
+{
+    const std::string indentStr(indent * 4, ' ');
+    const auto        devices = rccl.get_devices();
+
+    os << indentStr << "CommRCCLGather " << precision_name(precision) << " "
+       << PrintArrayType(arrayType) << ":\n";
+    os << indentStr << "  count_per_rank: " << count_per_rank << "\n";
+    os << indentStr << "  destCommRank: " << destLocation.comm_rank << "\n";
+    os << indentStr << "  destDeviceID: " << destLocation.device << "\n";
+    os << indentStr << "  num_ops: " << ops.size() << "\n";
+    for(const auto& op : ops)
+    {
+        os << indentStr << "    srcCommRank: " << op.srcLocation.comm_rank
+           << " srcDeviceID: " << op.srcLocation.device << " nccl_rank: " << op.nccl_rank
+           << " numElems: " << op.numElems << "\n";
+        os << indentStr << "    srcBuf: " << PrintBufferPtrOffset(op.srcPtr, op.srcOffset) << "\n";
+        os << indentStr << "    destBuf: " << PrintBufferPtrOffset(destPtr, op.destOffset) << "\n";
+    }
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        os << indentStr << "  rank " << r << ": device=" << devices[r]
+           << " sendBuf=" << PrintBufferPtrOffset(agents[r].sendBuffer, agents[r].sendOffset)
+           << (agents[r].is_direct ? " (direct)" : " (staged)") << "\n";
+    }
+    os << std::endl;
+}
+
+void CommRCCLScatter::ExecuteAsync(const rocfft_plan                     plan,
+                                   void*                                 in_buffer[],
+                                   void*                                 out_buffer[],
+                                   const rocfft_execution_info_internal& info,
+                                   size_t                                multiPlanIdx)
+{
+    const auto devices = rccl.get_devices();
+
+    if(LOG_PLAN_ENABLED())
+    {
+        log_plan("CommRCCLScatter: count_per_rank=" + std::to_string(count_per_rank) + ", ndevices="
+                 + std::to_string(devices.size()) + ", nops=" + std::to_string(ops.size()) + ", "
+                 + precision_name(precision) + " " + PrintArrayType(arrayType) + "\n");
+    }
+
+    const auto elem_bytes = element_size(precision, arrayType);
+
+    void* send_ptr = sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
+
+    // pack srcOffset -> rank-ordered send slots on the root comm stream
+    {
+        rocfft_scoped_device dev(srcLocation.device);
+        auto                 src_base = srcPtr.get(in_buffer, out_buffer, local_comm_rank, info);
+        for(const auto& op : ops)
+        {
+            auto src = ptr_offset(src_base, op.srcOffset, precision, arrayType);
+            auto dst
+                = ptr_offset(send_ptr,
+                             static_cast<size_t>(op.nccl_rank) * count_per_rank + op.slot_offset,
+                             precision,
+                             arrayType);
+            if(hipMemcpyAsync(dst,
+                              src,
+                              op.numElems * elem_bytes,
+                              hipMemcpyDeviceToDevice,
+                              rccl.get_stream(srcLocation.device))
+               != hipSuccess)
+                throw std::runtime_error("hipMemcpyAsync failed packing RCCL scatter on device "
+                                         + std::to_string(srcLocation.device));
+        }
+    }
+
+    std::vector<void*> recv_ptrs(agents.size(), nullptr);
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        recv_ptrs[r]
+            = ptr_offset(agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info),
+                         agents[r].recvOffset,
+                         precision,
+                         arrayType);
+    }
+
+    rccl.scatter(send_ptr, recv_ptrs, count_per_rank, srcLocation.device, precision, arrayType);
+
+    // non-direct ranks copy from recv staging into destOffset. Direct
+    // ranks already received into the user/dest buffer.
+    for(const auto& op : ops)
+    {
+        auto& agent = agents[static_cast<size_t>(op.nccl_rank)];
+        if(agent.is_direct)
+            continue;
+        rocfft_scoped_device dev(op.destLocation.device);
+        auto src = ptr_offset(agent.recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info),
+                              agent.recvOffset + op.slot_offset,
+                              precision,
+                              arrayType);
+        auto dst = ptr_offset(op.destPtr.get(in_buffer, out_buffer, local_comm_rank, info),
+                              op.destOffset,
+                              precision,
+                              arrayType);
+        if(hipMemcpyAsync(dst,
+                          src,
+                          op.numElems * elem_bytes,
+                          hipMemcpyDeviceToDevice,
+                          rccl.get_stream(op.destLocation.device))
+           != hipSuccess)
+            throw std::runtime_error("hipMemcpyAsync failed unpacking RCCL scatter on device "
+                                     + std::to_string(op.destLocation.device));
+    }
+
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        if(agents[r].event
+           && hipEventRecord(agents[r].event, rccl.get_stream(devices[r])) != hipSuccess)
+            throw std::runtime_error("hipEventRecord failed for RCCL Scatter on device "
+                                     + std::to_string(devices[r]));
+    }
+}
+
+void CommRCCLScatter::Wait()
+{
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        if(!agents[r].event)
+            continue;
+
+        hipError_t status;
+        while((status = hipEventQuery(agents[r].event)) == hipErrorNotReady)
+            std::this_thread::yield();
+        if(status != hipSuccess)
+            throw std::runtime_error("hipEventQuery failed for RCCL Scatter");
+    }
+}
+
+void CommRCCLScatter::Print(rocfft_ostream& os, const int indent) const
+{
+    const std::string indentStr(indent * 4, ' ');
+    const auto        devices = rccl.get_devices();
+
+    os << indentStr << "CommRCCLScatter " << precision_name(precision) << " "
+       << PrintArrayType(arrayType) << ":\n";
+    os << indentStr << "  count_per_rank: " << count_per_rank << "\n";
+    os << indentStr << "  srcCommRank: " << srcLocation.comm_rank << "\n";
+    os << indentStr << "  srcDeviceID: " << srcLocation.device << "\n";
+    os << indentStr << "  num_ops: " << ops.size() << "\n";
+    for(const auto& op : ops)
+    {
+        os << indentStr << "    destCommRank: " << op.destLocation.comm_rank
+           << " destDeviceID: " << op.destLocation.device << " nccl_rank: " << op.nccl_rank
+           << " numElems: " << op.numElems << "\n";
+        os << indentStr << "    srcBuf: " << PrintBufferPtrOffset(srcPtr, op.srcOffset) << "\n";
+        os << indentStr << "    destBuf: " << PrintBufferPtrOffset(op.destPtr, op.destOffset)
+           << "\n";
+    }
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        os << indentStr << "  rank " << r << ": device=" << devices[r]
+           << " recvBuf=" << PrintBufferPtrOffset(agents[r].recvBuffer, agents[r].recvOffset)
+           << (agents[r].is_direct ? " (direct)" : " (staged)") << "\n";
+    }
+    os << std::endl;
+}
 #endif // ROCFFT_RCCL_ENABLE
 
 void CommScatter::ExecuteAsync(const rocfft_plan                     plan,

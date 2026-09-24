@@ -132,6 +132,31 @@ public:
                   rocfft_precision                precision,
                   rocfft_array_type               array_type) const;
 
+    // gather with a uniform count on every rank. sendbufs is sized
+    // num_ranks() and indexed by RCCL rank (a rank with no real data
+    // still supplies a dummy buffer of `count` elements). recvbuf is
+    // used only on root_device_id and must hold num_ranks() * count
+    // elements, slot i = NCCL rank i. Count is in logical
+    // (precision, array_type) elements. Throws std::invalid_argument
+    // on size mismatch, rocfft_rccl_exception_t on RCCL failure.
+    void gather(const std::vector<const void*>& sendbufs,
+                void*                           recvbuf,
+                size_t                          count,
+                int                             root_device_id,
+                rocfft_precision                precision,
+                rocfft_array_type               array_type) const;
+
+    // scatter with a uniform count on every rank. sendbuf is used
+    // only on root_device_id and holds num_ranks() * count elements,
+    // slot i = NCCL rank i. recvbufs is sized num_ranks() and indexed
+    // by RCCL rank (dummy slots still receive `count` elements).
+    void scatter(const void*               sendbuf,
+                 const std::vector<void*>& recvbufs,
+                 size_t                    count,
+                 int                       root_device_id,
+                 rocfft_precision          precision,
+                 rocfft_array_type         array_type) const;
+
     // point-to-point send: endpoints are device ids; runs on the comm's
     // own stream for device_id.
     void send(const void*       sendbuf,

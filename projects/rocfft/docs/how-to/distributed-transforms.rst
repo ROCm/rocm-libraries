@@ -26,7 +26,9 @@ fields.
 
    When built with ``ROCFFT_RCCL_ENABLE=ON``, rocfft plans may use the
    ROCm Communication Collectives Library (RCCL) for inter-device
-   communication. For efficiency reasons, rocfft reuses the same RCCL
+   communication, including all-to-all transposes and the gather/scatter
+   fallback that runs a distributed FFT on a single device. For efficiency
+   reasons, rocfft reuses the same RCCL
    communicator across plans that share the same set of devices. RCCL
    communicators are not safe for concurrent use, so any two such plans
    must be executed serially: If you need to execute multiple plans

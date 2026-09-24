@@ -342,6 +342,166 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
     group.end();
 }
 
+// ncclGather/ncclScatter shipped alongside ncclAllToAll (NCCL 2.19 /
+// RCCL 2.18+). Older headers still get a grouped send/recv star with
+// the same buffer contract so plan nodes stay unchanged.
+#if defined(NCCL_MAJOR) \
+    && (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && defined(NCCL_MINOR) && NCCL_MINOR >= 19))
+#define ROCFFT_RCCL_HAS_GATHER_SCATTER 1
+#endif
+
+void rocfft_rccl_comm_t::gather(const std::vector<const void*>& sendbufs,
+                                void*                           recvbuf,
+                                size_t                          count,
+                                int                             root_device_id,
+                                rocfft_precision                precision,
+                                rocfft_array_type               array_type) const
+{
+    const auto nranks = num_ranks();
+    if(sendbufs.size() != nranks)
+        throw std::invalid_argument(
+            "rocfft_rccl_comm_t::gather: sendbufs must have size num_ranks() ("
+            + std::to_string(nranks) + "); got " + std::to_string(sendbufs.size()));
+    if(!recvbuf)
+        throw std::invalid_argument("rocfft_rccl_comm_t::gather: recvbuf is null");
+
+    const auto devices   = get_devices();
+    const int  root_rank = get_rank(root_device_id);
+
+#ifdef ROCFFT_RCCL_HAS_GATHER_SCATTER
+    const auto nccl_count = count * (array_type_is_interleaved(array_type) ? 2 : 1);
+    const auto dtype      = get_nccl_dtype(precision);
+
+    rocfft_rccl_group_t group;
+    for(size_t r = 0; r < nranks; ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        void*                root_recv = (static_cast<int>(r) == root_rank) ? recvbuf : nullptr;
+        ncclResult_t         result    = ncclGather(sendbufs[r],
+                                         root_recv,
+                                         nccl_count,
+                                         dtype,
+                                         root_rank,
+                                         get_comm(devices[r]),
+                                         get_stream(devices[r]));
+        if(result != ncclSuccess)
+        {
+            throw rocfft_rccl_exception_t(
+                "ncclGather failed on device " + std::to_string(devices[r]), result);
+        }
+    }
+    group.end();
+#else
+    // send/recv star: every non-root rank sends to root; root copies
+    // its own sendbuf into slot root_rank after the group.
+    rocfft_rccl_group_t group;
+    for(size_t r = 0; r < nranks; ++r)
+    {
+        if(static_cast<int>(r) == root_rank)
+            continue;
+        rocfft_scoped_device src_dev(devices[r]);
+        send(sendbufs[r], count, root_device_id, devices[r], precision, array_type);
+        rocfft_scoped_device root_dev(root_device_id);
+        recv(ptr_offset(recvbuf, r * count, precision, array_type),
+             count,
+             devices[r],
+             root_device_id,
+             precision,
+             array_type);
+    }
+    group.end();
+
+    rocfft_scoped_device root_dev(root_device_id);
+    const size_t         bytes = count * element_size(precision, array_type);
+    if(hipMemcpyAsync(
+           ptr_offset(recvbuf, static_cast<size_t>(root_rank) * count, precision, array_type),
+           const_cast<void*>(sendbufs[static_cast<size_t>(root_rank)]),
+           bytes,
+           hipMemcpyDeviceToDevice,
+           get_stream(root_device_id))
+       != hipSuccess)
+    {
+        throw std::runtime_error("hipMemcpyAsync failed for gather root self-copy");
+    }
+#endif
+}
+
+void rocfft_rccl_comm_t::scatter(const void*               sendbuf,
+                                 const std::vector<void*>& recvbufs,
+                                 size_t                    count,
+                                 int                       root_device_id,
+                                 rocfft_precision          precision,
+                                 rocfft_array_type         array_type) const
+{
+    const auto nranks = num_ranks();
+    if(recvbufs.size() != nranks)
+        throw std::invalid_argument(
+            "rocfft_rccl_comm_t::scatter: recvbufs must have size num_ranks() ("
+            + std::to_string(nranks) + "); got " + std::to_string(recvbufs.size()));
+    if(!sendbuf)
+        throw std::invalid_argument("rocfft_rccl_comm_t::scatter: sendbuf is null");
+
+    const auto devices   = get_devices();
+    const int  root_rank = get_rank(root_device_id);
+
+#ifdef ROCFFT_RCCL_HAS_GATHER_SCATTER
+    const auto nccl_count = count * (array_type_is_interleaved(array_type) ? 2 : 1);
+    const auto dtype      = get_nccl_dtype(precision);
+
+    rocfft_rccl_group_t group;
+    for(size_t r = 0; r < nranks; ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        const void*          root_send = (static_cast<int>(r) == root_rank) ? sendbuf : nullptr;
+        ncclResult_t         result    = ncclScatter(root_send,
+                                          recvbufs[r],
+                                          nccl_count,
+                                          dtype,
+                                          root_rank,
+                                          get_comm(devices[r]),
+                                          get_stream(devices[r]));
+        if(result != ncclSuccess)
+        {
+            throw rocfft_rccl_exception_t(
+                "ncclScatter failed on device " + std::to_string(devices[r]), result);
+        }
+    }
+    group.end();
+#else
+    rocfft_rccl_group_t group;
+    for(size_t r = 0; r < nranks; ++r)
+    {
+        if(static_cast<int>(r) == root_rank)
+            continue;
+        rocfft_scoped_device root_dev(root_device_id);
+        send(ptr_offset(const_cast<void*>(sendbuf), r * count, precision, array_type),
+             count,
+             devices[r],
+             root_device_id,
+             precision,
+             array_type);
+        rocfft_scoped_device dst_dev(devices[r]);
+        recv(recvbufs[r], count, root_device_id, devices[r], precision, array_type);
+    }
+    group.end();
+
+    rocfft_scoped_device root_dev(root_device_id);
+    const size_t         bytes = count * element_size(precision, array_type);
+    if(hipMemcpyAsync(recvbufs[static_cast<size_t>(root_rank)],
+                      ptr_offset(const_cast<void*>(sendbuf),
+                                 static_cast<size_t>(root_rank) * count,
+                                 precision,
+                                 array_type),
+                      bytes,
+                      hipMemcpyDeviceToDevice,
+                      get_stream(root_device_id))
+       != hipSuccess)
+    {
+        throw std::runtime_error("hipMemcpyAsync failed for scatter root self-copy");
+    }
+#endif
+}
+
 void rocfft_rccl_comm_t::send(const void*       sendbuf,
                               size_t            count,
                               int               peer_device_id,

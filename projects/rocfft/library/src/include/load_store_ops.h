@@ -23,9 +23,13 @@
 
 #include "../../../shared/rocfft_hip.h"
 #include "../device/kernels/callback.h"
+#include <algorithm>
+#include <cctype>
+#include <cstring>
 #include <hip/hip_runtime_api.h>
 #include <hip/linker_types.h>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -76,7 +80,7 @@ private:
         static constexpr auto legal_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
         constexpr auto legal_chars_end = legal_chars + std::char_traits<char>::length(legal_chars);
 
-        const char* end = name + strlen(name);
+        const char* end = name + std::strlen(name);
         if(!std::all_of(name, end, [=](unsigned char c) {
                return std::isdigit(c)
                       || std::find(legal_chars, legal_chars_end, c) != legal_chars_end;

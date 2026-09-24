@@ -46,6 +46,7 @@
 
 #include <algorithm>
 #include <assert.h>
+#include <cctype>
 #include <cstring>
 #include <functional>
 #include <iterator>
@@ -78,6 +79,17 @@ constexpr bool dft_is_real(rocfft_transform_type fft_type)
     return fft_type == rocfft_transform_type_real_forward
            || fft_type == rocfft_transform_type_real_inverse;
 }
+
+#ifdef ROCFFT_RCCL_ENABLE
+static bool rocfft_rccl_force_grouped_backend()
+{
+    auto v = rocfft_getenv("ROCFFT_RCCL_BACKEND");
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return v == "grouped" || v == "send_recv";
+}
+#endif
 constexpr bool dft_is_complex(rocfft_transform_type fft_type)
 {
     return fft_type == rocfft_transform_type_complex_forward
@@ -1856,8 +1868,36 @@ std::vector<size_t>
     // data layout to be observed by the final results of the data-gathering steps
     const auto single_dev_input_layout = exec_plan_metadata.layout_for(io_data_label::INPUT);
 
-    // Create node that captures data-gathering steps
-    std::unique_ptr<CommGather> gather_node;
+    std::vector<CommGather::GatherOp> gather_ops;
+    std::string                       gather_description;
+
+    auto add_gather_items = [&](BufferPtr dest_ptr, const std::vector<size_t>& pack_idxs) {
+        std::vector<size_t> gather_idxs;
+#ifdef ROCFFT_RCCL_ENABLE
+        gather_idxs = BuildRCCLGather(exec_plan_location,
+                                      dest_ptr,
+                                      desc.inArrayType,
+                                      gather_ops,
+                                      antecedents,
+                                      gather_description);
+        if(gather_idxs.empty())
+#endif
+        {
+            auto gather_node = std::make_unique<CommGather>(
+                local_comm_rank, precision, desc.inArrayType, exec_plan_location, dest_ptr);
+            gather_node->description = gather_description;
+            for(auto& op : gather_ops)
+                gather_node->AddOperation(local_comm_rank, std::move(op));
+            gather_idxs.push_back(AddMultiPlanItem(std::move(gather_node), antecedents));
+        }
+        for(auto packIdx : pack_idxs)
+        {
+            for(auto gatherIdx : gather_idxs)
+                AddAntecedent(gatherIdx, packIdx);
+        }
+        return gather_idxs;
+    };
+
     if(std::all_of(input_bricks.begin(), input_bricks.end(), [&](const rocfft_brick_t& ibrick) {
            return ibrick.layout.is_continuous_in(single_dev_input_layout)
                   && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PtrType::PTR_TEMP
@@ -1865,24 +1905,19 @@ std::vector<size_t>
        }))
     {
         // All inputs may and can be copied directly into the execution plan's input buffer
-        gather_node              = std::make_unique<CommGather>(local_comm_rank,
-                                                   precision,
-                                                   desc.inArrayType,
-                                                   exec_plan_location,
-                                                   exec_plan_metadata.input_buffer);
-        gather_node->description = "Gather input data of " + std::to_string(input_bricks.size())
-                                   + " bricks directly into single-device plan's input buffer";
+        gather_description = "Gather input data of " + std::to_string(input_bricks.size())
+                             + " bricks directly into single-device plan's input buffer";
         for(size_t b_idx = 0; b_idx < input_bricks.size(); ++b_idx)
         {
             const auto& ibrick = input_bricks[b_idx];
-            gather_node->AddOperation(local_comm_rank,
-                                      {ibrick.location,
-                                       input_buffers[b_idx],
-                                       0 /* : srcOffset */,
-                                       ibrick.layout.offset_in(single_dev_input_layout),
-                                       ibrick.layout.buffer_element_count()});
+            gather_ops.emplace_back(ibrick.location,
+                                    input_buffers[b_idx],
+                                    0 /* : srcOffset */,
+                                    ibrick.layout.offset_in(single_dev_input_layout),
+                                    ibrick.layout.buffer_element_count());
         }
-        gather_plan_items.push_back(AddMultiPlanItem(std::move(gather_node), antecedents));
+        auto gather_idxs = add_gather_items(exec_plan_metadata.input_buffer, {});
+        gather_plan_items.insert(gather_plan_items.end(), gather_idxs.begin(), gather_idxs.end());
     }
     else
     {
@@ -1895,40 +1930,26 @@ std::vector<size_t>
                                             local_comm_rank,
                                             exec_plan_location,
                                             packed_layout.logical_count() * input_elem_size);
-        gather_node = std::make_unique<CommGather>(local_comm_rank,
-                                                   precision,
-                                                   desc.inArrayType,
-                                                   exec_plan_location,
-                                                   BufferPtr::temp(packing_temp_buffer.data()));
-
-        gather_node->description = "Gather contiguously-packed input data chunks for "
-                                   + std::to_string(input_bricks.size()) + " bricks";
-        // save the raw pointer as gather_node will be moved below
-        auto gather_node_raw_ptr = gather_node.get();
-        // Add gather_node to the plan, operations are added to it below
-        const auto gatherIdx = AddMultiPlanItem(std::move(gather_node), antecedents);
-        // Devices may need to pack their data (locally) before having it transferred
-        // to packing_temp_buffer
+        gather_description = "Gather contiguously-packed input data chunks for "
+                             + std::to_string(input_bricks.size()) + " bricks";
         std::vector<TempBufferLease> local_packed_chunk;
+        std::vector<size_t>          pack_idxs;
+        std::vector<size_t>          brick_packed_offset(input_bricks.size(), 0);
         size_t                       packed_offset = 0;
         for(size_t b_idx = 0; b_idx < input_bricks.size(); ++b_idx)
         {
-            const auto& ibrick = input_bricks[b_idx];
-
+            const auto& ibrick         = input_bricks[b_idx];
+            brick_packed_offset[b_idx] = packed_offset;
             if(ibrick.layout.is_contiguous())
             {
-                // a direct copy into packing_temp_buffer may be done
-                gather_node_raw_ptr->AddOperation(local_comm_rank,
-                                                  {ibrick.location,
-                                                   input_buffers[b_idx],
-                                                   0 /* : srcOffset */,
-                                                   packed_offset,
-                                                   ibrick.layout.logical_count()});
+                gather_ops.emplace_back(ibrick.location,
+                                        input_buffers[b_idx],
+                                        0 /* : srcOffset */,
+                                        packed_offset,
+                                        ibrick.layout.logical_count());
             }
             else
             {
-                // Pre-pack data locally on the brick's device before transferring it
-                // to packing_temp_buffer
                 std::string local_pack_description
                     = "pack brick " + std::to_string(b_idx) + "'s input data on device "
                       + std::to_string(ibrick.location.device) + " (rank "
@@ -1937,7 +1958,7 @@ std::vector<size_t>
                                                 local_comm_rank,
                                                 ibrick.location,
                                                 ibrick.layout.logical_count() * input_elem_size);
-                const auto packIdx = AddMultiPlanItem(
+                pack_idxs.push_back(AddMultiPlanItem(
                     transpose_brick(local_comm_rank,
                                     ibrick.location,
                                     ibrick.layout.lengths_and_batches(),
@@ -1950,17 +1971,21 @@ std::vector<size_t>
                                     0 /* : offsetOut */,
                                     ibrick.layout.contiguous_strides_and_distances(),
                                     std::move(local_pack_description)),
-                    antecedents);
-                AddAntecedent(gatherIdx, packIdx);
-
-                gather_node_raw_ptr->AddOperation(
-                    local_comm_rank,
-                    {ibrick.location,
-                     BufferPtr::temp(local_packed_chunk.back().data()),
-                     0 /* : srcOffset */,
-                     packed_offset,
-                     ibrick.layout.logical_count()});
+                    antecedents));
+                gather_ops.emplace_back(ibrick.location,
+                                        BufferPtr::temp(local_packed_chunk.back().data()),
+                                        0 /* : srcOffset */,
+                                        packed_offset,
+                                        ibrick.layout.logical_count());
             }
+            packed_offset += ibrick.layout.logical_count();
+        }
+
+        auto gather_idxs = add_gather_items(BufferPtr::temp(packing_temp_buffer.data()), pack_idxs);
+
+        for(size_t b_idx = 0; b_idx < input_bricks.size(); ++b_idx)
+        {
+            const auto& ibrick = input_bricks[b_idx];
             std::string description
                 = "unpack brick " + std::to_string(b_idx)
                   + "'s contiguous data chunk into single-device plan's input buffer";
@@ -1971,14 +1996,13 @@ std::vector<size_t>
                                                  precision,
                                                  desc.inArrayType,
                                                  BufferPtr::temp(packing_temp_buffer.data()),
-                                                 packed_offset,
+                                                 brick_packed_offset[b_idx],
                                                  ibrick.layout.contiguous_strides_and_distances(),
                                                  exec_plan_metadata.input_buffer,
                                                  ibrick.layout.offset_in(single_dev_input_layout),
                                                  single_dev_input_layout.strides_and_distances(),
                                                  std::move(description)),
-                                 {gatherIdx}));
-            packed_offset += ibrick.layout.logical_count();
+                                 gather_idxs));
         }
     }
     return gather_plan_items;
@@ -2008,8 +2032,36 @@ std::vector<size_t>
     // data layout of the results to be scattered
     const auto single_dev_output_layout = exec_plan_metadata.layout_for(io_data_label::OUTPUT);
 
-    // Create node that captures data-scattering steps
-    std::unique_ptr<CommScatter> scatter_node;
+    std::vector<CommScatter::ScatterOp> scatter_ops;
+    std::string                         scatter_description;
+
+    auto add_scatter_items = [&](BufferPtr src_ptr, const std::vector<size_t>& pack_idxs) {
+        std::vector<size_t> scatter_idxs;
+#ifdef ROCFFT_RCCL_ENABLE
+        scatter_idxs = BuildRCCLScatter(exec_plan_location,
+                                        src_ptr,
+                                        desc.outArrayType,
+                                        scatter_ops,
+                                        antecedents,
+                                        scatter_description);
+        if(scatter_idxs.empty())
+#endif
+        {
+            auto scatter_node = std::make_unique<CommScatter>(
+                precision, desc.outArrayType, exec_plan_location, src_ptr);
+            scatter_node->description = scatter_description;
+            for(auto& op : scatter_ops)
+                scatter_node->AddOperation(local_comm_rank, std::move(op));
+            scatter_idxs.push_back(AddMultiPlanItem(std::move(scatter_node), antecedents));
+        }
+        for(auto packIdx : pack_idxs)
+        {
+            for(auto scatterIdx : scatter_idxs)
+                AddAntecedent(scatterIdx, packIdx);
+        }
+        return scatter_idxs;
+    };
+
     if(std::all_of(output_bricks.begin(), output_bricks.end(), [&](const rocfft_brick_t& obrick) {
            return obrick.layout.is_continuous_in(single_dev_output_layout)
                   && obrick.layout.is_contiguous();
@@ -2017,21 +2069,20 @@ std::vector<size_t>
     {
         // All outputs are continuous chunks of the execution plan's output buffer and the
         // chunks may be transferred directly
-        scatter_node = std::make_unique<CommScatter>(
-            precision, desc.outArrayType, exec_plan_location, exec_plan_metadata.output_buffer);
-        scatter_node->description = "Scatter single-device plan's output buffer directly to "
-                                    + std::to_string(output_bricks.size()) + " bricks";
+        scatter_description = "Scatter single-device plan's output buffer directly to "
+                              + std::to_string(output_bricks.size()) + " bricks";
         for(size_t b_idx = 0; b_idx < output_bricks.size(); ++b_idx)
         {
             const auto& obrick = output_bricks[b_idx];
-            scatter_node->AddOperation(local_comm_rank,
-                                       {obrick.location,
-                                        output_buffers[b_idx],
-                                        obrick.layout.offset_in(single_dev_output_layout),
-                                        0 /* : destOffset*/,
-                                        obrick.layout.buffer_element_count()});
+            scatter_ops.emplace_back(obrick.location,
+                                     output_buffers[b_idx],
+                                     obrick.layout.offset_in(single_dev_output_layout),
+                                     0 /* : destOffset*/,
+                                     obrick.layout.buffer_element_count());
         }
-        scatter_plan_items.push_back(AddMultiPlanItem(std::move(scatter_node), antecedents));
+        auto scatter_idxs = add_scatter_items(exec_plan_metadata.output_buffer, {});
+        scatter_plan_items.insert(
+            scatter_plan_items.end(), scatter_idxs.begin(), scatter_idxs.end());
     }
     else
     {
@@ -2045,91 +2096,86 @@ std::vector<size_t>
                                             local_comm_rank,
                                             exec_plan_location,
                                             packed_layout.logical_count() * output_elem_size);
-        scatter_node              = std::make_unique<CommScatter>(precision,
-                                                     desc.outArrayType,
-                                                     exec_plan_location,
-                                                     BufferPtr::temp(packing_temp_buffer.data()));
-        scatter_node->description = "Scatter contiguously-packed output data chunks for "
-                                    + std::to_string(output_bricks.size()) + " bricks";
-        // save the raw pointer as scatter_node will be moved below
-        auto scatter_node_raw_ptr = scatter_node.get();
-        // Add scatter_node to the plan, operations are added to it below
-        const auto scatter_idx = AddMultiPlanItem(std::move(scatter_node), antecedents);
-        // Devices may need to unpack their data (locally) after having received it from
-        // packing_temp_buffer
+        scatter_description = "Scatter contiguously-packed output data chunks for "
+                              + std::to_string(output_bricks.size()) + " bricks";
         std::vector<TempBufferLease> local_packed_chunk;
+        std::vector<size_t>          pack_idxs;
+        std::vector<size_t>          brick_packed_offset(output_bricks.size(), 0);
+        std::vector<bool>            brick_needs_unpack(output_bricks.size(), false);
         size_t                       packed_offset = 0;
         for(size_t b_idx = 0; b_idx < output_bricks.size(); b_idx++)
         {
-            const auto& obrick = output_bricks[b_idx];
+            const auto& obrick         = output_bricks[b_idx];
+            brick_packed_offset[b_idx] = packed_offset;
             std::string description
                 = "pack brick " + std::to_string(b_idx) + "'s output data on device "
                   + std::to_string(obrick.location.device) + " (rank "
                   + std::to_string(obrick.location.comm_rank) + ") before scatter";
 
-            const auto packIdx = AddMultiPlanItem(
-                transpose_brick(local_comm_rank,
-                                exec_plan_location,
-                                obrick.layout.lengths_and_batches(),
-                                precision,
-                                desc.outArrayType,
-                                exec_plan_metadata.output_buffer,
-                                obrick.layout.offset_in(single_dev_output_layout),
-                                single_dev_output_layout.strides_and_distances(),
-                                BufferPtr::temp(packing_temp_buffer.data()),
-                                packed_offset,
-                                obrick.layout.contiguous_strides_and_distances(),
-                                std::move(description)),
-                antecedents);
-            AddAntecedent(scatter_idx, packIdx);
+            pack_idxs.push_back(
+                AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                 exec_plan_location,
+                                                 obrick.layout.lengths_and_batches(),
+                                                 precision,
+                                                 desc.outArrayType,
+                                                 exec_plan_metadata.output_buffer,
+                                                 obrick.layout.offset_in(single_dev_output_layout),
+                                                 single_dev_output_layout.strides_and_distances(),
+                                                 BufferPtr::temp(packing_temp_buffer.data()),
+                                                 packed_offset,
+                                                 obrick.layout.contiguous_strides_and_distances(),
+                                                 std::move(description)),
+                                 antecedents));
             if(obrick.layout.is_contiguous())
             {
-                // Bricks are packed to be contiguous - if output is the
-                // same shape, then there's no need for unpacking
-                scatter_node_raw_ptr->AddOperation(local_comm_rank,
-                                                   {obrick.location,
-                                                    output_buffers[b_idx],
-                                                    packed_offset,
-                                                    0 /* : destOffset */,
-                                                    obrick.layout.logical_count()});
+                scatter_ops.emplace_back(obrick.location,
+                                         output_buffers[b_idx],
+                                         packed_offset,
+                                         0 /* : destOffset */,
+                                         obrick.layout.logical_count());
             }
             else
             {
-                // allocate memory for packed data chunk local to destination device
                 local_packed_chunk.emplace_back(tempBuffers,
                                                 local_comm_rank,
                                                 obrick.location,
                                                 obrick.layout.logical_count() * output_elem_size);
-
-                // send the data
-                scatter_node_raw_ptr->AddOperation(
-                    local_comm_rank,
-                    {obrick.location,
-                     BufferPtr::temp(local_packed_chunk.back().data()),
-                     packed_offset,
-                     0 /* : destOffset */,
-                     obrick.layout.logical_count()});
-
-                // unpack data after sending
-                description = "unpack brick " + std::to_string(b_idx)
-                              + "'s contiguous data chunk into user's output buffer";
-
-                scatter_plan_items.push_back(AddMultiPlanItem(
-                    transpose_brick(local_comm_rank,
-                                    obrick.location,
-                                    obrick.layout.lengths_and_batches(),
-                                    precision,
-                                    desc.outArrayType,
-                                    BufferPtr::temp(local_packed_chunk.back().data()),
-                                    0 /* : offsetIn */,
-                                    obrick.layout.contiguous_strides_and_distances(),
-                                    output_buffers[b_idx],
-                                    0 /* : offsetOut */,
-                                    obrick.layout.strides_and_distances(),
-                                    std::move(description)),
-                    {scatter_idx}));
+                scatter_ops.emplace_back(obrick.location,
+                                         BufferPtr::temp(local_packed_chunk.back().data()),
+                                         packed_offset,
+                                         0 /* : destOffset */,
+                                         obrick.layout.logical_count());
+                brick_needs_unpack[b_idx] = true;
             }
             packed_offset += obrick.layout.logical_count();
+        }
+
+        auto scatter_idxs
+            = add_scatter_items(BufferPtr::temp(packing_temp_buffer.data()), pack_idxs);
+
+        size_t unpack_lease_idx = 0;
+        for(size_t b_idx = 0; b_idx < output_bricks.size(); b_idx++)
+        {
+            if(!brick_needs_unpack[b_idx])
+                continue;
+            const auto& obrick      = output_bricks[b_idx];
+            std::string description = "unpack brick " + std::to_string(b_idx)
+                                      + "'s contiguous data chunk into user's output buffer";
+            scatter_plan_items.push_back(AddMultiPlanItem(
+                transpose_brick(local_comm_rank,
+                                obrick.location,
+                                obrick.layout.lengths_and_batches(),
+                                precision,
+                                desc.outArrayType,
+                                BufferPtr::temp(local_packed_chunk[unpack_lease_idx].data()),
+                                0 /* : offsetIn */,
+                                obrick.layout.contiguous_strides_and_distances(),
+                                output_buffers[b_idx],
+                                0 /* : offsetOut */,
+                                obrick.layout.strides_and_distances(),
+                                std::move(description)),
+                scatter_idxs));
+            ++unpack_lease_idx;
         }
     }
     return scatter_plan_items;
@@ -2735,22 +2781,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
     //    intersection patterns.
     // ROCFFT_RCCL_BACKEND=grouped overrides the selection and forces
     // the grouped path even when alltoall is eligible.
-    enum class RcclBackend
-    {
-        AllToAll,
-        Grouped,
-    };
-    static const RcclBackend backend_choice = []() {
-        auto v = rocfft_getenv("ROCFFT_RCCL_BACKEND");
-        std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        if(v == "grouped" || v == "send_recv")
-            return RcclBackend::Grouped;
-        return RcclBackend::AllToAll;
-    }();
-
-    const bool use_alltoall = alltoall_eligible && backend_choice == RcclBackend::AllToAll;
+    const bool use_alltoall = alltoall_eligible && !rocfft_rccl_force_grouped_backend();
 
     if(LOG_PLAN_ENABLED())
     {
@@ -2761,7 +2792,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                      + ")\n");
         else
         {
-            const char* reason = (backend_choice == RcclBackend::Grouped)
+            const char* reason = rocfft_rccl_force_grouped_backend()
                                      ? (alltoall_eligible ? ", forced via ROCFFT_RCCL_BACKEND" : "")
                                      : ", pattern not alltoall-eligible";
             log_plan(std::string("RCCL backend: using grouped ncclSend/ncclRecv (")
@@ -3840,6 +3871,359 @@ rocfft_plan_t::field_view_t rocfft_plan_t::field_view_t::get_embedding_view() co
 
     return field_view_t(embedding_field, buffers, embedding_array_type, precision, group_name);
 }
+
+#ifdef ROCFFT_RCCL_ENABLE
+std::vector<size_t> rocfft_plan_t::BuildRCCLGather(const rocfft_location_t& destLocation,
+                                                   BufferPtr                destPtr,
+                                                   rocfft_array_type        arrayType,
+                                                   const std::vector<CommGather::GatherOp>& ops,
+                                                   const std::vector<size_t>& antecedents,
+                                                   const std::string&         description)
+{
+    std::vector<size_t> item_indices;
+    if(!rccl || ops.empty())
+        return {};
+
+    std::unique_ptr<CommRCCLGather>  uniform_node;
+    std::unique_ptr<CommRCCLGrouped> grouped_node;
+    std::unique_ptr<CommGather>      local_node;
+    std::vector<TempBufferLease>     leases;
+
+    try
+    {
+        const auto   devices    = rccl.get_devices();
+        const size_t nranks     = devices.size();
+        const int    local_rank = desc.get_local_comm_rank();
+        const auto   elem_size  = element_size(precision, arrayType);
+
+        // dest must be in the communicator; throws if not
+        (void)rccl.get_rank(destLocation.device);
+
+        std::vector<size_t>              rank_count(nranks, 0);
+        std::vector<std::vector<size_t>> rank_ops(nranks);
+        bool                             has_remote = false;
+        for(size_t i = 0; i < ops.size(); ++i)
+        {
+            const auto& op = ops[i];
+            const int   r  = rccl.get_rank(op.srcLocation.device);
+            rank_count[static_cast<size_t>(r)] += op.numElems;
+            rank_ops[static_cast<size_t>(r)].push_back(i);
+            if(!(op.srcLocation == destLocation))
+                has_remote = true;
+        }
+        if(!has_remote)
+            return {};
+
+        size_t uniform_count = 0;
+        bool   is_uniform    = true;
+        for(size_t c : rank_count)
+        {
+            if(c == 0)
+                continue;
+            if(uniform_count == 0)
+                uniform_count = c;
+            else if(c != uniform_count)
+                is_uniform = false;
+        }
+        if(uniform_count == 0)
+            return {};
+
+        if(is_uniform && !rocfft_rccl_force_grouped_backend())
+        {
+            if(LOG_PLAN_ENABLED())
+                log_plan("RCCL gather: using ncclGather (count_per_rank="
+                         + std::to_string(uniform_count) + ", nranks=" + std::to_string(nranks)
+                         + ")\n");
+
+            std::vector<CommRCCLGather::agent_t> agents(nranks);
+            std::vector<CommRCCLGather::Op>      rccl_ops;
+            rccl_ops.reserve(ops.size());
+            std::vector<size_t> rank_filled(nranks, 0);
+            for(const auto& op : ops)
+            {
+                const int          r = rccl.get_rank(op.srcLocation.device);
+                CommRCCLGather::Op cop;
+                cop.srcLocation = op.srcLocation;
+                cop.srcPtr      = op.srcPtr;
+                cop.srcOffset   = op.srcOffset;
+                cop.destOffset  = op.destOffset;
+                cop.numElems    = op.numElems;
+                cop.nccl_rank   = r;
+                cop.slot_offset = rank_filled[static_cast<size_t>(r)];
+                rank_filled[static_cast<size_t>(r)] += op.numElems;
+                rccl_ops.push_back(std::move(cop));
+            }
+
+            for(size_t r = 0; r < nranks; ++r)
+            {
+                const rocfft_location_t loc{local_rank, devices[r]};
+                if(rank_ops[r].size() == 1 && rank_count[r] == uniform_count)
+                {
+                    const auto& op       = ops[rank_ops[r][0]];
+                    agents[r].sendBuffer = op.srcPtr;
+                    agents[r].sendOffset = op.srcOffset;
+                    agents[r].is_direct  = true;
+                }
+                else
+                {
+                    leases.emplace_back(tempBuffers, local_rank, loc, uniform_count * elem_size);
+                    agents[r].sendBuffer = BufferPtr::temp(leases.back().data());
+                    agents[r].sendOffset = 0;
+                    agents[r].is_direct  = false;
+                }
+            }
+
+            leases.emplace_back(
+                tempBuffers, local_rank, destLocation, nranks * uniform_count * elem_size);
+            auto recvBuffer = BufferPtr::temp(leases.back().data());
+
+            uniform_node              = std::make_unique<CommRCCLGather>(rccl,
+                                                            precision,
+                                                            arrayType,
+                                                            destLocation,
+                                                            destPtr,
+                                                            uniform_count,
+                                                            std::move(agents),
+                                                            recvBuffer,
+                                                            std::move(rccl_ops));
+            uniform_node->description = description;
+        }
+        else
+        {
+            if(LOG_PLAN_ENABLED())
+                log_plan("RCCL gather: using grouped ncclSend/ncclRecv ("
+                         + std::to_string(ops.size()) + " ops"
+                         + (rocfft_rccl_force_grouped_backend() ? ", forced via ROCFFT_RCCL_BACKEND"
+                                                                : ", mixed counts")
+                         + ")\n");
+
+            grouped_node = std::make_unique<CommRCCLGrouped>(rccl, precision, arrayType);
+            grouped_node->description = description;
+            for(const auto& op : ops)
+            {
+                if(op.srcLocation == destLocation)
+                {
+                    if(!local_node)
+                        local_node = std::make_unique<CommGather>(
+                            local_rank, precision, arrayType, destLocation, destPtr);
+                    local_node->AddOperation(
+                        local_rank,
+                        CommGather::GatherOp(
+                            op.srcLocation, op.srcPtr, op.srcOffset, op.destOffset, op.numElems));
+                }
+                else
+                {
+                    grouped_node->AddTransfer<rccl_op::send>(destLocation,
+                                                             op.srcLocation,
+                                                             op.srcPtr,
+                                                             op.srcOffset,
+                                                             op.numElems,
+                                                             local_rank);
+                    grouped_node->AddTransfer<rccl_op::recv>(op.srcLocation,
+                                                             destLocation,
+                                                             destPtr,
+                                                             op.destOffset,
+                                                             op.numElems,
+                                                             local_rank);
+                }
+            }
+            if(!grouped_node->HasTransfers())
+                grouped_node.reset();
+        }
+    }
+    catch(const std::exception& e)
+    {
+        if(LOG_PLAN_ENABLED())
+            *LogSingleton::GetInstance().GetPlanOS()
+                << "RCCL gather could not be used, falling back to CommGather: " << e.what()
+                << std::endl;
+        return {};
+    }
+
+    if(uniform_node)
+        item_indices.push_back(AddMultiPlanItem(std::move(uniform_node), antecedents));
+    if(grouped_node)
+        item_indices.push_back(AddMultiPlanItem(std::move(grouped_node), antecedents));
+    if(local_node)
+        item_indices.push_back(AddMultiPlanItem(std::move(local_node), antecedents));
+    return item_indices;
+}
+
+std::vector<size_t> rocfft_plan_t::BuildRCCLScatter(const rocfft_location_t& srcLocation,
+                                                    BufferPtr                srcPtr,
+                                                    rocfft_array_type        arrayType,
+                                                    const std::vector<CommScatter::ScatterOp>& ops,
+                                                    const std::vector<size_t>& antecedents,
+                                                    const std::string&         description)
+{
+    std::vector<size_t> item_indices;
+    if(!rccl || ops.empty())
+        return {};
+
+    std::unique_ptr<CommRCCLScatter> uniform_node;
+    std::unique_ptr<CommRCCLGrouped> grouped_node;
+    std::unique_ptr<CommScatter>     local_node;
+    std::vector<TempBufferLease>     leases;
+
+    try
+    {
+        const auto   devices    = rccl.get_devices();
+        const size_t nranks     = devices.size();
+        const int    local_rank = desc.get_local_comm_rank();
+        const auto   elem_size  = element_size(precision, arrayType);
+
+        (void)rccl.get_rank(srcLocation.device);
+
+        std::vector<size_t>              rank_count(nranks, 0);
+        std::vector<std::vector<size_t>> rank_ops(nranks);
+        bool                             has_remote = false;
+        for(size_t i = 0; i < ops.size(); ++i)
+        {
+            const auto& op = ops[i];
+            const int   r  = rccl.get_rank(op.destLocation.device);
+            rank_count[static_cast<size_t>(r)] += op.numElems;
+            rank_ops[static_cast<size_t>(r)].push_back(i);
+            if(!(op.destLocation == srcLocation))
+                has_remote = true;
+        }
+        if(!has_remote)
+            return {};
+
+        size_t uniform_count = 0;
+        bool   is_uniform    = true;
+        for(size_t c : rank_count)
+        {
+            if(c == 0)
+                continue;
+            if(uniform_count == 0)
+                uniform_count = c;
+            else if(c != uniform_count)
+                is_uniform = false;
+        }
+        if(uniform_count == 0)
+            return {};
+
+        if(is_uniform && !rocfft_rccl_force_grouped_backend())
+        {
+            if(LOG_PLAN_ENABLED())
+                log_plan("RCCL scatter: using ncclScatter (count_per_rank="
+                         + std::to_string(uniform_count) + ", nranks=" + std::to_string(nranks)
+                         + ")\n");
+
+            std::vector<CommRCCLScatter::agent_t> agents(nranks);
+            std::vector<CommRCCLScatter::Op>      rccl_ops;
+            rccl_ops.reserve(ops.size());
+            std::vector<size_t> rank_filled(nranks, 0);
+            for(const auto& op : ops)
+            {
+                const int           r = rccl.get_rank(op.destLocation.device);
+                CommRCCLScatter::Op cop;
+                cop.destLocation = op.destLocation;
+                cop.destPtr      = op.destPtr;
+                cop.srcOffset    = op.srcOffset;
+                cop.destOffset   = op.destOffset;
+                cop.numElems     = op.numElems;
+                cop.nccl_rank    = r;
+                cop.slot_offset  = rank_filled[static_cast<size_t>(r)];
+                rank_filled[static_cast<size_t>(r)] += op.numElems;
+                rccl_ops.push_back(std::move(cop));
+            }
+
+            for(size_t r = 0; r < nranks; ++r)
+            {
+                const rocfft_location_t loc{local_rank, devices[r]};
+                if(rank_ops[r].size() == 1 && rank_count[r] == uniform_count)
+                {
+                    const auto& op       = ops[rank_ops[r][0]];
+                    agents[r].recvBuffer = op.destPtr;
+                    agents[r].recvOffset = op.destOffset;
+                    agents[r].is_direct  = true;
+                }
+                else
+                {
+                    leases.emplace_back(tempBuffers, local_rank, loc, uniform_count * elem_size);
+                    agents[r].recvBuffer = BufferPtr::temp(leases.back().data());
+                    agents[r].recvOffset = 0;
+                    agents[r].is_direct  = false;
+                }
+            }
+
+            leases.emplace_back(
+                tempBuffers, local_rank, srcLocation, nranks * uniform_count * elem_size);
+            auto sendBuf = BufferPtr::temp(leases.back().data());
+
+            uniform_node              = std::make_unique<CommRCCLScatter>(rccl,
+                                                             precision,
+                                                             arrayType,
+                                                             srcLocation,
+                                                             srcPtr,
+                                                             uniform_count,
+                                                             std::move(agents),
+                                                             sendBuf,
+                                                             std::move(rccl_ops));
+            uniform_node->description = description;
+        }
+        else
+        {
+            if(LOG_PLAN_ENABLED())
+                log_plan("RCCL scatter: using grouped ncclSend/ncclRecv ("
+                         + std::to_string(ops.size()) + " ops"
+                         + (rocfft_rccl_force_grouped_backend() ? ", forced via ROCFFT_RCCL_BACKEND"
+                                                                : ", mixed counts")
+                         + ")\n");
+
+            grouped_node = std::make_unique<CommRCCLGrouped>(rccl, precision, arrayType);
+            grouped_node->description = description;
+            for(const auto& op : ops)
+            {
+                if(op.destLocation == srcLocation)
+                {
+                    if(!local_node)
+                        local_node = std::make_unique<CommScatter>(
+                            precision, arrayType, srcLocation, srcPtr);
+                    local_node->AddOperation(
+                        local_rank,
+                        CommScatter::ScatterOp(
+                            op.destLocation, op.destPtr, op.srcOffset, op.destOffset, op.numElems));
+                }
+                else
+                {
+                    grouped_node->AddTransfer<rccl_op::send>(op.destLocation,
+                                                             srcLocation,
+                                                             srcPtr,
+                                                             op.srcOffset,
+                                                             op.numElems,
+                                                             local_rank);
+                    grouped_node->AddTransfer<rccl_op::recv>(srcLocation,
+                                                             op.destLocation,
+                                                             op.destPtr,
+                                                             op.destOffset,
+                                                             op.numElems,
+                                                             local_rank);
+                }
+            }
+            if(!grouped_node->HasTransfers())
+                grouped_node.reset();
+        }
+    }
+    catch(const std::exception& e)
+    {
+        if(LOG_PLAN_ENABLED())
+            *LogSingleton::GetInstance().GetPlanOS()
+                << "RCCL scatter could not be used, falling back to CommScatter: " << e.what()
+                << std::endl;
+        return {};
+    }
+
+    if(uniform_node)
+        item_indices.push_back(AddMultiPlanItem(std::move(uniform_node), antecedents));
+    if(grouped_node)
+        item_indices.push_back(AddMultiPlanItem(std::move(grouped_node), antecedents));
+    if(local_node)
+        item_indices.push_back(AddMultiPlanItem(std::move(local_node), antecedents));
+    return item_indices;
+}
+#endif // ROCFFT_RCCL_ENABLE
 
 #ifdef ROCFFT_RCCL_ENABLE
 void rocfft_plan_t::InitRCCLCommunicator() noexcept
