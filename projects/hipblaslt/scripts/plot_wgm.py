@@ -230,15 +230,17 @@ def to_plot(lattice, xcc_grid, order, wgm_value, out_path, meta=None):
         for (i, j), x in np.ndenumerate(xcc_grid):
             rows_by_xcd[int(x)].append(j)   # wg_m -> M-tile (row)
             cols_by_xcd[int(x)].append(i)   # wg_n -> N-tile (col)
-        stat_lines = ["Per-XCD operand-load reuse (Rows=M-tiles, Cols=N-tiles):",
-                      "XCD  tiles  uRows  uCols  RowShare%  ColShare%"]
+        stat_lines = ["Per-XCD operand-load reuse (Rows=M-tiles, Cols=N-tiles). "
+                      "TotShare% = 100 - (uRows+uCols)/(2*tiles):",
+                      "XCD  tiles  uRows  uCols  RowShare%  ColShare%  TotShare%"]
         for x in sorted(rows_by_xcd):
             tot = len(rows_by_xcd[x])
             ur = len(set(rows_by_xcd[x]))
             uc = len(set(cols_by_xcd[x]))
             rs = (tot - ur) * 100.0 / tot if tot else 0.0
             cs = (tot - uc) * 100.0 / tot if tot else 0.0
-            stat_lines.append(f"{x:3d}  {tot:5d}  {ur:5d}  {uc:5d}  {rs:8.1f}  {cs:8.1f}")
+            ts = (2 * tot - ur - uc) * 100.0 / (2 * tot) if tot else 0.0
+            stat_lines.append(f"{x:3d}  {tot:5d}  {ur:5d}  {uc:5d}  {rs:8.1f}  {cs:8.1f}  {ts:8.1f}")
         stats_table = "\n".join(stat_lines)
 
     # --- Full names at the top of the chart (solution + kernel) ---
