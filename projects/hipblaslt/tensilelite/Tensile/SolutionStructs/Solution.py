@@ -3855,6 +3855,25 @@ class Solution(collections.abc.Mapping):
         state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
+      # At one wave, a scale fetch that spans more than one K group
+      # (DepthU > MatrixInstK) computes wrong results, even with every scale at
+      # 1.0. A wave-separated kernel with the same scale tile validates, and the
+      # cause is not known yet. Checked here rather than in
+      # assignDerivedParameters so that DepthU is the resolved candidate and the
+      # TDMFuse/PAP arms keep their own diagnostics.
+      if (state["TDMInst"] and state["EnableMatrixInstruction"]
+          and state["NumWaves"] == 1 and not state.get("UseSubtileImpl")
+          and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+          and depthU > state["MatrixInstK"]):
+        # NoReject leaves Valid set. Returning anyway would stop the DepthU
+        # search on a solution that never reached GRVW, LDS, or LoopIters.
+        if reject(state, printRejectionReason,
+                  "single-wave MX scale TDM requires DepthU <= MatrixInstK (got %d > %d)"
+                  % (depthU, state["MatrixInstK"])):
+          # Let the auto-search fall through to a DepthU that fits.
+          state["ValidDepthU"] = False
+          return
+
       # Runs here (not earlier) because it needs MacroTileA/B and _DepthUA/B,
       # which TileInfo reads and which are only set by this point.
       if not validateSubtileGRKPartition(state, printRejectionReason):
