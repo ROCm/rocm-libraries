@@ -16,11 +16,12 @@ freshly-regenerated goldens.
 This script is the backstop that CANNOT be bypassed with ``git commit
 --no-verify``, because it runs in CI against the PR's actual diff. It compares
 the `.ambr` files changed between a PR's merge-base and its head; if more than
-``DEFAULT_THRESHOLD`` (3) changed, it fails unless the same diff also adds or updates an
-Architecture Decision Record (ADR, under ``characterization/adr/``) carrying an
-explicit ``Bulk-Snapshot-Update: yes`` line -- a conscious, reviewed opt-in for a
-genuine mass update (e.g. a change to the snapshot format itself), documented the
-same way as any other characterization decision (see ``adr/README.md``).
+``DEFAULT_THRESHOLD`` (3) changed, it fails unless the same diff also adds or updates a
+numbered Architecture Decision Record (``characterization/adr/NNNN-*.md``) whose
+header metadata block carries an explicit ``Bulk-Snapshot-Update: yes`` line -- a
+conscious, reviewed opt-in for a genuine mass update (e.g. a change to the snapshot
+format itself), documented the same way as any other characterization decision
+(see ``adr/README.md``).
 
 Usage (from the rocm-libraries repo root; pass ``--characterization-dir`` so
 pathspecs match the monorepo layout, not the flat TensileLite test fixtures)::
@@ -38,6 +39,7 @@ blanket regeneration was detected with no override, ``2`` a setup/usage problem
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
 import subprocess
 import sys
@@ -52,11 +54,17 @@ DEFAULT_THRESHOLD = 3
 DEFAULT_CHARACTERIZATION_DIR = "Tensile/Tests/unit/characterization"
 
 # Matches the ADR template field documented in adr/README.md. Deliberately strict
-# (exact "yes", own line) so a stray mention of "bulk" in an ADR's prose can never
+# (exact "yes", own line, column 0 like the other metadata fields) so a stray
+# mention of "bulk" in an ADR's prose, or an indented code example, can never
 # accidentally grant an override.
-OVERRIDE_MARKER_RE = re.compile(
-    r"^[ \t]*Bulk-Snapshot-Update:[ \t]*yes[ \t]*$", re.IGNORECASE | re.MULTILINE
-)
+OVERRIDE_MARKER_RE = re.compile(r"^Bulk-Snapshot-Update:[ \t]*yes[ \t]*$", re.IGNORECASE)
+
+# Numbered decision records only; adr/README.md documents the field (with
+# examples) and must never grant it.
+ADR_FILENAME_RE = re.compile(r"^\d{4}-.+\.md$")
+
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_SECTION_HEADING_RE = re.compile(r"^ {0,3}#{2,6}(\s|$)")
 
 # Printed verbatim so a failing CI log tells the developer exactly how to move
 # forward (never "just re-run with --snapshot-update and force it through").
@@ -67,9 +75,9 @@ REMEDIATION = (
     "      changes (see 'The cardinal rule: never blanket-regenerate.' in the\n"
     "      characterization README's snapshot discipline section), or\n"
     "  (b) if this bulk update is genuinely reviewed and intentional (e.g. a\n"
-    "      change to the snapshot format itself), add or update an ADR under\n"
-    "      characterization/adr/ (see adr/README.md for the template) with the\n"
-    "      line:\n"
+    "      change to the snapshot format itself), add or update a numbered ADR\n"
+    "      (characterization/adr/NNNN-*.md; see adr/README.md for the template)\n"
+    "      with this line in its header, next to Status:\n"
     "          Bulk-Snapshot-Update: yes\n"
     "      explaining why the bulk regeneration is correct, then push again."
 )
@@ -109,49 +117,72 @@ def merge_base(base: str, head: str, repo_root: Path) -> str:
     return _run_git(["merge-base", base, head], repo_root).strip()
 
 
-def _changed_files(
-    ref_range: tuple[str, str], diff_filter: str, pathspec: str, repo_root: Path
-) -> list[str]:
+def _changed_files(ref_range: tuple[str, str], pathspec: str, repo_root: Path) -> list[str]:
+    """Paths (as of head) that exist at head and differ from their merge-base content.
+
+    Uses ``--raw -z`` so paths arrive verbatim (git's default output C-quotes
+    non-ASCII names, e.g. ``"caf\\303\\251.ambr"``) and each entry carries its
+    source and destination blob IDs. Deletions are dropped, and a rename is
+    dropped only when its blob is byte-identical: git's rename similarity score
+    can report ``R100`` for reordered content, so the status alone is not proof.
+    """
     base_ref, head_ref = ref_range
     out = _run_git(
-        [
-            "diff",
-            "--name-only",
-            f"--diff-filter={diff_filter}",
-            base_ref,
-            head_ref,
-            "--",
-            pathspec,
-        ],
+        ["diff", "--raw", "-z", "--no-abbrev", "-M", base_ref, head_ref, "--", pathspec],
         repo_root,
     )
-    return [line for line in out.splitlines() if line]
+    fields = out.split("\0")
+    paths = []
+    i = 0
+    while i < len(fields) and fields[i]:
+        # ":<src_mode> <dst_mode> <src_oid> <dst_oid> <status>", then one path
+        # (two for renames/copies: source, destination).
+        _, _, src_oid, dst_oid, status = fields[i].split()
+        kind = status[0]
+        if kind in "RC":
+            path = fields[i + 2]
+            i += 3
+        else:
+            path = fields[i + 1]
+            i += 2
+        if kind == "D" or (kind == "R" and src_oid == dst_oid):
+            continue
+        paths.append(path)
+    return paths
 
 
 def changed_ambr_files(
     merge_base_ref: str, head: str, repo_root: Path, characterization_dir: str
 ) -> list[str]:
-    """`.ambr` goldens added/copied/modified between merge-base and head.
+    """`.ambr` goldens whose content changed between merge-base and head.
 
-    Deliberately excludes renames: a pure rename (e.g. a test function renamed,
-    carrying its golden along byte-for-byte) changes no pinned content, so it
-    must not count toward the blanket-regeneration threshold.
+    Counts added, modified, and renamed-with-edits goldens. Excludes only
+    deletions and byte-identical renames (e.g. a test function renamed, carrying
+    its golden along untouched), which change no pinned content.
     """
-    names = _changed_files((merge_base_ref, head), "ACM", characterization_dir, repo_root)
+    names = _changed_files((merge_base_ref, head), characterization_dir, repo_root)
     return sorted(p for p in names if p.endswith(".ambr"))
 
 
 def changed_adr_files(
     merge_base_ref: str, head: str, repo_root: Path, characterization_dir: str
 ) -> list[str]:
-    """ADR markdown files added/modified between merge-base and head.
+    """Numbered ADRs (``adr/NNNN-*.md``) whose content changed between merge-base and head.
 
-    Deliberately excludes deletions/renames: the override must be a real, present
-    ADR file at ``head``, not a file that merely existed somewhere in the range.
+    Excludes deletions (the override must be a real, present ADR at ``head``),
+    byte-identical renames, and unnumbered files such as ``adr/README.md``,
+    which documents the override field and must never grant it.
     """
     adr_dir = f"{characterization_dir.rstrip('/')}/adr"
-    names = _changed_files((merge_base_ref, head), "ACM", adr_dir, repo_root)
-    return sorted(p for p in names if p.endswith(".md"))
+    names = _changed_files((merge_base_ref, head), adr_dir, repo_root)
+    # git reports paths relative to the repo top level, not to repo_root, so match
+    # on the file's own directory name rather than on the full adr_dir prefix.
+    return sorted(
+        p
+        for p in names
+        if posixpath.basename(posixpath.dirname(p)) == "adr"
+        and ADR_FILENAME_RE.match(posixpath.basename(p))
+    )
 
 
 def file_at_ref(ref: str, path: str, repo_root: Path) -> str:
@@ -165,10 +196,38 @@ def file_at_ref(ref: str, path: str, repo_root: Path) -> str:
     return _run_git(["show", f"{ref}:{path}"], repo_root)
 
 
+def has_override_marker(text: str) -> bool:
+    """True if the ADR's header metadata block carries ``Bulk-Snapshot-Update: yes``.
+
+    Only the lines before the first ``##`` section (where the template puts
+    ``Status:``/``Defect:``/``Commit:``) count, and fenced code blocks are skipped,
+    so an ADR that merely quotes the field as an example never grants the override.
+    """
+    open_fence = ""
+    for line in text.splitlines():
+        fence = _FENCE_RE.match(line)
+        if open_fence:
+            if (
+                fence
+                and fence.group(1)[0] == open_fence[0]
+                and len(fence.group(1)) >= len(open_fence)
+            ):
+                open_fence = ""
+            continue
+        if fence:
+            open_fence = fence.group(1)
+            continue
+        if _SECTION_HEADING_RE.match(line):
+            return False
+        if OVERRIDE_MARKER_RE.match(line):
+            return True
+    return False
+
+
 def find_override(adr_paths: list[str], head: str, repo_root: Path) -> str | None:
     """First ADR path (of ``adr_paths``, as of ``head``) granting the override, if any."""
     for path in adr_paths:
-        if OVERRIDE_MARKER_RE.search(file_at_ref(head, path, repo_root)):
+        if has_override_marker(file_at_ref(head, path, repo_root)):
             return path
     return None
 
@@ -184,6 +243,8 @@ def _format_offenders(paths: list[str]) -> list[str]:
 
 def cmd_check(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root)
+    if not repo_root.is_dir():
+        raise SnapshotDiffError(f"--repo-root {str(repo_root)!r} is not a directory")
     mb = merge_base(args.base, args.head, repo_root)
 
     changed_ambr = changed_ambr_files(mb, args.head, repo_root, args.characterization_dir)

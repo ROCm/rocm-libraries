@@ -269,7 +269,7 @@ An opt-in local **pre-commit hook** runs the unit + characterization tests affec
 
 A real mass update (e.g. an intended change to the snapshot format itself) is allowed, but it must be a **conscious, reviewed act**: do it in its own PR that touches nothing else, and explain why in the description.
 
-CI enforces this mechanically (`characterization/tools/check_snapshot_diff.py`, AIHPBLAS-3876): a PR that changes more than 3 `.ambr` files (the guard's default `--threshold`) fails unless the same PR also adds or updates an ADR under `adr/` (see [`adr/README.md`](adr/README.md)) carrying a `Bulk-Snapshot-Update: yes` line. This is an unbypassable backstop — it runs in CI against the PR's actual diff, so it cannot be skipped with `git commit --no-verify` the way the local pre-commit hook can.
+CI enforces this mechanically (`characterization/tools/check_snapshot_diff.py`, AIHPBLAS-3876): a PR that changes more than 3 `.ambr` files (the guard's default `--threshold`) fails unless the same PR also adds or updates a numbered ADR under `adr/` (see [`adr/README.md`](adr/README.md)) carrying a `Bulk-Snapshot-Update: yes` line in its header metadata block. Renamed goldens count when their contents change; only byte-identical moves are exempt. This is an unbypassable backstop — it runs in CI against the PR's actual diff, so it cannot be skipped with `git commit --no-verify` the way the local pre-commit hook can.
 
 When the guard trips, CI fails at **Component CI → TensileLite coverage → "Guard against blanket .ambr snapshot regeneration"**. To reproduce locally from the `rocm-libraries` repo root (after fetching the PR's base):
 
