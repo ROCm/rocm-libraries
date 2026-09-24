@@ -127,14 +127,19 @@ def build_lattice(raw, m, n, ldd, bpe, mt0, mt1):
     for iy, ix in np.ndindex(lattice.shape):
         orig_wg, (new_wg1, new_wg0), _ = lattice[iy][ix]
         if 0 <= orig_wg < grid_size:
-            order[orig_wg] = (new_wg1, new_wg0)
+            # Store as (x=new_wg0, y=new_wg1) to match the cell-text placement
+            # ax.text(new_wg0, new_wg1, ...); otherwise arrows are transposed and
+            # only cover part of the grid.
+            order[orig_wg] = (new_wg0, new_wg1)
 
     return lattice, lattice_str, xcc_grid, wgm_value, order, (n_wg_m, n_wg_n)
 
 
-def to_plot(lattice, xcc_grid, order, wgm_value, out_path):
+def to_plot(lattice, xcc_grid, order, wgm_value, out_path, meta=None):
     from matplotlib import patches
     from matplotlib import pyplot as plt
+
+    meta = meta or {}
 
     def to_text(orig_wg, new_wg0, new_wg1, xcc):
         return f"{orig_wg}->({new_wg1},{new_wg0})\n(XCC:{xcc})"
@@ -167,10 +172,37 @@ def to_plot(lattice, xcc_grid, order, wgm_value, out_path):
         )
         ax.add_patch(p)
 
-    title = "WGM workgroup mapping"
+    # --- Title: WGM value + macro-tile / grid / StreamK / GSU / LSU ---
+    total_wgs = n_wg_m * n_wg_n
+    mt0 = meta.get("mt0")
+    mt1 = meta.get("mt1")
+    depthu = meta.get("depthu")
+    mt_str = None
+    if mt0 is not None and mt1 is not None:
+        mt_str = f"{mt0}x{mt1}" + (f"x{depthu}" if depthu is not None else "")
+
+    line1 = "WGM workgroup mapping"
     if wgm_value is not None:
-        title += f"  (WGM=0x{wgm_value:08X})"
-    ax.set_title(title)
+        wgm_dec = meta.get("wgm")
+        line1 += f"  (WGM=0x{wgm_value:08X}" + (f", WGM={wgm_dec}" if wgm_dec is not None else "") + ")"
+
+    parts = []
+    if mt_str is not None:
+        parts.append(f"MacroTile {mt_str}")
+    parts.append(f"Grid {n_wg_m}x{n_wg_n} ({total_wgs} WGs)")
+    for key, label in (("streamk", "StreamK"), ("gsu", "GSU"), ("lsu", "LSU"),
+                       ("wgm", "WGM"), ("wgmxcc", "WGMXCC")):
+        if meta.get(key) is not None:
+            parts.append(f"{label}={meta[key]}")
+    line2 = "  |  ".join(parts)
+
+    ax.set_title(line1 + "\n" + line2, fontsize=14)
+
+    # Full kernel/solution name as a small caption under the figure.
+    name = meta.get("name")
+    if name:
+        fig.text(0.5, 0.005, name, ha="center", va="bottom", fontsize=6,
+                 family="monospace", wrap=True)
 
     plt.savefig(out_path, bbox_inches="tight")
     print(f"wrote {out_path}")
@@ -184,6 +216,14 @@ def main():
     parser.add_argument("--mt1", type=int, default=16, help="MacroTile1 / N tile size (default 16)")
     parser.add_argument("-o", "--output", default=None,
                         help="output image path (default: <dump>_wgm.jpg)")
+    # Optional metadata annotated onto the plot (from the kernel name / solution).
+    parser.add_argument("--depthu", type=int, default=None, help="DepthU (unroll K) for MacroTile label")
+    parser.add_argument("--streamk", default=None, help="StreamK value")
+    parser.add_argument("--gsu", default=None, help="GlobalSplitU (GSU) value")
+    parser.add_argument("--lsu", default=None, help="LocalSplitU (LSU) value")
+    parser.add_argument("--wgm", default=None, help="WorkGroupMapping (WGM) value")
+    parser.add_argument("--wgmxcc", default=None, help="WorkGroupMappingXCC value")
+    parser.add_argument("--name", default=None, help="kernel/solution name to caption on the plot")
     args = parser.parse_args()
 
     raw, m, n, ldd, bpe = read_dump(args.dump)
@@ -196,8 +236,13 @@ def main():
     if wgm_value is not None:
         print(f"WGM value: 0x{wgm_value:08X}")
 
+    meta = {
+        "mt0": args.mt0, "mt1": args.mt1, "depthu": args.depthu,
+        "streamk": args.streamk, "gsu": args.gsu, "lsu": args.lsu,
+        "wgm": args.wgm, "wgmxcc": args.wgmxcc, "name": args.name,
+    }
     out_path = args.output or (args.dump + "_wgm.jpg")
-    to_plot(lattice, xcc_grid, order, wgm_value, out_path)
+    to_plot(lattice, xcc_grid, order, wgm_value, out_path, meta=meta)
 
 
 if __name__ == "__main__":
