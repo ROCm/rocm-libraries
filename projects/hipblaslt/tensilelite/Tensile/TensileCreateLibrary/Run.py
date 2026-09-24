@@ -39,9 +39,6 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
-from .ParseArguments import parseArguments
-
-
 from .. import LibraryIO
 from ..Common import (
     CHeader,
@@ -90,6 +87,7 @@ from ..Toolchain.Validators import (
 from ..Toolchain.Component import Assembler
 from ..Utilities.Decorators.Profile import profile
 from ..Utilities.Decorators.Timing import timing
+from .ParseArguments import parseArguments
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
@@ -348,7 +346,7 @@ def _applyCustomKernelDefToSol(sol, result):
     ckDef = getattr(result, 'customKernelDef', None)
     if ckDef is not None:
         sol.originalSolution._state["CustomKernel"] = ckDef
-        from Tensile.Contractions import CustomKernel as CK
+        from ..Contractions import CustomKernel as CK
         sol.customKernel = CK.FromOriginalState(ckDef)
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
