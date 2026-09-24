@@ -1010,6 +1010,12 @@ class ProblemType(Mapping):
       self["ActivationComputeDataType"] = self["ComputeDataType"]
 
     if self["ActivationType"] != 'none':
+      if self["OutputAmaxD"] and self["ActivationComputeDataType"] != self["ComputeDataType"]:
+        # Amax reduces activated accumulators before destination rounding.
+        # Select this precision before activation register allocation and calls.
+        printWarning("OutputAmaxD requires activation in ComputeDataType; "
+                     "ActivationComputeDataType will be set to ComputeDataType.")
+        self["ActivationComputeDataType"] = self["ComputeDataType"]
       # This is a dummy guard in case we currently don't have a converter to convert data from compute type to activation compute type
       if self["ActivationComputeDataType"] not in [self["ComputeDataType"], self["DestDataType"]]:
         printWarning("TensileLite currently only supports ActivationComputeDataType (%s) = ComputeDataType (%s) or DestDataType (%s). \
