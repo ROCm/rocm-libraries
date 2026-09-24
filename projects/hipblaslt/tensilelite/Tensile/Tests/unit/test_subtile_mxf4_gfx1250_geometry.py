@@ -184,7 +184,7 @@ def _make_smoke_params(gfx1250_iim, **overrides):
     )
 
     isa = gfxToIsa("gfx1250")
-    mi = [32, 16, 128, 1, 1, 2, 2, 2, 2]
+    mi = overrides.pop("MatrixInstruction", [32, 16, 128, 1, 1, 2, 2, 2, 2])
     problem_type = {
         "OperationType": "GEMM",
         "DataType": "F4",
@@ -252,6 +252,21 @@ def test_smoke_yaml_solution_is_valid(_gp_gfx1250, gfx1250_iim, assembler, capsy
     assert sol.get("MacroTile0") == 128
     assert sol.get("MacroTile1") == 64
     assert sol.get("MIOutputVectorWidth") == 16
+
+
+def test_bank_conflict_bench_yaml_solution_is_valid(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """256x256x256 MIWaveTile 4x8 bench knobs must derive Valid (even WT, LDS fit)."""
+    sol = Solution(
+        _make_smoke_params(gfx1250_iim, MatrixInstruction=[32, 16, 128, 1, 1, 4, 8, 2, 2]),
+        False, True, False, assembler, gfx1250_iim,
+    )
+    out = capsys.readouterr().out
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol.get("MacroTile0") == 256
+    assert sol.get("MacroTile1") == 256
+    assert sol.get("DepthU") == 256
+    assert sol.get("MIWaveTile") == [4, 8]
+    assert sol.get("MIWaveGroup") == [2, 2]
 
 
 def test_smoke_solution_emits_full_gfx1250_kernel(

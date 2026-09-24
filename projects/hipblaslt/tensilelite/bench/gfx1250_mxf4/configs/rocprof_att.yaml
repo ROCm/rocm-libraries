@@ -1,0 +1,17 @@
+# rocprofv3 Advanced Thread Trace (ATT) job.
+# gfx1250: --att-perfcounters is gfx9-only; instruction-level SQTT is still collected.
+jobs:
+  - advanced_thread_trace: true
+    kernel_include_regex: "Cijk"
+    kernel_exclude_regex: ""
+    truncate_kernels: true
+    att_consecutive_kernels: 1
+    att_target_cu: 0
+    att_shader_engine_mask: "0xF"
+    att_simd_select: "0xF"
+    att_buffer_size: "0x40000000"
+    att_gpu_index: "0"          # visible GPU 0 == physical GPU 2 (HIP_VISIBLE_DEVICES)
+    output_format:
+      - json
+      - csv
+    log_level: info

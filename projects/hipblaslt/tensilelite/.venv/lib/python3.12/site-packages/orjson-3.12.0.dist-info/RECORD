@@ -1,0 +1,14 @@
+orjson-3.12.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+orjson-3.12.0.dist-info/METADATA,sha256=OgS4GQbCrI9TWwpPuDce6nhnGPvKCKdf8T9sc09Dt3g,41988
+orjson-3.12.0.dist-info/RECORD,,
+orjson-3.12.0.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+orjson-3.12.0.dist-info/WHEEL,sha256=xePaIXZtDnKvRf8NMrO2enfKl7aJHT-f4ydLBaOLZ8E,147
+orjson-3.12.0.dist-info/licenses/LICENSE-APACHE,sha256=pg7qgXUUUxZo1-AHZXMUSf4U0FnTJJ4LyTs23kX3WfI,10847
+orjson-3.12.0.dist-info/licenses/LICENSE-MIT,sha256=I_GOA9xJ35FiL-KnYXZJdATkbO2KcV2dK2enRGVxzKM,1023
+orjson-3.12.0.dist-info/licenses/LICENSE-MPL-2.0,sha256=ZqMQfVrWoFiqt1PqrCBHzLLtDjlGXdD-WETaPjANUXI,16727
+orjson-3.12.0.dist-info/sboms/orjson.cyclonedx.json,sha256=ZnR1d6xC7tavQ53uQA1MINxgt0s0RbNN8K7pV0k47qA,26166
+orjson/__init__.py,sha256=ejoFsSgbZapQVMNTh_vlvJkwW_lLnsd3SmzUpvWxSPU,693
+orjson/__init__.pyi,sha256=ApTAgpg75i1fKjyi5QwAkB2eP0w73IJFNaqKSx70ASE,876
+orjson/__pycache__/__init__.cpython-312.pyc,,
+orjson/orjson.cpython-312-x86_64-linux-gnu.so,sha256=-3fog0FhS1LXuyEFqtzt-8pq6SoaLzez20tXgc0ypvs,241328
+orjson/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0

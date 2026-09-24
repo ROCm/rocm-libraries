@@ -1,0 +1,3 @@
+# ATT dumps and Tensile working dirs are large; keep the tree, drop the data.
+**/logs/**
+!**/logs/.gitkeep

@@ -1,0 +1,431 @@
+"""
+My own variation on function-specific inspect-like features.
+"""
+
+# Author: Gael Varoquaux <gael dot varoquaux at normalesup dot org>
+# Copyright (c) 2009 Gael Varoquaux
+# License: BSD Style, 3 clauses.
+
+import collections
+import hashlib
+import inspect
+import os
+import re
+import types
+import warnings
+from itertools import islice
+from tokenize import open as open_py_source
+
+from .logger import pformat
+
+full_argspec_fields = (
+    "args varargs varkw defaults kwonlyargs kwonlydefaults annotations"
+)
+full_argspec_type = collections.namedtuple("FullArgSpec", full_argspec_fields)
+
+
+def _code_fingerprint(code):
+    """Digest the contents of a code object.
+
+    ``hash(code)`` would be simpler, but it hashes the strings it is built from
+    and those are salted by PYTHONHASHSEED. This value is written to
+    func_code.py and compared by *other* processes, which then conclude the
+    function changed and wipe its cache directory (#1694).
+
+    The fields below mirror CPython's own ``code_hash()``:
+    https://github.com/python/cpython/blob/5918085bb6f4a3a48193cacb9bb99b044d4e0452/Objects/codeobject.c#L2608-L2624
+    co_localsplusnames is spelled out as varnames/cellvars/freevars. Only the
+    position information, co_firstlineno and co_linetable, is deliberately left
+    out: joblib compares source *text* and tracks the line number separately,
+    so moving a function without editing it must not invalidate its cache. For
+    the same reason co_filename is not included, unlike ``marshal.dumps``,
+    which would key a notebook function to the cell number it last ran in.
+    """
+    parts = [
+        code.co_name,
+        # co_code de-specializes adaptive bytecode, like _Py_GetBaseCodeUnit
+        code.co_code.hex(),
+        # 3.11+ moved the try/except ranges out of the bytecode and in here
+        getattr(code, "co_exceptiontable", b"").hex(),
+        *code.co_names,
+        *code.co_varnames,
+        *code.co_cellvars,
+        *code.co_freevars,
+        *map(
+            repr,
+            (
+                code.co_argcount,
+                code.co_posonlyargcount,
+                code.co_kwonlyargcount,
+                code.co_flags,
+            ),
+        ),
+    ]
+    for const in code.co_consts:
+        # repr() of a nested code object embeds its address
+        if isinstance(const, types.CodeType):
+            parts.append(_code_fingerprint(const))
+        else:
+            parts.append(repr(const))
+    digest = hashlib.new("md5", usedforsecurity=False)
+    digest.update("\n".join(parts).encode("utf-8", errors="replace"))
+    return digest.hexdigest()
+
+
+def get_func_code(func):
+    """Attempts to retrieve a reliable function code hash.
+
+    The reason we don't use inspect.getsource is that it caches the
+    source, whereas we want this to be modified on the fly when the
+    function is modified.
+
+    Returns
+    -------
+    func_code: string
+        The function code
+    source_file: string
+        The path to the file in which the function is defined.
+    first_line: int
+        The first line of the code in the source file.
+
+    Notes
+    ------
+    This function does a bit more magic than inspect, and is thus
+    more robust.
+    """
+    source_file = None
+    try:
+        code = func.__code__
+        source_file = code.co_filename
+        if not os.path.exists(source_file):
+            # Use inspect for lambda functions and functions defined in an
+            # interactive shell, or in doctests
+            source_code = "".join(inspect.getsourcelines(func)[0])
+            line_no = 1
+            if source_file.startswith("<doctest "):
+                source_file, line_no = re.match(
+                    r"\<doctest (.*\.rst)\[(.*)\]\>", source_file
+                ).groups()
+                line_no = int(line_no)
+                source_file = "<doctest %s>" % source_file
+            return source_code, source_file, line_no
+        # Try to retrieve the source code.
+        with open_py_source(source_file) as source_file_obj:
+            first_line = code.co_firstlineno
+            # All the lines after the function definition:
+            source_lines = list(islice(source_file_obj, first_line - 1, None))
+        return "".join(inspect.getblock(source_lines)), source_file, first_line
+    except:  # noqa: E722
+        # If the source code fails, we use the hash. This is fragile and
+        # might change from one session to another.
+        if hasattr(func, "__code__"):
+            # Python 3.X
+            return _code_fingerprint(func.__code__), source_file, -1
+        else:
+            # Weird objects like numpy ufunc don't have __code__
+            # This is fragile, as quite often the id of the object is
+            # in the repr, so it might not persist across sessions,
+            # however it will work for ufuncs.
+            return repr(func), source_file, -1
+
+
+def _clean_win_chars(string):
+    """Windows cannot encode some characters in filename."""
+    import urllib
+
+    if hasattr(urllib, "quote"):
+        quote = urllib.quote
+    else:
+        # In Python 3, quote is elsewhere
+        import urllib.parse
+
+        quote = urllib.parse.quote
+    for char in ("<", ">", "!", ":", "\\"):
+        string = string.replace(char, quote(char))
+    return string
+
+
+def get_func_name(func, resolv_alias=True, win_characters=True):
+    """Return the function import path (as a list of module names), and
+    a name for the function.
+
+    Parameters
+    ----------
+    func: callable
+        The func to inspect
+    resolv_alias: boolean, optional
+        If true, possible local aliases are indicated.
+    win_characters: boolean, optional
+        If true, substitute special characters using urllib.quote
+        This is useful in Windows, as it cannot encode some filenames
+    """
+    if hasattr(func, "__module__"):
+        module = func.__module__
+    else:
+        try:
+            module = inspect.getmodule(func)
+        except TypeError:
+            if hasattr(func, "__class__"):
+                module = func.__class__.__module__
+            else:
+                module = "unknown"
+    if module is None:
+        # Happens in doctests, eg
+        module = ""
+    if module == "__main__":
+        try:
+            filename = os.path.abspath(inspect.getsourcefile(func))
+        except:  # noqa: E722
+            filename = None
+        if filename is not None:
+            # mangling of full path to filename
+            parts = filename.split(os.sep)
+            if parts[-1].startswith("<ipython-input"):
+                # We're in a IPython (or notebook) session. parts[-1] comes
+                # from func.__code__.co_filename and is of the form
+                # <ipython-input-N-XYZ>, where:
+                # - N is the cell number where the function was defined
+                # - XYZ is a hash representing the function's code (and name).
+                #   It will be consistent across sessions and kernel restarts,
+                #   and will change if the function's code/name changes
+                # We remove N so that cache is properly hit if the cell where
+                # the func is defined is re-exectuted.
+                # The XYZ hash should avoid collisions between functions with
+                # the same name, both within the same notebook but also across
+                # notebooks
+                split = parts[-1].split("-")
+                parts[-1] = "-".join(split[:2] + split[3:])
+            elif len(parts) > 2 and parts[-2].startswith("ipykernel_"):
+                # In a notebook session (ipykernel). Filename seems to be 'xyz'
+                # of above. parts[-2] has the structure ipykernel_XXXXXX where
+                # XXXXXX is a six-digit number identifying the current run (?).
+                # If we split it off, the function again has the same
+                # identifier across runs.
+                parts[-2] = "ipykernel"
+            filename = "-".join(parts)
+            if filename.endswith(".py"):
+                filename = filename[:-3]
+            module = module + "-" + filename
+    module = module.split(".")
+    if hasattr(func, "func_name"):
+        name = func.func_name
+    elif hasattr(func, "__name__"):
+        name = func.__name__
+    else:
+        name = "unknown"
+    # Hack to detect functions not defined at the module-level
+    if resolv_alias:
+        # TODO: Maybe add a warning here?
+        if hasattr(func, "func_globals") and name in func.func_globals:
+            if func.func_globals[name] is not func:
+                name = "%s-alias" % name
+    if hasattr(func, "__qualname__") and func.__qualname__ != name:
+        # Extend the module name in case of nested functions to avoid
+        # (module, name) collisions
+        module.extend(func.__qualname__.split(".")[:-1])
+    if inspect.ismethod(func):
+        # We need to add the name of the class
+        if hasattr(func, "im_class"):
+            klass = func.im_class
+            module.append(klass.__name__)
+    if os.name == "nt" and win_characters:
+        # Windows can't encode certain characters in filenames
+        name = _clean_win_chars(name)
+        module = [_clean_win_chars(s) for s in module]
+    return module, name
+
+
+def _signature_str(function_name, arg_sig):
+    """Helper function to output a function signature"""
+    return "{}{}".format(function_name, arg_sig)
+
+
+def _function_called_str(function_name, args, kwargs):
+    """Helper function to output a function call"""
+    template_str = "{0}({1}, {2})"
+
+    args_str = repr(args)[1:-1]
+    kwargs_str = ", ".join("%s=%s" % (k, v) for k, v in kwargs.items())
+    return template_str.format(function_name, args_str, kwargs_str)
+
+
+def filter_args(func, ignore_lst, args=(), kwargs=dict()):
+    """Filters the given args and kwargs using a list of arguments to
+    ignore, and a function specification.
+
+    Parameters
+    ----------
+    func: callable
+        Function giving the argument specification
+    ignore_lst: list of strings
+        List of arguments to ignore (either a name of an argument
+        in the function spec, or '*', or '**')
+    *args: list
+        Positional arguments passed to the function.
+    **kwargs: dict
+        Keyword arguments passed to the function
+
+    Returns
+    -------
+    filtered_args: list
+        List of filtered positional and keyword arguments.
+    """
+    args = list(args)
+    if isinstance(ignore_lst, str):
+        # Catch a common mistake
+        raise ValueError(
+            "ignore_lst must be a list of parameters to ignore "
+            f"{ignore_lst} (type {type(ignore_lst)}) was given"
+        )
+    # Special case for functools.partial objects
+    if not inspect.ismethod(func) and not inspect.isfunction(func):
+        if ignore_lst:
+            warnings.warn(
+                f"Cannot inspect object {func}, ignore list will not work.",
+                stacklevel=2,
+            )
+        return {"*": args, "**": kwargs}
+    arg_sig = inspect.signature(func)
+    arg_names = []
+    arg_kwonlyargs = []
+    arg_varargs = None
+    arg_varkw = None
+    arg_dict = dict()
+    for param in arg_sig.parameters.values():
+        if param.kind is param.POSITIONAL_OR_KEYWORD:
+            arg_names.append(param.name)
+        elif param.kind is param.KEYWORD_ONLY:
+            arg_kwonlyargs.append(param.name)
+        elif param.kind is param.VAR_POSITIONAL:
+            arg_varargs = param.name
+        elif param.kind is param.VAR_KEYWORD:
+            arg_varkw = param.name
+        if param.default is not param.empty:
+            arg_dict[param.name] = param.default
+    if inspect.ismethod(func):
+        # First argument is 'self', it has been removed by Python
+        # we need to add it back:
+        args = [
+            func.__self__,
+        ] + args
+        # func is an instance method, inspect.signature(func) does not
+        # include self, we need to fetch it from the class method, i.e
+        # func.__func__
+        class_method_sig = inspect.signature(func.__func__)
+        self_name = next(iter(class_method_sig.parameters))
+        arg_names = [self_name] + arg_names
+    # XXX: Maybe I need an inspect.isbuiltin to detect C-level methods, such
+    # as on ndarrays.
+
+    _, name = get_func_name(func, resolv_alias=False)
+
+    # Check for positional argument of the function, that can be
+    # passed either as positional or keyword arguments in the call
+    for arg_position, arg_name in enumerate(arg_names):
+        if arg_position < len(args):
+            # given as positional
+            arg_dict[arg_name] = args[arg_position]
+            if arg_name in kwargs:
+                raise ValueError(
+                    f"Argument {arg_name} was given both as positional and as keyword"
+                    f" for {_signature_str(name, arg_sig)}:\n"
+                    f"    {_function_called_str(name, args, kwargs)} was called."
+                )
+        elif arg_name in kwargs:
+            # given as keyword
+            arg_dict[arg_name] = kwargs[arg_name]
+        elif arg_name not in arg_dict:
+            # Missing argument
+            raise ValueError(
+                f"Wrong number of arguments for {_signature_str(name, arg_sig)}:\n"
+                f"    {_function_called_str(name, args, kwargs)} was called."
+            )
+
+    # If more positional arguments are given, they correspond
+    # to *args, store them in vargs
+    if len(args) > len(arg_names):
+        if arg_varargs is None:
+            raise ValueError(
+                f"Too many arguments for {_signature_str(name, arg_sig)}:\n"
+                f"    {_function_called_str(name, args, kwargs)} was called."
+            )
+        arg_dict["*"] = args[len(arg_names) :]
+    elif arg_varargs is not None:
+        arg_dict["*"] = []
+
+    # Check keyword only arguments
+    for arg_name in arg_kwonlyargs:
+        if arg_name in kwargs:
+            arg_dict[arg_name] = kwargs[arg_name]
+        elif arg_name not in arg_dict:
+            # required keyword only argument that is missing,
+            # raise an error
+            raise ValueError(
+                f"Wrong number of arguments for {_signature_str(name, arg_sig)}:\n"
+                f"    {_function_called_str(name, args, kwargs)} was called."
+            )
+
+    # If more keyword arguments are given, store them in varkwargs
+    varkwargs = {k: v for k, v in kwargs.items() if k not in arg_dict}
+    if arg_varkw is not None:
+        arg_dict["**"] = varkwargs
+
+    elif varkwargs:
+        raise ValueError(
+            f"Too many keyword arguments for {_signature_str(name, arg_sig)}:\n"
+            f"    {_function_called_str(name, args, kwargs)} was called."
+        )
+
+    # Now remove the arguments to be ignored
+    for item in ignore_lst:
+        if item in arg_dict:
+            arg_dict.pop(item)
+        else:
+            raise ValueError(
+                f"Ignore list: argument '{item}' is not defined for "
+                f"function {_signature_str(name, arg_sig)}"
+            )
+    # XXX: Return a sorted list of pairs?
+    return arg_dict
+
+
+def _format_arg(arg):
+    formatted_arg = pformat(arg, indent=2)
+    if len(formatted_arg) > 1500:
+        formatted_arg = "%s..." % formatted_arg[:700]
+    return formatted_arg
+
+
+def format_signature(func, *args, **kwargs):
+    # XXX: Should this use inspect.formatargvalues/formatargspec?
+    module, name = get_func_name(func)
+    module = [m for m in module if m]
+    if module:
+        module.append(name)
+        module_path = ".".join(module)
+    else:
+        module_path = name
+    arg_str = list()
+    previous_length = 0
+    for arg in args:
+        formatted_arg = _format_arg(arg)
+        if previous_length > 80:
+            formatted_arg = "\n%s" % formatted_arg
+        previous_length = len(formatted_arg)
+        arg_str.append(formatted_arg)
+    arg_str.extend(["%s=%s" % (v, _format_arg(i)) for v, i in kwargs.items()])
+    arg_str = ", ".join(arg_str)
+
+    signature = "%s(%s)" % (name, arg_str)
+    return module_path, signature
+
+
+def format_call(func, args, kwargs, object_name="Memory"):
+    """Returns a nicely formatted statement displaying the function
+    call with the given arguments.
+    """
+    path, signature = format_signature(func, *args, **kwargs)
+    msg = "%s\n[%s] Calling %s...\n%s" % (80 * "_", object_name, path, signature)
+    return msg
+    # XXX: Not using logging framework
+    # self.debug(msg)

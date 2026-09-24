@@ -1,0 +1,21 @@
+# rocprofv3 kernel dispatch + LDS counters.
+#
+# gfx1250 exposes no SQ_LDS_BANK_CONFLICT / SQC_LDS_BANK_CONFLICT (those are gfx9/gfx10-11).
+# Verify with: rocprofv3-avail info --pmc | rg -i 'lds|bank'
+#
+# Bank-conflict proxy: SQ_INST_CYCLES_LDS / SQ_INSTS_LDS is the average cycles spent per
+# LDS instruction. A conflict-free ds_read is a fixed cost, so a rise in this ratio between
+# two macrotile/LdsPad variants is the conflict signal.
+jobs:
+  - kernel_trace: true
+    kernel_include_regex: "Cijk"
+    pmc:
+      - SQ_INSTS_LDS
+      - SQ_INST_CYCLES_LDS
+      - SQ_WAVES
+      - SQ_BUSY_CYCLES
+      - GRBM_GUI_ACTIVE
+    output_format:
+      - csv
+      - json
+    log_level: info
