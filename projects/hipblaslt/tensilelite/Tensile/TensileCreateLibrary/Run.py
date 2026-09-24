@@ -58,7 +58,7 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import archNamesByIsa, architectureMap, baseArchName, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf
+from Tensile.Common.Architectures import archNamesByIsa, architectureMap, baseArchName, gfxToIsa, isaCollisionFreeGroups, isaToGfx, withSteppingsOfNamedArchs, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
@@ -1321,6 +1321,14 @@ def run():
         archs = arguments["Architecture"].split(";")
     else:
         archs = arguments["Architecture"].split("_")
+
+    # Before the grouping, not after: the pair this produces is what the
+    # partitioner below exists to split. Skipped in a fan-out's children, which
+    # were each handed the exact group to build -- expanding again there spawns a
+    # grandchild that shares its sibling's scratch directory, and two processes
+    # over one set of .s files surfaces as an assembler crash.
+    if not os.environ.get(_GROUP_BUILD_ENV):
+        archs = withSteppingsOfNamedArchs(archs)
 
     # More than one group only when a stepping was asked for beside the
     # architecture it steps from, which no single run can name. Everything else

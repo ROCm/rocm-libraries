@@ -244,6 +244,34 @@ def expandAllArchitectures(archs: List[str]) -> List[str]:
     ]
 
 
+def withSteppingsOfNamedArchs(archs: List[str]) -> List[str]:
+    """``archs`` with the steppings of any architecture it names appended.
+
+    Transitional. Naming gfx1250 asks for a package that serves gfx1250
+    hardware, which is two steppings; covering only one leaves an A0 on kernels
+    built for features it does not have. This is what the gfx1250v0 overlay used
+    to do before the stepping became a target of its own.
+
+    One-way: ``gfx1250`` names the family and fans out, ``gfx1250-strict`` names
+    one stepping and does not, so a strict-only build still fails on a B0 rather
+    than serving it A0-tuned kernels.
+
+    Call before ``isaCollisionFreeGroups``, never after: the pair shares an ISA
+    and has to reach the partitioner that splits it into separate processes.
+
+    Args:
+        archs: Requested architecture specs.
+
+    Returns:
+        ``archs`` plus any stepping of an architecture it names but does not
+            already name itself, in ``architectureMap`` order.
+    """
+    named = {baseArchName(a) for a in archs}
+    return archs + [
+        s for s in supportedSteppings() if steppingArchOf(s) in named and s not in named
+    ]
+
+
 def baseArchName(spec: str) -> str:
     """The bare architecture name in a spec, without predicates or qualifiers."""
     return spec.split("[")[0].split(":")[0].strip()
