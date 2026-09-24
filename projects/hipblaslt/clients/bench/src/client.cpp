@@ -60,6 +60,98 @@ struct perf_matmul : hipblaslt_test_valid
     }
 };
 
+// HIPBLASLT_TUNING_FILE tunes with hipBLASLt's own tune mode, which main has
+// pointed at that file: one untimed call through the C API measures the
+// candidates and records the winner. Only that API's runner tunes, and the row
+// it writes serves the C++ API's lookups for the same problem too. The run that
+// is timed afterwards is then the winner alone, which the heuristic now returns
+// like any cached problem.
+void tune_with_library(Arguments& arg)
+{
+    if(arg.grouped_gemm
+       || static_cast<hipblasLtBatchMode_t>(arg.batch_mode) == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+    {
+        hipblaslt_cout << "HIPBLASLT_TUNING_FILE: grouped GEMM and pointer-array batched problems "
+                          "are not cached, so this one runs untuned."
+                       << std::endl;
+        return;
+    }
+
+    // Untimed, so the bench's own rotation would only cost memory: the library
+    // rotates its own scratch while it measures.
+    Arguments tuning              = arg;
+    tuning.timing                 = 0;
+    tuning.rotating               = 0;
+    tuning.print_solution_found   = false;
+    tuning.use_ext                = false;
+    tuning.use_ext_setproblem     = false;
+    tuning.norm_check             = 0;
+    tuning.allclose_check         = 0;
+    tuning.ulp_check              = 0;
+    tuning.algo_method            = 0;
+    tuning.requested_solution_num = 1;
+
+    struct TuningPass
+    {
+        TuningPass()
+        {
+            hipblaslt_bench_options::tuning_pass() = true;
+        }
+        ~TuningPass()
+        {
+            hipblaslt_bench_options::tuning_pass() = false;
+        }
+    } pass;
+    perf_matmul{}(tuning);
+
+    arg.algo_method            = 0;
+    arg.requested_solution_num = 1;
+    arg.print_kernel_info      = true;
+}
+
+// hipblaslt-bench tunes with the library's tune mode rather than a loop of its
+// own, so it and a tuning application measure the same way and cannot choose
+// different winners. The tuning file becomes the cache the winners are written
+// to, and the bench's measurement options become the tune-mode settings. Set
+// before any hipBLASLt call, since the library reads them once.
+bool enter_library_tune_mode(const char* tuningFile, const Arguments& arg)
+{
+    const char* mode = getenv("HIPBLASLT_TUNING_MODE");
+    const char* path = getenv("HIPBLASLT_TUNING_CACHE_PATH");
+    if((mode && std::string(mode) != "tune") || (path && std::string(path) != tuningFile))
+    {
+        hipblaslt_cerr << "HIPBLASLT_TUNING_FILE tunes into that file: leave HIPBLASLT_TUNING_MODE "
+                          "and HIPBLASLT_TUNING_CACHE_PATH unset, or set them to tune and the "
+                          "same file."
+                       << std::endl;
+        return false;
+    }
+
+    auto set = [](const char* name, const std::string& value) { setenv(name, value.c_str(), 1); };
+    set("HIPBLASLT_TUNING_MODE", "tune");
+    set("HIPBLASLT_TUNING_CACHE_PATH", tuningFile);
+    set("HIPBLASLT_TUNING_COLD_ITERS", std::to_string(arg.cold_iters));
+    set("HIPBLASLT_TUNING_HOT_ITERS", std::to_string(arg.iters));
+    set("HIPBLASLT_TUNING_ROTATING_MB", std::to_string(arg.rotating));
+    set("HIPBLASLT_TUNING_FLUSH_ICACHE", arg.flush ? "1" : "0");
+    if(arg.requested_solution_num < 0)
+    {
+        set("HIPBLASLT_TUNING_ALL_KERNELS", "1");
+    }
+    else
+    {
+        set("HIPBLASLT_TUNING_ALL_KERNELS", "0");
+        set("HIPBLASLT_TUNING_MAX_CANDIDATES", std::to_string(arg.requested_solution_num));
+    }
+
+    // Offline tuning is where a search is meant to finish, so there is no
+    // ceiling unless one was asked for.
+    if(!getenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE"))
+        set("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "0");
+
+    return true;
+}
+
 int run_bench_test(Arguments&         arg,
                    const std::string& filter,
                    bool               any_stride,
@@ -201,6 +293,9 @@ int run_bench_test(Arguments&         arg,
         }
     }
 
+    if(getenv("HIPBLASLT_TUNING_FILE"))
+        tune_with_library(arg);
+
     perf_matmul{}(arg);
     return 0;
 }
@@ -229,43 +324,6 @@ void fix_batch(int argc, char* argv[])
                    0);
             argv[i] = b_c;
         }
-}
-
-bool tuning_path_compare_git_version(const char* tuningEnv)
-{
-    char                   git_version[128];
-    hipblaslt_local_handle handle;
-    hipblasLtGetGitRevision(handle, &git_version[0]);
-    std::string   tuningPath = tuningEnv;
-    std::ifstream file_read(tuningPath);
-
-    if(file_read.peek() == std::ifstream::traits_type::eof())
-    {
-        std::ofstream file_write(tuningPath, std::ios::app);
-        file_write << "Git Version: " << (std::string)git_version << std::endl;
-        hipblaslt_cout << "Initialize tuning file." << std::endl;
-        return true;
-    }
-    else
-    {
-        std::string firstline;
-        std::string prefix = "Git Version: ";
-        std::getline(file_read, firstline);
-        size_t pos = firstline.find(prefix);
-        if(pos != std::string::npos)
-        {
-            std::string file_version = firstline.substr(pos + prefix.length());
-            hipblaslt_cout << "tuning file git version: " << file_version << std::endl;
-            if(file_version == git_version)
-            {
-                return true;
-            }
-        }
-    }
-
-    hipblaslt_cout << "The hipBLASLt git version and the tuning file git version are not the same."
-                   << std::endl;
-    return false;
 }
 
 int main(int argc, char* argv[])
@@ -315,16 +373,6 @@ try
     arg.init(); // set all defaults
     const char* tuningEnv          = getenv("HIPBLASLT_TUNING_FILE");
     const char* tuningMaxWorkSpace = getenv("HIPBLASLT_TUNING_USER_MAX_WORKSPACE");
-    if(tuningEnv)
-    {
-        bool tuning_success = tuning_path_compare_git_version(tuningEnv);
-        if(tuning_success)
-        {
-            hipblaslt_cout << "HIPBLASLT_TUNING_FILE is the correct setting." << std::endl;
-        }
-        else
-            return 1;
-    }
 
     options_description desc("hipblaslt-bench command line options");
     desc.add_options()
@@ -982,6 +1030,9 @@ try
             arg.stride_e[i]
                 = stride_e.size() >= length ? stride_e[i] : stride_e[stride_e.size() - 1];
     }
+
+    if(tuningEnv && !enter_library_tune_mode(tuningEnv, arg))
+        return 1;
 
     // Device Query
     hipDeviceProp_t props;

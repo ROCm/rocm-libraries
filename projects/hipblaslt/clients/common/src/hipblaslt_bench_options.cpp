@@ -37,4 +37,10 @@ namespace hipblaslt_bench_options
         static std::string v;
         return v;
     }
+
+    bool& tuning_pass()
+    {
+        static bool v = false;
+        return v;
+    }
 }

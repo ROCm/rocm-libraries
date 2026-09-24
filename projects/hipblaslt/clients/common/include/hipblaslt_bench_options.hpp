@@ -21,6 +21,11 @@
 //
 // uniform_summation_order maps to HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT
 // as {0=off, 1=on} and follows the same convention.
+//
+// tuning_pass is set while HIPBLASLT_TUNING_FILE has the library tune a
+// problem: the matmul is then handed the whole workspace limit rather than what
+// the heuristic's pick needs, so the search covers every kernel the limit
+// allows.
 namespace hipblaslt_bench_options
 {
     int32_t&     sm_count_target();
@@ -28,4 +33,5 @@ namespace hipblaslt_bench_options
     std::string& streamk_tile_scheduling_mode_str();
     int32_t&     uniform_summation_order();
     std::string& uniform_summation_order_str();
+    bool&        tuning_pass();
 }

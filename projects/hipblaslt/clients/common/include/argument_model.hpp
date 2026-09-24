@@ -48,19 +48,6 @@ void ArgumentModel_log_efficiency(hipblaslt_internal_ostream& name_line,
                                   const Arguments&            arg,
                                   const double                hipblaslt_gflops);
 
-// The ext API's name accessors append a readable
-// " (Custom tuning: GSU: x, WGM: y)" suffix when GemmTuning overrides differ
-// from the solution's own values. That is fine for console output but must
-// never reach the persisted kernel_name: replay resolves names through
-// getKernelNameFromAlgoIndex, which never decorates, so a suffixed name
-// could not match even on the first replay.
-inline std::string hipblaslt_strip_custom_tuning_suffix(const std::string& name)
-{
-    static const std::string marker = " (Custom tuning: ";
-    const size_t             pos    = name.find(marker);
-    return pos == std::string::npos ? name : name.substr(0, pos);
-}
-
 // ArgumentModel template has a variadic list of argument enums
 template <hipblaslt_argument... Args>
 class ArgumentModel
@@ -178,8 +165,6 @@ public:
                   int32_t                     solution_index,
                   std::string&                solution_name,
                   std::string&                kernel_name,
-                  std::string&                archName,
-                  std::string&                cuNum,
                   const Arguments&            arg,
                   uint32_t                    splitK,
                   uint32_t                    wgm,
@@ -318,40 +303,6 @@ public:
             print("cv", timing.cv);
             print("rel_iqr", timing.rel_iqr);
             print("status", status);
-        }
-
-        if(archName != "")
-        {
-            auto delim = ",";
-            name_list << delim << "solution_index";
-            value_list << delim << solution_index;
-
-            // Record the name beside the index so replay can confirm the index
-            // still identifies the kernel that was actually tuned. The kernel
-            // name rather than the solution name, because that is the field the
-            // library validates against and it leaves out the solution-level
-            // GSU/WGM defaults.
-            name_list << delim << "kernel_name";
-            value_list << delim << hipblaslt_strip_custom_tuning_suffix(kernel_name);
-
-            const char*   tuningEnv  = getenv("HIPBLASLT_TUNING_FILE");
-            std::string   tuningPath = tuningEnv;
-            std::ofstream file(tuningPath, std::ios::app);
-
-            std::string name_list_str  = name_list.str();
-            std::string value_list_str = value_list.str();
-
-            name_list_str.erase(0, std::string("[" + std::to_string(index) + "]:").length());
-
-            if(ArgumentModel_get_log_function_name())
-            {
-                name_list_str.erase(0, std::string("function,").length());
-                value_list_str.erase(0, std::string(arg.function).length() + 1);
-            }
-
-            file << "    " << name_list_str << delim << "gcnArchName" << delim << "CUs"
-                 << std::endl;
-            file << value_list_str << delim << archName << delim << cuNum << std::endl;
         }
 
         str << name_list << "\n" << value_list << std::endl;
