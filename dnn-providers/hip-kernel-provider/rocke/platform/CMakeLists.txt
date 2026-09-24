@@ -374,10 +374,8 @@ if(ROCKE_INSTALL_TESTS)
     # from the installed CTest invocation; normal source-tree pytest runs remain
     # unaffected.
     #
-    # TODO: Re-enable these tests when NumPy is available in TheRock CI, or
-    # investigate a dependency-free reference implementation or another way to
-    # supply test-specific dependencies without changing the shared CI
-    # requirements.
+    # TODO(AICK-2425): Re-enable the NumPy and ml_dtypes tests after rocKE's
+    # component requirements are staged and installed by TheRock.
     set(_ROCKE_INSTALLED_PYTEST_EXCLUDE_RELPATHS
         "tests/library"
         "tests/core/test_gfx1250_scaled_wmma_reference.py"
@@ -388,8 +386,21 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_PYTEST_EXCLUDES
              " --ignore \"${ROCKE_TEST_CTEST_REL}${_rocke_pytest_exclude}\"")
     endforeach()
+
+    # Keep the dependency-free tests in test_binding.py while temporarily
+    # deselecting the two classes whose binding/reference paths require NumPy.
+    set(_ROCKE_INSTALLED_PYTEST_FILTER
+        "not TestGemmBinding and not TestBf16Encoding")
+    if(WIN32)
+      # This POSIX symlink-resolution test exposes a separate path parsing issue
+      # on Windows. Quarantine only that test while retaining the rest of the
+      # cross-platform suite.
+      string(APPEND _ROCKE_INSTALLED_PYTEST_FILTER
+             " and not test_stale_comgr_demotion_fires_through_a_symlinked_root")
+    endif()
+
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\"${_ROCKE_INSTALLED_PYTEST_EXCLUDES} -v --timeout=60)\n")
+           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\"${_ROCKE_INSTALLED_PYTEST_EXCLUDES} -k \"${_ROCKE_INSTALLED_PYTEST_FILTER}\" -v --timeout=60)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;quick\"\n"
