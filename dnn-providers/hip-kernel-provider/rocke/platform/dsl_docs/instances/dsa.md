@@ -1,8 +1,8 @@
 # DSA lightning indexer
 
-The gfx942 lightning-indexer forward, the scoring stage of DeepSeek Sparse
-Attention (DSA), is provided by
-[`lightning_indexer.py`](../../../library/kernels/gfx942/lightning_indexer.py).
+The lightning-indexer forward (gfx942 and gfx950), the scoring stage of DeepSeek
+Sparse Attention (DSA), is provided by the arch-neutral
+[`lightning_indexer.py`](../../../library/kernels/common/lightning_indexer.py).
 The host drivers are in
 [`library/builders/gfx942/dsa`](../../../library/builders/gfx942/dsa/).
 
@@ -70,19 +70,31 @@ python -m pytest tests/test_dsa_indexer_gfx942_numeric.py
 The emitted IR is pinned by `tests/test_dsa_indexer_gfx942_golden.py` and by the
 platform representative golden (`lightning_indexer/gfx942/*`).
 
-## gfx942 implementation
+## Implementation
 
-v1 is a scalar-reduction body: one workgroup per query row, threads stride the key
-range, and each key's score is a straight FMA reduction over `index_head_dim`
-followed by the ReLU, the per-head weight, the head sum, and the causal bound. It
-allocates no LDS, so it fits the 64 KiB budget trivially; occupancy is register-
-rather than LDS-bound. This is the correctness-first baseline; the MFMA score body
-(reusing the 16x16x16 bf16 contract atom) is a later perf hoist under the
-optimization runbook.
+Two bodies behind the `IndexerSpec.body` field, selected by two dispatch
+candidates per arch:
+
+- Scalar (`body="scalar"`): one workgroup per query row; threads stride the key
+  range and each key's score is a straight FMA reduction over `index_head_dim`
+  followed by ReLU, the per-head weight, the head sum, and the causal bound. No
+  LDS. Grid `(seqlen_q, 1, 1)`. This is the correctness oracle and the path for
+  decode (`seqlen_q=1`) and non-16-aligned shapes.
+- MFMA (`body="mfma"`): per head, `scores_h = Q_h @ K^T` over the 16x16x16 bf16
+  contract atom, register-to-register (score-only means no value matmul, so no
+  P->LDS round-trip and no LDS at all). Each workgroup owns one (16-query,
+  16-key) output block, so the launch parallelizes over both dimensions: grid
+  `(seqlen_q/16, seqlen_k/16, 1)`, one wave64 per block. Requires 16-aligned
+  `seqlen_q` / `seqlen_k` / `index_head_dim`; unaligned requests fall to the
+  scalar candidate. This is the fast prefill path.
+
+Both run on gfx942 (CDNA3) and gfx950 (CDNA4): the 16x16x16 bf16 atom and the
+register-only body exist on both, so the kernel is arch-neutral and the two arches
+differ only in the lowering target (and their own goldens).
 
 Two seams are kept so the fused indexer+top-k kernel is a swap, not a rewrite:
-`_emit_score` is the only place a score reaches memory, and
-`_load_index_q_elem` / `_load_index_k_elem` are the only places inputs are read.
+`_emit_score` is the only place a score reaches memory, and the input loads are
+the only place inputs are read.
 
 ## ABI
 
@@ -94,11 +106,11 @@ Two seams are kept so the fused indexer+top-k kernel is a swap, not a rewrite:
  q_pos_base: i32)              # causal base: pos(q) = q_pos_base + q
 ```
 
-Grid `(seqlen_q, 1, 1)`; block `(block_size, 1, 1)`.
+Block `(block_size, 1, 1)` (256 scalar, 64 mfma). Grid is body-dependent (above).
 
 ## Coverage
 
-gfx942, bf16 only. fp8 (gfx950-first, OCP-native) and gfx950 are later phases.
+gfx942 and gfx950, bf16. fp8 (gfx950-first, OCP-native) is a later phase.
 Sparsity is a long-context feature, so benchmark shapes sweep `seqlen_k` well
 above the selection size; below it the whole context is selected and DSA reduces
 to dense MLA.

@@ -10,7 +10,7 @@ head, a ReLU, a per-head weighting, a sum across heads, and a causal mask that
 drives future keys to the sentinel.
 
 Layout matches the kernel signature (see
-``kernels.gfx942.lightning_indexer.build_lightning_indexer``):
+``kernels.common.lightning_indexer.build_lightning_indexer``):
 
 * ``index_q``  [seqlen_q, H_I, D_I]  bf16   -- per-head index-query
 * ``index_k``  [seqlen_k, D_I]       bf16   -- shared index-key (no head axis)
@@ -25,7 +25,7 @@ from typing import Dict
 
 import numpy as np
 
-# Must match kernels.gfx942.lightning_indexer.NEG_INF_SCORE. Kept as a local
+# Must match kernels.common.lightning_indexer.NEG_INF_SCORE. Kept as a local
 # literal so the oracle has no dependency back up into the kernels layer.
 NEG_INF_SCORE = -3.0e38
 
@@ -66,7 +66,9 @@ def make_inputs(
 ) -> Dict[str, np.ndarray]:
     """Generate a reproducible set of bf16-rounded indexer inputs (as f32)."""
     rng = np.random.default_rng(seed)
-    index_q = to_bf16(rng.standard_normal((seqlen_q, n_index_heads, index_head_dim), dtype=np.float32))
+    index_q = to_bf16(
+        rng.standard_normal((seqlen_q, n_index_heads, index_head_dim), dtype=np.float32)
+    )
     index_k = to_bf16(rng.standard_normal((seqlen_k, index_head_dim), dtype=np.float32))
     # Weights stay f32 (higher precision at negligible cost, per the dtype plan);
     # keep them non-negative so no head's contribution is inverted.
@@ -124,5 +126,7 @@ def pack(inputs: Dict[str, np.ndarray], q_pos_base: int = 0) -> PackedIndexer:
         index_k_bits=f32_to_bf16_bits(inputs["index_k"]),
         w=inputs["w"].astype(np.float32),
         q_pos_base=q_pos_base,
-        ref_scores=ref_indexer_scores(inputs["index_q"], inputs["index_k"], inputs["w"], q_pos_base),
+        ref_scores=ref_indexer_scores(
+            inputs["index_q"], inputs["index_k"], inputs["w"], q_pos_base
+        ),
     )

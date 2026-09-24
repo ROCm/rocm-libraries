@@ -119,10 +119,12 @@ class IndexerSpec:
 def is_valid_spec(spec: IndexerSpec, arch: str = "gfx942") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for one indexer config on ``arch``.
 
-    v1 is gfx942 + bf16 only. The architecture facts (wave size, LDS capacity)
+    Supported on the CDNA wave64 targets gfx942 and gfx950 in bf16: the kernel is
+    arch-neutral (the 16x16x16 bf16 atom and the register-only MFMA body exist on
+    both, and neither body uses LDS). Architecture facts (wave size, LDS capacity)
     are sourced from :class:`rocke.core.arch.ArchTarget` so an unknown or
-    unsupported arch is rejected with a structured reason instead of crashing
-    comgr at lower time.
+    unsupported arch (e.g. an RDNA wave32 part) is rejected with a structured
+    reason instead of crashing comgr at lower time.
     """
     from rocke.core.arch import ArchTarget
 
@@ -130,8 +132,8 @@ def is_valid_spec(spec: IndexerSpec, arch: str = "gfx942") -> Tuple[bool, str]:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
-    if arch != "gfx942":
-        return False, f"lightning indexer v1 is gfx942 only (got {arch!r})"
+    if arch not in ("gfx942", "gfx950"):
+        return False, f"lightning indexer supports gfx942/gfx950 (got {arch!r})"
     if spec.dtype not in INDEXER_DTYPES:
         return False, f"unsupported dtype {spec.dtype!r} (only bf16 in v1)"
     if spec.n_index_heads <= 0:
@@ -139,7 +141,10 @@ def is_valid_spec(spec: IndexerSpec, arch: str = "gfx942") -> Tuple[bool, str]:
     if spec.index_head_dim <= 0:
         return False, f"index_head_dim must be positive (got {spec.index_head_dim})"
     if spec.seqlen_q <= 0 or spec.seqlen_k <= 0:
-        return False, f"seqlen_q/seqlen_k must be positive (got {spec.seqlen_q}, {spec.seqlen_k})"
+        return (
+            False,
+            f"seqlen_q/seqlen_k must be positive (got {spec.seqlen_q}, {spec.seqlen_k})",
+        )
     bs = spec.tile.block_size
     wave = target.wave_size
     if bs <= 0 or bs > 1024:
@@ -155,9 +160,15 @@ def is_valid_spec(spec: IndexerSpec, arch: str = "gfx942") -> Tuple[bool, str]:
         # v1 has no tile-tail masking, so shapes must be 16-aligned. Unaligned
         # requests fall to the scalar candidate.
         if bs != wave:
-            return False, f"mfma body requires block_size == wave_size {wave} (got {bs})"
+            return (
+                False,
+                f"mfma body requires block_size == wave_size {wave} (got {bs})",
+            )
         if spec.index_head_dim % 16 != 0:
-            return False, f"mfma body requires index_head_dim % 16 == 0 (got {spec.index_head_dim})"
+            return (
+                False,
+                f"mfma body requires index_head_dim % 16 == 0 (got {spec.index_head_dim})",
+            )
         if spec.seqlen_q % 16 != 0 or spec.seqlen_k % 16 != 0:
             return False, (
                 f"mfma body requires seqlen_q/seqlen_k multiples of 16 "
@@ -298,7 +309,9 @@ def _emit_mfma_body(b, spec, index_q, index_k, w, scores, q_pos_base):
     for ka in range(n_katoms):
         d_start = b.add(b.mul(b.const_i32(ka), c_atomk), k_lane_start)
         k_vecs.append(
-            b.global_load_vN(index_k, b.add(k_row_base, d_start), BF16, apl, align=apl * 2)
+            b.global_load_vN(
+                index_k, b.add(k_row_base, d_start), BF16, apl, align=apl * 2
+            )
         )
     head_loop = b.scf_for_iter(
         b.const_i32(0),
@@ -355,10 +368,16 @@ def build_lightning_indexer(spec: IndexerSpec, *, arch: str = "gfx942") -> Kerne
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.tile.block_size
 
-    index_q = b.param("index_q", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
-    index_k = b.param("index_k", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+    index_q = b.param(
+        "index_q", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
+    )
+    index_k = b.param(
+        "index_k", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
+    )
     w = b.param("w", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
-    scores = b.param("scores", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
+    scores = b.param(
+        "scores", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
+    )
     q_pos_base = b.param("q_pos_base", I32)
 
     if spec.body == "mfma":
