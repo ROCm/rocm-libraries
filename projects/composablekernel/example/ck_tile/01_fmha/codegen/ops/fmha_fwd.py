@@ -1469,6 +1469,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in cls._DT_FP16_BF16:
+            # Each entry lists a bm0=64 tile guarded by CppConstraint("a.max_seqlen_q
+            # < N") and a bm0=128 fallback: the dispatcher picks bm0=64 below N and
+            # bm0=128 at/above it. N is the measured bm0=64 -> bm0=128 crossover
+            # max_seqlen_q on gfx1250 (fp16/bf16) and must be re-benchmarked for each
+            # new head dim (e.g. (96,96) measured N=128, not inherited from a sibling).
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 32,  32) : [FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 256")),

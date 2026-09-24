@@ -369,6 +369,14 @@ static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 192, 128>());
 static_assert(validate_aligned_head_dim<ck_tile::half_t, 96, 96>());
 static_assert(validate_aligned_head_dim<ck_tile::half_t, 160, 160>());
 static_assert(validate_aligned_head_dim<ck_tile::half_t, 192, 128>());
+// (64,64) is symmetric. gfx125's (32,32) tile stores its QK length as 64 (bk0max),
+// not 32, because the qr_tdm K0 prefetch needs k0_loops = kQKHeaddim / kK0 >= 2 and
+// kK0 is 32 -- so its real geometry is QK=64 with V head dim 32, exercised here as
+// <64, 32> (a QK=32 shape would set k0_loops=1 and fail the prefetch static_assert).
+static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 64, 64>());
+static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 64, 32>());
+static_assert(validate_aligned_head_dim<ck_tile::half_t, 64, 64>());
+static_assert(validate_aligned_head_dim<ck_tile::half_t, 64, 32>());
 #endif
 
 template <typename Layout>
