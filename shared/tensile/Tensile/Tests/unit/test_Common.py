@@ -41,6 +41,14 @@ def test_gfxArch():
 
     assert Common.gfxArch('blah gfx900 stuff') == (9,0,0)
 
+def test_isStubGfxTarget():
+    assert Common.isStubGfxTarget("gfx000")
+    assert Common.isStubGfxTarget("gfx000:xnack+")
+    assert Common.isStubGfxTarget("gfx000-xnack-")
+    assert not Common.isStubGfxTarget("gfx90a")
+    assert not Common.isStubGfxTarget("gfx0000")
+    assert not Common.isStubGfxTarget("")
+
 def test_isGfx12():
     assert Common.isGfx12((12, 0, 0))
     assert Common.isGfx12((12, 0, 1))

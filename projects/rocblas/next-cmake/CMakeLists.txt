@@ -61,6 +61,12 @@ if(ROCBLAS_ENABLE_TENSILE)
     set(ROCBLAS_TENSILE_INSTALL_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/rocblas/library" CACHE PATH "Path to tensile library")
   endif()
   set(ROCBLAS_TENSILE_SUBDIR_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../Tensile" CACHE STRING "Path to Tensile subdirectory")
+  # GPU_TARGETS remains the full offload list for the rocBLAS library.
+  set(ROCBLAS_TENSILE_ARCH_SKIPLIST "gfx1201" CACHE STRING
+    "GPU targets skipped during Tensile library generation; rocBLAS still compiles for GPU_TARGETS")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/tensile-arch-skiplist.cmake")
+  rocblas_tensile_arch_skiplist_c_literals(ROCBLAS_TENSILE_ARCH_SKIPLIST
+                                           ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS)
 endif()
 set(ROCBLAS_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
 
@@ -107,6 +113,19 @@ if(ROCBLAS_ENABLE_AMD_SMI)
   find_package(amd_smi REQUIRED)
 endif()
 
+if(ROCBLAS_ENABLE_TENSILE)
+  if(GPU_TARGETS AND NOT GPU_TARGETS STREQUAL "all")
+    rocblas_filter_tensile_arch_skiplist(GPU_TARGETS ROCBLAS_TENSILE_ARCH_SKIPLIST
+                                         _tensile_archs _tensile_excluded_archs)
+    rocblas_tensile_use_stub_if_empty(_tensile_archs
+      "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/blas3/Tensile/Logic/asm_full"
+      "${GPU_TARGETS}" "${ROCBLAS_TENSILE_ARCH_SKIPLIST}")
+    if(_tensile_excluded_archs)
+      message(STATUS "Skipping in Tensile (ROCBLAS_TENSILE_ARCH_SKIPLIST): ${_tensile_excluded_archs}")
+    endif()
+    set(Tensile_ARCHITECTURE "${_tensile_archs}" CACHE STRING "Tensile to use which architecture?" FORCE)
+  endif()
+endif()
 if(ROCBLAS_ENABLE_TENSILE)
   if(NOT ROCBLAS_ENABLE_SUPERBUILD)
     message(STATUS "Adding Tensile from subdirectory: ${ROCBLAS_TENSILE_SUBDIR_PATH}")
@@ -265,7 +284,8 @@ rocm_export_targets(
 
 if(ROCBLAS_ENABLE_TENSILE)
   rocm_install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library/"
-               DESTINATION "${ROCBLAS_TENSILE_INSTALL_DIR}" COMPONENT runtime)
+               DESTINATION "${ROCBLAS_TENSILE_INSTALL_DIR}" COMPONENT runtime
+               PATTERN "*gfx000*" EXCLUDE)
 endif()
 
 if(ROCBLAS_ENABLE_CLIENT)

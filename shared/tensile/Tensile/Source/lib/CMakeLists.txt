@@ -103,7 +103,7 @@ if(TENSILE_USE_MSGPACK)
     endif()
     get_target_property(msgpack_inc ${msgpack_target} INTERFACE_INCLUDE_DIRECTORIES)
     target_include_directories(TensileHost PRIVATE "${msgpack_inc}")
-    target_compile_definitions(TensileHost PRIVATE TENSILE_MSGPACK=1)
+    target_compile_definitions(TensileHost PRIVATE TENSILE_MSGPACK=1 MSGPACK_NO_BOOST)
 endif()
 
 if(TENSILE_USE_LLVM)

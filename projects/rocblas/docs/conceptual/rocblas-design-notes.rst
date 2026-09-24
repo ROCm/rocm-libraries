@@ -31,6 +31,14 @@ For instance, hipBLASLt is used as the default backend for problems on the gfx12
 allow rocBLAS to be built without Tensile or hipBLASLt.
 They can potentially be used as fallbacks for problems that are not supported by the Tensile or hipBLASLt backends.
 
+CMake ``GPU_TARGETS`` (offload architectures) are always used when compiling the rocBLAS library.
+``ROCBLAS_TENSILE_ARCH_SKIPLIST`` removes selected targets from Tensile library generation only
+(default ``gfx1250``). If every ``GPU_TARGETS`` entry is skipped, Tensile is still enabled and
+builds its stub ``gfx000`` target when the selected logic tree provides one (HIP fallback or
+``gfx000`` YAML). Stub ``gfx000`` catalogs are not packaged. A skipped architecture still receives rocBLAS device
+code. When Tensile is present, GEMM on a skipped architecture uses hipBLASLt or
+source kernels instead of aborting Tensile initialization.
+
 The environment variables ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_BATCHED`` are provided to manually control which GEMM backend is used. ``ROCBLAS_USE_HIPBLASLT`` is for non-batched, _strided_batched and _batched GEMM. ``ROCBLAS_USE_HIPBLASLT_BATCHED`` only affects _batched GEMM. ``ROCBLAS_USE_HIPBLASLT_BATCHED`` is deprecated, should no longer be required, and is planned for removal in a future release. These provide the following settings:
 
 *  ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_BATCHED`` are not set: the GEMM backend is automatically selected.

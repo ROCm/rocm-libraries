@@ -111,6 +111,7 @@ Options
 
 * ``ROCBLAS_TENSILE_SUBDIR_PATH``: Path to Tensile subdirectory (default: ``${CMAKE_CURRENT_SOURCE_DIR}/../../Tensile``)
 * ``ROCBLAS_TENSILE_INSTALL_DIR``: Path to tensile library (default: ``${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/rocblas`` on Linux, ``${CPACK_PACKAGING_INSTALL_PREFIX}rocblas/bin`` on Windows)
+* ``ROCBLAS_TENSILE_ARCH_SKIPLIST``: GPU targets skipped during Tensile library generation. The rocBLAS library still compiles for all ``GPU_TARGETS`` (default: ``gfx1250``). If every target is skipped, Tensile is invoked with stub ``gfx000`` when that logic exists, but ``gfx000`` catalogs are not packaged. GEMM on a skipped architecture uses hipBLASLt or source kernels.
 
 *Client options*:
 

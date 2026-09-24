@@ -849,7 +849,8 @@ if( BUILD_WITH_TENSILE )
       DIRECTORY ${CMAKE_BINARY_DIR}/Tensile/library
       DESTINATION ${ROCBLAS_TENSILE_LIBRARY_DIR}
       COMPONENT ${TENSILE_DATA_COMPONENT_NAME} # Use this cmake variable to be compatible with rocm-cmake 0.6 and 0.7
-      PATTERN "TensileManifest.txt" EXCLUDE)
+      PATTERN "TensileManifest.txt" EXCLUDE
+      PATTERN "*gfx000*" EXCLUDE)
   endif()
 endif()
 

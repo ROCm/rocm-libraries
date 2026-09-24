@@ -259,6 +259,10 @@ function(TensileCreateLibraryFiles
         set(_tensile_base_archs "")
         foreach(_arch IN LISTS Tensile_ARCHITECTURE)
           string(REGEX REPLACE ":.*$" "" _base "${_arch}")
+          # gfx000 is a Tensile stub; catalogs for it are not packaged.
+          if(_base STREQUAL "gfx000")
+            continue()
+          endif()
           list(APPEND _tensile_base_archs "${_base}")
         endforeach()
         list(REMOVE_DUPLICATES _tensile_base_archs)
