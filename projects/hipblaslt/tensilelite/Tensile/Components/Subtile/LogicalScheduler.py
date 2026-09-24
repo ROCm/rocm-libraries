@@ -5998,10 +5998,17 @@ class LogicalScheduler:
             # body reads second -- and it reaches that half in partition 0,
             # ahead of every wait it does have. The split pair never needed
             # this, because the NGLL stood between the loads and the NLL that
-            # read them. Costs one drain at entry, and the loads have had a
-            # whole macro tile to retire by now.
+            # read them.
+            #
+            # The count is how many of those loads may stay in flight past the
+            # barrier. Zero is the safe bound and what ships; it costs 181
+            # cycles per entry, ~23000 over the dispatch. Dropping the wait
+            # outright is *not* safe -- it fails fp4-verify 9/11 -- so some of
+            # what is in flight really is read here. The knob is for finding
+            # where that line falls; see FINDINGS F22.
             from rocisa.instruction import SWaitCnt, SBarrier
-            module.add(SWaitCnt(vlcnt=0, dscnt=-1, vscnt=-1,
+            entryVmcnt = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_ENTRY_VMCNT", "0"))
+            module.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
                                 comment="four-deep tail: retire the mainloop's"
                                         " loads before reading what they wrote"))
             module.add(SBarrier(comment="four-deep tail entry"))
