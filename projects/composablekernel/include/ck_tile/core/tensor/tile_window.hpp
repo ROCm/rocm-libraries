@@ -81,7 +81,6 @@ CK_TILE_HOST_DEVICE constexpr auto tdm_real_lengths(const TensorDesc& desc)
 
 } // namespace detail
 
-
 /**
  * @brief This class provides tile (windowed) view and access to the device memory.
  *
@@ -966,10 +965,11 @@ struct tile_window_with_static_distribution
 
             // Calculate remaining tensor dimensions, clamping negative values to 0
             // This prevents out-of-bounds access when window_origin + bottom_index > tensor_length
-            auto&& tensor_dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
-                transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                 detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
-                                     window_adaptor_thread_coord.get_bottom_index())));
+            auto&& tensor_dims =
+                to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(transform_tuples(
+                    [](auto x) { return max(index_t{0}, x); },
+                    detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
+                        window_adaptor_thread_coord.get_bottom_index())));
             tensor_dims[0] /= Traits::PackedSize;
             // Assert that both window origins have the same dimensionality
             static_assert(
@@ -1118,10 +1118,11 @@ struct tile_window_with_static_distribution
 
             // Calculate remaining tensor dimensions, clamping negative values to 0
             // This prevents out-of-bounds access when window_origin + bottom_index > tensor_length
-            auto&& tensor_dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
-                transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                 detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
-                                     window_adaptor_thread_coord.get_bottom_index())));
+            auto&& tensor_dims =
+                to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(transform_tuples(
+                    [](auto x) { return max(index_t{0}, x); },
+                    detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
+                        window_adaptor_thread_coord.get_bottom_index())));
             tensor_dims[0] /= Traits::PackedSize;
 
             // Prefetch across the 2D tile using strides
@@ -1367,10 +1368,11 @@ struct tile_window_with_static_distribution
             // Calculate remaining tensor dimensions, clamping negative values to 0
             // This prevents out-of-bounds access when window_origin + bottom_index >
             // tensor_length
-            auto&& tensor_dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
-                transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                 detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
-                                     window_adaptor_thread_coord.get_bottom_index())));
+            auto&& tensor_dims =
+                to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(transform_tuples(
+                    [](auto x) { return max(index_t{0}, x); },
+                    detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
+                        window_adaptor_thread_coord.get_bottom_index())));
             tensor_dims[0] /= Traits::PackedSize;
 
             constexpr auto raw_box_dim =

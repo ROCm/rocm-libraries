@@ -172,22 +172,18 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE 0
 #endif
 
-
 // PROBE: drop the remaining hand-written GemmStagedScheduler prescriptions
 // (<0>, <3>, <4>) and/or the sched_barrier that follows each, the same way A2
 // did for <1>/<2>.  Bit N of the mask selects scheduler N.
-
 
 // PROBE: fence the softmax/dropout stage from the operand prefetch that follows
 // it. The hot-loop VGPR peak is a ~1000-line band where the scheduler has
 // hoisted the next gemm's ds_load_tr fragments into the dropout stage; this
 // measures what that overlap costs in registers.
 
-
 // A2: merge the gemm_1 / gemm_2 scheduling regions -- drop the sched_barrier
 // between them AND both hand-written GemmStagedScheduler prescriptions.
 // Both halves are required; doing either alone is a loss (see HANDOFF_A2).
-
 
 // PROBE: keep ONLY dV in registers, leave dK in LDS. Halves the extra register
 // cost versus the fully register-resident pipeline (128 VGPR instead of 256).
@@ -196,7 +192,6 @@ namespace ck_tile {
 // odd ones out.  Safe: gemm_4 touches neither, and nothing between gemm_4 and
 // the dO/D loads writes LDS or barriers, so they sit in the same validity
 // window the dO/D loads already rely on.
-
 
 // Same algorithm as BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP, with the dK and dV
 // accumulators held in LDS instead of registers.
@@ -244,7 +239,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     static constexpr index_t kBlockPerCu = Problem::kBlockPerCu;
     static constexpr index_t kBlockSize  = Problem::kBlockSize;
 
-    static constexpr index_t kM0        = BlockFmhaShape::kM0;
+    static constexpr index_t kM0 = BlockFmhaShape::kM0;
     // Resolved Q/dO ring depth, exposed so the kernel can keep the dQ static
     // stride paired with it -- the fold only pays alongside the deep ring.
     static constexpr index_t kQDOSlotsResolved = Policy::template GetQDOSlots<Problem>();
@@ -289,8 +284,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     // simplify here: kUseQrQtrDorPipeline is false by construction in this
     // pipeline, and with it false kUsePersistent reduces to kIsDeterministic.
     static constexpr bool kBodyIsPaired = CK_TILE_FMHA_BWD_MASK_TILE_PAIRING &&
-                                          FmhaMask::IsMasking && !kIsGroupMode &&
-                                          !kIsDeterministic;
+                                          FmhaMask::IsMasking && !kIsGroupMode && !kIsDeterministic;
     static constexpr bool kDropStagedSched =
         (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 2) ||
         (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 1 && !kBodyIsPaired);
@@ -351,13 +345,11 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                       "the fold must not change how many values a lane holds");
 
         constexpr index_t kWarpSize = get_warp_size();
-        constexpr index_t kMPerLane =
-            BlockFmhaShape::Gemm4WarpTile::at(number<0>{}) *
-            BlockFmhaShape::Gemm4WarpTile::at(number<1>{}) / kWarpSize;
+        constexpr index_t kMPerLane = BlockFmhaShape::Gemm4WarpTile::at(number<0>{}) *
+                                      BlockFmhaShape::Gemm4WarpTile::at(number<1>{}) / kWarpSize;
         // One pair-group is two consecutive N iterations, i.e. two runs of
         // kMPerLane values in the thread buffer.
-        constexpr index_t kPairGroups =
-            QGradAccTensor::get_thread_buffer_size() / (2 * kMPerLane);
+        constexpr index_t kPairGroups = QGradAccTensor::get_thread_buffer_size() / (2 * kMPerLane);
         static_assert(kPairGroups * 2 * kMPerLane == QGradAccTensor::get_thread_buffer_size(),
                       "accumulator does not split into N-adjacent pairs");
 
@@ -369,11 +361,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 constexpr auto i_lo = number<i_pair * 2 * kMPerLane + i_e>{};
                 constexpr auto i_hi = number<i_pair * 2 * kMPerLane + kMPerLane + i_e>{};
 
-                const int32x2_t s =
-                    __builtin_amdgcn_permlane16_swap(bit_cast<int32_t>(src[i_lo]),
-                                                     bit_cast<int32_t>(src[i_hi]),
-                                                     false,
-                                                     false);
+                const int32x2_t s = __builtin_amdgcn_permlane16_swap(
+                    bit_cast<int32_t>(src[i_lo]), bit_cast<int32_t>(src[i_hi]), false, false);
 
                 dst(i_lo) = bit_cast<AccDataType>(s[0]);
                 dst(i_hi) = bit_cast<AccDataType>(s[1]);
@@ -593,22 +582,23 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         TDMConfig tdm_config_lse;
         TDMConfig tdm_config_d;
         {
-            constexpr auto LdsPaddingConfigV = Policy::template GetLdsPaddingConfigV<Problem>();
+            constexpr auto LdsPaddingConfigV     = Policy::template GetLdsPaddingConfigV<Problem>();
             tdm_config_v.pad_enable              = LdsPaddingConfigV[number<0>{}];
             tdm_config_v.pad_config.pad_amount   = LdsPaddingConfigV[number<1>{}];
             tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
 
-            constexpr auto LdsPaddingConfigK = Policy::template GetLdsPaddingConfigK<Problem>();
+            constexpr auto LdsPaddingConfigK     = Policy::template GetLdsPaddingConfigK<Problem>();
             tdm_config_k.pad_enable              = LdsPaddingConfigK[number<0>{}];
             tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[number<1>{}];
             tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
 
-            constexpr auto LdsPaddingConfigQ = Policy::template GetLdsPaddingConfigQ<Problem>();
+            constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
             tdm_config_q.pad_enable              = LdsPaddingConfigQ[number<0>{}];
             tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[number<1>{}];
             tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
 
-            constexpr auto LdsPaddingConfigDO = Policy::template GetLdsPaddingConfigOGrad<Problem>();
+            constexpr auto LdsPaddingConfigDO =
+                Policy::template GetLdsPaddingConfigOGrad<Problem>();
             tdm_config_do.pad_enable              = LdsPaddingConfigDO[number<0>{}];
             tdm_config_do.pad_config.pad_amount   = LdsPaddingConfigDO[number<1>{}];
             tdm_config_do.pad_config.pad_interval = LdsPaddingConfigDO[number<2>{}];
@@ -729,8 +719,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         auto q_lds_windows = generate_tuple(
             [&](auto j) {
                 auto tv = make_tensor_view<address_space_enum::lds>(
-                    static_cast<QDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr) +
-                                                               q_slot_off(j))),
+                    static_cast<QDataType*>(
+                        static_cast<void*>(static_cast<char*>(smem_ptr) + q_slot_off(j))),
                     Policy::template MakeQLdsBlockDescriptor<Problem>());
                 return make_tile_window(
                     tv, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
@@ -771,11 +761,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         auto do_lds_windows = generate_tuple(
             [&](auto j) {
                 auto tv = make_tensor_view<address_space_enum::lds>(
-                    static_cast<OGradDataType*>(static_cast<void*>(
-                        static_cast<char*>(smem_ptr) + do_slot_off(j))),
+                    static_cast<OGradDataType*>(
+                        static_cast<void*>(static_cast<char*>(smem_ptr) + do_slot_off(j))),
                     Policy::template MakeOGradLdsBlockDescriptor<Problem>());
-                return make_tile_window(
-                    tv, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
+                return make_tile_window(tv, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
             },
             number<kQDOSlots>{});
 
@@ -860,17 +849,17 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                       "BiasDataType and BiasGradDataType should be the same!");
 
         // LSE: HBM -> LDS ->Reg
-        auto lse_dram_window = make_tile_window(
-            lse_dram_block_window_tmp.get_bottom_tensor_view(),
-            lse_dram_block_window_tmp.get_window_lengths(),
-            {seqlen_q_start},
-            Policy::template MakeLSEDDramTdmDistribution<Problem>());
+        auto lse_dram_window =
+            make_tile_window(lse_dram_block_window_tmp.get_bottom_tensor_view(),
+                             lse_dram_block_window_tmp.get_window_lengths(),
+                             {seqlen_q_start},
+                             Policy::template MakeLSEDDramTdmDistribution<Problem>());
 
         auto lse_lds_views = generate_tuple(
             [&](auto j) {
                 return make_tensor_view<address_space_enum::lds>(
-                    static_cast<LSEDataType*>(static_cast<void*>(
-                        static_cast<char*>(smem_ptr) + lse_slot_off(j))),
+                    static_cast<LSEDataType*>(
+                        static_cast<void*>(static_cast<char*>(smem_ptr) + lse_slot_off(j))),
                     Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
             },
             number<kQDOSlots>{});
@@ -892,17 +881,17 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             number<kQDOSlots>{});
 
         // D: HBM ->Reg
-        auto d_dram_window = make_tile_window(
-            d_dram_block_window_tmp.get_bottom_tensor_view(),
-            d_dram_block_window_tmp.get_window_lengths(),
-            {seqlen_q_start},
-            Policy::template MakeLSEDDramTdmDistribution<Problem>());
+        auto d_dram_window =
+            make_tile_window(d_dram_block_window_tmp.get_bottom_tensor_view(),
+                             d_dram_block_window_tmp.get_window_lengths(),
+                             {seqlen_q_start},
+                             Policy::template MakeLSEDDramTdmDistribution<Problem>());
 
         auto d_lds_views = generate_tuple(
             [&](auto j) {
                 return make_tensor_view<address_space_enum::lds>(
-                    static_cast<DDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr) +
-                                                               d_slot_off(j))),
+                    static_cast<DDataType*>(
+                        static_cast<void*>(static_cast<char*>(smem_ptr) + d_slot_off(j))),
                     Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
             },
             number<kQDOSlots>{});
@@ -991,9 +980,9 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // -- 4 transfers each, because CK splits LSE and D where aiter shares a
         // descriptor. kQDOSlots == 2 gives a wait of 0, i.e. the full drain this
         // loop used to do; kQDOSlots == 4 gives 8 and never drains.
-        constexpr index_t kIssueAhead  = kQDOSlots == 1 ? 1 : kQDOSlots - 1;
-        constexpr index_t kTdmPerTile  = CK_TILE_FMHA_BWD_ABLATE_DROP_D ? 3 : 4;
-        constexpr index_t kTdmWaitCnt  = kQDOSlots >= 2 ? kTdmPerTile * (kQDOSlots - 2) : 0;
+        constexpr index_t kIssueAhead = kQDOSlots == 1 ? 1 : kQDOSlots - 1;
+        constexpr index_t kTdmPerTile = CK_TILE_FMHA_BWD_ABLATE_DROP_D ? 3 : 4;
+        constexpr index_t kTdmWaitCnt = kQDOSlots >= 2 ? kTdmPerTile * (kQDOSlots - 2) : 0;
 
         // Advance the DRAM windows only while a real tile remains. Past the end
         // the issue re-reads the last tile into a slot nothing will look at:
@@ -1381,9 +1370,9 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             // behind; at 4 it has had three.
             s_wait_tensorcnt_barrier<kTdmWaitCnt>();
 #endif
-            auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
-            q_reg_tensor = load_tile(q_rd_dst);
-            lse          = load_tile(lse_rd_dst);
+            auto ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
+            q_reg_tensor       = load_tile(q_rd_dst);
+            lse                = load_tile(lse_rd_dst);
 
             if constexpr(!kDropStagedSched || (CK_TILE_FMHA_BWD_SCHED_KEEP_MASK & (1 << 3)))
             {
@@ -1403,7 +1392,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                                       sequence<0, i_k4 * kK4>{},
                                       sequence<kM0, (i_k4 + 1) * kK4>{}),
                        kt_reg_tensor_slice);
-
             });
 
             do_reg_tensor = load_tile(do_rd_dst);
@@ -1459,19 +1447,17 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                         constexpr index_t kCur = j;
                         constexpr index_t kNxt = (kCur + 1) % kQDOSlots;
                         constexpr index_t kWr  = (kCur + kIssueAhead) % kQDOSlots;
-                        hot_loop_body(bool_constant<true>{},
-                                      q_lds_read_windows.at(number<kCur>{}),
-                                      qt_lds_read_windows.at(number<kCur>{}),
-                                      do_lds_read_windows.at(number<kCur>{}),
-                                      dot_lds_read_windows.at(number<kCur>{}),
-                                      q_lds_read_windows.at(number<kNxt>{}),
-                                      do_lds_read_windows.at(number<kNxt>{}),
-                                      lse_lds_read_windows.at(number<kNxt>{}),
-                                      d_lds_read_windows.at(number<kNxt>{}),
-                                      [&] {
-                                          issue_qdo_tile(number<kWr>{},
-                                                         i_total_loops + kIssueAhead);
-                                      });
+                        hot_loop_body(
+                            bool_constant<true>{},
+                            q_lds_read_windows.at(number<kCur>{}),
+                            qt_lds_read_windows.at(number<kCur>{}),
+                            do_lds_read_windows.at(number<kCur>{}),
+                            dot_lds_read_windows.at(number<kCur>{}),
+                            q_lds_read_windows.at(number<kNxt>{}),
+                            do_lds_read_windows.at(number<kNxt>{}),
+                            lse_lds_read_windows.at(number<kNxt>{}),
+                            d_lds_read_windows.at(number<kNxt>{}),
+                            [&] { issue_qdo_tile(number<kWr>{}, i_total_loops + kIssueAhead); });
                     }
                 });
             }
@@ -1546,18 +1532,18 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                         : lse_lds_read_windows.at(number<kB>{}),
                     sec ? d_lds_read_windows.at(number<0>{}) : d_lds_read_windows.at(number<kB>{}),
                     [&] {
-                        load_tile_tdm(
-                            tdm_config_q,
-                            sec ? q_lds_windows.at(number<0>{}) : q_lds_windows.at(number<kB>{}),
-                            q_dram_window);
+                        load_tile_tdm(tdm_config_q,
+                                      sec ? q_lds_windows.at(number<0>{})
+                                          : q_lds_windows.at(number<kB>{}),
+                                      q_dram_window);
                         load_tile_tdm(tdm_config_lse,
                                       sec ? lse_lds_write_windows.at(number<0>{})
                                           : lse_lds_write_windows.at(number<kB>{}),
                                       lse_dram_window);
-                        load_tile_tdm(
-                            tdm_config_do,
-                            sec ? do_lds_windows.at(number<0>{}) : do_lds_windows.at(number<kB>{}),
-                            do_dram_window);
+                        load_tile_tdm(tdm_config_do,
+                                      sec ? do_lds_windows.at(number<0>{})
+                                          : do_lds_windows.at(number<kB>{}),
+                                      do_dram_window);
 #if !CK_TILE_FMHA_BWD_ABLATE_DROP_D
                         load_tile_tdm(tdm_config_d,
                                       sec ? d_lds_write_windows.at(number<0>{})
@@ -1593,18 +1579,18 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                         : lse_lds_read_windows.at(number<kB>{}),
                     sec ? d_lds_read_windows.at(number<0>{}) : d_lds_read_windows.at(number<kB>{}),
                     [&] {
-                        load_tile_tdm(
-                            tdm_config_q,
-                            sec ? q_lds_windows.at(number<0>{}) : q_lds_windows.at(number<kB>{}),
-                            q_dram_window);
+                        load_tile_tdm(tdm_config_q,
+                                      sec ? q_lds_windows.at(number<0>{})
+                                          : q_lds_windows.at(number<kB>{}),
+                                      q_dram_window);
                         load_tile_tdm(tdm_config_lse,
                                       sec ? lse_lds_write_windows.at(number<0>{})
                                           : lse_lds_write_windows.at(number<kB>{}),
                                       lse_dram_window);
-                        load_tile_tdm(
-                            tdm_config_do,
-                            sec ? do_lds_windows.at(number<0>{}) : do_lds_windows.at(number<kB>{}),
-                            do_dram_window);
+                        load_tile_tdm(tdm_config_do,
+                                      sec ? do_lds_windows.at(number<0>{})
+                                          : do_lds_windows.at(number<kB>{}),
+                                      do_dram_window);
 #if !CK_TILE_FMHA_BWD_ABLATE_DROP_D
                         load_tile_tdm(tdm_config_d,
                                       sec ? d_lds_write_windows.at(number<0>{})
@@ -1762,7 +1748,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             }
         }
 
-
         // STAGE 4, OGrad@V Gemm2
         auto dp_acc = SPGradBlockTileType{};
 
@@ -1835,7 +1820,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         block_sync_lds();
 
-        auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
+        auto ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
 
         HotLoopScheduler::template GemmStagedScheduler<3>();
         __builtin_amdgcn_sched_barrier(0);
@@ -1848,9 +1833,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 kt_reg_tensor, sequence<0, i_k4 * kK4>{}, sequence<kQKHeaddim, (i_k4 + 1) * kK4>{});
 
             gemm_4(dq_acc,
-                   get_slice_tile(ds_reg_tensor,
-                                  sequence<0, i_k4 * kK4>{},
-                                  sequence<kM0, (i_k4 + 1) * kK4>{}),
+                   get_slice_tile(
+                       ds_reg_tensor, sequence<0, i_k4 * kK4>{}, sequence<kM0, (i_k4 + 1) * kK4>{}),
                    kt_reg_tensor_slice);
         });
 

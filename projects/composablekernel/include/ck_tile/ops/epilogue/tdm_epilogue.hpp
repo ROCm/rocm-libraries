@@ -174,13 +174,13 @@ CK_TILE_DEVICE constexpr auto tdm_wave_linear_distr()
     static_assert(kMPerBlock % waveNum == 0, "kMPerBlock must split evenly across waves");
 
     return make_static_tile_distribution(
-        tile_distribution_encoding<sequence<>,
-                                   tuple<sequence<waveNum, kMPerBlock / waveNum>,
-                                         sequence<kNPerBlock>>,
-                                   tuple<sequence<1>>,
-                                   tuple<sequence<0>>,
-                                   sequence<1, 2>,
-                                   sequence<1, 0>>{},
+        tile_distribution_encoding<
+            sequence<>,
+            tuple<sequence<waveNum, kMPerBlock / waveNum>, sequence<kNPerBlock>>,
+            tuple<sequence<1>>,
+            tuple<sequence<0>>,
+            sequence<1, 2>,
+            sequence<1, 0>>{},
         bool_constant<true>{});
 }
 
@@ -244,16 +244,16 @@ CK_TILE_DEVICE void tdm_store_2d_pair(ADramWindow& a_dram_window,
                                  {0, 0},
                                  b_acc_tile.get_tile_distribution());
 
-    auto a_out = make_tile_window(
-        a_lds,
-        make_tuple(number<kMPerBlock>{}, number<kNPerBlockA>{}),
-        {0, 0},
-        impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kNPerBlockA>());
-    auto b_out = make_tile_window(
-        b_lds,
-        make_tuple(number<kMPerBlock>{}, number<kNPerBlockB>{}),
-        {0, 0},
-        impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kNPerBlockB>());
+    auto a_out =
+        make_tile_window(a_lds,
+                         make_tuple(number<kMPerBlock>{}, number<kNPerBlockA>{}),
+                         {0, 0},
+                         impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kNPerBlockA>());
+    auto b_out =
+        make_tile_window(b_lds,
+                         make_tuple(number<kMPerBlock>{}, number<kNPerBlockB>{}),
+                         {0, 0},
+                         impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kNPerBlockB>());
 
     TDMConfig tdm_config;
 

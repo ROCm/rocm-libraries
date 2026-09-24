@@ -21,25 +21,23 @@ class BlockFmhaBwdDQDKDVPipelineSelector
 
     public:
     template <typename... TS>
-    using type_ =
-        std::conditional_t<Problem::kUseTrLoad,
-                           std::conditional_t<is_decode,
-                                              BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR<TS...>,
-                                              BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR<TS...>>,
-                           // LdsAcc is the IGLP pipeline with the dK/dV
-                           // accumulators moved to LDS, so it slots in wherever
-                           // IGLP would have been chosen. It outranks has_dpad1:
-                           // that gate predates this pipeline and all three treat
-                           // kPadHeadDim identically (it only lowers the load
-                           // alignment), so sending dpad=1 to KRKTRVR cost 3.5-9x
-                           // for no reason.
-                           std::conditional_t<
-                               Problem::kUseLdsAcc,
-                               BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR<TS...>,
-                               std::conditional_t<
-                                   has_dpad1,
-                                   BlockFmhaBwdDQDKDVPipelineKRKTRVR<TS...>,
-                                   BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP<TS...>>>>;
+    using type_ = std::conditional_t<
+        Problem::kUseTrLoad,
+        std::conditional_t<is_decode,
+                           BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR<TS...>,
+                           BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR<TS...>>,
+        // LdsAcc is the IGLP pipeline with the dK/dV
+        // accumulators moved to LDS, so it slots in wherever
+        // IGLP would have been chosen. It outranks has_dpad1:
+        // that gate predates this pipeline and all three treat
+        // kPadHeadDim identically (it only lowers the load
+        // alignment), so sending dpad=1 to KRKTRVR cost 3.5-9x
+        // for no reason.
+        std::conditional_t<Problem::kUseLdsAcc,
+                           BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR<TS...>,
+                           std::conditional_t<has_dpad1,
+                                              BlockFmhaBwdDQDKDVPipelineKRKTRVR<TS...>,
+                                              BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP<TS...>>>>;
     using type = std::conditional_t<std::is_same_v<Policy, void>, //
                                     type_<Problem>,
                                     type_<Problem, Policy>>;

@@ -243,8 +243,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<0>{});
         constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<1>{});
 
-        constexpr index_t MIterPerWarp =
-            Problem::BlockFmhaShape::kM0 / (MWarp * WarpGemm::kM);
+        constexpr index_t MIterPerWarp = Problem::BlockFmhaShape::kM0 / (MWarp * WarpGemm::kM);
         constexpr index_t NIterPerWarp =
             Problem::BlockFmhaShape::kQKHeaddim / (NWarp * WarpGemm::kN);
 
@@ -268,14 +267,13 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         // into one 128-long P dim would land all four warps on the first 32
         // columns.
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<MWarp, MIterPerWarp, kCMLane, kMPerLane>,
-                      sequence<NWarp, NIterPerWarp / 2, kWarpSize>>,
-                tuple<sequence<1, 2>, sequence<2>>,
-                tuple<sequence<0, 0>, sequence<2>>,
-                sequence<1, 2, 1, 1>,
-                sequence<1, 1, 2, 3>>{});
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<MWarp, MIterPerWarp, kCMLane, kMPerLane>,
+                                             sequence<NWarp, NIterPerWarp / 2, kWarpSize>>,
+                                       tuple<sequence<1, 2>, sequence<2>>,
+                                       tuple<sequence<0, 0>, sequence<2>>,
+                                       sequence<1, 2, 1, 1>,
+                                       sequence<1, 1, 2, 3>>{});
     }
 #endif
 
@@ -344,8 +342,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
 
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<warpNum, kSeq / warpNum>,
-                                             sequence<kHeaddim>>,
+                                       tuple<sequence<warpNum, kSeq / warpNum>, sequence<kHeaddim>>,
                                        tuple<sequence<1>>,
                                        tuple<sequence<0>>,
                                        sequence<1, 2>,
@@ -408,9 +405,8 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                       "operand LDS pad must be a whole number of dwords");
         static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
 
-        return make_tuple(number<true>{},
-                          number<pad_dwords - 1>{},
-                          number<log2_floor(row_dwords) - 1>{});
+        return make_tuple(
+            number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
     }
 
     // ---- dO: one plain box, dO^T read back by ds_load_tr --------------------
@@ -557,10 +553,9 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr auto qt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             qt_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
 
-        return make_static_tile_distribution(
-            typename InputTileDistributionTraits<
-                decltype(qt_block_dstr_encode),
-                typename Problem::QDataType>::TransposedDstrEncode{});
+        return make_static_tile_distribution(typename InputTileDistributionTraits<
+                                             decltype(qt_block_dstr_encode),
+                                             typename Problem::QDataType>::TransposedDstrEncode{});
     }
 
     // dS box transposed to [kN0][kM0], for THIS pipeline only.
@@ -679,23 +674,23 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeVDramTileDistribution()
     {
-        constexpr index_t kSeq     = Problem::BlockFmhaShape::kN0;        // V rows
-        constexpr index_t kHeaddim = Problem::BlockFmhaShape::kVHeaddim;  // V cols
+        constexpr index_t kSeq     = Problem::BlockFmhaShape::kN0;       // V rows
+        constexpr index_t kHeaddim = Problem::BlockFmhaShape::kVHeaddim; // V cols
         constexpr index_t warpNum  = Problem::BlockFmhaShape::NumWarps;
 
         static_assert(kSeq % warpNum == 0,
                       "V kN0 must be divisible by the warp count for a tile-major V dist");
 
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,                                 // R: nothing replicated
-                tuple<sequence<warpNum, kSeq / warpNum>,    // X[0]: rows, split across warps
-                      sequence<kHeaddim>>,                  // X[1]: one full row per thread
-                tuple<sequence<1>>,                         // PsToRH major
-                tuple<sequence<0>>,                         // PsToRH minor
-                sequence<1, 2>,                             // YsToD major
-                sequence<1, 0>>{},                          // YsToD minor
-            bool_constant<true>{});                         // warp-level parallel only
+            tile_distribution_encoding<sequence<>, // R: nothing replicated
+                                       tuple<sequence<warpNum, kSeq / warpNum>, // X[0]: rows, split
+                                                                                // across warps
+                                             sequence<kHeaddim>>, // X[1]: one full row per thread
+                                       tuple<sequence<1>>,        // PsToRH major
+                                       tuple<sequence<0>>,        // PsToRH minor
+                                       sequence<1, 2>,            // YsToD major
+                                       sequence<1, 0>>{},         // YsToD minor
+            bool_constant<true>{});                               // warp-level parallel only
     }
 
     // TDM LDS padding for V: disabled, mirroring the fwd TDM policy. Enabling it
@@ -730,9 +725,8 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                       "operand LDS pad must be a whole number of dwords");
         static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
 
-        return make_tuple(number<true>{},
-                          number<pad_dwords - 1>{},
-                          number<log2_floor(row_dwords) - 1>{});
+        return make_tuple(
+            number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
     }
 
     // GetSmemSizeV lives in the base and would otherwise call the base's
@@ -813,12 +807,12 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         // reports 0 for them and there is nothing to reserve. Taking the base's
         // 16,384 each instead -- as this did originally -- reserved 32,768 B
         // that the layout never addresses.
-        constexpr index_t stage1 =
-            GetSmemSizeQT<Problem>() + GetSmemSizeQ<Problem>() +
-            GetSmemSizeOGradT<Problem>() + GetSmemSizeOGrad<Problem>() +
-            Base::template GetSmemSizeLSE<Problem>() + Base::template GetSmemSizeD<Problem>() +
-            max(Base::template GetSmemSizeBias<Problem>(),
-                Base::template GetSmemSizeSGrad<Problem>());
+        constexpr index_t stage1 = GetSmemSizeQT<Problem>() + GetSmemSizeQ<Problem>() +
+                                   GetSmemSizeOGradT<Problem>() + GetSmemSizeOGrad<Problem>() +
+                                   Base::template GetSmemSizeLSE<Problem>() +
+                                   Base::template GetSmemSizeD<Problem>() +
+                                   max(Base::template GetSmemSizeBias<Problem>(),
+                                       Base::template GetSmemSizeSGrad<Problem>());
 
         constexpr index_t total = max(stage0_0, stage0_1, stage1);
         // The old assert compared against the base policy's total, which does
@@ -869,15 +863,14 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeQDramTileDistribution()
     {
-        constexpr index_t kRows    = Problem::BlockFmhaShape::kM0;
-        constexpr index_t kCols    = Problem::BlockFmhaShape::kQKHeaddim;
-        constexpr index_t warpNum  = Problem::BlockFmhaShape::NumWarps;
+        constexpr index_t kRows   = Problem::BlockFmhaShape::kM0;
+        constexpr index_t kCols   = Problem::BlockFmhaShape::kQKHeaddim;
+        constexpr index_t warpNum = Problem::BlockFmhaShape::NumWarps;
         static_assert(kRows % warpNum == 0, "kM0 must divide by the warp count");
 
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<warpNum, kRows / warpNum>,
-                                             sequence<kCols>>,
+                                       tuple<sequence<warpNum, kRows / warpNum>, sequence<kCols>>,
                                        tuple<sequence<1>>,
                                        tuple<sequence<0>>,
                                        sequence<1, 2>,
@@ -888,15 +881,14 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeOGradDramTileDistribution()
     {
-        constexpr index_t kRows    = Problem::BlockFmhaShape::kM0;
-        constexpr index_t kCols    = Problem::BlockFmhaShape::kVHeaddim;
-        constexpr index_t warpNum  = Problem::BlockFmhaShape::NumWarps;
+        constexpr index_t kRows   = Problem::BlockFmhaShape::kM0;
+        constexpr index_t kCols   = Problem::BlockFmhaShape::kVHeaddim;
+        constexpr index_t warpNum = Problem::BlockFmhaShape::NumWarps;
         static_assert(kRows % warpNum == 0, "kM0 must divide by the warp count");
 
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<warpNum, kRows / warpNum>,
-                                             sequence<kCols>>,
+                                       tuple<sequence<warpNum, kRows / warpNum>, sequence<kCols>>,
                                        tuple<sequence<1>>,
                                        tuple<sequence<0>>,
                                        sequence<1, 2>,
@@ -933,9 +925,8 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                       "operand LDS pad must be a whole number of dwords");
         static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
 
-        return make_tuple(number<true>{},
-                          number<pad_dwords - 1>{},
-                          number<log2_floor(row_dwords) - 1>{});
+        return make_tuple(
+            number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
     }
 
     template <typename Problem>
@@ -967,9 +958,8 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                       "operand LDS pad must be a whole number of dwords");
         static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
 
-        return make_tuple(number<true>{},
-                          number<pad_dwords - 1>{},
-                          number<log2_floor(row_dwords) - 1>{});
+        return make_tuple(
+            number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
     }
 
     // Double-buffering Q/dO is a trade, not a free win: measured +3.2% on nomask
@@ -1037,8 +1027,8 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQDOSlotStride()
     {
-        return GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>() +
-               GetSmemSizeLSE<Problem>() + GetSmemSizeD<Problem>();
+        return GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>() + GetSmemSizeLSE<Problem>() +
+               GetSmemSizeD<Problem>();
     }
 
     // Base of slot j, j >= 1. j == 0 is addressed through the staged offsets.
@@ -1081,8 +1071,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        constexpr index_t single = GetSmemSizeStaged<Problem>() +
-                                   GetSmemSizeKGradAcc<Problem>() +
+        constexpr index_t single = GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>() +
                                    GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
         return single + (GetQDOSlots<Problem>() - 1) * GetQDOSlotStride<Problem>();
     }

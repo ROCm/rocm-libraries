@@ -1307,8 +1307,8 @@ struct FmhaBwdDQDKDVKernel
         {
             const index_t paired_x  = integer_divide_ceil(jobs_per_head, 2);
             const index_t paired_wg = paired_x * nhead_ * batch_size_;
-            const index_t min_wg    = static_cast<index_t>(get_num_cus()) /
-                                      CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV;
+            const index_t min_wg =
+                static_cast<index_t>(get_num_cus()) / CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV;
             return (paired_wg > min_wg &&
                     jobs_per_head <= CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD)
                        ? dim3(paired_x, nhead_, batch_size_)
@@ -1354,9 +1354,8 @@ struct FmhaBwdDQDKDVKernel
                     // Grid was halved; cover tiles {x, n-1-x}. i_split/n_splits
                     // are dead on the non-deterministic path (see the dq_acc
                     // offset), so the trailing arguments are placeholders.
-                    const index_t n_tiles =
-                        integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0);
-                    const index_t x      = blockIdx.x;
+                    const index_t n_tiles = integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0);
+                    const index_t x       = blockIdx.x;
                     // GridSize() may have declined to pair, in which case it
                     // launched the full grid; then this block covers only x.
                     // Inferring it from gridDim keeps host and device in sync
