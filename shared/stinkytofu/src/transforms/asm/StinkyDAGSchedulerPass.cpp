@@ -426,20 +426,20 @@ static void scheduleRegionWithMovableSideEffects(
     if (readyQueue.clusterBarrierEnabled())
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
 
-    // The parent-VALU DS tier and deadline-ordered dsReadPriority are the
-    // mxUnit==1 (MX128) schedule. MX16/MX32 keep affinity / DsReadOrder only.
+    // WMMA-parent VALU is the mxUnit==1 (MX128) schedule, introduced in
+    // 3dd555. MX16/MX32 leave feedsWmma false so those VALUs stay on valuQueue.
     const bool mxUnit1Scheduling =
         readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.mxUnit1Scheduling;
-
-    // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
-    // CDNA5ReadyQueue routes feedsWmma nodes to wmmaParentValuQueue (Phase B).
-    // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
-    for (unsigned i = 0; i < regionSize; ++i) {
-        if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
-        for (unsigned succId : dagGraph[i]) {
-            if (isMatrixInstruction(*dagNodes[succId].inst)) {
-                dagNodes[i].feedsWmma = true;
-                break;
+    if (mxUnit1Scheduling) {
+        // CDNA5ReadyQueue routes feedsWmma nodes to wmmaParentValuQueue (Phase B).
+        // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
+        for (unsigned i = 0; i < regionSize; ++i) {
+            if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
+            for (unsigned succId : dagGraph[i]) {
+                if (isMatrixInstruction(*dagNodes[succId].inst)) {
+                    dagNodes[i].feedsWmma = true;
+                    break;
+                }
             }
         }
     }

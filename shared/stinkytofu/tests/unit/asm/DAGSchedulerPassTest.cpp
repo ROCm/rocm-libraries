@@ -206,7 +206,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    // MX128 (mxUnit==1) ds_load order. Default unroll runs
+    // MX128 (mxUnit==1) DS-deadline and parent-VALU rules. Default unroll runs
     // leave the flag clear, which is the MX16/MX32 schedule.
     void runPassWithMxUnit1Scheduling() {
         PassContext ctx;
@@ -1364,7 +1364,7 @@ TEST_F(DAGSchedulerPassTest, ParentValuIssuesOnlyForTargetWmma) {
     w1->addSrcReg(StinkyRegister("v", 20, 1));
 
     int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
         << "target-parent unlock must not drop instructions";
 
@@ -1420,7 +1420,7 @@ TEST_F(DAGSchedulerPassTest, ParentValuCoIssuesUnderInFlightWmmaInsteadOfWaiting
     ASSERT_NE(wmma2, nullptr);
 
     const int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
         << "co-issued unlock must not drop instructions";
 
@@ -1459,7 +1459,7 @@ TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReady
     createMovableDsLoad(/*destReg=*/708, /*addrReg=*/80, /*ldsToken=*/3);
 
     const int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
 
     EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm20));
@@ -1486,7 +1486,7 @@ TEST_F(DAGSchedulerPassTest, PendingWmmaDsLoadBeatsNextIterPreload) {
     ASSERT_NE(wmma1, nullptr);
 
     const int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
 
     EXPECT_LT(positionOf(*bb, needed), positionOf(*bb, preload))
