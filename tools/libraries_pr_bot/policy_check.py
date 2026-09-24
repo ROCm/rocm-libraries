@@ -263,24 +263,15 @@ def iter_pr_files(
 
 
 def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str, Any]]:
-    """Return all check-runs associated with a commit SHA, with pagination."""
-    runs: List[Dict[str, Any]] = []
-    page = 1
-    while True:
-        data = gh_get(
-            f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100&page={page}",
-            token,
-        )
-        if not isinstance(data, dict):
-            raise RuntimeError("Unexpected check-runs payload")
-        page_runs = data.get("check_runs", [])
-        if not isinstance(page_runs, list):
-            raise RuntimeError("Unexpected check-runs payload")
-        if not page_runs:
-            break
-        runs.extend(r for r in page_runs if isinstance(r, dict))
-        page += 1
-    return runs
+    """Return the list of check-runs associated with a commit SHA."""
+    data = gh_get(
+        f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100",
+        token,
+    )
+    if not isinstance(data, dict):
+        raise RuntimeError("Unexpected check-runs payload")
+    runs = data.get("check_runs", [])
+    return runs if isinstance(runs, list) else []
 
 
 def ensure_pr_not_draft(policy: Policy, is_draft: bool, errors: List[str]) -> None:

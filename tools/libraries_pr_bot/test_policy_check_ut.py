@@ -17,7 +17,6 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import patch
 
 # Make `policy_check` importable regardless of the working directory.
 THIS_DIR = Path(__file__).resolve().parent
@@ -504,28 +503,6 @@ class IntegrationBlobTests(unittest.TestCase):
 
 
 # ----------------------------- load_policy -----------------------------------
-
-
-class CheckRunFetchTests(unittest.TestCase):
-    def test_get_check_runs_paginates_all_pages(self) -> None:
-        with patch.object(pc, "gh_get") as gh_get:
-            gh_get.side_effect = [
-                {"check_runs": [{"name": "therock-pr-bot"}]},
-                {"check_runs": [{"name": "pre-commit"}]},
-                {"check_runs": []},
-            ]
-            runs = pc.get_check_runs("ROCm", "rocm-libraries", "abc123", "token")
-
-        self.assertEqual([r["name"] for r in runs], ["therock-pr-bot", "pre-commit"])
-        self.assertEqual(gh_get.call_count, 3)
-        self.assertTrue(gh_get.call_args_list[0].args[0].endswith("page=1"))
-        self.assertTrue(gh_get.call_args_list[1].args[0].endswith("page=2"))
-        self.assertTrue(gh_get.call_args_list[2].args[0].endswith("page=3"))
-
-    def test_get_check_runs_rejects_non_list_payload(self) -> None:
-        with patch.object(pc, "gh_get", return_value={"check_runs": "bad"}):
-            with self.assertRaisesRegex(RuntimeError, "Unexpected check-runs payload"):
-                pc.get_check_runs("ROCm", "rocm-libraries", "abc123", "token")
 
 
 class LoadPolicyTests(unittest.TestCase):
