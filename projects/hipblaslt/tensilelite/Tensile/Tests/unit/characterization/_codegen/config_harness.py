@@ -521,6 +521,29 @@ def assert_config_emits(
     return results
 
 
+def assert_config_rejects(config_path, arch, monkeypatch, capsys, expected_rejections):
+    """Derive a configuration serially and check its exact rejection multiset.
+
+    This helper is consumed by the dependent terminal characterization PR,
+    whose designed zero-survivor cases exercise validation through the config
+    front end rather than through a pre-built solution state.
+    """
+    import Tensile.BenchmarkProblems as benchmark_problems
+
+    def serial_map(function, objects, *_args, **_kwargs):
+        return [function(*args) for args in objects]
+
+    monkeypatch.setattr(benchmark_problems, "ParallelMap2", serial_map)
+    solutions = solutions_from_config(config_path, arch=arch)
+    rejection_counts = Counter(
+        line.strip()
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("reject:")
+    )
+    assert not solutions, f"expected 0 surviving solutions, got {len(solutions)}"
+    assert rejection_counts == Counter(expected_rejections)
+
+
 _TARGET_RE = re.compile(r'^\.amdgcn_target\s+"amdgcn-amd-amdhsa--(\S+?)"', re.M)
 _WAVE32_RE = re.compile(r"^\s*\.amdhsa_wavefront_size32\s+1", re.M)
 
