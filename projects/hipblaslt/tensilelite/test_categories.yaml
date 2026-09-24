@@ -100,11 +100,10 @@ test_categories:
       - "Tensile/Tests/common"
     pytest_markers:
       - "common"
-    # assign_gpu_to_worker() maps workers onto GPUs with worker_num % num_gpus,
-    # and worker_lock_path hands out a per-worker lock, so on a 1-GPU runner
-    # every worker shares GPU 0 with no mutual exclusion. 4 is what Math CI
-    # runs (tox default); the 16 used by the FFM categories assumes one
-    # emulator per worker.
+    # On a 1-GPU runner every worker is pinned to the same GPU and
+    # worker_lock_path serializes their client runs, so extra workers only
+    # parallelize codegen and builds. 4 is what Math CI runs (tox default);
+    # the 16 used by the FFM categories assumes one emulator per worker.
     parallel_workers: 4
     pytest_args:
       - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
