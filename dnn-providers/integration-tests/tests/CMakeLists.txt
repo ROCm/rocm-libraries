@@ -107,6 +107,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceReduction.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
+    gpu-ref/TestGpuFpReferenceRmsValidation.cpp
     gpu-ref/TestGpuFpReferenceValidation.cpp
     gpu-ref/TestGpuRefHipError.cpp
     gpu-ref/TestGpuRefKernelCompiler.cpp

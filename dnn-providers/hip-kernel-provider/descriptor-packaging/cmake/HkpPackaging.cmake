@@ -114,7 +114,7 @@ endfunction()
 # hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
 #               ARCHES <list> HIPCC <path>
 #               ROCM_KPACK_DIR <dir> OUT_ROOT <dir>
-#               ROCKE_INTERP <path> ROCKE_READY <path>
+#               ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
 #               ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]
 #               [PACK_JOBS <n>])
 #   Wire the compile -> prune -> pack DAG for ONE authored source root.
@@ -138,15 +138,14 @@ endfunction()
 #   What actually differs between roots is declared, not forked into a second
 #   function:
 #
-#   Every root runs under ROCKE_INTERP, the wheel-provisioned interpreter, so
-#   `import rocke`/`kernels` resolve wherever a UKD names them. Producer
-#   selection stays per-UKD on kernel_source.kind, so a root holding no rocKE
-#   descriptor never invokes that producer and pays only the interpreter.
+#   Every root runs under the supplied ROCKE_INTERP with ROCKE_PYTHON_DIR
+#   prepended to PYTHONPATH, so `import rocke`/`kernels` resolve from the private
+#   wheels wherever a UKD names them. Producer selection stays per-UKD on
+#   kernel_source.kind, including roots holding only hip descriptors.
 #
-#   ROCKE_READY is the venv's wheel-install stamp, and is what the pack step
-#   depends on rather than the interpreter itself: the interpreter's own rule
-#   carries no content dependency, so an edge to it would not restage when a
-#   kernel under rocke/library changes. ROCKE_WHEEL_STAMP is the wheel content
+#   ROCKE_READY is the private directory's wheel-install stamp. The pack step
+#   depends on it rather than only the interpreter, so changing a kernel under
+#   rocke/library restages the pack. ROCKE_WHEEL_STAMP is the wheel content
 #   digest, recorded into each rocKE UKD's provenance so a shipped kernel names
 #   the wheel that produced it. ROCKE_COMGR_LIB, if set, is forwarded to the
 #   tool environment.
@@ -163,7 +162,7 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
-        OUT_ROOT ROCKE_INTERP ROCKE_READY ROCKE_COMGR_LIB
+        OUT_ROOT ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR ROCKE_COMGR_LIB
         ROCKE_WHEEL_STAMP PACK_JOBS)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
@@ -189,12 +188,8 @@ function(hkp_wire_pack_target)
     # shard directories it does not ship.
     set(_stamp "${ARG_OUT_ROOT}/${HKP_PACK_STAMP_NAME}")
 
-    # Every root runs under the wheel interpreter, including hip-only ones that do
-    # not need it: hip compiles shell out to hipcc and are interpreter-agnostic,
-    # so the cost is the interpreter and nothing else. Selecting per root is what
-    # let a rocKE descriptor land in a root that could not import rocke, where it
-    # was not skipped but attempted -- surfacing as a mid-build ImportError rather
-    # than as a configuration error.
+    # All roots use the supplied interpreter and private wheels, including
+    # hip-only roots: producer selection is per descriptor, not per root.
     set(_interp "${ARG_ROCKE_INTERP}")
     set(_interp_what "rocKE wheel interpreter (root '${ARG_NAME}')")
     set(_interp_dep "${ARG_ROCKE_READY}")
@@ -257,8 +252,9 @@ function(hkp_wire_pack_target)
         set(_wheel_stamp_arg --rocke-wheel-stamp "${_wheel_dep}")
     endif()
 
-    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env} "${_interp}"
-        "${HKP_TOOL}")
+    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env}
+        --modify "PYTHONPATH=path_list_prepend:${ARG_ROCKE_PYTHON_DIR}" --
+        "${_interp}" "${HKP_TOOL}")
 
     # The wipe removes the stamp along with the tree, because the stamp lives inside it.
     # So no stamp exists from the moment a pack begins until it completes: a pack that
@@ -301,10 +297,8 @@ function(hkp_wire_pack_target)
                       DEPENDS "${_stamp}"
                       COMMENT "hkp: descriptor packaging (${ARG_NAME})")
     if(TARGET hkp_rocke_wheel_python_interp)
-        # Every root shares one venv. A file-level edge alone leaves generators
-        # that build per directory copying the provisioning recipe into each pack
-        # target, so a parallel fresh build can reprovision the venv while
-        # another pack is using it.
+        # Every root shares one private wheel directory. Keep a single producer:
+        # parallel consumers must not clear/repopulate it while another packs.
         add_dependencies(hkp_packaging_${ARG_NAME} hkp_rocke_wheel_python_interp)
     endif()
     set_property(GLOBAL PROPERTY HKP_PACK_STAMP_${ARG_NAME} "${_stamp}")
@@ -617,9 +611,9 @@ endfunction()
 #   configure time.
 #
 #   This probe does NOT check that `rocke`/`kernels` import. That check belongs
-#   in the provisioned venv (last step of hkp_rocke_wheel_python_interp):
-#   neither the venv nor the wheels exist at configure time, and the build
-#   imports from the wheels, not from the source tree.
+#   after private wheel installation in hkp_rocke_wheel_python_interp: the
+#   private import directory is populated at build time, and the build imports
+#   from those wheels rather than from the source tree.
 #
 #   An explicitly-set ROCKE_COMGR_LIB is checked as an ASSERTION, which rocKE
 #   itself does not do: `_candidate_lib_paths` puts the override first and
@@ -691,7 +685,7 @@ endfunction()
 #
 #   ROCKE_WHEEL_VERSION is pinned at 0.1.0 and never bumps, so the wheel
 #   filenames are constant and `pip wheel` rewrites both files every build.
-#   Keying the venv and the pack step on wheel mtime would therefore recompile
+#   Keying wheel installation and packing on wheel mtime would therefore recompile
 #   every kernel for every arch on every build, even when the wheels are
 #   byte-identical. Keying on this stamp instead means a rebuild that produces
 #   identical wheels leaves the stamp's mtime untouched, and Ninja's restat
@@ -734,27 +728,18 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_require_kpack_runtime(<interp> <what>)
 #   rocm_kpack is reached by putting a source tree on sys.path, so pip never
-#   resolves the msgpack/zstandard it declares. Any interpreter that runs the
-#   pack step therefore needs them present independently, and a hip-only pack
-#   runs under the BASE interpreter where nothing provisions anything.
+#   resolves the msgpack/zstandard it declares. The supplied interpreter needs
+#   them present independently for every pack, including hip-only roots.
 #
 #   Checked at configure time because the failure is otherwise a mid-build
 #   ImportError from inside a dependency, which reads as a packer bug rather
 #   than a missing dependency on the build machine.
-#
-#   Only interpreters that ALREADY EXIST can be probed. The rocKE wheel venv is
-#   an add_custom_command OUTPUT, so on a clean tree it is not created until the
-#   build runs and probing it here would fail every configure with a message
-#   blaming absent dependencies -- advice that cannot be followed, because there
-#   is no interpreter to install them into. That venv installs these same two
-#   packages itself and re-affirms the import after provisioning, so skipping it
-#   here loses no coverage.
 # ---------------------------------------------------------------------------
 function(hkp_require_kpack_runtime interp what)
     if(NOT EXISTS "${interp}")
-        # Provisioned during the build (the rocKE wheel venv), which validates
-        # its own imports once it exists.
-        return()
+        message(FATAL_ERROR
+            "hkp: ${what} does not exist: ${interp}. Set Python3_EXECUTABLE "
+            "to an existing interpreter with pip, msgpack and zstandard supplied.")
     endif()
 
     execute_process(
@@ -776,124 +761,70 @@ function(hkp_require_kpack_runtime interp what)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_rocke_wheel_python_interp(<out_interp> <out_ready> <wheel_stamp>)
-#   Provision a build-local interpreter carrying the rocke + rocke_library
-#   wheels. With ROCKE_BUILD_PYENV ON they are built by the rocke-wheels target,
-#   which rides HIPKERNELPROVIDER_ENABLE_ROCKE; with it OFF there is no such
-#   target and the wheels are supplied through ROCKE_WHEEL_DIR. Every pack step
-#   imports rocke/kernels from these wheels rather than from the editable dev
-#   venv, in either provenance.
+# hkp_rocke_wheel_python_interp(<out_interp> <out_ready> <out_python_dir> <wheel_stamp>)
+#   Install the exact local rocke + rocke_library wheels into a build-owned import
+#   directory, using the supplied Python3_EXECUTABLE and its existing pip/runtime
+#   dependencies. ROCKE_BUILD_PYENV ON supplies wheels via rocke-wheels; OFF uses
+#   ROCKE_WHEEL_DIR. Neither mode installs anything into the supplied environment.
 #
-#   Not ROCKE_PYENV_PYTHON: production ships wheels, so the packs must test wheels.
+#   Wheel-content changes trigger replacement. Clear the owned directory
+#   first so removed modules cannot survive same-version replacement. Readiness
+#   lives inside it and is published only after imports succeed: deleting the
+#   tree or interrupting a refresh cannot leave a valid external stamp.
 #
-#   TWO rules, with deliberately different dependency sets:
-#
-#     Rule A produces the interpreter. Expensive -- it reaches the index for
-#     msgpack/zstandard -- and carries NO content dependency, so it runs once per
-#     build tree and never again.
-#     Rule B produces <out_ready>, reinstalling the wheels into that venv. Cheap
-#     and offline, and the only rule keyed on wheel content.
-#
-#   Merged, as they once were, one edited rocKE kernel tore the whole venv down
-#   and re-provisioned it over the network. Pack steps therefore depend on
-#   <out_ready>, never on <out_interp>.
-#
-#   The venv is HERMETIC:
-#     - no --system-site-packages: the dev venv inherits it to pick up the
-#       system ROCm torch, but torch is not a build dependency. Inheriting the
-#       system environment is how a build silently starts depending on whatever
-#       happens to be installed on the machine.
-#     - no `pip install --upgrade pip`: unconditional network access on every
-#       provisioning run, to install two local files.
-#     - --no-index: hermeticity enforced by the build rather than assumed.
-#     - --no-deps: rocke declares numpy>=1.24 and rocke-library declares rocke.
-#       Verified that the whole build path -- import rocke, import kernels,
-#       build_attention_dense, and the comgr entry rocke.helpers.compile_kernel
-#       -- works with neither installed; numpy is imported only by examples/,
-#       heuristics/, benchmark/ and runtime/, which lowering never touches. The
-#       dependency goes deliberately unsatisfied: nothing vendored, nothing
-#       fetched. Should a future kernel import numpy at build time, the failure
-#       is a loud ImportError naming the module rather than a silent pull from
-#       an index.
-#     - --force-reinstall: pip treats a same-name/same-version wheel as already
-#       satisfied and leaves the OLD bytes in place. Since the version never
-#       bumps, this flag is what makes a changed wheel actually land.
-#
-#   Rule B depends on the wheel digest stamp, not the wheels, so a byte-identical
-#   rebuild does not reinstall.
-#
-#   The rocke import check runs in RULE B, as its last step, rather than at
-#   configure time: the venv and the wheels are both add_custom_command outputs
-#   that do not exist until the build runs, so there is nothing to probe at
-#   configure time. Running it there also means it validates exactly the wheels
-#   just installed, in the interpreter the pack step will use.
+#   --no-index and --no-deps restrict pip to the two local inputs. Missing runtime
+#   dependencies are errors, not permission to acquire them. The supplied Python
+#   retains its normal startup behavior, including .pth and enabled user-site
+#   processing; a scoped PYTHONPATH prepend selects the private wheels.
 # ---------------------------------------------------------------------------
-function(hkp_rocke_wheel_python_interp out_interp out_ready wheel_stamp)
-    set(_venv "${CMAKE_CURRENT_BINARY_DIR}/hkp-rocke-venv")
-    if(WIN32)
-        set(_venv_py "${_venv}/Scripts/python.exe")
-    else()
-        set(_venv_py "${_venv}/bin/python")
-    endif()
-    set(_ready "${CMAKE_CURRENT_BINARY_DIR}/hkp-rocke-venv.installed")
-
-    # `cmake --fresh` removes CMakeCache.txt and CMakeFiles/ only, so the venv
-    # would survive one -- and Rule A, having no content dependency, would never
-    # rebuild it. Keying on a cache variable makes --fresh mean what it says:
-    # absent cache, absent marker, wipe. It must be CACHE; a normal variable does
-    # not survive a configure and would wipe the venv on every one.
-    #
-    # This is the documented remedy for the staleness Rule A accepts: a changed
-    # Python3_EXECUTABLE, or a raised msgpack/zstandard floor, leaves the old venv
-    # in place until someone reconfigures fresh.
-    if(NOT DEFINED HKP_ROCKE_VENV_GENERATION)
-        file(REMOVE_RECURSE "${_venv}")
-        set(HKP_ROCKE_VENV_GENERATION 1 CACHE INTERNAL
-            "Marks hkp-rocke-venv as belonging to this cache generation")
-    endif()
-
+function(hkp_rocke_wheel_python_interp out_interp out_ready out_python_dir wheel_stamp)
+    set(_python_dir "${CMAKE_CURRENT_BINARY_DIR}/hkp-rocke-python")
+    set(_ready "${_python_dir}/.installed")
     set(_platform_wheel
         "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
     set(_library_wheel
         "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
 
-    # Rule A -- the venv itself, carrying rocm_kpack's runtime dependencies (see
-    # hkp_require_kpack_runtime). Those two come from the index, unlike the rocke
-    # wheels: they are third-party packages with no local artifact to install
-    # from, and they are what makes this the expensive rule. Scoped to exactly
-    # these two pinned-floor names, so the venv stays reproducible in everything
-    # that describes OUR code.
-    #
-    # No wheel dependency, so editing a rocKE kernel never reaches this rule.
-    add_custom_command(
-        OUTPUT "${_venv_py}"
-        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_venv}"
-        COMMAND "${Python3_EXECUTABLE}" -m venv --copies "${_venv}"
-        COMMAND "${_venv_py}" -m pip install -q
-                "msgpack>=1.0.0" "zstandard>=0.20.0"
-        COMMENT "hkp: provisioning hermetic rocke wheel interpreter"
-        VERBATIM)
+    hkp_require_kpack_runtime("${Python3_EXECUTABLE}" "the supplied interpreter")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -m pip --version
+        RESULT_VARIABLE _pip_rc
+        OUTPUT_QUIET
+        ERROR_VARIABLE _pip_err)
+    if(NOT _pip_rc EQUAL 0)
+        string(STRIP "${_pip_err}" _pip_err)
+        message(FATAL_ERROR
+            "hkp: ${Python3_EXECUTABLE} cannot run pip. Supply pip in this "
+            "interpreter's environment, or set Python3_EXECUTABLE to an existing "
+            "interpreter with pip, msgpack and zstandard. Packaging does not "
+            "bootstrap pip or acquire runtime dependencies.\nPython said: ${_pip_err}")
+    endif()
 
-    # Rule B -- the wheels in it. Offline, and the only rule keyed on their content.
+    set(_import_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
+    if(HIPKERNELPROVIDER_ROCKE_COMGR_LIB)
+        list(APPEND _import_env "ROCKE_COMGR_LIB=${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
+    endif()
     add_custom_command(
         OUTPUT "${_ready}"
-        COMMAND "${_venv_py}" -m pip install -q
-                --no-index --no-deps --force-reinstall
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_python_dir}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_python_dir}"
+        COMMAND "${Python3_EXECUTABLE}" -m pip --disable-pip-version-check install
+                --no-index --no-deps --no-cache-dir --target "${_python_dir}"
                 "${_platform_wheel}" "${_library_wheel}"
-        # Probe what the pack step will actually import, in the interpreter it
-        # will actually use -- rocke/kernels AND the kpack stack.
-        COMMAND "${_venv_py}" -c
-                "import rocke, kernels, msgpack, zstandard"
+        COMMAND "${CMAKE_COMMAND}" -E env ${_import_env}
+                --modify "PYTHONPATH=path_list_prepend:${_python_dir}" --
+                "${Python3_EXECUTABLE}" -c "import rocke, kernels, msgpack, zstandard"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_ready}"
-        DEPENDS "${_venv_py}" "${wheel_stamp}" "${HKP_WHEEL_DIGEST_TOOL}"
-        COMMENT "hkp: installing rocke wheels into the pack interpreter"
+        DEPENDS "${Python3_EXECUTABLE}" "${wheel_stamp}" "${HKP_WHEEL_DIGEST_TOOL}"
+        COMMENT "hkp: installing local rocke wheels into the private import directory"
         VERBATIM)
 
     add_custom_target(hkp_rocke_wheel_python_interp ALL DEPENDS "${_ready}"
-                      COMMENT "hkp: rocke wheel python interpreter")
+                      COMMENT "hkp: preparing rocke wheel imports")
     add_dependencies(hkp_rocke_wheel_python_interp hkp_rocke_wheel_digest)
-    set(${out_interp} "${_venv_py}" PARENT_SCOPE)
+    set(${out_interp} "${Python3_EXECUTABLE}" PARENT_SCOPE)
     set(${out_ready} "${_ready}" PARENT_SCOPE)
+    set(${out_python_dir} "${_python_dir}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -905,13 +836,12 @@ endfunction()
 #   Without hipcc or a gfx list the packer creates no output root at all, and a
 #   consumer of a packed root reports that as a broken layout rather than as a
 #   missing prerequisite. A missing wheel supply surfaces later still, inside the
-#   venv provisioning's pip install or import. Fail here for all three instead,
+#   private wheel installation or import. Fail here for all three instead,
 #   and name the remedy.
 #
-#   The wheel check covers SUPPLY, not importability. The interpreter that
-#   imports rocke/kernels is the venv hkp_rocke_wheel_python_interp provisions,
-#   an add_custom_command OUTPUT that does not exist until the build runs; the
-#   import is asserted there, in the interpreter the pack step will use.
+#   The wheel check covers SUPPLY, not importability. The private directory
+#   hkp_rocke_wheel_python_interp populates does not exist until the build runs;
+#   imports are asserted there under the environment the pack step will use.
 # ---------------------------------------------------------------------------
 function(hkp_require_ingestor_toolchain out_arches)
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
@@ -1170,7 +1100,8 @@ the one named here.")
             "${_comgr_detail}")
     endif()
     hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
-    hkp_rocke_wheel_python_interp(_rocke_interp _rocke_ready "${_rocke_wheel_stamp}")
+    hkp_rocke_wheel_python_interp(_rocke_interp _rocke_ready _rocke_python_dir
+                                 "${_rocke_wheel_stamp}")
 
     # One list for every root, so "every root is wired to rocKE identically" is
     # structural rather than six sites that have to agree. COMGR_LIB is appended
@@ -1179,6 +1110,7 @@ the one named here.")
     set(_rocke_args
         ROCKE_INTERP "${_rocke_interp}"
         ROCKE_READY "${_rocke_ready}"
+        ROCKE_PYTHON_DIR "${_rocke_python_dir}"
         ROCKE_WHEEL_STAMP "${_rocke_wheel_stamp}")
     if(_rocke_comgr_lib)
         list(APPEND _rocke_args ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
@@ -1366,8 +1298,15 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     # forwarded here regardless of which variable resolved it.
     #
     # HKP_HIPCC names the hipcc that configure found.
+    #
+    # HKP_CMAKE_COMMAND and HKP_CMAKE_MAKE_PROGRAM name this build's own CMake
+    # and build tool. The python environment tests drive real sub-configures and
+    # sub-builds; without these they would resolve `cmake` and `ninja` from PATH
+    # and could exercise a different CMake than the one running them.
     set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}"
-        "HKP_HIPCC=${hipcc}")
+        "HKP_HIPCC=${hipcc}"
+        "HKP_CMAKE_COMMAND=${CMAKE_COMMAND}"
+        "HKP_CMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}")
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()
