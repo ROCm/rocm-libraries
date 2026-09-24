@@ -1473,20 +1473,22 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # < N") and a bm0=128 fallback: the dispatcher picks bm0=64 below N and
             # bm0=128 at/above it. N is the measured bm0=64 -> bm0=128 crossover
             # max_seqlen_q on gfx1250 (fp16/bf16) and must be re-benchmarked for each
-            # new head dim (e.g. (96,96) measured N=128, not inherited from a sibling).
+            # new head dim. All heads below were benchmarked at N=128 (bm0=64 wins
+            # at seqlen_q=64, bm0=128 wins at seqlen_q>=128) under the current
+            # double-buffer pipeline; do not assume a value inherited from a sibling.
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 256")),
+                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
                               FmhaFwdTileSize(128,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 384")),
+                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 768")),
+                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 768")),
+                (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
                               FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 768")),
+                (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             }  # fmt: skip
