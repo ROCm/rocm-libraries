@@ -227,16 +227,16 @@ def test_boolean_outer_argument_versions_remain_rejected(version):
 
 
 @pytest.mark.parametrize("strategy", ("None", "StreamK"))
-def test_native_whole_tile_layout_requires_data_parallel(strategy):
+def test_argument_layout_v1_requires_data_parallel(strategy):
     with pytest.raises(ValueError, match="PersistentLoopArgsVersion=1 requires DataParallel/StaticGrid"):
         normalize_execution_policy({"TileProcessingStrategy": strategy, "InternalSupportParams": {"PersistentLoopArgsVersion": 1}}, regenerate=False)
 
 
-def test_prebuilt_dp_defaults_to_legacy_layout_and_preserves_explicit_native_layout():
+def test_prebuilt_dp_defaults_to_legacy_layout_and_preserves_explicit_v1_layout():
     state = normalize_execution_policy({"StreamK": 3, "StreamKForceDPOnly": 1}, regenerate=False)
     assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 0
-    native = normalize_execution_policy({"TileProcessingStrategy": "DataParallel", "InternalSupportParams": {"PersistentLoopArgsVersion": 1}}, regenerate=False)
-    assert native["InternalSupportParams"]["PersistentLoopArgsVersion"] == 1
+    data_parallel_v1 = normalize_execution_policy({"TileProcessingStrategy": "DataParallel", "InternalSupportParams": {"PersistentLoopArgsVersion": 1}}, regenerate=False)
+    assert data_parallel_v1["InternalSupportParams"]["PersistentLoopArgsVersion"] == 1
 
 
 @pytest.mark.parametrize("outer", (0, 1, 2, 3))

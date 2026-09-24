@@ -173,20 +173,20 @@ INSTANTIATE_TEST_SUITE_P(OuterAndPersistentVersions, PersistentArgumentLayoutTes
                                           std::make_tuple(2, 0), std::make_tuple(3, 0),
                                           std::make_tuple(3, 1)));
 
-TEST(PersistentArgumentLayout, NativePayloadChangesOnlySchedulingSlots)
+TEST(PersistentArgumentLayout, DataParallelV1PayloadChangesOnlySchedulingSlots)
 {
     for(int outer : {3})
     {
         SCOPED_TRACE(outer);
-        ContractionSolution legacy, native;
+        ContractionSolution legacy, dataParallelV1;
         configurePersistentSolution(legacy, outer, 0);
-        configurePersistentSolution(native, outer, 1);
+        configurePersistentSolution(dataParallelV1, outer, 1);
         auto problem = persistentProblem();
         auto device = persistentDevice();
         auto oldCall = legacy.generateSingleCall<true>(
             problem, persistentInputs(), device, legacy.resolvePersistentSettings(problem, device), GSUSettings{});
-        auto newCall = native.generateSingleCall<true>(
-            problem, persistentInputs(), device, native.resolvePersistentSettings(problem, device), GSUSettings{});
+        auto newCall = dataParallelV1.generateSingleCall<true>(
+            problem, persistentInputs(), device, dataParallelV1.resolvePersistentSettings(problem, device), GSUSettings{});
         auto const& oldArgs = oldCall.args;
         auto const& newArgs = newCall.args;
         auto oldStart = offset(oldArgs, "itersPerTile");
@@ -251,11 +251,11 @@ TEST(PersistentArgumentLayout, RejectsUnknownAndIncompatibleLayoutsBeforePacking
     }
 }
 
-TEST(PersistentArgumentLayout, CustomDescriptorPacksNativePayloadAndRejectsLegacyClaims)
+TEST(PersistentArgumentLayout, CustomDescriptorPacksDataParallelPayloadAndRejectsLegacyClaims)
 {
     ContractionSolution solution;
     configurePersistentSolution(solution, 3, 1);
-    solution.customKernel.name = "prebuilt_native_data_parallel";
+    solution.customKernel.name = "prebuilt_data_parallel_v1";
     solution.kernelName = solution.customKernel.name;
     solution.customKernel.macrotile = TensileLite::dim3(128, 128, 64);
     solution.customKernel.threads = TensileLite::dim3(256, 1, 1);
@@ -268,7 +268,7 @@ TEST(PersistentArgumentLayout, CustomDescriptorPacksNativePayloadAndRejectsLegac
     auto device = persistentDevice();
     auto launch = solution.resolvePersistentSettings(problem, device);
     auto invocation = solution.generateCustomCall<true>(problem, persistentInputs(), device, launch);
-    EXPECT_EQ(invocation.kernelName, "prebuilt_native_data_parallel");
+    EXPECT_EQ(invocation.kernelName, "prebuilt_data_parallel_v1");
     EXPECT_EQ(invocation.numWorkGroups.x, 7u);
     ASSERT_EQ(invocation.args.size(), 8u);
     EXPECT_EQ(value<uint32_t>(invocation.args, "ItersPerTile"), 3u);
@@ -291,7 +291,7 @@ TEST(PersistentArgumentLayout, CustomDescriptorPacksNativePayloadAndRejectsLegac
     EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
 }
 
-TEST(PersistentArgumentLayout, NativeCustomDescriptorMatchesCompleteNormalBuffer)
+TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormalBuffer)
 {
     for(bool initialStrides : {false, true})
     for(bool pointerArray : {false, true})
