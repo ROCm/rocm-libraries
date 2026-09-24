@@ -396,6 +396,15 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         const auto& w = irInst->swaitcnt.value();
         asmInst->addModifier<SWaitCntData>(SWaitCntData{w[0], w[1], w[2], w[3], w[4]});
     }
+    if (irInst->sdelayalu.has_value()) {
+        // s_delay_alu data carried from the adaptor's SDelayAlu shim. The
+        // rocisa->asm path attaches the same SDelayAluData in
+        // convertSDelayAluData; without it the emitter's s_delay_alu custom
+        // operand path (StinkyAsmEmitter) asserts on the missing modifier, and
+        // O0 kernels (RemoveDelayAlu gated off) would otherwise diverge from
+        // native in the downstream wait/hazard passes.
+        asmInst->addModifier<SDelayAluData>(irInst->sdelayalu.value());
+    }
 
     // MFMA/SMFMA/MXMFMA: attach MFMAModifiers so downstream passes
     // (RegionClonePass, SetMatrixReusePass) can identify these instructions.

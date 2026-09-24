@@ -1489,12 +1489,11 @@ class Module(Item):
         if isinstance(it, TextBlock):
             lm.add_textblock(it.text)
             return
-        # Skip SDelayAlu instructions — the optimization pipeline handles
-        # all hazard insertion (InsertWaitAluPass for ESM2, InsertDelayAluPass
-        # for non-ESM2 regions).  The adaptor previously emitted these as
-        # s_nop 0 placeholders that survived the pipeline unrecognized.
-        if getattr(it, "instStr", "") == "s_delay_alu":
-            return
+        # SDelayAlu now lowers to a real stinkytofu SDelayAlu (with the
+        # SDelayAluData modifier) via to_stinky_logical, matching the native
+        # ToStinkyTofuUtils path. This keeps the pipeline-input identical to
+        # rocisa -- required at OptLevel 0, where RemoveDelayAlu is gated off
+        # and the incoming s_delay_alu feeds the downstream wait/hazard passes.
         handle = getattr(it, "to_stinky_logical", None)
         if not callable(handle):
             return
