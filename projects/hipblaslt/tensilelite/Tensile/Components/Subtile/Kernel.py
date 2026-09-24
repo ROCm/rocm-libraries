@@ -509,14 +509,14 @@ class TileInfo:
       # Derived byte-counts for emit logic
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
-      # TDM path. gfx1250 inserts a 16-byte pad after each configured LDS
-      # block (256 bytes for this MXF4 kernel), not after every matrix row.
+      # TDM path. gfx1250 inserts a 16-byte pad after each LDS block: 256
+      # bytes (or LdsBlockSizePerPad) for 32x16 WMMA, one row otherwise.
       isTDM = kernel.get("enableTDM%s" % tc, False)
       self.ldsRowPadBytes = 16 if isTDM else 0
-      blockSizePerPad = int(kernel.get("LdsBlockSizePerPad%s" % tc, 0))
-      if isTDM and blockSizePerPad == 0 and kernel.get("WavefrontSize") == 32 \
-          and kernel.get("MatrixInstM") == 32:
-        blockSizePerPad = 256
+      if kernel.get("WavefrontSize") == 32 and kernel.get("MatrixInstM") == 32:
+        blockSizePerPad = int(kernel.get("LdsBlockSizePerPad%s" % tc, 0)) or 256
+      else:
+        blockSizePerPad = self.depthUBytes
       self.ldsBlockSizePerPadBytes = blockSizePerPad if isTDM else 0
 
       # Convenience counts for scheduler / diagram

@@ -682,8 +682,10 @@ def _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfo):
   else:
     module.add(VAndB32(dst=vgpr(laneRow), src0=vgpr("Serial"), src1=15,
                        comment="B: WMMA row = laneId % 16"))
+  module.add(VAndB32(dst=vgpr(laneHalf), src0=vgpr("Serial"), src1=kernel["WavefrontSize"] - 1,
+                     comment=f"{tc}: laneId"))
   module.add(VLShiftRightB32(dst=vgpr(laneHalf), shiftHex=hex(4),
-                             src=vgpr("Serial"), comment=f"{tc}: WMMA K quarter = laneId / 16"))
+                             src=vgpr(laneHalf), comment=f"{tc}: WMMA K quarter = laneId / 16"))
   module.add(VLShiftLeftB32(dst=vgpr(laneHalf), shiftHex=hex(4),
                             src=vgpr(laneHalf), comment=f"{tc}: K byte offset = laneHalf * 16"))
   module.add(VMulLOU32(dst=vgpr(rowBase), src0=rowStride, src1=vgpr(laneRow),

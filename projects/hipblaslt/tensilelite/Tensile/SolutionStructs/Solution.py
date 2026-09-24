@@ -819,7 +819,9 @@ class Solution(collections.abc.Mapping):
     elif isaInfoMap[isa].asmCaps['HasWMMA_V1']:
         outputVectorWidth, RegsPerOut = 1, 1
     elif isaInfoMap[isa].asmCaps['HasWMMA_V2'] or isaInfoMap[isa].asmCaps['HasWMMA_V3']:
-        outputVectorWidth = 16 if state.get("MatrixInstM") == 32 else 8
+        # Only the subtile path stores 32x16 natively; the common path splits it into 16x16 blocks.
+        nativeRectWmma = state.get("UseSubtileImpl") and state.get("MatrixInstM") == 32
+        outputVectorWidth = 16 if nativeRectWmma else 8
         RegsPerOut = 1
     else:
       print("WARNING: unexpect code flow")

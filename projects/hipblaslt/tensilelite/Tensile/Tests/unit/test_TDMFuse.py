@@ -267,9 +267,11 @@ def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, f
          "TDMFuse=2 does not support sparse metadata"),
         (1, {"TDMInst": 1}, "TDMA and TDMB must be enabled simultaneously"),
         # A tile whose MX scales fit one load per wave, so the subtile
-        # scale-load budget does not answer first.
-        (1, {"UseSubtileImpl": True,
-             "MatrixInstruction": [16, 16, 128, 1, 1, 2, 2, 2, 2]},
+            # scale-load budget does not answer first. F8 on B keeps the
+            # FP4 wave32 subtile MI requirement from answering first.
+            (1, {"UseSubtileImpl": True,
+                 "MatrixInstruction": [16, 16, 128, 1, 1, 2, 2, 2, 2],
+                 "ProblemType": {"MacDataTypeB": "F8"}},
          "TDMFuse=1 requires UseSubtileImpl=0"),
     ],
 )

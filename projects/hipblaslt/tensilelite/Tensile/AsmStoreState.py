@@ -431,7 +431,8 @@ class StoreState:
         kw = self.kernelWriter
 
         if kernel["EnableMatrixInstruction"]:
-            nativeRectWmma = (kernel["WavefrontSize"] == 32
+            nativeRectWmma = (kernel.get("UseSubtileImpl")
+                              and kernel["WavefrontSize"] == 32
                               and kernel["MatrixInstM"] == 32
                               and kernel["MatrixInstN"] == 16)
             if nativeRectWmma:
