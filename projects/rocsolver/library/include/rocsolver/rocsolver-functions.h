@@ -21519,9 +21519,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdj_strided_batched(rocblas_handle
                 Number of rows and columns of matrix A.
     @param[inout]
     A           pointer to type. Array on the GPU of dimension lda*n.
-                On entry, the matrix A. On exit, the eigenvectors of A if they were computed and
-                the algorithm converged. Otherwise, A contains the partially rotated vectors
-                from the sweeps that were performed.
+                On entry, the matrix A. On exit, A is unchanged if evect is rocblas_evect_none.
+                Otherwise it contains the eigenvectors of A if the algorithm converged, or the
+                partially rotated vectors from the sweeps that were performed if it did not.
     @param[in]
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrix A.
@@ -21621,9 +21621,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevj(rocblas_handle handle,
                 Number of rows and columns of matrix A.
     @param[inout]
     A           pointer to type. Array on the GPU of dimension lda*n.
-                On entry, the matrix A. On exit, the eigenvectors of A if they were computed and
-                the algorithm converged. Otherwise, A contains the partially rotated vectors
-                from the sweeps that were performed.
+                On entry, the matrix A. On exit, A is unchanged if evect is rocblas_evect_none.
+                Otherwise it contains the eigenvectors of A if the algorithm converged, or the
+                partially rotated vectors from the sweeps that were performed if it did not.
     @param[in]
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrix A.
@@ -21723,9 +21723,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheevj(rocblas_handle handle,
                 Number of rows and columns of matrices A_l.
     @param[inout]
     A           Array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
-                On entry, the matrices A_l. On exit, the eigenvectors of A_l if they were computed and
-                the algorithm converged. Otherwise, A_l contains the partially rotated vectors
-                from the sweeps that were performed.
+                On entry, the matrices A_l. On exit, A_l is unchanged if evect is rocblas_evect_none.
+                Otherwise it contains the eigenvectors of A_l if the algorithm converged, or the
+                partially rotated vectors from the sweeps that were performed if it did not.
     @param[in]
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
@@ -21836,9 +21836,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevj_batched(rocblas_handle handle,
                 Number of rows and columns of matrices A_l.
     @param[inout]
     A           Array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
-                On entry, the matrices A_l. On exit, the eigenvectors of A_l if they were computed and
-                the algorithm converged. Otherwise, A_l contains the partially rotated vectors
-                from the sweeps that were performed.
+                On entry, the matrices A_l. On exit, A_l is unchanged if evect is rocblas_evect_none.
+                Otherwise it contains the eigenvectors of A_l if the algorithm converged, or the
+                partially rotated vectors from the sweeps that were performed if it did not.
     @param[in]
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
@@ -21949,9 +21949,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheevj_batched(rocblas_handle handle,
                 Number of rows and columns of matrices A_l.
     @param[inout]
     A           pointer to type. Array on the GPU (the size depends on the value of strideA).
-                On entry, the matrices A_l. On exit, the eigenvectors of A_l if they were computed and
-                the algorithm converged. Otherwise, A_l contains the partially rotated vectors
-                from the sweeps that were performed.
+                On entry, the matrices A_l. On exit, A_l is unchanged if evect is rocblas_evect_none.
+                Otherwise it contains the eigenvectors of A_l if the algorithm converged, or the
+                partially rotated vectors from the sweeps that were performed if it did not.
     @param[in]
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
@@ -22068,9 +22068,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevj_strided_batched(rocblas_handle 
                 Number of rows and columns of matrices A_l.
     @param[inout]
     A           pointer to type. Array on the GPU (the size depends on the value of strideA).
-                On entry, the matrices A_l. On exit, the eigenvectors of A_l if they were computed and
-                the algorithm converged. Otherwise, A_l contains the partially rotated vectors
-                from the sweeps that were performed.
+                On entry, the matrices A_l. On exit, A_l is unchanged if evect is rocblas_evect_none.
+                Otherwise it contains the eigenvectors of A_l if the algorithm converged, or the
+                partially rotated vectors from the sweeps that were performed if it did not.
     @param[in]
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
