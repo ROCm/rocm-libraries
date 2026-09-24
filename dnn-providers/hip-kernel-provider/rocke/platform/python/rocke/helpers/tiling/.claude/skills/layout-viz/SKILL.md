@@ -70,8 +70,10 @@ Import viz from the PACKAGE, not submodules (matplotlib is lazy). Modules under 
 - `tiling_recorder.record_build(build_fn, *args, **cfg) -> ((kernel, mma), RecordedPipeline)` — records
   transactions/ops at the verb boundary (emitted IR byte-identical). `RecordedPipeline` exposes
   `.transactions`/`.ops`/`.lds_spaces()`/`.block_diagram(out, title=)`.
-- `visualization.auto_pipeline` — `resolve_origin`, the gates `verify_lds_roundtrip` / `verify_mma_soundness`,
-  the sweep driver `render_sweep` / `plan_flows`, the `view()` dispatcher, the committed renderers.
+- `analysis` — `resolve_origin` + the gates `verify_lds_roundtrip` / `verify_mma_soundness` (they live here
+  now, next to `coalescing` / `vectorization`; import them from `rocke.helpers.tiling.analysis`).
+- `visualization.auto_pipeline` — the sweep driver `render_sweep` / `plan_flows`, the `view()` dispatcher,
+  the committed renderers.
 - `visualization.block_diagram` — `extract_blocks` + `block_diagram(pipe, out)`.
 
 ## Workflow A — whole kernel (automated, block-diagram-first)
@@ -100,8 +102,9 @@ Correctness is CODE — but **YOU must call it**: `render_sweep` / `render_flow`
 gates. Call them explicitly on the fresh recording before any pipeline render, and show both results:
 
 ```python
-halves = auto_pipeline.verify_lds_roundtrip(pipe, space_id, tile_k=<K>)   # per LDS space
-n_mma  = auto_pipeline.verify_mma_soundness(pipe)
+from rocke.helpers.tiling import analysis                              # the gates live here
+halves = analysis.verify_lds_roundtrip(pipe, space_id, tile_k=<K>)     # per LDS space
+n_mma  = analysis.verify_mma_soundness(pipe)
 ```
 
 **A gate is only evidence when it is NON-VACUOUS.** `verify_lds_roundtrip` returns `[]` when the recording

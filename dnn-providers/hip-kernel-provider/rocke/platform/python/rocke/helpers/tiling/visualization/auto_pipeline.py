@@ -18,19 +18,10 @@ from typing import Any
 
 from . import block_diagram as _bd
 
-# Geometry helpers + the two verification GATES moved to the analysis package (machinery: pure calc,
-# one home next to coalescing/vectorization). Imported here for the renderers' own use AND re-exported
-# so existing `auto_pipeline.X` callers keep resolving.
-from ..analysis.geometry import (  # noqa: F401
-    OriginResolutionError,
-    _arch_wave,
-    _elem_bytes,
-    _lane_span,
-    resolve_origin,
-    resolve_value,
-)
-from ..analysis.roundtrip import RoundTripError, verify_lds_roundtrip  # noqa: F401
-from ..analysis.soundness import MmaSoundnessError, verify_mma_soundness  # noqa: F401
+# Geometry helpers the renderers USE, imported from the analysis package (machinery: pure calc, one
+# home next to coalescing/vectorization). No re-export shim -- callers import the gates from
+# `rocke.helpers.tiling.analysis` directly, so the renderers no longer re-couple to them.
+from ..analysis.geometry import _arch_wave, _elem_bytes, _lane_span, resolve_origin
 
 
 # --------------------------------------------------------------------------------------------------

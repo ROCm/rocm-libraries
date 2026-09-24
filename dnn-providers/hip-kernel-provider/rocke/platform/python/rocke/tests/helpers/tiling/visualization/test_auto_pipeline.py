@@ -19,6 +19,7 @@ from rocke.helpers.tiling.kernels.tiling_gemm_crc_demo.crc_interleaved_gemm impo
     build_crc_gemm,
 )
 from rocke.helpers.tiling.visualization import auto_pipeline as ap
+from rocke.helpers.tiling import analysis as an   # verification gates + geometry live here now
 
 CFG = dict(tile_m=64, tile_n=64, tile_k=32, waves_m=2, waves_n=2)  # 4 waves, warp 32x32, tile_k 32
 
@@ -37,16 +38,16 @@ def test_resolver_matches_the_read_origin_formula():
     """The read origin is cur*tile_m + wm*warp_m: cur=(k//tile_k)%2, wm=(tid//64)//waves_n."""
     _k, _m, pipe = _record()
     origin = _first_read(pipe).origin
-    assert ap.resolve_origin(origin, {"k": 0, "tid": 0})[1] == 0     # cur 0, wave 0
-    assert ap.resolve_origin(origin, {"k": 0, "tid": 128})[1] == 32  # cur 0, wave 2 -> wm 1
-    assert ap.resolve_origin(origin, {"k": 32, "tid": 0})[1] == 64   # cur 1 -> half 1
-    assert ap.resolve_origin(origin, {"k": 32, "tid": 192})[1] == 96  # cur 1, wm 1
+    assert an.resolve_origin(origin, {"k": 0, "tid": 0})[1] == 0     # cur 0, wave 0
+    assert an.resolve_origin(origin, {"k": 0, "tid": 128})[1] == 32  # cur 0, wave 2 -> wm 1
+    assert an.resolve_origin(origin, {"k": 32, "tid": 0})[1] == 64   # cur 1 -> half 1
+    assert an.resolve_origin(origin, {"k": 32, "tid": 192})[1] == 96  # cur 1, wm 1
 
 
 def test_resolver_passes_ints_and_flags_unknown():
-    assert ap.resolve_value(7, {}) == 7
-    with pytest.raises(ap.OriginResolutionError):
-        ap.resolve_value(_first_read(_record()[2]).origin[1], {})  # scf.for IV with no 'k' binding
+    assert an.resolve_value(7, {}) == 7
+    with pytest.raises(an.OriginResolutionError):
+        an.resolve_value(_first_read(_record()[2]).origin[1], {})  # scf.for IV with no 'k' binding
 
 
 @pytest.mark.parametrize("sw,label", [(False, "none"), (b32_swizzle, "b32"), (b64_swizzle, "b64")])
@@ -57,7 +58,7 @@ def test_crc_lds_roundtrip_passes_through_swizzle(sw, label):
     spaces = pipe.lds_spaces()
     assert len(spaces) == 2  # lds_a, lds_b
     for sid in spaces:
-        assert ap.verify_lds_roundtrip(pipe, sid, tile_k=32) == [0, 1], f"{label} {pipe.spaces[sid]}"
+        assert an.verify_lds_roundtrip(pipe, sid, tile_k=32) == [0, 1], f"{label} {pipe.spaces[sid]}"
 
 
 def test_roundtrip_catches_a_misplaced_read():
@@ -67,15 +68,15 @@ def test_roundtrip_catches_a_misplaced_read():
     read = _first_read(pipe)
     bad = dataclasses.replace(read, origin=(0, 999))  # free 999 -> no such buffer half
     pipe.nodes[pipe.nodes.index(read)] = bad
-    with pytest.raises(ap.RoundTripError):
-        ap.verify_lds_roundtrip(pipe, sid, tile_k=32)
+    with pytest.raises(an.RoundTripError):
+        an.verify_lds_roundtrip(pipe, sid, tile_k=32)
 
 
 def test_crc_mma_soundness_passes():
     """Gate 2: CRC's own interleaved operands are sound against the canonical machine ref
     (mma.a_layout) and K-aligned -- the operand-correctness the addressing round-trip can't see."""
     _k, _m, pipe = _record()
-    assert ap.verify_mma_soundness(pipe) == 2  # two K-tiles -> two recorded MMA ops
+    assert an.verify_mma_soundness(pipe) == 2  # two K-tiles -> two recorded MMA ops
 
 
 def test_mma_soundness_catches_unsound_operand():
@@ -84,8 +85,8 @@ def test_mma_soundness_catches_unsound_operand():
     mma_op = next(o for o in pipe.ops if o.kind == "mma")
     bad = dataclasses.replace(mma_op, a_enc=mma_op.c_enc)  # C (M,N) is not a valid A (M,K) operand
     pipe.nodes[pipe.nodes.index(mma_op)] = bad
-    with pytest.raises(ap.MmaSoundnessError):
-        ap.verify_mma_soundness(pipe)
+    with pytest.raises(an.MmaSoundnessError):
+        an.verify_mma_soundness(pipe)
 
 
 def test_roundtrip_catches_swizzle_mismatch():
@@ -96,8 +97,8 @@ def test_roundtrip_catches_swizzle_mismatch():
     read = _first_read(pipe)
     bad = dataclasses.replace(read, swizzle=False)  # read now disagrees with the swizzled store
     pipe.nodes[pipe.nodes.index(read)] = bad
-    with pytest.raises(ap.RoundTripError, match="never written"):
-        ap.verify_lds_roundtrip(pipe, sid, tile_k=32)
+    with pytest.raises(an.RoundTripError, match="never written"):
+        an.verify_lds_roundtrip(pipe, sid, tile_k=32)
 
 
 def test_view_prefetch_flow_and_lds_store_block(tmp_path):

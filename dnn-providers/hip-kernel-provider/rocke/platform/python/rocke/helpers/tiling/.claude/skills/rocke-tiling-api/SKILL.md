@@ -245,7 +245,7 @@ learns it with the user and outputs the **stage table**, which is Emit's input.
 
    ```python
    from rocke.helpers.tiling import tiling_recorder
-   from rocke.helpers.tiling.visualization import auto_pipeline
+   from rocke.helpers.tiling import analysis                 # the verification gates live here
 
    (kernel, mma), pipe = tiling_recorder.record_build(build_fn, *args, **cfg)   # MMA kernel
    #  no matrix instruction? DECLARE the target you resolved at Frame (note the names: `arch=` is
@@ -254,8 +254,8 @@ learns it with the user and outputs the **stage table**, which is Emit's input.
    #      build_fn, *args, declared_arch=<gfx>, declared_wave_size=<n>, **cfg)
    tiling_recorder.witness(pipe, kernel)                  # CoverageError => the recording is SHORT: hard stop
    for space_id in pipe.lds_spaces():            # ✗ NOT pipe.spaces -- that includes GLOBAL buffers,
-       halves = auto_pipeline.verify_lds_roundtrip(pipe, space_id, tile_k=<K>)   # which return [] = NOT RUN
-   n_mma  = auto_pipeline.verify_mma_soundness(pipe)                         # rung 4, MMA compute class
+       halves = analysis.verify_lds_roundtrip(pipe, space_id, tile_k=<K>)       # which return [] = NOT RUN
+   n_mma  = analysis.verify_mma_soundness(pipe)                              # rung 4, MMA compute class
    ```
 
    > **Where arch and wave size come from.** They enter the recording when a **`TileMma` EXECUTES** — not

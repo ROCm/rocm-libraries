@@ -176,6 +176,6 @@ def test_undeclared_is_unchanged():
 
 
 def test_roundtrip_driver_names_the_fix_when_no_target_is_available():
-    from rocke.helpers.tiling.visualization.auto_pipeline import _arch_wave
+    from rocke.helpers.tiling.analysis.geometry import _arch_wave
     with pytest.raises(ValueError, match="record_build"):
         _arch_wave(tr.RecordedPipeline())
