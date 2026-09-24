@@ -86,15 +86,21 @@ int main()
   }
 
   // Allocation failure must be returned instead of passing nullptr to memset.
-  errno = 0;
-  if (auto p = runtime_calloc(1, max_size))
+  // SIZE_MAX is rejected by the interposer's own size arithmetic; SIZE_MAX / 2
+  // gets past it and fails in the backing allocator instead.
+  const std::size_t failing_sizes[]{max_size, max_size / 2};
+  for (const auto failing_size : failing_sizes)
   {
-    std::free(p);
-    return EXIT_FAILURE;
-  }
-  if (errno != ENOMEM)
-  {
-    return EXIT_FAILURE;
+    errno = 0;
+    if (auto p = runtime_calloc(1, failing_size))
+    {
+      std::free(p);
+      return EXIT_FAILURE;
+    }
+    if (errno != ENOMEM)
+    {
+      return EXIT_FAILURE;
+    }
   }
 
   // A successful allocation must still be fully zero-initialized.
