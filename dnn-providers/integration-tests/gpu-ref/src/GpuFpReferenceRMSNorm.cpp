@@ -1,11 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "hipdnn-gpu-ref/detail/GpuRefHelpers.hpp"
 #include <hipdnn-gpu-ref/GpuFpReferenceRMSNorm.hpp>
 
-#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
 #include <cstdint>
 #include <hip/hip_runtime.h>
@@ -20,35 +19,6 @@ namespace
 
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefRMSNormArgs.h> // NOLINT(misc-include-cleaner)
-
-void launchKernel(hipFunction_t function, int64_t gridSize, void* argsPtr, size_t argsSize)
-{
-    // Check the device limits for grid size
-    detail::assertValidGridSize(
-        gridSize, 1, 1, static_cast<int64_t>(GpuFpReferenceRMSNorm::BLOCK_SIZE), 1, 1);
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    detail::throwOnHipError(hipModuleLaunchKernel(function,
-                                                  static_cast<unsigned int>(gridSize),
-                                                  1,
-                                                  1,
-                                                  GpuFpReferenceRMSNorm::BLOCK_SIZE,
-                                                  1,
-                                                  1,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr,
-                                                  config),
-                            "hipModuleLaunchKernel failed");
-
-    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
-}
 
 } // namespace
 
@@ -83,7 +53,13 @@ void GpuFpReferenceRMSNorm::launchFprop(const void* inputPtr,
     args.stride = static_cast<long long>(stride);
     args.eps = epsilon;
 
-    launchKernel(kernel.function(), outerSize * stride, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(),
+                           outerSize * stride,
+                           BLOCK_SIZE,
+                           &args,
+                           sizeof(args),
+                           "RMSNorm forward",
+                           BLOCK_SIZE);
 }
 
 void GpuFpReferenceRMSNorm::launchDgrad(const void* gradOutputPtr,
@@ -117,7 +93,13 @@ void GpuFpReferenceRMSNorm::launchDgrad(const void* gradOutputPtr,
     args.outerSize = static_cast<long long>(outerSize);
     args.stride = static_cast<long long>(stride);
 
-    launchKernel(kernel.function(), outerSize * stride, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(),
+                           outerSize * stride,
+                           BLOCK_SIZE,
+                           &args,
+                           sizeof(args),
+                           "RMSNorm data gradient",
+                           BLOCK_SIZE);
 }
 
 void GpuFpReferenceRMSNorm::launchWgrad(const void* gradOutputPtr,
@@ -151,7 +133,13 @@ void GpuFpReferenceRMSNorm::launchWgrad(const void* gradOutputPtr,
     args.outerSize = static_cast<long long>(outerSize);
     args.stride = static_cast<long long>(stride);
 
-    launchKernel(kernel.function(), (innerSize + BLOCK_SIZE - 1) / BLOCK_SIZE, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(),
+                           (innerSize + BLOCK_SIZE - 1) / BLOCK_SIZE,
+                           BLOCK_SIZE,
+                           &args,
+                           sizeof(args),
+                           "RMSNorm weight gradient",
+                           BLOCK_SIZE);
 }
 
 } // namespace hipdnn_gpu_ref
