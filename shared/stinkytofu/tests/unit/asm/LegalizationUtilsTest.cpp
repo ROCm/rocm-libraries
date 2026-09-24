@@ -424,3 +424,108 @@ TEST_F(LegalizationUtilsTest, ImplicitRegistersNotAddedTwice) {
     EXPECT_EQ(static_cast<int>(inst->getDestRegs().size()), dstsAfterFirst)
         << "Should not add duplicate implicit dst registers";
 }
+
+// ---------------------------------------------------------------------------
+// legalizeReadWriteSources
+//
+// A narrow destination reads itself only where op_sel names the half it writes,
+// so every case here says whether the instruction carries that position.
+// ---------------------------------------------------------------------------
+
+/// A two-source VOP3's op_sel is [src0, src1, dst], so \p dstHalf is the third.
+static StinkyInstruction* withDestHalf(StinkyInstruction* inst, int dstHalf) {
+    inst->addModifier<VOP3PModifiers>(VOP3PModifiers({0, 0, dstHalf}));
+    return inst;
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceAddedForHalfPack) {
+    // The high convert of an FP8 pack keeps the low half of v10, so it reads v10.
+    StinkyInstruction* inst = withDestHalf(createInst(GFX::v_cvt_pk_fp8_f32), 1);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    // Appended last, past the printed sources, so the emitter never prints it.
+    ASSERT_EQ(inst->getSrcRegs().size(), 3u);
+    EXPECT_TRUE(inst->getSrcRegs()[2] == StinkyRegister("v", 10, 1));
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceAddedForLowHalfPack) {
+    // The low convert keeps the high half, so it reads its destination too.
+    StinkyInstruction* inst = withDestHalf(createInst(GFX::v_cvt_pk_bf8_f32), 0);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    ASSERT_EQ(inst->getSrcRegs().size(), 3u);
+    EXPECT_TRUE(inst->getSrcRegs()[2] == StinkyRegister("v", 10, 1));
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceNotDuplicatedWhenAlreadyPresent) {
+    // The producer's in-place pack already names the destination as src0.
+    StinkyInstruction* inst = withDestHalf(createInst(GFX::v_cvt_pk_fp8_f32), 1);
+    inst->addDestReg(StinkyRegister("v", 4, 1));
+    inst->addSrcReg(StinkyRegister("v", 4, 1));
+    inst->addSrcReg(StinkyRegister("v", 5, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourcesLeavesFullWidthWriteAlone) {
+    // v_cvt_pk_f16_f32 replaces its whole destination, so a named half says
+    // nothing about what survives and it reads nothing back.
+    StinkyInstruction* inst = withDestHalf(createInst(GFX::v_cvt_pk_f16_f32), 1);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourcesLeavesNarrowWriteWithNoPositionAlone) {
+    // Without op_sel nothing says which half the pack lands in, and a producer
+    // that does not name one is not building a register out of two writes.
+    StinkyInstruction* inst = createInst(GFX::v_cvt_pk_fp8_f32);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourcesLeavesF16ArithmeticAlone) {
+    // v_add_f16 also declares a 16-bit destination, and Tensile uses its result
+    // as a whole register. Reading the other half back would tie a register in
+    // every f16 kernel for a value nothing wants.
+    StinkyInstruction* inst = createInst(GFX::v_add_f16);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceAddedForTableReadWriteWithoutModifiers) {
+    // s_cmov_b32 keeps its whole destination on the untaken path, which is a
+    // property of the opcode, so the table says so and no modifier is needed.
+    StinkyInstruction* inst = createInst(GFX::s_cmov_b32);
+    inst->addDestReg(StinkyRegister("s", 3, 1));
+    inst->addSrcReg(StinkyRegister("s", 4, 1));
+
+    legalizeReadWriteSources(inst);
+
+    ASSERT_EQ(inst->getSrcRegs().size(), 2u);
+    EXPECT_TRUE(inst->getSrcRegs()[1] == StinkyRegister("s", 3, 1));
+}

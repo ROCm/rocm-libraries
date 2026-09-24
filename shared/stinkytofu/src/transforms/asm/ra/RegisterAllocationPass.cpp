@@ -295,6 +295,21 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
             text += " +" + std::to_string(undefined.size() - sampled) + " more";
         text += "]";
     }
+    // Narrow writes nothing reads, usually a missing RW. Sampled like the line above.
+    const std::span<const SSAValueID> unread = constraints.unreadPartialWrites();
+    if (!unread.empty()) {
+        constexpr size_t kSampleSize = 8;
+        const size_t sampled = std::min(kSampleSize, unread.size());
+        text += " unreadPartialWrite[" + std::to_string(unread.size());
+        for (size_t i = 0; i < sampled; ++i) {
+            text += " %" + std::to_string(unread[i]);
+            if (const std::optional<RegKey> hint = constraints.hintFor(unread[i]))
+                text += "=" + regKeyToString(*hint);
+        }
+        if (sampled != unread.size())
+            text += " +" + std::to_string(unread.size() - sampled) + " more";
+        text += "]";
+    }
     // What was done about operands that cannot name a bank. Reported in both
     // modes, because under Hold these registers are why the high-water mark
     // cannot fall below them, and under Allocate the constraint is still in

@@ -55,6 +55,7 @@
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
+#include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
@@ -307,6 +308,45 @@ stinkytofu::SDWAModifiers convertSDWAModifiers(const rocisa::SDWAModifiers& rocM
         static_cast<stinkytofu::SDWAModifiers::SelectBit>(rocMod.src1_sel));
 }
 
+#ifndef NDEBUG
+/// Every destination that reads itself must appear on both sides.
+///
+/// legalizeReadWriteSources puts the source there, so a failure means the
+/// destination the field describes never reached destRegs at all.
+void assertReadWriteSourcesPresent(const StinkyInstruction* inst) {
+    const HwInstDesc* desc = inst->getHwInstDesc();
+    if (desc == nullptr) return;
+
+    const std::vector<StinkyRegister>& destRegs = inst->getDestRegs();
+    const std::vector<StinkyRegister>& srcRegs = inst->getSrcRegs();
+    size_t destIdx = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t slot = destIdx++;
+        if (!readsDestination(*inst, slot)) continue;
+
+        if (slot >= destRegs.size()) {
+            std::cerr << "Read-write operand missing from destRegs\n"
+                      << "  Instruction: " << desc->mnemonic << ": ";
+            inst->dump(std::cerr);
+            assert(false && "Read-write operand missing from destRegs");
+            continue;
+        }
+
+        const StinkyRegister& reg = destRegs[slot];
+        if (!reg.isRegister()) continue;
+        if (std::find(srcRegs.begin(), srcRegs.end(), reg) == srcRegs.end()) {
+            std::cerr << "Read-write operand missing from srcRegs\n"
+                      << "  Instruction: " << desc->mnemonic << ": ";
+            inst->dump(std::cerr);
+            std::cerr << "  Register: ";
+            reg.dump(std::cerr);
+            assert(false && "Read-write operand missing from srcRegs");
+        }
+    }
+}
+#endif
+
 Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* rocisaInst,
                               AsmIRBuilder& irBuilder, GfxArchID archId,
                               const std::map<std::string, int>& asmCaps,
@@ -314,6 +354,14 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
     // Attach implicit special registers (SCC/VCC/`EXEC) declared by HW flags
     // (Flags.def) to the instruction.
     legalizeImplicitSpecialRegisters(inst, getWaveFrontSize(archId));
+
+    // A destination that keeps part of its old value is also a read, and not
+    // every rocisa class lists it in getSrcParams(). This runs after
+    // addModifiersToInstruction, which op_sel being half of the answer requires.
+    legalizeReadWriteSources(inst);
+#ifndef NDEBUG
+    assertReadWriteSourcesPresent(inst);
+#endif
 
     if (auto* swappc = dynamic_cast<rocisa::SSwapPCB64*>(rocisaInst)) {
         assert(isCall(*inst) && "SSwapPCB64 must lower to an IF_Call instruction");
@@ -451,52 +499,6 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             stinkyInst->addSrcReg(reg);
         }
     }
-
-#ifndef NDEBUG
-    // Verify: read-write operands must exist in both destRegs and srcRegs.
-    {
-        const auto& fields = stinkyInst->getHwInstDesc()->operandFields;
-        for (const auto& field : fields) {
-            if (!field.isReadWrite) continue;
-
-            const auto& destRegs = stinkyInst->getDestRegs();
-            const auto& srcRegs = stinkyInst->getSrcRegs();
-            unsigned dIdx = 0, sIdx = 0;
-            for (const auto& f : fields) {
-                if (&f == &field) break;
-                if (f.isDest || f.isReadWrite)
-                    dIdx++;
-                else
-                    sIdx++;
-            }
-
-            const StinkyRegister* reg = nullptr;
-            if (field.isDest && dIdx < destRegs.size())
-                reg = &destRegs[dIdx];
-            else if (sIdx < srcRegs.size())
-                reg = &srcRegs[sIdx];
-
-            if (reg && reg->dataType == StinkyRegister::Type::Register) {
-                if (std::find(destRegs.begin(), destRegs.end(), *reg) == destRegs.end()) {
-                    std::cerr << "Read-write operand missing from destRegs\n"
-                              << "  Instruction: " << stinkyInst->getHwInstDesc()->mnemonic << ": ";
-                    stinkyInst->dump(std::cerr);
-                    std::cerr << "  Register: ";
-                    reg->dump(std::cerr);
-                    assert(false && "Read-write operand missing from destRegs");
-                }
-                if (std::find(srcRegs.begin(), srcRegs.end(), *reg) == srcRegs.end()) {
-                    std::cerr << "Read-write operand missing from srcRegs\n"
-                              << "  Instruction: " << stinkyInst->getHwInstDesc()->mnemonic << ": ";
-                    stinkyInst->dump(std::cerr);
-                    std::cerr << "  Register: ";
-                    reg->dump(std::cerr);
-                    assert(false && "Read-write operand missing from srcRegs");
-                }
-            }
-        }
-    }
-#endif
 }
 
 /// Helper to extract neg_lo/neg_hi modifiers from instruction string
