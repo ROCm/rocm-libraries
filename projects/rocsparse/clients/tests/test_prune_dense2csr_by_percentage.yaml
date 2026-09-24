@@ -105,3 +105,19 @@ Tests:
   denseld: [47000]
   percentage: [10.0]
   baseA: [rocsparse_index_base_zero]
+
+# 66000 x 66000 is 4,356,000,000 elements, the first tested shape above the
+# 2^32 wrap in abs_kernel's block-index arithmetic (AISPARSE-682). The 47000
+# case above stops at 2,209,000,192 and cannot reach it. Pruning 99% keeps
+# the surviving nnz well inside rocsparse_int while the kernel still reads
+# every element.
+- name: prune_dense2csr_by_percentage
+  category: stress
+  hardware: [gfx942, gfx950]
+  function: prune_dense2csr_by_percentage
+  precision: *single_only_precisions
+  M: [66000]
+  N: [66000]
+  denseld: [66000]
+  percentage: [99.0]
+  baseA: [rocsparse_index_base_zero]

@@ -102,6 +102,157 @@ def test_validate_skill_flags_slash_command_reference(validate_mod, tmp_path):
     assert any("slash-command reference" in error for error in errors)
 
 
+def test_validate_skill_allows_relative_link_to_a_sibling_skill(validate_mod, tmp_path):
+    """A markdown link into a sibling skill directory is a path, not a command.
+
+    Paired with the test above, which shares the '/hipdnn' text and must still be
+    rejected, so this passing cannot mean the check stopped firing.
+    """
+    skill = tmp_path / "demo-skill"
+    _write_skill(
+        skill, body="See [the runbook](../hipdnn-demo/RUNBOOK.md) for steps.\n"
+    )
+    errors = validate_mod.validate_skill(skill)
+    assert not any("slash-command reference" in error for error in errors)
+
+
+def test_validate_skill_flags_link_escaping_the_installed_skill_root(
+    validate_mod, tmp_path
+):
+    """A link above skills/<name>/ resolves in the checkout and dies on install:
+    install-skills.py copies one skill directory and nothing above it."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(
+        skill, body="See [the generator](../../../IngestorGenerator/README.md).\n"
+    )
+    errors = validate_mod.validate_skill(skill)
+    assert any("escapes the installed skill root" in error for error in errors)
+
+
+def test_validate_skill_allows_link_into_a_sibling_skill_directory(
+    validate_mod, tmp_path
+):
+    """Sibling skills install side by side, so ../<sibling>/ still resolves.
+    Paired with the escape test above, which must still fail."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(skill, body="See [the runbook](../other-skill/RUNBOOK.md#setup).\n")
+    errors = validate_mod.validate_skill(skill)
+    assert not any("escapes the installed skill root" in error for error in errors)
+
+
+def test_validate_skill_flags_a_dangling_link_inside_the_skill(validate_mod, tmp_path):
+    """A typo that stays inside skills/<name>/ passes the escape check, so the
+    escape check alone cannot be what proves a link resolves."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(skill, body="See [the runbook](./RUNBOOK.md) for steps.\n")
+    errors = validate_mod.validate_skill(skill)
+    assert any("no such file exists" in error for error in errors)
+
+
+def test_validate_skill_allows_a_link_whose_target_exists(validate_mod, tmp_path):
+    """Paired with the dangling test above: same link text, target exists."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(skill, body="See [the runbook](./RUNBOOK.md) for steps.\n")
+    (skill / "RUNBOOK.md").write_text("# Runbook\n", encoding="utf-8")
+    errors = validate_mod.validate_skill(skill)
+    assert not any("no such file exists" in error for error in errors)
+
+
+def test_validate_skill_ignores_links_inside_a_fenced_block(validate_mod, tmp_path):
+    """An illustrative link in a code fence is a sample, not a reference."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(
+        skill,
+        body=(
+            "Example markdown:\n\n"
+            "```markdown\n[x](../../../elsewhere/README.md)\n```\n"
+        ),
+    )
+    errors = validate_mod.validate_skill(skill)
+    assert not any("escapes the installed skill root" in error for error in errors)
+
+
+def test_validate_skill_flags_missing_repo_relative_path(validate_mod, tmp_path):
+    """`tools/...` anchors at the repository root, so a missing tail is a defect."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(
+        skill, body="Run `tools/dnn-benchmarking/setup.ps1` before building.\n"
+    )
+    errors = validate_mod.validate_skill(skill)
+    assert any("tools/dnn-benchmarking/setup.ps1" in error for error in errors)
+
+
+def test_validate_skill_flags_missing_skill_relative_path(validate_mod, tmp_path):
+    """`scripts/...` anchors inside the skill, so a missing tail is a defect too."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(skill, body="Run `scripts/windows/windows_build_setup.ps1` first.\n")
+    (skill / "scripts").mkdir(parents=True, exist_ok=True)
+    errors = validate_mod.validate_skill(skill)
+    assert any("windows_build_setup.ps1" in error for error in errors)
+
+
+def test_validate_skill_allows_resolvable_and_ambiguous_paths(validate_mod, tmp_path):
+    """Only an anchored miss is flagged -- the conservative half of the check.
+    Paired with the two tests above, which share the token shape and must fail."""
+    skill = tmp_path / "demo-skill"
+    (skill / "scripts").mkdir(parents=True, exist_ok=True)
+    (skill / "scripts" / "helper.py").write_text("pass\n", encoding="utf-8")
+    _write_skill(
+        skill,
+        body=(
+            # resolvable from the repository root
+            "See `projects/hipdnn/tools/ai/validate-skills.py`.\n"
+            # resolvable inside the skill
+            "Run `scripts/helper.py`.\n"
+            # a bare filename is prose, not a path claim
+            "Then `setup.ps1` finishes the job.\n"
+            # unanchored, so ambiguous: left alone
+            "Also `descriptors/README.md` in the provider tree.\n"
+            # templated, so not a literal path
+            "And `<build-dir>/stamp/config.json` after configure.\n"
+        ),
+    )
+    errors = validate_mod.validate_skill(skill)
+    assert not any("does not exist" in error for error in errors), errors
+
+
+def test_validate_skill_flags_undefined_command_placeholder(validate_mod, tmp_path):
+    skill = tmp_path / "demo-skill"
+    _write_skill(
+        skill,
+        body="Stage the DLL:\n\n```bash\n<PY> scripts/comgr_stage.py --verbose\n```\n",
+    )
+    errors = validate_mod.validate_skill(skill)
+    assert any("placeholder '<PY>'" in error for error in errors)
+
+
+def test_validate_skill_allows_placeholder_introduced_in_prose(validate_mod, tmp_path):
+    """Paired with the test above: same command block, one prose sentence added."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(
+        skill,
+        body=(
+            "`<PY>` is the resolved Python interpreter for the active host.\n\n"
+            "Stage the DLL:\n\n```bash\n<PY> scripts/comgr_stage.py --verbose\n```\n"
+        ),
+    )
+    errors = validate_mod.validate_skill(skill)
+    assert not any("placeholder" in error for error in errors), errors
+
+
+def test_validate_skill_ignores_generics_in_a_language_fence(validate_mod, tmp_path):
+    """C++ template arguments and include headers are not placeholders."""
+    skill = tmp_path / "demo-skill"
+    _write_skill(
+        skill,
+        body=(
+            "Example:\n\n```cpp\n#include <algorithm>\nstd::vector<int> values;\n```\n"
+        ),
+    )
+    errors = validate_mod.validate_skill(skill)
+    assert not any("placeholder" in error for error in errors), errors
+
+
 def test_validate_skill_requires_claude_frontmatter_fields(validate_mod, tmp_path):
     """A skill named in the claude_commands set needs argument-hint + allowed-tools."""
     skill = tmp_path / "hipdnn-pr-quality"
@@ -109,6 +260,30 @@ def test_validate_skill_requires_claude_frontmatter_fields(validate_mod, tmp_pat
     errors = validate_mod.validate_skill(skill)
     assert any("argument-hint" in error for error in errors)
     assert any("allowed-tools" in error for error in errors)
+
+
+def test_symlink_target_recognises_a_git_materialized_link(validate_mod, tmp_path):
+    """Windows checkouts store a mode-120000 entry as a file holding the target.
+    The duplicate-script pair is a symlink upstream, so it must not read as a
+    byte-identity violation."""
+    real = tmp_path / "a" / "script.py"
+    real.parent.mkdir(parents=True)
+    real.write_text("print('hello')\n", encoding="utf-8")
+    materialized = tmp_path / "b" / "script.py"
+    materialized.parent.mkdir(parents=True)
+    materialized.write_text("../a/script.py", encoding="utf-8")
+    assert validate_mod.symlink_target(materialized) == real.resolve()
+
+
+def test_symlink_target_ignores_ordinary_script_content(validate_mod, tmp_path):
+    """Paired with the test above so a real divergence still reads as content."""
+    real = tmp_path / "script.py"
+    real.write_text("print('hello')\n", encoding="utf-8")
+    assert validate_mod.symlink_target(real) is None
+
+    dangling = tmp_path / "dangling.py"
+    dangling.write_text("../nowhere/script.py", encoding="utf-8")
+    assert validate_mod.symlink_target(dangling) is None
 
 
 @pytest.mark.parametrize("name", ["pr-summary", "hipdnn-review"])
