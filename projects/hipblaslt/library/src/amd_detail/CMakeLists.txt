@@ -23,3 +23,14 @@ if(HIPBLASLT_BUILD_TESTING)
     set_target_properties(hipblaslt-jit-process-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
 endif()
+
+if(HIPBLASLT_BUILD_TESTING)
+    find_package(ZLIB REQUIRED)
+    add_executable(hipblaslt-jit-artifacts-test
+        "${PROJECT_SOURCE_DIR}/clients/tests/jit/tensilelite_artifacts_test.cpp")
+    target_include_directories(hipblaslt-jit-artifacts-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(hipblaslt-jit-artifacts-test PRIVATE cxx_std_17)
+    target_link_libraries(hipblaslt-jit-artifacts-test PRIVATE ZLIB::ZLIB)
+    set_target_properties(hipblaslt-jit-artifacts-test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+endif()
