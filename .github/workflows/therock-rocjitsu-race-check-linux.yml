@@ -21,6 +21,26 @@ on:
       amdgpu_targets:
         type: string
         default: ""
+  # EXPERIMENT: direct dispatch entry point + artifact_run_id override, so this
+  # can be pointed at an already-completed run's artifacts without waiting for
+  # a brand new build. Do not merge.
+  workflow_dispatch:
+    inputs:
+      therock_ref:
+        type: string
+        required: true
+      build_runs_on:
+        type: string
+        required: true
+      amdgpu_families:
+        type: string
+        required: true
+      amdgpu_targets:
+        type: string
+        default: ""
+      artifact_run_id:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -49,7 +69,7 @@ jobs:
         shell: bash
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
@@ -119,7 +139,7 @@ jobs:
           AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: --blas --tests
+          FETCH_ARTIFACT_ARGS: --miopen --tests
 
       - name: Run rocjitsu race check
         timeout-minutes: 75
