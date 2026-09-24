@@ -8,4 +8,4 @@ export TENSILE_DISABLE_HELPER_CACHE=1
 
 cd "$TENSILE_DIR"
 rm -rf /tmp/fused-harness
-./Tensile/bin/Tensile "$YAML_DIR/benchmark_fused_bf16_partialrms_residualadd.yaml" /tmp/fused-harness
+./Tensile/bin/Tensile "$YAML_DIR/benchmark_k1_bf16.yaml" /tmp/fused-harness

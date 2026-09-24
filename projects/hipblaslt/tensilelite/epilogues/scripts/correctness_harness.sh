@@ -17,9 +17,9 @@ rm -rf /tmp/fused-mxfp8-harness
 ./Tensile/bin/Tensile "$YAML_DIR/correctness_mxfp8.yaml" /tmp/fused-mxfp8-harness
 MXFP8_RC=$?
 
-# Non-zero if either path failed so callers can gate on a single exit code.
+# Non-zero if any path failed so callers can gate on a single exit code.
 if [[ $FUSED_RC -ne 0 || $MXFP8_RC -ne 0 ]]; then
   echo "correctness_harness FAILED: fused_rc=$FUSED_RC mxfp8_rc=$MXFP8_RC"
   exit 1
 fi
-echo "correctness_harness PASSED: fused and mxfp8 mega-fused configs both OK"
+echo "correctness_harness PASSED: fused and mxfp8 configs both OK"
