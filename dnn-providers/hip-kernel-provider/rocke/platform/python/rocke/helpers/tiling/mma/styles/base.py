@@ -86,7 +86,7 @@ class LayoutStyle:
 
     def lds_bridge(
         self, traits: MmaTraits, *, role: str, free_sub: int, k_sub: int
-    ) -> "tuple[TileDesc, TileDesc] | None":
+    ) -> tuple[TileDesc, TileDesc] | None:
         """OPTIONAL declared extension point for a style that STAGES the operand THROUGH LDS. Returns the
         memory-bridge pair ``(lds_read_landing_desc, mma_ready_desc)`` for ``role`` in {"A", "B"}: the
         kernel loads the wide LDS read with the first descriptor, then applies the in-register reorder to

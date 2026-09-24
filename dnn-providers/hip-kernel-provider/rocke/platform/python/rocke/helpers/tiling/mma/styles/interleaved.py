@@ -31,7 +31,9 @@ class InterleavedStyle(LayoutStyle):
     def operand_descs(
         self, traits: MmaTraits, *, free_sub: int, k_sub: int, free_lanes: int
     ) -> tuple[TileDesc, TileDesc]:
-        """``(lds_read_desc_in_(free,K), mma_ready_desc)`` for one operand.
+        """``(lds_read_desc_in_(free,K), mma_ready_desc)`` for one operand. The generic ``free_lanes``-keyed
+        form (public: introspected by the interleavability proof sweep); :meth:`lds_bridge` is the
+        role-keyed wrapper the protocol/kernel use.
 
         ``free_lanes`` is PER OPERAND (``traits.m`` for A -- free axis M; ``traits.n`` for B -- free axis
         N); making it a caller argument is what lets A and B differ from one profile without B reusing

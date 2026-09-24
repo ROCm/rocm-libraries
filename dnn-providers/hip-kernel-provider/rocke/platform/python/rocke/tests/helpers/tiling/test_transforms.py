@@ -253,3 +253,14 @@ def test_reorder_between_raises_on_different_per_lane_data() -> None:
     tgt = {(0, 0): (1, 0), (1, 0): (0, 0)}
     with pytest.raises(ValueError, match="same per-lane data"):
         reorder_between(src, tgt, pack=1)
+
+
+def test_observer_result_types_surfaced_at_package_root() -> None:
+    # #34: the observers' return dataclasses are importable from the package root (so an exported
+    # observer function's return type is reachable without diving into transforms/_core).
+    import rocke.helpers.tiling as tiling
+    from rocke.helpers.tiling import Diagnostic, ReorderPlan, TransformPlan
+
+    for name in ("Diagnostic", "TransformPlan", "ReorderPlan"):
+        assert name in tiling.__all__
+    assert all(isinstance(t, type) for t in (Diagnostic, TransformPlan, ReorderPlan))

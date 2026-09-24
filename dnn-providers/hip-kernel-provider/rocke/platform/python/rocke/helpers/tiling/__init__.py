@@ -38,6 +38,8 @@ TOOLBOX -- the primitives the front door composes, callable directly for finer c
     ``classify_transform`` / ``describe_edge`` / ``diagnose_k_match`` / ``operand_soundness`` /
         ``mma_pair_compatible`` / ``reorder_between`` / ``derive_c_distribution``   the read-only
         transform observers -- classify an edge, check MMA soundness, derive C (never mutate/emit).
+    ``Diagnostic`` / ``TransformPlan`` / ``ReorderPlan``   the observers' result types (the objects the
+        observers above hand back).
     ``WarpDistributionEncoding``   the raw coordinate-transform encoding (extension substrate; rarely
         built by hand).
 
@@ -89,6 +91,9 @@ from .transforms import (
     mma_pair_compatible,
     reorder_between,
     derive_c_distribution,
+    Diagnostic,
+    TransformPlan,
+    ReorderPlan,
 )
 
 __all__ = [
@@ -136,6 +141,10 @@ __all__ = [
     "mma_pair_compatible",
     "reorder_between",
     "derive_c_distribution",
+    # the observers' result types (so an exported function's return type is importable from the root)
+    "Diagnostic",
+    "TransformPlan",
+    "ReorderPlan",
     "WarpDistributionEncoding",  # extension substrate (rarely built by hand)
     # ---- MACHINERY is intentionally NOT re-exported (see the module docstring) ------------------
 ]

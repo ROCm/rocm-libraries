@@ -42,3 +42,37 @@ def test_lds_bridge_role_selects_operand_free_axis() -> None:
 def test_lds_bridge_rejects_bad_role() -> None:
     with pytest.raises(ValueError, match="role must be 'A' or 'B'"):
         InterleavedStyle().lds_bridge(_T, role="C", free_sub=1, k_sub=1)
+
+
+# ---- #33: per-operand soundness runs at TileMmaPlan CONSTRUCTION (same timing as the C-oracle) ----
+
+def test_shipped_styles_build_a_plan_without_raising() -> None:
+    # Both profiles pass the construction-time operand-soundness check by construction -- for a
+    # single-atom wave AND a subtiled one. The (32,32,32) wave over a (16,16,16) atom makes
+    # m_sub/n_sub/k_sub == 2, so the check's subtiling path is covered by THIS test, not only
+    # transitively via the driver-path tests.
+    from rocke.helpers.tiling.mma.plan import TileMmaPlan, Tiling
+
+    configs = (
+        ((16, 16, 16), None),                              # single atom (m_sub=n_sub=k_sub=1)
+        ((32, 32, 32), Tiling(atom_shape=(16, 16, 16))),   # 2x2x2 subtiled wave tile
+    )
+    for style in (CanonicalStyle(), InterleavedStyle()):
+        for shape, tiling in configs:
+            TileMmaPlan(
+                shape, a="f16", b="f16", c="f32", target="gfx90a", style=style, tiling=tiling
+            )
+
+
+def test_unsound_operand_rejected_at_plan_construction(monkeypatch) -> None:
+    # Force operand_soundness to report an error and confirm the PLAN rejects it at build -- proving the
+    # gate fires at construction (matching the C-oracle), not only later at TileMmaDriver.__call__.
+    import rocke.helpers.tiling.transforms as transforms
+    from rocke.helpers.tiling.mma.plan import TileMmaPlan
+    from rocke.helpers.tiling.transforms._core import Diagnostic
+
+    monkeypatch.setattr(
+        transforms, "operand_soundness", lambda *a, **k: Diagnostic("error", "forced-unsound (test)")
+    )
+    with pytest.raises(ValueError, match="not sound"):
+        TileMmaPlan((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")

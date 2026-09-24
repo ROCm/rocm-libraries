@@ -162,6 +162,10 @@ class TileMmaPlan:
         # The two shipped styles pass; a mis-generalized future style whose C geometry the atom-derived
         # descriptor cannot express is rejected here, not silently mis-stored. C is always derived (never
         # style-supplied); a style only influences C via the K-distribution its operands present.
+        # Per-operand soundness at construction (SAME timing as the C-oracle): a custom style whose
+        # operand descriptor is per-operand-unsound (a wandering M/N) is rejected here at plan build,
+        # not only later at TileMmaDriver.__call__. Derived / canonical / interleaved pass by construction.
+        self._assert_operands_sound()
         self._assert_accumulator_matches_oracle()
 
     @staticmethod
@@ -314,6 +318,24 @@ class TileMmaPlan:
         return self._style.accumulator_desc(
             self._traits, m_sub=self._m_subtiles, n_sub=self._n_subtiles
         )
+
+    def _assert_operands_sound(self) -> None:
+        """Per-operand soundness at CONSTRUCTION: each operand descriptor the style produces must be a
+        sound MMA operand (one fixed M/N per output-row, well-formed K) against the atom-canonical
+        machine. Catches a per-operand-unsound custom style at plan build, matching the C-oracle's
+        timing; the driver keeps its own unconditional check. The reference is the atom-canonical
+        ``a_layout``/``b_layout`` -- NEVER the style's own descriptor (that would be vacuous)."""
+        from ..transforms import operand_soundness
+
+        for role, operand_desc, canon in (
+            ("A", self.a_operand_desc, self.a_layout),
+            ("B", self.b_operand_desc, self.b_layout),
+        ):
+            d = operand_soundness(operand_desc.layout, canon, role=role)
+            if d.severity != "ok":
+                raise ValueError(
+                    f"style {self._style.name!r} {role} operand not sound for {self.op_id!r} -- {d.message}"
+                )
 
     def _assert_accumulator_matches_oracle(self) -> None:
         """Independent-path C-oracle: the style's native accumulator labels vs the machine's fall-out
