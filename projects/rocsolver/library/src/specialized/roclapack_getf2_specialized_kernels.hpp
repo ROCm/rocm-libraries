@@ -238,149 +238,156 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
 {
     using S = decltype(std::real(T{}));
 
+    // const I id = hipBlockIdx_z;
+
     const I tx = hipThreadIdx_x;
     const I ty = hipThreadIdx_y;
-    const I id = hipBlockIdx_z;
     const I bdx = hipBlockDim_x;
     const I bdy = hipBlockDim_y;
 
-    // batch instance
-    T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
-    I* ipiv = load_ptr_batch<I>(ipivA, id, shiftP, strideP);
-    I* permut = (permut_idx != nullptr ? permut_idx + id * stridePI : nullptr);
-    INFO* info = infoA + id;
+    I const id_start = hipBlockIdx_z;
+    I const id_inc = hipGridDim_z;
 
-    // shared memory (for communication between threads in group)
-    extern __shared__ double lmem[];
-    T* x = reinterpret_cast<T*>(lmem);
-    T* y = x + bdx;
-    S* sval = reinterpret_cast<S*>(y + n);
-    I* sidx = reinterpret_cast<I*>(sval + bdx);
-    __shared__ T val;
-
-    // local variables
-    S val1, val2;
-    T valtmp, pivot_val;
-    I idx1, idx2, pivot_idx;
-    INFO myinfo = 0; // to build info
-
-    // init step: read column zero from A
-    if(ty == 0)
+    for(I id = id_start; id < batch_count; id += id_inc)
     {
-        valtmp = (tx < m) ? A[tx] : 0;
-        idx1 = tx;
-        x[tx] = valtmp;
-        val1 = aabs<S>(valtmp);
-        sval[tx] = val1;
-        sidx[tx] = idx1;
-    }
+        // batch instance
+        T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
+        I* ipiv = load_ptr_batch<I>(ipivA, id, shiftP, strideP);
+        I* permut = (permut_idx != nullptr ? permut_idx + id * stridePI : nullptr);
+        INFO* info = infoA + id;
 
-    // main loop (for each pivot)
-    for(I k = 0; k < n; ++k)
-    {
-        // find pivot (maximum in column)
-        __syncthreads();
-        for(I i = bdx / 2; i > 0; i /= 2)
+        // shared memory (for communication between threads in group)
+        extern __shared__ double lmem[];
+        T* x = reinterpret_cast<T*>(lmem);
+        T* y = x + bdx;
+        S* sval = reinterpret_cast<S*>(y + n);
+        I* sidx = reinterpret_cast<I*>(sval + bdx);
+        __shared__ T val;
+
+        // local variables
+        S val1, val2;
+        T valtmp, pivot_val;
+        I idx1, idx2, pivot_idx;
+        INFO myinfo = 0; // to build info
+
+        // init step: read column zero from A
+        if(ty == 0)
         {
-            if(tx < i && ty == 0)
+            valtmp = (tx < m) ? A[tx] : 0;
+            idx1 = tx;
+            x[tx] = valtmp;
+            val1 = aabs<S>(valtmp);
+            sval[tx] = val1;
+            sidx[tx] = idx1;
+        }
+
+        // main loop (for each pivot)
+        for(I k = 0; k < n; ++k)
+        {
+            // find pivot (maximum in column)
+            __syncthreads();
+            for(I i = bdx / 2; i > 0; i /= 2)
             {
-                val2 = sval[tx + i];
-                idx2 = sidx[tx + i];
-                if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+                if(tx < i && ty == 0)
                 {
-                    sval[tx] = val1 = val2;
-                    sidx[tx] = idx1 = idx2;
+                    val2 = sval[tx + i];
+                    idx2 = sidx[tx + i];
+                    if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+                    {
+                        sval[tx] = val1 = val2;
+                        sidx[tx] = idx1 = idx2;
+                    }
                 }
+                __syncthreads();
+            }
+            pivot_idx = sidx[0]; //after reduction this is the index of max value
+            pivot_val = x[pivot_idx];
+
+            // check singularity and scale value for current column
+            if(pivot_val == T(0))
+            {
+                pivot_idx = k;
+                if(myinfo == 0)
+                    myinfo = k + 1;
+            }
+            else
+                pivot_val = S(1) / pivot_val;
+
+            // update ipiv
+            if(tx == 0 && ty == 0)
+                ipiv[k] = pivot_idx + 1 + offset;
+
+            // update column k
+            if(tx != pivot_idx)
+            {
+                pivot_val *= x[tx];
+                if(ty == 0 && tx >= k && tx < m)
+                    A[tx + k * lda] = pivot_val;
+            }
+
+            // put pivot row in shared mem
+            if(tx < n && ty == 0)
+            {
+                y[tx] = A[pivot_idx + tx * lda];
+                if(tx == k)
+                    val = pivot_val;
             }
             __syncthreads();
-        }
-        pivot_idx = sidx[0]; //after reduction this is the index of max value
-        pivot_val = x[pivot_idx];
 
-        // check singularity and scale value for current column
-        if(pivot_val == T(0))
-        {
-            pivot_idx = k;
-            if(myinfo == 0)
-                myinfo = k + 1;
-        }
-        else
-            pivot_val = S(1) / pivot_val;
-
-        // update ipiv
-        if(tx == 0 && ty == 0)
-            ipiv[k] = pivot_idx + 1 + offset;
-
-        // update column k
-        if(tx != pivot_idx)
-        {
-            pivot_val *= x[tx];
-            if(ty == 0 && tx >= k && tx < m)
-                A[tx + k * lda] = pivot_val;
-        }
-
-        // put pivot row in shared mem
-        if(tx < n && ty == 0)
-        {
-            y[tx] = A[pivot_idx + tx * lda];
-            if(tx == k)
-                val = pivot_val;
-        }
-        __syncthreads();
-
-        // swap pivot row with updated row k
-        if(tx < n && ty == 0 && pivot_idx != k)
-        {
-            valtmp = (tx == k) ? val : A[k + tx * lda];
-            valtmp -= (tx > k) ? val * y[tx] : 0;
-            A[pivot_idx + tx * lda] = valtmp;
-            A[k + tx * lda] = y[tx];
-            if(tx == k + 1)
+            // swap pivot row with updated row k
+            if(tx < n && ty == 0 && pivot_idx != k)
             {
-                x[pivot_idx] = valtmp;
-                val1 = aabs<S>(valtmp);
-                sval[pivot_idx] = val1;
-            }
-            if(permut_idx && tx == k)
-                swap(permut[k], permut[pivot_idx]);
-        }
-
-        // complete the rank update
-        if(tx > k && tx < m && tx != pivot_idx)
-        {
-            for(I j = ty + k + 2; j < n; j += bdy)
-            {
-                valtmp = A[tx + j * lda];
-                valtmp -= pivot_val * y[j];
-                A[tx + j * lda] = valtmp;
+                valtmp = (tx == k) ? val : A[k + tx * lda];
+                valtmp -= (tx > k) ? val * y[tx] : 0;
+                A[pivot_idx + tx * lda] = valtmp;
+                A[k + tx * lda] = y[tx];
+                if(tx == k + 1)
+                {
+                    x[pivot_idx] = valtmp;
+                    val1 = aabs<S>(valtmp);
+                    sval[pivot_idx] = val1;
+                }
+                if(permut_idx && tx == k)
+                    swap(permut[k], permut[pivot_idx]);
             }
 
-            if(ty == 0 && k < n - 1)
+            // complete the rank update
+            if(tx > k && tx < m && tx != pivot_idx)
             {
-                valtmp = A[tx + (k + 1) * lda];
-                valtmp -= pivot_val * y[k + 1];
-                A[tx + (k + 1) * lda] = valtmp;
-                x[tx] = valtmp;
-                val1 = aabs<S>(valtmp);
-                sval[tx] = val1;
+                for(I j = ty + k + 2; j < n; j += bdy)
+                {
+                    valtmp = A[tx + j * lda];
+                    valtmp -= pivot_val * y[j];
+                    A[tx + j * lda] = valtmp;
+                }
+
+                if(ty == 0 && k < n - 1)
+                {
+                    valtmp = A[tx + (k + 1) * lda];
+                    valtmp -= pivot_val * y[k + 1];
+                    A[tx + (k + 1) * lda] = valtmp;
+                    x[tx] = valtmp;
+                    val1 = aabs<S>(valtmp);
+                    sval[tx] = val1;
+                }
             }
+
+            // update ipiv and prepare for next step
+            if(tx <= k && ty == 0)
+            {
+                val1 = 0;
+                x[tx] = 0;
+                sval[tx] = 0;
+            }
+            idx1 = tx;
+            if(ty == 0)
+                sidx[tx] = idx1;
         }
 
-        // update ipiv and prepare for next step
-        if(tx <= k && ty == 0)
-        {
-            val1 = 0;
-            x[tx] = 0;
-            sval[tx] = 0;
-        }
-        idx1 = tx;
-        if(ty == 0)
-            sidx[tx] = idx1;
+        // update info
+        if(tx == 0 && *info == 0 && myinfo > 0 && ty == 0)
+            *info = myinfo + offset;
     }
-
-    // update info
-    if(tx == 0 && *info == 0 && myinfo > 0 && ty == 0)
-        *info = myinfo + offset;
 }
 
 /** getf2_npvt_panel_kernel (non pivoting version) **/
@@ -399,87 +406,92 @@ ROCSOLVER_KERNEL void getf2_npvt_panel_kernel(const I m,
 
     const I tx = hipThreadIdx_x;
     const I ty = hipThreadIdx_y;
-    const I id = hipBlockIdx_z;
     const I bdx = hipBlockDim_x;
     const I bdy = hipBlockDim_y;
 
-    // batch instance
-    T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
-    INFO* info = infoA + id;
+    I const id_start = hipBlockIdx_z;
+    I const id_inc = hipGridDim_z;
 
-    // shared memory (for communication between threads in group)
-    extern __shared__ double lmem[];
-    T* x = reinterpret_cast<T*>(lmem);
-    T* y = x + bdx;
-    __shared__ T val;
-
-    // local variables
-    T pivot_val, val1;
-    INFO myinfo = 0; // to build info
-
-    // init step: read column zero from A
-    if(ty == 0)
+    for(I id = id_start; id < batch_count; id += id_inc)
     {
-        val1 = (tx < m) ? A[tx] : 0;
-        x[tx] = val1;
-    }
+        // batch instance
+        T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
+        INFO* info = infoA + id;
 
-    // main loop (for each pivot)
-    for(I k = 0; k < n; ++k)
-    {
-        __syncthreads();
-        pivot_val = x[k];
+        // shared memory (for communication between threads in group)
+        extern __shared__ double lmem[];
+        T* x = reinterpret_cast<T*>(lmem);
+        T* y = x + bdx;
+        __shared__ T val;
 
-        // check singularity and scale value for current column
-        if(pivot_val == T(0) && myinfo == 0)
-            myinfo = k + 1;
-        else
-            pivot_val = S(1) / pivot_val;
+        // local variables
+        T pivot_val, val1;
+        INFO myinfo = 0; // to build info
 
-        // update column k
-        if(tx != k)
+        // init step: read column zero from A
+        if(ty == 0)
         {
-            pivot_val *= x[tx];
-            if(ty == 0 && tx >= k && tx < m)
-                A[tx + k * lda] = pivot_val;
+            val1 = (tx < m) ? A[tx] : 0;
+            x[tx] = val1;
         }
 
-        // put pivot row in shared mem
-        if(tx < n && ty == 0)
+        // main loop (for each pivot)
+        for(I k = 0; k < n; ++k)
         {
-            y[tx] = A[k + tx * lda];
-            if(tx == k)
-                val = pivot_val;
-        }
-        __syncthreads();
+            __syncthreads();
+            pivot_val = x[k];
 
-        // complete the rank update
-        if(tx > k && tx < m)
-        {
-            for(I j = ty + k + 2; j < n; j += bdy)
+            // check singularity and scale value for current column
+            if(pivot_val == T(0) && myinfo == 0)
+                myinfo = k + 1;
+            else
+                pivot_val = S(1) / pivot_val;
+
+            // update column k
+            if(tx != k)
             {
-                val1 = A[tx + j * lda];
-                val1 -= pivot_val * y[j];
-                A[tx + j * lda] = val1;
+                pivot_val *= x[tx];
+                if(ty == 0 && tx >= k && tx < m)
+                    A[tx + k * lda] = pivot_val;
             }
 
-            if(ty == 0 && k < n - 1)
+            // put pivot row in shared mem
+            if(tx < n && ty == 0)
             {
-                val1 = A[tx + (k + 1) * lda];
-                val1 -= pivot_val * y[k + 1];
-                A[tx + (k + 1) * lda] = val1;
-                x[tx] = val1;
+                y[tx] = A[k + tx * lda];
+                if(tx == k)
+                    val = pivot_val;
             }
+            __syncthreads();
+
+            // complete the rank update
+            if(tx > k && tx < m)
+            {
+                for(I j = ty + k + 2; j < n; j += bdy)
+                {
+                    val1 = A[tx + j * lda];
+                    val1 -= pivot_val * y[j];
+                    A[tx + j * lda] = val1;
+                }
+
+                if(ty == 0 && k < n - 1)
+                {
+                    val1 = A[tx + (k + 1) * lda];
+                    val1 -= pivot_val * y[k + 1];
+                    A[tx + (k + 1) * lda] = val1;
+                    x[tx] = val1;
+                }
+            }
+
+            // prepare for next step
+            if(tx <= k && ty == 0)
+                x[tx] = 0;
         }
 
-        // prepare for next step
-        if(tx <= k && ty == 0)
-            x[tx] = 0;
+        // update info
+        if(tx == 0 && *info == 0 && myinfo > 0 && ty == 0)
+            *info = myinfo + offset;
     }
-
-    // update info
-    if(tx == 0 && *info == 0 && myinfo > 0 && ty == 0)
-        *info = myinfo + offset;
 }
 
 /** getf2_scale_update_kernel executes an optimized scaled rank-update (scal + ger)
@@ -493,49 +505,56 @@ ROCSOLVER_KERNEL void getf2_scale_update_kernel(const I m,
                                                 U AA,
                                                 const rocblas_stride shiftA,
                                                 const I lda,
-                                                const rocblas_stride strideA)
+                                                const rocblas_stride strideA,
+                                                const I batch_count)
 {
     // indices
-    I bid = hipBlockIdx_z;
-    I tx = hipThreadIdx_x;
-    I ty = hipThreadIdx_y;
-    I i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + tx;
 
-    // shared data arrays
-    T pivot, val;
-    extern __shared__ double lmem[];
-    T* x = reinterpret_cast<T*>(lmem);
-    T* y = x + hipBlockDim_x;
+    I const bid_start = hipBlockIdx_z;
+    I const bid_inc = hipGridDim_z;
 
-    // batch instance
-    T* A = load_ptr_batch(AA, bid, shiftA + 1 + lda, strideA);
-    T* X = load_ptr_batch(AA, bid, shiftA + 1, strideA);
-    T* Y = load_ptr_batch(AA, bid, shiftA + lda, strideA);
-    pivot = pivotval[bid];
-
-    // read data from global to shared memory
-    I j = tx * hipBlockDim_y + ty;
-    if(j < n)
-        y[j] = Y[j * lda];
-
-    // scale
-    if(ty == 0 && i < m)
+    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
-        x[tx] = X[i];
-        x[tx] *= pivot;
-        X[i] = x[tx];
-    }
-    __syncthreads();
+        I tx = hipThreadIdx_x;
+        I ty = hipThreadIdx_y;
+        I i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + tx;
 
-    // rank update; put computed values back to global memory
-    if(i < m)
-    {
-#pragma unroll
-        for(I j = ty; j < n; j += hipBlockDim_y)
+        // shared data arrays
+        T pivot, val;
+        extern __shared__ double lmem[];
+        T* x = reinterpret_cast<T*>(lmem);
+        T* y = x + hipBlockDim_x;
+
+        // batch instance
+        T* A = load_ptr_batch(AA, bid, shiftA + 1 + lda, strideA);
+        T* X = load_ptr_batch(AA, bid, shiftA + 1, strideA);
+        T* Y = load_ptr_batch(AA, bid, shiftA + lda, strideA);
+        pivot = pivotval[bid];
+
+        // read data from global to shared memory
+        I j = tx * hipBlockDim_y + ty;
+        if(j < n)
+            y[j] = Y[j * lda];
+
+        // scale
+        if(ty == 0 && i < m)
         {
-            val = A[i + j * lda];
-            val -= x[tx] * y[j];
-            A[i + j * lda] = val;
+            x[tx] = X[i];
+            x[tx] *= pivot;
+            X[i] = x[tx];
+        }
+        __syncthreads();
+
+        // rank update; put computed values back to global memory
+        if(i < m)
+        {
+#pragma unroll
+            for(I j = ty; j < n; j += hipBlockDim_y)
+            {
+                val = A[i + j * lda];
+                val -= x[tx] * y[j];
+                A[i + j * lda] = val;
+            }
         }
     }
 }
@@ -715,7 +734,8 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
     dimy = I(max_threads) / dimx;
 
     // prepare kernel launch
-    dim3 grid(1, 1, batch_count);
+    I const max_blocks = 1024;
+    dim3 grid(1, 1, std::min(max_blocks, batch_count));
     dim3 block(dimx, dimy, 1);
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -751,16 +771,17 @@ void getf2_run_scale_update(rocblas_handle handle,
                             const I dimx,
                             const I dimy)
 {
+    I const max_blocks = 1024;
     size_t lmemsize = sizeof(T) * (dimx + n);
     I blocks = (m - 1) / dimx + 1;
     dim3 threads(dimx, dimy, 1);
-    dim3 grid(blocks, 1, batch_count);
+    dim3 grid(blocks, 1, std::min(max_blocks, batch_count));
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
     // scale and update trailing matrix with local function
     ROCSOLVER_LAUNCH_KERNEL((getf2_scale_update_kernel<T>), grid, threads, lmemsize, stream, m, n,
-                            pivotval, A, shiftA, lda, strideA);
+                            pivotval, A, shiftA, lda, strideA, batch_count);
 }
 
 /*************************************************************
