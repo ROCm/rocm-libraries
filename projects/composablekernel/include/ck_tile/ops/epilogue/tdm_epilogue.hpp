@@ -87,6 +87,15 @@ struct TdmEpilogue
         return kMPerBlock * kNPerBlock * sizeof(ODataType);
     }
 
+    /// Number of workgroup barriers operator() issues. Must stay in sync with operator().
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBarrierCount() { return 2; }
+
+    /// Issues the barriers of operator() for wavelet load waves, which hold no C tile.
+    CK_TILE_DEVICE static void RunBarrierStub()
+    {
+        static_for<0, GetBarrierCount(), 1>{}([&](auto) { block_sync_lds(); });
+    }
+
     template <typename LdsTile, typename InLdsWindow>
     CK_TILE_DEVICE void cast_lds_tile(LdsTile& lds_tile, InLdsWindow& in_lds_window)
     {
@@ -149,6 +158,7 @@ struct TdmEpilogue
                              {0, 0},
                              outLdsTileDistr);
 
+        // Barriers here must match GetBarrierCount(): RunBarrierStub() mirrors them.
         s_wait_tensorcnt_barrier<0 /*tensor_cnt*/, 0 /*lgkmcnt*/>();
 
         cast_lds_tile(o_acc_tile, in_lds_window);
