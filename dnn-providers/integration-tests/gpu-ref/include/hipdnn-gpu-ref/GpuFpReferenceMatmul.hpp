@@ -6,6 +6,7 @@
 #include "hipdnn-gpu-ref/detail/HipRtcTypeName.hpp"
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <stdexcept>
 
 namespace hipdnn_gpu_ref
@@ -83,51 +84,37 @@ private:
                                              const std::vector<int64_t>& bDims,
                                              const std::vector<int64_t>& cDims)
     {
-        if(aDims.size() != bDims.size())
+        if(aDims.size() != bDims.size() || aDims.size() != cDims.size())
         {
-            throw std::invalid_argument("Matmul requires A and B tensors to have the same rank.");
+            throw std::invalid_argument(
+                "Matmul requires A, B and C tensors to have the same rank.");
         }
 
         if(aDims.size() < 2 || aDims.size() > 5)
         {
-            throw std::invalid_argument("Matmul requires A and B tensor ranks to be 2, 3, 4 or 5.");
+            throw std::invalid_argument(
+                "Matmul requires A, B and C tensor ranks to be 2, 3, 4 or 5.");
         }
 
         for(size_t i = 0; i < aDims.size(); ++i)
         {
-            if(aDims[i] <= 0 || bDims[i] <= 0)
+            if(aDims[i] <= 0 || bDims[i] <= 0 || cDims[i] <= 0)
             {
                 throw std::invalid_argument(
-                    "Matmul requires A and B tensors to have positive dimensions.");
+                    "Matmul requires A, B and C tensors to have positive dimensions.");
             }
         }
 
-        std::vector<int64_t> aBatchDims(aDims.begin(), aDims.end() - 2);
-        std::vector<int64_t> bBatchDims(bDims.begin(), bDims.end() - 2);
-        for(size_t i = 0; i < aBatchDims.size(); ++i)
+        if(!hipdnn_test_sdk::utilities::CpuFpReferenceMatmul::isBroadcastCompatible(
+               aDims, bDims, cDims))
         {
-            if(aBatchDims[i] % bBatchDims[i] != 0 && bBatchDims[i] % aBatchDims[i] != 0)
-            {
-                throw std::invalid_argument(
-                    "Matmul requires A and B tensors to have broadcast-compatible batch dimensions "
-                    "(all but the last two dimensions).");
-            }
+            throw std::invalid_argument(
+                "Matmul requires A and B tensors to have broadcast-compatible batch dimensions "
+                "(all but the last two dimensions).");
         }
 
-        if(aDims[aDims.size() - 1] != bDims[bDims.size() - 2])
-        {
-            throw std::invalid_argument("Matmul requires K to match between A tensor (last "
-                                        "dimension) and B tensor (second to last dimension).");
-        }
-
-        std::vector<int64_t> expectedCDims(aDims.size());
-        for(size_t i = 0; i < aBatchDims.size(); ++i)
-        {
-            expectedCDims[i] = std::max(aBatchDims[i], bBatchDims[i]);
-        }
-        expectedCDims[expectedCDims.size() - 2] = aDims[aDims.size() - 2];
-        expectedCDims[expectedCDims.size() - 1] = bDims[bDims.size() - 1];
-        if(cDims != expectedCDims)
+        if(!hipdnn_test_sdk::utilities::CpuFpReferenceMatmul::isMatrixDimensionsValid(
+               aDims, bDims, cDims))
         {
             throw std::invalid_argument(
                 "Matmul requires C tensor dimensions to match expected C tensor dimensions "
