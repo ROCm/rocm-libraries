@@ -328,6 +328,10 @@ class StateValues:
   # Pending deferred check-in of the abs-prefetch base triple: set in _initKernel, freed at
   # label_MultiGemmEnd in KernelWriterAssembly. -1 = nothing pending / already freed.
   swPrefetchAbsBaseSgprPendingCheckIn: int = -1
+  # Base pair for the scheduled device-alpha value load. gfx125x XNACK replay
+  # can reread an outstanding scalar load's base SGPRs, so the pair remains
+  # reserved until the shared prologue wait at label_MultiGemmEnd.
+  deviceScalarAlphaPtrSgpr: int          = -1
   nonPostLoopSgpr: List[str]             = field(init=False)
   userArgsInfo: UserArgumentsInfo        = field(default_factory=UserArgumentsInfo)
   numSgprToLoad: int                     = 0 # For kernel args

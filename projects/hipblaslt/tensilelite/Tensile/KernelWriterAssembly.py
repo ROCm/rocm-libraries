@@ -2258,24 +2258,66 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
     module.add(SCBranchSCC0(labelName=scalarAlphaDone.getLabelName(), comment="keep device vector alpha path"))
 
-    # AddressScaleAlphaVec belongs to the deferred epilogue SGPR block and is
-    # not allocated yet at this point. Use a short-lived pair to fetch the
-    # pointer before any control flow can inspect Alpha.
-    with self.allocTmpSgpr(2, 2, tag="loadDeviceScalarAlpha_pointer") as alphaPtr:
-      normalOffset = self.argLoader.getOffset()
-      if kernel["ProblemType"]["UseScaleAB"]:
-        normalOffset += self.states.userArgsInfo.scaleASize + self.states.userArgsInfo.scaleBSize
-      if kernel["ProblemType"]["UseScaleCD"]:
-        normalOffset += self.states.userArgsInfo.scaleCSize + self.states.userArgsInfo.scaleDSize
+    normalOffset = self.argLoader.getOffset()
+    if kernel["ProblemType"]["UseScaleAB"]:
+      normalOffset += self.states.userArgsInfo.scaleASize + self.states.userArgsInfo.scaleBSize
+    if kernel["ProblemType"]["UseScaleCD"]:
+      normalOffset += self.states.userArgsInfo.scaleCSize + self.states.userArgsInfo.scaleDSize
 
-      module.add(SLoadB64(dst=sgpr(alphaPtr.idx, 2), base=sgpr("KernArgAddress", 2),
+    def addLoads(alphaPtrIdx, deferWait):
+      module.add(SLoadB64(dst=sgpr(alphaPtrIdx, 2), base=sgpr("KernArgAddress", 2),
                           soffset=hex(normalOffset), comment="load device scalar alpha pointer"))
       module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha pointer"))
-      module.add(SLoadB32(dst=sgpr("Alpha"), base=sgpr(alphaPtr.idx, 2), soffset=0,
+      module.add(SLoadB32(dst=sgpr("Alpha"), base=sgpr(alphaPtrIdx, 2), soffset=0,
                           comment="replace inline alpha with ScaleAlphaVec[0]"))
-      module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha"))
+      if not deferWait:
+        module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha"))
+
+    # AddressScaleAlphaVec belongs to the deferred epilogue SGPR block and is
+    # not allocated yet at this point. gfx125x XNACK replay can reread the base
+    # SGPRs of an outstanding scalar load, so a scheduled value load keeps its
+    # pointer pair reserved until waitForDeviceScalarAlpha emits kmcnt=0.
+    deferWait = self.deferDeviceScalarAlphaWait(kernel)
+    if deferWait:
+      assert self.states.deviceScalarAlphaPtrSgpr == -1
+      alphaPtrIdx = self.sgprPool.checkOutAligned(
+          2, 2, tag="loadDeviceScalarAlpha_pointer", preventOverflow=False)
+      if alphaPtrIdx + 2 > self.states.regCaps["MaxSgpr"]:
+        self.states.overflowedResources = 2
+        if self.db["AssertOnSgprOverflow"]:
+          self.sgprPool.checkIn(alphaPtrIdx)
+          raise RuntimeError("device scalar alpha pointer SGPR overflow")
+      self.states.deviceScalarAlphaPtrSgpr = alphaPtrIdx
+      addLoads(alphaPtrIdx, True)
+    else:
+      with self.allocTmpSgpr(2, 2, tag="loadDeviceScalarAlpha_pointer") as alphaPtr:
+        addLoads(alphaPtr.idx, False)
 
     module.add(scalarAlphaDone)
+    return module
+
+  def deferDeviceScalarAlphaWait(self, kernel):
+    """Whether gfx125x can hide the scalar-value load behind strided setup."""
+    return (kernel.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False)
+            and kernel["ProblemType"]["StridedBatched"]
+            and self.states.version[:2] == (12, 5))
+
+  def waitForDeviceScalarAlpha(self, kernel):
+    """Drain a scheduled device-alpha value load before its first consumer."""
+    module = Module("Wait for scheduled device scalar alpha")
+    if not self.deferDeviceScalarAlphaWait(kernel):
+      return module
+
+    scalarAlphaReady = Label(label=self.labels.getNameInc("DeviceScalarAlphaReady"), comment="")
+    module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
+    module.add(SCBranchSCC0(labelName=scalarAlphaReady.getLabelName(),
+                            comment="vector alpha has no scheduled scalar load"))
+    module.add(SWaitCnt(kmcnt=0, comment="wait for scheduled device scalar alpha"))
+    module.add(scalarAlphaReady)
+
+    assert self.states.deviceScalarAlphaPtrSgpr >= 0
+    self.sgprPool.checkIn(self.states.deviceScalarAlphaPtrSgpr)
+    self.states.deviceScalarAlphaPtrSgpr = -1
     return module
 
   def localReadAddresses(self, kernel, tPA, tPB, tPM):
@@ -3206,6 +3248,11 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.remapWgSerial(kernel))
       module.addSpaceLine()
       module.add(labelMultiGemmEnd)
+
+      # Both mutually exclusive workgroup-setup clones issue the device-alpha
+      # value load, then converge here. Drain the selected path before freeing
+      # its replay-sensitive pointer pair for the remaining SGPR definitions.
+      module.addModuleAsFlatItems(self.waitForDeviceScalarAlpha(kernel))
 
       # Deferred check-in of the abs-prefetch base triple (reserved across the prolog in
       # _initKernel so the dynamic CFG-target ladder inserted after this label can use it). Free it
