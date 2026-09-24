@@ -46,7 +46,28 @@ struct WmmaHideBudgetBarrierInfo {
     int threshold = 0;
     int dsLoadCount = 0;
     int dsLoadWmmaNeeded = 0;
+    bool overlap = false;
 };
+
+/// Inputs used to reproduce the CDNA5 DS issue-density estimate per WMMA
+/// window. Non-positive values disable throttle-shaped distribution and fall
+/// back to the existing even distribution.
+struct DsLoadBudgetConfig {
+    int dsReadPerWmma = 0;
+    int dsReadQueueDepth = 0;
+    int dsReadThrottleLatency = 0;
+    double dsReadThrottleTransitionFactor = 1.0;
+    int dsReadThrottleTransitionEntries = 0;
+    int wmmaLatency = 0;
+};
+
+/// Per-window DS allocation produced by the shared hard-cap/throttle model.
+STINKYTOFU_EXPORT std::vector<int> computeDsLoadWmmaWindowDistribution(
+    int dsLoadCount, const DsLoadBudgetConfig& config);
+
+/// Number of windows occupied by computeDsLoadWmmaWindowDistribution().
+STINKYTOFU_EXPORT int computeDsLoadWmmaWindowsNeeded(int dsLoadCount,
+                                                     const DsLoadBudgetConfig& config);
 
 // -------------------------------------------------------------------------
 // Per-WMMA instruction budget
@@ -63,6 +84,8 @@ struct WmmaWindowBudget {
     StinkyInstruction* wmma = nullptr;
     /// Non-WMMA instructions the scheduling policy assigns to this window.
     int issueBudget = 0;
+    /// DS reads assigned to this window. Included in issueBudget.
+    int dsLoadBudget = 0;
 };
 
 /// Summed hide budget of one scheduling region.
@@ -105,6 +128,16 @@ struct RegionHideBudget {
                    ? 0
                    : windows[static_cast<size_t>(wmmaIndex)].issueBudget;
     }
+    /// Policy-assigned DS-read subset of issueBudget for a WMMA issue slot.
+    int dsLoadBudgetFor(int wmmaIndex) const {
+        if (!issueBudgetByWmmaIndex)
+            report_fatal_error(
+                "RegionHideBudget is configured for StinkyInstruction "
+                "lookup, but dsLoadBudgetFor was called with a WMMA index");
+        return wmmaIndex < 0 || wmmaIndex >= numWindows()
+                   ? 0
+                   : windows[static_cast<size_t>(wmmaIndex)].dsLoadBudget;
+    }
 };
 
 /// True when \p pos -- cycles elapsed since a matrix op issued -- lands on a
@@ -128,6 +161,6 @@ inline bool isBlockedWindowCycle(int pos, int latency, uint16_t blockedMask) {
 /// After records.
 STINKYTOFU_EXPORT RegionHideBudget analyzeWmmaHideBudget(
     const dag::RegionDAG& regionDag, const std::vector<WmmaHideBudgetBarrierInfo>& barriers,
-    int wmmaHideBudgetBase);
+    int wmmaHideBudgetBase, const DsLoadBudgetConfig& dsLoadConfig = {});
 
 }  // namespace stinkytofu

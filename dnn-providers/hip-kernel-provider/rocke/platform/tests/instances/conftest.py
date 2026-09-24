@@ -53,24 +53,14 @@ def gpu_env():
     return env
 
 
-@pytest.mark.parametrize(
-    "matrix_path,route,m,n,k,case,count",
-    [
-        ("wmma_scale", "comgr", 16, 16, 128, "all", 8),
-        ("wmma_scale16", "comgr", 16, 16, 128, "all", 12),
-        ("wmma_scale", "comgr", 32, 48, 256, "mixed", 1),
-        ("wmma_scale16", "comgr", 32, 48, 256, "mixed", 1),
-        ("wmma_scale", "hip", 32, 48, 256, "mixed", 1),
-        ("wmma_scale16", "hip", 32, 48, 256, "mixed", 1),
-        ("wmma", "comgr", 16, 16, 128, "mixed", 1),
-    ],
-)
-def test_scaled_wmma_numeric(gpu_env, matrix_path, route, m, n, k, case, count):
+def _run_numeric(gpu_env, dtype, matrix_path, route, m, n, k, case, count):
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             _MODULE,
+            "--dtype",
+            dtype,
             "--matrix-path",
             matrix_path,
             "--compile-route",
@@ -94,3 +84,11 @@ def test_scaled_wmma_numeric(gpu_env, matrix_path, route, m, n, k, case, count):
     assert f"PASS: verified {count} cases" in output, output
     assert output.count("bad=0") == count, output
     print(output, end="")
+
+
+@pytest.fixture
+def numeric_case(gpu_env):
+    """Run one bounded scaled-GEMM case with the validated GPU environment."""
+    from functools import partial
+
+    return partial(_run_numeric, gpu_env)
