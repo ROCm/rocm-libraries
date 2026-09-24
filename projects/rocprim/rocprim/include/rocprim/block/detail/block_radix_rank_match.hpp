@@ -147,7 +147,7 @@ private:
                 = i == 0 ? digit_counter_type(0) : *digit_counters[i];
 
             // Construct a mask of threads in this wave which have the same digit.
-            ::rocprim::lane_mask_type peer_mask = ::rocprim::match_any(digit, RadixBits);
+            ::rocprim::lane_mask_type peer_mask = ::rocprim::match_any<RadixBits>(digit);
 
             ::rocprim::wave_barrier();
 
