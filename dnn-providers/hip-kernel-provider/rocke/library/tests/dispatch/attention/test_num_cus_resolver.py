@@ -194,34 +194,52 @@ def test_target_ctas_threaded_through_problem():
     assert prob2._effective_target_ctas == 800  # 200*4
 
 
-def test_problem_lowercases_arch_for_the_clamp():
-    """``_problem`` lowercases ``req.arch`` into ``clamp_arch`` before it reaches
-    the clamp, which compares against lowercase literals ("gfx942" / "gfx950") --
-    an exact string match, so a mixed-case arch would silently skip the clamp
-    rather than error.
+def test_request_canonicalizes_arch_once():
+    """``AttentionRequest.__post_init__`` is the single arch authority.
 
-    Scope: this pins ``_problem``'s normalization ONLY. It is defence in depth,
-    not a reachable input -- the dispatch path rejects mixed case earlier, in
-    ``_request_errors``, because ``ArchTarget.from_gfx`` is case-sensitive
-    (``from_gfx("GFX950")`` raises ``KeyError``). Entry here is deliberately
-    below that gate. See ``test_request_layer_rejects_mixed_case_arch``.
+    Every arch comparison downstream is an exact ``==`` against a lowercase base
+    name, which is only sound if the request normalized first. Casing and target
+    -ID decoration (``:features``, ``-strict``) must therefore be gone by the
+    time ``req.arch`` is readable -- not fixed up at each comparison site.
     """
-    for raw in ("GFX950", "Gfx950", "gfx950"):
-        assert A._problem(_req(num_cus=200, arch=raw)).clamp_arch == "gfx950", raw
-    # Driven through _problem + _num_segments, casing must not change the segment
-    # count: both normalize to gfx950 and take the same clamp.
-    p_mixed = A._problem(_req(num_cus=256, arch="GFX950"))
-    p_lower = A._problem(_req(num_cus=256, arch="gfx950"))
-    assert au._num_segments(p_mixed, "gfx950") == au._num_segments(p_lower, "gfx950")
+    for raw in ("GFX950", "Gfx950", "gfx950", "gfx950:sramecc+", "GFX950:xnack-"):
+        assert _req(num_cus=200, arch=raw).arch == "gfx950", raw
+    assert _req(num_cus=200, arch="gfx942:xnack-").arch == "gfx942"
+    assert _req(num_cus=200, arch="gfx1250-strict").arch == "gfx1250"
+    # A missing arch stays missing: "" is how callers detect "none supplied",
+    # and None must not canonicalize into the plausible-looking string "none".
+    assert _req(num_cus=200, arch=None).arch == ""
+    assert _req(num_cus=200, arch="  ").arch == ""
 
 
-def test_request_layer_rejects_mixed_case_arch():
-    """Pins the reason the test above is defence in depth: the request layer is
-    case-sensitive, so a mixed-case arch never reaches ``_problem`` at all."""
-    for raw in ("GFX950", "Gfx950", "GFX942"):
-        errors = AC._request_errors(_req(num_cus=0, arch=raw))
-        assert any("unknown gfx target" in e for e in errors), (raw, errors)
+def test_canonical_arch_does_not_change_selection():
+    """Widening the accepted spelling must not move any selection outcome.
+
+    The decorated spellings were rejected outright before, so there is no
+    behaviour to preserve for them -- but the already-valid spellings must land
+    on exactly the segment count they landed on before.
+    """
+    p_suffixed = A._problem(_req(num_cus=256, arch="gfx950:sramecc+"))
+    p_plain = A._problem(_req(num_cus=256, arch="gfx950"))
+    assert au._num_segments(p_suffixed, "gfx950") == au._num_segments(
+        p_plain, "gfx950"
+    )
+
+
+def test_request_layer_accepts_canonicalizable_arch():
+    """The request layer used to reject these; canonicalization is what fixed it.
+
+    ``_request_errors`` validates through ``ArchTarget.from_gfx``, an exact
+    lowercase dict lookup, so ``"GFX950"`` and ``"gfx950:sramecc+"`` were both
+    "unknown gfx target" before. They name a supported arch, so rejecting them
+    was a normalization gap, not a real capability limit.
+    """
+    for raw in ("GFX950", "Gfx950", "GFX942", "gfx950:sramecc+", "gfx942:xnack-"):
+        assert AC._request_errors(_req(num_cus=0, arch=raw)) == [], raw
     assert AC._request_errors(_req(num_cus=0, arch="gfx950")) == []
+    # Still rejected: canonicalization normalizes spelling, it does not invent
+    # support for an arch the catalog has no entry for.
+    assert AC._request_errors(_req(num_cus=0, arch="gfx404")) != []
 
 
 def test_segments_bounded_after_bump():
