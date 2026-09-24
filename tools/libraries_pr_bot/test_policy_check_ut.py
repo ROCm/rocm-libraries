@@ -17,6 +17,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from unittest.mock import patch
 
 # Make `policy_check` importable regardless of the working directory.
 THIS_DIR = Path(__file__).resolve().parent
@@ -433,6 +434,37 @@ class SkipTagTests(unittest.TestCase):
     def test_skip_tag_ignored_inside_comment(self) -> None:
         # Tags inside HTML comments (e.g. a PR template) do not trigger a skip.
         self.assertFalse(pc.pr_wants_skip("<!-- @skip-pr-bot -->"))
+
+
+# ----------------------------- check-runs pagination --------------------------
+
+
+class CheckRunPaginationTests(unittest.TestCase):
+    def test_get_check_runs_reads_all_pages(self) -> None:
+        with patch.object(
+            pc,
+            "gh_get",
+            side_effect=[
+                {
+                    "total_count": 2,
+                    "check_runs": [
+                        {"name": "check-1", "conclusion": "success"},
+                    ],
+                },
+                {
+                    "total_count": 2,
+                    "check_runs": [
+                        {"name": "check-2", "conclusion": "success"},
+                    ],
+                },
+            ],
+        ) as gh_get:
+            runs = pc.get_check_runs("ROCm", "rocm-libraries", "abc123", "token")
+
+        self.assertEqual([r["name"] for r in runs], ["check-1", "check-2"])
+        self.assertEqual(gh_get.call_count, 2)
+        self.assertIn("per_page=100&page=1", gh_get.call_args_list[0].args[0])
+        self.assertIn("per_page=100&page=2", gh_get.call_args_list[1].args[0])
 
 
 # ----------------------------- integration -----------------------------------
