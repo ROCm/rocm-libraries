@@ -22,6 +22,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Fixed SYEVJ/HEEVJ and GESVDJ silently returning an undiagonalized matrix when one entry dominates the norm. The convergence test compared the global off-diagonal norm against a multiple of the norm of the whole matrix, so a single large entry could mask a block that had not been rotated at all, and the routine returned after zero sweeps with `info = 0`. In fp32, `GESVDJ` broke at a largest singular value of 3.4e3, `SYEVJ` at 5.9e6.
 * Fixed SYEVJ/HEEVJ never reporting non-convergence for matrices with `n <= 58`. The small-size kernel tested the sweep counter with a condition that was always true, so `info` was unconditionally 0.
+* Fixed SYEVJ/HEEVJ declaring convergence for well-scaled matrices near the limits of the floating-point range, where the squared convergence comparison saturated. In fp32 this affected entry magnitudes at or above roughly 1e19.
 
 ### Known issues
 

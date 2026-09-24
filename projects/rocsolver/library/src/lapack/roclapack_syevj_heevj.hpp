@@ -37,6 +37,8 @@
 #include "asan_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "lib_device_helpers.hpp"
+#include <limits>
+
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
@@ -53,18 +55,27 @@ ROCSOLVER_BEGIN_NAMESPACE
 
     An entry counts as converged when it is negligible against its own two diagonal entries.
     Comparing one global residual against the norm of the whole matrix instead lets a single
-    large entry mask a block that has not been diagonalised at all. **/
+    large entry mask a block that has not been diagonalised at all.
+
+    The test is on magnitudes, not squares: squaring halves the usable exponent range and
+    both sides saturate for well-scaled but extreme inputs. An entry the rotation step will
+    skip counts as converged, so the two guards cannot disagree and spin. **/
 template <typename T, typename S>
 __device__ void syevj_offd_measure(const rocblas_int n,
                                    const rocblas_int tix,
                                    const rocblas_int dimx,
                                    T* Acpy,
                                    const S abstol,
+                                   const S small_num,
                                    S* out_res,
                                    S* out_exceed)
 {
     S res = 0;
     S exceed = 0;
+
+    // squaring halves the usable exponent range, so it is only safe while mag * mag
+    // is finite; past that compare magnitudes, which costs a square root
+    const S mag_max = std::sqrt(std::numeric_limits<S>::max());
 
     for(rocblas_int i = tix; i < n; i += dimx)
     {
@@ -72,12 +83,19 @@ __device__ void syevj_offd_measure(const rocblas_int n,
 
         for(rocblas_int j = 0; j < i; j++)
         {
-            S a2 = std::norm(Acpy[i + j * n]);
+            S mag = std::abs(Acpy[i + j * n]);
             S djj = std::abs(std::real(Acpy[j + j * n]));
+            S a2 = mag * mag;
 
             res += 2 * a2;
-            if(a2 > abstol * abstol * dii * djj)
-                exceed += a2;
+
+            // an entry the rotation step will skip cannot be reduced any further
+            if(a2 < small_num)
+                continue;
+
+            if(mag < mag_max ? (a2 > abstol * abstol * dii * djj)
+                             : (mag > abstol * std::sqrt(dii) * std::sqrt(djj)))
+                exceed += 1;
         }
     }
 
@@ -205,7 +223,7 @@ __device__ void run_syevj(const rocblas_int dimx,
     if(tiy == 0)
     {
         S res_t, exceed_t;
-        syevj_offd_measure(n, tix, dimx, Acpy, abstol, &res_t, &exceed_t);
+        syevj_offd_measure(n, tix, dimx, Acpy, abstol, small_num, &res_t, &exceed_t);
         cosines_res[tix] = exceed_t;
     }
     __syncthreads();
@@ -346,7 +364,7 @@ __device__ void run_syevj(const rocblas_int dimx,
         S res_t = 0, exceed_t = 0;
         if(tiy == 0)
         {
-            syevj_offd_measure(n, tix, dimx, Acpy, abstol, &res_t, &exceed_t);
+            syevj_offd_measure(n, tix, dimx, Acpy, abstol, small_num, &res_t, &exceed_t);
             cosines_res[tix] = res_t;
         }
         __syncthreads();
@@ -516,6 +534,7 @@ ROCSOLVER_KERNEL void syevj_init(const rocblas_evect evect,
                                  const rocblas_int lda,
                                  const rocblas_stride strideA,
                                  S abstol,
+                                 S small_num,
                                  S* residual,
                                  T* AcpyA,
                                  S* norms,
@@ -617,7 +636,7 @@ ROCSOLVER_KERNEL void syevj_init(const rocblas_evect evect,
 
     {
         S res_t, exceed_t;
-        syevj_offd_measure(n, tid, dimx, Acpy, abstol, &res_t, &exceed_t);
+        syevj_offd_measure(n, tid, dimx, Acpy, abstol, small_num, &res_t, &exceed_t);
         sh_res[tid] = exceed_t;
     }
     __syncthreads();
@@ -2052,6 +2071,7 @@ template <typename T, typename S>
 ROCSOLVER_KERNEL void syevj_calc_norm(const rocblas_int n,
                                       const rocblas_int sweeps,
                                       const S abstol,
+                                      const S small_num,
                                       S* residual,
                                       T* AcpyA,
                                       rocblas_int* completed)
@@ -2075,7 +2095,7 @@ ROCSOLVER_KERNEL void syevj_calc_norm(const rocblas_int n,
 
     S local_res = 0;
     S local_exceed = 0;
-    syevj_offd_measure(n, tid, dimx, Acpy, abstol, &local_res, &local_exceed);
+    syevj_offd_measure(n, tid, dimx, Acpy, abstol, small_num, &local_res, &local_exceed);
     sh_res[tid] = local_res;
     __syncthreads();
 
@@ -2365,6 +2385,7 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
     // absolute tolerance for evaluating when the algorithm has converged
     S eps = get_epsilon<S>();
     S atol = (abstol <= 0 ? eps : abstol);
+    S small_num = get_safemin<S>() / eps;
 
     // local variables
     rocblas_int even_n = n + n % 2;
@@ -2482,8 +2503,8 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
         // copy A to Acpy, set A to identity (if applicable), compute initial residual, and
         // initialize top/bottom pairs (if applicable)
         ROCSOLVER_LAUNCH_KERNEL(syevj_init<T>, grid, threads, lmemsizeInit, stream, evect, uplo,
-                                half_blocks, n, A, shiftA, lda, strideA, atol, residual, Acpy,
-                                norms, top, bottom, completed);
+                                half_blocks, n, A, shiftA, lda, strideA, atol, small_num, residual,
+                                Acpy, norms, top, bottom, completed);
 
         while(h_sweeps < max_sweeps)
         {
@@ -2635,7 +2656,7 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
             // compute new residual
             h_sweeps++;
             ROCSOLVER_LAUNCH_KERNEL(syevj_calc_norm<T>, grid, threads, lmemsizeInit, stream, n,
-                                    h_sweeps, atol, residual, Acpy, completed);
+                                    h_sweeps, atol, small_num, residual, Acpy, completed);
         }
 
         // set outputs and sort eigenvalues & vectors

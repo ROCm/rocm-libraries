@@ -111,6 +111,38 @@ void run_gesvdj(rocblas_int n,
     CHECK_HIP_ERROR(hipMemcpy(&info, dinfo.data(), sizeof(rocblas_int), hipMemcpyDeviceToHost));
 }
 
+/* Runs syevj directly (no normal equations), so the input scale reaches the
+   convergence test unsquared. */
+template <typename T>
+void run_syevj(rocblas_int n, const vector<T>& hA, vector<T>& hW, rocblas_int& n_sweeps, rocblas_int& info)
+{
+    rocblas_local_handle handle;
+
+    device_strided_batch_vector<T> dA(size_t(n) * n, 1, size_t(n) * n, 1);
+    device_strided_batch_vector<T> dW(n, 1, n, 1);
+    device_strided_batch_vector<T> dres(1, 1, 1, 1);
+    device_strided_batch_vector<rocblas_int> dsweeps(1, 1, 1, 1);
+    device_strided_batch_vector<rocblas_int> dinfo(1, 1, 1, 1);
+
+    CHECK_HIP_ERROR(dA.memcheck());
+    CHECK_HIP_ERROR(dW.memcheck());
+    CHECK_HIP_ERROR(dres.memcheck());
+    CHECK_HIP_ERROR(dsweeps.memcheck());
+    CHECK_HIP_ERROR(dinfo.memcheck());
+
+    CHECK_HIP_ERROR(hipMemcpy(dA.data(), hA.data(), sizeof(T) * hA.size(), hipMemcpyHostToDevice));
+
+    CHECK_ROCBLAS_ERROR(rocsolver_syevj_heevj(
+        false, handle, rocblas_esort_ascending, rocblas_evect_original, rocblas_fill_upper, n,
+        dA.data(), n, rocblas_stride(n) * n, T(0), dres.data(), 100, dsweeps.data(), dW.data(),
+        rocblas_stride(n), dinfo.data(), 1));
+
+    hW.resize(n);
+    CHECK_HIP_ERROR(hipMemcpy(hW.data(), dW.data(), sizeof(T) * n, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(&n_sweeps, dsweeps.data(), sizeof(rocblas_int), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(&info, dinfo.data(), sizeof(rocblas_int), hipMemcpyDeviceToHost));
+}
+
 } // namespace
 
 /* A single large entry must not mask an off-diagonal block that has not been
@@ -174,4 +206,30 @@ TEST(checkin_lapack, SYEVJ_reports_non_convergence)
 
     run_gesvdj<float>(n, hA, hS, n_sweeps, info, 1);
     EXPECT_EQ(info, 1) << "capped at one sweep, info must report non-convergence";
+}
+
+/* The convergence test squares magnitudes on its cheap path, which halves the
+   usable exponent range. Well-scaled matrices near the top of fp32 must still
+   converge rather than be declared diagonal. */
+TEST(checkin_lapack, SYEVJ_extreme_scale_still_converges)
+{
+    const rocblas_int n = 4;
+
+    for(double scale : {1.0e0, 1.0e18, 1.0e24, 1.0e30, 1.0e37})
+    {
+        // diag = scale, one off-diagonal pair = scale/2; eigenvalues 0.5 and 1.5 times scale
+        vector<float> hA(size_t(n) * n, 0.0f);
+        for(rocblas_int i = 0; i < n; i++)
+            hA[i + i * n] = float(scale);
+        hA[0 + 1 * n] = float(0.5 * scale);
+        hA[1 + 0 * n] = float(0.5 * scale);
+
+        vector<float> hW;
+        rocblas_int n_sweeps = -1, info = -1;
+        run_syevj<float>(n, hA, hW, n_sweeps, info);
+
+        EXPECT_EQ(info, 0) << "scale = " << scale;
+        EXPECT_GT(n_sweeps, 0) << "scale = " << scale << ": the Jacobi loop never ran";
+        EXPECT_NEAR(double(hW[0]), 0.5 * scale, 0.5 * scale * 1e-5) << "scale = " << scale;
+    }
 }
