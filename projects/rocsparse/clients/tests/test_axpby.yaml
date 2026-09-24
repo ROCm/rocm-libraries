@@ -131,10 +131,10 @@ Tests:
 
 # Regression test for AISPARSE-650: axpby with a 64-bit index type and nnz just
 # past 2^32 exercises the block-index overflow that was fixed in the axpyi
-# device kernel. Needs a large-memory device (~52 GB of index/value data);
+# device kernel. Needs a large-memory device (~68 GiB of device data);
 # skipped elsewhere.
 - name: axpby_extra
   category: nightly
   function: axpby_extra
   host_memory_gb: 1
-  device_memory_gb: 55
+  device_memory_gb: 70

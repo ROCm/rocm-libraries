@@ -41,40 +41,37 @@ namespace rocsparse
                                             Y*                   y,
                                             rocsparse_index_base idx_base)
     {
-        // Cast to the (possibly 64-bit) index type I before the multiply so the
-        // global thread id does not wrap at 2^32 when m exceeds the 32-bit range.
-        const I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
+        const int64_t first_row  = static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
+        const int64_t row_stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
 
-        if(ai >= m)
+        for(int64_t ai = first_row; ai < m; ai += row_stride)
         {
-            return;
-        }
-
-        T sum = static_cast<T>(0);
-        for(I p = 0; p < ell_width; ++p)
-        {
-
-            const int64_t idx = ELL_IND(ai, (int64_t)p, m, ell_width);
-            const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
-            if(col >= 0 && col < n)
+            T sum = static_cast<T>(0);
+            for(I p = 0; p < ell_width; ++p)
             {
-                sum = rocsparse::fma<T>(
-                    rocsparse::nontemporal_load(ell_val + idx), rocsparse::ldg(x + col), sum);
+
+                const int64_t idx = ELL_IND(ai, (int64_t)p, m, ell_width);
+                const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
+                if(col >= 0 && col < n)
+                {
+                    sum = rocsparse::fma<T>(
+                        rocsparse::nontemporal_load(ell_val + idx), rocsparse::ldg(x + col), sum);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if(beta != static_cast<T>(0))
+            {
+                const Y yv = rocsparse::nontemporal_load(y + ai);
+                rocsparse::nontemporal_store(rocsparse::fma<T>(beta, yv, alpha * sum), y + ai);
             }
             else
             {
-                break;
+                rocsparse::nontemporal_store(alpha * sum, y + ai);
             }
-        }
-
-        if(beta != static_cast<T>(0))
-        {
-            const Y yv = rocsparse::nontemporal_load(y + ai);
-            rocsparse::nontemporal_store(rocsparse::fma<T>(beta, yv, alpha * sum), y + ai);
-        }
-        else
-        {
-            rocsparse::nontemporal_store(alpha * sum, y + ai);
         }
     }
 

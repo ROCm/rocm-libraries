@@ -159,21 +159,47 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coomvn_aos_atomic_loops<256, 1>),
-                dim3((nnz - 1) / 256 + 1),
-                dim3(256),
-                0,
-                stream,
-                nnz,
-                m,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                coo_ind,
-                coo_val,
-                x,
-                y,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            const int64_t one_loop_blocks = (nnz - 1) / 256 + 1;
+            const bool    use_two_loops
+                = rocsparse::get_grid_size_x(handle->properties, one_loop_blocks, 256)
+                  < one_loop_blocks;
+
+            if(use_two_loops)
+            {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::coomvn_aos_atomic_loops<256, 2>),
+                    dim3((nnz - 1) / (2 * 256) + 1),
+                    dim3(256),
+                    0,
+                    stream,
+                    nnz,
+                    m,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                    coo_ind,
+                    coo_val,
+                    x,
+                    y,
+                    descr->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+            }
+            else
+            {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::coomvn_aos_atomic_loops<256, 1>),
+                    dim3(one_loop_blocks),
+                    dim3(256),
+                    0,
+                    stream,
+                    nnz,
+                    m,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                    coo_ind,
+                    coo_val,
+                    x,
+                    y,
+                    descr->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+            }
             break;
         }
         case rocsparse_operation_transpose:
