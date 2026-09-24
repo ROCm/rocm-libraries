@@ -22,11 +22,21 @@
 # (14/14 isolated runs). It is upstream library code, not hipDNN, and it is
 # equally present in non-ASAN builds where nothing detects it.
 #
-# ⚠️ VERIFICATION STATUS: this pattern has NOT yet been observed to match.
-# A run with print_suppressions=1 completed cleanly but reported a suppression
-# tally of ZERO, meaning the crash stopped for some other reason (most likely
-# eager symbolizer init perturbing startup timing, which shifts the race
-# window). Treat this entry as unproven until a run reports a non-zero tally.
+# VERIFICATION: placebo-controlled A/B on gfx90a, same build and seeds.
+#   no ASAN_OPTIONS ............................. crash 2/2
+#   suppressions file matching nothing .......... crash 2/2
+#   print_suppressions=1, no file ............... crash 2/2
+#   this pattern ................................ clean, 138/138 twice
+#   interceptor_via_lib:librocblas.so ........... clean, 138/138
+# The crash point is seed-determined (seed 401 at test 1, seed 402 at test 13,
+# identical across all three non-suppressing arms), so the clean runs are not
+# luck. Having a suppressions file present is not itself sufficient; only a
+# pattern that can match prevents the abort.
+#
+# ⚠️ Caveat: print_suppressions=1 nonetheless reported a tally of ZERO on the
+# clean runs. The causal claim rests on the placebo control, not on the tally,
+# and that discrepancy is unexplained. If this entry is ever edited, re-run the
+# placebo A/B rather than trusting the tally to reveal a broken pattern.
 # See Research/ALMIOPEN-2673-tensile-trigger-experiment.md.
 interceptor_via_fun:*findBestKeyMatch*
 
