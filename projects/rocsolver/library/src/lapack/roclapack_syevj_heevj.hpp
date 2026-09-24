@@ -226,6 +226,7 @@ __device__ void run_syevj(const rocblas_int dimx,
     __syncthreads();
     for(i = 0; i < dimx; i++)
         local_exceed += cosines_res[i];
+    __syncthreads();
 
     // execute sweeps
     rocblas_int count = (half_n - 1) / dimx + 1;
@@ -390,8 +391,8 @@ __device__ void run_syevj(const rocblas_int dimx,
         if(tix == 0)
         {
             *residual = sqrt(local_res);
-            // test convergence, not the sweep counter: the loop above exits at
-            // sweeps == max_sweeps, so a sweeps <= max_sweeps test is always true
+            // the loop can exit on the sweep cap, so info comes from the
+            // convergence flag rather than the sweep counter
             if(local_exceed <= 0)
             {
                 *n_sweeps = sweeps;
@@ -2013,7 +2014,8 @@ ROCSOLVER_KERNEL void
 {
     rocblas_int n = half_blocks - 1;
 
-    auto cycle = [n = n](auto i) -> auto {
+    auto cycle = [n = n](auto i) -> auto
+    {
         using I = decltype(i);
         i = (i - 1) % (2 * n + 1) + 1;
         I j{};

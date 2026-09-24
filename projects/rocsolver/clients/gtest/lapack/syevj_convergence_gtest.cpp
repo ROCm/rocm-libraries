@@ -34,6 +34,9 @@
  * matrices, which cannot reach these paths; each case below is built
  * explicitly. */
 
+#include <algorithm>
+#include <functional>
+
 #include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
 #include "common/misc/rocsolver.hpp"
