@@ -236,9 +236,10 @@ struct callable_proxy
   Fn* fn_ptr;
 
   template <typename... Args>
-  THRUST_HIP_FUNCTION void operator()(Args&&... args) const
+  THRUST_HIP_FUNCTION auto operator()(Args&&... args) const
+    -> decltype((*fn_ptr)(std::forward<Args>(args)...))
   {
-    (*fn_ptr)(::std::forward<Args>(args)...);
+    return (*fn_ptr)(::std::forward<Args>(args)...);
   }
 };
 
