@@ -27,6 +27,8 @@
 #include "rocsparse-version.h"
 #include "rocsparse/rocsparse-export.h"
 
+#include "internal/auxiliary/rocsparse_dnmat_copy_data.h"
+
 namespace rocsparse
 {
 
@@ -351,11 +353,11 @@ rocsparse_status rocsparse::dnmat_copy_data(rocsparse_handle            handle,
     return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse_dnmat_copy_data(rocsparse_handle            handle,
-                                           rocsparse_const_dnvec_descr alpha,
-                                           rocsparse_const_dnmat_descr source,
-                                           rocsparse_dnmat_descr       target,
-                                           rocsparse_error*            p_error)
+extern "C" rocsparse_status rocsparse_dnmat_copy_data(rocsparse_handle            handle,
+                                                      rocsparse_const_dnvec_descr alpha,
+                                                      rocsparse_const_dnmat_descr source,
+                                                      rocsparse_dnmat_descr       target,
+                                                      rocsparse_error*            p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;

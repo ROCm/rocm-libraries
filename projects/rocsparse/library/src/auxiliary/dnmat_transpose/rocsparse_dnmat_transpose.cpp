@@ -27,11 +27,7 @@
 #include "rocsparse-version.h"
 #include "rocsparse/rocsparse-export.h"
 
-rocsparse_status rocsparse_dnmat_transpose(rocsparse_handle            handle,
-                                           rocsparse_const_dnvec_descr alpha,
-                                           rocsparse_const_dnmat_descr X,
-                                           rocsparse_dnmat_descr       Y,
-                                           rocsparse_error*            p_error);
+#include "internal/auxiliary/rocsparse_dnmat_transpose.h"
 
 namespace rocsparse
 {
@@ -417,11 +413,11 @@ rocsparse_status rocsparse::dnmat_switch_order(rocsparse_handle            handl
     return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse_dnmat_transpose(rocsparse_handle            handle,
-                                           rocsparse_const_dnvec_descr alpha,
-                                           rocsparse_const_dnmat_descr source,
-                                           rocsparse_dnmat_descr       target,
-                                           rocsparse_error*            p_error)
+extern "C" rocsparse_status rocsparse_dnmat_transpose(rocsparse_handle            handle,
+                                                      rocsparse_const_dnvec_descr alpha,
+                                                      rocsparse_const_dnmat_descr source,
+                                                      rocsparse_dnmat_descr       target,
+                                                      rocsparse_error*            p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
