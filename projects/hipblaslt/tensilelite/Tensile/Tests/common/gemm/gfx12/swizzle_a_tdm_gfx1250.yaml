@@ -3,8 +3,8 @@
 # gfx1250 swizzled tensor-A via TDM (F8, TN). A is pre-swizzled into WMMA-optimal order,
 # loaded global->LDS by tensor_load_to_lds (TDMInst=3) with LdsPadA=0, then read by plain
 # ds_load_b128. B uses the normal TDM path. Distinct from the gfx942 DTV swizzle path.
-# Covers: single/multi M-tile (MIWaveTile[0]=1,2), single/multi K-iteration, and multi-wave
-# M split (MIWaveGroup=[2,2], numComp=2).
+# Covers: single/multi M-tile (MIWaveTile[0]=1,2), single/multi K-iteration, multi-wave
+# M split (MIWaveGroup=[2,2], numComp=2), and VectorWidthA>1 (VWA=2, TDM iterate-mode LDS pad).
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
@@ -214,5 +214,74 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [64, 32, 1, 256]
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, F8 swizzle-A, VWA=2 (VectorWidth>1 on the swizzled tensor).
+      # Regression guard for swizzled-TDM VectorWidthA>1: the read decomposes the VW-strided M into
+      # (mO,mI) (per-lane) plus an eIdx column phase + vIdx tile-group in the ds_load immediate, and
+      # scales the multi-wave mO-band offset by VW, so the swizzled A lands in the VW-interleaved
+      # register layout the WMMA/acc consume. VW>1 breaks the mO-way LDS bank conflict with a per-mO
+      # 16B pad deposited via TDM iterate-mode (MI_M*DepthU tile). Mirrors the swizzle-B VWB>1 case.
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - HalfPLR: [1]
+        - TDMIterateMode: [-1]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [2]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
         - ActivationArgs:
           - [Enum: none]

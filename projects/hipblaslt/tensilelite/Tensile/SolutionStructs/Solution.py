@@ -4273,17 +4273,31 @@ class Solution(collections.abc.Mapping):
       # VectorWidth must be 1: a stride-VW register axis (VW>1) cannot be produced from the swizzle order
       # and silently miscomputes in the swizzled tensor's direction. Covers the TDM and non-TDM paths.
       if state["ProblemType"]["SwizzleTensorA"]:
-        if state["VectorWidthA"] != 1:
-          reject(state, printRejectionReason, f"SwizzleTensorA requires VectorWidthA == 1 (got {state['VectorWidthA']})")
-          return
-        # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts the
-        # data out from under those offsets. And the swizzle builds its own TDM descriptor, not iterate.
-        if state["LdsPadA"] != 0 or state["LdsBlockSizePerPadA"] != 0:
-          reject(state, printRejectionReason, f"SwizzleTensorA requires LdsPadA==0 and LdsBlockSizePerPadA==0 (got {state['LdsPadA']}, {state['LdsBlockSizePerPadA']})")
-          return
-        if state.get("_TDMIterateModeA", False):
-          reject(state, printRejectionReason, "SwizzleTensorA is incompatible with TDMIterateMode (A); swizzle uses its own TDM descriptor")
-          return
+        # VectorWidthA>1 is supported on the TDM path: _localReadSwizzledTDM + lraTileAssignmentSwizzledTDM
+        # decompose the VW-strided M into (mO,mI) so the swizzled read produces the VW-interleaved register
+        # layout the WMMA/acc expect. VWA must still divide MIWaveTile[0] (enforced by the generic VW checks).
+        # Mirrors the swizzle-B VW>1 handling below (M<->N): the per-mO LDS tile is MI_M*DepthU, and VW>1 hits
+        # the same mO-way LDS bank conflict, broken by a 16B (4-bank) pad per mO-tile applied via TDM
+        # iterate-mode. VW==1 stays unpadded (already conflict-free) and byte-identical to before.
+        if swizzleAIsTDM and state["VectorWidthA"] > 1:
+          bpeA = int(state["ProblemType"]["DataTypeA"].numBytes())
+          mOStrideBytes = state["MatrixInstM"] * state["_DepthUA"] * bpeA   # per-mO LDS tile size
+          state["LdsBlockSizePerPadA"] = mOStrideBytes
+          state["LdsPadA"] = 16 // bpeA                                     # 16B = 4-bank shift (ds_load b128 width)
+          state["_TDMIterateModeA"] = True
+          state["TDMIterateMode"] = state["TDMIterateMode"] | 1             # kernel naming (bit0 = A)
+        else:
+          if state["VectorWidthA"] != 1:
+            reject(state, printRejectionReason, f"SwizzleTensorA requires VectorWidthA == 1 (got {state['VectorWidthA']})")
+            return
+          # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts the
+          # data out from under those offsets. And the swizzle builds its own TDM descriptor, not iterate.
+          if state["LdsPadA"] != 0 or state["LdsBlockSizePerPadA"] != 0:
+            reject(state, printRejectionReason, f"SwizzleTensorA requires LdsPadA==0 and LdsBlockSizePerPadA==0 (got {state['LdsPadA']}, {state['LdsBlockSizePerPadA']})")
+            return
+          if state.get("_TDMIterateModeA", False):
+            reject(state, printRejectionReason, "SwizzleTensorA is incompatible with TDMIterateMode (A); swizzle uses its own TDM descriptor")
+            return
         if not state["DirectToVgprA"] and not swizzleAIsTDM:
           reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
           return
