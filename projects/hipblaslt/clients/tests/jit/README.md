@@ -5,7 +5,7 @@ with an explicit YAML recipe and the optional generic backend/request/solution
 API layered above it. Each path reaches the existing C/C++ GEMM execution APIs.
 Samples `29_hipblaslt_jit_gemm` and `30_hipblaslt_generic_jit_gemm` illustrate the
 direct and generic paths; the tests here exercise failures, repeated calls and
-ownership changes. The [component roadmap](../../../tensilelite/docs/jit-roadmap.md)
+ownership changes. The [component roadmap](../../../JIT_ROADMAP.md)
 distinguishes the implemented layers from planned work.
 
 ## Build and run from a checkout
