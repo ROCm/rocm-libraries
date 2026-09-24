@@ -273,7 +273,7 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
 
     m = re.match(r"(MagicNumberSize|MagicShiftSize)(\w)", name)
     if m:
-        from Tensile.Common.Constants import INDEX_CHARS
+        from .Common.Constants import INDEX_CHARS
         idx = INDEX_CHARS.index(m.group(2))
         return {"type": argType, "semantic": m.group(1), "index": idx}
 
