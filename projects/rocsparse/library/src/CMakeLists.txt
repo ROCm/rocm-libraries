@@ -614,9 +614,9 @@ set(rocsparse_source
   src/conversion/rocsparse_gebsr2gebsr.cpp
   src/conversion/rocsparse_identity.cpp
   src/conversion/rocsparse_inverse_permutation.cpp
-  src/conversion/rocsparse_csrsort.cpp
-  src/conversion/rocsparse_cscsort.cpp
-  src/conversion/rocsparse_coosort.cpp
+  src/conversion/rocsparse_csrsort_impl.cpp
+  src/conversion/rocsparse_cscsort_impl.cpp
+  src/conversion/rocsparse_coosort_impl.cpp
   src/conversion/rocsparse_sparse_to_dense.cpp
   src/conversion/rocsparse_dense_to_sparse.cpp
   src/conversion/rocsparse_bsrpad_value.cpp
