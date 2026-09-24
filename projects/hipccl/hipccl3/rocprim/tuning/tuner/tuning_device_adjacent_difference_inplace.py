@@ -20,4 +20,22 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from .utils import TypeInfo, TYPE_CONFIGS, Parser, BASE_DIR
+import sys
+import os
+
+sys.path.append(f"{os.path.dirname(__file__)}/../")
+sys.path.append(f"{os.path.dirname(__file__)}")
+
+from tuner.base_tuner import TunerArgs
+from tuning_device_adjacent_difference import Tuner
+
+class InplaceTuner(Tuner):
+    @classmethod
+    def _get_default_args(cls) -> TunerArgs:
+        return TunerArgs(algo_full_name='device_adjacent_difference_inplace')
+
+    def __init__(self, args: TunerArgs) -> None:
+        super().__init__(args)
+
+if __name__ == "__main__":
+    InplaceTuner.cli()

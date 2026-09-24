@@ -67,14 +67,14 @@ def make_config(
 
     # Select the following type names
     # TODO: derive this from alg name maybe?
-    type_names = ["key_type", "value_type", "data_type", "flag_type"]
+    type_names = ["key_type", "value_type", "data_type", "flag_type", "input_type"]
     # Only select relevant types
     type_info = {k: type_data[k] for k in type_names if k in type_data}
+
     # Annotate with extra info for jinja
     type_details = {k: annotate_type(type_info[k], k) for k in type_info}
     type_hash = frozenset(type_info.items())
     return (type_hash, {"type": type_details, "config": type_info | config_data})
-
 
 def derive_gen(arch: str) -> str:
     """Derives the hardware generation from a given architecture."""
