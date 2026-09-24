@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <limits>
 #include <new>
+#include <utility>
 
 #include <malloc.h>
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
@@ -50,9 +51,12 @@ void test_new_handler()
   std::set_new_handler(nullptr);
 }
 
+// glibc declares memalign with alloc_align, which makes an alignment that is not
+// a power of two undefined at the call site. __libc_memalign is interposed the
+// same way but is declared above without that attribute.
 __attribute__((noinline)) void* runtime_memalign(std::size_t alignment, std::size_t size)
 {
-  return memalign(alignment, size);
+  return __libc_memalign(alignment, size);
 }
 
 __attribute__((noinline)) void runtime_free(void* p)
@@ -107,9 +111,21 @@ int main()
     {
       std::free(p);
     }
-    volatile std::size_t invalid_alignment = 3;
+    // As in glibc, memalign rounds an alignment that is not a power of two up
+    // instead of rejecting it.
+    const std::pair<std::size_t, std::size_t> rounded_alignments[]{{0, 1}, {3, 4}, {24, 32}};
+    for (const auto& alignment : rounded_alignments)
+    {
+      auto p = runtime_memalign(alignment.first, 42);
+      if (!p || reinterpret_cast<std::uintptr_t>(p) % alignment.second != 0)
+      {
+        std::free(p);
+        return EXIT_FAILURE;
+      }
+      std::free(p);
+    }
     errno = 0;
-    if (auto p = runtime_memalign(invalid_alignment, 42))
+    if (auto p = runtime_memalign((std::numeric_limits<std::size_t>::max)() / 2 + 2, 1))
     {
       std::free(p);
       return EXIT_FAILURE;
