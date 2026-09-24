@@ -47,6 +47,7 @@
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -201,7 +202,27 @@ inline void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::sort(::thrust::device, f, l, ::std::move(r));
+  using r_t = ::std::decay_t<R>;
+
+  if constexpr (::std::is_trivially_destructible_v<r_t>)
+  {
+    return ::thrust::sort(::thrust::device, f, l, ::std::move(r));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<r_t> guard(::std::move(r));
+    try
+    {
+      ::thrust::sort(::thrust::device, f, l, ::hipstd::detail::callable_proxy<r_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar sort: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename I,
@@ -248,7 +269,27 @@ inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::stable_sort(::thrust::device, f, l, ::std::move(r));
+  using r_t = ::std::decay_t<R>;
+
+  if constexpr (::std::is_trivially_destructible_v<r_t>)
+  {
+    return ::thrust::stable_sort(::thrust::device, f, l, ::std::move(r));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<r_t> guard(::std::move(r));
+    try
+    {
+      ::thrust::stable_sort(::thrust::device, f, l, ::hipstd::detail::callable_proxy<r_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar stable_sort: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename I,
@@ -299,7 +340,28 @@ partial_sort(execution::parallel_unsequenced_policy, KeysIt first, KeysIt middle
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  ::thrust::__partial_sort(::thrust::device, first, middle, last, compare_op);
+  using compare_op_t = ::std::decay_t<CompareOp>;
+
+  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
+  {
+    ::thrust::__partial_sort(::thrust::device, first, middle, last, ::std::move(compare_op));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
+    try
+    {
+      ::thrust::__partial_sort(
+        ::thrust::device, first, middle, last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar partial_sort: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename KeysIt, typename CompareOp, enable_if_t<!hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
@@ -365,7 +427,29 @@ inline void partial_sort_copy(
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  ::thrust::__partial_sort_copy(::thrust::device, first, last, d_first, d_last, compare_op);
+  using compare_op_t = ::std::decay_t<CompareOp>;
+
+  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
+  {
+    ::thrust::__partial_sort_copy(::thrust::device, first, last, d_first, d_last, ::std::move(compare_op));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
+    try
+    {
+      ::thrust::__partial_sort_copy(
+        ::thrust::device, first, last, d_first, d_last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar partial_sort_copy: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename ForwardIt,
@@ -519,7 +603,28 @@ nth_element(execution::parallel_unsequenced_policy, KeysIt first, KeysIt nth, Ke
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  ::thrust::__nth_element(::thrust::device, first, nth, last, compare_op);
+  using compare_op_t = ::std::decay_t<CompareOp>;
+
+  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
+  {
+    ::thrust::__nth_element(::thrust::device, first, nth, last, ::std::move(compare_op));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
+    try
+    {
+      ::thrust::__nth_element(
+        ::thrust::device, first, nth, last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar nth_element: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename KeysIt, enable_if_t<!hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
