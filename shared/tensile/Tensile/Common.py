@@ -89,17 +89,19 @@ def _readHipBuildVersion(path: Path) -> Optional[str]:
 
 
 def _readHipVersionFromRoot(root: Path) -> Optional[str]:
-  """Read the HIP build version, with the ROCm release as a last fallback."""
+  """Read the HIP build version from HIP metadata files only.
+
+  Reads share/hip/version and include/hip/hip_version.h, which contain the
+  HIP build version including the patch/build number used for feature gating.
+  The ROCm release file (.info/version) is intentionally excluded — it contains
+  only the release version and silently drops the build number, which can cause
+  incorrect feature detection when patch-level thresholds are checked.
+  """
   for relativePath in (Path("share/hip/version"), Path("include/hip/hip_version.h")):
     versionString = _readHipBuildVersion(root / relativePath)
     if versionString:
       return versionString
-
-  try:
-    versionString = (root / ".info" / "version").read_text().strip()
-  except OSError:
-    return None
-  return versionString or None
+  return None
 
 
 def _getHipVersion() -> str:

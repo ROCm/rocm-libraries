@@ -114,13 +114,12 @@ if(NOT USE_CUDA)
   endif( )
 
 else( )
-  target_compile_definitions( hipblas PRIVATE ${HIPBLAS_CUDA_COMPILER_DEFINES} )
+  # PUBLIC so consumers inherit __HIP_PLATFORM_NVIDIA__ when including HIP headers
+  # through hipBLAS, ensuring correct backend selection without extra configuration.
+  target_compile_definitions( hipblas PUBLIC ${HIPBLAS_CUDA_COMPILER_DEFINES} )
 
   # hipBLAS' public headers expose cuBLAS and CUDA runtime declarations on this
   # backend, so propagate their usage requirements to consumers of roc::hipblas.
-  # Using legacy FindCUDA variables since FindCUDAToolkit (which provides
-  # imported targets) requires CMake 3.17. Include dirs must be added explicitly
-  # because legacy variables do not propagate them transitively.
   target_link_libraries( hipblas PUBLIC CUDA::cublas CUDA::cudart )
 endif( )
 
@@ -191,9 +190,11 @@ if(NOT USE_CUDA )
 else( )
   rocm_export_targets(
     TARGETS roc::hipblas
-    DEPENDS PACKAGE HIP
+    DEPENDS PACKAGE hip
+    DEPENDS PACKAGE CUDAToolkit
     DEPENDS PACKAGE hipblas-common
     NAMESPACE roc::
+    INCLUDE "${PROJECT_SOURCE_DIR}/cmake/hipblas-cuda-dependencies.cmake"
   )
 endif( )
 
