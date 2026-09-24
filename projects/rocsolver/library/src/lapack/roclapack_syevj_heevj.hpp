@@ -208,12 +208,12 @@ __device__ void run_syevj(const rocblas_int dimx,
     S small_num = get_safemin<S>() / eps;
 
     // convergence is measured per off-diagonal pair, against that pair's own diagonal entries
-    S res_t = 0;
-    rocblas_int exceed_t = 0;
+    S pre_res = 0;
+    rocblas_int pre_exceed = 0;
     if(tiy == 0)
     {
-        syevj_offd_measure(n, tix, dimx, Acpy, abstol, eps, &res_t, &exceed_t);
-        cosines_res[tix] = res_t;
+        syevj_offd_measure(n, tix, dimx, Acpy, abstol, eps, &pre_res, &pre_exceed);
+        cosines_res[tix] = pre_res;
     }
     __syncthreads();
 
@@ -223,7 +223,7 @@ __device__ void run_syevj(const rocblas_int dimx,
     __syncthreads();
 
     if(tiy == 0)
-        cosines_res[tix] = exceed_t;
+        cosines_res[tix] = pre_exceed;
     __syncthreads();
 
     S local_exceed = 0;
