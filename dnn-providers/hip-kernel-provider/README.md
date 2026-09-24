@@ -110,6 +110,15 @@ When adding new operations:
 
 Follow the existing patterns from the codebase.
 
+## Project policies
+
+This plugin is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
+
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)
+
 ## License
 
 Copyright © Advanced Micro Devices, Inc., or its affiliates.

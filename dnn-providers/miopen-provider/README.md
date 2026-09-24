@@ -29,3 +29,12 @@ cmake -G Ninja -DCMAKE_CXX_COMPILER=/path/to/amdclang/clang++ \
 ```
 
 Beyond the shared third-party set, the prefixes must provide HIP, MIOpen, `hipdnn_data_sdk`, `hipdnn_flatbuffers_sdk`, `hipdnn_plugin_sdk`, and their transitive dependencies. The fetch opt-in supplies none of those.
+
+## Project policies
+
+This plugin is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
+
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)
