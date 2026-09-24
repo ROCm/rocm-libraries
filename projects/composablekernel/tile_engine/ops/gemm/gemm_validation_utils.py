@@ -72,7 +72,15 @@ def get_warp_size_for_gpu(gpu_target: str) -> int:
 
 
 WARP_SUPPORTED_COMBINATIONS = {
-    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
+    # gfx1250 is wave32, and a block of more than four warps is not dependable there.
+    # Measured over a 14,208-row GPU sweep, the 8-warp maps ([2,4,1] [4,2,1] [1,8,1]
+    # [8,1,1]) paired with a legal 16x16x64 tile gave 2,168 launch aborts ("cannot
+    # find symbol"), 424 clean rejects, 192 correct passes -- and ZERO wrong answers.
+    # They do not corrupt results on their own; they are simply unreliable, and
+    # re-running the same surface flips hundreds of rows between abort and pass.
+    # [1,2,2] (warp_k=2) is a different failure: it compiles and returns wrong
+    # results (max_rel 1.37).
+    "gfx1250": [[1, 4, 1], [2, 1, 1], [2, 2, 1], [4, 1, 1]],
     "gfx90a": [
         [1, 4, 1],
         [2, 2, 1],

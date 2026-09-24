@@ -37,7 +37,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codegen"))
 # the codegen tile selector, the runtime helpers and these tests.
 from codegen_common import normalize_gfx_arch  # noqa: E402
 from dispatcher_common import fp8_uses_ocp as _fp8_uses_ocp
-
 from grouped_gemm_tensorquant_utils import (
     TensorQuantGemmProblem,
     TensorQuantGpuGemmRunner,

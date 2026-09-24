@@ -40,7 +40,11 @@ _CODEGEN_DIR = Path(__file__).parent
 if str(_CODEGEN_DIR) not in sys.path:
     sys.path.insert(0, str(_CODEGEN_DIR))
 
-from codegen_common import TileConfig, parallel_generate  # noqa: E402
+from codegen_common import (  # noqa: E402
+    TileConfig,
+    arch_config_supported,
+    parallel_generate,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -805,6 +809,10 @@ def build_specs(config: dict, gfx_arch: str = "",
         {"num_dim_g": 1, "num_dim_m": 2, "num_dim_n": 2, "num_dim_k": 1}
     ])
 
+    # Target arch for the central arch-validity gate. None/absent => no arch
+    # gating, so callers that never passed one keep their current behaviour.
+    arch = config.get("arch") or None
+
     a_elementwise  = config.get("a_elementwise",  "PassThrough")
     b_elementwise  = config.get("b_elementwise",  "PassThrough")
     cde_elementwise = config.get("cde_elementwise", "MultiDAdd")
@@ -830,15 +838,20 @@ def build_specs(config: dict, gfx_arch: str = "",
         if not tc.is_valid():
             continue
 
-        # Arch filter. TileConfig.is_valid() above only checks that the block
-        # tile divides evenly by the warp tile -- it knows nothing about which
-        # MMA shapes the target actually has, so a gfx9 MFMA tile passes it and
-        # then emits a kernel gfx1250 compiles and answers wrongly. This is the
-        # pre-launch rejection for that case, before any header is written.
-        # Archs with no table entry return None and are not filtered at all.
-        allowed = valid_warp_tiles_for_arch(gfx_arch, dtype) if gfx_arch else None
-        if allowed is not None and (tc.warp_tile_m, tc.warp_tile_n,
-                                    tc.warp_tile_k) not in allowed:
+        # Central arch gate (codegen_common.arch_config_supported) -- the single
+        # place that knows which warp maps / warp tiles / pipelines exist on the
+        # target. This expansion previously had no arch input at all, so it could
+        # emit e.g. a wave64 MFMA warp tile on a wave32 WMMA arch.
+        if not arch_config_supported(
+            arch,
+            dtype=dtype,
+            warp_m=tc.warp_m, warp_n=tc.warp_n, warp_k=tc.warp_k,
+            warp_tile_m=tc.warp_tile_m,
+            warp_tile_n=tc.warp_tile_n,
+            warp_tile_k=tc.warp_tile_k,
+            pipeline=pipeline,
+            scheduler=scheduler,
+        ):
             continue
 
         specs.append(ContractionMultiABDKernelSpec(

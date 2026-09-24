@@ -173,7 +173,6 @@
         "int8_int8_int32": [[16, 16, 16]]
       }
     },
-
     "gfx1250": {
       "family": "cdna5",
       "target_family": "gfx125",
