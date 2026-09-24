@@ -68,33 +68,10 @@ def test_assign_custom_kernel_params_basic_derivation():
     assert state["PackedC0IndicesX"] == []
     assert state["ThreadTile0"] == 0 and state["ThreadTile1"] == 0
     assert state["LocalSplitU"] == 1
-    # No widths on state: fall back to 1 so SizeMapping.FromOriginalState
-    # still finds the keys.
     assert state["GlobalReadVectorWidthA"] == 1
     assert state["GlobalReadVectorWidthB"] == 1
     assert state["StoreVectorWidth"] == 1
     assert state["_GlobalAccumulation"] is None  # GlobalSplitUAlgorithm == ""
-
-
-@pytest.mark.parametrize("grvwA,grvwB,svw,expectA,expectB,expectS", [
-    (4, 4, 4, 4, 4, 4),
-    (-1, -1, -1, 1, 1, 1),
-    (None, 8, -2, 1, 8, 1),
-])
-def test_assign_custom_kernel_params_preserves_vector_widths(
-    grvwA, grvwB, svw, expectA, expectB, expectS
-):
-    over = {}
-    if grvwA is not None:
-        over["GlobalReadVectorWidthA"] = grvwA
-    if grvwB is not None:
-        over["GlobalReadVectorWidthB"] = grvwB
-    over["StoreVectorWidth"] = svw
-    state = _ck_state(**over)
-    Solution._assignCustomKernelParameters(state)
-    assert state["GlobalReadVectorWidthA"] == expectA
-    assert state["GlobalReadVectorWidthB"] == expectB
-    assert state["StoreVectorWidth"] == expectS
 
 
 def test_assign_custom_kernel_params_enable_mi_sets_wave_params():

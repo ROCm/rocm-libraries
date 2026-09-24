@@ -1863,19 +1863,9 @@ class Solution(collections.abc.Mapping):
       state["MIWaveGroup"] = [0, 0]
 
     state["LocalSplitU"] = 1
-    # custom.config (via LibraryIO overlay) and the logic YAML already carry
-    # these widths.  Do not clobber them: SizeMapping serializes them, and
-    # handwritten kernels never reach assignDerivedParameters to recover a
-    # declared 4 from the Tensile -1 auto sentinel.  Default to 1 only when
-    # the key is missing or still at that sentinel.
-    def _positiveOrDefault(key, default=1):
-      v = state.get(key, default)
-      if v is None or v < 1:
-        v = default
-      state[key] = v
-    _positiveOrDefault("GlobalReadVectorWidthA")
-    _positiveOrDefault("GlobalReadVectorWidthB")
-    _positiveOrDefault("StoreVectorWidth")
+    state["GlobalReadVectorWidthA"] = 1
+    state["GlobalReadVectorWidthB"] = 1
+    state["StoreVectorWidth"] = 1
 
   ########################################
   # assign all derived parameters
