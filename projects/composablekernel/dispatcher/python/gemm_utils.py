@@ -2366,6 +2366,62 @@ def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> 
     return [wave_m, wave_n, wave_k] in allowed
 
 
+# --- gfx1250-only pipeline gate (parity with unified_gemm_codegen) ---------
+# comp_async / comp_tdm / comp_tdm_v2 are only generated for exact gfx1250 by
+# unified_gemm_codegen (_gfx1250_pipeline_reject_reason). expand_sweep must drop
+# the same combinations up front, otherwise it hands back configs whose header
+# is never emitted. Pipelines outside this set are untouched.
+_TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+_GFX1250_ONLY_PIPELINES = ("comp_async",) + _TDM_PIPELINES
+# TDM bounds-clips on the real descriptor extents; the kPad right-pad
+# transforms inflate them, so TDM requires pad_m=pad_n=pad_k=False.
+# comp_async on gfx1250 requires A row-major and B col-major: the LDS
+# transpose-load path is incompatible with the WMMA 16x16x32 K distribution.
+
+
+def _gfx1250_pipeline_supported(
+    pipeline: str,
+    scheduler: str,
+    epilogue: str,
+    persistent: bool,
+    wave_m: int,
+    wave_n: int,
+    wave_k: int,
+    arch: str,
+    variant: str,
+    pad_m: bool = False,
+    pad_n: bool = False,
+    pad_k: bool = False,
+    layout: str = "",
+) -> bool:
+    """False iff the (pipeline, epilogue) pair is a gfx1250-only combination
+    that the codegen would reject for this arch/variant/trait.
+
+    ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
+    comp_async layout rule."""
+    if pipeline not in _GFX1250_ONLY_PIPELINES and epilogue != "tdm":
+        return True
+    if pipeline not in _GFX1250_ONLY_PIPELINES:
+        # The tdm epilogue is only valid together with a TDM pipeline.
+        return False
+    if arch != "gfx1250" or scheduler != "intrawave":
+        return False
+    if variant not in ("standard", "batched"):
+        return False
+    if pipeline in _TDM_PIPELINES:
+        if epilogue != "tdm" or persistent:
+            return False
+        if pad_m or pad_n or pad_k:
+            return False
+        if pipeline == "comp_tdm_v2" and wave_m * wave_n * wave_k != 4:
+            return False
+        return True
+    # comp_async
+    if layout and layout[:2] != "rc":
+        return False
+    return epilogue == "cshuffle"
+
+
 def expand_sweep(
     config_path: str,
     arch: Optional[str] = None,
@@ -2611,6 +2667,22 @@ def expand_sweep(
         # reference; <=4-warp compv3 and all compv4/mem/interwave kernels are
         # bit-accurate). Gate it off until the pipeline is ported to wave32.
         if arch == "gfx1250" and pipe == "compv3" and sched == "intrawave" and wm * wn == 8:
+            continue
+        if not _gfx1250_pipeline_supported(
+            pipe,
+            sched,
+            epi,
+            bool(persist),
+            wm,
+            wn,
+            wk,
+            arch,
+            variant,
+            pad_m=bool(pm),
+            pad_n=bool(pn),
+            pad_k=bool(pk),
+            layout=layout,
+        ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
             tm // m_div, tn // n_div, wtm, wtn

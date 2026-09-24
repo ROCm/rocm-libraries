@@ -274,7 +274,11 @@ except ImportError:
         per_pipeline = LDS_CAPACITY_LIMITS_BY_ARCH.get(
             gpu_arch.lower(), _FALLBACK_LDS_BUDGET
         )
-        budget = per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+        # TDM pipelines always double-buffer, exactly like comp_async.
+        pipeline_key = {"comp_tdm": "comp_async", "comp_tdm_v2": "comp_async"}.get(
+            pipeline.lower(), pipeline.lower()
+        )
+        budget = per_pipeline.get(pipeline_key, per_pipeline["default"])
         if double_smem_buffer:
             # Conservative: the fallback assumes the smallest capacity we ship.
             budget = min(budget, _FALLBACK_LDS_BUDGET["default"] // 2)
@@ -285,6 +289,8 @@ except ImportError:
         ("compv3", "default", "interwave"),
         ("compv4", "cshuffle", "interwave"),
         ("compv4", "default", "interwave"),
+        ("comp_tdm", "tdm", "interwave"),
+        ("comp_tdm_v2", "tdm", "interwave"),
     }
 
     DTYPE_COMBINATIONS = {
@@ -298,6 +304,12 @@ except ImportError:
         "int8_int8": {"acc": "int32", "notes": "Integer GEMM"},
         "pk_fp4_pk_fp4": {"acc": "fp32", "notes": "Packed 4-bit float"},
     }
+
+
+# Tensor Data Mover pipelines. They exist only on gfx1250; elsewhere the TDM
+# instructions are no-ops and the kernel silently produces zeros.
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+TDM_ARCH = "gfx1250"
 
 
 # =============================================================================
@@ -743,12 +755,66 @@ class ArchFilter:
                     f"(compv4/compv5 have ck_tile template compatibility issues)"
                 )
 
+        self._validate_gfx1250_pipeline(config, result)
+
         combo = (config.pipeline, config.epilogue, config.scheduler)
         if combo in TRAIT_UNSUPPORTED_COMBINATIONS:
             result.add_error(
                 f"Unsupported trait combination: pipeline={config.pipeline}, "
                 f"epilogue={config.epilogue}, scheduler={config.scheduler}"
             )
+
+    def _validate_gfx1250_pipeline(
+        self, config: KernelConfig, result: ValidationResult
+    ):
+        """Validate the gfx1250-only Tensor Data Mover (TDM) pipelines.
+
+        Off gfx1250 the TDM instructions compile to no-ops and the kernel
+        silently writes zeros, so the architecture gate is exact rather than
+        family-based. The TDM pipelines must be paired with the TDM epilogue
+        (and the TDM epilogue with a TDM pipeline), are intrawave-only, and
+        comp_tdm_v2 requires exactly four waves. Only the plain GEMM operator is
+        supported (no stream-K, multi-D, grouped or preshuffle).
+        """
+        is_tdm_pipeline = config.pipeline in TDM_PIPELINES
+        if not is_tdm_pipeline:
+            if config.epilogue == "tdm":
+                result.add_error(
+                    f"epilogue=tdm requires a TDM pipeline {TDM_PIPELINES}, "
+                    f"got {config.pipeline}"
+                )
+            return
+
+        base_arch = self.gpu_arch.split(":")[0]
+        if base_arch != TDM_ARCH:
+            result.add_error(
+                f"pipeline={config.pipeline} is only supported on {TDM_ARCH}, "
+                f"got {self.gpu_arch}"
+            )
+        if config.epilogue != "tdm":
+            result.add_error(
+                f"pipeline={config.pipeline} requires epilogue=tdm, "
+                f"got {config.epilogue}"
+            )
+        if config.scheduler != "intrawave":
+            result.add_error(
+                f"pipeline={config.pipeline} requires scheduler=intrawave, "
+                f"got {config.scheduler}"
+            )
+        if config.operator != OperatorType.GEMM:
+            # TdmEpilogue has no D tensors and ignores the split/atomic memory
+            # operation, so only the plain GEMM operator can use it.
+            result.add_error(
+                f"pipeline={config.pipeline} is only supported for operator="
+                f"{OperatorType.GEMM.value}, got {config.operator.value}"
+            )
+        if config.pipeline == "comp_tdm_v2":
+            num_waves = config.warp_m * config.warp_n * config.warp_k
+            if num_waves != 4:
+                result.add_error(
+                    f"pipeline=comp_tdm_v2 requires exactly 4 waves, got "
+                    f"{config.warp_m}x{config.warp_n}x{config.warp_k}"
+                )
 
     def _validate_lds_capacity(self, config: KernelConfig, result: ValidationResult):
         """Validate LDS (Local Data Share) memory capacity"""

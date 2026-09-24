@@ -33,6 +33,25 @@ get_abc_layouts = _validation_utils.get_abc_layouts
 get_abcd_layouts = _validation_utils.get_abcd_layouts
 get_dtype_string = _validation_utils.get_dtype_string
 
+# gfx1250 pipelines. Only the ops listed here may emit them; every other op
+# raises instead of silently generating an unsupported kernel.
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+ASYNC_PIPELINES = ("comp_async",)
+GFX1250_PIPELINES = TDM_PIPELINES + ASYNC_PIPELINES
+GFX1250_PIPELINE_OPS = ("gemm_universal", "batched_gemm")
+# Pipelines whose CShuffle epilogue problem receives DoubleSmemBuffer.
+DOUBLE_SMEM_EPILOGUE_PIPELINES = ("comp_async",) + TDM_PIPELINES
+
+
+def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
+    """Strict map lookup: raise instead of emitting 'None' into generated code."""
+    try:
+        return pipeline_map[pipeline]
+    except KeyError:
+        raise ValueError(
+            f"unknown {what} '{pipeline}'; supported: {sorted(pipeline_map)}"
+        ) from None
+
 
 class GemmKernelBuilder:
     def __init__(
@@ -194,6 +213,55 @@ class GemmKernelBuilder:
                 )
 
         return self._apply_sampling(kernel_list)
+
+    def _check_pipeline_allowed_for_op(
+        self, pipeline, epilogue, pad_m=False, pad_n=False, pad_k=False
+    ):
+        """Reject gfx1250 pipelines/epilogues on ops that cannot host them."""
+        prefix = self.kernel_name_prefix
+        if pipeline in GFX1250_PIPELINES and prefix not in GFX1250_PIPELINE_OPS:
+            raise ValueError(f"{prefix} does not support the {pipeline} pipeline")
+        if epilogue == "tdm" and pipeline not in TDM_PIPELINES:
+            raise ValueError(
+                f"tdm epilogue requires a TDM pipeline {TDM_PIPELINES}, got '{pipeline}'"
+            )
+        if pipeline in TDM_PIPELINES and epilogue != "tdm":
+            raise ValueError(
+                f"{pipeline} pipeline requires the tdm epilogue, got '{epilogue}'"
+            )
+        pad_reason = _validation_utils.tdm_pad_reject_reason(
+            pipeline, epilogue, pad_m, pad_n, pad_k
+        )
+        if pad_reason:
+            raise ValueError(f"{pipeline}/{epilogue}: {pad_reason}")
+        if (
+            _validation_utils._base_gfx_arch(self.gpu_target)
+            == _validation_utils.GFX1250_ONLY_PIPELINE_ARCH
+        ):
+            layout_reason = _validation_utils.gfx1250_comp_async_layout_reject_reason(
+                pipeline, self.layout
+            )
+            if layout_reason:
+                raise ValueError(f"layout {self.layout}: {layout_reason}")
+            async_pad_reason = _validation_utils.gfx1250_comp_async_pad_reject_reason(
+                pipeline, pad_m, pad_n, pad_k
+            )
+            if async_pad_reason:
+                raise ValueError(f"{pipeline}/{epilogue}: {async_pad_reason}")
+
+    def _tdm_k_batch_guard(self, pipeline):
+        """Host-side split-K guard for TDM pipelines (empty for all others).
+
+        TdmEpilogue ignores the memory operation, so k_batch > 1 would produce a
+        partial C without any error.
+        """
+        if pipeline not in TDM_PIPELINES:
+            return ""
+        return """
+
+        if(args.k_batch != 1) {
+            throw std::runtime_error("TDM pipeline requires k_batch==1");
+        }"""
 
     def _uses_persistent_trait(self):
         return self.kernel_name_prefix != "batched_gemm"
@@ -473,7 +541,7 @@ class GemmKernelBuilder:
         # Filter out unsupported trait combinations
         combinations = []
         for combo in all_combinations:
-            pipeline, epilogue, scheduler = combo[:3]
+            pipeline, epilogue, scheduler, pad_m, pad_n, pad_k = combo[:6]
             persistent_or_preshuffle_quant = combo[6] if len(combo) > 6 else False
             if is_trait_combination_valid(
                 pipeline,
@@ -482,6 +550,9 @@ class GemmKernelBuilder:
                 persistent_or_preshuffle_quant,
                 self.kernel_name_prefix,
                 self.layout,
+                pad_m,
+                pad_n,
+                pad_k,
             ):
                 combinations.append(combo)
             else:
@@ -520,13 +591,20 @@ class GemmKernelBuilder:
                 "mem": "ck_tile::GemmPipelineAgBgCrMem",
                 "compv3": "ck_tile::GemmPipelineAgBgCrCompV3",
                 "compv4": "ck_tile::GemmPipelineAgBgCrCompV4",
+                "comp_async": "ck_tile::GemmPipelineAgBgCrCompAsync",
+                "comp_tdm": "ck_tile::GemmPipelineAgBgCrCompTDMV1",
+                "comp_tdm_v2": "ck_tile::GemmPipelineAgBgCrCompTDMV2",
             }
             # Map pipeline names to base pipeline for hot loop detection
             base_pipeline_map = {
                 "mem": "ck_tile::BaseGemmPipelineAgBgCrMem",
                 "compv3": "ck_tile::BaseGemmPipelineAgBgCrCompV3",
                 "compv4": "ck_tile::BaseGemmPipelineAgBgCrCompV4",
+                "comp_async": "ck_tile::BaseGemmPipelineAgBgCrCompAsync",
+                "comp_tdm": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
+                "comp_tdm_v2": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
             }
+            self._check_pipeline_allowed_for_op(pipeline, epilogue, pad_m, pad_n, pad_k)
         elif self.kernel_name_prefix == "gemm_preshuffle":
             # Map pipeline names to the correct pipeline implementation
             pipeline_impl_map = {
@@ -565,6 +643,10 @@ class GemmKernelBuilder:
         }
 
         instance_code = self.populate_kernel_header(kernel_name)
+        if pipeline in TDM_PIPELINES:
+            # TdmEpilogue is only reachable through the ops/epilogue.hpp
+            # umbrella, which the generated headers do not include.
+            instance_code += '#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"\n'
         instance_code += self.populate_kernel_dtype_layout()
         instance_code += self.populate_strut_begin(kernel_name)
         instance_code += self.populate_tile_config(tile_config)
@@ -744,7 +826,7 @@ struct SelectedKernel {{
     static constexpr bool kPadN = {"true" if pad_n in [True, "true"] else "false"};
     static constexpr bool kPadK = {"true" if pad_k in [True, "true"] else "false"};
     static constexpr bool TransposeC = false;
-    static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2", "comp_async"] else "false"};"""
+    static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2", "comp_async", "comp_tdm", "comp_tdm_v2", "comp_async_eight_waves", "weight_preshuffle"] else "false"};"""
 
         if self.kernel_name_prefix == "gemm_aquant":
             instance_code += f"""
@@ -894,7 +976,7 @@ struct SelectedKernel {{
             instance_code += f"""
 
     // Base pipeline for hot loop detection
-    using BaseGemmPipeline = {base_pipeline_map.get(pipeline)}<GemmPipelineProblem>;"""
+    using BaseGemmPipeline = {lookup_pipeline(base_pipeline_map, pipeline)}<GemmPipelineProblem>;"""
 
         return instance_code
 
@@ -1021,7 +1103,7 @@ struct SelectedKernel {{
         ]:
             instance_code += f"""
 
-        using GemmPipeline = {pipeline_impl_map.get(pipeline)}<UniversalGemmProblem>;"""
+        using GemmPipeline = {lookup_pipeline(pipeline_impl_map, pipeline)}<UniversalGemmProblem>;"""
 
         # Scheduler initialization
         if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "mx_gemm"]:
@@ -1047,10 +1129,10 @@ struct SelectedKernel {{
         if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "mx_gemm"]:
             instance_code += f"""
 
-        using GemmPipeline = {pipeline_impl_map.get(pipeline)}<UniversalGemmProblem>;"""
+        using GemmPipeline = {lookup_pipeline(pipeline_impl_map, pipeline)}<UniversalGemmProblem>;"""
 
         # Epilogue
-        instance_code += self.populate_epilogue(epilogue)
+        instance_code += self.populate_epilogue(epilogue, pipeline)
 
         # Kernel type
         if self.kernel_name_prefix == "gemm_multi_d":
@@ -1096,7 +1178,7 @@ struct SelectedKernel {{
         using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
         // Kernel arguments
-        auto kargs = GemmKernel::MakeKernelArgs(args);
+        auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(pipeline)}
 
         if (!GemmKernel::IsSupportedArgument(kargs)) {{
             throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
@@ -1132,7 +1214,7 @@ struct SelectedKernel {{
         using GemmKernel = ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
         // Kernel arguments
-        auto kargs = GemmKernel::MakeKernelArgs(args);
+        auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(pipeline)}
 
         if (!GemmKernel::IsSupportedArgument(kargs)) {{
             throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
@@ -1421,17 +1503,37 @@ struct SelectedKernel {{
 """
         return instance_code
 
-    def populate_epilogue(self, epilogue):
+    def populate_epilogue(self, epilogue, pipeline=None):
         instance_code = """
 
         // Epilogue
         """
 
-        if epilogue == "cshuffle":
+        if epilogue == "tdm" and pipeline not in TDM_PIPELINES:
+            raise ValueError(
+                f"tdm epilogue requires a TDM pipeline {TDM_PIPELINES}, got '{pipeline}'"
+            )
+        if pipeline in TDM_PIPELINES and epilogue != "tdm":
+            raise ValueError(
+                f"{pipeline} pipeline requires the tdm epilogue, got '{epilogue}'"
+            )
+        double_smem = pipeline in DOUBLE_SMEM_EPILOGUE_PIPELINES
+
+        # mx_gemm + tdm falls through to the default arm below, which rejects
+        # it, until the MX TDM epilogue gets its own arm.
+        if epilogue == "tdm" and self.kernel_name_prefix == "gemm_universal":
+            instance_code += self.populate_tdm_gemm_universal()
+        elif epilogue == "tdm" and self.kernel_name_prefix == "batched_gemm":
+            instance_code += self.populate_tdm_batched_gemm()
+        elif epilogue == "tdm" and self.kernel_name_prefix != "mx_gemm":
+            raise ValueError(
+                f"{self.kernel_name_prefix} does not support the tdm epilogue"
+            )
+        elif epilogue == "cshuffle":
             if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
-                instance_code += self.populate_cshuffle_gemm_universal()
+                instance_code += self.populate_cshuffle_gemm_universal(double_smem)
             elif self.kernel_name_prefix == "batched_gemm":
-                instance_code += self.populate_cshuffle_batched_gemm()
+                instance_code += self.populate_cshuffle_batched_gemm(double_smem)
             elif self.kernel_name_prefix == "gemm_multi_d":
                 instance_code += self.populate_cshuffle_gemm_multi_d()
             elif self.kernel_name_prefix == "gemm_preshuffle":
@@ -1452,8 +1554,74 @@ struct SelectedKernel {{
 
         return instance_code
 
-    def populate_cshuffle_gemm_universal(self):
-        instance_code = """
+    def _double_smem_epilogue_tail(self, legacy_tail, open_tail, double_smem):
+        """Close a CShuffleEpilogueProblem argument list.
+
+        Legacy pipelines keep their exact argument list (legacy_tail). The
+        gfx1250 async/TDM pipelines continue it (open_tail) with the default
+        FixedVectorSize/VectorSizeC/BlockedXDLN_PerWarp values followed by
+        DoubleSmemBuffer, matching the dispatcher codegen.
+        """
+        if not double_smem:
+            return legacy_tail
+        return (
+            open_tail
+            + """
+            false,                       // FixedVectorSize_
+            1,                           // VectorSizeC_
+            1,                           // BlockedXDLN_PerWarp_
+            DoubleSmemBuffer>;           // DoubleSmemBuffer_"""
+        )
+
+    def _populate_tdm_epilogue(
+        self, m_per_block, n_per_block, transpose_c, num_wave_groups
+    ):
+        return f"""
+        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
+            ADataType,
+            BDataType,
+            ck_tile::tuple<>,  // DsDataType
+            AccDataType,
+            CDataType,
+            ck_tile::tuple<>,  // DsLayout
+            CLayout,
+            ck_tile::element_wise::PassThrough,
+            {m_per_block},  // kM_
+            {n_per_block},  // kN_
+            WarpPerBlock_M,              // MWave_
+            WarpPerBlock_N,              // NWave_
+            WarpTileM,                   // MPerXdl_
+            WarpTileN,                   // NPerXdl_
+            WarpTileK,                   // KPerXdl_
+            {transpose_c},  // isCTransposed_
+            {num_wave_groups},  // kNumWaveGroups_
+            false,                       // FixedVectorSize_
+            1,                           // VectorSizeC_
+            1,                           // BlockedXDLN_PerWarp_
+            DoubleSmemBuffer>;           // DoubleSmemBuffer_
+
+        using GemmEpilogue = ck_tile::TdmEpilogue<EpilogueProblem>;"""
+
+    def populate_tdm_gemm_universal(self):
+        return self._populate_tdm_epilogue(
+            "TileM", "TileN", "TransposeC", "NumWaveGroups"
+        )
+
+    def populate_tdm_batched_gemm(self):
+        return self._populate_tdm_epilogue(
+            "TilePartitioner::MPerBlock",
+            "TilePartitioner::NPerBlock",
+            "UniversalGemmProblem::TransposeC",
+            "1",
+        )
+
+    def populate_cshuffle_gemm_universal(self, double_smem=False):
+        epilogue_tail = self._double_smem_epilogue_tail(
+            "NumWaveGroups>;              // kNumWaveGroups_",
+            "NumWaveGroups,               // kNumWaveGroups_",
+            double_smem,
+        )
+        instance_code = f"""
         using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
             ADataType,
             BDataType,
@@ -1471,13 +1639,18 @@ struct SelectedKernel {{
             WarpTileN,                   // NPerXdl_
             WarpTileK,                   // KPerXdl_
             TransposeC,                  // isCTransposed_
-            NumWaveGroups>;              // kNumWaveGroups_
+            {epilogue_tail}
 
         using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
         return instance_code
 
-    def populate_cshuffle_batched_gemm(self):
-        instance_code = """
+    def populate_cshuffle_batched_gemm(self, double_smem=False):
+        epilogue_tail = self._double_smem_epilogue_tail(
+            "UniversalGemmProblem::TransposeC>;",
+            "UniversalGemmProblem::TransposeC,\n            1,                           // kNumWaveGroups_",
+            double_smem,
+        )
+        instance_code = f"""
         using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
             ADataType,
             BDataType,
@@ -1494,7 +1667,7 @@ struct SelectedKernel {{
             WarpTileM,
             WarpTileN,
             WarpTileK,
-            UniversalGemmProblem::TransposeC>;
+            {epilogue_tail}
 
         using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
         return instance_code

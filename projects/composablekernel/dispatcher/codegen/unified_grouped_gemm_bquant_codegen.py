@@ -42,6 +42,28 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 
+# The async (comp_async) and TDM (comp_tdm, comp_tdm_v2 + tdm epilogue) pipelines
+# are not implemented for grouped bquant GEMM: the quant pipeline problem is
+# synchronous and the kernel uses a CShuffle-style epilogue. Reject them on
+# every arch with a clear error instead of skipping or mislabelling a kernel.
+UNSUPPORTED_ASYNC_TDM_PIPELINES = ("comp_async", "comp_tdm", "comp_tdm_v2")
+UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
+
+
+def reject_async_tdm_traits(pipeline: str, epilogue: str) -> None:
+    """Raise ValueError if pipeline/epilogue is async/TDM-only."""
+    if pipeline in UNSUPPORTED_ASYNC_TDM_PIPELINES:
+        raise ValueError(
+            f"grouped_gemm_bquant does not support the '{pipeline}' pipeline "
+            "(async/TDM pipelines are not implemented for grouped quant GEMM)"
+        )
+    if epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
+        raise ValueError(
+            f"grouped_gemm_bquant does not support the '{epilogue}' epilogue "
+            "(TDM epilogue is not implemented for grouped quant GEMM)"
+        )
+
+
 # =============================================================================
 # Dtype variant definitions
 # Each entry: (dtype_key, ADataType, BDataType, CDataType, QDataType)
@@ -207,6 +229,9 @@ class BQuantKernelSpec:
     pad_k: bool = True
     block_size: int = 256
     k_block_per_cu: int = 1
+
+    def __post_init__(self):
+        reject_async_tdm_traits(self.pipeline, self.epilogue)
 
     @property
     def name(self) -> str:
@@ -503,6 +528,7 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
     specs = []
     pipeline  = config.get("pipeline", "compv3")
     epilogue  = config.get("epilogue", "cshuffle")
+    reject_async_tdm_traits(pipeline, epilogue)
     scheduler = config.get("scheduler", "intrawave")
     pad_m     = config.get("pad_m", False)
     pad_n     = config.get("pad_n", False)

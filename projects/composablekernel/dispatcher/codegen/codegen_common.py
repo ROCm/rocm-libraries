@@ -112,6 +112,12 @@ class TraitConfigBase:
             ("comp_async", "default", "interwave"),
             ("basic_async_v1", "cshuffle", "interwave"),
             ("basic_async_v1", "default", "interwave"),
+            ("comp_tdm", "tdm", "interwave"),
+            ("comp_tdm", "cshuffle", "interwave"),
+            ("comp_tdm", "default", "interwave"),
+            ("comp_tdm_v2", "tdm", "interwave"),
+            ("comp_tdm_v2", "cshuffle", "interwave"),
+            ("comp_tdm_v2", "default", "interwave"),
         }
     )
 
@@ -184,6 +190,10 @@ class CommonTypeMappings:
         "compv4": "GemmPipelineAgBgCrCompV4",
         "compv5": "GemmPipelineAgBgCrCompV5",
         "preshufflev2": "WeightPreshufflePipelineAGmemBGmemCRegV2",
+        "comp_async": "GemmPipelineAgBgCrCompAsync",
+        # gfx1250 only (Tensor Data Mover); always paired with the tdm epilogue.
+        "comp_tdm": "GemmPipelineAgBgCrCompTDMV1",
+        "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
     }
 
     PIPELINE_TO_BASE = {
@@ -192,6 +202,9 @@ class CommonTypeMappings:
         "compv4": "BaseGemmPipelineAgBgCrCompV4",
         "compv5": "BaseGemmPipelineAgBgCrCompV5",
         "preshufflev2": "BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
+        "comp_async": "BaseGemmPipelineAgBgCrCompAsync",
+        "comp_tdm": "BaseGemmPipelineAgBgCrCompTDM",
+        "comp_tdm_v2": "BaseGemmPipelineAgBgCrCompTDM",
     }
 
     PIPELINE_TO_DISPATCHER = {
@@ -200,6 +213,9 @@ class CommonTypeMappings:
         "compv4": "Pipeline::CompV4",
         "compv5": "Pipeline::CompV5",
         "preshufflev2": "Pipeline::PreShuffleV2",
+        "comp_async": "Pipeline::CompAsync",
+        "comp_tdm": "Pipeline::CompTDMV1",
+        "comp_tdm_v2": "Pipeline::CompTDMV2",
     }
 
     SCHEDULER_TO_CK = {
@@ -217,6 +233,7 @@ class CommonTypeMappings:
     EPILOGUE_TO_DISPATCHER = {
         "cshuffle": "Epilogue::CShuffle",
         "default": "Epilogue::Default",
+        "tdm": "Epilogue::Tdm",
     }
 
     @staticmethod

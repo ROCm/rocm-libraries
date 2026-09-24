@@ -28,6 +28,51 @@ def _import_gemm_kernel_builder():
 GemmKernelBuilder = _import_gemm_kernel_builder()
 
 
+# The async (comp_async) and TDM (comp_tdm, comp_tdm_v2 + tdm epilogue) paths are
+# not available for grouped_gemm_rowcolquant: the quant pipeline problem is synchronous
+# and the kernel is CompV3 + CShuffle only. Reject them on every arch with a
+# clear error instead of silently emitting a kernel of a different
+# pipeline/epilogue.
+UNSUPPORTED_ASYNC_TDM_PIPELINES = ("comp_async", "comp_tdm", "comp_tdm_v2")
+UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
+
+
+def reject_async_tdm_traits(pipeline, epilogue):
+    """Raise ValueError if pipeline/epilogue is an async/TDM-only trait."""
+    if pipeline in UNSUPPORTED_ASYNC_TDM_PIPELINES:
+        raise ValueError(
+            f"grouped_gemm_rowcolquant does not support the {pipeline} pipeline"
+        )
+    if epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
+        raise ValueError(
+            f"grouped_gemm_rowcolquant does not support the {epilogue} epilogue"
+        )
+
+
+def reject_async_tdm_trait_string(trait_combo):
+    """Same check on a raw '_'-joined trait string (before it is split).
+
+    comp_async/comp_tdm/comp_tdm_v2 contain '_', so a plain split would parse
+    them as pipeline 'comp' and mis-assign every following field.
+    """
+    # Longest first so comp_tdm_v2 is not reported as comp_tdm.
+    for pipeline in sorted(UNSUPPORTED_ASYNC_TDM_PIPELINES, key=len, reverse=True):
+        if trait_combo == pipeline or trait_combo.startswith(pipeline + "_"):
+            reject_async_tdm_traits(pipeline, None)
+    for epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
+        if epilogue in trait_combo.split("_"):
+            reject_async_tdm_traits(None, epilogue)
+
+
+def _reject_async_tdm_config(config):
+    """Reject async/TDM values listed in a trait_config before enumeration."""
+    trait_config = config.get("trait_config", {})
+    for pipeline in trait_config.get("pipeline", {}).get("values", []):
+        reject_async_tdm_traits(pipeline, None)
+    for epilogue in trait_config.get("epilogue", {}).get("values", []):
+        reject_async_tdm_traits(None, epilogue)
+
+
 def _import_validation_utils():
     """Import validation utilities from the parent gemm directory."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -268,6 +313,10 @@ using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
 """
         return instance_code
 
+    def _generate_trait_combinations(self):
+        _reject_async_tdm_config(self.config)
+        return super()._generate_trait_combinations()
+
     def _generate_kernel_instance(self, tile_config, trait_combo):
         """Generate a single kernel instance"""
 
@@ -282,6 +331,7 @@ using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
             pad_k,
             persistent,
         ) = trait_combo
+        reject_async_tdm_traits(pipeline, epilogue)
 
         # Create kernel name with proper boolean capitalization
         kernel_name = f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_{epilogue}_{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_{str(pad_k).capitalize()}_{str(persistent).capitalize()}"
@@ -597,6 +647,7 @@ def main():
         }
 
         # Parse trait combo
+        reject_async_tdm_trait_string(args.trait_combo)
         trait_parts = args.trait_combo.split("_")
         trait_combo = (
             trait_parts[0],  # pipeline
