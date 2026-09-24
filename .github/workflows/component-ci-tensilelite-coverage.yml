@@ -50,12 +50,17 @@ jobs:
       # fails in seconds instead of waiting on the ~7 min coverage run below.
       # Unlike the opt-in local pre-commit hook, this cannot be bypassed with
       # `git commit --no-verify`: it inspects the PR's actual diff in CI.
+      #
+      # --repo-root is `.` (the step's default working directory, i.e. the
+      # checkout) rather than `${{ github.workspace }}`: in a container job that
+      # expression expands to the runner host's path, which does not exist
+      # inside the container.
       - name: Guard against blanket .ambr snapshot regeneration
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
           python3 projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \
-            --repo-root "${{ github.workspace }}" \
+            --repo-root . \
             --characterization-dir projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}"
