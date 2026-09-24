@@ -64,11 +64,19 @@ Source-of-truth specification for interleaved MMA operand/accumulator layouts. F
 against the interleave reference tables (MFMA/WMMA, CDNA + RDNA).
 
 **Scope.** One recipe (§6, §8, §9) builds the intra-lane `reorder` tier **cross-lane-free**, by adjusting
-the **static distribution** read from the target's traits — so it is **atom-, dtype-, and arch-agnostic**:
-any AMDGPU arch (CDNA, RDNA, …), any atom (16×16, 32×32, …), any dtype (incl. f64) follows the identical
-construction, with no special-casing. What varies is only **validation status** — re-derive and check per
-instance (§9), don't assume. (Worked and validated in full on MmaDim-16 f16, gfx90a; other arch/atom/dtype
-follow the same recipe and are not yet validated.)
+the **static distribution** read from the target's traits. It covers **every dense square atom** — any
+AMDGPU arch (CDNA, and RDNA/gfx11 via operand **replication**, §9), any dtype **including f64** — with no
+special-casing. The **one non-square** catalogue atom (`wmma_f32_32x16x128_f4`) over-subscribes the wave on
+one operand and does **not** interleave under this construction; it is deferred (task #21). Which rows
+interleave is enumerated and locked by the proof sweep `test_interleave_all_dense.py` — read the census
+there, never copy a count into prose. What varies per instance is **validation depth**: the construction is
+proven cross-lane-free across the whole square catalogue (incl. f64) by that CPU sweep; GPU **bit-exact**
+perf is validated on MmaDim-16 f16 / gfx90a and is a per-instance measurement elsewhere, never assumed.
+
+**Building it — the shipped API.** The recipe below is what `InterleavedStyle` (`mma/styles/interleaved.py`)
+implements. Call `style.lds_bridge(traits, role=…, free_sub=…, k_sub=…)` for the A/B operand bridge and
+`style.accumulator_desc(traits, m_sub=…, n_sub=…)` for C; the sections that follow are the **why**, not a
+second thing to hand-build.
 
 **Naming.** This layer uses two descriptive labels for the register order, each naming exactly which
 axis the vector width runs along — no "structure" to interpret, no other layout vocabulary needed:
@@ -458,7 +466,7 @@ Worked example — `interleave_idx<1, 2, 8>` (count 8, stride 2 → a `2 × 4` g
 ## 6. A/B input interleave (worked on MmaDim-16; general construction in §9)
 
 *(Worked instance: MmaDim-16 f16, wave64, gfx90a — the numbers below (M=64, 16 lanes, DPT/KPT) are this
-instance. The construction generalizes to any atom / wave size / arch; see §9.)*
+instance. The construction generalizes to any dense square atom / wave size / arch; see §9.)*
 
 Per lane:
 - **DPT (DimPerThread)** = free-dim atoms per lane = `m_iter` (A) / `n_iter` (B).
@@ -620,8 +628,9 @@ col-major = `interleave_idx<1, 16, 64>`.
 row/col roles). *Derived by M↔N symmetry — confirm against the ACC reference table's rows before
 relying on it.*
 
-**Accumulators for any target are built the same way, cross-lane-free** — the atom-/dtype-/arch-agnostic
-§9 construction (only validation status varies, f64 untested; see §9).
+**Accumulators are built the same way, cross-lane-free**, by the §9 construction — every dense **square**
+atom, any dtype (incl. f64, proven cross-lane-free by the sweep), any arch (RDNA via replication). Only GPU
+bit-exact validation varies per instance; see §9.
 
 ### C-store coalescing — the lane-major axis (store-transaction cost)
 
@@ -664,6 +673,10 @@ NOT a label change.
 **store-transaction** count, NOT automatically a TFLOPS hit — the C store is a one-time epilogue that is
 often hidden in the MMA shadow. Treat it like a bank conflict: real, modelled, but subordinate to the
 binding stage. **Measure per case** (sweep the A↔B-swap knob); do not assume the 4× shows up end-to-end.
+The table's *absolute* per-line counts assume the intended `b128` (`dwordx4`) store; the emit realizes
+≤ `b64` (see [`bug_report_c_store_vectorization.md`](./bug_report_c_store_vectorization.md)), so read those
+two columns as **intent-side**. The 4× ratio is a cross-lane fusion property, **width-independent**, and
+holds regardless.
 
 ## 7a. Register states + the layout optimizer
 
@@ -745,8 +758,9 @@ layout's **intent**, distinct from the codegen's *achieved* store width (a separ
     f4 = 8). Needs **unpack (extract lo/hi) → move → repack**, cost ∝ the pack factor (f16 ~2×, f8 ~4×).
     Still `reorder` — the element does NOT change lane, it is only re-packed in place.
   Compile-time `vec_extract`/`vec_insert`. All single-patch A/B and C-shuffle interleaves are this tier.
-  The §9 construction stays in THIS tier for **any** target — any atom, dtype, or arch — it adjusts the
-  static distribution and never emits a cross-lane shuffle. See §9 → *Accumulators*.
+  The §9 construction stays in THIS tier for any dense **square** atom (any dtype, any arch incl. RDNA via
+  replication) — it adjusts the static distribution and never emits a cross-lane shuffle; the non-square
+  case is deferred (§9). See §9 → *Accumulators*.
 - **`cross_lane`** — an element moves **between lanes**, or the on-lane permutation is not lane-uniform.
   Needs DPP / `ds_bpermute` / LDS. **THIS is the reject/defer seam** (see the D1 correction below) — the
   static-distribution recipe is built to avoid it.
@@ -887,26 +901,24 @@ multi-atom (free_sub > 1):
 **`P == 1` is the degenerate case of this same construction** — single-patch and multi-patch are one code
 path, not two.
 
-Where this has been run the chain came out sound with **zero `cross_lane`**. That is a property of the
-encoding, so the *constructibility* should transfer — but re-derive it rather than assume it, especially at
-a different wave size. **`f64` is untested by this construction.**
+Where this has been run the chain came out sound with **zero `cross_lane`** — a property of the encoding, so
+*constructibility* transfers across dtype and wave size. `f64` is **constructible and proven cross-lane-free**
+by the CPU proof sweep (the registered `mfma_f64_16x16x4f64` row); only GPU **bit-exact** validation is still
+per-instance. Re-derive rather than assume, especially at a different wave size.
 
-**Operand-side precondition — check it PER CATALOGUE ROW; the wave size does not imply it.**
-`free_lanes · k_lanes == wave_size`, with `k_lanes = k / k_ab_per_lane` and `free_lanes = m` on the A side,
-`n` on the B side. **Check it PER OPERAND, not per row** — on a non-square atom one side can pass while the
-other fails.
+**Operand-side precondition — check it PER OPERAND (one side can pass while the other fails).**
+`free_lanes · k_lanes` must **divide** `wave_size`, with `k_lanes = k / k_ab_per_lane`, `free_lanes = m` on
+the A side and `n` on the B side. The quotient is the operand **replication** factor: **1** on CDNA / gfx12,
+**2** on gfx11 WMMA — there a lane holds the atom's whole K (`k_lanes == 1`) and the operand is duplicated
+across the two 16-lane halves (identical data, no cross-lane; the duplicate is a replication axis, §6). A
+**square** atom satisfies this on both sides (and the accumulator precondition above, so the two never fail
+together); a **non-square** atom can over-subscribe one side (`free_lanes · k_lanes > wave_size`, no integer
+quotient) and then does not interleave — the deferred case (task #21).
 
-Measured over the registered catalogue (128 rows), the A side fails on **9**:
-- 8 are the **gfx11-era** `wmma_*_16x16x16_*_w32` rows (those WITHOUT a `_gfx12` suffix), where a lane holds
-  the atom's whole K (`k_ab_per_lane == k`, so `k_lanes == 1`). ✗ The bare glob also matches 10 `_gfx12`
-  rows that **PASS** — the suffix is load-bearing.
-- 1 is `wmma_f32_32x16x128_f4`, the only non-square row, where `k_ab_per_lane (64) != k (128)`. ✗ So
-  "fails exactly when a lane holds the whole K" is **false** — that is the common cause, not the only one.
-  Its B side passes (`16·2 == 32`), which is why the check is per operand.
-
-✗ "Wave32 doesn't work" is **false** — 55 of 64 dense wave32 rows pass, and **no** dense wave64 row fails.
-Scan the catalogue; never infer from the wave size or from a row's name. The accumulator precondition above holds for
-every dense square row, so the two preconditions do not fail together.
+**Which catalogue rows interleave is enumerated and asserted by the proof sweep** `test_interleave_all_dense.py`:
+it drives the real construction over every dense row and locks the population, so it is the executable
+census — trust it, don't copy a count here (that is what goes stale). The durable rule is the one above:
+**every dense square row interleaves; the lone non-square row does not.**
 
 **Structural constraints that bind.** The wave tile is a whole number of atoms on **both** free axes, and
 `tile_k` is a multiple of the atom's K.
@@ -926,11 +938,11 @@ it either way, and re-sweep the neighbouring knobs when you change it (a wave-sp
 *For example, on one GEMM a bigger atom won (~+8%), tied, AND lost (~−5%) at different configs of that same
 kernel.*
 
-## mma_workflow — the layout-choice recipe (thread-tile transpose flow)
+## The layout-choice recipe (thread-tile transpose flow)
 
-The `mma_workflow` component answers: **given the memory layouts + dtypes of A, B, and C, choose the
-highest-bandwidth way to move the data through the MMA.** It is the recipe that §10's cost model optimizes
-over. It rests on two facts (derived in §1/§6 and §2):
+This recipe answers: **given the memory layouts + dtypes of A, B, and C, choose the highest-bandwidth way
+to move the data through the MMA.** It is what §10's cost model optimizes over; its runnable form is
+`layout_optimizer.py`. It rests on two facts (derived in §1/§6 and §2):
 - **The thread-tile is a rectangle** (A `M×K`, B `N×K`, C `M×N`) → its elements lay into registers two ways
   (row/col-major), and **row↔col-major is a pure in-register reorder** (a transpose; §1/§6) — no re-load, no
   cross-lane. (row/col is operand-relative: K-contiguous = row-major for A, col-major for B.)
@@ -1096,8 +1108,8 @@ separate LDS regions — isolate them (A-only / B-only, store-only / read-only) 
   construction quantity is read from here.
 - `helpers/tiling/transforms.py` — `interleave_idx`, `k_distribution`, `classify_transform`,
   `validate_operands`, `derive_c_distribution` (the §9 accumulator ground truth).
-- `helpers/tiling/mma/warp_encoding.py` — canonical `a_/b_warp_encoding` (the `interleaved=` flag is BROKEN
-  and raises; it does not produce a proper interleaved layout).
-- `helpers/tiling/kernels/tiling_gemm_interleaved_demo.py` — `_wave_descs_interleaved`: the real interleaved
-  layouts (custom `make_tile_desc` static tile distributions).
+- `helpers/tiling/mma/styles/interleaved.py` — `InterleavedStyle`: the shipped interleaved construction
+  (`lds_bridge` / `operand_desc` for A/B, `accumulator_desc` for C). The API this document describes.
+- `helpers/tiling/mma/warp_encoding.py` — canonical `a_/b_warp_encoding`: the atom-native reference the
+  soundness gate reconstructs from (the interleaved operand is `InterleavedStyle`, not a flag here).
 - `helpers/tiling/kernels/latency_probe.py` — instruction-latency microbench feeding §10's cost model.

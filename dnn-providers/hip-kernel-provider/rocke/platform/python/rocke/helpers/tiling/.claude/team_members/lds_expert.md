@@ -120,8 +120,9 @@ apply the cheapest lever, **re-measuring after each** (the bottleneck migrates):
    conflict; measure end-to-end.
 
 **The cooperative-load WIDTH can be a bank-map lever, not only a bandwidth choice — and it is usually
-overlooked.** A cooperative global->LDS store has a "one K value per served group" property that keeps the LDS
-row stride OUT of the store's bank map entirely (and so makes every pad inert).
+overlooked.** A cooperative global->LDS store CAN have a "one K value per served group" property — WHEN the
+free-axis lane count reaches the served group — that keeps the LDS row stride OUT of the store's bank map
+(and so makes a pad inert). It is arch- and descriptor-specific; verify it by counting (below), never assume.
 
 **Test it by counting, not by a formula.** Dump the address map and count **the distinct K rows one served
 group touches**. One row -> the property holds. Two or more -> it does not, and the row stride is back in the

@@ -55,8 +55,9 @@ Every coordinator DEFAULT is CANONICAL (`TileMma.a_layout`, `MmaTee.from_mma` wi
 - Recommending non-canonical → SPECIFY the encoding, and state the two verifies: **sound** (rule 2) AND
   genuinely **≠ canonical**. An "interleaved" layout that equals canonical is canonical (or the interleaving is
   on another stage — say which).
-- `a_desc/b_desc(interleaved=True)` (and `a_/b_warp_encoding(interleaved=True)`) is **BROKEN** (raises) — real
-  interleaved layouts are custom static distributions (`make_tile_desc`), sound for any tile shape.
+- There is no `interleaved=` flag on `a_desc/b_desc` or `a_/b_warp_encoding` — the interleaved operand is a
+  `LayoutStyle` (`InterleavedStyle`, `mma/styles/interleaved.py`), which builds the static distribution; the
+  atom-native encodings stay canonical. Sound for any tile shape.
 - A property that can't be realized as expected → SAY SO and point to the stage where it IS visible; don't
   paper the gap. When unsure, verify in code (`RegisterMapper` / `classify_transform`) before asserting.
 - **Test against the RIGHT target.** `classify_transform`/`transform_fragment` only answer correctly if the
@@ -80,7 +81,7 @@ that is WHY it is cheap (and why non-adjacent registers / multiple atoms never i
 ### Decision areas
 
 **Thread-tile transpose.** The rectangle → two vectorizations → a pure in-register reorder (no re-load, no
-cross-lane), and MMA-ready = K-vectorize both operands: `tiling_interleaving_design.md` → *mma_workflow*.
+cross-lane), and MMA-ready = K-vectorize both operands: `tiling_interleaving_design.md` → *The layout-choice recipe*.
 Load coalesced along the contiguous axis, reach MMA-ready by transpose.
 **Default to the wide load and pay the reorder; deviate only to repair a bank map, and measure it.** The
 mechanism and its exception live under "Putting K on the LDS stride-1 axis" in Hard-won heuristics — that
@@ -123,25 +124,25 @@ cheap. **Tier: free-symmetry(free) < `reorder` dword-aligned < `reorder` sub-dwo
 **Interleaved thread-tile knobs (`DPT×KPT`; DPT = free-dim atoms, KPT = `k_ab_per_lane·k_iter`).**
 Restrictions: the **tile is an integer multiple of the atom** (`m/n/k_iter ∈ ℤ⁺`, not power-of-2); the
 **VECTOR width** is where power-of-2 ≤ 128-bit applies (`VW ∈ {1,2,4} dwords`); `interleave_idx<1,KPT,DPT·KPT>`
-(the in-register transpose) needs `gather==1`; soundness needs `A.K==B.K` (holds for any tile shape —
-**no square-only restriction**).
+(the in-register transpose) needs `gather==1`; soundness needs `A.K==B.K` (holds for any tile shape). The
+operand **construction**, separately, assumes a **square atom** — do not conflate the two.
 
 **A multi-patch accumulator (32×32 and anything like it) is NOT disqualified from an interleaved layout.**
 C de-interleave stays in-register as long as the derived C's per-lane ownership is a set of **congruent,
 evenly-spaced patches** — one patch is the easy case, not the requirement. ✗ Never reject a candidate on
-patch count — 32×32 (and any atom) is a valid interleaving target, built cross-lane-free by the same
+patch count — 32×32 (and any **square** atom) is a valid interleaving target, built cross-lane-free by the same
 recipe. **The construction is `tiling_interleaving_design.md` §9 → *Accumulators — the multi-patch
 construction*** — read it there, never re-derive it. Two preconditions decide whether a candidate is worth constructing at all, so check them
 BEFORE you open §9:
-- **accumulator:** `R · atom.n == wave_size` (`R = m / c_m_per_lane`). Assert it, but note it holds for all
-  128 registered rows — it is a guard against a future atom, not a screening gate. The operand one is the
-  gate that actually bites.
-- **operand, PER OPERAND (not per row):** `free_lanes · k_lanes == wave_size`, with
-  `k_lanes = k / k_ab_per_lane` and `free_lanes = m` (A side) or `n` (B side). Usually fails because a lane
-  holds the atom's whole K (`k_ab_per_lane == k`) — ✗ but not only then, and on a non-square atom one side
-  can pass while the other fails. Measured: 9 of 128 rows fail on A. ✗ "wave32 doesn't work" is FALSE (55 of
-  64 dense wave32 rows pass; no dense wave64 row fails) — scan the catalogue, never infer from the wave size.
-**`f64` is untested by this construction.**
+- **accumulator:** `R · atom.n == wave_size` (`R = m / c_m_per_lane`). Holds for every registered row — a
+  guard against a future atom, not a screening gate.
+- **operand, PER OPERAND (not per row):** `free_lanes · k_lanes` must **divide** `wave_size`
+  (`k_lanes = k / k_ab_per_lane`, `free_lanes = m` on A / `n` on B); the quotient is the **replication**
+  factor (1 CDNA/gfx12, 2 gfx11 WMMA, which duplicates the operand across the two lane halves). Every
+  **square** atom passes both sides; a **non-square** atom can over-subscribe one side and is the deferred
+  case (task #21). `f64` is proven cross-lane-free by the sweep.
+Which rows interleave is the proof sweep's job (`test_interleave_all_dense.py`) — read the census there,
+never restate a count here. The construction itself is `tiling_interleaving_design.md` §9.
 
 **Size the wave tile WITH the atom, not after it.** Every free-dim-vectorised stage gives a lane a contiguous
 run of `wave_m / atom.m` (M axis) or `wave_n / atom.n` (N axis) elements — ✗ there is no `atom.mn` traits

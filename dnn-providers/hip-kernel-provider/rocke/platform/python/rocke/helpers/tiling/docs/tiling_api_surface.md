@@ -455,7 +455,7 @@ designed-in seam, not yet implemented.
 | clipping / bounds | desc `lengths` (auto) | `make_window(tensor, origin, bounds)` -> zero-pad load / drop store | BUILT (bit-exact incl within a valid space) |
 | clip fill | 0 (zero-pad) | `pad=` on load (`constant(value)`) | RESERVED (`pad!=0` raises) |
 | C transpose | off | `c_transpose=True` on `TileMma` (-> C^T, `c_desc` = (N,M)) | PLANNED (analyzed; Part D) |
-| interleaved layout | default per-atom | `mma_layout=interleaved()` | PLANNED (Part D) |
+| interleaved layout | `style=` (default `CanonicalStyle`) | `TileMma(..., style=InterleavedStyle())` | BUILT (dense square atoms; see `tiling_interleaving_design.md`) |
 | operand layout | `mma.a/b/c_layout` | `make_tile_desc(...)` / `custom_layout(...)` | BUILT (make_tile_desc) / RESERVED (custom_layout) |
 | memory space | global | LDS view (`space="lds"`) | RESERVED |
 | coherency | default | `CACHE_STREAM` / `NON_TEMPORAL` per load | RESERVED (param present) |

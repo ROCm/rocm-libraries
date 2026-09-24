@@ -27,7 +27,10 @@ code, plus any tiling-API gap proposals.
   `make_tile_desc`, `make_window`, `make_fragment`, `fill_fragment`, `load_fragment`/`store_fragment`
   (incl. the `lds_swizzle` policy, §5c), `TileMma`, `Tiling`).
 - `tiling_interleaving_design.md` — layouts, the pipeline regimes, the vectorization contract (§2b, **incl.
-  *Computing the width*** — the mechanical procedure and the dwords→elements conversion), symmetries.
+  *Computing the width*** — the mechanical procedure and the dwords→elements conversion), symmetries. The
+  interleaved operand/C descriptors are built by `InterleavedStyle` (`mma/styles/interleaved.py`:
+  `lds_bridge` / `accumulator_desc`), NOT hand-rolled; which atoms interleave is the proof sweep's census
+  (`test_interleave_all_dense.py`) — every dense **square** atom, non-square deferred.
 - `mma_is_machinery.md` — the MMA position/label machinery and the **sound MAC** (SOT for layout correctness).
 - `lds_banks.md` — the LDS bank model, the binding-stage decision, swizzle/pad tradeoffs.
 Quote the operative fact + the section; never paste derivations.

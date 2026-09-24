@@ -40,9 +40,12 @@ __all__ = [
 def cooperative_load_width(
     tile_free: int, tile_k: int, n_waves: int, *, wave_size: int = 64
 ) -> int | None:
-    """Widest per-lane global vector width (in elements) a cooperative load of this operand can use,
-    or ``None`` if none works. DERIVED, and PER OPERAND -- A and B have independent free extents so may
-    want different widths.
+    """Widest GEOMETRY-PERMITTED per-lane free-run (in elements) for a cooperative load of this operand,
+    or ``None`` if none works. This is the distribution ceiling only -- the dtype / 128-bit HARDWARE ceiling
+    is applied separately in ``emit``: ``_contiguous_run`` caps a vector-eligible dtype at 16 B (an f32
+    8-run -> 2x ``dwordx4``) and scalarizes an ineligible one (f64) outright, so a wide result here need not
+    be a single global access. DERIVED, and PER OPERAND -- A and B have independent free extents so may want
+    different widths.
 
     Two arithmetic constraints: the free axis splits into whole lanes (``tile_free % vw == 0`` and
     ``tile_free/vw`` divides the wave), and the waves split K evenly
@@ -66,8 +69,9 @@ def cooperative_load_desc(
 ) -> TileDesc:
     """Block-wide cooperative global-load tile, in (free, K) axis order.
 
-    The lane takes ``vw`` CONTIGUOUS free-dim elements -- the free dim is the tensor's stride-1 axis, so
-    this is the wide, coalesced direction. ``thread_order`` puts the free axis LAST (fastest), so
+    The lane takes ``vw`` CONTIGUOUS free-dim elements. This ASSUMES the operand's free axis is stride-1
+    (free-major storage: A col-major, B row-major) -- then the free dim is the wide, coalesced direction;
+    for a K-major operand the coalesced axis is K instead. ``thread_order`` puts the free axis LAST (fastest), so
     consecutive lanes step the free dim by ``vw``; the register order falls out as [K major, free minor]
     -> the free dim is innermost -> the global load AND the LDS store are both wide with NO reorder
     between them. ``vw`` is REQUIRED (derive it with :func:`cooperative_load_width`, or pin it).
