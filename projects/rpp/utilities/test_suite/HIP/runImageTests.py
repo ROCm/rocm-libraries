@@ -44,6 +44,7 @@ buildFolderPath = os.getcwd()
 caseMin = min(imageAugmentationMap.keys())
 caseMax = max(imageAugmentationMap.keys())
 errorLog = [{"notExecutedFunctionality": 0}]
+qaFailures = 0
 
 
 # Get a list of log files based on a flag for preserving output
@@ -1664,7 +1665,7 @@ if qaMode and testType == TestType.UNIT_TEST.value:
             print(
                 "---------------------------------- Results of QA Test - Tensor_single_image_hip ----------------------------------\n"
             )
-            print_qa_tests_summary(
+            qaFailures += print_qa_tests_summary(
                 qaFilePath,
                 list(SINGLE_IMAGE_SUPPORTED_CASES),
                 singleImageNonQACaseList,
@@ -1674,21 +1675,8 @@ if qaMode and testType == TestType.UNIT_TEST.value:
             print(
                 "---------------------------------- Results of QA Test - Tensor_image_hip ----------------------------------\n"
             )
-            print_qa_tests_summary(
+            qaFailures += print_qa_tests_summary(
                 qaFilePath, supportedCaseList, nonQACaseList, "Tensor_image_hip"
             )
 
-if len(errorLog) > 1 or errorLog[0]["notExecutedFunctionality"] != 0:
-    print(
-        "\n---------------------------------- Log of function variants requested but not run - Tensor_image_hip  ----------------------------------\n"
-    )
-    for i in range(1, len(errorLog)):
-        print(errorLog[i])
-    if errorLog[0]["notExecutedFunctionality"] != 0:
-        print(
-            str(errorLog[0]["notExecutedFunctionality"])
-            + " functionality variants requested by test_suite_image_hip were not executed since these sub-variants are not currently supported in RPP.\n"
-        )
-    print(
-        "-----------------------------------------------------------------------------------------------"
-    )
+finalize_test_run(errorLog, "Tensor_image_hip", "test_suite_image_hip", qaFailures)
