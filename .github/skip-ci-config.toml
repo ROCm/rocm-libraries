@@ -1,34 +1,32 @@
 # Skip CI Configuration for rocm-libraries
 #
-# This file defines which file patterns can skip TheRock CI.
-# When all changed files match these patterns, CI can be skipped.
+# This file defines repo-specific file patterns that can skip TheRock CI.
+# These patterns EXTEND the base patterns from TheRock's skip-ci-base.toml
+# which already includes universal patterns like *.md, CODEOWNERS, .gitignore, docs/*.
 #
 # Pattern syntax: fnmatch glob patterns (*, ?, [abc])
 # See https://docs.python.org/3/library/fnmatch.html
-#
-# To add platform-specific skips (e.g., skip Windows CI for Linux-only projects),
-# use the [skip_ci.linux] or [skip_ci.windows] sections.
 
 version = 1
 
 [skip_ci]
-# Common patterns that skip CI on all platforms
+# Repo-specific patterns that skip CI on all platforms
+# (base patterns like *.md, docs/*, .gitignore are inherited automatically)
 common = [
-    # Documentation and metadata files
+    # Additional documentation formats and configs
+    "*.rst",
+    "*.rtf",
     "*.clinerules",
     "*.cursorrules",
     "*.mdc",
-    "*.md",
-    "*.rst",
-    "*.rtf",
     "*/.markdownlint-ci2.yaml",
     "*/.readthedocs.yaml",
     "*/.spellcheck.local.yaml",
     "*/.wordlist.txt",
-    ".gitignore",
+
+    # Per-project gitignore and docs (base has top-level only)
     "dnn-providers/*/.gitignore",
     "dnn-providers/*/docs/*",
-    "docs/*",
     "projects/*/.gitignore",
     "projects/*/docs/*",
     "shared/*/.gitignore",
