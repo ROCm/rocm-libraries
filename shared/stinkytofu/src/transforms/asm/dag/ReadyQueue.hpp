@@ -63,6 +63,9 @@ struct DAGNode {
     // parent-VALU input families first, then remaining loads, each tier using
     // DsReadOrder + WMMA-affinity.
     unsigned dsReadPriority = UINT_MAX;
+    // Accumulator pack containing this matrix op. A new pack starts when a
+    // matrix destination overlaps one already written in the current pack.
+    unsigned wmmaPack = UINT_MAX;
     // True when this VALU/transcendental has a direct matrix DAG successor.
     // CDNA5ReadyQueue routes these to wmmaParentValuQueue (Phase B unlock).
     // Set by the pre-scan in scheduleRegionWithMovableSideEffects.
@@ -289,6 +292,10 @@ class ReadySetByDAGid {
 
     void erase(DAGNode* node) {
         set.erase(node);
+    }
+
+    bool contains(DAGNode* node) const {
+        return set.contains(node);
     }
 
     using iterator = std::set<DAGNode*, CompareByDAGid>::iterator;

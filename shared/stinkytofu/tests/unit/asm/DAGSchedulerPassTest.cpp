@@ -1042,6 +1042,169 @@ TEST_F(DAGSchedulerPassTest, ParentValuIssuesOnlyForTargetWmma) {
 }
 
 // ---------------------------------------------------------------------------
+// The other half of the target-parent rule: a WMMA sitting in wmmaQueue has
+// in-degree 0, so no queued parent VALU feeds it. Naming that WMMA the unlock
+// target matches nothing and starves the parents of the WMMAs still waiting for
+// operands for as long as any other WMMA stays ready. Here wmma2 is
+// independently ready, so under that behavior it issues first and perm20 only
+// goes once the queue drains. While wmma0 is in flight there is a co-issue
+// window to spend, so perm20 (which unlocks wmma1) must ride it instead.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, ParentValuCoIssuesUnderInFlightWmmaInsteadOfWaitingForQueueDrain) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+
+    StinkyInstruction* perm20 =
+        createVAddInBlock(bb, arch, /*destReg=*/20, /*src0Reg=*/21, /*src1Reg=*/22);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    wmma1->addSrcReg(StinkyRegister("v", 20, 1));
+
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "co-issued unlock must not drop instructions";
+
+    EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm20))
+        << "the unlock should be co-issued under an in-flight WMMA, not hoisted before it";
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma2))
+        << "an already-ready WMMA must not starve the parent VALU of a blocked earlier WMMA";
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma1))
+        << "the unlocked WMMA still has to follow its parent";
+}
+
+// After the in-flight window, findMostReadyWMMA prefers a later WMMA whose
+// sources are already waiting in wmmaQueue (wait 0) over unlocking an earlier
+// blocked WMMA. That is the C+16 then C+32-before-C+24 pattern: C+24 still
+// needs its splat v_perm / matrix_b_reuse partner. Keep the earlier blocked
+// WMMA as the unlock target even when the window has closed, so the parent
+// issues before the later ready WMMA. Filler ds_loads compete for the hide
+// budget the way B_X2 preloads do in the real kernel.
+TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReadyWmma) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+
+    StinkyInstruction* perm20 =
+        createVAddInBlock(bb, arch, /*destReg=*/20, /*src0Reg=*/21, /*src1Reg=*/22);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    wmma1->addSrcReg(StinkyRegister("v", 20, 1));
+
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+    StinkyInstruction* wmma3 = createWmmaScaleF8(/*destStart=*/500, /*src0Start=*/600);
+    ASSERT_NE(wmma3, nullptr);
+
+    createMovableDsLoad(/*destReg=*/700, /*addrReg=*/80, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/704, /*addrReg=*/80, /*ldsToken=*/2);
+    createMovableDsLoad(/*destReg=*/708, /*addrReg=*/80, /*ldsToken=*/3);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm20));
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma1));
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma2))
+        << "a later already-ready WMMA must not issue before the parent that "
+           "unlocks an earlier blocked WMMA";
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma3));
+}
+
+// Next-iter / already-consumed ds_loads can get a better dsReadPriority than
+// the load that still unlocks a later WMMA (loop-head affinity via PHI). If
+// those preloads issue first they occupy the LDS queue and the later WMMA
+// waits s_wait_dscnt 0. While any WMMA is still unissued, only loads that
+// still feed a pending WMMA may be picked.
+TEST_F(DAGSchedulerPassTest, PendingWmmaDsLoadBeatsNextIterPreload) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+    StinkyInstruction* preload = createMovableDsLoad(/*destReg=*/500, /*addrReg=*/80,
+                                                     /*ldsToken=*/1);
+    StinkyInstruction* needed = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80,
+                                                    /*ldsToken=*/2);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, needed), positionOf(*bb, preload))
+        << "the ds_load that unlocks a still-pending WMMA must issue before a "
+           "preload that feeds no pending WMMA";
+    EXPECT_LT(positionOf(*bb, needed), positionOf(*bb, wmma1));
+}
+
+// dsReadPerWmma leftover slots will otherwise take later-pack loads that are
+// also pending (B_X1+28 then B_X2+0/+4). Those occupy the LDS FIFO in front of
+// the next WMMA and WaitCntInsertion emits s_wait_dscnt 2. Rank by earliest
+// pending WMMA consumer, and once this window has issued a load for that WMMA
+// do not spend leftover cap on a later pack.
+TEST_F(DAGSchedulerPassTest, EarliestPendingWmmaDsLoadBeatsLaterPackCapFill) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+
+    StinkyInstruction* dsLate0 = createMovableDsLoad(/*destReg=*/400, /*addrReg=*/80,
+                                                     /*ldsToken=*/1);
+    StinkyInstruction* dsLate1 = createMovableDsLoad(/*destReg=*/404, /*addrReg=*/80,
+                                                     /*ldsToken=*/2);
+    StinkyInstruction* dsEarly = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80,
+                                                     /*ldsToken=*/3);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    // Reuse wmma1's accumulator destination: this is the next pack.
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsLate0))
+        << "the load that unlocks the earlier WMMA must issue before later-pack "
+           "loads that only compete on leftover dsReadPerWmma slots";
+    EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsLate1));
+    EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, wmma1));
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, dsLate0))
+        << "do not occupy leftover DS-cap slots with later-pack loads before the "
+           "already-ready earlier WMMA issues";
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, dsLate1));
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, wmma2));
+}
+
+// The pack boundary above must not block useful look-ahead within one pack.
+// A load for a later, disjoint accumulator tile should use the current WMMA's
+// latency window instead of landing immediately before its own consumer and
+// producing s_wait_dscnt 0.
+TEST_F(DAGSchedulerPassTest, SamePackFutureWmmaDsLoadUsesCurrentWindow) {
+    bb->addSuccessor(bb);
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+    StinkyInstruction* dsEarly = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80,
+                                                     /*ldsToken=*/1);
+    StinkyInstruction* dsFuture = createMovableDsLoad(/*destReg=*/400, /*addrReg=*/80,
+                                                      /*ldsToken=*/2);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsFuture));
+    EXPECT_LT(positionOf(*bb, dsFuture), positionOf(*bb, wmma1))
+        << "a later consumer in the same accumulator pack should prefetch in "
+           "the current WMMA window";
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, wmma2));
+}
+
+// ---------------------------------------------------------------------------
 // Co-execution hazard (regression test for destOverlapsActiveWmmaSrc):
 // a ds_load whose dest VGPRs overlap the in-flight WMMA's src VGPRs must NOT be
 // issued inside that WMMA's latency window, because the load could clobber a
