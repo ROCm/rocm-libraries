@@ -134,6 +134,20 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
     # variable) so a stale/poisoned entry cannot mask a failure across runs.
     set(HIPDNN_TEST_MIOPEN_CACHE_DIR "${CMAKE_BINARY_DIR}/miopen_test_cache")
 
+    # Suppressions for interceptor-detected errors in upstream libraries come from
+    # __asan_default_suppressions() in hipdnn's test_sdk/src/AsanDefaultSuppressions.cpp, compiled
+    # into each test executable that links hipdnn_test_sdk, so they apply to an installed or
+    # relocated tree with no file to locate.
+    #
+    # ASAN_OPTIONS is deliberately not set here, so a developer's own value is no longer overwritten
+    # (ctest's ENVIRONMENT property assigns unconditionally). It cannot switch these suppressions
+    # off, though: a user-supplied suppressions file is ADDED to them rather than replacing them,
+    # and no ASan flag disables them. Set HIPDNN_ASAN_NO_DEFAULT_SUPPRESSIONS to see the errors.
+    #
+    # That holds however this tree is built: hipdnn_test_sdk names the source under both
+    # BUILD_INTERFACE and INSTALL_INTERFACE, so a standalone build resolving it through
+    # find_package() compiles the hook in exactly as an in-tree build does.
+
     # Set environment variables for Address Sanitizer.
     # HSA_XNACK is only required for device-side ASAN (not HOST_ASAN).
     # ASAN_SYMBOLIZER_PATH is set to the LLVM symbolizer to make the output from leak detection
