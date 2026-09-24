@@ -20,6 +20,7 @@
 
 #include "../../shared/accuracy_test.h"
 #include "../../shared/params_gen.h"
+#include "../../shared/rocfft_accuracy_test.h"
 
 std::vector<std::vector<size_t>> adhoc_sizes = {
     // sizes that exercise L1D_TRTRT subplan of 2D_RTRT or 3D_TRTRTR
@@ -53,6 +54,18 @@ std::vector<std::vector<size_t>> adhoc_sizes = {
     // TILE_UNALIGNED type of SBRC 3D ERC
     {98, 98, 98},
 
+    // SBRC length 112, complex 3D (CS_KERNEL_STOCKHAM_BLOCK_RC, SBRC_2D /
+    // SBRC_3D_FFT_TRANS_XY_Z, non-ERC): on tuned architectures (e.g. gfx90a's
+    // shipped solution_map picks factors={7,2,8}, threads_per_transform=8 for
+    // this length) the final store pass has length/width=112/8=14, which is
+    // NOT a multiple of threads_per_transform=8.  This forces add_work's
+    // "not enough threads, some threads do extra work" tail branch, so
+    // StockhamKernelRC::store_global_generator must store the tail group's
+    // rows using hr=iheight (not collapse hr to h=0) for direct-register
+    // store.  A broken hr fallback would corrupt specific tail-row elements
+    // of this transform's output.
+    {112, 112, 112},
+
     // 3D_BLOCK_CR
     {336, 336, 56},
 
@@ -68,6 +81,33 @@ std::vector<std::vector<size_t>> adhoc_sizes = {
     {4096},
     {8192},
 };
+
+// StockhamKernelRC::store_global_generator's hr defaulting, direct-register-store
+// tail branch.  SBRC length 112 (complex, non-ERC) forces add_work's "not enough
+// threads, some threads do extra work" path on tuned architectures whose shipped
+// solution_map picks factors={7,2,8}, threads_per_transform=8 for this length:
+// the final store pass has length/width=112/8=14, which is not a multiple of
+// threads_per_transform=8.  In that tail branch, store_global_generator is
+// called with hr=iheight (nonzero), so its "if(hr == 0) hr = h;" fallback must
+// NOT fire; if it were inverted (always collapsing hr to h==0), the tail
+// group's rows would be stored from the wrong register (R[0*width+w] instead
+// of R[iheight*width+w]), corrupting specific tail-row output elements and
+// failing the tolerance comparison below.
+TEST(adhoc_sbrc_store_global_tail, length_112_direct_reg_store_non_tile_multiple)
+{
+    rocfft_params params;
+    params.length         = {112, 112, 112};
+    params.precision      = fft_precision_double;
+    params.transform_type = fft_transform_type_complex_forward;
+    params.placement      = fft_placement_notinplace;
+    params.itype          = fft_array_type_complex_interleaved;
+    params.otype          = fft_array_type_complex_interleaved;
+    params.nbatch         = 1;
+    params.validate();
+
+    ASSERT_TRUE(params.valid(0));
+    fft_vs_reference(params, /*round_trip=*/false);
+}
 
 const static std::vector<std::vector<size_t>> stride_range = {{1}};
 
