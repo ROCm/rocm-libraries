@@ -23,6 +23,7 @@
 #include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 
 #include "../../transforms/asm/dag/RegionDAG.hpp"
@@ -34,13 +35,80 @@
 
 namespace stinkytofu {
 
+namespace {
+
+int computeThrottleOnlyWindowsNeeded(int dsLoadCount, const DsLoadBudgetConfig& config) {
+    if (dsLoadCount <= 0 || config.dsReadPerWmma <= 0) return 0;
+
+    const int perWmma = config.dsReadPerWmma;
+    int windowsNeeded = (dsLoadCount + perWmma - 1) / perWmma;
+    if (config.dsReadQueueDepth <= 0 || dsLoadCount <= config.dsReadQueueDepth ||
+        config.dsReadThrottleLatency <= 0 || config.wmmaLatency <= 0)
+        return windowsNeeded;
+
+    const int overflowCount = dsLoadCount - config.dsReadQueueDepth;
+    const int transitionCount =
+        std::min(overflowCount, std::max(0, config.dsReadThrottleTransitionEntries));
+    const int fullThrottleCount = overflowCount - transitionCount;
+    const float cyclesPerDs = static_cast<float>(config.dsReadThrottleLatency) /
+                              static_cast<float>(config.dsReadQueueDepth);
+    const float transitionFactor =
+        static_cast<float>(std::clamp(config.dsReadThrottleTransitionFactor, 0.0, 1.0));
+    const float cyclesNeeded =
+        cyclesPerDs * (transitionFactor * transitionCount + fullThrottleCount);
+    const float baseWindows =
+        static_cast<float>(config.dsReadQueueDepth + perWmma - 1) / static_cast<float>(perWmma);
+    const float latencyWindows = cyclesNeeded / static_cast<float>(config.wmmaLatency);
+    return static_cast<int>(std::ceil(baseWindows + latencyWindows));
+}
+
+}  // namespace
+
+std::vector<int> computeDsLoadWmmaWindowDistribution(int dsLoadCount,
+                                                     const DsLoadBudgetConfig& config) {
+    std::vector<int> distribution;
+    if (dsLoadCount <= 0 || config.dsReadPerWmma <= 0) return distribution;
+
+    const int perWmma = config.dsReadPerWmma;
+    const int depth = std::max(0, config.dsReadQueueDepth);
+    const int initialLoads = depth > 0 ? std::min(dsLoadCount, depth) : dsLoadCount;
+    int remaining = dsLoadCount;
+    for (int initialRemaining = initialLoads; initialRemaining > 0;) {
+        const int contribution = std::min(perWmma, initialRemaining);
+        distribution.push_back(contribution);
+        initialRemaining -= contribution;
+        remaining -= contribution;
+    }
+
+    const bool hasThrottle =
+        depth > 0 && config.dsReadThrottleLatency > 0 && config.wmmaLatency > 0;
+    for (int overflowIndex = 0; remaining > 0; ++overflowIndex, --remaining) {
+        int target = hasThrottle
+                         ? computeThrottleOnlyWindowsNeeded(depth + overflowIndex + 1, config) - 1
+                         : static_cast<int>(distribution.size());
+        target = std::max(0, target);
+        while (target < static_cast<int>(distribution.size()) &&
+               distribution[static_cast<size_t>(target)] >= perWmma)
+            ++target;
+        if (target >= static_cast<int>(distribution.size()))
+            distribution.resize(static_cast<size_t>(target) + 1, 0);
+        ++distribution[static_cast<size_t>(target)];
+    }
+    return distribution;
+}
+
+int computeDsLoadWmmaWindowsNeeded(int dsLoadCount, const DsLoadBudgetConfig& config) {
+    return static_cast<int>(computeDsLoadWmmaWindowDistribution(dsLoadCount, config).size());
+}
+
 // The previous prefix-density implementation was intentionally removed. This
 // entry point now receives the barrier analysis computed by
 // CDNA5ReadyQueue::onInitRegion and keeps it as the input for the next budget
 // policy.
 RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                                        const std::vector<WmmaHideBudgetBarrierInfo>& barriers,
-                                       int wmmaHideBudgetBase) {
+                                       int wmmaHideBudgetBase,
+                                       const DsLoadBudgetConfig& dsLoadConfig) {
     RegionHideBudget budget;
     budget.barriers = barriers;
     budget.issueBudgetByWmmaIndex = !barriers.empty();
@@ -73,10 +141,44 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
         budget.windows.push_back(window);
     }
 
+    auto addDsBudget = [&](int window, int count) {
+        if (count <= 0) return;
+        WmmaWindowBudget& target = budget.windows[static_cast<size_t>(window)];
+        target.dsLoadBudget += count;
+        target.issueBudget += count;
+    };
+
+    auto distributeEvenly = [&](int begin, int end, int dsLoads) {
+        const int span = end - begin;
+        if (span <= 0 || dsLoads <= 0) return;
+        const int perWindow = dsLoads / span;
+        const int remainder = dsLoads % span;
+        for (int i = begin; i < end; ++i) {
+            const int contribution = perWindow + (i - begin < remainder ? 1 : 0);
+            addDsBudget(i, contribution);
+        }
+    };
+
+    // Use the same hard-cap/throttle model as computeWmmaWindowsNeeded. If a
+    // barrier threshold leaves fewer legal windows than the model requests,
+    // preserve the total DS demand in the final legal window.
+    auto distributeByThrottle = [&](int begin, int end, int dsLoads) {
+        const int span = end - begin;
+        if (span <= 0 || dsLoads <= 0) return;
+        if (dsLoadConfig.dsReadPerWmma <= 0) {
+            distributeEvenly(begin, end, dsLoads);
+            return;
+        }
+
+        const std::vector<int> distribution =
+            computeDsLoadWmmaWindowDistribution(dsLoads, dsLoadConfig);
+        for (int i = 0; i < static_cast<int>(distribution.size()); ++i)
+            addDsBudget(begin + std::min(i, span - 1), distribution[static_cast<size_t>(i)]);
+    };
+
     // Step 2: distribute every Before barrier's DS loads over the WMMA windows at
-    // and after its final threshold. Accumulate contributions from all Before
-    // barriers. Quotient/remainder distribution keeps each barrier's total
-    // contribution exactly N.
+    // and after its final threshold. Overlapping groups preserve the existing
+    // even policy; non-overlapping groups use the throttle-shaped policy.
     for (const WmmaHideBudgetBarrierInfo& info : barriers) {
         if (info.position != WmmaHideBudgetBarrierPosition::Before) continue;
 
@@ -91,23 +193,20 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
             continue;
         }
 
-        const int perWindow = dsLoads / span;
-        const int remainder = dsLoads % span;
-        for (int i = begin; i < budget.numWindows(); ++i) {
-            const int offset = i - begin;
-            const int contribution = perWindow + (offset < remainder ? 1 : 0);
-            budget.windows[static_cast<size_t>(i)].issueBudget += contribution;
-        }
+        if (info.overlap)
+            distributeEvenly(begin, budget.numWindows(), dsLoads);
+        else
+            distributeByThrottle(begin, budget.numWindows(), dsLoads);
         PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis before] barrier=" << info.barrier
                              << " threshold=" << info.threshold << " begin=" << begin
                              << " end=" << budget.numWindows() << " dsLoadCount=" << dsLoads
-                             << " perWindow=" << perWindow << " remainder=" << remainder << "\n");
+                             << " overlap=" << info.overlap
+                             << " policy=" << (info.overlap ? "even" : "throttle") << "\n");
     }
 
     // Step 3: distribute every After barrier's DS loads from window 0 up to the
-    // smaller of its required WMMA span and final threshold. Contributions
-    // accumulate across all After barriers and on top of the Before-barrier
-    // contributions above.
+    // smaller of its required WMMA span and final threshold, using the same
+    // overlap-dependent policy as Before groups.
     for (const WmmaHideBudgetBarrierInfo& info : barriers) {
         if (info.position != WmmaHideBudgetBarrierPosition::After) continue;
 
@@ -122,17 +221,15 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
             continue;
         }
 
-        const int perWindow = dsLoads / end;
-        const int remainder = dsLoads % end;
-        for (int i = 0; i < end; ++i) {
-            const int contribution = perWindow + (i < remainder ? 1 : 0);
-            budget.windows[static_cast<size_t>(i)].issueBudget += contribution;
-        }
+        if (info.overlap)
+            distributeEvenly(0, end, dsLoads);
+        else
+            distributeByThrottle(0, end, dsLoads);
         PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis after] barrier=" << info.barrier
-                             << " threshold=" << info.threshold
-                             << " wmmaNeeded=" << info.dsLoadWmmaNeeded << " begin=0"
-                             << " end=" << end << " dsLoadCount=" << dsLoads
-                             << " perWindow=" << perWindow << " remainder=" << remainder << "\n");
+                             << " threshold=" << info.threshold << " wmmaNeeded="
+                             << info.dsLoadWmmaNeeded << " begin=0" << " end=" << end
+                             << " dsLoadCount=" << dsLoads << " overlap=" << info.overlap
+                             << " policy=" << (info.overlap ? "even" : "throttle") << "\n");
     }
 
     // Step 4: place remaining non-DS-load instructions in the first 50% of WMMA
@@ -179,16 +276,19 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                          << " wmmaHideBudgetBase=" << budget.wmmaHideBudgetBase
                          << " barriers=" << barriers.size() << "\n");
     for (const WmmaHideBudgetBarrierInfo& info : barriers) {
-        PASS_DEBUG(
-            std::cerr << "[WmmaHideBudgetAnalysis barrier] barrier=" << info.barrier << " position="
-                      << (info.position == WmmaHideBudgetBarrierPosition::After ? "after"
-                                                                                : "before")
-                      << " threshold=" << info.threshold << " dsLoadCount=" << info.dsLoadCount
-                      << " dsLoadWmmaNeeded=" << info.dsLoadWmmaNeeded << "\n");
+        PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis barrier] barrier=" << info.barrier
+                             << " position="
+                             << (info.position == WmmaHideBudgetBarrierPosition::After ? "after"
+                                                                                       : "before")
+                             << " threshold=" << info.threshold << " dsLoadCount="
+                             << info.dsLoadCount << " dsLoadWmmaNeeded=" << info.dsLoadWmmaNeeded
+                             << " overlap=" << info.overlap << "\n");
     }
     for (int i = 0; i < budget.numWindows(); ++i) {
         PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis window] index=" << i << " issueBudget="
-                             << budget.windows[static_cast<size_t>(i)].issueBudget << "\n");
+                             << budget.windows[static_cast<size_t>(i)].issueBudget
+                             << " dsLoadBudget="
+                             << budget.windows[static_cast<size_t>(i)].dsLoadBudget << "\n");
     }
     return budget;
 }

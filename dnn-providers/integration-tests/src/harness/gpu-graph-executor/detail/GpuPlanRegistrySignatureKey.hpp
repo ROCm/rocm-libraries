@@ -6,6 +6,8 @@
 #include <ostream>
 #include <variant>
 
+#include "GpuBatchnormFwdInfSignatureKey.hpp"
+#include "GpuBatchnormFwdInfVarianceSignatureKey.hpp"
 #include "GpuConvolutionFwdSignatureKey.hpp"
 #include "GpuLayernormBwdSignatureKey.hpp"
 #include "GpuLayernormFwdSignatureKey.hpp"
@@ -26,7 +28,9 @@ using GpuPlanRegistrySignatureKey = std::variant<GpuConvolutionFwdSignatureKey,
                                                  GpuPointwiseSignatureKey,
                                                  GpuReductionSignatureKey,
                                                  GpuRMSNormFwdSignatureKey,
-                                                 GpuRMSNormBwdSignatureKey>;
+                                                 GpuRMSNormBwdSignatureKey,
+                                                 GpuBatchnormFwdInfSignatureKey,
+                                                 GpuBatchnormFwdInfVarianceSignatureKey>;
 
 struct GpuPlanRegistrySignatureKeyHash
 {

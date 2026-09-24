@@ -256,7 +256,8 @@ RppStatus hip_exec_glitch_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                  RpptDescPtr dstDescPtr, RpptChannelOffsets* rgbOffsets,
                                  RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                  rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
     int globalThreads_z = dstDescPtr->n;

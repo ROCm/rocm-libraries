@@ -221,7 +221,8 @@ RppStatus hip_exec_non_linear_blend_tensor(T* srcPtr1, T* srcPtr2, RpptDescPtr s
                                            T* dstPtr, RpptDescPtr dstDescPtr, Rpp32f* stdDevTensor,
                                            RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                            rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;

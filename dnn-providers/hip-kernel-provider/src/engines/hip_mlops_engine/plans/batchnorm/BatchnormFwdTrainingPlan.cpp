@@ -211,7 +211,6 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     const bool useBfp16Mix
         = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
            && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    const bool useFp32 = !useFp16Mix && !useBfp16Mix;
 
     // Extract dimensions from x tensor
     const auto* xDims = _trainingParams.x()->dims();
@@ -277,47 +276,34 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Get the kernel launch configuration based on heuristics
     hip_kernel_provider::batchnorm::KernelConfig config;
+    const size_t minWorkgroups = std::max(
+        size_t(1), size_t(0.6f * static_cast<float>(deviceProperties.multiProcessorCount)));
+    const hip_kernel_provider::batchnorm::ProblemDescription problem(
+        n,
+        c,
+        h,
+        w,
+        isLayoutNHWC,
+        useFp16Mix,
+        useBfp16Mix,
+        hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING,
+        minWorkgroups);
     // Define default configuration based on heuristics and
     // add all other valid configurations for the given problem
-    if(hip_kernel_provider::batchnorm::useMultiple(
-           n,
-           h,
-           w,
-           useFp16Mix || useBfp16Mix,
-           isLayoutNHWC,
-           hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING))
+    if(hip_kernel_provider::batchnorm::useMultiple(problem))
     {
-        // Determine the minimum number of workgroups
-        const size_t minWorkgroups = std::max(
-            size_t(1), size_t(0.6f * static_cast<float>(deviceProperties.multiProcessorCount)));
         hip_kernel_provider::batchnorm::defaultConfigSpatialMultiple(
-            n, c, h, w, isLayoutNHWC, useFp32, minWorkgroups, stashValuesFwd, config);
+            problem, stashValuesFwd, config);
         if(config.variant == -1)
         {
             // If the default spatial multiple function failed to select a valid configuration,
             // get a default spatial single configuration as fallback
-            hip_kernel_provider::batchnorm::defaultConfigSpatialSingle(
-                n,
-                h,
-                w,
-                useFp16Mix,
-                useBfp16Mix,
-                isLayoutNHWC,
-                hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING,
-                config);
+            hip_kernel_provider::batchnorm::defaultConfigSpatialSingle(problem, config);
         }
     }
     else
     {
-        hip_kernel_provider::batchnorm::defaultConfigSpatialSingle(
-            n,
-            h,
-            w,
-            useFp16Mix,
-            useBfp16Mix,
-            isLayoutNHWC,
-            hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING,
-            config);
+        hip_kernel_provider::batchnorm::defaultConfigSpatialSingle(problem, config);
     }
 
     variant = config.variant;
@@ -357,15 +343,8 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
         zgridsize = zlocalsize * ((n / nelements + zlocalsize - 1) / zlocalsize);
 
         // Get the stash method based on problem size and WG size
-        stashMethod = hip_kernel_provider::batchnorm::getStashMethod(isLayoutNHWC,
-                                                                     useFp32,
-                                                                     stashValuesFwd,
-                                                                     c,
-                                                                     n,
-                                                                     inCstride,
-                                                                     ylocalsize,
-                                                                     zlocalsize,
-                                                                     nelements);
+        stashMethod = hip_kernel_provider::batchnorm::getStashMethod(
+            problem, stashValuesFwd, ylocalsize, zlocalsize, nelements);
 
         // WG size for Final kernels (NHWC)
         if(isLayoutNHWC && c % 2 == 0 && xlocalsize % 2 == 0)

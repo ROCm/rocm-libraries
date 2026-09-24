@@ -21,6 +21,7 @@ inline void to_json(nlohmann::json& tensorAttrJson,
     tensorAttrJson["name"] = flatbuffers::safeStr(tensorAttr.name());
     tensorAttrJson["virtual"] = tensorAttr.virtual_();
     tensorAttrJson["alignment"] = tensorAttr.alignment();
+    tensorAttrJson["ragged_offset_multiplier"] = tensorAttr.ragged_offset_multiplier();
     tensorAttrJson["is_runtime_pass_by_value"] = tensorAttr.is_runtime_pass_by_value();
     if(tensorAttr.ragged_offset_tensor_uid().has_value())
     {
@@ -80,6 +81,7 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
     const bool isVirtual = entry.at("virtual").get<bool>();
     const bool isRuntimePassByValue = entry.value("is_runtime_pass_by_value", false);
     const int64_t alignment = entry.value("alignment", INT64_C(16));
+    const int64_t raggedOffsetMultiplier = entry.value("ragged_offset_multiplier", INT64_C(1));
     flatbuffers::Optional<int64_t> raggedOffsetTensorUid = flatbuffers::nullopt;
     if(entry.contains("ragged_offset_tensor_uid"))
     {
@@ -167,7 +169,8 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
                                                     valueOffset,
                                                     isRuntimePassByValue,
                                                     raggedOffsetTensorUid,
-                                                    alignment);
+                                                    alignment,
+                                                    raggedOffsetMultiplier);
     }
 
     // No TensorValue, use the Direct version
@@ -182,7 +185,8 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
                                                       0,
                                                       isRuntimePassByValue,
                                                       raggedOffsetTensorUid,
-                                                      alignment);
+                                                      alignment,
+                                                      raggedOffsetMultiplier);
 }
 }
 

@@ -448,3 +448,68 @@ description for the exact before/after counts).
   two tests* — rejected: both are reachable from real call sites, and
   "fixing" the test to assert the buggy behavior would have pinned a real
   regression as if it were intended, exactly what this suite exists to catch.
+
+## D26 — LibraryIO characterization: add-only mutation-kill snapshot cases
+**Decision:** The LibraryIO mutation-hardening slice pins additional *current*
+LibraryIO behavior by appending new syrupy cases to three existing goldens
+(`test_parse_integration_char.ambr`, `test_serializers_char.ambr`,
+`test_writesolutions_char.ambr`); no existing snapshot value is re-recorded.
+**Classification:** category (a) intended behavior capture -- new cases pinning
+previously-unsnapshotted read/write/parse behavior to raise mutation kill power,
+not a change to any pinned behavior. The diffs are insertion-only (+258/-0,
++9/-0, +54/-0) and confined to the LibraryIO node, so no ADR is required (nothing
+behavior-changing or known-wrong is pinned); this registry line is the record.
+The parse_integration additions begin in the mutation infra base and continue
+in this slice.
+**Re-run:** goldens byte-identical on two further no-update runs; `-m unit` green.
+
+## D27 — Solution.py mutation kill: pickle-free `.ambr` derivation golden
+**Decision:** Kill the `Solution.assignDerivedParameters` mutant giant with a
+syrupy `.ambr` full-derived-state golden regenerated from in-tree designed YAML
+configs, committing no pickle. See ADR 0003.
+**Why:** the giant (~18820 mutants across the `depthU`/`adp` families) is only
+observable by asserting the complete derived `_state`; a pickle golden is opaque,
+version-coupled, and undiffable, against the suite's add-only diffable-golden
+discipline. Unlike the LibraryIO add-only cases in D24, this introduces a new
+golden *vehicle* with a non-obvious regeneration mechanism, so it lands with an
+ADR (0003), not just this registry line.
+**Equivalence evidence:** verified kill-equivalent to the interim pickle corpus
+over 8 stratified windows (lines 1567-2857, 684 mutants, 0 per-key exit-code
+divergence). Byte-stability confirmed by two further no-update runs.
+**Harness fixes (not source):** derivation moved out of collection (a
+collection-time try/except was swallowing raising mutants); `_sanitize` now
+recurses into any `Mapping` so `ProblemType` is deep-compared, closing 4
+`MirrorDimsMetadata` mutants a `str()`-only render missed.
+**Regeneration:** on an intentional derivation/config change, rerun with
+`--snapshot-update`, confirm byte-stability with two clean runs, and log the
+regeneration here.
+
+## D28 — Per-file ratchet audit after wave-2 (r8 + HUX crossover)
+**Decision:** Keep the current `develop` floors for the six files flagged in
+review, except for two reproducible increases: raise `Configuration.py` from
+91.18% to 92.53% and `StreamK.py` from 82.18% to 82.24%. Do not import the
+higher floors measured on `users/davidd-amd/mut-v2-coverage` at e69017042cf.
+
+**Evidence:** The local combined report and the uploaded #11967 report agree to
+two decimal places: Configuration 92.53%, segment_interleave 94.41%, Solution
+70.40%, Component 93.49%, GSU 73.72%, and StreamK 82.24%. The gate passes all
+172 files with the existing one-point tolerance. No floor is lowered;
+Solution.py remains at 70.55% even though the current measurement is 0.15 points
+lower.
+
+The e69017042cf report was produced from a different source and test tree. That
+tree has 101 test files absent from this layer, while this layer has 58 other
+test files and 198 modified tests. Relative to that tree, segment_interleave,
+Solution, GSU, and StreamK also changed substantially. The old 99.25%, 100.00%,
+74.58%, 97.20%, 75.86%, and 84.29% values therefore cannot be used as floors for
+this earlier stack layer.
+
+**Classification:** None of the six reported drops is run-to-run measurement
+noise; repeated local and hosted runs reproduce the current values. Configuration
+and Component lost indirect execution supplied by the other test tree.
+segment_interleave, Solution, GSU, and StreamK combine a different test set with
+source growth. Restoring the old floors requires new tests rather than another
+baseline reduction: cover ExpressionEvaluator and reverse-operator branches in
+Configuration, asymmetric aligned layouts in segment_interleave, consolidated
+derived-state cases in Solution, LDS token selection in Component, and focused
+reduction/fixup paths in GSU and StreamK.

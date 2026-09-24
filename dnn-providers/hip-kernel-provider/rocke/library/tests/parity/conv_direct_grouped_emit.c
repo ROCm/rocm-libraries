@@ -28,7 +28,9 @@ enum
     KIND_8C = 2,
     KIND_32C = 3,
     KIND_DW = 4,
-    KIND_SPATIAL = 5
+    KIND_SPATIAL = 5,
+    KIND_DGRAD = 6,
+    KIND_DW_DGRAD = 7
 };
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
@@ -41,6 +43,8 @@ static int make_cfg(int idx,
                     rocke_direct_conv_32c_spec_t* s32,
                     rocke_direct_depthwise_spec_t* sdw,
                     rocke_direct_depthwise_spatial_spec_t* ssp,
+                    rocke_direct_conv_dgrad_spec_t* sdgrad,
+                    rocke_direct_depthwise_dgrad_spec_t* sdw_dgrad,
                     const char** arch)
 {
     rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
@@ -225,6 +229,209 @@ static int make_cfg(int idx,
         *kind = KIND_SPATIAL;
         *arch = "gfx950";
         return 0;
+    case 12:
+        /* dgrad: baseline grouped dgrad stride=1 */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        *sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sdgrad->problem = p;
+        sdgrad->block_q = 16;
+        sdgrad->block_groups = 8;
+        *kind = KIND_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 13:
+        /* dgrad: larger groups / different block_groups */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 32;
+        p.kpg = 32;
+        *sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sdgrad->problem = p;
+        sdgrad->block_q = 16;
+        sdgrad->block_groups = 4;
+        *kind = KIND_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 14:
+        /* dgrad: gfx942 target */
+        p.N = 1;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        *sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sdgrad->problem = p;
+        sdgrad->block_q = 16;
+        sdgrad->block_groups = 8;
+        *kind = KIND_DGRAD;
+        *arch = "gfx942";
+        return 0;
+    case 15:
+        /* depthwise_dgrad: stride=1 */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        *sdw_dgrad = rocke_direct_depthwise_dgrad_spec_default();
+        sdw_dgrad->problem = p;
+        sdw_dgrad->block_w = 8;
+        sdw_dgrad->block_waves = 1;
+        *kind = KIND_DW_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 16:
+        /* depthwise_dgrad: stride=2 exercises divisibility checks */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.stride = 2;
+        *sdw_dgrad = rocke_direct_depthwise_dgrad_spec_default();
+        sdw_dgrad->problem = p;
+        sdw_dgrad->block_w = 8;
+        sdw_dgrad->block_waves = 1;
+        *kind = KIND_DW_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 17:
+        /* 16c bf16: exercises bf16 I/O, bf16 load/store taps, mfma_f32_16x16x16_bf16 */
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 16;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dtype = "bf16";
+        *s16 = rocke_direct_conv_16c_spec_default();
+        s16->problem = p;
+        s16->block_groups = 8;
+        s16->fold_k32 = false;
+        *kind = KIND_16C;
+        *arch = "gfx950";
+        return 0;
+    case 18:
+        /* 8c bf16: exercises bf16 I/O, bf16 load/store taps, mfma_f32_16x16x16_bf16 */
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 16;
+        p.cpg = 8;
+        p.kpg = 8;
+        p.dtype = "bf16";
+        *s8 = rocke_direct_conv_8c_spec_default();
+        s8->problem = p;
+        s8->block_q = 16;
+        s8->block_groups = 8;
+        s8->double_buffer = true;
+        *kind = KIND_8C;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* dgrad bf16: exercises bf16 I/O on the scalar-FMA grouped dgrad path */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dtype = "bf16";
+        *sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sdgrad->problem = p;
+        sdgrad->block_q = 16;
+        sdgrad->block_groups = 8;
+        *kind = KIND_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 20:
+        /* 16c bf16 with fold_k32=True: pins the non-default fold_k32 path under bf16 */
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 16;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dtype = "bf16";
+        *s16 = rocke_direct_conv_16c_spec_default();
+        s16->problem = p;
+        s16->block_groups = 8;
+        s16->fold_k32 = true;
+        *kind = KIND_16C;
+        *arch = "gfx950";
+        return 0;
+    case 21:
+        /* 32c bf16: exercises bf16 I/O on the 32c MFMA path */
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 32;
+        p.cpg = 32;
+        p.kpg = 32;
+        p.dtype = "bf16";
+        *s32 = rocke_direct_conv_32c_spec_default();
+        s32->problem = p;
+        s32->block_groups = 8;
+        *kind = KIND_32C;
+        *arch = "gfx950";
+        return 0;
+    case 22:
+        /* depthwise forward bf16: exercises bf16 I/O on the scalar-FMA depthwise path */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.dtype = "bf16";
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = p;
+        sdw->block_w = 8;
+        sdw->block_waves = 1;
+        *kind = KIND_DW;
+        *arch = "gfx950";
+        return 0;
+    case 23:
+        /* depthwise spatial bf16: exercises bf16 I/O on the small-group spatial path */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 16;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.dtype = "bf16";
+        *ssp = rocke_direct_depthwise_spatial_spec_default();
+        ssp->problem = p;
+        ssp->block_waves = 1;
+        *kind = KIND_SPATIAL;
+        *arch = "gfx950";
+        return 0;
+    case 24:
+        /* depthwise dgrad bf16: exercises bf16 I/O on the scalar-FMA depthwise dgrad path */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.dtype = "bf16";
+        *sdw_dgrad = rocke_direct_depthwise_dgrad_spec_default();
+        sdw_dgrad->problem = p;
+        sdw_dgrad->block_w = 8;
+        sdw_dgrad->block_waves = 1;
+        *kind = KIND_DW_DGRAD;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
@@ -247,8 +454,10 @@ int main(int argc, char** argv)
     rocke_direct_conv_32c_spec_t s32;
     rocke_direct_depthwise_spec_t sdw;
     rocke_direct_depthwise_spatial_spec_t ssp;
+    rocke_direct_conv_dgrad_spec_t sdgrad;
+    rocke_direct_depthwise_dgrad_spec_t sdw_dgrad;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &arch) != 0)
+    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdgrad, &sdw_dgrad, &arch) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -266,6 +475,10 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_conv_32c_new(&b, &s32, arch);
     else if(kind == KIND_SPATIAL)
         kernel = rocke_build_direct_depthwise_spatial_new(&b, &ssp, arch);
+    else if(kind == KIND_DGRAD)
+        kernel = rocke_build_direct_conv_dgrad_new(&b, &sdgrad, arch);
+    else if(kind == KIND_DW_DGRAD)
+        kernel = rocke_build_direct_depthwise_dgrad_new(&b, &sdw_dgrad, arch);
     else
         kernel = rocke_build_direct_depthwise_new(&b, &sdw, arch);
     if(kernel == NULL)
