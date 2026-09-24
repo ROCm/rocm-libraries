@@ -124,6 +124,25 @@ def buildTargetGfx(isaInfoMap, archNames=None) -> str:
   return requested.get(isa, isaToGfx(isa))
 
 
+def clientLibraryFiles(clientLibraryPath, archs):
+  """Return the code objects and master library files built for `archs`.
+
+  Kernels fan out into one per-base subdir per arch, so the globs are unioned
+  across them. The master library is matched by name and by the extension of
+  the configured LibraryFormat: msgpack writes `.dat`, and always-msgpack side
+  files such as `TensileLiteLibrary_lazy_<arch>_Mapping.dat` must not be
+  mistaken for it.
+  """
+  libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+  coList = []
+  libraryList = []
+  for arch in archs:
+    archDir = libraryDir(clientLibraryPath, arch)
+    coList.extend(glob(os.path.join(archDir, "*.co")))
+    libraryList.extend(glob(os.path.join(archDir, "TensileLibrary*" + libraryExt)))
+  return coList, libraryList
+
+
 def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: Path, deviceId: int, gfxName: str, archNames=None):
 
   libraryLogicPath = ensurePath(outputPath / LIBRARY_LOGIC_DIR)
@@ -155,13 +174,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
-  # Kernels fan out into one per-base subdir per arch; union the globs across them.
-  coList = []
-  yamlList = []
-  for arch in archs:
-    archDir = libraryDir(clientLibraryPath, arch)
-    coList.extend(glob(os.path.join(archDir, "*.co")))
-    yamlList.extend(glob(os.path.join(archDir, "*.yaml")))
+  coList, libraryList = clientLibraryFiles(clientLibraryPath, archs)
 
   clientParametersPaths = []
   splitGSU = False
@@ -227,7 +240,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
                                   deviceId=deviceId,
                                   gfxName=gfxName,
                                   tileAwareSelection=False,
-                                  libraryFile=yamlList[0]))
+                                  libraryFile=libraryList[0]))
 
   forBenchmark = False
   problemSizes = None
