@@ -128,6 +128,16 @@ def _detect_default_backend() -> str:
     # gfx1250, there is no point loading the stinkytofu adapter regardless
     # of the physical GPU.  This covers every entry point (bin/*, __main__,
     # -m invocations) without per-script patches.
+    #
+    # ``--architecture`` defaults to the literal string "all" for a combined
+    # (all-arch) build (see TensileCreateLibrary/ParseArguments.py); "all"
+    # does not contain the substring "gfx1250" as text, but it *covers*
+    # gfx1250 whenever that arch is supported. Treat it the same as an
+    # explicit gfx1250 target rather than returning native-only -- the
+    # per-kernel split in TensileCreateLibrary/Run.py
+    # (writeSolutionsAndKernelsTCL) still routes non-gfx1250 kernels to
+    # native rocisa based on their actual resolved ISA, so opting into the
+    # adapter here for "all" builds is always safe.
     for i, arg in enumerate(sys.argv):
         arch_val = None
         if arg == "--architecture" and i + 1 < len(sys.argv):
@@ -136,7 +146,7 @@ def _detect_default_backend() -> str:
             arch_val = arg.split("=", 1)[1]
         if arch_val is not None:
             archs = arch_val.replace(";", "_").split("_")
-            if any("gfx1250" in a for a in archs):
+            if "all" in archs or any("gfx1250" in a for a in archs):
                 return "stinkytofu"
             return ""
 

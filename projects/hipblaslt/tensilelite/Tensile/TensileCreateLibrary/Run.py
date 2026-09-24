@@ -33,6 +33,7 @@ import itertools
 import os
 import shutil
 import pickle
+import sys
 import zlib
 from contextlib import contextmanager
 from pathlib import Path
@@ -248,8 +249,90 @@ def memDecompress(byt):
 _GFX1250 = (12, 5)
 
 
+def _assertCorrectBackendForKernel(kernel) -> None:
+    """Fail loudly if the active rocisa backend is inconsistent with what was
+    requested for *this* worker, instead of silently emitting wrong assembly.
+
+    Two regimes, distinguished by whether ``ROCISA_BACKEND`` is explicitly set:
+
+    * **Explicitly set** (e.g. ``cmpbackend.sh``; the documented
+      "``ROCISA_BACKEND=rocisa`` forces the native path on gfx1250" override;
+      or the native batch of a mixed build): trust the requested backend, but
+      verify the *active* backend actually matches it. A mismatch means a
+      worker ignored the env var -- e.g. a forked pool inheriting the parent's
+      already-selected backend -- which is the real hazard we guard against.
+      We deliberately do NOT impose the gfx1250->stinkytofu policy here:
+      forcing native rocisa on gfx1250 (to compare backends) is a supported,
+      intentional choice.
+
+    * **Unset** (backend auto-selected via ``_detect_default_backend``):
+      enforce the ISA->backend policy so a gfx1250 kernel never silently goes
+      through native rocisa (the combined-arch "all"-detection bug), and a
+      non-gfx1250 kernel never accidentally goes through the adapter.
+
+    In both regimes we also check the underlying nanobind extension
+    (``stinkytofu._stinkytofu`` / ``rocisa._rocisa``) is really loaded, not
+    just that ``rocisa._BACKEND`` is a matching string.
+
+    Raises ``RuntimeError`` (not ``assert``) so the guard survives ``python -O``
+    -- a safety net whose whole point is to fail the build loudly must not be
+    optimised away.
+    """
+    backend = getattr(rocisa, "_BACKEND", "")
+    stinky_loaded = "stinkytofu._stinkytofu" in sys.modules
+    native_loaded = "rocisa._rocisa" in sys.modules
+    env = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+
+    if env:
+        want_stinky = (env == "stinkytofu")
+        active_stinky = (backend == "stinkytofu")
+        if want_stinky != active_stinky:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')} (ISA={tuple(kernel['ISA'])}): "
+                f"ROCISA_BACKEND={env!r} was requested but the active backend is "
+                f"rocisa._BACKEND={backend!r} -- a worker ignored the env var "
+                "(likely a forked pool inheriting the parent's backend). Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        if want_stinky and not stinky_loaded:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')}: ROCISA_BACKEND='stinkytofu' "
+                "but the stinkytofu._stinkytofu extension is not loaded. Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        if not want_stinky and not native_loaded:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')}: ROCISA_BACKEND={env!r} "
+                "(native) but the rocisa._rocisa extension is not loaded. Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        return
+
+    isGfx1250 = tuple(kernel["ISA"])[:2] == _GFX1250
+    if isGfx1250:
+        if not (backend == "stinkytofu" and stinky_loaded):
+            raise RuntimeError(
+                f"gfx1250 kernel {kernel.get('SolutionIndex')} is about to be "
+                f"generated with rocisa._BACKEND={backend!r} "
+                f"(stinkytofu._stinkytofu loaded={stinky_loaded}); "
+                "expected the stinkytofu backend with its native extension loaded. "
+                "This would silently produce wrong assembly for gfx1250 -- refusing "
+                "to continue instead."
+            )
+    else:
+        if not (backend != "stinkytofu" and native_loaded):
+            raise RuntimeError(
+                f"non-gfx1250 kernel {kernel.get('SolutionIndex')} (ISA={tuple(kernel['ISA'])}) "
+                f"is about to be generated with rocisa._BACKEND={backend!r} "
+                f"(rocisa._rocisa loaded={native_loaded}); "
+                "expected the native rocisa backend. This would silently produce "
+                "wrong assembly -- refusing to continue instead."
+            )
+
+
 def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> KernelCodeGenResult:
     """Run codegen on a single kernel after rocisa state has been set up."""
+    _assertCorrectBackendForKernel(kernel)
     asmFilename = getKernelFileBase(splitGSU, kernel)
     err, src = kernelWriterAssembly.getSourceFileString(kernel)
     if compress:
@@ -297,6 +380,47 @@ def processKernelSourceNativeInit(
     outOpts.outputNoComment = outputNoComment
     kernelWriterAssembly.setRocIsa(ti.getData(), outOpts)
     return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
+
+
+def _restart_worker_pool_for_native_batch(threadCount):
+    """Shut down the current loky pool and pre-create a fresh one that uses
+    the "spawn" multiprocessing context, so the workers used for the
+    upcoming native-rocisa batch are real fresh interpreters.
+
+    This matters because loky's default "loky" start method forks new
+    workers from *this* (calling) process. If this process already ran the
+    stinkytofu-adapter batch, ``sys.modules["rocisa"]`` is already rebound to
+    the adapter here -- a forked worker would inherit that binding regardless
+    of the ``ROCISA_BACKEND`` env var, since fork doesn't re-run imports.
+    Forcing "spawn" avoids that: each new worker re-imports ``rocisa`` from
+    scratch and sees the updated env var.
+    """
+    import multiprocessing
+    from joblib.externals.loky import get_reusable_executor
+
+    try:
+        get_reusable_executor().shutdown(wait=True)
+    except Exception:
+        pass
+
+    # Pre-create the singleton loky executor with a spawn context before
+    # joblib's Parallel(...) call implicitly requests one; joblib's own API
+    # has no way to pass `context` through, but it will reuse this
+    # already-configured executor since the worker count matches.
+    get_reusable_executor(
+        max_workers=threadCount,
+        context=multiprocessing.get_context("spawn"),
+        reuse=False,
+    )
+
+
+def _shutdown_worker_pool():
+    try:
+        from joblib.externals.loky import get_reusable_executor
+        get_reusable_executor().shutdown(wait=True)
+    except Exception:
+        pass
+
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
     if result.err != 0:
@@ -756,13 +880,7 @@ def writeSolutionsAndKernelsTCL(
             ))
 
         # Batch 2: non-gfx1250 kernels with fresh native-rocisa workers.
-        # Shut down the existing worker pool so new workers inherit the
-        # updated ROCISA_BACKEND env and import native rocisa.
-        try:
-            from joblib.externals.loky import get_reusable_executor
-            get_reusable_executor().shutdown(wait=True)
-        except Exception:
-            pass
+        from Tensile.Common.Parallel import CPUThreadCount
 
         _orig_backend = os.environ.get("ROCISA_BACKEND")
         _orig_threads = globalParameters["CpuThreads"]
@@ -772,6 +890,11 @@ def writeSolutionsAndKernelsTCL(
         # adapter from sys.modules instead of loading native rocisa.
         if _orig_threads >= 0 and _orig_threads < 2:
             globalParameters["CpuThreads"] = 2
+        # Shut down the existing (stinkytofu-adapter) worker pool and pre-create
+        # a fresh spawn-context pool so native-rocisa workers are real fresh
+        # interpreters that re-import rocisa and honour ROCISA_BACKEND=rocisa,
+        # rather than forked children inheriting this process's adapter binding.
+        _restart_worker_pool_for_native_batch(CPUThreadCount())
         try:
             assemblerPath = str(asmToolchain.assembler._component_path)
             unaryProcessNative = functools.partial(
@@ -792,11 +915,7 @@ def writeSolutionsAndKernelsTCL(
         finally:
             # Shut down native workers before restoring env so joblib won't
             # reuse them for subsequent stinkytofu codegen.
-            try:
-                from joblib.externals.loky import get_reusable_executor
-                get_reusable_executor().shutdown(wait=True)
-            except Exception:
-                pass
+            _shutdown_worker_pool()
             globalParameters["CpuThreads"] = _orig_threads
             if _orig_backend is None:
                 os.environ.pop("ROCISA_BACKEND", None)
