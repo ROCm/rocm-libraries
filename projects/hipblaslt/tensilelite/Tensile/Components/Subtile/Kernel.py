@@ -14,6 +14,7 @@ from Tensile.Components.Subtile.LogicalScheduler import (
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
+from ...Common.MxScaleLayout import mxUnitsAre1
 
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
@@ -1233,11 +1234,15 @@ def preLoop(writer, kernel):
   # Just sample impl, we can also interleave A/B loads
   for i in range(pgr):
     module.addComment0("Emitting %u-th set of GRs"%i)
-    # Family order matches SIA4 ds_load: MXSA → MXSB → A → B.
-    module.add(globalReadDoScaleSubtile('A', writer, kernel))
-    module.add(globalReadDoScaleSubtile('B', writer, kernel))
+    # mxUnit==1 issues scales before A/B. MX16/MX32 issue A, B, then the scales.
+    if mxUnitsAre1(kernel):
+      module.add(globalReadDoScaleSubtile('A', writer, kernel))
+      module.add(globalReadDoScaleSubtile('B', writer, kernel))
     module.add(globalReadDoSubtile('A', writer, kernel))
     module.add(globalReadDoSubtile('B', writer, kernel))
+    if not mxUnitsAre1(kernel):
+      module.add(globalReadDoScaleSubtile('A', writer, kernel))
+      module.add(globalReadDoScaleSubtile('B', writer, kernel))
     module.addComment("Add appropriate GR offset swap logic")
   module.addComment("")
 

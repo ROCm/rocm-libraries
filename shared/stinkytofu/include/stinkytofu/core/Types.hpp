@@ -108,6 +108,11 @@ struct PassFeatureConfig {
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// Mirrors ModuleOptions::MxUnit1Scheduling. When set, CDNA5 keeps DS
+        /// loads and WMMA-parent VALU on the earliest pending WMMA (MX128 /
+        /// mxUnit==1). When clear, DS priority and parent-VALU selection stay
+        /// on the pre-mxUnit schedule (MX16 / MX32).
+        bool mxUnit1Scheduling = false;
     };
 
     LoopConfig loopConfig;

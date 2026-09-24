@@ -82,20 +82,48 @@ def mxTdmKRowPitch(size: int, mxTile: int) -> int:
     return max(1, int(size) // mxTile)
 
 
-def mxIssueTpList(kernel: Mapping, tPA: Mapping, tPB: Mapping, *, includeMetadata: bool = False):
-    """Tensor-parameter list for TDM tensor_load and GL2 prefetch issue.
+def mxUnitsAre1(kernel: Mapping) -> bool:
+    """True when every present MX side has mxUnit == 1 (MX128).
 
-    Matches SIA4 ds_load parent-tier: MXSA, MXSB, then remaining A, B.
+    mxUnit = MatrixInstK / MXBlockK. MX16, MX32, and non-MX stay false so
+    TDM tensor_load and GL2 prefetch keep the pre-MXS-first issue order.
+    """
+    pt = kernel.get("ProblemType") or {}
+    try:
+        mi_k = int(kernel.get("MatrixInstK") or 0)
+    except (TypeError, ValueError):
+        return False
+    units = []
+    for side in ("A", "B"):
+        block = pt.get("MXBlock%s" % side) or 0
+        if isinstance(block, (list, tuple)):
+            block = block[-1] if block else 0
+        try:
+            block = int(block)
+        except (TypeError, ValueError):
+            return False
+        if block <= 0:
+            continue
+        if mi_k <= 0:
+            return False
+        units.append(mi_k // block)
+    return bool(units) and all(u == 1 for u in units)
+
+
+def mxIssueTpList(kernel: Mapping, tPA: Mapping, tPB: Mapping, *, includeMetadata: bool = False):
+    """Tensor-parameter list for GL2 prefetch issue.
+
+    mxUnit==1 issues MXSA, MXSB, then A, B. Otherwise A, B, then MXSA, MXSB.
     Metadata stays last when requested.
     """
-    tps = []
     pt = kernel.get("ProblemType") or {}
+    ab = [tPA, tPB]
+    mx = []
     if pt.get("MXBlockA") and "MX" in tPA:
-        tps.append(tPA["MX"])
+        mx.append(tPA["MX"])
     if pt.get("MXBlockB") and "MX" in tPB:
-        tps.append(tPB["MX"])
-    tps.append(tPA)
-    tps.append(tPB)
+        mx.append(tPB["MX"])
+    tps = (mx + ab) if mxUnitsAre1(kernel) else (ab + mx)
     if includeMetadata and kernel.get("enableTDMMetadata"):
         tps.append(tPA["tpsMetadata"] if tPA.get("is_sparse") else tPB["tpsMetadata"])
     return tps

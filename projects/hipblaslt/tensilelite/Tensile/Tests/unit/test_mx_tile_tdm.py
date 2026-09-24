@@ -254,12 +254,20 @@ def test_mx_tile_span_partner_delta_non_split():
     assert mxTileSpanPartnerDelta(_partner_delta_kernel(8, (1, 1)), "MXSA", 0) == 128
 
 
-def test_mx_issue_tp_list_mxs_then_ab():
+def test_mx_issue_tp_list_mxs_then_ab_when_mx_unit_1():
     tPA = {"tensorChar": "A", "MX": {"tensorChar": "MXSA"}}
     tPB = {"tensorChar": "B", "MX": {"tensorChar": "MXSB"}}
-    kernel = {"ProblemType": {"MXBlockA": 32, "MXBlockB": 32}}
+    kernel = {"MatrixInstK": 128, "ProblemType": {"MXBlockA": 128, "MXBlockB": 128}}
     chars = [tp["tensorChar"] for tp in mxIssueTpList(kernel, tPA, tPB)]
     assert chars == ["MXSA", "MXSB", "A", "B"]
+
+
+def test_mx_issue_tp_list_ab_then_mxs_when_mx_unit_not_1():
+    tPA = {"tensorChar": "A", "MX": {"tensorChar": "MXSA"}}
+    tPB = {"tensorChar": "B", "MX": {"tensorChar": "MXSB"}}
+    kernel = {"MatrixInstK": 128, "ProblemType": {"MXBlockA": 32, "MXBlockB": 32}}
+    chars = [tp["tensorChar"] for tp in mxIssueTpList(kernel, tPA, tPB)]
+    assert chars == ["A", "B", "MXSA", "MXSB"]
 
 
 def test_mx_issue_tp_list_without_mx_is_ab():

@@ -426,15 +426,20 @@ static void scheduleRegionWithMovableSideEffects(
     if (readyQueue.clusterBarrierEnabled())
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
 
-    // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
-    // CDNA5ReadyQueue routes feedsWmma nodes to wmmaParentValuQueue (Phase B).
-    // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
-    for (unsigned i = 0; i < regionSize; ++i) {
-        if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
-        for (unsigned succId : dagGraph[i]) {
-            if (isMatrixInstruction(*dagNodes[succId].inst)) {
-                dagNodes[i].feedsWmma = true;
-                break;
+    // WMMA-parent VALU is the mxUnit==1 (MX128) schedule, introduced in
+    // 3dd555. MX16/MX32 leave feedsWmma false so those VALUs stay on valuQueue.
+    const bool mxUnit1Scheduling =
+        readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.mxUnit1Scheduling;
+    if (mxUnit1Scheduling) {
+        // CDNA5ReadyQueue routes feedsWmma nodes to wmmaParentValuQueue (Phase B).
+        // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
+        for (unsigned i = 0; i < regionSize; ++i) {
+            if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
+            for (unsigned succId : dagGraph[i]) {
+                if (isMatrixInstruction(*dagNodes[succId].inst)) {
+                    dagNodes[i].feedsWmma = true;
+                    break;
+                }
             }
         }
     }
@@ -509,17 +514,21 @@ static void scheduleRegionWithMovableSideEffects(
             }
         }
 
+        // Parent-family DS boost is the mxUnit==1 (MX128) schedule. MX16/MX32
+        // keep affinity / DsReadOrder only, so parentKindMask stays 0.
         unsigned parentKindMask = 0;
-        for (unsigned i = 0; i < regionSize; ++i) {
-            if (!dagNodes[i].feedsWmma) continue;
-            // WMMA itself can be IF_VALU with a matrix successor (C-chain).
-            // Only splat/pack VALUs should boost ds_load families.
-            if (isMatrixInstruction(*dagNodes[i].inst)) continue;
-            const StinkyInstruction& inst = *dagNodes[i].inst;
-            for (unsigned k = 0; k < kDsNumKinds; ++k) {
-                if (instVgprsOverlap(inst, /*useDest=*/false, kindVgprs[k]) ||
-                    instVgprsOverlap(inst, /*useDest=*/true, kindVgprs[k]))
-                    parentKindMask |= (1u << k);
+        if (mxUnit1Scheduling) {
+            for (unsigned i = 0; i < regionSize; ++i) {
+                if (!dagNodes[i].feedsWmma) continue;
+                // WMMA itself can be IF_VALU with a matrix successor (C-chain).
+                // Only splat/pack VALUs should boost ds_load families.
+                if (isMatrixInstruction(*dagNodes[i].inst)) continue;
+                const StinkyInstruction& inst = *dagNodes[i].inst;
+                for (unsigned k = 0; k < kDsNumKinds; ++k) {
+                    if (instVgprsOverlap(inst, /*useDest=*/false, kindVgprs[k]) ||
+                        instVgprsOverlap(inst, /*useDest=*/true, kindVgprs[k]))
+                        parentKindMask |= (1u << k);
+                }
             }
         }
 
@@ -578,6 +587,7 @@ static void scheduleRegionWithMovableSideEffects(
                 }
                 auto it = wmmaIndex.find(u);
                 if (it != wmmaIndex.end()) affinity = std::min(affinity, it->second);
+                if (!mxUnit1Scheduling) continue;
                 auto uit = instToId.find(u);
                 if (uit != instToId.end() && dagNodes[uit->second].feedsWmma &&
                     !isMatrixInstruction(*u))
@@ -636,7 +646,13 @@ static void scheduleRegionWithMovableSideEffects(
             });
 
             if (dsOrder == DsReadOrder::ProgramOrder) {
-                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                // mxUnit==1 shares one counter with the parent tier. Otherwise
+                // priority is the DAG id, as before 3dd555..HEAD.
+                if (!mxUnit1Scheduling) {
+                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = d.idx;
+                } else {
+                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                }
                 return;
             }
 

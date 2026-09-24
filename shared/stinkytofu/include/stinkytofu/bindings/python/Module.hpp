@@ -106,6 +106,7 @@
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
+    X(MxUnit1Scheduling, bool)                    \
     X(ArchName, std::string)
 
 // Keep transition disabled by default to preserve legacy full-throttle pacing:

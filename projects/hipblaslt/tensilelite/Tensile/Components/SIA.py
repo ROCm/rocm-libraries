@@ -29,6 +29,7 @@ from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
 
 from ..Common import roundUp, print2
+from ..Common.MxScaleLayout import mxUnitsAre1
 from ..Component import SIA
 
 from copy import deepcopy
@@ -70,7 +71,7 @@ class SIA3(SIA):
             itemsGRToSched, itemsGRToSchedLater = prepareGRInstToSched(writer, kernel, isNGLL)
             itemsGRIncToSched = appendInstToSchedSIA3(writer, kernel, numEmptyGlobalReadIncCode, globalReadIncACode, globalReadIncBCode)
             schedNumForIter0, endIter = getSchedNumForIter0SIA3(writer, kernel, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter)
-            lastLoadIter = schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
+            lastLoadIter = schedGlobalRead(writer, kernel, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
         # Schedule local write
         if not writer.states.scheduleLocalWrite:
             noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
@@ -110,7 +111,7 @@ class SIA2(SIA):
             itemsGRToSched, itemsGRToSchedLater = prepareGRInstToSched(writer, kernel, isNGLL)
             itemsGRIncToSched = appendInstToSchedDefault(numEmptyGlobalReadIncCode, globalReadIncACode, globalReadIncBCode)
             schedNumForIter0, endIter = getSchedNumForIter0Default(itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, localWriteEndIter)
-            lastLoadIter = schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
+            lastLoadIter = schedGlobalRead(writer, kernel, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
         # Schedule local write
         if not writer.states.scheduleLocalWrite:
             noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
@@ -138,7 +139,7 @@ class SIA1(SIA):
             itemsGRToSched, itemsGRToSchedLater = prepareGRInstToSched(writer, kernel, isNGLL)
             itemsGRIncToSched = appendInstToSchedDefault(numEmptyGlobalReadIncCode, globalReadIncACode, globalReadIncBCode)
             schedNumForIter0, endIter = getSchedNumForIter0Default(itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, localWriteEndIter)
-            lastLoadIter = schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
+            lastLoadIter = schedGlobalRead(writer, kernel, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
         # Schedule local write
         if not writer.states.scheduleLocalWrite:
             noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
@@ -514,18 +515,19 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
 ################################################################################
 ################################################################################
 
-def _globalReadFamilySlots(writer):
-    """TDM tensor_load family order aligned with SIA4 ds_load.
+def _globalReadFamilySlots(writer, kernel):
+    """TDM tensor_load family order.
 
-    Parent-VALU splat families issue first (MXSA → MXSB), then remaining
-    A → B. Empty MX modules are no-ops.
+    mxUnit==1 issues MXSA → MXSB → A → B. MX16/MX32 keep A → MXSA → MXSB → B.
+    Empty MX modules are no-ops.
     """
-    return (
-        ("MXSA", writer.codes.globalReadMXSA, writer.codes.dtlsM0UpdateMXSA),
-        ("MXSB", writer.codes.globalReadMXSB, writer.codes.dtlsM0UpdateMXSB),
-        ("A", writer.codes.globalReadA, writer.codes.dtlsM0UpdateA),
-        ("B", writer.codes.globalReadB, writer.codes.dtlsM0UpdateB),
-    )
+    mxsa = ("MXSA", writer.codes.globalReadMXSA, writer.codes.dtlsM0UpdateMXSA)
+    mxsb = ("MXSB", writer.codes.globalReadMXSB, writer.codes.dtlsM0UpdateMXSB)
+    a = ("A", writer.codes.globalReadA, writer.codes.dtlsM0UpdateA)
+    b = ("B", writer.codes.globalReadB, writer.codes.dtlsM0UpdateB)
+    if mxUnitsAre1(kernel):
+        return (mxsa, mxsb, a, b)
+    return (a, mxsa, mxsb, b)
 
 
 def _splitTdmLoad(grCode):
@@ -570,7 +572,7 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             # does not gate TDM, which retires on tensorcnt).
             # Issue order matches SIA4 ds_load: MXSA → MXSB → A → B.
             tdmLoads = []
-            for name, grCode, dtls in _globalReadFamilySlots(writer):
+            for name, grCode, dtls in _globalReadFamilySlots(writer, kernel):
                 imod.addComment1("Global Read %s" % name)
                 imod.add(dtls)
                 nonTdmMod, tdmLoadMod = _splitTdmLoad(grCode)
@@ -598,7 +600,7 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.add(writer.codes.gl2PrefetchIncrement)
             imod.add(writer.codes.gl2Prefetch)
         else:
-            for name, grCode, dtls in _globalReadFamilySlots(writer):
+            for name, grCode, dtls in _globalReadFamilySlots(writer, kernel):
                 imod.addComment1("Global Read %s" % name)
                 imod.add(dtls)
                 imod.add(grCode)
@@ -609,7 +611,7 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.add(writer.codes.gl2Prefetch)
     else:
         # put everything in the header (original behavior for PGR=0/1):
-        for _name, grCode, dtls in _globalReadFamilySlots(writer):
+        for _name, grCode, dtls in _globalReadFamilySlots(writer, kernel):
             writer.codes.unrollLoopHeader.add(dtls)
             writer.codes.unrollLoopHeader.add(grCode)
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata) if kernel["ProblemType"]["Sparse"] else None
@@ -623,13 +625,13 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     return itemsGRToSchedLater, lastLoadIter
 
 def prepareGRInstToSched(writer, kernel, isNGLL):
-    for _name, grCode, _dtls in _globalReadFamilySlots(writer):
+    for _name, grCode, _dtls in _globalReadFamilySlots(writer, kernel):
         writer.codes.unrollLoopHeader.add(grCode.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata.header) if kernel["ProblemType"]["Sparse"] else None
 
     # Add all loads from middle as individual schedulable items.
     # Family order matches SIA4 ds_load: MXSA → MXSB → A → B.
-    familyMiddles = [list(grCode.middle.items()) for _name, grCode, _dtls in _globalReadFamilySlots(writer)]
+    familyMiddles = [list(grCode.middle.items()) for _name, grCode, _dtls in _globalReadFamilySlots(writer, kernel)]
     familyMiddles.append(list(writer.codes.globalReadMetadata.middle.items()))
     # when using PGR2, put global read instruction right after corresponding localWrite instruction
     if isNGLL and (kernel["UnrollLoopSwapGlobalReadOrder"] == 1 and not (kernel["DirectToLdsA"] and kernel["DirectToLdsB"])):
@@ -760,7 +762,7 @@ def getSchedNumForIter0Default(itemsGRToSched, itemsGRIncToSched, numGlobalReadI
         schedNumForIter0 = numGlobalReadInsPerIter
     return schedNumForIter0, endIter
 
-def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter):
+def schedGlobalRead(writer, kernel, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter):
     # insert dtlsM0UpdateACode dtlsM0UpdateBCode code
     if writer.codes.globalReadA.middle.items():
         writer.codes.globalReadA.middle.getItem(0).add(writer.codes.dtlsM0UpdateA, 0)
@@ -796,10 +798,8 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
 
     assert not itemsGRToSched # should have scheduled everything already, itemsGRToSched should be empty
 
-    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSA.footer)
-    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSB.footer)
-    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadA.footer)
-    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadB.footer)
+    for _name, grCode, _dtls in _globalReadFamilySlots(writer, kernel):
+        writer.codes.perIterGlobalRead[endIter-1].add(grCode.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMetadata.footer)
     return lastLoadIter
 

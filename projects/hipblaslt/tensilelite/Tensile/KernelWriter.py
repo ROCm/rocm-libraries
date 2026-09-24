@@ -59,7 +59,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast, swizzleGeometry
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
-from .Common.MxScaleLayout import mxFreeTile
+from .Common.MxScaleLayout import mxFreeTile, mxUnitsAre1
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getKernelNameMin
@@ -2709,9 +2709,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if iteration == swapIter:
         tdmInj = Module("tdmInjectGRForPGR2")
         tdmInj.addComment1("tdm: inject GR for PGR>=2 (scheduler drops these when no LWs to pair with)")
-        # Family order matches SIA4 ds_load: MXSA → MXSB → A → B.
-        for grCode in (self.codes.globalReadMXSA, self.codes.globalReadMXSB,
-                       self.codes.globalReadA, self.codes.globalReadB):
+        # mxUnit==1 issues MXSA → MXSB → A → B. MX16/MX32 keep A → MXSA → MXSB → B.
+        if mxUnitsAre1(kernel):
+          grOrder = (self.codes.globalReadMXSA, self.codes.globalReadMXSB,
+                     self.codes.globalReadA, self.codes.globalReadB)
+        else:
+          grOrder = (self.codes.globalReadA, self.codes.globalReadMXSA,
+                     self.codes.globalReadMXSB, self.codes.globalReadB)
+        for grCode in grOrder:
           for item in grCode.middle.items():
             tdmInj.add(deepcopy(item))
         if tdmInj.itemsSize() > 1:
@@ -3181,19 +3186,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st)
         module.add(replaceHolder(moduleTmp, 0))
 
-        # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
-        if "MX" in tensorParameters1st:
-          moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st["MX"], skipWait=True)
-          module.add(replaceHolder(moduleTmp, 0))
-          module.add(self.globalReadDo(kernel, 0, tensorParameters1st["MX"]))
-        if "MX" in tensorParameters2nd:
-          moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters2nd["MX"], skipWait=True)
-          module.add(replaceHolder(moduleTmp, 0))
-          module.add(self.globalReadDo(kernel, 0, tensorParameters2nd["MX"]))
+        def emitMxLoads():
+          if "MX" in tensorParameters1st:
+            moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st["MX"], skipWait=True)
+            module.add(replaceHolder(moduleTmp, 0))
+            module.add(self.globalReadDo(kernel, 0, tensorParameters1st["MX"]))
+          if "MX" in tensorParameters2nd:
+            moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters2nd["MX"], skipWait=True)
+            module.add(replaceHolder(moduleTmp, 0))
+            module.add(self.globalReadDo(kernel, 0, tensorParameters2nd["MX"]))
+
+        # mxUnit==1 issues MX before A/B. MX16/MX32 keep the first tensor, then MX, then the second.
         # PAP+MX keeps MX G2L in the durable read range, so scale loads are part
         # of the same first-PGR handoff as main A/B. When SkPrefetchPrimed is
         # already set, the branch above skips this whole first-PGR group.
+        if mxUnitsAre1(kernel):
+          emitMxLoads()
         module.add(self.globalReadDo(kernel, 0, tensorParameters1st, tPM=tPM))
+        if not mxUnitsAre1(kernel):
+          emitMxLoads()
         skip2ndWaitForDtl = kernel["DirectToLds%s"%tensorParameters1st["tensorChar"]]
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters2nd, skip2ndWaitForDtl)
         module.add(replaceHolder(moduleTmp, 0))
@@ -3432,12 +3443,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.openSumAtLeastUnroll(kernel, prefetch=True, isOptNLL=isOptNLL))
       if papPrefetchUsesStagger:
         module.add(self.declareStaggerParms(kernel))
-      # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
-      if "MX" in tensorParameters1st:
-        emitTensorLoad(tensorParameters1st["MX"], skipWait=True)
-      if "MX" in tensorParameters2nd:
-        emitTensorLoad(tensorParameters2nd["MX"], skipWait=True)
+      def emitMxLoads():
+        if "MX" in tensorParameters1st:
+          emitTensorLoad(tensorParameters1st["MX"], skipWait=True)
+        if "MX" in tensorParameters2nd:
+          emitTensorLoad(tensorParameters2nd["MX"], skipWait=True)
+
+      # mxUnit==1 issues MX before A/B. MX16/MX32 issue the first tensor, then MX, then the second.
+      if mxUnitsAre1(kernel):
+        emitMxLoads()
       emitTensorLoad(tensorParameters1st)
+      if not mxUnitsAre1(kernel):
+        emitMxLoads()
       skip2ndWaitForDtl = kernel["DirectToLds%s" % tensorParameters1st["tensorChar"]]
       emitTensorLoad(tensorParameters2nd, skipWait=skip2ndWaitForDtl)
 
@@ -3535,13 +3552,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if preloopGrModule is not None:
       module.add(preloopGrModule)
     else:
-      # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
-      if kernel["ProblemType"].get("MXBlockA", 0) and "MX" in tensorParametersA:
-        emitTensorLoad(tensorParametersA["MX"])
-      if kernel["ProblemType"].get("MXBlockB", 0) and "MX" in tensorParametersB:
-        emitTensorLoad(tensorParametersB["MX"])
+      # mxUnit==1 issues MXSA/MXSB before A/B. MX16/MX32 issue A, B, then the scales.
+      if mxUnitsAre1(kernel):
+        if kernel["ProblemType"].get("MXBlockA", 0) and "MX" in tensorParametersA:
+          emitTensorLoad(tensorParametersA["MX"])
+        if kernel["ProblemType"].get("MXBlockB", 0) and "MX" in tensorParametersB:
+          emitTensorLoad(tensorParametersB["MX"])
       emitTensorLoad(tensorParametersA)
       emitTensorLoad(tensorParametersB)
+      if not mxUnitsAre1(kernel):
+        if kernel["ProblemType"].get("MXBlockA", 0) and "MX" in tensorParametersA:
+          emitTensorLoad(tensorParametersA["MX"])
+        if kernel["ProblemType"].get("MXBlockB", 0) and "MX" in tensorParametersB:
+          emitTensorLoad(tensorParametersB["MX"])
     module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=1, comment="Subtile PAP: first PRELOOP GR group prefetched"))
 
     module.addComment2("End setupPrefetchAcrossPersistentSubtileLoads")
@@ -5663,28 +5686,35 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # skip wait for DTL if global load 1st is DTL
           skip1stWaitForDtl = idxPgr > 1 or kernel["NoLdsWriteCode"]
           skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1] or idxPgr > 1
-          # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
-          if not skipMXS1st:
-            g2lBufIdx1st = 0
-            if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgprMXS%s"%tc1]:
-              # use second buffer
-              g2lBufIdx1st = 1
-            module.add(self.directToLdsM0Update(kernel, 1, tensorParameters1st["MX"], skipWait=True))
-            module.add(self.globalReadDo(kernel, 0, tensorParameters1st["MX"], g2lBufIdx=g2lBufIdx1st))
-          if not skipMXS2nd:
-            g2lBufIdx2nd = 0
-            if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgprMXS%s"%tc2]:
-              # use second buffer
-              g2lBufIdx2nd = 1
-            module.add(self.directToLdsM0Update(kernel, 1, tensorParameters2nd["MX"], skipWait=True))
-            module.add(self.globalReadDo(kernel, 0, tensorParameters2nd["MX"], g2lBufIdx=g2lBufIdx2nd))
-          if not skip1st:
-            g2lBufIdx1st = 0
-            if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgpr%s"%tc1]:
-              # use second buffer
-              g2lBufIdx1st = 1
-            module.add(self.directToLdsM0Update(kernel, 1, tensorParameters1st, skip1stWaitForDtl))
-            module.add(self.globalReadDo(kernel, 0, tensorParameters1st, g2lBufIdx=g2lBufIdx1st, tPM=tPM))
+          # mxUnit==1 issues MX before A/B. MX16/MX32 issue the first tensor, then MX, then the second.
+          def emitPgrMx():
+            if not skipMXS1st:
+              g2lBufIdx1st = 0
+              if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgprMXS%s"%tc1]:
+                # use second buffer
+                g2lBufIdx1st = 1
+              module.add(self.directToLdsM0Update(kernel, 1, tensorParameters1st["MX"], skipWait=True))
+              module.add(self.globalReadDo(kernel, 0, tensorParameters1st["MX"], g2lBufIdx=g2lBufIdx1st))
+            if not skipMXS2nd:
+              g2lBufIdx2nd = 0
+              if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgprMXS%s"%tc2]:
+                # use second buffer
+                g2lBufIdx2nd = 1
+              module.add(self.directToLdsM0Update(kernel, 1, tensorParameters2nd["MX"], skipWait=True))
+              module.add(self.globalReadDo(kernel, 0, tensorParameters2nd["MX"], g2lBufIdx=g2lBufIdx2nd))
+          def emitPgr1st():
+            if not skip1st:
+              g2lBufIdx1st = 0
+              if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgpr%s"%tc1]:
+                # use second buffer
+                g2lBufIdx1st = 1
+              module.add(self.directToLdsM0Update(kernel, 1, tensorParameters1st, skip1stWaitForDtl))
+              module.add(self.globalReadDo(kernel, 0, tensorParameters1st, g2lBufIdx=g2lBufIdx1st, tPM=tPM))
+          if mxUnitsAre1(kernel):
+            emitPgrMx()
+          emitPgr1st()
+          if not mxUnitsAre1(kernel):
+            emitPgrMx()
           if not skip2nd:
             g2lBufIdx2nd = 0
             if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgpr%s"%tc2]:
@@ -6356,28 +6386,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         # skip wait for DTL if global load 1st is DTL
         skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1]
-        # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
-        if "MX" in tensorParameters1st:
-          module.addComment1("Update M0 for DTLDS")
-          moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters1st["MX"], skipWait=skip2ndWaitForDtl)
-          module.add(replaceHolder(moduleTmp, 0))
-          module.addComment1("Tail global read MXS%s"%tc1)
-          if tailLoopOpt1st and (globalReadMode1st == 2):
-            module.add(self.doTailLoopOpt(kernel, tensorParameters1st["MX"]))
-          else:
-            module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st["MX"]))
+        def emitTailMx():
+          if "MX" in tensorParameters1st:
+            module.addComment1("Update M0 for DTLDS")
+            moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters1st["MX"], skipWait=skip2ndWaitForDtl)
+            module.add(replaceHolder(moduleTmp, 0))
+            module.addComment1("Tail global read MXS%s"%tc1)
+            if tailLoopOpt1st and (globalReadMode1st == 2):
+              module.add(self.doTailLoopOpt(kernel, tensorParameters1st["MX"]))
+            else:
+              module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st["MX"]))
 
-        if "MX" in tensorParameters2nd:
-          module.addComment1("Update M0 for DTLDS")
-          moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd["MX"], skipWait=skip2ndWaitForDtl)
-          module.add(replaceHolder(moduleTmp, 0))
-          module.addComment1("Tail global read MXS%s"%tc2)
-          if tailLoopOpt2nd and (globalReadMode2nd == 2):
-            module.add(self.doTailLoopOpt(kernel, tensorParameters2nd["MX"]))
-          else:
-            module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd["MX"]))
+          if "MX" in tensorParameters2nd:
+            module.addComment1("Update M0 for DTLDS")
+            moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd["MX"], skipWait=skip2ndWaitForDtl)
+            module.add(replaceHolder(moduleTmp, 0))
+            module.addComment1("Tail global read MXS%s"%tc2)
+            if tailLoopOpt2nd and (globalReadMode2nd == 2):
+              module.add(self.doTailLoopOpt(kernel, tensorParameters2nd["MX"]))
+            else:
+              module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd["MX"]))
 
+        # mxUnit==1 issues MX before the first tensor. MX16/MX32 issue that tensor first.
+        if mxUnitsAre1(kernel):
+          emitTailMx()
         module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st))
+        if not mxUnitsAre1(kernel):
+          emitTailMx()
 
         module.addComment1("Update M0 for DTLDS")
         moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters2nd, skip2ndWaitForDtl)
@@ -6927,6 +6962,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "EnableXnackReplay": bool(
                                    self.states.archCaps["EnableXnackReplay"]),
                               }
+
+      # mxUnit = MatrixInstK / MXBlockK. 1 is MX128. New DAG scheduling
+      # (parent-VALU target + DS pack focus) runs only when every present MX
+      # side is mxUnit 1. MX16/MX32 and non-MX keep the older schedule.
+      def _mx_unit(side):
+        block = kernel["ProblemType"].get("MXBlock%s" % side) or 0
+        if isinstance(block, (list, tuple)):
+          # Raw spelling is [k] or [free, k]. ProblemType normally splits this
+          # into an int before KernelWriter; keep the K element if it did not.
+          block = block[-1] if block else 0
+        block = int(block)
+        if block <= 0:
+          return 0
+        return int(kernel["MatrixInstK"]) // block
+      mx_units = [u for u in (_mx_unit("A"), _mx_unit("B")) if u]
+      stinky_module_options["MxUnit1Scheduling"] = bool(mx_units) and all(u == 1 for u in mx_units)
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
       cloneList = []

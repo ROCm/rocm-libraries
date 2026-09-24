@@ -165,6 +165,18 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
+    // MX128 (mxUnit==1) DS-pack and parent-VALU rules. Default unroll runs
+    // leave the flag clear, which is the MX16/MX32 schedule.
+    void runPassWithMxUnit1Scheduling() {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.mxUnit1Scheduling = true;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+
     // Run with the tensor_load_to_lds credit-pool throttle enabled.
     // distributeGlobalRead routes tensor loads into globalReadQueue;
     // depth/latency configure the in-flight credit pool.
@@ -1008,7 +1020,7 @@ TEST_F(DAGSchedulerPassTest, ParentValuIssuesOnlyForTargetWmma) {
     w1->addSrcReg(StinkyRegister("v", 20, 1));
 
     int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
         << "target-parent unlock must not drop instructions";
 
@@ -1064,7 +1076,7 @@ TEST_F(DAGSchedulerPassTest, ParentValuCoIssuesUnderInFlightWmmaInsteadOfWaiting
     ASSERT_NE(wmma2, nullptr);
 
     const int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
         << "co-issued unlock must not drop instructions";
 
@@ -1103,7 +1115,7 @@ TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReady
     createMovableDsLoad(/*destReg=*/708, /*addrReg=*/80, /*ldsToken=*/3);
 
     const int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
 
     EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm20));
@@ -1130,7 +1142,7 @@ TEST_F(DAGSchedulerPassTest, PendingWmmaDsLoadBeatsNextIterPreload) {
     ASSERT_NE(wmma1, nullptr);
 
     const int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
 
     EXPECT_LT(positionOf(*bb, needed), positionOf(*bb, preload))
@@ -1161,7 +1173,7 @@ TEST_F(DAGSchedulerPassTest, EarliestPendingWmmaDsLoadBeatsLaterPackCapFill) {
     ASSERT_NE(wmma2, nullptr);
 
     const int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
 
     EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsLate0))
@@ -1194,7 +1206,7 @@ TEST_F(DAGSchedulerPassTest, SamePackFutureWmmaDsLoadUsesCurrentWindow) {
     ASSERT_NE(wmma2, nullptr);
 
     const int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithMxUnit1Scheduling();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
 
     EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsFuture));

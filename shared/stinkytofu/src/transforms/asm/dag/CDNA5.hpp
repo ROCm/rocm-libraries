@@ -459,6 +459,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool hideBudgetPrescanEnabled() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.enableWmmaHideBudgetPrescan;
     }
+    // MX128 (mxUnit==1) pack/parent rules. MX16/MX32 leave this clear and keep
+    // the DS-priority / unfiltered parent-VALU schedule.
+    bool mxUnit1Scheduling() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.mxUnit1Scheduling;
+    }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
     }
@@ -1253,9 +1258,12 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
 // Phase B unlock: issue a VALU that directly feeds the target WMMA when the
 // co-issue window (if any) allows and the node is RAW/hazard/dest-overlap free.
 DAGNode* CDNA5ReadyQueue::tryPickWmmaParentValu() const {
+    // Phase B parent-VALU unlock is mxUnit==1 only. MX16/MX32 keep the
+    // pre-3dd555 picker, which has no wmmaParentValuQueue.
+    if (!mxUnit1Scheduling()) return nullptr;
     if (wmmaParentValuQueue.empty()) return nullptr;
     if (!isValuPickable()) return nullptr;
-    DAGNode* target = selectTargetWmma();
+    const DAGNode* target = selectTargetWmma();
     if (!target) return nullptr;
     DAGNode* t = pickFreeBest(wmmaParentValuQueue, nullptr, /*allowHiddenStall=*/false, target);
     if (t == nullptr || destOverlapsActiveWmmaSrc(t)) return nullptr;
@@ -1333,12 +1341,15 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         consider(t, kOther, otherWait);
     }
     if (isValuPickable() || best == nullptr) {
-        // WMMA-parent VALUs: only parents of the target WMMA, not deferred
-        // behind the DS window cap — they unlock that WMMA and outrank filler
-        // VALU within the same free tier.
-        if (DAGNode* t = pickFreeBest(wmmaParentValuQueue, nullptr, /*allowHiddenStall=*/false,
-                                      selectTargetWmma())) {
-            if (!destOverlapsActiveWmmaSrc(t)) consider(t, kWmmaParentValu, 0);
+        // WMMA-parent VALUs: mxUnit==1 only unlocks the target WMMA. MX16/MX32
+        // keep every ready parent eligible. Not deferred behind the DS window
+        // cap — they outrank filler VALU within the same free tier.
+        if (mxUnit1Scheduling()) {
+            const DAGNode* parentTarget = selectTargetWmma();
+            if (DAGNode* t = pickFreeBest(wmmaParentValuQueue, nullptr, /*allowHiddenStall=*/false,
+                                          parentTarget)) {
+                if (!destOverlapsActiveWmmaSrc(t)) consider(t, kWmmaParentValu, 0);
+            }
         }
         if (DAGNode* t = pickFreeBest(valuQueue)) {
             if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t)) consider(t, kValu, 0);
@@ -1458,7 +1469,7 @@ void CDNA5ReadyQueue::decidePromote() {
         if (!deadlineReached) continue;
         if (getMaxSrcDataWait(hc.node) > 0 || getHazardWait(hc.node) > 0) continue;
         if (destOverlapsActiveWmmaSrc(hc.node)) continue;
-        if (hc.kind == kWmmaParentValu) {
+        if (mxUnit1Scheduling() && hc.kind == kWmmaParentValu) {
             DAGNode* target = selectTargetWmma();
             if (target && !parentFeedsWmma(hc.node, target)) continue;
         }
@@ -1956,35 +1967,42 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // load that unlocks the earliest still-pending WMMA so a later pack cannot
     // occupy leftover dsReadPerWmma slots and drive s_wait_dscnt 2.
     DAGNode* pickedDS = nullptr;
-    bool pickedPending = false;
-    int pickedEarly = INT_MAX;
-    int pickedPack = INT_MAX;
-    const bool holdIssuedOnlyPreload = wmmaIssueConfig.issuedCount > 0;
-    for (DAGNode* n : localReadQueue) {
-        if (holdIssuedOnlyPreload && dsFeedsIssuedOnlyWmma(n)) continue;
-        const auto [pack, early] = earliestPendingWmmaKey(n);
-        const bool pending = early != INT_MAX;
-        if (!pickedDS || (pending && !pickedPending) ||
-            (pending == pickedPending &&
-             (early < pickedEarly ||
-              (early == pickedEarly && n->dsReadPriority < pickedDS->dsReadPriority)))) {
-            pickedDS = n;
-            pickedPending = pending;
-            pickedEarly = early;
-            pickedPack = pack;
+    if (!mxUnit1Scheduling()) {
+        // MX16/MX32: lowest dsReadPriority, no pack focus and no preload hold.
+        for (DAGNode* n : localReadQueue)
+            if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
+    } else {
+        bool pickedPending = false;
+        int pickedEarly = INT_MAX;
+        int pickedPack = INT_MAX;
+        const bool holdIssuedOnlyPreload = wmmaIssueConfig.issuedCount > 0;
+        for (DAGNode* n : localReadQueue) {
+            if (holdIssuedOnlyPreload && dsFeedsIssuedOnlyWmma(n)) continue;
+            const auto [pack, early] = earliestPendingWmmaKey(n);
+            const bool pending = early != INT_MAX;
+            if (!pickedDS || (pending && !pickedPending) ||
+                (pending == pickedPending &&
+                 (early < pickedEarly ||
+                  (early == pickedEarly && n->dsReadPriority < pickedDS->dsReadPriority)))) {
+                pickedDS = n;
+                pickedPending = pending;
+                pickedEarly = early;
+                pickedPack = pack;
+            }
         }
-    }
-    // Steady-state loops need look-ahead across consumers in one accumulator
-    // pack to hide four-load groups across multiple WMMA windows. At a tail,
-    // retain exact-consumer focus: there is no next iteration to prepare, and
-    // younger loads would only sit ahead of the current consumer in DS FIFO.
-    if (pickedDS) {
-        const Loop* loop = getLoop();
-        const bool inSteadyLoop = loop && currentBB_ && loop->contains(currentBB_);
-        const bool switchesFocus =
-            inSteadyLoop ? (dsWindowFocusPack_ != INT_MAX && pickedPack > dsWindowFocusPack_)
-                         : (dsWindowFocusWmmaId_ != INT_MAX && pickedEarly > dsWindowFocusWmmaId_);
-        if (switchesFocus) pickedDS = nullptr;
+        // Steady-state loops need look-ahead across consumers in one accumulator
+        // pack to hide four-load groups across multiple WMMA windows. At a tail,
+        // retain exact-consumer focus: there is no next iteration to prepare, and
+        // younger loads would only sit ahead of the current consumer in DS FIFO.
+        if (pickedDS) {
+            const Loop* loop = getLoop();
+            const bool inSteadyLoop = loop && currentBB_ && loop->contains(currentBB_);
+            const bool switchesFocus =
+                inSteadyLoop
+                    ? (dsWindowFocusPack_ != INT_MAX && pickedPack > dsWindowFocusPack_)
+                    : (dsWindowFocusWmmaId_ != INT_MAX && pickedEarly > dsWindowFocusWmmaId_);
+            if (switchesFocus) pickedDS = nullptr;
+        }
     }
 
     // Phase B — advance the WMMA pipeline: parent VALU of the target WMMA, then
