@@ -117,3 +117,20 @@ assert tuple(sys.meta_path) == meta_path
 assert not any(name == alias or name.startswith(f"{{alias}}.") for name in sys.modules)
 """
     _run_script(script)
+
+
+def test_alias_submodule_does_not_replace_parent_export():
+    script = f"""
+import importlib
+
+from tensilelite._namespace_bridge import install_alias
+
+alias = {_ALIAS!r}
+install_alias(alias=alias, canonical={_CANONICAL!r})
+
+solution_module = importlib.import_module(f"{{alias}}.SolutionStructs.Solution")
+library_io = importlib.import_module(f"{{alias}}.LibraryIO")
+
+assert library_io.Solution is solution_module.Solution
+"""
+    _run_script(script)
