@@ -12,6 +12,11 @@ This topic demonstrates how to migrate a NVIDIA CUDA cuDNN project to hipDNN.
 
 Before you begin, ensure hipDNN (ROCm) is installed. See :ref:`prerequisites` for more information.
 
+.. note::
+
+  NVIDIA, CUDA, and cuDNN are trademarks and/or registered trademarks of NVIDIA Corporation.
+  hipDNN is not affiliated with or endorsed by NVIDIA.
+
 Here's a minimal example of a hipDNN project in ``CMakeLists.txt``:
 
 .. code:: cmake
