@@ -106,11 +106,14 @@ def test_non_sia0_pgr2_no_schedule_keeps_original_global_read_iter():
     assert writer.codes.perIterGlobalRead[6].itemsSize() == 0
 
 
-def test_sia0_tdm_global_read_family_order_mxs_first():
+def test_sia0_tdm_global_read_family_order_mxs_first_when_mx_unit_1():
     writer = _make_writer()
     writer.codes.globalReadMXSA = _marker_module("globalReadMXSA", "tensor_load_mxsa")
     writer.codes.globalReadMXSB = _marker_module("globalReadMXSB", "tensor_load_mxsb")
     kernel = _make_kernel(schedule_iter_alg=0)
+    kernel["MatrixInstK"] = 128
+    kernel["ProblemType"]["MXBlockA"] = 128
+    kernel["ProblemType"]["MXBlockB"] = 128
     kernel["enableTDMA"] = True
     kernel["enableTDMB"] = True
     kernel["NoLdsWriteCode"] = True
@@ -123,3 +126,23 @@ def test_sia0_tdm_global_read_family_order_mxs_first():
     assert scheduled.find("Global Read MXSA") < scheduled.find("Global Read B")
     assert scheduled.find("tensor_load_mxsa") < scheduled.find("buffer_load_a_to_vgprG2LA")
     assert scheduled.find("tensor_load_mxsb") < scheduled.find("buffer_load_b_to_vgprG2LB")
+
+
+def test_sia0_tdm_global_read_family_order_ab_before_mxs_when_mx_unit_not_1():
+    writer = _make_writer()
+    writer.codes.globalReadMXSA = _marker_module("globalReadMXSA", "tensor_load_mxsa")
+    writer.codes.globalReadMXSB = _marker_module("globalReadMXSB", "tensor_load_mxsb")
+    kernel = _make_kernel(schedule_iter_alg=0)
+    kernel["MatrixInstK"] = 128
+    kernel["ProblemType"]["MXBlockA"] = 32
+    kernel["ProblemType"]["MXBlockB"] = 32
+    kernel["enableTDMA"] = True
+    kernel["enableTDMB"] = True
+    kernel["NoLdsWriteCode"] = True
+    noSchedGlobalRead(writer, kernel,
+                      _marker_module("globalReadIncA", "global_read_inc_a"),
+                      _marker_module("globalReadIncB", "global_read_inc_b"))
+    scheduled = str(writer.codes.perIterGlobalRead[0])
+    assert scheduled.find("Global Read A") < scheduled.find("Global Read MXSA")
+    assert scheduled.find("Global Read MXSA") < scheduled.find("Global Read B")
+    assert scheduled.find("buffer_load_a_to_vgprG2LA") < scheduled.find("tensor_load_mxsa")
