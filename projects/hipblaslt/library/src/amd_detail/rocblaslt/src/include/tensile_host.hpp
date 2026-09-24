@@ -322,16 +322,16 @@ TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<voi
  * A pure probe: the caller counts the lookup, because only it knows whether the
  * probe decided which kernel the call launches.
  */
-#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
 int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
                                   size_t                              max_workspace_bytes);
 
+#ifdef HIPBLASLT_ENABLE_TUNING_TEST_HOOKS
 /**
  * The solution index this thread last launched through runContractionProblem,
- * or -1, clearing it. Tests only.
+ * or -1, clearing it.
  */
 int tuningLastLaunchedIndexForTest();
 
@@ -339,7 +339,7 @@ int tuningLastLaunchedIndexForTest();
  * Make later tuning attempts go wrong at one stage: 1 fails setup, 2 fails
  * enumeration, 3 throws after the first measured candidate, 4 stops the search
  * after the first measured candidate the way an expiring budget does; 0
- * restores normal behaviour. Tests only.
+ * restores normal behaviour.
  */
 void tuningInjectFailureForTest(int stage);
 #endif

@@ -3549,7 +3549,6 @@ __global__ void hipblasltTuningFlushICache()
 
 namespace
 {
-#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     /**
      * How much work a single shape's tuning does.
      *
@@ -4354,11 +4353,8 @@ namespace
         return gLock;
     }
 
-    // Tests only: the index the last launch on this thread used, and the stage
-    // at which later tuning attempts fail on purpose (see TuningFailureStage).
-    thread_local int t_lastLaunchedIndex = -1;
-    std::atomic<int> g_injectedTuningFailure{0};
-
+    // Where a test makes later tuning attempts go wrong on purpose. Without the
+    // test hooks nothing can set one, and every check below is constant false.
     enum class TuningFailureStage : int
     {
         None               = 0,
@@ -4368,10 +4364,20 @@ namespace
         TruncateAfterFirst = 4,
     };
 
+#ifdef HIPBLASLT_ENABLE_TUNING_TEST_HOOKS
+    thread_local int t_lastLaunchedIndex = -1;
+    std::atomic<int> g_injectedTuningFailure{0};
+
     bool tuningFailureInjected(TuningFailureStage stage)
     {
         return g_injectedTuningFailure.load(std::memory_order_relaxed) == static_cast<int>(stage);
     }
+#else
+    constexpr bool tuningFailureInjected(TuningFailureStage)
+    {
+        return false;
+    }
+#endif
 
     bool streamIsCapturing(hipStream_t stream)
     {
@@ -4989,10 +4995,9 @@ namespace
         }
         return TuningAttempt::Tuned;
     }
-#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 } // namespace
 
-#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+#ifdef HIPBLASLT_ENABLE_TUNING_TEST_HOOKS
 int tuningLastLaunchedIndexForTest()
 {
     const int index     = t_lastLaunchedIndex;
@@ -5071,13 +5076,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(prob.trans_b == HIPBLAS_OP_C)
             data->problem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
 
-#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         // Noted before algo is filled in below. An explicit algo is launched as
         // given, whatever the cache holds or tuning finds; the cache and the
         // tuner choose the kernel only when the caller leaves that choice to the
         // library by passing no algo.
         const bool callerSuppliedAlgo = (algo != nullptr);
-#endif
 
         if(algo == nullptr)
         {
@@ -5099,7 +5102,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         int* solutionIndex = (int*)algo->data;
 
-#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         // Cache lookup and tune mode.
         //
         // Decided here rather than by a flag the heuristic set, because
@@ -5427,7 +5429,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             launchIndex = tunedIndex;
         if(launchIndex >= 0)
             solutionIndex = &launchIndex;
-#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
@@ -5599,7 +5600,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
-#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+#ifdef HIPBLASLT_ENABLE_TUNING_TEST_HOOKS
             t_lastLaunchedIndex = solution->index;
 #endif
             status = hip2RocStatus(

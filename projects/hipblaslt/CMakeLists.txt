@@ -67,14 +67,6 @@ option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 
-# Runtime tuning is compiled out by default. Off, no part of the benchmarker,
-# the cache writer, or the lifecycle diagnostics is built, and neither
-# HIPBLASLT_TUNING_MODE nor HIPBLASLT_TUNING_CACHE_PATH does anything. The
-# offline HIPBLASLT_TUNING_OVERRIDE_FILE path is unaffected either way.
-# Declared beside the other top-level options so the clients tree can read it
-# too; the host library is what actually consumes the compile definition.
-option(HIPBLASLT_ENABLE_TUNING_CACHE "Build the opt-in runtime tuning cache." OFF)
-
 option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Build experimental fused GEMM + all-to-all support." OFF)
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_HOST=ON")
@@ -397,10 +389,12 @@ if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
-    if(HIPBLASLT_ENABLE_TUNING_CACHE)
-        # PUBLIC because the client tests compile against the same guarded
-        # declarations and link the test-only reset/telemetry exports.
-        target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_ENABLE_TUNING_CACHE)
+    if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
+        # The tuning cache's test hooks: reset, counters, the launched index and
+        # failure injection. Only the client tests call them, so they are built
+        # exactly when those tests are, and a build without tests keeps them
+        # out of the library's ABI.
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_TUNING_TEST_HOOKS)
     endif()
     if(NOT HIPBLASLT_ENABLE_YAML)
         target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})
