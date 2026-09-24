@@ -28,10 +28,12 @@ def main():
         action="append",
         choices=(
             "sample",
+            "generic-sample",
+            "generic-api",
+            "alternate-backend",
             "streamk-api",
             "amax-api",
             "alpha-zero-api",
-            "alternate-backend",
             "process-runner",
             "artifact-loader",
             "splitk-api",
@@ -169,8 +171,36 @@ def main():
             420,
         )
     )
+    commands.append(
+        (
+            "generic-sample",
+            [
+                str(staging / "hipblaslt-generic-jit-gemm"),
+                sys.executable,
+                str(tensile),
+                env["PYTHONPATH"],
+                str(fixtures / f"single_solution_splitk{fixture_suffix}.yaml"),
+                str(output / "generic-sample"),
+                args.architecture,
+                compiler,
+            ],
+            {},
+            420,
+        )
+    )
+    commands.append(
+        (
+            "generic-api",
+            [str(staging / "hipblaslt-jit-generic-api-test"), sys.executable,
+             str(tensile), env["PYTHONPATH"],
+             str(fixtures / f"single_solution_splitk{fixture_suffix}.yaml"),
+             str(output / "generic-api"), args.architecture, compiler, "--k", "512"],
+            {},
+            420,
+        )
+    )
     # These are the public C hipblasLtMatmul and C++ Gemm routes.
-    # They use the same generic JIT selection API as any application.
+    # They use the direct TensileLite entry point with an explicit YAML recipe.
     for feature, fixture, options in [
         ("streamk", "streamk", ["--k", "4096", "--workspace-fallback", "1"]),
         ("amax", "amax", ["--amax", "1"]),

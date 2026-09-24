@@ -10,6 +10,9 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
+#ifdef HIPBLASLT_TEST_GENERIC_JIT
+#include <hipblaslt/hipblaslt-jit.hpp>
+#endif
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -280,38 +283,83 @@ namespace
     void runPublicGemm(Problem& p, const TensileLiteOptions& options)
     {
         using namespace hipblaslt_ext;
+#ifdef HIPBLASLT_TEST_GENERIC_JIT
         experimental::jit::Diagnostics   info;
         hipblasLtMatmulHeuristicResult_t selected;
-        auto                             select = [&](const TensileLiteOptions& generation) {
-            experimental::jit::Backend backend;
-            require(experimental::jit::tensilelite::createBackend(generation, backend, info)
-                        == HIPBLAS_STATUS_SUCCESS,
-                    info.message.c_str());
-            experimental::jit::Request request;
-            auto                       status = experimental::jit::makeGemmRequest(p.handle,
-                                                             p.desc,
-                                                             &p.alpha,
-                                                             zeroAlphaInputs ? nullptr : p.a,
-                                                             p.aLayout,
-                                                             zeroAlphaInputs ? nullptr : p.b,
-                                                             p.bLayout,
-                                                             &p.beta,
-                                                             p.c,
-                                                             p.cLayout,
-                                                             p.d,
-                                                             p.dLayout,
-                                                             request,
-                                                             info);
-            require(status == HIPBLAS_STATUS_SUCCESS, info.message.c_str());
-            int device;
+        auto                             generate = [&](const TensileLiteOptions& generation) {
+            namespace jit = experimental::jit;
+            selected      = {};
+            jit::Request request;
+            auto         status = jit::makeGemmRequest(p.handle,
+                                               p.desc,
+                                               &p.alpha,
+                                               zeroAlphaInputs ? nullptr : p.a,
+                                               p.aLayout,
+                                               zeroAlphaInputs ? nullptr : p.b,
+                                               p.bLayout,
+                                               &p.beta,
+                                               p.c,
+                                               p.cLayout,
+                                               p.d,
+                                               p.dLayout,
+                                               request,
+                                               info);
+            if(status != HIPBLAS_STATUS_SUCCESS)
+                return status;
+            jit::Backend backend;
+            status = jit::tensilelite::createBackend(generation, backend, info);
+            if(status != HIPBLAS_STATUS_SUCCESS)
+                return status;
+            int device = -1;
             check(hipGetDevice(&device), "Get current device");
-            experimental::jit::Solution solution;
-            status = experimental::jit::getJitAlgo(
+            jit::Solution solution;
+            status = jit::getJitAlgo(
                 device, request, backend, std::numeric_limits<size_t>::max(), solution, info);
-            require(status == HIPBLAS_STATUS_SUCCESS, info.message.c_str());
-            status = experimental::jit::getGemmAlgo(solution, selected, info);
+            if(status != HIPBLAS_STATUS_SUCCESS)
+                return status;
+            return jit::getGemmAlgo(solution, selected, info);
+        };
+#else
+        experimental::jit::tensilelite::Diagnostics info;
+        hipblasLtMatmulHeuristicResult_t            selected;
+        auto generate = [&](const TensileLiteOptions& generation) {
+            return experimental::jit::tensilelite::getGemmAlgo(p.handle,
+                                                               p.desc,
+                                                               &p.alpha,
+                                                               zeroAlphaInputs ? nullptr : p.a,
+                                                               p.aLayout,
+                                                               zeroAlphaInputs ? nullptr : p.b,
+                                                               p.bLayout,
+                                                               &p.beta,
+                                                               p.c,
+                                                               p.cLayout,
+                                                               p.d,
+                                                               p.dLayout,
+                                                               generation,
+                                                               std::numeric_limits<size_t>::max(),
+                                                               selected,
+                                                               info);
+        };
+#endif
+        auto select = [&](const TensileLiteOptions& generation) {
+            auto status = generate(generation);
             require(status == HIPBLAS_STATUS_SUCCESS, ("JIT selection: " + info.message).c_str());
         };
+#ifndef HIPBLASLT_TEST_GENERIC_JIT
+        auto missingRecipe = options;
+        missingRecipe.configPath.clear();
+        std::memset(&selected, 0xa5, sizeof(selected));
+        require(generate(missingRecipe) == HIPBLAS_STATUS_INVALID_VALUE,
+                "An explicit recipe is required; prediction is not part of this API");
+        hipblasLtMatmulAlgo_t empty{};
+        require(selected.state == HIPBLAS_STATUS_INVALID_VALUE && selected.workspaceSize == 0
+                    && std::memcmp(&selected.algo, &empty, sizeof(empty)) == 0,
+                "Failed direct generation did not clear its result");
+        require(!std::filesystem::exists(options.outputPath)
+                    && !std::filesystem::exists(options.outputPath + ".cwd")
+                    && !std::filesystem::exists(options.outputPath + ".log"),
+                "Missing recipe invoked the generator");
+#endif
         select(options);
         std::cout << "Public GEMM API manifest: " << (options.outputPath + "/bundle/manifest.json")
                   << '\n';
