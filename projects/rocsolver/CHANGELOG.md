@@ -15,7 +15,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * `abstol` in SYEVJ/HEEVJ, GESVDJ, and SYGVJ/HEGVJ is now a relative tolerance, requiring every off-diagonal element to satisfy `|a_ij| <= abstol * sqrt(|a_ii| * |a_jj|)`. Callers that tuned `abstol` may see a different number of sweeps.
 * SYEVJ/HEEVJ can now report non-convergence for small matrices, where `info` was previously always 0. SYEVDJ/HEEVDJ and SYGVDJ/HEGVDJ inherit this through their Jacobi sub-solver.
-* Corrected the SYEVJ/HEEVJ documentation for `A` on non-convergence: it holds the partially rotated vectors, and never held the unchanged input.
+* Corrected the SYEVJ/HEEVJ documentation for `A` on non-convergence: when eigenvectors are requested it holds the partially rotated vectors, and never held the unchanged input.
 
 ### Removed
 ### Optimized
@@ -23,7 +23,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Fixed SYEVJ/HEEVJ and GESVDJ returning an undiagonalized matrix, with `info = 0`, when one entry dominates the norm of the whole matrix.
 * Fixed SYEVJ/HEEVJ never reporting non-convergence for small matrices.
-* Fixed SYEVJ/HEEVJ declaring convergence for well-scaled matrices near the limits of the floating-point range.
+* Fixed SYEVJ/HEEVJ declaring convergence for well-scaled matrices near the limits of the floating-point range, or when a large `abstol` overflowed the squared threshold.
 
 ### Known issues
 
