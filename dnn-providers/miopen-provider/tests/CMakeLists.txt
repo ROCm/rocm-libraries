@@ -16,6 +16,7 @@ endif()
 
 add_executable(
     miopen_plugin_tests
+    common/TestWorkarounds.cpp
     engines/plans/TestMiopenBatchnormApplicabilityChecks.cpp
     engines/plans/TestMiopenBatchnormBwdPlan.cpp
     engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
@@ -25,23 +26,26 @@ add_executable(
     engines/plans/TestMiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/TestMiopenBatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/TestMiopenBatchnormPlanBuilder.cpp
+    engines/plans/TestMiopenBinaryPointwiseChecks.cpp
+    engines/plans/TestMiopenBinaryPointwisePlan.cpp
+    engines/plans/TestMiopenBinaryPointwisePlanBuilder.cpp
     engines/plans/TestMiopenConvBwdPlan.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdPlan.cpp
     engines/plans/TestMiopenConvPlanBuilder.cpp
-    engines/plans/TestMiopenUnaryActivationPlanBuilder.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
+    engines/plans/TestMiopenPointwiseTensorChecks.cpp
+    engines/plans/TestMiopenUnaryActivationPlanBuilder.cpp
     engines/TestMiopenEngine.cpp
-    common/TestWorkarounds.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp
     TestMiopenConvDescriptor.cpp
     TestMiopenEngineManager.cpp
     TestMiopenHipdnnEnginePluginHandle.cpp
     TestMiopenHipdnnPluginExecutionContext.cpp
-    TestMiopenTensor.cpp
     TestMiopenPluginPublic.cpp
+    TestMiopenTensor.cpp
     TestMiopenUtils.cpp
 )
 

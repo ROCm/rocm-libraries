@@ -358,6 +358,13 @@ def run(
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+    if spec.runtime_shape:
+        # Mirrors the three i32 params attention_dense_signature declares after
+        # scale on the runtime-shape path; omitting them under-fills the kernarg
+        # buffer for a kernel that reads them.
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
 
     def call():
         launcher(vals, config=cfg)

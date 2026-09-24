@@ -399,6 +399,29 @@ class WgradConvSpec:
     # emits byte-identical IR.
     lds_k_outer: bool = False
 
+    # Number of conv groups a single workgroup computes ("Gm"; CK calls it
+    # NumGroupsToMerge). 1 is grid-per-group, the historical behaviour.
+    #
+    # A depthwise group has cpg == kpg == 1, so its per-group GEMM is
+    # 1 x (Y*X) x (N*Ho*Wo) and its operands are single channels of an NHWC
+    # tensor: consecutive K-steps are C elements apart, the free axis is one
+    # element wide, and every load degenerates to a scalar. Merging Gm adjacent
+    # groups into one workgroup makes the free axis a run of Gm consecutive
+    # channels -- contiguous in NHWC -- so the same work is issued as vector
+    # loads and one (n, ho, wo) address decode is amortised over Gm channels
+    # instead of repeated per channel.
+    #
+    # The merged tile computes a Gm x Gm block of group pairs, of which only the
+    # diagonal is wanted; the epilogue masks the rest (see
+    # ``_emit_wgrad_workspace_store_epilogue``). CK gets the same effect with an
+    # xor onto a padded descriptor dim, which costs an extra magic-division scan
+    # here and buys nothing, since these epilogues already guard the store with
+    # a predicate an extra term can fold into.
+    #
+    # Default 1: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    group_merge: int = 1
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -474,6 +497,41 @@ class WgradConvSpec:
     def wg_K(self) -> int:
         return _wg_K(self.problem)
 
+    # ---- group merging (Gm) ----
+    #
+    # ``wg_M``/``wg_N`` above stay the TRUE per-group dims: they size the dW
+    # tensor and the two-stage workspace, neither of which merges. The ``grid_*``
+    # properties below are the dims the *tile* covers. At group_merge == 1 the
+    # two are equal, which is what keeps the default path byte-identical.
+
+    @property
+    def merged_problem(self) -> ConvProblem:
+        """``problem`` with Gm groups folded into one.
+
+        ``cpg``/``kpg`` are derived as ``C // groups`` / ``K // groups``, so
+        dividing the group count multiplies both -- and nothing else moves.
+        That is the whole trick: every consumer that asks the problem how wide
+        a channel run is then sees ``Gm`` instead of 1.
+        """
+        if self.group_merge <= 1:
+            return self.problem
+        return dc_replace(self.problem, groups=self.problem.groups // self.group_merge)
+
+    @property
+    def grid_M(self) -> int:
+        # GEMM-M the tile covers: kpg*Gm (CK's GemmM = K * NumGroupsToMerge).
+        return _wg_M(self.merged_problem)
+
+    @property
+    def grid_N(self) -> int:
+        # GEMM-N the tile covers: Z*Y*X*cpg*Gm (CK's GemmN = C*X*Y*Gm).
+        return _wg_N(self.merged_problem)
+
+    @property
+    def grid_groups(self) -> int:
+        # Conv groups actually launched; gridDim.z is grid_groups * split_k.
+        return self.problem.groups // max(1, self.group_merge)
+
     def wg_K_padded(self, split_k: Optional[int] = None) -> int:
         """K_wg rounded up to the nearest multiple of ``tile_k * split_k``.
 
@@ -514,6 +572,13 @@ class WgradConvSpec:
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
                 "spkrt": self.split_k == 0,
+                # Gm changes the emitted code but nothing else in the name
+                # reflects it -- p.short() carries the true group count either
+                # way. Untagged, a Gm sweep would collide on one symbol and the
+                # compile cache would hand every degree the same binary. Same
+                # reasoning as lds_k_pad above; only tagged when > 1, so the
+                # default keeps its historical name and golden.
+                f"gm{self.group_merge}": self.group_merge > 1,
                 "twostage": self.two_stage,
             },
         )
@@ -545,6 +610,11 @@ class WgradConvSpec:
                 "two_stage=True requires split_k > 1 (or split_k=-1 for auto); "
                 "with split_k=1 there is nothing to reduce and two_stage is a no-op"
             )
+        # Delegate rather than re-derive -- is_valid_wgrad_spec calls the same
+        # predicate, so the two cannot drift apart.
+        _gm_ok, _gm_why = wgrad_group_merge_available(self)
+        if not _gm_ok:
+            raise ValueError(_gm_why)
         # force_deterministic is folded in here rather than relied on being
         # already promoted: build_implicit_gemm_conv_wgrad promotes it to
         # two_stage before calling validate(), but validate() is a public method
@@ -599,6 +669,13 @@ class WgradConvSpec:
                 f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
                 f"scattered MFMA layout; cshuffle produces contiguous pairs)"
             )
+        # two_stage uses an f32 workspace store, not LDS cshuffle; cshuffle is
+        # both redundant and misleading in the kernel name.
+        if _effective_two_stage and self.epilogue == "cshuffle":
+            raise ValueError(
+                "two_stage wgrad uses an f32 workspace store epilogue; "
+                "epilogue='cshuffle' is invalid (use epilogue='default')"
+            )
         if self.async_dma and not self.lds_k_outer:
             # Direct global->LDS load is only correct on the K-outer tile.
             # `raw_ptr_buffer_load_lds` moves N *contiguous global* elements into
@@ -620,9 +697,7 @@ class WgradConvSpec:
                 "global->LDS load needs a stride-1 reduction axis, which wgrad "
                 "only has once the tile is stored K-outer"
             )
-        if self.split_k == 0 and (
-            self.async_dma or self.unroll_k or self.pipeline == "basic"
-        ):
+        if self.split_k == 0 and (self.async_dma or self.unroll_k):
             # split_k == 0 means the split degree is a launch-time kernel
             # argument, so the K-slice length is not known at build time. The
             # async and unrolled k-loops both need a compile-time trip count to
@@ -632,8 +707,7 @@ class WgradConvSpec:
             # sweep drivers swallow into a silent skip.
             raise ValueError(
                 "wgrad split_k=0 (runtime degree) is incompatible with "
-                "async_dma/unroll_k/pipeline='basic': those pipelines need a "
-                "compile-time "
+                "async_dma/unroll_k: those pipelines need a compile-time "
                 "iteration count. Use a fixed split_k >= 1."
             )
         if self.lds_k_outer:
@@ -817,6 +891,146 @@ _LDS_K_OUTER_ARCH = "gfx950"  # retained: the wave64 regime's arch
 # (pipeline='basic' and async_dma). Mirrors ROCKE_MAX_UNROLLED_K_ITERS.
 _MAX_UNROLLED_K_ITERS = 128
 
+# Group-merge degrees the merged-tile index math is written for. Powers of two
+# keep the group split (`m // kpg`, `(n // cpg) % Gm`) and the diagonal test to
+# shifts and an xor; CK constrains its own Gm to the same set.
+_GROUP_MERGE_DEGREES = (2, 4, 8, 16, 32, 64)
+
+
+def _gm_coord_splitter(b: IRBuilder, p: ConvProblem, gm: int):
+    """Return ``(split, c_zero)`` for decomposing merged accumulator coords.
+
+    Under group merging a tile covers ``Gm`` conv groups on each side, so an
+    accumulator element ``(m, n)`` carries an M-side group ``m // kpg`` and an
+    N-side group ``(n // cpg) % Gm``. Only the diagonal -- where the two agree
+    -- is real work; the rest is the off-diagonal filler the epilogue drops.
+
+    ``split(b_, c_m, c_n)`` returns ``(gm_m, km, gm_n, yx, cc)``: the two group
+    indices, the row within the group's dW slab, the filter-spatial index and
+    the channel within the group. Every caller needs the same five, and a
+    second copy of this arithmetic is how a decompaction bug gets into one
+    epilogue and not another.
+
+    The ``kpg``/``cpg`` guards are load-bearing: :class:`IRBuilder` does no
+    constant folding, so a div or mod by 1 emits real instructions rather than
+    disappearing.
+    """
+    c_gm = b.const_i32(gm)
+    c_kpg = b.const_i32(p.kpg)
+    c_cpg = b.const_i32(p.cpg)
+    c_gm_cpg = b.const_i32(gm * p.cpg)
+    c_zero = b.const_i32(0)
+
+    def split(b_: IRBuilder, c_m: Value, c_n: Value):
+        gm_m = b_.div(c_m, c_kpg) if p.kpg > 1 else c_m
+        km = b_.mod(c_m, c_kpg) if p.kpg > 1 else c_zero
+        gm_n = b_.mod(b_.div(c_n, c_cpg) if p.cpg > 1 else c_n, c_gm)
+        yx = b_.div(c_n, c_gm_cpg)
+        cc = b_.mod(c_n, c_cpg) if p.cpg > 1 else c_zero
+        return gm_m, km, gm_n, yx, cc
+
+    return split, c_zero
+
+
+def _gm_dw_addr_fn(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    dW_desc,
+    gm_group: Value,
+):
+    """Build a dW ``addr_fn`` for a group-merged tile.
+
+    The accumulator is indexed by merged coords; dW is not merged, so the
+    address is rebuilt from true coords while the diagonal test rides along in
+    the ``valid`` predicate the epilogue already ANDs into its store guard.
+    Off-diagonal elements therefore cost no store at all.
+    """
+    p = spec.problem
+    gm = spec.group_merge
+    split, c_zero = _gm_coord_splitter(b, p, gm)
+    c_gm = b.const_i32(gm)
+    c_kpg = b.const_i32(p.kpg)
+    c_cpg = b.const_i32(p.cpg)
+
+    def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+        gm_m, km, gm_n, yx, cc = split(b_, m_val, n_val)
+        # True conv group, then its row in the global [K, ...] dW slab.
+        group_true = b_.add(b_.mul(gm_group, c_gm), gm_m)
+        k_out = b_.add(b_.mul(group_true, c_kpg), km) if p.kpg > 1 else group_true
+        n_wg = b_.mul(yx, c_cpg) if p.cpg > 1 else yx
+        if p.cpg > 1:
+            n_wg = b_.add(n_wg, cc)
+        off, valid = dW_desc.offset(b_, k_out=k_out, n_wg=n_wg)
+        diag = b_.cmp_eq(b_.xor(gm_m, gm_n), c_zero)
+        return off, (b_.land(valid, diag) if valid is not None else diag)
+
+    return dw_addr
+
+
+def wgrad_group_merge_available(
+    spec: WgradConvSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for ``spec.group_merge``.
+
+    Single source of truth for :meth:`WgradConvSpec.validate` and
+    :func:`is_valid_wgrad_spec`. Two copies of a wgrad gate is exactly how the
+    dispatcher came to hand the builder a spec the builder then rejected, so
+    both delegate here rather than re-deriving.
+    """
+    gm = spec.group_merge
+    if gm == 1:
+        return True, "ok"
+    if gm not in _GROUP_MERGE_DEGREES:
+        return False, (
+            f"group_merge must be 1 or one of {_GROUP_MERGE_DEGREES}; got {gm}"
+        )
+    p = spec.problem
+    if p.groups % gm != 0:
+        return False, (
+            f"group_merge {gm} does not divide groups {p.groups}: a workgroup "
+            f"would own a partial group"
+        )
+    if p.cpg != 1 or p.kpg != 1:
+        return False, (
+            f"group_merge is implemented for depthwise only (cpg == kpg == 1); "
+            f"got cpg={p.cpg} kpg={p.kpg}. The merged index math is correct for "
+            f"wider groups but is not covered, so it is gated off."
+        )
+    if spec.wave_size != 64:
+        return False, (
+            f"group_merge is MFMA-only (wave_size 64); got wave_size="
+            f"{spec.wave_size}"
+        )
+    # Merging and split-K fix different things -- merging widens the loads and
+    # divides the grid by Gm, split-K multiplies the grid back -- so they
+    # compose, and the best depthwise configuration generally uses both. What a
+    # merged tile cannot use is the packed-atomic split-K epilogue: it has no
+    # way to drop an off-diagonal group pair, so it would accumulate garbage
+    # into a live dW element instead of skipping the store. Route split_k > 1
+    # through two-stage, whose workspace store carries the mask.
+    _effective_two_stage = (
+        spec.two_stage or spec.force_deterministic
+    ) and spec.split_k > 1
+    if (spec.split_k == 0 or spec.split_k > 1) and not _effective_two_stage:
+        return False, (
+            f"group_merge with split_k={spec.split_k} needs the two-stage path "
+            f"(two_stage=True); the packed-atomic split-K epilogue cannot drop "
+            f"off-diagonal group pairs"
+        )
+    # The merged GEMM must fit one tile, or a tile would straddle group pairs
+    # the diagonal mask cannot separate. Mirrors CK's GemmM <= MPerBlock &&
+    # GemmN <= NPerBlock gate.
+    if spec.grid_M > spec.tile_m:
+        return False, (
+            f"merged GEMM-M {spec.grid_M} (kpg*{gm}) exceeds tile_m {spec.tile_m}"
+        )
+    if spec.grid_N > spec.tile_n:
+        return False, (
+            f"merged GEMM-N {spec.grid_N} (Z*Y*X*cpg*{gm}) exceeds tile_n "
+            f"{spec.tile_n}"
+        )
+    return True, "ok"
+
 
 def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``.
@@ -831,6 +1045,10 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
+
+    _gm_ok, _gm_why = wgrad_group_merge_available(spec, arch)
+    if not _gm_ok:
+        return False, _gm_why
 
     if spec.tile_m % (spec.warp_m * spec.warp_tile_m):
         return False, "tile_m not divisible by warp_m * warp_tile_m"
@@ -926,14 +1144,16 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
             f"scattered MFMA layout; cshuffle produces contiguous pairs)"
         )
+    if _effective_two_stage and spec.epilogue == "cshuffle":
+        return False, (
+            "two_stage wgrad uses an f32 workspace store epilogue; "
+            "epilogue='cshuffle' is invalid (use epilogue='default')"
+        )
 
-    if spec.split_k == 0 and (
-        spec.async_dma or spec.unroll_k or spec.pipeline == "basic"
-    ):
+    if spec.split_k == 0 and (spec.async_dma or spec.unroll_k):
         return False, (
             "wgrad split_k=0 (runtime degree) is incompatible with "
-            "async_dma/unroll_k/pipeline='basic': those pipelines need a "
-            "compile-time iteration "
+            "async_dma/unroll_k: those pipelines need a compile-time iteration "
             "count. Use a fixed split_k >= 1."
         )
     if spec.lds_k_outer and spec.lds_k_pad is not None:
@@ -1008,21 +1228,13 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     if spec.pipeline == "basic" and spec.async_dma:
         return False, "pipeline='basic' is incompatible with async_dma=True"
 
-    if spec.pipeline == "basic" or spec.async_dma:
-        # Both loops are unrolled in Python, one full load+mfma body per K
-        # iteration, so a deep reduction explodes compile time and code size.
-        # The cap is a build-practicality bound, not a hardware one.
-        #
-        # This used to guard 'basic' only, which left async uncapped. A deep
-        # reduction at a low split-K degree then unrolled five figures of
-        # bodies into one kernel; a sweep that reached those specs exhausted
-        # host memory during the IR build rather than failing validation.
-        _label = "pipeline='basic'" if spec.pipeline == "basic" else "async_dma"
+    if spec.async_dma:
+        # async_dma is Python-unrolled; a deep reduction explodes compile time.
         _slice_k = spec.wg_K_padded() // max(spec.split_k, 1)
         _k_iters = (_slice_k + spec.tile_k - 1) // spec.tile_k
         if _k_iters > _MAX_UNROLLED_K_ITERS:
             return False, (
-                f"{_label} would unroll to {_k_iters} K iterations "
+                f"async_dma would unroll to {_k_iters} K iterations "
                 f"(slice_k={_slice_k}, tile_k={spec.tile_k}), over the "
                 f"{_MAX_UNROLLED_K_ITERS} limit; raise split_k or tile_k"
             )
@@ -1191,6 +1403,11 @@ def build_implicit_gemm_conv_wgrad(
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=arch,
+            # grid_groups, not problem.groups: a merged spec launches one
+            # workgroup per group_merge conv groups, so that is the real CTA
+            # multiplier the degree has to be sized against. Equal at gm == 1.
+            groups=spec.grid_groups,
+            block_size=spec.block_size,
         )
         spec = _dc_replace(spec, split_k=decision.split_k)
 
@@ -1210,7 +1427,15 @@ def build_implicit_gemm_conv_wgrad(
     # Grouped wgrad is grid-per-group: one workgroup per conv group, the group
     # index riding on block_id_z.  The load side (dY, X, GEMM dims, grid) is built
     # straight from the per-group problem.
-    p_load = p
+    #
+    # Under group merging the load side is built from a SYNTHETIC problem with
+    # Gm groups folded into one instead. ``cpg``/``kpg`` are derived from
+    # ``groups``, so that single substitution widens every channel run the
+    # loaders see -- GEMM bounds, dY/X vector widths, the X channel-slab embed
+    # and the async contiguity check all read ``p_load`` and need no further
+    # change. The epilogue keeps using the TRUE ``p``: dW and the two-stage
+    # workspace are per-group and do not merge.
+    p_load = spec.merged_problem
     ir_dtype_a = _ir_dtype(spec.data.dtype_a)
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
@@ -1218,7 +1443,11 @@ def build_implicit_gemm_conv_wgrad(
     _is_split_k = spec.split_k > 1 or spec.split_k == 0
     _is_two_stage = spec.split_k > 1 and spec.two_stage
     _split_k_runtime = spec.split_k == 0  # ks passed as kernel arg at launch
-    _grouped = p_load.groups > 1
+    # At group_merge == groups the merged problem has a single group, but the
+    # kernel still has to decode the K-slice off z and the epilogue still has to
+    # mask off-diagonal pairs -- so the grouped path stays engaged. Without this
+    # term the decode below is skipped and the group index is never bound.
+    _grouped = p_load.groups > 1 or spec.group_merge > 1
 
     b = IRBuilder(spec.kernel_name())
     if spec.waves_per_eu is not None:
@@ -1331,6 +1560,9 @@ def build_implicit_gemm_conv_wgrad(
     # byte-identical to the pre-grouped kernel.
     grouped = _grouped
     group_v = None
+    # K-slice index within the group, needed by the merged two-stage epilogue to
+    # rebuild the true workspace slab. None whenever merging is off.
+    slice_v = None
     if grouped:
         c_kpg = b.const_i32(p_load.kpg)  # kpg: dY output-channel slab stride
         if not _is_split_k:
@@ -1349,6 +1581,8 @@ def build_implicit_gemm_conv_wgrad(
                 z_id = b.block_id_z()
                 group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
                 slice_id = b.mod(z_id, _ks_count_param)
+                if spec.group_merge > 1:
+                    slice_v = slice_id
                 k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
             else:
                 k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
@@ -1361,6 +1595,8 @@ def build_implicit_gemm_conv_wgrad(
                 z_id = b.block_id_z()
                 group_v = b.to_sgpr_u32(b.div(z_id, c_split_k))
                 slice_id = b.mod(z_id, c_split_k)
+                if spec.group_merge > 1:
+                    slice_v = slice_id
                 k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
             else:
                 k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
@@ -1710,44 +1946,6 @@ def build_implicit_gemm_conv_wgrad(
             return _dy_kouter, _x_kouter
         return dy_descriptor, x_descriptor
 
-    def emit_global_read(k_off: Value) -> tuple:
-        """Issue only the global reads (buffer_load_vN) for one K tile.
-
-        Returns ``(k_off, a_staged, b_staged)`` -- the tile offset plus the two
-        lists of ``(row, col, v)`` triples from
-        :meth:`CoalescedTileLoader.load_global`. The caller commits them later
-        with :func:`emit_lds_write`. Sync path only; this is what lets the
-        CK pipeline_basic loop overlap VMEM latency with MFMA compute.
-
-        ``k_off`` is carried in the tuple because wgrad's offsets are
-        ``add(k_lo, const)`` -- a real emitted op, unlike the forward conv's
-        cached ``const_i32`` -- so re-deriving it in :func:`emit_lds_write`
-        would strand an extra add after the barrier.
-        """
-        k_off_capture[0] = k_off
-        a_desc_fn, b_desc_fn = _split_desc_fns()
-        a_staged = a_sync_loader.load_global(
-            b, tid=tid, descriptor=a_desc_fn, rsrc=dy_rsrc
-        )
-        b_staged = b_sync_loader.load_global(
-            b, tid=tid, descriptor=b_desc_fn, rsrc=x_rsrc
-        )
-        return k_off, a_staged, b_staged
-
-    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
-        """Commit previously staged VGPR values to LDS.
-
-        Restores ``k_off_capture`` so any descriptor consulted here sees the
-        offset the values were read at, even though the read and the write sit
-        in different loop positions. ``store_lds`` funnels through the same
-        ``_store_tile`` as the fused loader, so ``vector_axis="row"`` replays
-        the transpose-on-store scatter unchanged.
-        """
-        k_off, a_staged, b_staged = staged_tuple
-        k_off_capture[0] = k_off
-        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
-        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
-
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -1958,51 +2156,6 @@ def build_implicit_gemm_conv_wgrad(
             b.sync()
 
         final_accs = current_accs
-    elif spec.pipeline == "basic":
-        # CK pipeline_basic: single LDS buffer, global-read/compute overlap.
-        #
-        # The buffer_load_vN for tile it+1 is issued BEFORE the sync+mfma for
-        # tile it, so the VMEM latency hides behind the MFMA stream. The LDS
-        # write is deferred past the second sync -- once every ds_read for tile
-        # it has drained -- which is what makes one buffer sufficient: the tile
-        # it+1 data waits in VGPRs, not in a second LDS tile. unroll_k needs
-        # A_smem2/B_smem2 precisely because it moves the *store* inside the
-        # read window; this does not.
-        #
-        # Per iteration:
-        #   emit_global_read(k_lo + (it+1)*block_k)   buffer_load, in flight
-        #   sync()      drain the previous ds_write   -> tile it RAW-safe
-        #   k_off_capture = k_lo + it*block_k         descriptors address tile it
-        #   emit_mfma_phase                           ds_read + mfma
-        #   sync()      drain the ds_reads            -> buffer WAR-safe
-        #   emit_lds_write(staged it+1)               ds_write
-        #
-        # Each k offset is materialised once and carried in the staged tuple:
-        # wgrad's offsets are add(k_lo, const), so re-deriving one in
-        # emit_lds_write would emit a stray add after the barrier.
-        slice_k = wg_K if k_hi is None else (spec.wg_K_padded() // spec.split_k)
-        K_iters = (slice_k + block_k - 1) // block_k
-        current_accs = [v for _, v in accs]
-
-        # Prologue: read tile 0 and commit it immediately -- no prior ds_read
-        # exists to drain, so the write needs no barrier in front of it.
-        emit_lds_write(emit_global_read(k_lo), A_smem, B_smem)
-
-        pending_staged = None
-        for it in range(K_iters):
-            if it + 1 < K_iters:
-                pending_staged = emit_global_read(
-                    b.add(k_lo, b.const_i32((it + 1) * block_k))
-                )
-            b.sync()
-            k_off_capture[0] = b.add(k_lo, b.const_i32(it * block_k))
-            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-            b.sync()
-            if pending_staged is not None:
-                emit_lds_write(pending_staged, A_smem, B_smem)
-                pending_staged = None
-
-        final_accs = current_accs
     elif not spec.async_dma:
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
@@ -2061,6 +2214,8 @@ def build_implicit_gemm_conv_wgrad(
             block_n_off_v,
             ws_ptr,
             c_per_lane,
+            gm_group=group_v,
+            gm_slice=slice_v,
         )
     elif _is_split_k and op.family == "wmma":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
@@ -2506,6 +2661,12 @@ def _emit_wgrad_direct_epilogue(
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
 
+    elif group is not None and spec.group_merge > 1:
+        # Group-merged: the tile covers Gm groups per side. Rebuild the true dW
+        # address from the merged coords and drop off-diagonal group pairs.
+        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+        dw_addr = _gm_dw_addr_fn(b, spec, dW_desc, group)
+
     elif group is not None:
         # Grouped: dW packed [K,Y,X,cpg]; the group rides on the global k_out
         # only (m_val is the per-group [0,kpg) row).
@@ -2527,7 +2688,9 @@ def _emit_wgrad_direct_epilogue(
         accs=accs,
         addr_fn=dw_addr,
         d_rsrc=dw_rsrc,
-        bounds=(b.const_i32(_wg_M(p)), b.const_i32(_wg_N(p))),
+        # Merged tiles are bounded by what the TILE covers; the address above
+        # maps back to the true per-group dW position.
+        bounds=(b.const_i32(spec.grid_M), b.const_i32(spec.grid_N)),
     )
 
 
@@ -2634,6 +2797,14 @@ def _emit_wgrad_cshuffle_epilogue(
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
 
+    elif group is not None and spec.group_merge > 1:
+        # Group-merged: rebuild the true dW address from merged coords and mask
+        # the off-diagonal group pairs. Safe to do per element here because the
+        # store stays scalar -- cpg == 1 under the group-merge gate, so the
+        # vector width derived below is 1.
+        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+        dw_addr = _gm_dw_addr_fn(b, spec, dW_desc, group)
+
     elif group is not None:
         dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
         _c_kpg = b.const_i32(p.kpg)
@@ -2665,7 +2836,9 @@ def _emit_wgrad_cshuffle_epilogue(
         accs=accs,
         addr_fn=dw_addr,
         d_rsrc=dw_rsrc,
-        bounds=(b.const_i32(_wg_M(p)), b.const_i32(_wg_N(p))),
+        # Merged tiles are bounded by what the TILE covers; the address fn maps
+        # back to the true per-group dW position.
+        bounds=(b.const_i32(spec.grid_M), b.const_i32(spec.grid_N)),
     )
 
 
@@ -2681,6 +2854,8 @@ def _emit_wgrad_workspace_store_epilogue(
     block_n_off: Value,
     ws_ptr: Value,
     c_per_lane: int,
+    gm_group: Optional[Value] = None,
+    gm_slice: Optional[Value] = None,
 ) -> None:
     """Two-stage Stage 1 epilogue: plain f32 store to workspace slice.
 
@@ -2694,6 +2869,15 @@ def _emit_wgrad_workspace_store_epilogue(
     ``dtype_d``; the dtype conversion happens in Stage 2 (workspace reduce).
     Out-of-bounds elements are guarded by ``scf_if`` — a plain ``global_store``
     to a sentinel offset would compute a real address and fault on AMD GPUs.
+
+    Under group merging the tile covers a ``Gm x Gm`` block of group pairs and
+    only the diagonal is real work, so the store predicate gains an equality
+    test. The workspace does NOT merge -- it keeps its true
+    ``[groups * split_k, wg_M, wg_N]`` shape, so Stage 2 needs no changes --
+    which means the address is rebuilt from true coordinates while the
+    accumulator *bounds* come from the merged dims. Getting that backwards
+    writes ``(1 - 1/Gm) * K`` silently-zero dW rows, which is what the
+    row-coverage guard in the correctness suite exists to catch.
     """
     p = spec.problem
     mfmas_m = spec.mfmas_per_warp_m
@@ -2710,6 +2894,25 @@ def _emit_wgrad_workspace_store_epilogue(
     # Workspace total size = groups * split_k * wg_M * wg_N (f32 elements).
     k_id = b.to_sgpr_u32(b.block_id_z())
     slice_off = b.mul(k_id, b.const_i32(wg_M * wg_N))
+
+    # Merged-path setup. Only materialised when gm > 1: IRBuilder.const_i32
+    # does no folding or CSE, so an unconditional constant would renumber every
+    # downstream SSA value and break byte-identity on the default path.
+    gm = spec.group_merge
+    bound_m_v, bound_n_v = wg_M_v, wg_N_v
+    if gm > 1:
+        if gm_group is None or gm_slice is None:
+            raise ValueError(
+                "group_merge > 1 needs the merged group and K-slice indices; "
+                "the caller must pass gm_group/gm_slice"
+            )
+        _gm_split, c_zero_v = _gm_coord_splitter(b, p, gm)
+        c_gm_v = b.const_i32(gm)
+        c_cpg_v = b.const_i32(p.cpg)
+        c_split_k_v = b.const_i32(spec.split_k)
+        c_slab_v = b.const_i32(wg_M * wg_N)
+        bound_m_v = b.const_i32(spec.grid_M)
+        bound_n_v = b.const_i32(spec.grid_N)
 
     # Per-warp M/N offsets (same as the atomic epilogue).
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
@@ -2749,7 +2952,26 @@ def _emit_wgrad_workspace_store_epilogue(
                 val_f32 = b.vec_extract(acc, i)
                 # OOB guard via conditional — global_store to a sentinel offset
                 # would compute a real address and fault; use scf_if instead.
-                in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
-                with b.scf_if(in_bounds):
-                    ws_off = b.add(slice_off, b.add(b.mul(c_m, wg_N_v), c_n))
-                    b.global_store(ws_ptr, ws_off, val_f32, align=4)
+                if gm == 1:
+                    in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+                    with b.scf_if(in_bounds):
+                        ws_off = b.add(slice_off, b.add(b.mul(c_m, wg_N_v), c_n))
+                        b.global_store(ws_ptr, ws_off, val_f32, align=4)
+                else:
+                    gm_m, km, gm_n, yx, cc = _gm_split(b, c_m, c_n)
+                    in_bounds = b.land(
+                        b.land(b.cmp_lt(c_m, bound_m_v), b.cmp_lt(c_n, bound_n_v)),
+                        b.cmp_eq(b.xor(gm_m, gm_n), c_zero_v),
+                    )
+                    with b.scf_if(in_bounds):
+                        # True conv group, then its (kpg, Z*Y*X*cpg) slab.
+                        group_true = b.add(b.mul(gm_group, c_gm_v), gm_m)
+                        slice_true = b.add(b.mul(group_true, c_split_k_v), gm_slice)
+                        n_true = b.mul(yx, c_cpg_v) if p.cpg > 1 else yx
+                        if p.cpg > 1:
+                            n_true = b.add(n_true, cc)
+                        ws_off = b.add(
+                            b.mul(slice_true, c_slab_v),
+                            b.add(b.mul(km, wg_N_v), n_true),
+                        )
+                        b.global_store(ws_ptr, ws_off, val_f32, align=4)

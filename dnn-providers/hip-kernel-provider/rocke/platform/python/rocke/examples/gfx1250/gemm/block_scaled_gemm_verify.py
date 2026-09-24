@@ -3,7 +3,7 @@
 """Launch gfx1250 block-scaled GEMM and compare with an independent reference.
 
 The default invocation keeps the K=64 FP8/BF8 WMMA + FP32-scale verifier.
-Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use FP8 and E8M0
+Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use FP8/BF8 and E8M0
 scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
 bounded dyadic values, permitting exact comparison after BF16 rounding.
 
@@ -29,7 +29,9 @@ import numpy as np
 
 from ....helpers import compile_kernel
 from ....helpers.compile import compile_kernel_via_hipcc
+from ....core.dtypes import normalize_dtype
 from ....instances.gfx1250.block_scaled_gemm import (
+    _LOWBIT_DTYPES,
     BlockScaledGemmSpec,
     block_scaled_gemm_grid,
     build_block_scaled_gemm,
@@ -211,7 +213,7 @@ def run_cases(
             inputs = make_case_inputs(spec, case)
             expected = reference_result(*inputs, spec.block_k, native=native)
             label = (
-                f"{spec.resolved_matrix_path()}/{compile_route}/{case} "
+                f"{spec.resolved_matrix_path()}/{spec.dtype_a}/{compile_route}/{case} "
                 f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k}"
             )
             got = _launch(rt, fn, spec, inputs)
@@ -233,7 +235,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--n", type=int, default=16)
     p.add_argument("--k", type=int, default=128)
     p.add_argument("--block-k", type=int, default=None)
-    p.add_argument("--dtype", default="fp8e4m3", choices=("fp8e4m3", "bf8e5m2"))
+    p.add_argument(
+        "--dtype",
+        default="fp8e4m3",
+        type=normalize_dtype,
+        choices=sorted(_LOWBIT_DTYPES),
+    )
     p.add_argument("--tol", type=float, default=2e-2, help="legacy WMMA tolerance only")
     p.add_argument(
         "--matrix-path", default="wmma", choices=("wmma", "wmma_scale", "wmma_scale16")

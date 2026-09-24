@@ -153,7 +153,8 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                                          Rpp32u* numBoxesTensor, Rpp32u maxBoxesPerImage,
                                          RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                          rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = dstDescPtr->w;
     int globalThreads_y = dstDescPtr->h;
@@ -187,6 +188,7 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                                dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
             globalThreads_x = dstDescPtr->w;
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         }
@@ -199,6 +201,7 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                            handle.GetStream(), dstPtr,
                            make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc, maxBoxesPerImage);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && dstDescPtr->c == 1) {
         RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
@@ -215,6 +218,7 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                       dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc, maxBoxesPerImage);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && dstDescPtr->c == 3) {
         RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
@@ -231,6 +235,7 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                       dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc, maxBoxesPerImage);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
         if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             globalThreads_x = (dstDescPtr->w + 7) >> 3;
@@ -245,6 +250,7 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                           dstDescPtr->strides.hStride),
                                roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
             globalThreads_x = dstDescPtr->w;
             hipLaunchKernelGGL(coarse_dropout_pln3_hip_tensor,
@@ -257,6 +263,7 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                                           dstDescPtr->strides.hStride),
                                anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc,
                                maxBoxesPerImage);
+            HIP_CHECK_LAUNCH_RETURN();
         }
     }
 
