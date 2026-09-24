@@ -127,7 +127,7 @@ for line in (out / "engines.log").read_text(errors="replace").splitlines():
     if match:
         value = int(match.group(2), 16)
         engines.append((match.group(1), value - (1 << 64) if value >= (1 << 63) else value))
-graphs = sorted((corpus / "graphs").glob("*.json"))
+graphs = sorted([*(corpus / "graphs").glob("*.json"), *(corpus / "graphs").glob("*.fb")])
 rows = []
 for graph in graphs:
     for name, engine_id in engines:

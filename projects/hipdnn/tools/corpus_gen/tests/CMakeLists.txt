@@ -5,7 +5,7 @@ find_package(Threads REQUIRED)
 # handling and logging that nothing here touches.
 add_executable(hipdnn_corpus_gen_tests
     TestFeasibleRegionProbe.cpp TestFeasibleShapeSet.cpp TestOperationMetadata.cpp
-    TestProblemSpace.cpp TestGraphBuilderRegistry.cpp TestWorkloadSampling.cpp TestCorpusRealism.cpp TestGraphSize.cpp TestEveryGraphBuilder.cpp TestCorpusOutput.cpp TestOperationDirectory.cpp)
+    TestProblemSpace.cpp TestGraphBuilderRegistry.cpp TestWorkloadSampling.cpp TestCorpusRealism.cpp TestGraphSize.cpp TestEveryGraphBuilder.cpp TestCorpusOutput.cpp TestOperationDirectory.cpp TestPoolAssembly.cpp TestRegimeLabel.cpp TestCorpusManifest.cpp TestGraphIdentity.cpp TestDeclaredOracle.cpp TestKernelCatalogSource.cpp TestPointFilter.cpp TestModelShapeSource.cpp TestEngineCoverage.cpp)
 
 target_compile_options(hipdnn_corpus_gen_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 

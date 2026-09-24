@@ -125,6 +125,22 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
 
         case BuilderArgument::Kind::EXPR:
         {
+            if(argument.scalarExpression)
+            {
+                try
+                {
+                    auto work = argument.expressions.workspace();
+                    resolved.value = hipdnn_plugin_sdk::uhd::expression::Program::number(
+                        argument.expressions.evaluate(0, context, work));
+                }
+                catch(const std::exception& error)
+                {
+                    resolution.error = "argument '" + argument.name + "': " + error.what();
+                    return resolution;
+                }
+                break;
+            }
+
             // All dimension expressions share a compiled descriptor program.
             std::vector<int64_t> dims;
             dims.reserve(argument.expressions.size());
