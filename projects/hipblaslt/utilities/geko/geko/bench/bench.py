@@ -27,11 +27,12 @@ import numpy as np
 from threading import Lock
 from tqdm import tqdm
 from pathlib import Path
-from typing import Sequence
+from typing import List, Sequence
 
 from geko.bench.utils import parse_benchmark_output, update_lib_source, is_built_custom_library
 from geko import library
-from geko.constants import GEMM_FIELDS
+from geko.constants import GEMM_FIELDS, GEMM_LOG_FIELDS
+from geko.bench import log
 from geko.bench.log import verify_output, dump as dump_bench_yaml, read as read_bench_yaml
 from geko.concurrency.runner import Runner, Worker
 from geko.utils import parse_devices
@@ -56,6 +57,7 @@ UNIQ_COLS = (
     "avg_MCLK", 
     "median_MCLK"
 )
+
 
 def run(
     hipblaslt_path: str | Path,
@@ -323,9 +325,15 @@ def standard_benchmark(
             f"Probe output rows ({len(df_probe)}) do not match bench rows ({len(rows)}); "
             f"check '{probe_out}'"
         )
+    df_probe = log.realign_rows(rows, df_probe)
 
     scaled_rows = copy.deepcopy(rows)
     for i, row in enumerate(scaled_rows):
+        assert all([
+            row["M"] == df_probe["M"].iloc[i],
+            row["N"] == df_probe["N"].iloc[i],
+            row["K"] == df_probe["K"].iloc[i]
+        ])
         us = float(df_probe["us"].iloc[i])
         if math.isfinite(us) and us > 0:
             scaled = max(math.ceil(duration * 1e6 / us), 1)
