@@ -46,6 +46,9 @@ void tensorBindings(nb::module_& m)
         .def("set_output", &TensorAttributes::set_output, nb::rv_policy::reference_internal)
         .def("set_value", &TensorAttributes::set_value<float>, nb::rv_policy::reference_internal)
         .def("get_is_pass_by_value", &TensorAttributes::get_is_pass_by_value)
+        .def("set_is_pass_by_value",
+             &TensorAttributes::set_is_pass_by_value,
+             nb::rv_policy::reference_internal)
         .def("get_volume", &TensorAttributes::get_volume)
         .def("has_uid", &TensorAttributes::has_uid)
         .def("clear_uid", &TensorAttributes::clear_uid, nb::rv_policy::reference_internal)

@@ -14,16 +14,17 @@
 namespace hipdnn_python
 {
 
-// Resolves an int pointer, a DeviceBuffer, or a __dlpack__ producer on the
-// current ROCm device to a raw device pointer. The DLPack byte offset is
-// applied and no data is copied. `what` prefixes error messages.
-void* toDevicePointer(nanobind::handle value, const std::string& what);
+// Resolves a variant-pack value to a raw pointer, matching cuDNN: an int
+// pointer, a DeviceBuffer, an object with data_ptr(), or a __dlpack__ producer
+// in host (cpu), ROCm, or pinned host (rocm_host) memory. The DLPack byte
+// offset is applied and no data is copied. `what` prefixes error messages.
+void* toDataPointer(nanobind::handle value, const std::string& what);
 
-// Converts a {uid: value} dict with toDevicePointer() on each value.
+// Converts a {uid or Tensor: value} dict with toDataPointer() on each value.
 std::unordered_map<int64_t, void*> toVariantPack(const nanobind::dict& variantPack);
 
 // Builds tensor metadata (dims, strides, data type) from a __dlpack__ producer.
-// A single-element host (CPU) tensor becomes a compile-time-constant scalar.
+// As in cuDNN, a host (cpu) tensor becomes a runtime pass-by-value tensor.
 std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
     tensorAttributesFromDlpack(nanobind::handle obj, const std::string& name);
 

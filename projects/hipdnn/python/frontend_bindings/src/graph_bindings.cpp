@@ -66,14 +66,13 @@ hipdnnHandle_t optionalRawHandle(const nb::object& handle)
     return reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 }
 
-// Shared body for both autotune() bindings. The UID-keyed and tensor-keyed variant
-// packs differ only in their key type, which Graph::autotune() itself overloads on.
-// Pointers cross the boundary as integers, exactly as the execute() binding does.
-template <typename KeyT>
+// Shared body for the autotune() binding. variant_pack keys may be tensor UIDs or
+// tensors, and values take the same kinds as execute(), so the conversion happens
+// here, while the GIL is still held.
 std::vector<AutotuneResult> autotunePy(graph::Graph& g,
                                        const nb::object& handle,
-                                       const std::unordered_map<KeyT, uintptr_t>& variantPack,
-                                       uintptr_t workspace,
+                                       const nb::dict& variantPack,
+                                       const nb::object& workspace,
                                        std::optional<int64_t> workspaceSize,
                                        const AutotuneConfig& config,
                                        const AutotuneStorageConfig& storageConfig)
@@ -82,16 +81,9 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-    std::unordered_map<KeyT, void*> cppVariantPack;
-    cppVariantPack.reserve(variantPack.size());
-    for(const auto& [key, value] : variantPack)
-    {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        cppVariantPack[key] = reinterpret_cast<void*>(value);
-    }
-
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    void* workspacePtr
+        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
 
     // Benchmarking touches no Python object: config/settings are native types, and
     // AutotuneConfig::rankingFn (the one field that could call back into Python) is
@@ -125,14 +117,13 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
 // benchmarking, accepts no sweep/variant parameter, and returns both the per-engine
 // results and the exact-match cache write outcome as a tuple, since nanobind does not
 // expose C++ out-parameters to Python.
-//
-// Only a UID-keyed variant pack is bound, because Graph::autotuneExhaustiveSweep()
-// itself takes only that form.
+// Only a UID-keyed variant pack reaches C++, because Graph::autotuneExhaustiveSweep()
+// itself takes only that form; tensor keys are mapped to their UIDs first.
 std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
     autotuneExhaustiveSweepPy(graph::Graph& g,
                               const nb::object& handle,
-                              const std::unordered_map<int64_t, uintptr_t>& variantPack,
-                              uintptr_t workspace,
+                              const nb::dict& variantPack,
+                              const nb::object& workspace,
                               int64_t workspaceSize,
                               const AutotuneConfig& config,
                               const AutotuneStorageConfig& storageConfig)
@@ -141,16 +132,9 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-    std::unordered_map<int64_t, void*> cppVariantPack;
-    cppVariantPack.reserve(variantPack.size());
-    for(const auto& [key, value] : variantPack)
-    {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        cppVariantPack[key] = reinterpret_cast<void*>(value);
-    }
-
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    void* workspacePtr = workspace != 0U ? reinterpret_cast<void*>(workspace) : nullptr;
+    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    void* workspacePtr
+        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
 
     // Same rationale as autotunePy: benchmarking touches no Python object, so the GIL
     // can be released for the duration of what may be a minutes-long call.
@@ -293,7 +277,7 @@ void graphBindings(nb::module_& m)
                 auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
                 void* workspacePtr = workspace.is_none()
                                          ? nullptr
-                                         : hipdnn_python::toDevicePointer(workspace, "workspace");
+                                         : hipdnn_python::toDataPointer(workspace, "workspace");
 
                 return g.execute(rawHandle, cppVariantPack, workspacePtr);
             },
@@ -301,9 +285,11 @@ void graphBindings(nb::module_& m)
             nb::arg("variant_pack"),
             nb::arg("workspace") = 0,
             "Execute the graph with the given handle, variant pack, and optional workspace. "
-            "variant_pack values and workspace may be int pointers, DeviceBuffer objects, or "
-            "__dlpack__ producers on the current ROCm device; callers must keep producers "
-            "alive until the HIP work completes.")
+            "variant_pack keys are tensor UIDs or tensors. Values and workspace may be int "
+            "pointers, DeviceBuffer objects, objects with data_ptr(), or __dlpack__ "
+            "producers in host, ROCm, or pinned host memory; a runtime pass-by-value "
+            "tensor takes a host tensor. Callers must keep producers alive until the HIP "
+            "work completes.")
         .def("get_execution_plan_count",
              &graph::Graph::get_execution_plan_count,
              "Number of compiled plans, including ones that failed to compile. Use with "
@@ -344,7 +330,7 @@ void graphBindings(nb::module_& m)
                 auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
                 void* workspacePtr = workspace.is_none()
                                          ? nullptr
-                                         : hipdnn_python::toDevicePointer(workspace, "workspace");
+                                         : hipdnn_python::toDataPointer(workspace, "workspace");
 
                 return g.execute_plan_at_index(rawHandle, cppVariantPack, workspacePtr, planIndex);
             },
@@ -354,9 +340,8 @@ void graphBindings(nb::module_& m)
             nb::arg("plan_index"),
             "Execute one compiled plan without making it active. Returns an Error whose "
             "is_bad() is set for an out-of-bounds, barred or uncompiled plan, so a manual "
-            "tuning loop can skip it and continue. variant_pack values and workspace may be "
-            "int pointers, DeviceBuffer objects, or __dlpack__ producers on the current ROCm "
-            "device; callers must keep producers alive until the HIP work completes.")
+            "tuning loop can skip it and continue. variant_pack and workspace accept the "
+            "same keys and values as execute().")
         .def(
             "get_workspace_size_plan_at_index",
             [](const graph::Graph& g, int64_t planIndex) {
@@ -499,7 +484,7 @@ void graphBindings(nb::module_& m)
              nb::rv_policy::reference_internal,
              "Bar plans belonging to these engine IDs.")
         .def("autotune",
-             &autotunePy<int64_t>,
+             &autotunePy,
              nb::arg("handle"),
              nb::arg("variant_pack"),
              nb::arg("workspace") = 0,
@@ -507,7 +492,8 @@ void graphBindings(nb::module_& m)
              nb::arg("config") = AutotuneConfig{},
              nb::arg("storage_config") = AutotuneStorageConfig{},
              "Benchmark autotune candidates and return one AutotuneResult per candidate.\n"
-             "variant_pack maps either tensor UIDs or tensors to device pointers.\n"
+             "variant_pack maps tensor UIDs or tensors to the same value kinds execute() "
+             "accepts.\n"
              "Pass workspace_size for the plan-spec path added via add_engine_*(), sized "
              "with get_estimated_max_workspace_size(); omit it for the compiled-plan path "
              "built with build_plans(BuildPlanPolicy.ALL), sized with "
@@ -517,15 +503,6 @@ void graphBindings(nb::module_& m)
              "The two C++ overloads taking a trailing userImpl pointer are not bound: that "
              "argument exists for cuDNN signature compatibility and is ignored, so calling "
              "this method covers them.")
-        .def("autotune",
-             &autotunePy<std::shared_ptr<graph::TensorAttributes>>,
-             nb::arg("handle"),
-             nb::arg("variant_pack"),
-             nb::arg("workspace") = 0,
-             nb::arg("workspace_size") = nb::none(),
-             nb::arg("config") = AutotuneConfig{},
-             nb::arg("storage_config") = AutotuneStorageConfig{},
-             "autotune() overload taking a tensor-keyed variant pack.")
         .def("autotune_exhaustive_sweep",
              &autotuneExhaustiveSweepPy,
              nb::arg("handle"),
@@ -757,7 +734,8 @@ void graphBindings(nb::module_& m)
             nb::arg("tensor"),
             nb::arg("name") = "",
             "Create a tensor with the metadata of a hipdnn Tensor or a __dlpack__ producer. "
-            "A single-element host tensor becomes a compile-time-constant scalar.")
+            "As in cuDNN, a host (cpu) producer becomes a runtime pass-by-value tensor "
+            "whose value is passed to execute() as a host tensor.")
         .def(
             "to_json",
             [](graph::Graph& g) {
@@ -825,11 +803,12 @@ void graphBindings(nb::module_& m)
             "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
             "Call build_operation_graph(handle) after to finalize for execution.");
 
-    // Private test hook: resolves a variant-pack value exactly as execute() does.
+    // Private test hook, named as in cuDNN: resolves a variant-pack value exactly as
+    // execute() does.
     m.def(
-        "_dlpack_device_ptr",
+        "_get_data_ptr",
         [](nb::handle value) {
-            return reinterpret_cast<uintptr_t>(hipdnn_python::toDevicePointer(value, "value"));
+            return reinterpret_cast<uintptr_t>(hipdnn_python::toDataPointer(value, "value"));
         },
         nb::arg("value"));
 }

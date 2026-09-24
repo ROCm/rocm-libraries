@@ -4,11 +4,9 @@
 #include "dlpack_adapter.hpp"
 #include "device_buffer.hpp"
 
-#include <hip/hip_runtime.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <nanobind/ndarray.h>
 
-#include <cstring>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -147,60 +145,27 @@ std::optional<DataType> toDataType(const nb::dlpack::dtype& dt)
     return std::nullopt;
 }
 
-template <typename T>
-T readScalar(const void* src)
+// Same device set cuDNN accepts (kDLCPU, kDLCUDAHost, kDLCUDA), mapped to ROCm.
+bool isSupportedDevice(int deviceType)
 {
-    T value{};
-    std::memcpy(&value, src, sizeof(T));
-    return value;
+    return deviceType == nb::device::cpu::value || deviceType == nb::device::rocm::value
+           || deviceType == nb::device::rocm_host::value;
 }
 
-void setHostScalar(TensorAttributes& tensor,
-                   DataType dataType,
-                   const void* src,
-                   const nb::dlpack::dtype& dt)
+std::string unsupportedDeviceText(int deviceType)
 {
-    switch(dataType)
-    {
-    case DataType::FLOAT:
-        tensor.set_value(readScalar<float>(src));
-        return;
-    case DataType::DOUBLE:
-        tensor.set_value(readScalar<double>(src));
-        return;
-    case DataType::HALF:
-        tensor.set_value(readScalar<hipdnn_frontend::half>(src));
-        return;
-    case DataType::BFLOAT16:
-        tensor.set_value(readScalar<hipdnn_frontend::bfloat16>(src));
-        return;
-    case DataType::UINT8:
-        tensor.set_value(readScalar<uint8_t>(src));
-        return;
-    case DataType::INT32:
-        tensor.set_value(readScalar<int32_t>(src));
-        return;
-    case DataType::INT64:
-        tensor.set_value(readScalar<int64_t>(src));
-        return;
-    case DataType::BOOLEAN:
-        tensor.set_value(readScalar<uint8_t>(src) != 0);
-        return;
-    default:
-        throw nb::value_error(("tensor_like(): host scalar dtype " + dtypeText(dt)
-                               + " is not supported for pass-by-value")
-                                  .c_str());
-    }
+    return "unsupported DLPack device_type=" + std::to_string(deviceType)
+           + "; expected cpu (1), rocm (10), or rocm_host (11)";
 }
 
 } // namespace
 
-void* toDevicePointer(nb::handle value, const std::string& what)
+void* toDataPointer(nb::handle value, const std::string& what)
 {
     // bool is a subclass of int in Python, so reject it before the int check.
     if(nb::isinstance<nb::bool_>(value))
     {
-        throw nb::type_error((what + ": bool is not a device pointer").c_str());
+        throw nb::type_error((what + ": bool is not a data pointer").c_str());
     }
     if(nb::isinstance<nb::int_>(value))
     {
@@ -211,35 +176,31 @@ void* toDevicePointer(nb::handle value, const std::string& what)
     {
         return nb::cast<DeviceBuffer&>(value).ptr();
     }
+    // cuDNN order: data_ptr() before the DLPack fallback. For torch it is the
+    // same address as DLPack (storage offset included) without a capsule round trip.
+    if(nb::hasattr(value, "data_ptr"))
+    {
+        const nb::object dataPtr = value.attr("data_ptr");
+        if(nb::isinstance<nb::callable>(dataPtr))
+        {
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            return reinterpret_cast<void*>(nb::cast<uintptr_t>(dataPtr()));
+        }
+    }
     if(nb::hasattr(value, "__dlpack__"))
     {
         const nb::ndarray<> array = importDlpack(value, what);
-        if(array.device_type() != nb::device::rocm::value)
+        if(!isSupportedDevice(array.device_type()))
         {
             throw nb::value_error(
-                (what
-                 + ": DLPack tensor must be ROCm device memory (device_type=10), got device_type="
-                 + std::to_string(array.device_type()))
-                    .c_str());
-        }
-        int currentDevice = 0;
-        const auto status = hipGetDevice(&currentDevice);
-        if(status != hipSuccess)
-        {
-            throw std::runtime_error("hipGetDevice failed: "
-                                     + std::string(hipGetErrorString(status)));
-        }
-        if(array.device_id() != currentDevice)
-        {
-            throw nb::value_error(
-                (what + ": DLPack tensor is on device " + std::to_string(array.device_id())
-                 + " but the current HIP device is " + std::to_string(currentDevice))
-                    .c_str());
+                (what + ": " + unsupportedDeviceText(array.device_type())).c_str());
         }
         return array.data();
     }
     throw nb::type_error(
-        (what + ": expected int, DeviceBuffer, or an object implementing __dlpack__, got "
+        (what
+         + ": expected int, DeviceBuffer, an object with data_ptr(), or an object implementing "
+           "__dlpack__, got "
          + nb::type_name(value.type()).c_str())
             .c_str());
 }
@@ -250,12 +211,26 @@ std::unordered_map<int64_t, void*> toVariantPack(const nb::dict& variantPack)
     result.reserve(variantPack.size());
     for(const auto& [key, value] : variantPack)
     {
-        if(!nb::isinstance<nb::int_>(key) || nb::isinstance<nb::bool_>(key))
+        int64_t uid = 0;
+        if(nb::isinstance<TensorAttributes>(key))
         {
-            throw nb::type_error("variant_pack keys must be int tensor UIDs");
+            const auto& tensor = nb::cast<const TensorAttributes&>(key);
+            if(!tensor.has_uid())
+            {
+                throw nb::value_error(
+                    ("variant_pack key tensor '" + tensor.get_name() + "' has no uid").c_str());
+            }
+            uid = tensor.get_uid();
         }
-        const auto uid = nb::cast<int64_t>(key);
-        result[uid] = toDevicePointer(value, "variant_pack[" + std::to_string(uid) + "]");
+        else if(nb::isinstance<nb::int_>(key) && !nb::isinstance<nb::bool_>(key))
+        {
+            uid = nb::cast<int64_t>(key);
+        }
+        else
+        {
+            throw nb::type_error("variant_pack keys must be Tensor objects or int tensor UIDs");
+        }
+        result[uid] = toDataPointer(value, "variant_pack[" + std::to_string(uid) + "]");
     }
     return result;
 }
@@ -270,6 +245,11 @@ std::shared_ptr<TensorAttributes> tensorAttributesFromDlpack(nb::handle obj,
     }
     const nb::ndarray<> array = importDlpack(obj, "tensor_like()");
 
+    const int deviceType = array.device_type();
+    if(!isSupportedDevice(deviceType))
+    {
+        throw nb::value_error(("tensor_like(): " + unsupportedDeviceText(deviceType)).c_str());
+    }
     const auto dt = array.dtype();
     if(dt.lanes != 1)
     {
@@ -281,49 +261,39 @@ std::shared_ptr<TensorAttributes> tensorAttributesFromDlpack(nb::handle obj,
         throw nb::value_error(("tensor_like(): unsupported DLPack dtype " + dtypeText(dt)).c_str());
     }
 
-    auto tensor = std::make_shared<TensorAttributes>();
-    const int deviceType = array.device_type();
-    if(deviceType == nb::device::cpu::value && array.size() == 1)
+    const size_t ndim = array.ndim();
+    std::vector<int64_t> dims(ndim);
+    std::vector<int64_t> strides(ndim);
+    for(size_t i = 0; i < ndim; ++i)
     {
-        setHostScalar(*tensor, *dataType, array.data(), dt);
+        dims[i] = static_cast<int64_t>(array.shape(i));
     }
-    else if(deviceType == nb::device::cpu::value || deviceType == nb::device::rocm::value)
+    if(array.stride_ptr() == nullptr)
     {
-        const size_t ndim = array.ndim();
-        std::vector<int64_t> dims(ndim);
-        std::vector<int64_t> strides(ndim);
-        for(size_t i = 0; i < ndim; ++i)
+        // DLPack: null strides mean compact row-major.
+        int64_t stride = 1;
+        for(size_t i = ndim; i > 0; --i)
         {
-            dims[i] = static_cast<int64_t>(array.shape(i));
+            strides[i - 1] = stride;
+            stride *= dims[i - 1];
         }
-        if(ndim == 0)
-        {
-            dims = strides = {1};
-        }
-        else if(array.stride_ptr() == nullptr)
-        {
-            strides[ndim - 1] = 1;
-            for(size_t i = ndim - 1; i > 0; --i)
-            {
-                strides[i - 1] = strides[i] * dims[i];
-            }
-        }
-        else
-        {
-            for(size_t i = 0; i < ndim; ++i)
-            {
-                strides[i] = array.stride(i);
-            }
-        }
-        tensor->set_dim(dims).set_stride(strides).set_data_type(*dataType);
     }
     else
     {
-        throw nb::value_error(("tensor_like(): unsupported DLPack device_type="
-                               + std::to_string(deviceType) + "; expected cpu (1) or rocm (10)")
-                                  .c_str());
+        for(size_t i = 0; i < ndim; ++i)
+        {
+            strides[i] = array.stride(i);
+        }
     }
-    tensor->set_name(name);
+
+    // As in cuDNN, host memory marks a runtime pass-by-value tensor: execute()
+    // takes its host pointer in the variant pack.
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_dim(dims)
+        .set_stride(strides)
+        .set_data_type(*dataType)
+        .set_is_pass_by_value(deviceType == nb::device::cpu::value)
+        .set_name(name);
     return tensor;
 }
 

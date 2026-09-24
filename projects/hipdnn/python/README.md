@@ -137,28 +137,37 @@ The wheel package uses a `src/` layout, so running pytest from
 
 ## DLPack Interoperability
 
-`Graph.execute()` and `Graph.execute_plan_at_index()` accept these kinds for
-each `variant_pack` value and for `workspace`:
+The bindings follow the cuDNN frontend Python rules for DLPack.
 
-- An `int` device pointer.
-- A `hipdnn.DeviceBuffer`.
-- Any object that implements `__dlpack__` (for example a PyTorch or CuPy
-  tensor) on the current ROCm device. The bindings use the DLPack data pointer
-  plus its byte offset and do not copy data.
+`Graph.execute()`, `Graph.execute_plan_at_index()`, `Graph.autotune()`, and
+`Graph.autotune_exhaustive_sweep()` take a `variant_pack` keyed by tensor UID
+or by `Tensor`. Each value, and `workspace`, may be one of these kinds, checked
+in this order:
 
-Host memory, other device types, and tensors on a different device raise
-`ValueError`. The caller must keep each producer alive until the HIP work
+1. An `int` pointer.
+2. A `hipdnn.DeviceBuffer`.
+3. An object with a `data_ptr()` method (for example a PyTorch tensor).
+4. An object that implements `__dlpack__` in host (`cpu`), ROCm (`rocm`), or
+   pinned host (`rocm_host`) memory. The bindings use the DLPack data pointer
+   plus its byte offset.
+
+No data is copied. The caller must keep each object alive until the HIP work
 completes.
 
 `Graph.tensor_like(obj, name="")` also accepts a `__dlpack__` producer. It
-infers the dims, the element strides (row-major when the producer reports
-none), and the data type. A single-element host tensor becomes a
-compile-time-constant pass-by-value scalar with dims `[1]`.
+copies the dims and the element strides (row-major when the producer reports
+none) and maps the data type. As in cuDNN, a host (`cpu`) producer becomes a
+runtime pass-by-value tensor: pass a host tensor for it in the variant pack of
+each execute call. Runtime pass-by-value tensors need an engine plugin that
+reports plugin API 1.2.0 or later.
 
 ```python
 x = torch.randn(8, 16, device="cuda")
-t = hipdnn.Graph.tensor_like(x, "x")
-graph.execute(handle, {t_uid: x, y_uid: y}, workspace)
+scale = np.full((1, 1), 0.5, np.float32)
+x_t = graph.tensor_like(x, "x")
+scale_t = graph.tensor_like(scale, "scale")  # runtime pass-by-value
+# ... build the graph and plans with x_t and scale_t, producing y_t ...
+graph.execute(handle, {x_t: x, scale_t: scale, y_t: y}, workspace)
 ```
 
 ## Running the Samples
