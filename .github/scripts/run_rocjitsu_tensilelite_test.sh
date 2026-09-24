@@ -27,38 +27,16 @@ PER_TEST_TIMEOUT="${PER_TEST_TIMEOUT:-2700}"
 # execution of the full gfx1250 suite exceeds the workflow step timeout. Local
 # validation used 12-16 workers. Override via PYTEST_WORKERS.
 PYTEST_WORKERS="${PYTEST_WORKERS:-16}"
-# Host SIMD target for the rocjitsu *emulator* build (x86, not the GPU kernels).
-# rocm-systems #10702/#10710 give a native-SIMD-width fast path for f32 MFMA/WMMA.
-# DEFAULT x86-64-v3 (AVX2, 8-lane): locally build-verified clean on develop
-# 6366fe4f with amdclang++ + GCC14 libstdc++ (matches the Ubuntu-24.04 CI base).
-# AVX-512 is NOT usable: -march=native reproduces the Aug-14 break (adc2acb2c43) —
-# a libstdc++ <experimental/simd> static_assert (simd_x86.h:4232, is_same_v<long
-# long, long>) at 512-bit width; a toolchain bug the rocjitsu-side fix can't touch.
-# Override: ROCJITSU_MARCH= (empty = portable 4-lane) or =native/=x86-64-v4 (breaks).
+# AVX2 build; -march=native breaks (libstdc++ <experimental/simd> AVX-512 assert).
 ROCJITSU_MARCH="${ROCJITSU_MARCH:-x86-64-v3}"
-# Link-time optimization (IPO) for the emulator build. rocm-systems cmake option
-# `LTO`, OFF by default; free perf in a Release build (no sanitizers here). Tier-1.
 ROCJITSU_LTO="${ROCJITSU_LTO:-ON}"
-# Per-CU functional_quantum: max CU step() iters per dispatch quantum (default 1024
-# upstream; 0 = unbounded). Higher/0 = fewer scheduler yields on long StreamK/MX
-# kernels. Empty = leave upstream default (A/B lever). Injected into every CU when set.
+# Per-CU step cap; empty = upstream default.
 ROCJITSU_FUNCTIONAL_QUANTUM="${ROCJITSU_FUNCTIONAL_QUANTUM:-}"
-# rocjitsu exposes TWO host-thread axes; both multiply, and xdist multiplies again:
-#   effective_host_threads ≈ PYTEST_WORKERS × num_threads × cpu_dispatch_threads
-#   - num_threads (config, top-level): 1 engine thread per XCD, XCDs run
-#     concurrently. Default 0 = min(host, #XCDs) → up to 8 on gfx1250. This is
-#     the RELIABLE axis today.
-#   - cpu_dispatch_threads (config, top-level, rocm-systems #10074): per-SoC CU
-#     dispatch width. Default 1 = serial. NOTE rocm-systems #11333: same-SoC CU
-#     work currently serializes, so this axis may not materialize as speedup yet.
-# We pin BOTH so the product stays ≈ host_cores/worker (no oversubscription), and
-# spend the per-process budget on the XCD axis first (reliable), remainder on CU.
-# "auto" derives them; set ROCJITSU_CPU_DISPATCH_THREADS/ROCJITSU_NUM_THREADS to
-# pin explicitly (e.g. 1/1 to force fully serial).
+# num_threads (XCD) and cpu_dispatch_threads (CU, #10074) sized so
+# PYTEST_WORKERS x num_threads x cpu_dispatch ~= host_cores. "auto" derives them.
 ROCJITSU_CPU_DISPATCH_THREADS="${ROCJITSU_CPU_DISPATCH_THREADS:-auto}"
 ROCJITSU_NUM_THREADS="${ROCJITSU_NUM_THREADS:-auto}"
-# Max XCD engine threads to request (gfx1250/gfx94x/gfx950 all have 8 XCDs).
-ROCJITSU_MAX_XCD_THREADS="${ROCJITSU_MAX_XCD_THREADS:-8}"
+ROCJITSU_MAX_XCD_THREADS="${ROCJITSU_MAX_XCD_THREADS:-8}"  # gfx1250/94x/950 have 8 XCDs
 TIMING_FILE="${REPORT_DIR}/timing.tsv"
 
 select_rocjitsu_target() {
@@ -173,12 +151,7 @@ fi
 mkdir -p "${REPORT_DIR}"
 : >"${TIMING_FILE}"
 
-# ── Size functional host-thread parallelism (#10074 + XCD engine threads) ─────
-# Upstream configs leave both axes at defaults; auto num_threads (up to 8 XCDs)
-# alone can oversubscribe once xdist runs PYTEST_WORKERS instances. We inject a
-# bounded budget = host_cores/PYTEST_WORKERS per process, spent XCD-axis first
-# (num_threads, reliable) then CU-axis (cpu_dispatch_threads, #10074 — may be
-# inert per #11333). Writes a modified config copy and repoints ROCJITSU_CONFIG.
+# Inject a bounded per-process thread budget into a config copy; repoint ROCJITSU_CONFIG.
 apply_dispatch_sizing() {
   local py host_cores budget num_threads cpu_dispatch injected
   py="$(command -v python3.12 || command -v python3)"
@@ -215,8 +188,7 @@ if em != "functional":
 cfg["num_threads"] = int(os.environ["INJECT_NUM_THREADS"])
 cfg["cpu_dispatch_threads"] = int(os.environ["INJECT_CPU_DISPATCH"])
 
-# functional_quantum is a per-CU field carried in each compute_unit node's
-# "config" [{key,value}] list under topology. Set it on every CU when requested.
+# functional_quantum is a per-CU config entry under topology.
 fq = os.environ.get("INJECT_FQ", "")
 if fq != "":
     def set_cu_quantum(node):
@@ -270,8 +242,6 @@ echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 
 configure_rocjitsu() {
   local cxx_flags="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
-  # Only add -march when explicitly requested (default empty = portable/safe;
-  # see the ROCJITSU_MARCH note re: the Aug-14 AVX-512 build break).
   [[ -n "${ROCJITSU_MARCH}" ]] && cxx_flags="-march=${ROCJITSU_MARCH} ${cxx_flags}"
   echo "rocjitsu build flags: CXX_FLAGS='${cxx_flags}' LTO=${ROCJITSU_LTO}"
   cmake \
@@ -312,11 +282,7 @@ else
   echo "::warning::libhsa_hotswap_rocjitsu.so not found — tests may fail with hipErrorNoDevice"
 fi
 
-# ── Log emulator provenance + perf hygiene ────────────────────────────────────
-# The one fact logged nowhere else: the exact rocjitsu commit (compare its date
-# to a fix's merge date to confirm inclusion). Plus warn on env that silently
-# slows a functional run. Build flags, config knobs, and exec_mode are already
-# logged at the points they're set (env dump, build flags line, dispatch sizing).
+# Log the rocjitsu commit and warn on env that slows a functional run.
 log_provenance_and_hygiene() {
   local repo="${ROCJITSU_SOURCE_DIR%/emulation/rocjitsu}"
   echo "::group::rocjitsu provenance + perf hygiene"
