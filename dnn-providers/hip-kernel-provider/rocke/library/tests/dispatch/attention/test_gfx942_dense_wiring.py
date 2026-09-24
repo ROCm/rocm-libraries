@@ -8,10 +8,11 @@ Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
     every other attention candidate
   - ``spec_id`` is an equivalent opt-in door
   - routing on gfx942, and rejection of every out-of-scope request
-  - ``dense_persistent``: 'auto' resolves to off (accepted), explicit 'on' is rejected
-    rather than silently downgraded
-  - the dispatched ``kernel_name()`` is batch-unique and matches what
-    ``build_attention_dense`` actually emits
+  - ``dense_persistent``: 'auto' turns the persistent grid on once there is enough
+    work; an explicit 'on' is accepted
+  - non-persistent gfx942 dense reads ``batch`` / ``seqlen_q`` / ``seqlen_kv`` as
+    runtime kernel params, so those fields drop out of ``kernel_name()`` and the
+    dispatched signature includes them. The persistent grid still bakes batch.
 
 The priority-3 tests are the load-bearing ones: the arm sorts ahead of every other
 candidate, so the opt-in check is the ONLY thing keeping a correctness-first P0 kernel
@@ -256,14 +257,43 @@ class TestGfx942DensePersistent(unittest.TestCase):
 
 
 class TestGfx942DenseSpecIdentity(unittest.TestCase):
-    def test_kernel_name_override_is_batch_unique(self):
-        """The kernel bakes batch into the buffer extents; the dispatched identity
-        must disambiguate it or a name-keyed cache serves the B=1 binary."""
+    def test_kernel_name_follows_the_runtime_shape_contract(self):
+        """Non-persistent gfx942 dense takes batch and both seqlens as kernel
+        params, so one name covers every batch. The persistent grid still bakes
+        batch into the symbol, and the dispatched signature matches that split."""
+        from kernels.gfx942.attention_dense import attention_dense_signature
+
         with _Gfx942Arch():
-            names = {
-                dispatch_attention(_req(batch=b)).spec.kernel_name() for b in (1, 2, 4)
-            }
-            self.assertEqual(len(names), 3, names)
+            runtime = [
+                dispatch_attention(_req(batch=b, dense_persistent="off")).spec
+                for b in (1, 2, 4)
+            ]
+            self.assertTrue(all(s.runtime_shape for s in runtime))
+            self.assertEqual(len({s.kernel_name() for s in runtime}), 1)
+            self.assertNotRegex(runtime[0].kernel_name(), r"_b\d+")
+            names = [p["name"] for p in attention_dense_signature(runtime[0])]
+            self.assertEqual(
+                names,
+                [
+                    "q_ptr",
+                    "k_ptr",
+                    "v_ptr",
+                    "o_ptr",
+                    "scale",
+                    "batch",
+                    "seqlen_q",
+                    "seqlen_kv",
+                ],
+            )
+
+            baked = [
+                dispatch_attention(_req(batch=b, dense_persistent="on")).spec
+                for b in (1, 2, 4)
+            ]
+            self.assertTrue(all(not s.runtime_shape for s in baked))
+            self.assertEqual(len({s.kernel_name() for s in baked}), 3)
+            baked_names = [p["name"] for p in attention_dense_signature(baked[0])]
+            self.assertEqual(baked_names, ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"])
 
     def test_support_implies_the_dispatched_spec_builds(self):
         """The dispatch-level half of the supports/build contract: the spec the

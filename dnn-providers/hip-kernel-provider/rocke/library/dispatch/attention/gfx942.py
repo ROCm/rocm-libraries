@@ -152,7 +152,9 @@ def _dense_spec(req: OperatorRequest):
       rule this factory follows, not a one-off: any value the kernel bakes into its
       ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
       the compiled binary can disagree and the name-keyed launcher cache serves the
-      wrong HSACO.
+      wrong HSACO. ``batch`` / ``seqlen_q`` / ``seqlen_kv`` are the exception on the
+      non-persistent grid: ``runtime_shape`` reads them as kernel params, so they
+      stay on the spec for the launch but drop out of the name and the cache key.
     The D64 K row-group pad is deliberately NOT set here: it is the shared
     ``lds_k_group_pad`` field, whose default (8) is already the value gfx942 wants,
     and which the gfx942 builder reads directly. Restating it would reintroduce the
@@ -243,6 +245,13 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     cannot move into ``capability`` -- it constrains the request's selector, not its
     shape -- and at priority 3 it is the only thing keeping this candidate off the
     default path.
+
+    The non-persistent body reads ``batch``, ``seqlen_q``, and ``seqlen_kv`` from
+    kernel params (``Gfx942AttentionDenseSpec.runtime_shape``). ``signature`` is
+    ``attention_dense_signature``, which appends those three i32s, and
+    ``bind_torch`` launches through ``run_attention_dense_torch``, which packs
+    them. The persistent grid declares no shape params and keeps batch in the
+    kernel name.
 
     Carries the port's P1-P5 levers: the 32x32x8 atom with K-loop doubling,
     conflict-free V (D128 fp16), exp2_fast + fused softmax rescale, per-config
