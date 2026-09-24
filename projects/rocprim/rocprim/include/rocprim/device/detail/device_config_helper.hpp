@@ -289,7 +289,7 @@ struct scan_config_params
     ::rocprim::block_load_method    block_load_method{};
     ::rocprim::block_store_method   block_store_method{};
     ::rocprim::block_scan_algorithm block_scan_method{};
-    int                             lookback_scan_state_alignment{};
+    unsigned int                    lookback_scan_state_alignment{};
 };
 
 } // namespace detail
