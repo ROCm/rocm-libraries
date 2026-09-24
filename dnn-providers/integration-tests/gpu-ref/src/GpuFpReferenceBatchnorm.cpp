@@ -325,4 +325,53 @@ void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
         kernel.function(), {BLOCK_SIZE, 1, 1}, {checkedNarrowToUInt(c), 1, 1}, &args, sizeof(args));
 }
 
+void GpuFpReferenceBatchnorm::launchBackward(const void* dyPtr,
+                                             const void* inputPtr,
+                                             const std::vector<int64_t>& inputDims,
+                                             const std::vector<int64_t>& inputStrides,
+                                             const void* scalePtr,
+                                             void* dxPtr,
+                                             void* dscalePtr,
+                                             void* dbiasPtr,
+                                             const void* meanPtr,
+                                             const void* invVariancePtr,
+                                             double epsilon,
+                                             std::vector<std::string>& defines)
+{
+    const auto n = inputDims[0];
+    const auto c = inputDims[1];
+    int64_t hw = 1;
+    for(size_t i = 2; i < inputDims.size(); ++i)
+    {
+        hw *= inputDims[i];
+    }
+
+    constexpr unsigned int BLOCK_SIZE = 256;
+    const auto isLayoutNhwc = isChannelLastLayout(inputStrides);
+    defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(BLOCK_SIZE));
+    defines.emplace_back(std::string("-DIS_CHANNEL_LAST_LAYOUT=")
+                         + std::to_string(isLayoutNhwc ? 1 : 0));
+
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    const auto& kernel
+        = compiler.getOrCompile("GpuRefBatchnormBwd.cpp", defines, "BatchnormBwdRef");
+
+    BatchnormBwdArgs args{};
+    args.dy = dyPtr;
+    args.input = inputPtr;
+    args.scale = scalePtr;
+    args.dx = dxPtr;
+    args.dscale = dscalePtr;
+    args.dbias = dbiasPtr;
+    args.mean = meanPtr;
+    args.invVariance = invVariancePtr;
+    args.epsilon = epsilon;
+    args.n = static_cast<long long>(n);
+    args.c = static_cast<long long>(c);
+    args.hw = static_cast<long long>(hw);
+
+    launchKernel(
+        kernel.function(), {BLOCK_SIZE, 1, 1}, {checkedNarrowToUInt(c), 1, 1}, &args, sizeof(args));
+}
+
 } // namespace hipdnn_gpu_ref

@@ -12,6 +12,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/reduction/GpuRefReduction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/GpuRefRMSNormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/GpuRefRMSNormBwd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/GpuRefBatchnormBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/GpuRefBatchnormFwdInf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/GpuRefBatchnormFwdTrain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseUnary.cpp
