@@ -161,6 +161,10 @@ static int test_scale_contracts()
     const auto* base = rocke_mma_catalog_op_for_shape(
         &arch->mma, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &e8);
     CHECK(base);
+    auto compatibility_op = *base;
+    rocke_layout_map_t dst_layout = {};
+    compatibility_op.dst.layout = &dst_layout;
+    CHECK(rocke_mmaop_acc_layout(&compatibility_op, NULL) == &dst_layout);
     // Indexed queries must match both the independent result and both scales.
     rocke_mma_op_t indexed_rows[3] = {*base, *base, *base};
     indexed_rows[1].dst.dtype = indexed_rows[2].dst.dtype = "i32";
@@ -179,6 +183,15 @@ static int test_scale_contracts()
     CHECK(rocke_mma_catalog_select_largest_k_indexed(
               &indexed, "wmma_scaled", sources, "i32", 16, 16, -1, &e8)
           == &indexed_rows[1]);
+    CHECK(rocke_mma_catalog_enumerate_indexed(
+              &indexed, "wmma_scaled", sources, "", 16, 16, NULL, 0, &e8)
+          == 0);
+    CHECK(!rocke_mma_catalog_has_shape_indexed(
+        &indexed, "wmma_scaled", sources, "", 16, 16, 128, &e8));
+    CHECK(!rocke_mma_catalog_op_for_shape_indexed(
+        &indexed, "wmma_scaled", sources, "", 16, 16, 128, &e8));
+    CHECK(!rocke_mma_catalog_select_largest_k_indexed(
+        &indexed, "wmma_scaled", sources, "", 16, 16, -1, &e8));
     CHECK(rejects_query([&] {
         rocke_mma_catalog_op_for_shape_indexed(
             &indexed, "wmma_scaled", sources, "i32", 16, 16, 128);
@@ -434,7 +447,8 @@ int main()
         for(int i = 0; i < arch->mma.num_ops; ++i)
         {
             const rocke_mma_op_t* op = &arch->mma.ops[i];
-            for(const char* dtype : {op->srcs[0].dtype, op->srcs[1].dtype, op->dst.dtype})
+            for(const char* dtype :
+                {op->srcs[0].dtype, op->srcs[1].dtype, op->srcs[2].dtype, op->dst.dtype})
             {
                 char scratch[64];
                 if(strcmp(dtype, rocke_normalize_dtype(dtype, scratch, sizeof(scratch))) != 0)

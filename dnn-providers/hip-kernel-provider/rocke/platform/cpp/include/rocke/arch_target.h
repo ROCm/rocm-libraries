@@ -160,8 +160,9 @@ typedef struct rocke_mma_op
 void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k);
 
 /* Canonical physical-layout accessors. Each returns the verified map for the
- * machine operand position, or NULL when none is registered. Source indices
- * outside [0, 3) are rejected. */
+ * machine operand position. Missing maps raise ckc::Error with ROCKE_ERR_NOTIMPL,
+ * even with b=NULL; callers handle it at a C++ boundary as described below.
+ * A NULL op returns NULL. Source indices outside [0, 3) raise ROCKE_ERR_VALUE. */
 const rocke_layout_map_t*
     rocke_mma_op_src_layout(const rocke_mma_op_t* op, int index, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_dst_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);

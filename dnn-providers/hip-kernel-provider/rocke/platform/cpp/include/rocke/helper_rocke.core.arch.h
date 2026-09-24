@@ -65,13 +65,15 @@ void rocke_mmaop_shape(const rocke_mmaop_t* op, int* m, int* n, int* k);
 
 /* Historical MmaOp.a_layout() / b_layout() / c_layout() projections. C is the
  * result/dst map; src2 is available through the canonical indexed
- * API. Each returns the verified lane/slot -> coord map for the role, or NULL
- * when none is registered for the op_id (Python raises NotImplementedError;
- * here, when `b` is non-NULL, the builder's sticky error is set -- pass b=NULL
- * for a pure lookup). */
+ * API. Missing maps raise ckc::Error with ROCKE_ERR_NOTIMPL, even with b=NULL.
+ * An enclosing public builder/lowering boundary translates the exception to
+ * status + message; direct C++ callers must catch it. A NULL op returns NULL. */
 const rocke_arch_layout_map_t* rocke_mmaop_a_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_b_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_c_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
+/* MmaOp.acc_layout(): compatibility alias for the result/dst map. */
+const rocke_arch_layout_map_t* rocke_mmaop_acc_layout(const rocke_mmaop_t* op,
+                                                      rocke_ir_builder_t* b);
 
 /* LayoutMap.coord(builder, lane, slot) -> (coord0, coord1). Forwards to
  * rocke_layout_map_coord (validates slot in [0, frag_len); emits arith via b). */

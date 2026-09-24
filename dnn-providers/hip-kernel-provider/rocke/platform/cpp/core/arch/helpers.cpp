@@ -44,6 +44,12 @@ const rocke_arch_layout_map_t* rocke_mmaop_c_layout(const rocke_mmaop_t* op, roc
     return rocke_mma_op_c_layout(op, b);
 }
 
+const rocke_arch_layout_map_t* rocke_mmaop_acc_layout(const rocke_mmaop_t* op,
+                                                      rocke_ir_builder_t* b)
+{
+    return rocke_mma_op_acc_layout(op, b);
+}
+
 bool rocke_arch_layout_map_coord(const rocke_arch_layout_map_t* m,
                                  rocke_ir_builder_t* b,
                                  rocke_value_t* lane,

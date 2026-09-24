@@ -696,6 +696,59 @@ def test_legacy_scaled_json_maps_to_the_same_indexed_contract():
         _build_mma_op(conflict)
 
 
+@pytest.mark.parametrize("dst_dtype", [None, "", "fp32"])
+def test_indexed_queries_preserve_explicit_destination(dst_dtype):
+    atom = _contracts()[0]
+    catalog = MmaCatalog([atom])
+    query = dict(
+        family=atom.family,
+        src_dtypes=("fp8", "bf8", "fp32"),
+        dst_dtype=dst_dtype,
+        m=16,
+        n=16,
+    )
+    expected = None if dst_dtype == "" else atom
+    assert catalog.enumerate(**query) == ([] if expected is None else [atom])
+    assert catalog.has_shape(**query, k=128) == (expected is not None)
+    assert catalog.op_for_shape(**query, k=128) is expected
+    assert catalog.select_largest_k(**query) is expected
+
+
+@pytest.mark.parametrize("source", [0, 1])
+@pytest.mark.parametrize("legacy_dtype", [None, "e4m3"])
+@pytest.mark.parametrize("indexed_dtype", [None, "fp8e4m3"])
+def test_explicit_legacy_and_indexed_scales_must_agree(
+    source, legacy_dtype, indexed_dtype
+):
+    legacy_scale = {"dtype": legacy_dtype, "block_size": 32} if legacy_dtype else None
+    srcs = [{"dtype": "fp8", "scale": legacy_scale} for _ in range(2)]
+    srcs.append({"dtype": "fp32"})
+    srcs[source]["scale"] = (
+        {"dtype": indexed_dtype, "block_size": 32} if indexed_dtype else None
+    )
+    row = dict(
+        family="mma",
+        op_id="fixture",
+        srcs=srcs,
+        dst={"dtype": "fp32"},
+        m=16,
+        n=16,
+        k=128,
+        a_scale_dtype=legacy_dtype,
+        b_scale_dtype=legacy_dtype,
+        scale_block_k=32 if legacy_dtype else None,
+    )
+    if (legacy_dtype is None) != (indexed_dtype is None):
+        with pytest.raises(ValueError, match="conflicting indexed and legacy"):
+            _build_mma_op(row)
+    else:
+        atom = _build_mma_op(row)
+        assert all(
+            src.scale == (MmaScaleOperand(legacy_dtype, 32) if legacy_dtype else None)
+            for src in atom.srcs[:2]
+        )
+
+
 def test_shared_scale_projection_does_not_hide_independent_blocks():
     atom = _contracts()[0]
     src0 = replace(atom.srcs[0], scale=replace(atom.srcs[0].scale, block_size=16))

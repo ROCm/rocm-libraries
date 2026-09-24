@@ -1098,7 +1098,7 @@ class MmaCatalog:
         src_keys = tuple(normalize_dtype(dtype) for dtype in src_dtypes)
         # Preserve the historical three-dtype query by defaulting dst to src2.
         # Indexed callers can state a distinct result.
-        dst_key = normalize_dtype(dst_dtype or src_dtypes[2])
+        dst_key = normalize_dtype(src_dtypes[2] if dst_dtype is None else dst_dtype)
         out = []
         for op in self._ops:
             if op.family != family:
@@ -1387,13 +1387,16 @@ def _build_mma_op(o: dict) -> MmaOp:
         )
         src_rows = [dict(row) for row in src_rows]
         for i, dtype in enumerate((a, b)):
-            if dtype is not None:
-                legacy_scale = {"dtype": dtype, "block_size": block_k}
-                if "scale" in src_rows[i] and MmaScaleOperand(
-                    **src_rows[i]["scale"]
-                ) != MmaScaleOperand(**legacy_scale):
+            legacy_scale = (
+                MmaScaleOperand(dtype, block_k) if dtype is not None else None
+            )
+            if "scale" in src_rows[i]:
+                scale = src_rows[i]["scale"]
+                indexed_scale = MmaScaleOperand(**scale) if scale is not None else None
+                if indexed_scale != legacy_scale:
                     raise ValueError("conflicting indexed and legacy scale metadata")
-                src_rows[i]["scale"] = legacy_scale
+            if legacy_scale is not None:
+                src_rows[i]["scale"] = {"dtype": dtype, "block_size": block_k}
     if len(src_rows) != 3:
         raise ValueError(
             f"MMA catalog op {op_id!r} must define exactly 3 matrix sources"
