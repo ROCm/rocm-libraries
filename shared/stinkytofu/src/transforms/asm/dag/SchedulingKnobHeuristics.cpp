@@ -116,13 +116,24 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     // Independent of the dsReadPerCap knob above: recompute the same capped
     // ceil ratio, then (firstWmmaLatency / perCap) * queueDepth, floored at
     // the arch's static readThrottleLatency (72 on gfx1250; queueDepth is 16).
+    // A saturated queue issues one ds_read every dsReadThrottleLatency/queueDepth
+    // cycles. The main loop only has sumWmmaLatencyCycles/dsLoadCount cycles per
+    // ds_load, so a throttle above (sum/ds)*queueDepth cannot issue every load.
+    // That budget wins over the arch floor. Zero (sum < ds) becomes 1, the
+    // smallest value dsReadThrottleLatency() honors instead of falling back.
     const int perCapForThrottle = std::min(perCapCeiling, ceilDivPositive(ds, wmma));
     const int queueDepth = std::max(1, hw.lds.readQueueDepth);
     const int throttleFloor =
         hw.lds.readThrottleLatency > 0 ? hw.lds.readThrottleLatency : 4 * queueDepth;
     const int firstWmmaLatency = std::max(0, features.stats.firstWmmaLatencyCycles);
     const int computedThrottle = (firstWmmaLatency / perCapForThrottle) * queueDepth;
-    out.dsReadThrottleLatency = std::max(throttleFloor, computedThrottle);
+    int throttle = std::max(throttleFloor, computedThrottle);
+    const int sumWmmaLatency = std::max(0, features.stats.sumWmmaLatencyCycles);
+    if (sumWmmaLatency > 0) {
+        const int finishBudget = (sumWmmaLatency / ds) * queueDepth;
+        if (throttle > finishBudget) throttle = std::max(1, finishBudget);
+    }
+    out.dsReadThrottleLatency = throttle;
     out.dsReadThrottleLatencySource = SchedulingKnobSource::Policy;
 
     // Longer main-loop WMMA latency budgets get a larger Rule3 signal lead.

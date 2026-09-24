@@ -141,6 +141,40 @@ TEST(SchedulingKnobHeuristics, ThrottleFlooredAtArchReadThrottleLatency) {
     EXPECT_EQ(resolved.dsReadThrottleLatency, 72);
     EXPECT_EQ(resolved.dsReadPerCap, kStaticDefaultDsReadPerCap);
 }
+TEST(SchedulingKnobHeuristics, ThrottleClampedSoEveryDsLoadCanIssue) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingKnobOverrides overrides;
+    // perWmma=min(3, ceil(16/4))=3, computed=(3/3)*16=16, arch floor 72.
+    // cycles per ds = 64/16=4, finish budget=4*16=64. 72 cannot issue every
+    // ds_load inside the WMMA latency sum, so the budget replaces the floor.
+    const SchedulingFeatures features =
+        makeFeatures(/*wmma=*/4, /*ds=*/16, /*firstWmmaLatency=*/3, /*sumWmmaLatency=*/64);
+    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
+    EXPECT_EQ(resolved.dsReadThrottleLatency, 64);
+    EXPECT_EQ(resolved.dsReadThrottleLatencySource, SchedulingKnobSource::Policy);
+}
+
+TEST(SchedulingKnobHeuristics, ThrottleKeepsComputedValueBelowFinishBudget) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingKnobOverrides overrides;
+    // computed=(32/3)*16=160. finish budget=(10000/12)*16 stays above 160.
+    const SchedulingFeatures features =
+        makeFeatures(/*wmma=*/4, /*ds=*/12, /*firstWmmaLatency=*/32, /*sumWmmaLatency=*/10000);
+    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
+    EXPECT_EQ(resolved.dsReadThrottleLatency, 160);
+}
+
+TEST(SchedulingKnobHeuristics, ThrottleBudgetOfZeroUsesSmallestHonoredValue) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingKnobOverrides overrides;
+    // sum/ds truncates to 0, so the finish budget is 0. 1 is the smallest
+    // positive throttle the accessor will not replace with the arch floor.
+    const SchedulingFeatures features =
+        makeFeatures(/*wmma=*/4, /*ds=*/16, /*firstWmmaLatency=*/32, /*sumWmmaLatency=*/8);
+    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
+    EXPECT_EQ(resolved.dsReadThrottleLatency, 1);
+}
+
 TEST(SchedulingKnobHeuristics, UserOverrideIndependentPerKnob) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
