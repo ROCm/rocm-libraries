@@ -123,7 +123,7 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     // bit-for-bit regardless of tile size or math mode (as the existing gemm_ex f32
     // path relies on). Other precisions keep the historical status-only query check,
     // where a single tolerance across all solutions/tile-orders would be unreliable.
-    const bool check_numerics = std::is_same_v<Ti, float> && (arg.unit_check || arg.norm_check);
+    const bool check_results = std::is_same_v<Ti, float> && (arg.unit_check || arg.norm_check);
 
     HOST_MEMCHECK(host_matrix<Ti>, hA, (A_row, A_col, lda));
     HOST_MEMCHECK(host_matrix<Ti>, hB, (B_row, B_col, ldb));
@@ -131,7 +131,7 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     HOST_MEMCHECK(host_matrix<To_hpa>, hD_gold, (M, N, ldd));
     HOST_MEMCHECK(host_matrix<To>, hD, (M, N, ldd));
 
-    if(check_numerics)
+    if(check_results)
     {
         // Initialize data on host memory
         rocblas_init_matrix<Ti>(
@@ -213,7 +213,7 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     // actually execute the solution (flags_none) and compare against the CPU
     // reference; otherwise fall back to the historical query-only status check.
     auto check_solution = [&](int32_t sol) {
-        if(!check_numerics)
+        if(!check_results)
         {
             CHECK_ROCBLAS_ERROR(
                 rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_check_solution_index));
