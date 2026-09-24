@@ -4,12 +4,18 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <map>
 #include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
+
+#include <hipdnn_frontend/Error.hpp>
+#include <nlohmann/json.hpp>
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -75,213 +81,288 @@ bool countersAreConsistent(const SupportClaimCoverage& coverage)
            && coverage.graphsReachedBody >= coverage.graphsQueried + coverage.graphsNotOpened;
 }
 
+std::string reportBundlePath(std::string_view recordedPath,
+                             std::string_view caseId,
+                             const std::filesystem::path& bundleRoot)
+{
+    std::string path(recordedPath);
+
+    const std::string caseSuffix = "#" + std::string(caseId);
+    if(!caseId.empty() && path.size() > caseSuffix.size()
+       && path.compare(path.size() - caseSuffix.size(), caseSuffix.size(), caseSuffix) == 0)
+    {
+        path.erase(path.size() - caseSuffix.size());
+    }
+
+    if(bundleRoot.empty())
+    {
+        return path;
+    }
+
+    // "dir/" normalizes to a path with an empty last component, whose filename() is
+    // empty; drop it so the prefix below is the folder's name.
+    std::filesystem::path root = bundleRoot.lexically_normal();
+    if(!root.has_filename())
+    {
+        root = root.parent_path();
+    }
+
+    const auto relative = std::filesystem::path(path).lexically_normal().lexically_relative(root);
+    if(relative.empty() || *relative.begin() == ".." || *relative.begin() == ".")
+    {
+        return path;
+    }
+    return (root.filename() / relative).generic_string();
+}
+
 namespace
 {
 
-// Both modes print the same tallies, so the header is the only thing telling a reader
-// whether the numbers below cost the run anything.
-std::string_view modeLabel(ClaimMode claims)
+struct ModeNames
+{
+    const char* header;
+    const char* key;
+};
+
+// Both modes report the same numbers, so this is the only thing telling a reader
+// whether they cost the run anything.
+ModeNames modeNames(ClaimMode claims)
 {
     switch(claims)
     {
     case ClaimMode::ENFORCE:
-        return " (ENFORCING)";
+        return {"ENFORCING", "enforcing"};
     case ClaimMode::WARN:
-        return " (WARNING ONLY -- NOT ENFORCED)";
+        return {"WARNING ONLY -- NOT ENFORCED", "warning_only"};
     default:
-        // A header that misdescribes the run is worse than no header: every tally
-        // below it is then read in the wrong mode. Throwing keeps a value that is not
-        // a ClaimMode from being labelled as one.
-        throw std::logic_error("printSupportClaimSummary: unhandled ClaimMode");
+        // A summary that misdescribes the run is worse than none: every number in it
+        // is then read in the wrong mode. Throwing keeps a value that is not a
+        // ClaimMode from being labelled as one.
+        throw std::logic_error("buildSupportClaimSummary: unhandled ClaimMode");
     }
+}
+
+// Where the verdict points. Engine, arch and platform are written only when they
+// differ from the "run" block: one lane tests one engine on one machine, so repeating
+// them on every entry is noise, and an entry that does differ is worth noticing.
+nlohmann::json locate(const SupportResult& r, const SupportClaimRunContext& run)
+{
+    nlohmann::json entry;
+    entry["bundle"] = reportBundlePath(r.bundlePath, r.caseId, run.bundleRoot);
+    if(!r.caseId.empty())
+    {
+        entry["case"] = r.caseId;
+    }
+    if(r.engineName != run.engine)
+    {
+        entry["engine"] = r.engineName;
+    }
+    if(r.arch != run.arch)
+    {
+        entry["arch"] = r.arch;
+    }
+    if(r.platform != run.platform)
+    {
+        entry["platform"] = r.platform;
+    }
+    return entry;
+}
+
+void addDepths(nlohmann::json& entry, const SupportResult& r)
+{
+    if(r.reachedDepth.has_value())
+    {
+        entry["reached"] = toString(*r.reachedDepth);
+    }
+    if(r.requiredDepth.has_value())
+    {
+        entry["required"] = toString(*r.requiredDepth);
+    }
+}
+
+// By bundle, then by everything else. Comparing the entries alone would not do it:
+// JSON objects compare key by key in key order, so an entry carrying an "arch" would
+// sort ahead of every entry that does not, whatever its bundle.
+void sortEntries(nlohmann::json& list)
+{
+    std::sort(list.begin(), list.end(), [](const nlohmann::json& a, const nlohmann::json& b) {
+        return std::tie(a.at("bundle"), a) < std::tie(b.at("bundle"), b);
+    });
 }
 
 } // namespace
 
-void printSupportClaimSummary(const SupportClaimCoverage& coverage,
-                              const SupportClaimVerdicts& verdicts,
-                              ClaimMode claims,
-                              std::ostream& os)
+std::optional<nlohmann::json> buildSupportClaimSummary(const SupportClaimCoverage& coverage,
+                                                       const SupportClaimVerdicts& verdicts,
+                                                       ClaimMode claims,
+                                                       const SupportClaimRunContext& run)
 {
     const std::vector<SupportResult>& records = verdicts.all();
 
     if(records.empty() && coverage.graphsWithClaims == 0)
     {
+        return std::nullopt;
+    }
+
+    nlohmann::json summary;
+    summary["schema_version"] = 1;
+    summary["mode"] = modeNames(claims).key;
+    summary["run"] = {{"engine", run.engine}, {"arch", run.arch}, {"platform", run.platform}};
+
+    // Graphs, not verdicts: a graph checked against several engines is still one
+    // graph queried.
+    summary["graphs"] = {{"found", coverage.graphsFound},
+                         {"with_claims", coverage.graphsWithClaims},
+                         {"selected", coverage.graphsSelectedWithClaims},
+                         {"ran", coverage.graphsReachedBody},
+                         {"queried", coverage.graphsQueried}};
+
+    summary["verdicts"] = {{"confirmed", verdicts.count(SupportVerdict::CLAIM_CONFIRMED)},
+                           {"accepted", verdicts.count(SupportVerdict::CLAIM_ACCEPTED)},
+                           {"failed_in_use", verdicts.count(SupportVerdict::CLAIM_FAILED_IN_USE)},
+                           {"broken", verdicts.count(SupportVerdict::CLAIM_BROKEN)},
+                           {"errored", verdicts.count(SupportVerdict::QUERY_ERRORED)},
+                           {"unclaimed", verdicts.count(SupportVerdict::UNCLAIMED_SUPPORT)}};
+
+    const bool consistent = countersAreConsistent(coverage);
+    summary["counters_consistent"] = consistent;
+
+    // Claim-bearing graphs whose claims this run did not check, by the reason why.
+    nlohmann::json unenforced = nlohmann::json::object();
+
+    // A graph that never opened ran and failed; it is not a graph the filter left out.
+    // Reported even when the ladder is broken: it is a counter read straight out, not
+    // a difference between two of them, so a miscount elsewhere cannot make it wrong.
+    unenforced["not_opened"] = coverage.graphsNotOpened;
+
+    // Otherwise invisible: a sidecar read in full that promised nothing about this
+    // arch/platform/case leaves no verdict, so the tallies look identical to a graph
+    // that was never claimed at all. On a bring-up ASIC that is usually the whole
+    // tree, and it is the difference between "enforced and green" and "enforced
+    // nothing here".
+    unenforced["no_applicable_claim"] = coverage.graphsWithNoApplicableClaim;
+
+    nlohmann::json harnessDefects = nlohmann::json::object();
+
+    // Each value below is the difference between two adjacent counters, so it has
+    // exactly one cause and one remedy: the counters are bumped at the three points a
+    // claim-bearing graph can stop -- discovery, SetUp(), the test body -- and
+    // subtracting neighbours names which one it stopped at.
+    //
+    // Left out when the ladder is broken, because that reasoning is exactly what a
+    // broken ladder invalidates: subtract counters that are not nested and the result
+    // is a number of graphs that does not correspond to any set of graphs.
+    if(consistent)
+    {
+        // Discovery counts every claim-bearing bundle on disk; only the ones
+        // --gtest_filter selected reach SetUp().
+        unenforced["not_selected"] = coverage.graphsWithClaims - coverage.graphsSelectedWithClaims;
+
+        // Selected, then stopped in SetUp() -- arch guard, skip-list, or no device. The
+        // remedy is a skip-list edit or different hardware, never widening the filter,
+        // which already let these through.
+        unenforced["skipped_before_run"]
+            = coverage.graphsSelectedWithClaims - coverage.graphsReachedBody;
+
+        // A body ran and neither queried the sidecar nor failed to open the graph. No
+        // configuration produces this; it is the harness losing a query it owed, which
+        // missedQueryComplaint() has already reported per bundle.
+        harnessDefects["missed_query"]
+            = coverage.graphsReachedBody - (coverage.graphsQueried + coverage.graphsNotOpened);
+    }
+
+    summary["unenforced"] = std::move(unenforced);
+    summary["harness_defects"] = std::move(harnessDefects);
+
+    nlohmann::json claimFailures = nlohmann::json::array();
+    nlohmann::json failedInUse = nlohmann::json::array();
+
+    // Unclaimed support is grouped: a sweep the engine takes whole would otherwise
+    // repeat one bundle once per case, and what a reader acts on is the bundle.
+    std::map<nlohmann::json, std::vector<std::string>> unclaimed;
+
+    for(const auto& r : records)
+    {
+        if(isFailure(r.verdict))
+        {
+            nlohmann::json entry = locate(r, run);
+            entry["verdict"] = toString(r.verdict);
+            entry["reason"] = r.detail;
+            if(r.queryStatus != hipdnn_frontend::ErrorCode::OK)
+            {
+                entry["status"] = hipdnn_frontend::to_string(r.queryStatus);
+            }
+            if(!r.queryMessage.empty())
+            {
+                entry["query_message"] = r.queryMessage;
+            }
+            claimFailures.push_back(std::move(entry));
+        }
+        else if(r.verdict == SupportVerdict::CLAIM_FAILED_IN_USE)
+        {
+            // Not a claim failure -- the claim held and the run is already red for
+            // another reason -- but it is the one signal that says "do not publish
+            // this cell as working support", so it gets named rather than counted.
+            nlohmann::json entry = locate(r, run);
+            addDepths(entry, r);
+            entry["reason"] = r.detail;
+            failedInUse.push_back(std::move(entry));
+        }
+        else if(r.verdict == SupportVerdict::UNCLAIMED_SUPPORT)
+        {
+            nlohmann::json key = locate(r, run);
+            key.erase("case");
+            addDepths(key, r);
+            auto& cases = unclaimed[key];
+            if(!r.caseId.empty())
+            {
+                cases.push_back(r.caseId);
+            }
+        }
+    }
+
+    nlohmann::json unclaimedSupport = nlohmann::json::array();
+    for(auto& [key, cases] : unclaimed)
+    {
+        nlohmann::json entry = key;
+        if(!cases.empty())
+        {
+            std::sort(cases.begin(), cases.end());
+            entry["cases"] = cases;
+        }
+        unclaimedSupport.push_back(std::move(entry));
+    }
+
+    sortEntries(claimFailures);
+    sortEntries(failedInUse);
+    sortEntries(unclaimedSupport);
+
+    summary["claim_failures"] = std::move(claimFailures);
+    summary["failed_in_use"] = std::move(failedInUse);
+    summary["unclaimed_support"] = std::move(unclaimedSupport);
+    return summary;
+}
+
+void printSupportClaimSummary(const SupportClaimCoverage& coverage,
+                              const SupportClaimVerdicts& verdicts,
+                              ClaimMode claims,
+                              const SupportClaimRunContext& run,
+                              std::ostream& os)
+{
+    const auto summary = buildSupportClaimSummary(coverage, verdicts, claims, run);
+    if(!summary.has_value())
+    {
         return;
     }
 
-    const auto tally = [&records](SupportVerdict verdict) {
-        return static_cast<size_t>(
-            std::count_if(records.begin(), records.end(), [verdict](const SupportResult& r) {
-                return r.verdict == verdict;
-            }));
-    };
+    // Wrapped under one named key so the block still says what it is once someone
+    // has cut it out of a CI log.
+    const nlohmann::json document = {{"support_claim_summary", *summary}};
 
-    const size_t confirmed = tally(SupportVerdict::CLAIM_CONFIRMED);
-    const size_t accepted = tally(SupportVerdict::CLAIM_ACCEPTED);
-    const size_t failedInUse = tally(SupportVerdict::CLAIM_FAILED_IN_USE);
-    const size_t broke = tally(SupportVerdict::CLAIM_BROKEN);
-    const size_t err = tally(SupportVerdict::QUERY_ERRORED);
-    const size_t unc = tally(SupportVerdict::UNCLAIMED_SUPPORT);
-
-    os << "\n==== SUPPORT CLAIM SUMMARY" << modeLabel(claims) << " ====\n"
-       << "  graphs: " << coverage.graphsFound << " found, " << coverage.graphsWithClaims
-       << " with claims, " << coverage.graphsSelectedWithClaims << " selected, "
-       << coverage.graphsReachedBody << " ran, " << coverage.graphsQueried << " queried ("
-       << records.size() << " verdicts)\n"
-       << "  confirmed: " << confirmed << "  accepted: " << accepted
-       << "  failed-in-use: " << failedInUse << "  broken: " << broke << "  errored: " << err
-       << "  unclaimed: " << unc << "\n"
-       << "  (accepted = engine advertises support; confirmed = the run reached the "
-          "depth this bundle's enforcement_level declares)\n";
-
-    // Printed between the counters and the lines drawn from them: the numbers above
-    // are the evidence, and everything below is the arithmetic that just became
-    // meaningless. A reader who sees only one of the two is misled either way.
-    const bool consistent = countersAreConsistent(coverage);
-    if(!consistent)
-    {
-        os << "\n  WARNING: the counters above do not nest (each should be a subset of "
-              "the one\n"
-              "  before it), so the attribution lines that would follow are "
-              "suppressed.\n"
-              "  Expected under --gtest_repeat, which re-counts every test but not the "
-              "registration;\n"
-              "  otherwise the harness is miscounting. The verdicts below are "
-              "unaffected -- they\n"
-              "  come from the claim records, not from these counters.\n";
-    }
-
-    // A graph that never opened ran and failed; it is not a graph the filter left
-    // out. Subtracted before the remainder is attributed, so the filter line counts
-    // only bundles that genuinely never ran.
-    //
-    // Printed even when the ladder is broken: this is a counter read straight out,
-    // not a difference between two of them, so a miscount elsewhere cannot turn it
-    // into a wrong claim about which graphs these were.
-    if(coverage.graphsNotOpened > 0)
-    {
-        os << "  " << coverage.graphsNotOpened
-           << " claim-bearing graph(s) could not be opened, so their claims could not "
-              "be checked;\n"
-              "  those tests are already failing on the graph itself.\n";
-    }
-
-    // Each remaining shortfall is the difference between two adjacent counters, so it
-    // has exactly one cause and one remedy. Nothing here is a guess: the counters are
-    // bumped at the three points a claim-bearing graph can stop -- discovery, SetUp(),
-    // the test body -- and subtracting neighbours names which one it stopped at.
-    //
-    // All three are gated on `consistent`, because that reasoning is exactly what a
-    // broken ladder invalidates: subtract counters that are not nested and the result
-    // is a number of graphs that does not correspond to any set of graphs, printed
-    // beside a confident sentence about what happened to them.
-
-    // A body ran and neither queried the sidecar nor failed to open the graph. No
-    // configuration produces this; it is the harness losing a query it owed, which
-    // missedQueryComplaint() has already reported per-bundle.
-    const size_t accountedFor = coverage.graphsQueried + coverage.graphsNotOpened;
-    if(consistent && coverage.graphsReachedBody > accountedFor)
-    {
-        os << "  " << (coverage.graphsReachedBody - accountedFor)
-           << " claim-bearing graph(s) ran without ever being queried;\n"
-              "  this is a harness defect, not a configuration choice.\n";
-    }
-
-    // Selected, then stopped in SetUp(). The remedy is a skip-list edit or different
-    // hardware -- never widening the filter, which already let these through.
-    if(consistent && coverage.graphsSelectedWithClaims > coverage.graphsReachedBody)
-    {
-        os << "  " << (coverage.graphsSelectedWithClaims - coverage.graphsReachedBody)
-           << " claim-bearing graph(s) were selected but skipped before running "
-              "(arch guard, skip-list, or no device);\n"
-              "  their claims are unenforced by this run.\n";
-    }
-
-    // Discovery counts every claim-bearing bundle on disk; only selected ones reach
-    // SetUp(). The gap between the two is the filter's doing and is named as such
-    // rather than left as a bare mismatch a reader has to interpret.
-    if(consistent && coverage.graphsWithClaims > coverage.graphsSelectedWithClaims)
-    {
-        os << "  " << (coverage.graphsWithClaims - coverage.graphsSelectedWithClaims)
-           << " claim-bearing graph(s) were discovered but not selected to run "
-              "(--gtest_filter);\n"
-              "  their claims are unenforced by this run.\n";
-    }
-
-    // Otherwise invisible: a sidecar read in full that promised nothing about this
-    // arch/platform/case leaves no verdict, so the tallies above look identical to a
-    // graph that was never claimed at all. On a bring-up ASIC that is usually the
-    // whole tree, and it is the difference between "enforced and green" and
-    // "enforced nothing here".
-    if(coverage.graphsWithNoApplicableClaim > 0)
-    {
-        os << "  " << coverage.graphsWithNoApplicableClaim
-           << " queried graph(s) carry a sidecar that claims nothing for this "
-              "arch/platform;\n"
-              "  nothing was promised for them, so nothing was enforced.\n";
-    }
-
-    const auto totalFailures = static_cast<size_t>(
-        std::count_if(records.begin(), records.end(), [](const SupportResult& r) {
-            return isFailure(r.verdict);
-        }));
-    if(totalFailures > 0)
-    {
-        os << "\n---- CLAIM FAILURES (" << totalFailures << ") ----\n";
-        for(const auto& r : records)
-        {
-            if(!isFailure(r.verdict))
-            {
-                continue;
-            }
-            os << "  " << toString(r.verdict) << "  " << r.bundlePath << "\n"
-               << "    engine=" << r.engineName << "  arch=" << r.arch
-               << "  platform=" << r.platform << "\n"
-               << "    " << r.detail << "\n";
-            if(!r.queryMessage.empty())
-            {
-                os << "    query: " << r.queryMessage << "\n";
-            }
-        }
-    }
-
-    // Not a claim failure — the claim held and the run is already red for another
-    // reason — but it is the one signal that says "do not publish this cell as
-    // working support", so it gets named rather than counted.
-    if(failedInUse > 0)
-    {
-        os << "\n---- FAILED IN USE (" << failedInUse << ") ----\n";
-        for(const auto& r : records)
-        {
-            if(r.verdict != SupportVerdict::CLAIM_FAILED_IN_USE)
-            {
-                continue;
-            }
-            os << "  " << r.bundlePath << "\n"
-               << "    engine=" << r.engineName << "  arch=" << r.arch
-               << "  platform=" << r.platform << "\n"
-               << "    " << r.detail << "\n";
-        }
-        os << "\nThe engine accepted these graphs but the test did not pass.\n";
-    }
-
-    if(unc > 0)
-    {
-        os << "\n---- UNCLAIMED SUPPORT (" << unc << ") ----\n";
-        for(const auto& r : records)
-        {
-            if(r.verdict != SupportVerdict::UNCLAIMED_SUPPORT)
-            {
-                continue;
-            }
-            os << "  " << r.bundlePath << "\n"
-               << "    engine=" << r.engineName << "  arch=" << r.arch
-               << "  platform=" << r.platform << "\n"
-               << "    " << r.detail << "\n";
-        }
-        os << "\nThese are supported but not recorded in a sidecar.\n";
-    }
+    // A query message is the backend's own text and nothing promises it is UTF-8;
+    // replacing a bad byte beats throwing out of the last thing the run prints.
+    os << "\n==== SUPPORT CLAIM SUMMARY (" << modeNames(claims).header << ") ====\n"
+       << document.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
 }
 
 } // namespace hipdnn_integration_tests::bundle

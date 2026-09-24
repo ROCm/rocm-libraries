@@ -6,22 +6,28 @@
 #include <sstream>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
+using hipdnn_integration_tests::bundle::buildSupportClaimSummary;
 using hipdnn_integration_tests::bundle::ClaimMode;
 using hipdnn_integration_tests::bundle::countersAreConsistent;
 using hipdnn_integration_tests::bundle::coverageFor;
 using hipdnn_integration_tests::bundle::CoverageUpdate;
 using hipdnn_integration_tests::bundle::missedQueryComplaint;
 using hipdnn_integration_tests::bundle::printSupportClaimSummary;
+using hipdnn_integration_tests::bundle::reportBundlePath;
 using hipdnn_integration_tests::bundle::SidecarState;
 using hipdnn_integration_tests::bundle::SupportClaimCoverage;
 using hipdnn_integration_tests::bundle::supportClaimCoverage;
+using hipdnn_integration_tests::bundle::SupportClaimRunContext;
 using hipdnn_integration_tests::bundle::SupportClaimVerdicts;
 using hipdnn_integration_tests::bundle::SupportObservation;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
+using hipdnn_integration_tests::bundle::VerificationDepth;
 using hipdnn_integration_tests::bundle::verifiedNothing;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -31,21 +37,43 @@ namespace
 
 SupportResult makeResult(SupportVerdict v)
 {
-    return SupportResult{v,
-                         "test/bundle",
-                         "ENGINE_A",
-                         "gfx942",
-                         "linux",
-                         "detail",
-                         hipdnn_frontend::ErrorCode::OK,
-                         {}};
+    SupportResult result;
+    result.verdict = v;
+    result.bundlePath = "test/bundle";
+    result.engineName = "ENGINE_A";
+    result.arch = "gfx942";
+    result.platform = "linux";
+    result.detail = "detail";
+    return result;
+}
+
+// The same engine, arch and platform makeResult() records, so an entry only carries
+// them when a test changes one on purpose.
+SupportClaimRunContext testRun()
+{
+    SupportClaimRunContext run;
+    run.engine = "ENGINE_A";
+    run.arch = "gfx942";
+    run.platform = "linux";
+    return run;
 }
 
 std::string summary(ClaimMode claims = ClaimMode::ENFORCE)
 {
     std::ostringstream oss;
-    printSupportClaimSummary(supportClaimCoverage(), SupportClaimVerdicts::get(), claims, oss);
+    printSupportClaimSummary(
+        supportClaimCoverage(), SupportClaimVerdicts::get(), claims, testRun(), oss);
     return oss.str();
+}
+
+// The document itself, for the tests that care what it says rather than how it
+// prints. Fails the calling test if the run would have printed nothing.
+nlohmann::json summaryJson(ClaimMode claims = ClaimMode::ENFORCE)
+{
+    const auto document = buildSupportClaimSummary(
+        supportClaimCoverage(), SupportClaimVerdicts::get(), claims, testRun());
+    EXPECT_TRUE(document.has_value()) << "expected a summary, got none";
+    return document.value_or(nlohmann::json::object());
 }
 
 class TestSupportClaimReport : public ::testing::Test
@@ -216,14 +244,18 @@ TEST_F(TestSupportClaimReport, MultiEngineQueriedCountIsPerGraph)
     SupportClaimVerdicts::get().record(r1);
     SupportClaimVerdicts::get().record(r2);
 
-    EXPECT_NE(summary().find("1 queried (2 verdicts)"), std::string::npos);
+    const auto doc = summaryJson();
+
+    EXPECT_EQ(doc.at("graphs").at("queried"), 1);
+    EXPECT_EQ(doc.at("verdicts").at("confirmed"), 1);
+    EXPECT_EQ(doc.at("verdicts").at("unclaimed"), 1);
 }
 
 // ---------------------------------------------------------------------------
-// Progressive print levels
+// The summary document
 // ---------------------------------------------------------------------------
 
-TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
+TEST_F(TestSupportClaimReport, SummaryShowsCountersAndVerdictTallies)
 {
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 1;
@@ -232,13 +264,39 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
+    const auto doc = summaryJson();
 
-    EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
-    EXPECT_NE(output.find("2 found, 1 with claims, 1 selected, 1 ran, 1 queried"),
-              std::string::npos);
-    EXPECT_NE(output.find("confirmed: 1"), std::string::npos);
-    EXPECT_NE(output.find("broken: 0"), std::string::npos);
+    const nlohmann::json expectedGraphs
+        = {{"found", 2}, {"with_claims", 1}, {"selected", 1}, {"ran", 1}, {"queried", 1}};
+    EXPECT_EQ(doc.at("graphs"), expectedGraphs) << doc.dump(2);
+
+    const nlohmann::json expectedVerdicts = {{"confirmed", 1},
+                                             {"accepted", 0},
+                                             {"failed_in_use", 0},
+                                             {"broken", 0},
+                                             {"errored", 0},
+                                             {"unclaimed", 0}};
+    EXPECT_EQ(doc.at("verdicts"), expectedVerdicts) << doc.dump(2);
+}
+
+// A machine reading this should not have to guess whether a missing key means zero,
+// so every key and every list is there even when it is empty.
+TEST_F(TestSupportClaimReport, SummaryKeepsItsShapeWhenThereIsNothingToList)
+{
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
+
+    const auto doc = summaryJson();
+
+    EXPECT_EQ(doc.at("schema_version"), 1);
+    EXPECT_EQ(doc.at("mode"), "enforcing");
+    EXPECT_EQ(doc.at("run"),
+              (nlohmann::json{{"engine", "ENGINE_A"}, {"arch", "gfx942"}, {"platform", "linux"}}));
+    EXPECT_TRUE(doc.at("claim_failures").is_array());
+    EXPECT_TRUE(doc.at("claim_failures").empty());
+    EXPECT_TRUE(doc.at("failed_in_use").is_array());
+    EXPECT_TRUE(doc.at("failed_in_use").empty());
+    EXPECT_TRUE(doc.at("unclaimed_support").is_array());
+    EXPECT_TRUE(doc.at("unclaimed_support").empty());
 }
 
 // A summary scraped out of a CI log has to say on its own face whether the failures
@@ -254,66 +312,206 @@ TEST_F(TestSupportClaimReport, PrintHeaderNamesEnforcement)
     EXPECT_NE(output.find("==== SUPPORT CLAIM SUMMARY (ENFORCING) ===="), std::string::npos);
     // The failures are listed in full under that header. Withholding them would make
     // the mode a coverage difference rather than an exit-code one.
-    EXPECT_NE(output.find("CLAIM FAILURES (1)"), std::string::npos);
+    EXPECT_EQ(summaryJson(ClaimMode::ENFORCE).at("claim_failures").size(), 1u);
 }
 
-// "accepted" and "confirmed" are different facts and the header has to say so,
-// because only one of them reached the depth its bundle declares.
-TEST_F(TestSupportClaimReport, PrintDistinguishesAcceptedFromConfirmed)
+TEST_F(TestSupportClaimReport, PrintHeaderNamesWarnOnly)
 {
-    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_ACCEPTED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
 
-    const auto output = summary();
+    const auto output = summary(ClaimMode::WARN);
 
-    EXPECT_NE(output.find("accepted: 1"), std::string::npos);
-    EXPECT_NE(output.find("confirmed: 0"), std::string::npos);
-    EXPECT_NE(output.find("confirmed = the run reached the depth"), std::string::npos);
+    EXPECT_NE(output.find("==== SUPPORT CLAIM SUMMARY (WARNING ONLY -- NOT ENFORCED) ===="),
+              std::string::npos)
+        << output;
+    EXPECT_EQ(summaryJson(ClaimMode::WARN).at("mode"), "warning_only");
+    EXPECT_EQ(summaryJson(ClaimMode::WARN).at("claim_failures").size(), 1u);
 }
 
-TEST_F(TestSupportClaimReport, PrintLevel2ShowsFailureDetail)
+// The printed block is the document under one named key, so it still says what it
+// is once someone has cut it out of a log, and it parses back to what was built.
+TEST_F(TestSupportClaimReport, PrintWrapsTheDocumentInANamedKey)
 {
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
 
     const auto output = summary();
+    const auto body = output.find('{');
+    ASSERT_NE(body, std::string::npos) << output;
 
-    EXPECT_NE(output.find("CLAIM FAILURES"), std::string::npos);
-    EXPECT_NE(output.find("test/bundle"), std::string::npos);
-    EXPECT_NE(output.find("ENGINE_A"), std::string::npos);
+    const auto printed = nlohmann::json::parse(output.substr(body));
+
+    EXPECT_EQ(printed.at("support_claim_summary"), summaryJson()) << output;
 }
 
-TEST_F(TestSupportClaimReport, PrintLevel3ListsUnclaimedBundles)
+// "accepted" and "confirmed" are different facts and the tallies have to say so,
+// because only one of them reached the depth its bundle declares.
+TEST_F(TestSupportClaimReport, SummaryDistinguishesAcceptedFromConfirmed)
 {
-    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_ACCEPTED));
 
-    const auto output = summary();
+    const auto doc = summaryJson();
 
-    EXPECT_NE(output.find("UNCLAIMED SUPPORT"), std::string::npos);
-    // A bare count is not actionable — the bundle has to be named.
-    EXPECT_NE(output.find("test/bundle"), std::string::npos);
-    EXPECT_NE(output.find("ENGINE_A"), std::string::npos);
+    EXPECT_EQ(doc.at("verdicts").at("accepted"), 1);
+    EXPECT_EQ(doc.at("verdicts").at("confirmed"), 0);
 }
 
-// A count with no bundle names is not actionable, and this is the section that
-// tells an operator which cells must not be published as working support.
-TEST_F(TestSupportClaimReport, PrintNamesBundlesThatFailedInUse)
+TEST_F(TestSupportClaimReport, SummaryShowsFailureDetail)
 {
-    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_FAILED_IN_USE));
+    auto broken = makeResult(SupportVerdict::CLAIM_BROKEN);
+    broken.queryStatus = hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED;
+    SupportClaimVerdicts::get().record(broken);
 
-    const auto output = summary();
+    const auto failures = summaryJson().at("claim_failures");
 
-    // The header names the same bucket as the counter line ("failed-in-use"), so a
-    // reader never has to translate between two words for one verdict.
-    EXPECT_NE(output.find("FAILED IN USE"), std::string::npos);
-    EXPECT_NE(output.find("test/bundle"), std::string::npos);
-    EXPECT_NE(output.find("ENGINE_A"), std::string::npos);
-    // Not a claim failure, so it must not appear under the failure header.
-    EXPECT_EQ(output.find("CLAIM FAILURES"), std::string::npos);
+    ASSERT_EQ(failures.size(), 1u);
+    EXPECT_EQ(failures[0].at("bundle"), "test/bundle");
+    EXPECT_EQ(failures[0].at("verdict"), "CLAIM_BROKEN");
+    EXPECT_EQ(failures[0].at("reason"), "detail");
+    EXPECT_EQ(failures[0].at("status"),
+              hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED));
+}
+
+// An unresolved query has a code but no reason of its own, so the backend's words are
+// the only explanation there is. A resolved one has neither field.
+TEST_F(TestSupportClaimReport, SummaryCarriesTheQueryMessageOnlyWhenThereIsOne)
+{
+    auto errored = makeResult(SupportVerdict::QUERY_ERRORED);
+    errored.bundlePath = "a/errored";
+    errored.queryStatus = hipdnn_frontend::ErrorCode::HEURISTIC_QUERY_FAILED;
+    errored.queryMessage = "backend said no";
+    SupportClaimVerdicts::get().record(errored);
+    auto broken = makeResult(SupportVerdict::CLAIM_BROKEN);
+    broken.bundlePath = "b/broken";
+    SupportClaimVerdicts::get().record(broken);
+
+    const auto failures = summaryJson().at("claim_failures");
+
+    ASSERT_EQ(failures.size(), 2u);
+    EXPECT_EQ(failures[0].at("query_message"), "backend said no");
+    EXPECT_TRUE(failures[0].contains("status"));
+    EXPECT_FALSE(failures[1].contains("query_message"));
+    EXPECT_FALSE(failures[1].contains("status"));
+}
+
+TEST_F(TestSupportClaimReport, SummaryListsUnclaimedBundles)
+{
+    auto unclaimed = makeResult(SupportVerdict::UNCLAIMED_SUPPORT);
+    unclaimed.reachedDepth = VerificationDepth::VERIFIED;
+    unclaimed.requiredDepth = VerificationDepth::VERIFIED;
+    SupportClaimVerdicts::get().record(unclaimed);
+
+    const auto list = summaryJson().at("unclaimed_support");
+
+    // A bare count is not actionable — the bundle has to be named, and how far the
+    // run got is what says whether the claim is ready to be written.
+    const nlohmann::json expected
+        = {{{"bundle", "test/bundle"}, {"reached", "verified"}, {"required", "verified"}}};
+    EXPECT_EQ(list, expected) << list.dump(2);
+}
+
+// A sweep the engine takes whole would otherwise repeat one bundle once per case.
+// Cases at different depths stay apart, since they are not ready for the same edit.
+TEST_F(TestSupportClaimReport, SummaryGroupsUnclaimedSweepCasesByBundleAndDepth)
+{
+    const auto sweepCase = [](const std::string& caseId, VerificationDepth reached) {
+        auto r = makeResult(SupportVerdict::UNCLAIMED_SUPPORT);
+        r.bundlePath = "sweep.json#" + caseId;
+        r.caseId = caseId;
+        r.reachedDepth = reached;
+        r.requiredDepth = VerificationDepth::VERIFIED;
+        return r;
+    };
+    SupportClaimVerdicts::get().record(sweepCase("case_b", VerificationDepth::VERIFIED));
+    SupportClaimVerdicts::get().record(sweepCase("case_a", VerificationDepth::VERIFIED));
+    SupportClaimVerdicts::get().record(sweepCase("case_c", VerificationDepth::EXECUTED));
+
+    const auto list = summaryJson().at("unclaimed_support");
+
+    const nlohmann::json expected = {{{"bundle", "sweep.json"},
+                                      {"reached", "verified"},
+                                      {"required", "verified"},
+                                      {"cases", nlohmann::json::array({"case_a", "case_b"})}},
+                                     {{"bundle", "sweep.json"},
+                                      {"reached", "executed"},
+                                      {"required", "verified"},
+                                      {"cases", nlohmann::json::array({"case_c"})}}};
+    EXPECT_EQ(list, expected) << list.dump(2);
+}
+
+// Two runs over the same tree must print the same document, or a diff between them
+// is noise. Record order is test order, which --gtest_shuffle changes.
+TEST_F(TestSupportClaimReport, SummaryListsAreSortedRegardlessOfRecordOrder)
+{
+    for(const char* path : {"z/bundle", "a/bundle", "m/bundle"})
+    {
+        auto broken = makeResult(SupportVerdict::CLAIM_BROKEN);
+        broken.bundlePath = path;
+        SupportClaimVerdicts::get().record(broken);
+        auto unclaimed = makeResult(SupportVerdict::UNCLAIMED_SUPPORT);
+        unclaimed.bundlePath = path;
+        SupportClaimVerdicts::get().record(unclaimed);
+    }
+
+    const auto doc = summaryJson();
+
+    for(const char* list : {"claim_failures", "unclaimed_support"})
+    {
+        ASSERT_EQ(doc.at(list).size(), 3u) << list;
+        EXPECT_EQ(doc.at(list)[0].at("bundle"), "a/bundle") << list;
+        EXPECT_EQ(doc.at(list)[1].at("bundle"), "m/bundle") << list;
+        EXPECT_EQ(doc.at(list)[2].at("bundle"), "z/bundle") << list;
+    }
+}
+
+// One lane tests one engine on one machine, so the run block says it once. An entry
+// repeats a field only when it differs, which is when it is worth noticing.
+TEST_F(TestSupportClaimReport, SummaryEntriesNameOnlyWhatDiffersFromTheRun)
+{
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
+    auto other = makeResult(SupportVerdict::QUERY_ERRORED);
+    other.bundlePath = "z/bundle";
+    other.engineName = "ENGINE_B";
+    other.arch = "gfx90a";
+    other.platform = "windows";
+    SupportClaimVerdicts::get().record(other);
+
+    const auto failures = summaryJson().at("claim_failures");
+
+    // Still in bundle order: the extra "arch" key must not pull the second entry ahead.
+    ASSERT_EQ(failures.size(), 2u);
+    EXPECT_EQ(failures[0].at("bundle"), "test/bundle");
+    EXPECT_FALSE(failures[0].contains("engine"));
+    EXPECT_FALSE(failures[0].contains("arch"));
+    EXPECT_FALSE(failures[0].contains("platform"));
+    EXPECT_EQ(failures[1].at("engine"), "ENGINE_B");
+    EXPECT_EQ(failures[1].at("arch"), "gfx90a");
+    EXPECT_EQ(failures[1].at("platform"), "windows");
+}
+
+// A count with no bundle names is not actionable, and this is the list that tells an
+// operator which cells must not be published as working support.
+TEST_F(TestSupportClaimReport, SummaryNamesBundlesThatFailedInUse)
+{
+    auto failed = makeResult(SupportVerdict::CLAIM_FAILED_IN_USE);
+    failed.reachedDepth = VerificationDepth::EXECUTED;
+    failed.requiredDepth = VerificationDepth::VERIFIED;
+    SupportClaimVerdicts::get().record(failed);
+
+    const auto doc = summaryJson();
+
+    const nlohmann::json expected = {{{"bundle", "test/bundle"},
+                                      {"reached", "executed"},
+                                      {"required", "verified"},
+                                      {"reason", "detail"}}};
+    EXPECT_EQ(doc.at("failed_in_use"), expected) << doc.dump(2);
+    // Not a claim failure, so it must not appear in the failure list.
+    EXPECT_TRUE(doc.at("claim_failures").empty());
 }
 
 // A filtered run discovers more claim-bearing graphs than it selects. That gap --
 // discovered minus selected -- is the filter's doing and nothing else's, so the
 // summary names it instead of leaving a mismatch to be misread as a harness gap.
-TEST_F(TestSupportClaimReport, PrintAttributesUnselectedGraphsToTheFilter)
+TEST_F(TestSupportClaimReport, SummaryAttributesUnselectedGraphsToTheFilter)
 {
     supportClaimCoverage().graphsFound = 3;
     supportClaimCoverage().graphsWithClaims = 3;
@@ -322,18 +520,17 @@ TEST_F(TestSupportClaimReport, PrintAttributesUnselectedGraphsToTheFilter)
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
+    const auto unenforced = summaryJson().at("unenforced");
 
-    EXPECT_NE(output.find("2 claim-bearing graph(s) were discovered but not selected"),
-              std::string::npos);
+    EXPECT_EQ(unenforced.at("not_selected"), 2);
     // Everything selected ran, so none of it is the skip-list's doing.
-    EXPECT_EQ(output.find("skipped before running"), std::string::npos) << output;
+    EXPECT_EQ(unenforced.at("skipped_before_run"), 0);
 }
 
 // The other half of the split. These graphs *were* selected -- the filter let them
 // through -- and then SetUp() skipped them before running. Blaming --gtest_filter
 // for them would send a reader to edit the one knob that is already correct.
-TEST_F(TestSupportClaimReport, PrintSeparatesSelectedButSkippedFromTheFilterRemainder)
+TEST_F(TestSupportClaimReport, SummarySeparatesSelectedButSkippedFromTheFilterRemainder)
 {
     supportClaimCoverage().graphsFound = 5;
     supportClaimCoverage().graphsWithClaims = 5;
@@ -342,40 +539,32 @@ TEST_F(TestSupportClaimReport, PrintSeparatesSelectedButSkippedFromTheFilterRema
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
+    const auto unenforced = summaryJson().at("unenforced");
 
-    EXPECT_NE(output.find("2 claim-bearing graph(s) were selected but skipped before running"),
-              std::string::npos)
-        << output;
-    EXPECT_NE(output.find("2 claim-bearing graph(s) were discovered but not selected"),
-              std::string::npos)
-        << output;
+    EXPECT_EQ(unenforced.at("skipped_before_run"), 2);
+    EXPECT_EQ(unenforced.at("not_selected"), 2);
 }
 
 // The arch-skipped lane, which is the common case this split exists for: the filter
-// selected everything and SetUp() skipped all of it. One line, naming the skip, and
-// no mention of a filter that did nothing wrong.
-TEST_F(TestSupportClaimReport, PrintBlamesTheSkipWhenTheFilterSelectedEverything)
+// selected everything and SetUp() skipped all of it.
+TEST_F(TestSupportClaimReport, SummaryBlamesTheSkipWhenTheFilterSelectedEverything)
 {
     supportClaimCoverage().graphsFound = 4;
     supportClaimCoverage().graphsWithClaims = 4;
     supportClaimCoverage().graphsSelectedWithClaims = 4;
     supportClaimCoverage().graphsReachedBody = 0;
 
-    const auto output = summary();
+    const auto unenforced = summaryJson().at("unenforced");
 
-    EXPECT_NE(output.find("4 claim-bearing graph(s) were selected but skipped before running"),
-              std::string::npos)
-        << output;
-    EXPECT_EQ(output.find("--gtest_filter"), std::string::npos)
-        << "the filter selected every claim-bearing graph; the skip is what stopped them\n"
-        << output;
+    EXPECT_EQ(unenforced.at("skipped_before_run"), 4);
+    EXPECT_EQ(unenforced.at("not_selected"), 0)
+        << "the filter selected every claim-bearing graph; the skip is what stopped them";
 }
 
 // A body that ran, opened its graph and still never queried is the one shortfall no
-// configuration can produce. It gets its own line saying so, because sending a reader
-// to the skip-list for a harness bug costs them the afternoon.
-TEST_F(TestSupportClaimReport, PrintNamesAMissedQueryAsAHarnessDefect)
+// configuration can produce. It is a harness defect rather than an unenforced graph,
+// because sending a reader to the skip-list for a harness bug costs them the afternoon.
+TEST_F(TestSupportClaimReport, SummaryNamesAMissedQueryAsAHarnessDefect)
 {
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 2;
@@ -384,18 +573,15 @@ TEST_F(TestSupportClaimReport, PrintNamesAMissedQueryAsAHarnessDefect)
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
+    const auto doc = summaryJson();
 
-    EXPECT_NE(output.find("1 claim-bearing graph(s) ran without ever being queried"),
-              std::string::npos)
-        << output;
-    EXPECT_NE(output.find("harness defect"), std::string::npos) << output;
-    EXPECT_EQ(output.find("skipped before running"), std::string::npos) << output;
+    EXPECT_EQ(doc.at("harness_defects").at("missed_query"), 1);
+    EXPECT_EQ(doc.at("unenforced").at("skipped_before_run"), 0);
 }
 
 // A graph that never opened ran and failed; it is already accounted for by its own
-// line, so it must not also be counted as a skip or as a missed query.
-TEST_F(TestSupportClaimReport, PrintDoesNotCountUnopenedGraphsAsSkipped)
+// counter, so it must not also be counted as a skip or as a missed query.
+TEST_F(TestSupportClaimReport, SummaryDoesNotCountUnopenedGraphsAsSkipped)
 {
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 2;
@@ -405,14 +591,14 @@ TEST_F(TestSupportClaimReport, PrintDoesNotCountUnopenedGraphsAsSkipped)
     supportClaimCoverage().graphsNotOpened = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
+    const auto doc = summaryJson();
 
-    EXPECT_NE(output.find("1 claim-bearing graph(s) could not be opened"), std::string::npos);
-    EXPECT_EQ(output.find("skipped before running"), std::string::npos) << output;
-    EXPECT_EQ(output.find("harness defect"), std::string::npos) << output;
+    EXPECT_EQ(doc.at("unenforced").at("not_opened"), 1);
+    EXPECT_EQ(doc.at("unenforced").at("skipped_before_run"), 0);
+    EXPECT_EQ(doc.at("harness_defects").at("missed_query"), 0);
 }
 
-TEST_F(TestSupportClaimReport, PrintOmitsEveryShortfallNoteWhenEverythingRan)
+TEST_F(TestSupportClaimReport, SummaryShowsNoShortfallWhenEverythingRan)
 {
     supportClaimCoverage().graphsFound = 1;
     supportClaimCoverage().graphsWithClaims = 1;
@@ -421,16 +607,19 @@ TEST_F(TestSupportClaimReport, PrintOmitsEveryShortfallNoteWhenEverythingRan)
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
+    const auto doc = summaryJson();
 
-    EXPECT_EQ(output.find("not selected"), std::string::npos);
-    EXPECT_EQ(output.find("skipped before running"), std::string::npos);
-    EXPECT_EQ(output.find("harness defect"), std::string::npos);
+    const nlohmann::json expectedUnenforced = {{"not_opened", 0},
+                                               {"no_applicable_claim", 0},
+                                               {"not_selected", 0},
+                                               {"skipped_before_run", 0}};
+    EXPECT_EQ(doc.at("unenforced"), expectedUnenforced) << doc.dump(2);
+    EXPECT_EQ(doc.at("harness_defects"), (nlohmann::json{{"missed_query", 0}}));
 }
 
 // Otherwise invisible: a sidecar read in full that promised nothing for this cell
 // leaves no verdict, so the tallies look identical to a graph nobody ever claimed.
-TEST_F(TestSupportClaimReport, PrintNamesGraphsWhoseSidecarClaimsNothingHere)
+TEST_F(TestSupportClaimReport, SummaryCountsGraphsWhoseSidecarClaimsNothingHere)
 {
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 2;
@@ -440,29 +629,7 @@ TEST_F(TestSupportClaimReport, PrintNamesGraphsWhoseSidecarClaimsNothingHere)
     supportClaimCoverage().graphsWithNoApplicableClaim = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
-
-    EXPECT_NE(output.find("1 queried graph(s) carry a sidecar that claims nothing"),
-              std::string::npos);
-}
-
-TEST_F(TestSupportClaimReport, PrintOmitsTheNoteWhenEveryQueriedGraphWasClaimed)
-{
-    supportClaimCoverage().graphsFound = 1;
-    supportClaimCoverage().graphsWithClaims = 1;
-    supportClaimCoverage().graphsSelectedWithClaims = 1;
-    supportClaimCoverage().graphsReachedBody = 1;
-    supportClaimCoverage().graphsQueried = 1;
-    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
-
-    EXPECT_EQ(summary().find("claims nothing"), std::string::npos);
-}
-
-TEST_F(TestSupportClaimReport, PrintShowsNoFailureSectionWhenOnlyConfirmed)
-{
-    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
-
-    EXPECT_EQ(summary().find("CLAIM FAILURES"), std::string::npos);
+    EXPECT_EQ(summaryJson().at("unenforced").at("no_applicable_claim"), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,11 +655,14 @@ TEST_F(TestSupportClaimReport, PrintShowsDiscoveryCountsWhenNothingWasQueried)
     supportClaimCoverage().graphsSelectedWithClaims = 1;
     supportClaimCoverage().graphsReachedBody = 1;
 
-    const auto output = summary();
+    EXPECT_NE(summary().find("SUPPORT CLAIM SUMMARY"), std::string::npos);
 
-    EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
-    EXPECT_NE(output.find("1 with claims, 1 selected, 1 ran, 0 queried"), std::string::npos)
-        << output;
+    const auto graphs = summaryJson().at("graphs");
+
+    EXPECT_EQ(graphs.at("with_claims"), 1);
+    EXPECT_EQ(graphs.at("selected"), 1);
+    EXPECT_EQ(graphs.at("ran"), 1);
+    EXPECT_EQ(graphs.at("queried"), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -684,9 +854,9 @@ TEST(TestCountersAreConsistent, AMissedQueryIsAShortfallAndNotAnInconsistency)
 
 // The counters are chosen so that all three subtraction lines would fire: only the
 // topmost relation is broken, and every rung below it still descends. That is the
-// dangerous shape -- one impossible number upstream, and three downstream sentences
+// dangerous shape -- one impossible number upstream, and three downstream counts
 // that each look locally reasonable.
-TEST_F(TestSupportClaimReport, PrintSuppressesAttributionsWhenCountersDoNotNest)
+TEST_F(TestSupportClaimReport, SummarySuppressesAttributionsWhenCountersDoNotNest)
 {
     supportClaimCoverage().graphsFound = 0;
     supportClaimCoverage().graphsWithClaims = 5;
@@ -695,20 +865,20 @@ TEST_F(TestSupportClaimReport, PrintSuppressesAttributionsWhenCountersDoNotNest)
     supportClaimCoverage().graphsQueried = 0;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
+    const auto doc = summaryJson();
 
-    EXPECT_NE(output.find("do not nest"), std::string::npos) << output;
-    // Each would otherwise print a count of graphs that corresponds to no set of
-    // graphs, next to a sentence naming a cause.
-    EXPECT_EQ(output.find("harness defect"), std::string::npos) << output;
-    EXPECT_EQ(output.find("skipped before running"), std::string::npos) << output;
-    EXPECT_EQ(output.find("not selected"), std::string::npos) << output;
+    EXPECT_EQ(doc.at("counters_consistent"), false);
+    // Each would otherwise be a count of graphs that corresponds to no set of graphs,
+    // under a key naming a cause.
+    EXPECT_FALSE(doc.at("unenforced").contains("not_selected")) << doc.dump(2);
+    EXPECT_FALSE(doc.at("unenforced").contains("skipped_before_run")) << doc.dump(2);
+    EXPECT_TRUE(doc.at("harness_defects").empty()) << doc.dump(2);
 }
 
-// The counters themselves and the verdicts still print. They are the evidence: one
+// The counters themselves and the verdicts are still there. They are the evidence: one
 // says which number is impossible, the other comes from the claim records and never
 // touched the ladder at all.
-TEST_F(TestSupportClaimReport, PrintKeepsCountersAndVerdictsWhenCountersDoNotNest)
+TEST_F(TestSupportClaimReport, SummaryKeepsCountersAndVerdictsWhenCountersDoNotNest)
 {
     supportClaimCoverage().graphsFound = 0;
     supportClaimCoverage().graphsWithClaims = 0;
@@ -717,19 +887,18 @@ TEST_F(TestSupportClaimReport, PrintKeepsCountersAndVerdictsWhenCountersDoNotNes
     supportClaimCoverage().graphsNotOpened = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
 
-    const auto output = summary();
+    const auto doc = summaryJson();
 
-    EXPECT_NE(output.find("0 found, 0 with claims, 3 selected, 3 ran, 0 queried"),
-              std::string::npos)
-        << output;
-    EXPECT_NE(output.find("CLAIM FAILURES"), std::string::npos) << output;
+    const nlohmann::json expectedGraphs
+        = {{"found", 0}, {"with_claims", 0}, {"selected", 3}, {"ran", 3}, {"queried", 0}};
+    EXPECT_EQ(doc.at("graphs"), expectedGraphs) << doc.dump(2);
+    EXPECT_EQ(doc.at("claim_failures").size(), 1u) << doc.dump(2);
     // A direct read of one counter, not a difference between two, so a miscount
     // elsewhere cannot turn it into a wrong claim about which graphs these were.
-    EXPECT_NE(output.find("1 claim-bearing graph(s) could not be opened"), std::string::npos)
-        << output;
+    EXPECT_EQ(doc.at("unenforced").at("not_opened"), 1) << doc.dump(2);
 }
 
-TEST_F(TestSupportClaimReport, PrintOmitsTheWarningWhenCountersNest)
+TEST_F(TestSupportClaimReport, SummaryKeepsAttributionsWhenCountersNest)
 {
     supportClaimCoverage().graphsFound = 3;
     supportClaimCoverage().graphsWithClaims = 2;
@@ -738,12 +907,11 @@ TEST_F(TestSupportClaimReport, PrintOmitsTheWarningWhenCountersNest)
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    const auto output = summary();
+    const auto doc = summaryJson();
 
-    EXPECT_EQ(output.find("do not nest"), std::string::npos) << output;
+    EXPECT_EQ(doc.at("counters_consistent"), true);
     // And the attribution the sound ladder earns is still there.
-    EXPECT_NE(output.find("1 claim-bearing graph(s) were selected but skipped"), std::string::npos)
-        << output;
+    EXPECT_EQ(doc.at("unenforced").at("skipped_before_run"), 1) << doc.dump(2);
 }
 
 // ---------------------------------------------------------------------------
@@ -841,14 +1009,17 @@ TEST(TestSupportClaimSummary, UnopenedGraphsAreNotBlamedOnTheFilter)
     coverage.graphsQueried = 3;
     coverage.graphsNotOpened = 1;
 
-    std::ostringstream os;
-    printSupportClaimSummary(coverage, SupportClaimVerdicts::get(), ClaimMode::ENFORCE, os);
-    const std::string out = os.str();
+    const auto doc = buildSupportClaimSummary(
+                         coverage, SupportClaimVerdicts::get(), ClaimMode::ENFORCE, testRun())
+                         .value_or(nlohmann::json::object());
 
-    EXPECT_NE(out.find("could not be opened"), std::string::npos) << out;
-    EXPECT_EQ(out.find("--gtest_filter"), std::string::npos)
-        << "every claim-bearing graph is accounted for, so nothing is the filter's doing\n"
-        << out;
+    ASSERT_TRUE(doc.contains("unenforced")) << doc.dump(2);
+    const auto& unenforced = doc.at("unenforced");
+    EXPECT_EQ(unenforced.at("not_opened"), 1) << doc.dump(2);
+    EXPECT_EQ(unenforced.at("not_selected"), 0)
+        << "every claim-bearing graph is accounted for, so nothing is the filter's doing";
+    EXPECT_EQ(unenforced.at("skipped_before_run"), 0);
+    EXPECT_EQ(doc.at("harness_defects").at("missed_query"), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -876,6 +1047,83 @@ TEST(TestMissedQueryComplaint, AGapNamesTheBundleItIsAbout)
     // The message is the whole payload -- a complaint carries no severity to inspect,
     // and one that cannot say which bundle it came from is unactionable in a CI log.
     EXPECT_NE(complaint->message.find("test/bundle"), std::string::npos) << complaint->message;
+}
+
+// ---------------------------------------------------------------------------
+// reportBundlePath(): the path a summary entry names.
+//
+// Relative to the bundle root's parent, so the same bundle reads the same on every
+// machine and a script can find it in the source tree.
+// ---------------------------------------------------------------------------
+
+TEST(TestReportBundlePath, APathUnderTheRootStartsAtTheRootFolder)
+{
+    EXPECT_EQ(reportBundlePath("/opt/rocm/lib/integration-test-bundles/quick/ConvFwd/a.json",
+                               "",
+                               "/opt/rocm/lib/integration-test-bundles"),
+              "integration-test-bundles/quick/ConvFwd/a.json");
+}
+
+// The case has its own field, so the path names the file a reader opens.
+TEST(TestReportBundlePath, TheCaseSuffixIsDropped)
+{
+    EXPECT_EQ(reportBundlePath("/data/integration-test-bundles/quick/Sdpa/sweep.json#case_a",
+                               "case_a",
+                               "/data/integration-test-bundles"),
+              "integration-test-bundles/quick/Sdpa/sweep.json");
+}
+
+TEST(TestReportBundlePath, OnlyTheRecordsOwnCaseIsDropped)
+{
+    EXPECT_EQ(reportBundlePath("dir/a.json#case_a", "case_b", ""), "dir/a.json#case_a");
+}
+
+TEST(TestReportBundlePath, AnEmptyRootLeavesThePathAsRecorded)
+{
+    EXPECT_EQ(reportBundlePath("/data/integration-test-bundles/quick/a.json", "", ""),
+              "/data/integration-test-bundles/quick/a.json");
+}
+
+// A "../" chain is harder to follow than the path it replaces.
+TEST(TestReportBundlePath, APathOutsideTheRootIsLeftAlone)
+{
+    EXPECT_EQ(reportBundlePath("/elsewhere/a.json", "", "/data/integration-test-bundles"),
+              "/elsewhere/a.json");
+}
+
+TEST(TestReportBundlePath, ATrailingSlashOnTheRootChangesNothing)
+{
+    EXPECT_EQ(reportBundlePath("/data/integration-test-bundles/quick/a.json",
+                               "",
+                               "/data/integration-test-bundles/"),
+              "integration-test-bundles/quick/a.json");
+}
+
+// The installed root is found relative to the binary, so it arrives with "..".
+TEST(TestReportBundlePath, TheRootIsNormalizedBeforeMatching)
+{
+    EXPECT_EQ(reportBundlePath("/opt/rocm/lib/integration-test-bundles/quick/a.json",
+                               "",
+                               "/opt/rocm/bin/../lib/integration-test-bundles"),
+              "integration-test-bundles/quick/a.json");
+}
+
+// The summary is where the rewrite is actually applied; the tests above only pin the
+// helper.
+TEST_F(TestSupportClaimReport, SummaryReportsBundlesRelativeToTheRoot)
+{
+    auto broken = makeResult(SupportVerdict::CLAIM_BROKEN);
+    broken.bundlePath = "/data/integration-test-bundles/quick/ConvFwd/a.json";
+    SupportClaimVerdicts::get().record(broken);
+
+    auto run = testRun();
+    run.bundleRoot = "/data/integration-test-bundles";
+    const auto doc = buildSupportClaimSummary(
+        supportClaimCoverage(), SupportClaimVerdicts::get(), ClaimMode::ENFORCE, run);
+
+    ASSERT_TRUE(doc.has_value());
+    EXPECT_EQ(doc->at("claim_failures").at(0).at("bundle"),
+              "integration-test-bundles/quick/ConvFwd/a.json");
 }
 
 // NOLINTEND(readability-identifier-naming)

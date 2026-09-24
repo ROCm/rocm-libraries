@@ -72,6 +72,15 @@ struct SupportResult
 
     hipdnn_frontend::ErrorCode queryStatus = hipdnn_frontend::ErrorCode::OK;
     std::string queryMessage;
+
+    /// The sweep case this verdict is for; empty for a single-graph bundle.
+    std::string caseId;
+
+    /// How far the run got, and how far the bundle asks it to get. Set by
+    /// finalizeClaims() for the engine under test once the run is over; empty for a
+    /// verdict the run never got to act on.
+    std::optional<VerificationDepth> reachedDepth;
+    std::optional<VerificationDepth> requiredDepth;
 };
 
 /// Did this graph have a sidecar, and did we read it?

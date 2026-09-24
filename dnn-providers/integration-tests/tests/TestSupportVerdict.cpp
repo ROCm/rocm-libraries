@@ -11,6 +11,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -380,6 +381,7 @@ TEST(TestSupportVerdict, SweepClaimAppliesToNamedCase)
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_BROKEN);
     EXPECT_EQ(observation.results.front().bundlePath, "dir/sweep.json#case_one");
+    EXPECT_EQ(observation.results.front().caseId, "case_one");
 }
 
 TEST(TestSupportVerdict, SweepClaimDoesNotApplyToUnnamedCase)
@@ -428,6 +430,7 @@ TEST(TestSupportVerdict, ResultCarriesLocatorAndCellMetadata)
     ASSERT_EQ(observation.results.size(), 1u);
     const auto& r = observation.results.front();
     EXPECT_EQ(r.bundlePath, "dir/Bundle.json");
+    EXPECT_TRUE(r.caseId.empty());
     EXPECT_EQ(r.engineName, UNDER_TEST);
     EXPECT_EQ(r.arch, ARCH);
     EXPECT_EQ(r.platform, PLAT);
@@ -752,6 +755,72 @@ TEST(TestSupportVerdict, FinalizeLeavesOtherEnginesDetailAlone)
 
     ASSERT_EQ(records.size(), 1u);
     EXPECT_EQ(records[0].detail.find("engine died"), std::string::npos);
+}
+
+// The depths are what the summary reports for a claim the run decided: how far it
+// got, against how far the bundle asked. Every verdict promotion can land on carries
+// them, and so does drift, which is how a reader tells a cell ready to claim from one
+// the ranked list merely offered.
+TEST(TestSupportVerdict, FinalizeRecordsTheDepthsOnEveryDecidedRecord)
+{
+    const auto confirmed = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED)},
+                                          UNDER_TEST,
+                                          VerificationOutcome::passed(VerificationDepth::VERIFIED),
+                                          VerificationDepth::VERIFIED);
+    const auto accepted
+        = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED)},
+                         UNDER_TEST,
+                         VerificationOutcome::skipped(VerificationDepth::EXECUTED, "no oracle"),
+                         VerificationDepth::VERIFIED);
+    const auto failedInUse
+        = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED)},
+                         UNDER_TEST,
+                         VerificationOutcome::failed(
+                             VerificationDepth::EXECUTED, FailureOrigin::COMPARISON, "mismatch"),
+                         VerificationDepth::VERIFIED);
+    const auto drift
+        = finalizeClaims({verdict(SupportVerdict::UNCLAIMED_SUPPORT)},
+                         UNDER_TEST,
+                         VerificationOutcome::skipped(VerificationDepth::BUILDABLE, "no data"),
+                         VerificationDepth::VERIFIED);
+
+    const std::vector<std::pair<std::vector<SupportResult>, VerificationDepth>> cases{
+        {confirmed, VerificationDepth::VERIFIED},
+        {accepted, VerificationDepth::EXECUTED},
+        {failedInUse, VerificationDepth::EXECUTED},
+        {drift, VerificationDepth::BUILDABLE},
+    };
+    for(const auto& [records, reached] : cases)
+    {
+        ASSERT_EQ(records.size(), 1u);
+        const auto& r = records[0];
+        EXPECT_EQ(r.reachedDepth, reached) << toString(r.verdict);
+        EXPECT_EQ(r.requiredDepth, VerificationDepth::VERIFIED) << toString(r.verdict);
+    }
+    EXPECT_EQ(confirmed[0].verdict, SupportVerdict::CLAIM_CONFIRMED);
+    EXPECT_EQ(accepted[0].verdict, SupportVerdict::CLAIM_ACCEPTED);
+    EXPECT_EQ(failedInUse[0].verdict, SupportVerdict::CLAIM_FAILED_IN_USE);
+    EXPECT_EQ(drift[0].verdict, SupportVerdict::UNCLAIMED_SUPPORT);
+}
+
+// A failing verdict was decided at the query, before anything ran, and another
+// engine's record was never run at all. Neither has a depth to report.
+TEST(TestSupportVerdict, FinalizeLeavesTheDepthsUnsetWhereTheRunDecidedNothing)
+{
+    const auto records = finalizeClaims({verdict(SupportVerdict::CLAIM_BROKEN),
+                                         verdict(SupportVerdict::QUERY_ERRORED),
+                                         verdict(SupportVerdict::CLAIM_ACCEPTED, OTHER_ENGINE),
+                                         verdict(SupportVerdict::UNCLAIMED_SUPPORT, OTHER_ENGINE)},
+                                        UNDER_TEST,
+                                        VerificationOutcome::passed(VerificationDepth::VERIFIED),
+                                        VerificationDepth::VERIFIED);
+
+    ASSERT_EQ(records.size(), 4u);
+    for(const auto& r : records)
+    {
+        EXPECT_FALSE(r.reachedDepth.has_value()) << toString(r.verdict) << " " << r.engineName;
+        EXPECT_FALSE(r.requiredDepth.has_value()) << toString(r.verdict) << " " << r.engineName;
+    }
 }
 
 // ---------------------------------------------------------------------------

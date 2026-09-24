@@ -278,57 +278,116 @@ run has no evidence either way about their claims.
 
 ## Reading the summary
 
-```text
-==== SUPPORT CLAIM SUMMARY ====
-  graphs: 3 found, 3 with claims, 3 queried (3 verdicts)
-  confirmed: 0  accepted: 1  failed-in-use: 0  broken: 1  errored: 0  unclaimed: 1
-  (accepted = engine advertises support; confirmed = the run reached the depth
-   this bundle's enforcement_level declares)
-```
-
-- **`queried`** counts graphs whose sidecar was read; **`verdicts`** counts the
-  verdicts they produced. A graph yields at most one verdict — the engine under
-  test's — and zero when the sidecar says nothing about this cell, so
-  `verdicts ≤ queried`.
-- **`found ⊇ with claims ⊇ queried`** is the nesting invariant.
-- **`accepted` is weaker than `confirmed`.** Only `confirmed` reached the depth its
-  bundle declares; the detail column names how far each cell actually got. A
-  published support matrix should carry `confirmed`.
-
-A shortfall between `with claims` and `queried` is attributed explicitly:
+The summary is one JSON document under a header line naming the claim mode. It is
+meant to be read by a person in a CI log and parsed by a tool that updates sidecars,
+so every key is always present — zeros and empty lists included — and every list is
+sorted by bundle, so two runs over the same tree print the same document.
 
 ```text
-  2 claim-bearing graph(s) were discovered but not selected to run (--gtest_filter);
-  their claims are unenforced by this run.
+==== SUPPORT CLAIM SUMMARY (ENFORCING) ====
+{
+  "support_claim_summary": {
+    "claim_failures": [
+      {
+        "bundle": "integration-test-bundles/quick/ConvFwd/conv_nchw.json",
+        "reason": "sidecar claims support, but engine not in ranked list (status=OK)",
+        "verdict": "CLAIM_BROKEN"
+      }
+    ],
+    "counters_consistent": true,
+    "failed_in_use": [],
+    "graphs": {
+      "found": 6,
+      "queried": 4,
+      "ran": 4,
+      "selected": 4,
+      "with_claims": 6
+    },
+    "harness_defects": {
+      "missed_query": 0
+    },
+    "mode": "enforcing",
+    "run": {
+      "arch": "gfx942",
+      "engine": "MIOPEN_ENGINE",
+      "platform": "linux"
+    },
+    "schema_version": 1,
+    "unclaimed_support": [
+      {
+        "bundle": "integration-test-bundles/quick/ConvFwd/sweep.json",
+        "cases": [
+          "case_a",
+          "case_b"
+        ],
+        "reached": "verified",
+        "required": "verified"
+      }
+    ],
+    "unenforced": {
+      "no_applicable_claim": 2,
+      "not_opened": 0,
+      "not_selected": 2,
+      "skipped_before_run": 0
+    },
+    "verdicts": {
+      "accepted": 0,
+      "broken": 1,
+      "confirmed": 1,
+      "errored": 0,
+      "failed_in_use": 0,
+      "unclaimed": 2
+    }
+  }
+}
 ```
 
-Discovery counts every claim-bearing bundle; only selected tests run. Because a
-*selected* graph can no longer go unqueried, the whole remainder is the filter's
-doing — so the summary names it rather than leaving a mismatch to be misread as an
-enforcement gap. **Filtered lanes do not enforce the claims they filtered out.**
+| Key | What it says |
+|---|---|
+| `mode` | `enforcing` or `warning_only`. The same numbers either way; only this says whether they cost the run anything. |
+| `run` | The engine, arch and platform the run was on. An entry below names one of these only when it differs. |
+| `graphs` | The coverage ladder, below. |
+| `verdicts` | One count per verdict. A graph yields at most one — the engine under test's — and none when the sidecar says nothing about this cell and the engine does not take the graph. |
+| `counters_consistent` | Whether the ladder nests. `--gtest_repeat` is the expected cause of `false`: it re-counts every test but not discovery. The attributions that subtract one counter from another are then left out. |
+| `unenforced` | Claim-bearing graphs whose claims this run did not check, by reason. |
+| `harness_defects` | Gaps no configuration produces. Anything above zero is a harness bug. |
+| `claim_failures` | Every `isFailure()` verdict. These are what turn the run red. |
+| `failed_in_use` | The engine accepted the graph and the test then failed. Not a claim failure, but the one signal that says *do not publish this cell as working support*. |
+| `unclaimed_support` | Cells that work but are not written down — add them to the sidecar. A sweep's cases are grouped under its bundle. |
 
-A second shortfall hides inside `queried` itself: a sidecar read in full that
-claims nothing for this arch/platform still counts as queried, so it looks
-identical to a graph that was never claimed at all. The summary names that gap
-too:
+Bundle paths start at the bundle root's folder name (`integration-test-bundles/...`),
+so they read the same on every machine. A sweep case is named in `case` (or `cases`),
+not in the path.
+
+**`accepted` is weaker than `confirmed`.** Only `confirmed` reached the depth its
+bundle declares; `reached` and `required` say how far each unclaimed or failed-in-use
+cell actually got. A published support matrix should carry `confirmed`.
+
+### The coverage ladder
 
 ```text
-  1 queried graph(s) carry a sidecar that claims nothing for this arch/platform;
-  nothing was promised for them, so nothing was enforced.
+found >= with_claims >= selected >= ran >= queried + not_opened
 ```
 
-On a bring-up ASIC this line is often the whole tree, and it is the difference
-between "enforced and green" and "enforced nothing here".
+Each step down has one cause, and `unenforced` names it:
 
-Three detail sections follow the counters when non-empty:
+| Gap | Key | Cause |
+|---|---|---|
+| `with_claims` → `selected` | `not_selected` | `--gtest_filter` left them out |
+| `selected` → `ran` | `skipped_before_run` | `SetUp()` skipped them: arch guard, skip-list, no device |
+| `ran` → `queried` | `not_opened` | the graph failed to open, so there was nothing to query |
+| inside `queried` | `no_applicable_claim` | the sidecar was read and promises nothing for this cell; every `unclaimed_support` graph lands here too |
+| `ran` → `queried + not_opened` | `harness_defects.missed_query` | the harness lost a query it owed |
 
-- **`CLAIM FAILURES`** — every `isFailure()` verdict, with bundle, engine, cell, and
-  the backend's own message for an errored query.
-- **`FAILED IN USE`** — cells where the engine accepted the graph and the test then
-  failed. Not a claim failure, but the one signal that says *do not publish this
-  cell as working support*.
-- **`UNCLAIMED SUPPORT`** — cells that work but are not written down. This is the
-  positive-drift signal: add them to the sidecar.
+**Filtered lanes do not enforce the claims they filtered out** — `not_selected` says
+how many. `no_applicable_claim` is otherwise invisible: a sidecar that promises
+nothing for this arch/platform leaves no failing verdict, so it looks identical to a
+graph whose claim held. On a bring-up ASIC it is often the whole tree, and it is the
+difference between "enforced and green" and "enforced nothing here".
+
+`not_selected`, `skipped_before_run` and `missed_query` appear only when
+`counters_consistent` is true: each is a difference between two counters, and a
+difference between counters that do not nest counts no real set of graphs.
 
 ## Run-level guard
 

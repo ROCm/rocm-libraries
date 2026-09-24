@@ -5,10 +5,14 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <iosfwd>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
@@ -165,23 +169,53 @@ bool verifiedNothing(const SupportClaimCoverage& coverage);
 // wrong.
 //
 // Nothing asserts this today; the relations live in the field comments above and in
-// the arithmetic printSupportClaimSummary() does on them. That is the fragile part:
+// the arithmetic buildSupportClaimSummary() does on them. That is the fragile part:
 // a new skip path added to SetUp() without a counter to match, or two bumps keyed on
 // different predicates, silently rewrites every attribution line downstream and no
 // test notices. Checked rather than described, because the failure mode is a
 // confident wrong answer rather than a crash.
 //
 // Deliberately not a hard assert: a summary is a diagnostic, and aborting the run
-// that produced it helps nobody. The caller prints and suppresses the attributions
-// instead, since those are the lines the broken numbers would corrupt.
+// that produced it helps nobody. The summary says so and leaves out the attributions
+// instead, since those are the numbers the broken ladder would corrupt.
 bool countersAreConsistent(const SupportClaimCoverage& coverage);
 
-// `claims` only labels the header; the body is the same either way. Taken as an
-// argument rather than read from TestConfig so the summary can be rendered without a
-// singleton, and so the label cannot disagree with the mode the caller ran under.
+// Who, where and on what the run was, for the summary's "run" block. Passed in rather
+// than read from TestConfig so the summary can be built without a singleton.
+struct SupportClaimRunContext
+{
+    std::string engine; // empty when --test-engine was not given
+    std::string arch; // base token, the same one the verdicts carry
+    std::string platform;
+    // The bundle data root. Bundle paths under it are reported relative to its
+    // parent, so they read the same on every machine; empty reports them as recorded.
+    std::filesystem::path bundleRoot;
+};
+
+// A verdict's bundle path as the summary reports it: the "#caseId" suffix dropped
+// (the case gets its own field), and a path under `bundleRoot` rewritten as
+// "<root folder>/<path below it>". A path outside the root comes back unchanged
+// rather than as a "../" chain nobody can follow.
+std::string reportBundlePath(std::string_view recordedPath,
+                             std::string_view caseId,
+                             const std::filesystem::path& bundleRoot);
+
+// The summary as JSON: the counters, the verdict tallies, what went unenforced and
+// why, and every verdict someone has to act on. nullopt when the run touched no
+// claims at all, so a lane with no sidecars prints nothing.
+//
+// Lists are sorted, so two runs over the same tree produce the same document.
+std::optional<nlohmann::json> buildSupportClaimSummary(const SupportClaimCoverage& coverage,
+                                                       const SupportClaimVerdicts& verdicts,
+                                                       ClaimMode claims,
+                                                       const SupportClaimRunContext& run);
+
+// A one-line header naming the claim mode, then buildSupportClaimSummary() indented
+// under a "support_claim_summary" key.
 void printSupportClaimSummary(const SupportClaimCoverage& coverage,
                               const SupportClaimVerdicts& verdicts,
                               ClaimMode claims,
+                              const SupportClaimRunContext& run,
                               std::ostream& os);
 
 } // namespace hipdnn_integration_tests::bundle

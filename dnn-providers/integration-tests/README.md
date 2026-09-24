@@ -261,7 +261,7 @@ is its own binary, not a mode of the engine harness.
 A bundle may carry a `.support.json` sidecar promising that a named engine supports
 that graph on a given arch and platform. `--enforce-support-claims` (which requires
 `--test-engine`) turns a broken promise into a test failure instead of a silent
-skip, and prints a summary of every verdict. Claims are checked for the single
+skip, and prints a JSON summary of every verdict. Claims are checked for the single
 engine under test. Enforcement is on by default, so the CTest registrations and a
 run by hand behave alike; pass `--enforce-support-claims=false` to keep the summary
 but let a broken claim stay green. See

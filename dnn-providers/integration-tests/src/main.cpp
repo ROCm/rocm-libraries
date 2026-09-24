@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "common/PlatformUtils.hpp"
 #include "common/Utilities.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
@@ -477,10 +478,24 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
         if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
+            const auto& config = hipdnn_integration_tests::TestConfig::get();
+
+            // The same arch token and platform the verdicts were recorded under, so an
+            // entry only repeats them when it genuinely differs from the run.
+            hipdnn_integration_tests::bundle::SupportClaimRunContext run;
+            if(config.hasEngineName())
+            {
+                run.engine = std::string(config.getEngineName());
+            }
+            run.arch = hipdnn_integration_tests::bundle::baseArchToken(config.getCurrentArch());
+            run.platform = hipdnn_integration_tests::currentPlatform();
+            run.bundleRoot = hipdnn_integration_tests::bundle::resolveDataDir();
+
             hipdnn_integration_tests::bundle::printSupportClaimSummary(
                 hipdnn_integration_tests::bundle::supportClaimCoverage(),
                 hipdnn_integration_tests::bundle::SupportClaimVerdicts::get(),
                 hipdnn_integration_tests::bundle::claimMode(),
+                run,
                 std::cerr);
         }
 

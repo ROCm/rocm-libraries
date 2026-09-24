@@ -101,6 +101,7 @@ SupportResult makeResult(SupportVerdict verdict,
     SupportResult result;
     result.verdict = verdict;
     result.bundlePath = locator.diagnosticPath;
+    result.caseId = locator.caseId;
     result.engineName = std::string(engineName);
     result.arch = std::string(arch);
     result.platform = std::string(platform);
@@ -307,6 +308,9 @@ std::vector<SupportResult> finalizeClaims(std::vector<SupportResult> results,
             // reports it is built from these same records.
             continue;
         }
+
+        record.reachedDepth = outcome.depth;
+        record.requiredDepth = required;
 
         // describeOutcome() says how far the run got; the outcome's message says what
         // to do about it — the frontend's error text, or which oracle was missing.
