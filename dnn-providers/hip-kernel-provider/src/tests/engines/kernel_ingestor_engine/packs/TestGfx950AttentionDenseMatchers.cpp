@@ -516,7 +516,7 @@ const std::vector<Tile>& d128Tiles()
 
 TileSet tileSetOf(const std::vector<Tile>& tiles)
 {
-    return TileSet(tiles.begin(), tiles.end());
+    return {tiles.begin(), tiles.end()};
 }
 
 KernelSpec withTile(KernelSpec spec, int64_t blockM, int64_t blockN)
