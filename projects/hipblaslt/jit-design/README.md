@@ -22,7 +22,7 @@ use line numbers from that revision. Verify anchors before implementation.
 The reusable KFA contract and implementation sequence are preserved here;
 obsolete scratch review ledgers and footprint-audit bookkeeping are omitted.
 
-Start with the [downstream handoff](../JIT_DOWNSTREAM_HANDOFF.md) for branch
+Start with the [downstream handoff](../../../SESSION_HANDOFF.md) for branch
 preservation, validation limits and the existing build environment. The
 [versioned roadmap](../JIT_ROADMAP.md), [direct API guide](../JIT_TENSILELITE.md)
 and [generic API guide](../JIT.md) remain the implementation guides.
