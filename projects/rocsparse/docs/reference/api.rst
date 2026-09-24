@@ -210,9 +210,9 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam_get_output`              |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_create_spsort_descr`            |
+|:cpp:func:`rocsparse_spsort_descr_create`            |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_destroy_spsort_descr`           |
+|:cpp:func:`rocsparse_spsort_descr_destroy`           |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spsort_set_input`               |
 +-----------------------------------------------------+

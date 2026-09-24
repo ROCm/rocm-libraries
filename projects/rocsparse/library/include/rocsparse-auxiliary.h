@@ -1489,31 +1489,46 @@ rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
 *  \brief Sparse matrix SpSort routine descriptor creation.
 *
 *  \details
-*  \p rocsparse_create_spsort_descr creates the descriptor of the \ref rocsparse_spsort_buffer_size and
+*  \p rocsparse_spsort_descr_create creates the descriptor of the \ref rocsparse_spsort_buffer_size and
 *  \ref rocsparse_spsort routines.
 *
+*  @param[in]
+*  handle         the handle to the rocSPARSE library context.
 *  @param[out]
-*  descr        pointer to the descriptor of the SpSort routine.
+*  p_spsort_descr pointer to the descriptor of the SpSort routine.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
-*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_invalid_pointer \p p_spsort_descr pointer is invalid.
 */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_create_spsort_descr(rocsparse_spsort_descr* descr);
+rocsparse_status rocsparse_spsort_descr_create(rocsparse_handle        handle,
+                                               rocsparse_spsort_descr* p_spsort_descr,
+                                               rocsparse_error*        p_error);
 
 /*! \ingroup aux_module
 *  \brief Destroy a sparse matrix SpSort descriptor.
 *
 *  \details
-*  \p rocsparse_destroy_spsort_descr destroys the descriptor of the \ref rocsparse_spsort_buffer_size and
+*  \p rocsparse_spsort_descr_destroy destroys the descriptor of the \ref rocsparse_spsort_buffer_size and
 *  \ref rocsparse_spsort routines.
 *
 *  @param[in]
-*  descr        descriptor of the SpSort routine.
+*  handle         the handle to the rocSPARSE library context.
+*  @param[in]
+*  spsort_descr   descriptor of the SpSort routine.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*
 *  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_destroy_spsort_descr(rocsparse_spsort_descr descr);
+rocsparse_status rocsparse_spsort_descr_destroy(rocsparse_handle       handle,
+                                                rocsparse_spsort_descr spsort_descr,
+                                                rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
  *  \brief Set the requested \ref rocsparse_spsort_input data in the SpSort descriptor.
@@ -1525,9 +1540,9 @@ rocsparse_status rocsparse_destroy_spsort_descr(rocsparse_spsort_descr descr);
  *  @param[in]
  *  input       one of the values from \ref rocsparse_spsort_input.
  *  @param[in]
- *  data        input data.
+ *  data        pointer to the input data, of the type listed for \p input in \ref rocsparse_spsort_input.
  *  @param[in]
- *  data_size_in_bytes   input data size.
+ *  data_size_in_bytes   size in bytes of the input data, which must be the size of that type.
  *  @param[out]
  *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
  *

@@ -297,8 +297,8 @@ typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
 /*! \ingroup types_module
  * \brief \p rocsparse_spsort_descr is a structure holding the rocSPARSE spsort
  * descriptor data. It must be initialized using
- * the rocsparse_create_spsort_descr() routine. It should be destroyed at the
- * end using rocsparse_destroy_spsort_descr().
+ * the rocsparse_spsort_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spsort_descr_destroy().
  */
 typedef struct _rocsparse_spsort_descr* rocsparse_spsort_descr;
 
@@ -1414,8 +1414,8 @@ typedef enum rocsparse_spsort_alg_
   */
 typedef enum rocsparse_spsort_input_
 {
-    rocsparse_spsort_input_alg, /**< Select algorithm for input on a SpSort descriptor. */
-    rocsparse_spsort_input_direction, /**< Select sorting direction for input on a SpSort descriptor. */
+    rocsparse_spsort_input_alg, /**< Select algorithm \ref rocsparse_spsort_alg for input on a SpSort descriptor. */
+    rocsparse_spsort_input_direction, /**< Select sorting direction \ref rocsparse_direction for input on a SpSort descriptor. */
 } rocsparse_spsort_input;
 
 /*! \ingroup types_module
