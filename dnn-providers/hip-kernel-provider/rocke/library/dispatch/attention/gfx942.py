@@ -120,10 +120,9 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 and a moving
-            # bottom-right causal diagonal are the exceptions this implementation
-            # does not provide, so fail them at capability admission.
-            supports_features=ATTENTION_FEATURES - {"fp8", "causal_bottom_right"},
+            # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
+            # unsupported, but the unified body already shifts causal masking.
+            supports_features=ATTENTION_FEATURES - {"fp8"},
         ),
         _supports=support,
         select_spec=select,

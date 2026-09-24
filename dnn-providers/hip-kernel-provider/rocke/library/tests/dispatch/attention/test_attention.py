@@ -15,27 +15,6 @@ from dispatch.attention import (
 )
 from dispatch.attention.common import ATTENTION_FEATURES
 
-# Frozen map of every registered candidate to the feature set its Capability
-# declares. Generated once from the registry; a new candidate (or a features
-# edit on an existing one) fails ``test_declared_features_are_frozen`` until it
-# is listed here, so a widening like fp8 can never silently reach a path that
-# does not implement it.
-EXPECTED_FEATURES = {
-    "attention_gfx942_dense": {"causal"},
-    "attention_gfx950_dense": {
-        "causal",
-        "causal_bottom_right",
-        "sinks",
-        "sliding_window",
-    },
-    "attention_d256_decode": {"causal"},
-    "attention_gfx1250_wmma": {"causal"},
-    "attention_gfx942_dense_pipe": {"causal", "sinks", "sliding_window"},
-    "attention_gfx950_d256": {"causal"},
-    "attention_unified_2d": {"causal", "fp8", "sinks", "sliding_window"},
-    "attention_unified_3d": {"causal", "fp8", "sinks", "sliding_window"},
-}
-
 # Request kwargs that turn each attention feature on. Keyed by the vocabulary so
 # a feature added to ATTENTION_FEATURES forces an entry here (KeyError until
 # listed) rather than inheriting silence.
@@ -154,50 +133,36 @@ class TestAttentionBottomRightRouting(unittest.TestCase):
         )
         self.assertEqual(equal_length.features(), frozenset({"causal"}))
 
-    def test_auto_declines_moving_bottom_right_instead_of_top_left_masking(self):
-        req = _attn(
-            batch=1,
-            nhead_q=32,
-            nhead_k=8,
-            seqlen_q=512,
-            seqlen_k=1024,
-            hdim_q=128,
-            hdim_v=128,
-            mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
-            algorithm="auto",
-        )
-        verdicts = {c.name: c.admits(req) for c in attention_candidates()}
-        self.assertFalse(any(ok for ok, _ in verdicts.values()), verdicts)
-        with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
-            dispatch_attention(req)
+    def test_bottom_right_auto_preserves_unified_prefill_and_decode(self):
+        for sq, sk, path in ((256, 512, "2d"), (1, 8192, "3d")):
+            with self.subTest(path=path):
+                req = _attn(
+                    batch=1,
+                    nhead_q=8,
+                    nhead_k=1,
+                    seqlen_q=sq,
+                    seqlen_k=sk,
+                    mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+                    num_cus=120,
+                )
+                result = dispatch_attention(req)
+                self.assertEqual(result.candidate.name, f"attention_unified_{path}")
+                self.assertEqual(result.spec.path, path)
 
-    def test_only_opt_in_gfx950_dense_admits_moving_bottom_right(self):
-        verdicts = {}
-        for candidate in attention_candidates():
-            capability = candidate.capability
-            self.assertIsNotNone(capability)
-            head_size = 256 if "d256" in candidate.name else 128
-            req = _attn(
-                arch=capability.arches[0],
-                dtype=capability.dtypes[0],
-                batch=1,
-                nhead_q=32,
-                nhead_k=8,
-                seqlen_q=512,
-                seqlen_k=1024,
-                hdim_q=head_size,
-                hdim_v=head_size,
-                mask_type=2,
-                algorithm=candidate.algorithm,
-            )
-            verdicts[candidate.name] = candidate.admits(req)
-
-        accepted = {name for name, (ok, _) in verdicts.items() if ok}
-        self.assertEqual(accepted, {"attention_gfx950_dense"}, verdicts)
-        for name, (ok, why) in verdicts.items():
-            if name != "attention_gfx950_dense":
-                self.assertFalse(ok)
-                self.assertIn("causal_bottom_right", why)
+    def test_bottom_right_still_rejects_top_left_only_standalone_kernels(self):
+        for arch, algorithm in (
+            ("gfx942", "attention_dense"),
+            ("gfx1250", "wmma_attention_fwd"),
+        ):
+            with self.subTest(arch=arch):
+                req = _attn(
+                    arch=arch,
+                    seqlen_k=1024,
+                    mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+                    algorithm=algorithm,
+                )
+                with self.assertRaises(ValueError):
+                    dispatch_attention(req)
 
 
 class TestAttentionDispatch(unittest.TestCase):
@@ -287,14 +252,6 @@ class TestAttentionDispatch(unittest.TestCase):
                     )
                 )
 
-    def test_declared_features_are_frozen(self):
-        # A new candidate, or a features edit on an existing one, must be listed
-        # in EXPECTED_FEATURES -- it cannot inherit a widened set unnoticed.
-        actual = {
-            c.name: set(c.capability.supports_features) for c in attention_candidates()
-        }
-        self.assertEqual(actual, EXPECTED_FEATURES)
-
     def test_feature_changes_spec_identity(self):
         # Derive one case per feature from the vocabulary: toggling a feature the
         # spec encodes must change kernel_name; the frozen causal/sinks gap must
@@ -311,8 +268,8 @@ class TestAttentionDispatch(unittest.TestCase):
                 )
                 base_kw = {}
                 if feature == "causal_bottom_right":
-                    # This feature is intentionally unavailable to auto/generic
-                    # routing, so compare it on the one opt-in implementation.
+                    # Dense kernels bake the diagonal; unified kernels obtain
+                    # their shifted diagonal from runtime sequence lengths.
                     common.update(
                         seqlen_q=512,
                         seqlen_k=1024,

@@ -292,7 +292,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=(256,)),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            supports_features=frozenset({"causal"}),
+            supports_features=frozenset({"causal", "causal_bottom_right"}),
         ),
         _supports=support,
         select_spec=select,

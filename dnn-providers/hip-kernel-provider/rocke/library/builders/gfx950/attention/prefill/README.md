@@ -205,6 +205,15 @@ spec = dense_spec_for_request(req)             # launch-ready best-config Attent
 run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
 ```
 
+For bottom-right masking, set `mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL`
+(exported by `dispatch.attention`). With unequal Q/K lengths, this standalone
+gfx950 dense path uses a non-persistent grid under `dense_persistent="auto"` and
+rejects an explicit `"on"`. Equal lengths preserve the equivalent top-left path.
+`algorithm="auto"` still uses the existing unified 2D/3D paths or their eligible
+dense-pipe/D256 candidates: those kernels already shift the causal diagonal by
+each sequence's runtime KV/query length difference. The standalone gfx942 dense
+and gfx1250 WMMA candidates still reject a moving bottom-right diagonal.
+
 `dense_persistent="auto"` turns on the persistent grid-stride variant once there is
 enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
 prefill regime — so the dispatcher reaches the persistent path, not the default

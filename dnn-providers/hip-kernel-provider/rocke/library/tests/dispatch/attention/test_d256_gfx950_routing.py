@@ -45,6 +45,11 @@ class TestD256Gfx950Routing(unittest.TestCase):
         self.assertEqual(r.candidate.spec_id, "gfx950_d256")
         self.assertEqual(r.spec.path, "2d")
 
+    def test_bottom_right_preserves_d256_prefill_selection(self):
+        result = dispatch_attention(_d256(seqlen_k=8192, mask_type=2, num_cus=120))
+        self.assertEqual(result.candidate.spec_id, "gfx950_d256")
+        self.assertEqual(result.spec.path, "2d")
+
     def test_outranks_generic_2d(self):
         # priority 5 must beat the generic unified_2d (priority 10).
         self.assertEqual(dispatch_attention(_d256()).candidate.priority, 5)
