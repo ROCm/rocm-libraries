@@ -172,6 +172,9 @@ namespace TensileLite
                 // Optional so older logic files that omit the field deserialize
                 // as false (no per-tile extra-iters capability).
                 iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
+                // Optional so pre-feature logic preserves its original GSU
+                // layout and is excluded from device-scalar-alpha selection.
+                iot::mapOptional(io, "deviceScalarAlpha", s.deviceScalarAlpha);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }
@@ -267,4 +270,3 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
-

@@ -259,3 +259,29 @@ TEST(ContractionSelectionLibraryTest, ConcurrentFindBestSolutionIsStable)
     for(auto& worker : workers)
         worker.join();
 }
+
+TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaRequiresAdvertisedKernelSupport)
+{
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+
+    ContractionSolution solution;
+    solution.problemType.useScaleAlphaVec = 1;
+    EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
+
+    solution.internalArgsSupport.deviceScalarAlpha = true;
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setGroupedGemm(true);
+    EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setGroupedGemm(false);
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+
+    solution.problemType.useScaleAlphaVec = 0;
+    EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setParams().setDeviceScalarAlpha(false);
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+}

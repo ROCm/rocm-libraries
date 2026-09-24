@@ -393,6 +393,7 @@ namespace TensileLite
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
                 ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
+                ("device-scalar-alpha",       po::value<bool>()->default_value(false), "Treat scaleAlphaVec as one device scalar alpha.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("use-gate-residual",         po::value<bool>()->default_value(false), "Use gate residual.")
                 ("gate-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Gate residual data type args.")
@@ -656,6 +657,7 @@ namespace TensileLite
             DUMP_OPT("use-scaleAB", std::string);
             DUMP_OPT("use-scaleCD", bool);
             DUMP_OPT("use-scaleAlphaVec", int);
+            DUMP_OPT("device-scalar-alpha", bool);
             DUMP_VEC("bias-type-args", rocisa::DataType);
             DUMP_OPT("use-gate-residual", bool);
             DUMP_VEC("gate-type-args", rocisa::DataType);

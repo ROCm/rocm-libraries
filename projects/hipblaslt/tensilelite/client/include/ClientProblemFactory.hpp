@@ -74,6 +74,7 @@ namespace TensileLite
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
             bool        m_cEqualsD;
+            bool        m_deviceScalarAlpha;
             int         m_useBias;
             int         m_biasSrc;
             std::string m_useScaleAB;

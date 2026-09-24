@@ -191,6 +191,7 @@ def _set_all_gp(monkeypatch):
         "DataInitTypeScaleC": 0,
         "DataInitTypeScaleD": 0,
         "DataInitTypeScaleAlphaVec": 0,
+        "DeviceScalarAlpha": False,
         "DataInitTypeMXSA": 0,
         "DataInitTypeMXSB": 0,
         "DataInitTypeAB": 3,
@@ -386,6 +387,17 @@ class TestWriteClientConfigIniPlain:
         content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,
                              libraryFile="/explicit/TensileLibrary.yaml")
         assert "library-file=/explicit/TensileLibrary.yaml" in content
+
+    def test_device_scalar_alpha_written(self, tmp_path, monkeypatch):
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(
+            tmp_path,
+            monkeypatch,
+            pt,
+            _PLAIN_GEMM_PT_DICT,
+            extra_gp={"DeviceScalarAlpha": True},
+        )
+        assert "device-scalar-alpha=True" in content
 
     def test_pointer_array_batch_mode_written_when_requested(self, tmp_path, monkeypatch):
         """BatchMode=1 reaches the standalone client as pointer-array mode."""

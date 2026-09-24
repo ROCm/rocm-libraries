@@ -169,7 +169,9 @@ namespace TensileLite
                                         lhs.getParams().streamKTileSchedulingMode(),
                                         rhs.getParams().streamKTileSchedulingMode(),
                                         lhs.getParams().uniformSummationOrder(),
-                                        rhs.getParams().uniformSummationOrder());
+                                        rhs.getParams().uniformSummationOrder(),
+                                        lhs.getParams().deviceScalarAlpha(),
+                                        rhs.getParams().deviceScalarAlpha());
         }
     };
 } // namespace TensileLite
@@ -221,7 +223,8 @@ namespace std
                                              problem.mxTypeB(),
                                              problem.getParams().smCountTarget(),
                                              problem.getParams().streamKTileSchedulingMode(),
-                                             problem.getParams().uniformSummationOrder());
+                                             problem.getParams().uniformSummationOrder(),
+                                             problem.getParams().deviceScalarAlpha());
         }
     };
 
@@ -271,7 +274,8 @@ namespace std
                                                   problem.mxBlockA(),
                                                   problem.mxBlockB(),
                                                   problem.mxTypeA(),
-                                                  problem.mxTypeB());
+                                                  problem.mxTypeB(),
+                                                  problem.getParams().deviceScalarAlpha());
             }
             return hash;
         }

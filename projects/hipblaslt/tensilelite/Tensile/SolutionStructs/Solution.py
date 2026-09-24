@@ -665,7 +665,8 @@ class Solution(collections.abc.Mapping):
       for key in defaultInternalSupportParams:
         assignParameterWithDefault(self["InternalSupportParams"], key, config["InternalSupportParams"], defaultInternalSupportParams)
     else:
-      self["InternalSupportParams"] = defaultInternalSupportParams
+      # Derived parameters below mutate this dictionary per solution.
+      self["InternalSupportParams"] = defaultInternalSupportParams.copy()
 
     # Assign solution state from config, filling missing from the defaultSolution
     for key in defaultSolution:
@@ -1855,6 +1856,19 @@ class Solution(collections.abc.Mapping):
       # reserves bits 12/13 for the NTA/NTB selector.
       if state["InternalSupportParams"]["KernArgsVersion"] < 3:
         state["InternalSupportParams"]["KernArgsVersion"] = 3
+
+    # The generated non-grouped F32 ScaleAlphaVec path understands
+    # internalArg0 bit 11: it
+    # dereferences element zero into the existing Alpha SGPR and bypasses the
+    # vector multiplier. Do not claim this capability for handwritten kernels
+    # unless their config explicitly opts in; their ABI remains unchanged.
+    if state["ProblemType"]["GroupedGemm"]:
+      state["InternalSupportParams"]["SupportDeviceScalarAlpha"] = False
+    elif (state["ProblemType"]["UseScaleAlphaVec"]
+          and state["ProblemType"]["ComputeDataType"].isSingle()
+          and state["KernelLanguage"] == "Assembly"
+          and not state["CustomKernelName"]):
+      state["InternalSupportParams"]["SupportDeviceScalarAlpha"] = True
 
     if state["StreamK"] != 0:
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K

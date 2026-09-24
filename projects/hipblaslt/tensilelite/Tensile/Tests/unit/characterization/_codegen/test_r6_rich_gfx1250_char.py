@@ -35,7 +35,7 @@ import os
 
 import pytest
 
-from config_harness import emit_kernels_from_config
+from config_harness import emit_kernels_from_config, solutions_from_config
 
 pytestmark = pytest.mark.unit
 
@@ -121,3 +121,71 @@ def test_r6_rich_gfx1250_bias_and_scale_present():
         "Expected at least one kernel to reference bias "
         "(KWA 14760-14960) — check UseBias=1, BiasSrc=D"
     )
+
+
+def test_r6_rich_gfx1250_device_scalar_alpha_dispatch_present():
+    """Device scalar mode replaces sgprAlpha and stages an identity vector factor."""
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    assert len(results) >= 1, "Need at least one kernel to check scalar-alpha dispatch"
+    for base, src, err in results:
+        assert err == 0, f"Kernel {base!r} emitted with err={err}, expected 0"
+        assert "device scalar alpha bit" in src
+        assert "save scalar alpha in ArgType bit 9" in src
+        assert "load device scalar alpha pointer" in src
+        assert "replace inline alpha with ScaleAlphaVec[0]" in src
+        assert "uniform alpha path; stage ScaleAlphaVec identity" in src
+        assert "broadcast ScaleAlphaVec[0]" not in src
+        assert "ScaleAlpha offset mask" not in src
+        alpha_load = src.index("replace inline alpha with ScaleAlphaVec[0]")
+        assert alpha_load < src.index("Short circuit condition if Alpha == 0")
+        if "skip buffer deref is size of summation is 0" in src:
+            assert alpha_load < src.index("skip buffer deref is size of summation is 0")
+
+
+def test_r6_rich_gfx1250_conversion_uses_scalar_alpha_element_zero():
+    """Post-GSU conversion replaces inline alpha with the device scalar."""
+    from Tensile.KernelHelperNaming import initConversionKernelObjects
+    from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    import codegen_harness as _ch
+
+    sols = solutions_from_config(_CONFIG, arch=_ARCH, limit_solutions=1)
+    assert sols, "Need one solution to generate the conversion helper"
+    kernels = generateKernelObjectsFromSolutions(sols)
+    assert kernels, "Need one generated kernel to derive production helper state"
+    _assembler, iim = _ch._toolchain()
+    conversions = initConversionKernelObjects(kernels[0], iim)
+    assert conversions, "Need at least one conversion helper"
+    conversion = conversions[0]
+    err, src = conversion.getSourceFileString()
+    header = conversion.getHeaderFileString()
+
+    assert err == 0
+    assert kernels[0]["InternalSupportParams"]["SupportDeviceScalarAlpha"] is True
+    assert "_DSA_PostGSU" in conversion.getKernelName()
+    assert "_GG_ScaleAlphaVec_DSA_" not in header
+    assert "_GG_ScaleAlphaVec_DSA_" not in src
+    assert "unsigned int deviceScalarAlpha;" in header
+    assert "if(arg.deviceScalarAlpha){" in src
+    assert "arg.alpha = arg.ScaleAlphaVec[0];" in src
+    assert "if(arg.ScaleAlphaVec != nullptr && !arg.deviceScalarAlpha){" in src
+    assert "ScaleAlphaVec[arg.deviceScalarAlpha ? 0 :" not in src
+
+    gg_name_pos = src.index("_GG_")
+    gg_start = src.rfind("__global__ void ", 0, gg_name_pos)
+    gg_end = src.index('\nextern "C"', gg_name_pos)
+    gg_src = src[gg_start:gg_end]
+    assert "deviceScalarAlpha" not in gg_src
+    assert "arg.alpha = arg.ScaleAlphaVec[0]" not in gg_src
+    assert "if(arg.ScaleAlphaVec != nullptr){" in gg_src
+
+    kernels[0]["InternalSupportParams"]["SupportDeviceScalarAlpha"] = False
+    legacy_conversions = initConversionKernelObjects(kernels[0], iim)
+    legacy = legacy_conversions[0]
+    legacy_err, legacy_src = legacy.getSourceFileString()
+    legacy_header = legacy.getHeaderFileString()
+
+    assert legacy_err == 0
+    assert "_DSA_PostGSU" not in legacy.getKernelName()
+    assert "unsigned int deviceScalarAlpha;" not in legacy_header
+    assert "arg.deviceScalarAlpha" not in legacy_src
+    assert "arg.ScaleAlphaVec[" in legacy_src

@@ -41,6 +41,9 @@ class KernelWriterConversion(KernelWriterBase):
     self.state["_GlobalAccumulation"] = state["_GlobalAccumulation"]
     self.state["ActivationFused"] = state["ActivationFused"]
     self.state["GlobalSplitU"] = state["GlobalSplitU"]
+    self.state["InternalSupportParams"] = deepcopy(state.get("InternalSupportParams", {}))
+    self.supportDeviceScalarAlpha = self.state["InternalSupportParams"].get(
+      "SupportDeviceScalarAlpha", False)
 
     self.state["UnrollOnly"] = state["UnrollOnly"]
 
@@ -76,6 +79,11 @@ class KernelWriterConversion(KernelWriterBase):
       while pgrgsu > 1:
         self.gsuKernels.append(pgrgsu)
         pgrgsu = int(pgrgsu / 2)
+
+  def deviceScalarAlphaEnabled(self):
+    """Device scalar alpha is intentionally limited to non-grouped helpers."""
+    return (self.supportDeviceScalarAlpha
+            and not self.state["ProblemType"]["GroupedGemm"])
 
   @staticmethod
   def _f8MacroFor(dataType):
@@ -153,6 +161,8 @@ class KernelWriterConversion(KernelWriterBase):
     # alpha & beta
     kStr += "  %s alpha;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
     kStr += "  %s beta;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
+    if self.state["ProblemType"]["UseScaleAlphaVec"] and self.deviceScalarAlphaEnabled():
+      kStr += "  unsigned int deviceScalarAlpha;%s" % (self.endLine)
 
     # activation
     activationCDataType = self.state["ProblemType"]["ActivationComputeDataType"]
@@ -719,6 +729,14 @@ class KernelWriterConversion(KernelWriterBase):
     accumStr = "accum"
     resultStr = "result"
 
+    # A device scalar replaces inline alpha. Do this before ScaleAB so the
+    # independent A/B scales still apply to the selected alpha value.
+    if self.state["ProblemType"]["UseScaleAlphaVec"] and self.deviceScalarAlphaEnabled():
+      kStr += "  if(arg.deviceScalarAlpha){" + self.endLine
+      kStr += "    arg.alpha = arg.ScaleAlphaVec[0];" + self.endLine
+      kStr += "  }" + self.endLine
+      kStr += self.endLine
+
     #scaleAB
     if self.state["ProblemType"]["UseScaleAB"] == "Scalar":
       kStr += "  arg.alpha = arg.alpha*scaleA_data*scaleB_data;%s" % (self.endLine)
@@ -740,7 +758,10 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += self.endLine
 
     if self.state["ProblemType"]["UseScaleAlphaVec"]:
-      kStr += "  if(arg.ScaleAlphaVec != nullptr){" + self.endLine
+      scaleAlphaGuard = "arg.ScaleAlphaVec != nullptr"
+      if self.deviceScalarAlphaEnabled():
+        scaleAlphaGuard += " && !arg.deviceScalarAlpha"
+      kStr += "  if(%s){%s" % (scaleAlphaGuard, self.endLine)
 
       if self.state["ProblemType"]["UseScaleAlphaVec"] == 3:
         kStr += "    if(arg.factorDim == 0){" + self.endLine
@@ -975,6 +996,9 @@ class KernelWriterConversion(KernelWriterBase):
       name += "_ScaleABVec"
     name += "_ScaleCD" if state["ProblemType"]["UseScaleCD"] else ""
     name += "_ScaleAlphaVec" if state["ProblemType"]["UseScaleAlphaVec"] else ""
+    if (not state["ProblemType"]["GroupedGemm"]
+        and state.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False)):
+      name += "_DSA"
     name += "_PostGSU" + str(state["GlobalSplitU"])
     if num_elements_load != None:
       name += "_VW" + str(num_elements_load)

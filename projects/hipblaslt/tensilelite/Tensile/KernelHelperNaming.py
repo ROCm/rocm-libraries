@@ -165,6 +165,7 @@ def initConversionKernelObjects(solution, isaInfoMap):
     return conversionKernelObjects
   gateList = solution["ProblemType"]["GateResidualDataTypeList"] if solution["ProblemType"]["UseGateResidual"] else [None]
   def appendConversionKernel(state, vw):
+    state["InternalSupportParams"] = deepcopy(solution["InternalSupportParams"])
     for gtype in gateList:
       if len(gateList) > 1:
         gstate = deepcopy(state)

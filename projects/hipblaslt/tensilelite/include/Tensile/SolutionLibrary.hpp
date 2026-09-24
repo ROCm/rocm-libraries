@@ -90,7 +90,8 @@ namespace TensileLite
             // (Synchronizer allocation is the remaining solve()-only clause).
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
-                   && solutions.uniformSummationOrderSupported(problem, hardware);
+                   && solutions.uniformSummationOrderSupported(problem, hardware)
+                   && solutions.deviceScalarAlphaSupported(problem);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
             return isGemmTypeSame(solutions, problem);
@@ -230,4 +231,3 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
-

@@ -45,6 +45,7 @@ namespace TensileLite
             , m_performanceMetric(args["performance-metric"].as<PerformanceMetric>())
             , m_deterministicMode(args["deterministic-mode"].as<bool>())
             , m_cEqualsD(args["c-equal-d"].as<bool>())
+            , m_deviceScalarAlpha(args["device-scalar-alpha"].as<bool>())
             , m_biasTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_gateTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_factorDimArgs(std::vector<int>(1, 0))
@@ -237,6 +238,9 @@ namespace TensileLite
                 m_useScaleCD = args["use-scaleCD"].as<bool>();
             if(args.count("use-scaleAlphaVec"))
                 m_useScaleAlphaVec = args["use-scaleAlphaVec"].as<int>();
+            if(m_deviceScalarAlpha && !m_useScaleAlphaVec)
+                throw std::invalid_argument(
+                    "device-scalar-alpha requires use-scaleAlphaVec to be enabled");
             if(args.count("max-workspace-size"))
                 m_maxWorkspaceSize = args["max-workspace-size"].as<size_t>();
 
@@ -401,8 +405,14 @@ namespace TensileLite
 
                                 rv.back().setComputeInputTypeA(m_computeInputTypeA);
                                 rv.back().setComputeInputTypeB(m_computeInputTypeB);
-                                rv.back().setAlphaRestriction(toScalarValueEnum(
-                                    m_constantValues[ContractionProblemGemm::CONST::ALPHA]));
+                                // A device scalar replaces the inline alpha, but its value is not
+                                // available while constructing the problem. Do not select an
+                                // AlphaValue-specialized solution from the ignored inline value.
+                                rv.back().setAlphaRestriction(
+                                    m_deviceScalarAlpha
+                                        ? ScalarValue::Any
+                                        : toScalarValueEnum(m_constantValues[
+                                              ContractionProblemGemm::CONST::ALPHA]));
                                 rv.back().setCEqualsD(m_cEqualsD);
                                 rv.back().setAlphaType(
                                     m_constantTypes[ContractionProblemGemm::CONST::ALPHA]);
@@ -515,9 +525,10 @@ namespace TensileLite
                                     m_constantTypes[ContractionProblemGemm::CONST::BETA]);
                             }
                             rv.back().setUseScaleAlphaVec(m_useScaleAlphaVec);
+                            rv.back().setParams().setDeviceScalarAlpha(m_deviceScalarAlpha);
                             rv.back().setScaleAlphaVec(
                                 m_constantTypes[ContractionProblemGemm::CONST::ALPHA],
-                                rv.back().d().sizes()[factorDim],
+                                m_deviceScalarAlpha ? 1 : rv.back().d().sizes()[factorDim],
                                 factorDim);
                             rv.back().setGroupedGemm(m_groupedGemm);
                             rv.back().setF32XdlMathOp(m_f32XdlMathOp);
