@@ -239,6 +239,8 @@ private:
     };
 
     static constexpr size_t alignment = max(sizeof(prefix_underlying_type), PreferredAlignment);
+    static_assert(is_power_of_two(alignment));
+    
     /// This type aligns the raw prefix data. This can be used to align
     /// a single atomic per cache line to reduce false sharing.
     struct alignas(alignment) aligned_prefix_type
@@ -534,6 +536,8 @@ private:
     };
 
     static constexpr size_t alignment = max(sizeof(flag_cast_type), PreferredAlignment);
+    static_assert(is_power_of_two(alignment));
+    
     /// This type aligns the raw flag data. This can be used to align
     /// a single atomic per cache line to reduce false sharing.
     struct alignas(alignment) aligned_flag_type
