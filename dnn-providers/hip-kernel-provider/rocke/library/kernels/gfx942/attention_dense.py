@@ -174,6 +174,7 @@ never sets a gfx942-private knob -- and every shape-only caller are unchanged.
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass, fields as _dataclass_fields
 
 from rocke.core.ir import (
@@ -193,8 +194,12 @@ from rocke.helpers.attention import mfma_32x32x8_for_dtype
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
+    QB_TRAVERSALS,
     attention_dense_cache_key,
     check_dense_spec_preflight,
+    decode_plan,
+    digit_radices,
+    parse_digit_order,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
@@ -369,6 +374,88 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   Numerically safe in both directions here -- both softmax arguments are
     #   always <= 0 -- so correctness never depends on it; the gate is pure perf.
     use_exp2_fast: bool | None = None
+
+    # REMOVED -- `reverse_qb` (process query blocks from the EXPENSIVE end first:
+    #   qb -> NQB-1-qb in place of the causal fold, on the persistent path). Deleted
+    #   rather than kept as a sweep knob; the verdict is preserved at the
+    #   `_qb_from_blk` helper below so it is not rediscovered.
+    #
+    #   The idea was sound -- a pure relabeling that shifts PHASE, not per-CTA total
+    #   cost: with long blocks taken first the end-of-kernel straggler is short (LPT),
+    #   and every CTA is inside a similarly long item early on, which is the in-phase
+    #   condition shared KV-tile reuse wants. Measured on BOTH architectures over a
+    #   large causal shape set, two independent passes, median of many repetitions:
+    #     * hkv_major / hkv_minor: a clear, reproducible LOSS. The fold's
+    #       cheap/expensive PAIRING carries the balance; LPT does not substitute.
+    #     * qb_major (the only decode with no fold to replace): a real, reproducible,
+    #       but sub-1% gain, rising to roughly 1% only at the longest sequences.
+    #   Not worth a knob. The regime it applies to -- persistent qb_major, selected
+    #   only where hkv_minor is illegal -- is itself well behind the non-persistent
+    #   axis swap on those same shapes, so improving it cannot change the dispatch
+    #   choice. See platform/dsl_docs/architecture/attention_thread_block_mapping.md.
+    # default_grid_order: axis order of the NON-persistent (default) grid.
+    #   The persistent path has three work-item decodes; the default path had
+    #   exactly one, and it is the worst of the available choices for chiplet
+    #   locality. The hardware assigns xcd = linear_wgid % num_xcds and the grid
+    #   linearizes x-fastest, so grid.x is what the XCD map reads:
+    #     "qb_major"  grid=(nqb, Hq, B), run(bx, by, bz)
+    #                 -> xcd = qb % 8 whenever 8 | nqb, so EVERY xcd touches
+    #                    every head. This is the shipped default.
+    #     "hq_major"  grid=(Hq, nqb, B), run(by, bx, bz)
+    #                 -> xcd = hq % 8: Hq/gcd(Hq,8) query heads per xcd, which
+    #                    for Hq >= 8*gqa still spans every kv-head.
+    #     "hkv_minor" grid=(Hq, nqb, B), x remapped so the KV-head index is the
+    #                 LOW digit: hq = gqa*(bx % Hkv) + bx // Hkv
+    #                 -> xcd == kv-head (exactly, when Hkv == num_xcds). The
+    #                    default-grid analogue of the persistent hkv_minor.
+    #   The remap is written out rather than calling helpers.grid's
+    #   chiplet_transform_chunked: that helper computes
+    #   limit = num_wgs // (num_xcds*chunk_size) and is a SILENT no-op at
+    #   limit == 0, which is exactly the Hq < 8*gqa case (e.g. Hq=28/Hkv=4) --
+    #   a silent identity reported as "the lever does nothing". The closed form
+    #   here is a bijection for every Hq = Hkv*gqa.
+    #   EXPERIMENTAL, default is the shipped order. Names deliberately mirror
+    #   persist_decode so the two paths can be compared in one table.
+    default_grid_order: str = "qb_major"
+
+    # digit_order / qb_traversal: EXPERIMENTAL generalized work-index ordering.
+    #   Empty string = OFF = the shipped hand-written decode chain, byte for byte.
+    #   These exist to sweep the whole mapping space rather than the eight points
+    #   that happen to be hand-written; see
+    #   platform/dsl_docs/architecture/attention_thread_block_mapping.md.
+    #
+    #   digit_order is a permutation of "QBVG" listed FASTEST DIGIT FIRST
+    #   (Q=query block, B=batch, V=kv head, G=gqa lane); the shipped decodes are
+    #   hkv_minor=VBGQ, hkv_major=BGQV, qb_major=BGVQ. It applies to BOTH paths --
+    #   persistent (1-D grid, decode from the grid-stride index) and
+    #   non-persistent (3-D grid, digits assigned to axes) -- which is the point:
+    #   the two paths were never actually different in what they can express, only
+    #   in who assigns the work.
+    #
+    #   No legality guard is needed or wanted. A mixed-radix decode is a bijection
+    #   for ANY order and any radices (asserted over all 24 orders x 11 shapes),
+    #   so xcd_partitionable stops being a gate here and becomes a PREDICTOR for
+    #   the heuristic -- which is what makes non-pow2 Hkv measurable at all.
+    digit_order: str = ""
+    qb_traversal: str = ""
+
+    # REMOVED -- `batch_outer` (bt as the SLOWEST work-index field for hkv_minor,
+    #   `wi = ((bt*NQB + blk)*gqa + hql)*Hkv + hkv` instead of the shipped
+    #   `wi = ((blk*gqa + hql)*B + bt)*Hkv + hkv`). It was MEASURED-NEGATIVE on both
+    #   architectures and is deleted rather than kept as a sweep knob; the finding is
+    #   preserved here and at the hkv_minor decode site so it is not rediscovered.
+    #
+    #   It was aimed at a real effect: XCD j owns kv-head j, but at B>1 that is head j
+    #   of EVERY batch element -- different tensors -- so with bt in a middle field the
+    #   concurrent (batch,head) streams per XCD grow linearly with B. Putting bt
+    #   outermost caps that at 2. Measured across B in {1,2,4,8}: it delivers that when
+    #   num_kv_heads >= num_xcds, but regresses badly and monotonically from B=2 upward
+    #   at num_kv_heads=4, where each kv-head already spans several XCDs and the
+    #   concurrency model does not apply. Neither field order dominates, so gating on
+    #   num_kv_heads would be fitting a rule to a handful of shapes.
+    #
+    #   The B>1 dilution it targeted is still real and UNSOLVED; that is why hkv_minor
+    #   remains explicit-only with a validated regime of B=1.
 
     # NOTE -- waves_per_eu is deliberately NOT redeclared here. It is an INHERITED
     #   field (``AttentionDenseSpec.waves_per_eu``), and the flat spec is what makes
@@ -611,6 +698,22 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
         parts.append("e2f1" if e2f else "e2f0")
     if spec.iglp != _DEFAULT_IGLP:
         parts.append("iglp1" if spec.iglp else "iglp0")
+    if spec.default_grid_order != "qb_major":
+        parts.append({
+            "hq_major": "gridhq", "hq_major_rev": "gridhqrev",
+            "hq_major_fold": "gridhqfold", "hkv_minor": "gridkvmin",
+            "hkv_minor_rev": "gridkvminrev",
+        }[spec.default_grid_order])
+    # Tagged UNCONDITIONALLY, on both paths. The base kernel_name() appends
+    # _persist_decode_name_part only under `if self.persistent`, so a
+    # non-persistent order tagged only there would collide with the baseline --
+    # and _DENSE_LAUNCHER_CACHE's `assert art.kernel_name == key` PASSES on a
+    # collision, serving the stale binary and reporting ~1.000x. Empty at the
+    # shipped configuration, so goldens stay byte-identical.
+    if spec.digit_order:
+        parts.append(f"ord{spec.digit_order.upper()}")
+    if spec.qb_traversal:
+        parts.append(f"qbt{spec.qb_traversal}")
     return "".join(f"_{p}" for p in parts)
 
 
@@ -633,6 +736,25 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
 # dispatch arm from selecting a spec it cannot build.
 _SUPPORTED_DTYPES = ("bf16", "fp16")
 _SUPPORTED_HEAD_SIZES = (64, 128)
+
+# Persistent work decodes THIS builder emits a branch for. Deliberately a separate
+# set from the spec's ``supported_persist_decodes()``: that one answers "is this
+# spec legal", this one answers "can this body build it". They differ whenever a
+# decode is added to the shared spec ahead of an arch implementing it, and keeping
+# them separate is what lets supports_attention_dense return a structured rejection
+# instead of the builder raising mid-emission. Resolved values only -- "auto" never
+# reaches the decode chain.
+_IMPLEMENTED_PERSIST_DECODES = frozenset({"qb_major", "hkv_major", "hkv_minor"})
+
+# Axis orders the NON-persistent grid implements. Separate from the persist
+# decodes even though the names overlap: they index different things (grid axes
+# vs work-item fields), and only the overlap of NAMES is intentional, so one
+# table can compare the two paths.
+_IMPLEMENTED_GRID_ORDERS = frozenset({
+    "qb_major",                                   # shipped: grid=(nqb,Hq,B)
+    "hq_major", "hq_major_rev", "hq_major_fold",  # grid=(Hq,nqb,B), plain head
+    "hkv_minor", "hkv_minor_rev",                 # grid=(Hq,nqb,B), kv-head low
+})
 
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
 # / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel emits
@@ -1077,6 +1199,47 @@ def supports_attention_dense(
                 f"D={spec.head_size}) is not a multiple of the {_threads}-thread CTA"
             )
 
+    # --- Persistent work decode. The builder's decode chain ends in a raise for an
+    # unrecognised value, so a decode this body cannot emit must be rejected HERE or
+    # dispatch selects this arm and dies at build time. The shared spec already
+    # validates hkv_minor's own legality in __post_init__; what is checked here is
+    # the narrower question of what THIS builder implements.
+    if spec.digit_order:
+        try:
+            parse_digit_order(spec.digit_order)
+        except ValueError as exc:
+            return False, f"gfx942 attention_dense: {exc}"
+        if spec.qb_traversal and spec.qb_traversal not in QB_TRAVERSALS:
+            return False, (
+                f"gfx942 attention_dense: qb_traversal={spec.qb_traversal!r} "
+                f"not in {sorted(QB_TRAVERSALS)}"
+            )
+        if spec.default_grid_order != "qb_major":
+            return False, (
+                "digit_order supersedes default_grid_order; set exactly one "
+                "(digit_order expresses every order the grid orders can)"
+            )
+        # NO legality guard on the order itself: a mixed-radix decode is a
+        # bijection for every permutation and every radix set, so there is
+        # nothing to reject. xcd_partitionable is a PREDICTOR here, not a gate.
+    if spec.default_grid_order not in _IMPLEMENTED_GRID_ORDERS:
+        return False, (
+            f"gfx942 attention_dense: default_grid_order="
+            f"{spec.default_grid_order!r} not in "
+            f"{sorted(_IMPLEMENTED_GRID_ORDERS)}"
+        )
+    if spec.default_grid_order != "qb_major" and spec.persistent:
+        return False, (
+            "default_grid_order only applies to the NON-persistent grid; "
+            "the persistent path is ordered by persist_decode"
+        )
+    if spec.resolved_persist_decode not in _IMPLEMENTED_PERSIST_DECODES:
+        return False, (
+            f"gfx942 attention_dense does not implement persist_decode="
+            f"{spec.resolved_persist_decode!r} (implements "
+            f"{sorted(_IMPLEMENTED_PERSIST_DECODES)})"
+        )
+
     # --- LDS budget. Without this, an over-budget tile reaches comgr and fails with
     # an opaque CODEGEN_BC_TO_RELOCATABLE abort instead of a structured reason.
     lds_bytes = _lds_bytes(spec)
@@ -1107,6 +1270,69 @@ def supports_attention_dense(
                 f"count {_n_ktiles} -> zero-trip KV loop -> NaN"
             )
     return True, ""
+
+
+def _emit_digit_decode(b, lin, order, radices):
+    """Emit the generalized mixed-radix decode of ``lin`` into the four work digits.
+
+    Returns ``{"Q": blk, "B": bt, "V": hkv, "G": hql}`` as IR values. The plan --
+    which digits are elided, which pair fuses, which step skips its ``mod`` -- is
+    computed by the shared :func:`decode_plan` so the builder and the pure-Python
+    oracle used to verify it cannot drift.
+
+    Every radix here is a COMPILE-TIME constant on gfx942 (this body bakes the
+    whole problem shape), so each ``mod``/``div`` folds to a magic-number multiply
+    rather than an integer division.
+    """
+    zero = b.const_i32(0)
+    out = {d: zero for d in ("Q", "B", "V", "G")}
+    cur = lin
+    for kind, digits, radix, is_tail in decode_plan(order, radices):
+        if kind == "elide":
+            continue
+        val = cur if is_tail else b.mod(cur, b.const_i32(radix))
+        if kind == "fuse":
+            # One digit of radix Hq, split back with the BAKED gqa: this is the
+            # `hq = rem % Hq` that qb_major writes by hand.
+            g = radices["G"]
+            out["G"] = b.mod(val, b.const_i32(g))
+            out["V"] = b.div(val, b.const_i32(g))
+        else:
+            out[digits[0]] = val
+        if not is_tail:
+            cur = b.div(cur, b.const_i32(radix))
+    return out
+
+
+def _emit_qb_traversal(b, blk, nqb, traversal):
+    """Map a block counter in [0,NQB) to a query-block index.
+
+    ``asc`` identity; ``rev`` descending (leaves the CHEAPEST block last, i.e. LPT
+    on a dispatch queue); ``fold`` pairs cheap with expensive so a CTA striding
+    both halves has constant causal cost. At ``nqb <= 1`` all three are the
+    identity by construction.
+    """
+    if nqb <= 1 or traversal == "asc":
+        return blk
+    if traversal == "rev":
+        return b.sub(b.const_i32(nqb - 1), blk)
+    half = nqb // 2
+    return b.select(
+        b.cmp_lt(blk, b.const_i32(half)),
+        blk,
+        b.sub(b.const_i32(nqb - 1 + half), blk),
+    )
+
+
+def _digit_decode_values(b, lin, spec, nqb, causal):
+    """``(qb, hq, bt)`` for the experimental generalized ordering."""
+    rad = digit_radices(nqb, spec.batch, spec.num_kv_heads,
+                        spec.num_query_heads // spec.num_kv_heads)
+    d = _emit_digit_decode(b, lin, spec.digit_order, rad)
+    hq = b.add(b.mul(d["V"], b.const_i32(rad["G"])), d["G"])
+    trav = spec.qb_traversal or "asc"
+    qb = _emit_qb_traversal(b, d["Q"], nqb, trav if causal else "asc")
+    return qb, hq, d["B"]
 
 
 def build_attention_dense(
@@ -1873,7 +2099,40 @@ def _build_attention_dense_single_buffer(
             # barrier suffices because there is no pending lgkm to sink here.
             b.s_waitcnt(vmcnt=0)
             b.s_barrier_bare()
-            if spec.resolved_persist_decode == "hkv_major":
+
+            def _qb_from_blk(blk):
+                """Map a block counter in [0,NQB) to a query-block index by the causal
+                FOLD: pair a cheap and an expensive block per CTA, so a CTA that strides
+                both halves does qb=X and qb=NQB-1-X -- constant causal cost per pair.
+
+                REMOVED -- ``reverse_qb``, the alternative "strictly descending, longest
+                block first" order (LPT balance instead of pairing). Measured on both
+                architectures over a large shape set, two independent passes:
+                  * folded decodes (hkv_major / hkv_minor): a clear LOSS, reproducibly.
+                    The fold's cheap/expensive PAIRING carries the balance and an
+                    LPT-style descending order does not substitute for it.
+                  * qb_major (the only decode with no fold to replace): a real but
+                    sub-1% gain overall, reaching ~1% only at the longest sequences.
+                Not worth a knob: the regime where it applies -- persistent qb_major,
+                which is only selected where hkv_minor is illegal -- is itself well
+                behind the non-persistent axis swap on those same shapes, so improving
+                it does not change which variant should be dispatched. See
+                ``platform/dsl_docs/architecture/attention_thread_block_mapping.md``.
+
+                Note the two orders were ALTERNATIVES, never composed: ``reverse(fold())``
+                is not a third option but a re-parameterised fold, with the halves
+                swapped.
+                """
+                half = NQB // 2
+                qb_hi = b.sub(b.const_i32(NQB - 1 + half), blk)  # NQB-1-(blk-half)
+                return b.select(b.cmp_lt(blk, b.const_i32(half)), blk, qb_hi)
+
+            if spec.digit_order:
+                # EXPERIMENTAL generalized ordering. Takes precedence over the
+                # hand-written chain below, which stays byte-identical when the
+                # field is empty.
+                qb_v, hq_v, bt_v = _digit_decode_values(b, wi, spec, NQB, causal)
+            elif spec.resolved_persist_decode == "hkv_major":
                 # hkv-MAJOR + causal-balanced decode (gfx950 §):
                 #   wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt
                 # hkv in the MSB keeps each grid-stride phase within ~1 kv-head so the
@@ -1888,8 +2147,7 @@ def _build_attention_dense_single_buffer(
                 blk = b.mod(r2, b.const_i32(NQB))
                 hkv_wi = b.div(r2, b.const_i32(NQB))
                 hq_v = b.add(b.mul(hkv_wi, b.const_i32(gqa)), hql)
-                qb_hi = b.sub(b.const_i32(NQB - 1 + half), blk)  # NQB-1-(blk-half)
-                qb_v = b.select(b.cmp_lt(blk, b.const_i32(half)), blk, qb_hi)
+                qb_v = _qb_from_blk(blk)
             elif spec.resolved_persist_decode == "qb_major":
                 # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
                 # triangular causal-cost index) in the MSB spreads cheap+expensive
@@ -1905,6 +2163,49 @@ def _build_attention_dense_single_buffer(
                     qb_v = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
                 else:
                     qb_v = qb0
+            elif spec.resolved_persist_decode == "hkv_minor":
+                # hkv-MINOR decode: wi = ((blk*gqa + hql)*B + bt)*Hkv + hkv.
+                #
+                # The point is the HARDWARE map, not the work order. The hardware
+                # assigns xcd = linear_wgid % num_xcds and this is a 1-D grid, so
+                # CTA c lives on XCD c % 8 and grid-strides over wi == c (mod NP).
+                # num_persistent % 8 == 0 is enforced by the spec, so that reduces
+                # to: XCD j receives EXACTLY the work items wi % 8 == j. Putting
+                # hkv in the LOW digit therefore makes xcd == hkv (at Hkv == 8),
+                # so each XCD owns one kv-head and fetches it from MALL once --
+                # instead of all 8 XCDs pulling every head, which is what both
+                # other decodes do.
+                #
+                # This is the inverse of hkv_major, and the two are NOT variations
+                # on one idea: hkv_major puts hkv in the MSB, which groups a CTA's
+                # successive grid-stride items (temporal reuse inside one XCD's L2,
+                # raising HIT RATE) but leaves every XCD touching every head, so the
+                # MISS traffic to MALL is unchanged. hkv_minor targets the misses.
+                #
+                # `blk` carries hkv_major's causal fold unchanged, so the cheap/
+                # expensive query-block pairing that keeps CTA cost constant is
+                # retained rather than traded away for the locality.
+                hkv_wi = b.mod(wi, b.const_i32(Hkv))
+                rest = b.div(wi, b.const_i32(Hkv))
+                # rest = (blk*gqa + hql)*B + bt  -- bt in a MIDDLE field, so one
+                # CTA interleaves batch elements and the concurrent (batch,head)
+                # streams per XCD grow with B. That dilution is a real, understood,
+                # UNSOLVED limitation of hkv_minor at B>1, and is why the decode
+                # stays explicit-only with a validated regime of B=1.
+                #
+                # Moving bt to the SLOWEST field was tried as the fix and is
+                # MEASURED-NEGATIVE -- do not re-add it. Across B in {1,2,4,8} on
+                # gfx942 (and re-confirmed on gfx950) it helped only when
+                # num_kv_heads >= num_xcds, and regressed badly and monotonically
+                # from B=2 upward at num_kv_heads=4, where each kv-head already
+                # spans several XCDs. Neither field order dominates, so gating on
+                # num_kv_heads would be fitting a rule to a handful of shapes.
+                bt_v = b.mod(rest, b.const_i32(B))
+                r2 = b.div(rest, b.const_i32(B))
+                hql = b.mod(r2, b.const_i32(gqa))
+                blk = b.div(r2, b.const_i32(gqa))
+                hq_v = b.add(b.mul(hkv_wi, b.const_i32(gqa)), hql)
+                qb_v = _qb_from_blk(blk)
             else:
                 raise ValueError(
                     "gfx942 attention_dense: persist_decode="
@@ -1912,8 +2213,65 @@ def _build_attention_dense_single_buffer(
                     "by this builder"
                 )
             _run_work_item(qb_v, hq_v, bt_v)
-    else:
+    elif spec.digit_order:
+        # EXPERIMENTAL generalized ordering, non-persistent. The grid is 1-D of
+        # W CTAs (see attention_dense_grid), one work item each, so the linear
+        # workgroup id IS the work index -- and it is the same linear id the
+        # hardware feeds to xcd = id % num_xcds that the shipped 3-D grid
+        # produces, since that grid linearizes x-fastest. A 1-D grid is what lets
+        # this path express all 24 orders instead of the 12 with (hkv,hql)
+        # adjacent; every radix is baked here, so the decode is magic-number
+        # multiplies rather than integer division.
+        _nqb = Sq // BLOCK_M
+        _qb, _hq, _bt = _digit_decode_values(b, b.block_id_x(), spec, _nqb, causal)
+        _run_work_item(_qb, _hq, _bt)
+    elif spec.default_grid_order == "qb_major":
         _run_work_item(b.block_id_x(), b.block_id_y(), b.block_id_z())
+    else:
+        # All non-qb_major orders share grid=(Hq, nqb, B): x is the head axis,
+        # y the query-block axis. They differ in two independent maps.
+        #
+        # HEAD map (x -> hq) -- decides the XCD assignment, because
+        # xcd = linear_wgid % num_xcds and the grid linearizes x-fastest:
+        #   plain       hq = bx            -> xcd = hq % 8
+        #   "hkv_minor" hq = gqa*(bx % Hkv) + bx // Hkv
+        #               -> kv-head lands in the low digit, so xcd == kv-head
+        #                  exactly when Hkv == num_xcds. Bijective on [0,Hq)
+        #                  because Hq == Hkv*gqa.
+        #
+        # QB map (y -> qb) -- decides DISPATCH ORDER, which on this grid is a
+        # makespan/tail question, NOT the per-CTA balance question the
+        # persistent path faces. Each CTA here runs exactly ONE work item, so
+        # no relabeling can change any CTA's total cost; it only changes which
+        # CTAs are co-resident and, critically, which are left at the end:
+        #   plain  qb = by             -> tail is qb=NQB-1, the MOST expensive
+        #   "_rev" qb = NQB-1-by       -> tail is qb=0, the cheapest (LPT)
+        #   "_fold" qb = by<half ? by : NQB-1-(by-half)  -> tail is qb=half
+        # This is why the persistent result (fold beats descending) does not
+        # transfer: there the fold equalizes per-CTA TOTALS across a grid-stride
+        # sequence, a mechanism that simply does not exist here.
+        _nqb = Sq // BLOCK_M
+        _order = spec.default_grid_order
+        _bx, _by = b.block_id_x(), b.block_id_y()
+        if _order.startswith("hkv_minor"):
+            _hq = b.add(
+                b.mul(b.mod(_bx, b.const_i32(Hkv)), b.const_i32(gqa)),
+                b.div(_bx, b.const_i32(Hkv)),
+            )
+        else:
+            _hq = _bx
+        if _order.endswith("_rev") and causal and _nqb > 1:
+            _qb = b.sub(b.const_i32(_nqb - 1), _by)
+        elif _order.endswith("_fold") and causal and _nqb > 1:
+            _h = _nqb // 2
+            _qb = b.select(
+                b.cmp_lt(_by, b.const_i32(_h)),
+                _by,
+                b.sub(b.const_i32(_nqb - 1 + _h), _by),
+            )
+        else:
+            _qb = _by
+        _run_work_item(_qb, _hq, b.block_id_z())
     b.ret()
     return b.kernel
 
@@ -1937,7 +2295,17 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
     # because ragged is rejected and supports_attention_dense then enforces
     # seqlen_q % block_m == 0.
     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
-    return (nqb, spec.num_query_heads, spec.batch)
+    if spec.digit_order:
+        # 1-D grid of W: the body decodes the work index from the linear
+        # workgroup id itself. Same CTA count and same linearization as the 3-D
+        # grid below, so the XCD round-robin sees an identical id sequence.
+        return (nqb * spec.num_query_heads * spec.batch, 1, 1)
+    if spec.default_grid_order == "qb_major":
+        return (nqb, spec.num_query_heads, spec.batch)
+    # hq_major / hkv_minor both put the head axis on x; they differ only in how
+    # the body interprets bx. Grid shape and body MUST agree -- a mismatch
+    # writes some query rows twice and others never.
+    return (spec.num_query_heads, nqb, spec.batch)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:

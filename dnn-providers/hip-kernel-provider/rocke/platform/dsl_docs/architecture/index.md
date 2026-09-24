@@ -49,6 +49,16 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 - [`wavescope_integration.md`](wavescope_integration.md) — how source locations
   reach an ATT trace, and how to use the viewer during an optimization pass.
   Opens with a glossary of the LLVM and DWARF terms the rest of it assumes.
+- [`attention_thread_block_mapping.md`](attention_thread_block_mapping.md) — which
+  workgroup gets which (query-block, head, batch) tuple in dense attention. Frames
+  every mapping as a mixed-radix decomposition over four digits, giving three
+  independent factors (digit order, query-block traversal, assignment policy) and a
+  144-combination space of which eight are measured. Records the hypotheses tested
+  against it and which held, why one locality class leads at every batch size, and why
+  the persistent and non-persistent paths differ in *who assigns work* rather than in
+  what they can express. Its "In flight" section covers the generalized-ordering sweep
+  now making the whole space reachable behind two experimental spec fields, including
+  the measured correction that the two slowest digits are **not** interchangeable.
 
 Experiment summaries are historical evidence tied to their stated hardware,
 toolchain, and configuration. They are not current performance promises.

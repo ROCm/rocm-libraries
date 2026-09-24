@@ -248,6 +248,14 @@ _PRIVATE_PERTURBATIONS = {
     "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
     "iglp": (True, False),
+    # Non-persistent grid order: rejected on the persistent bases, which the
+    # supports_attention_dense filter drops rather than asserts on.
+    "default_grid_order": ("hq_major", "hkv_minor_rev"),
+    # EXPERIMENTAL generalized ordering. Both values are legal on either path;
+    # qb_traversal moves the IR only while digit_order is set, which is why
+    # `digitorder_d128_fp16` below exists as a base.
+    "digit_order": ("BGVQ", "VGQB"),
+    "qb_traversal": ("fold", "rev"),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -270,6 +278,16 @@ _INJECTIVITY_BASES = {
         seqlen_q=4096,
         seqlen_kv=4096,
         num_query_heads=32,
+    ),
+    # Generalized-ordering base. Without a base that already sets digit_order,
+    # perturbing qb_traversal would move only the NAME -- the decode reads the
+    # traversal solely on the experimental path -- and its injectivity coverage
+    # would be vacuous. Here the traversal is genuinely live in the IR.
+    "digitorder_d128_fp16": dict(
+        head_size=128,
+        dtype="fp16",
+        digit_order="BGVQ",
+        qb_traversal="fold",
     ),
 }
 
@@ -721,6 +739,23 @@ _CONTRACT_GRID = [
     # --- private: iglp (no rejected region -- see the comment above) ---
     dict(iglp=False),
     dict(dtype="fp16", iglp=True),
+    # --- private: default_grid_order (non-persistent grid axis order) ---
+    dict(default_grid_order="qb_major"),  # accepted: the shipped default
+    dict(default_grid_order="hkv_minor_rev"),  # accepted on this path
+    # REJECTED: the order names the NON-persistent grid; the persistent path is
+    # ordered by persist_decode instead, so setting both is a contradiction.
+    dict(default_grid_order="hq_major", persistent=True, num_persistent=228),
+    # --- private: digit_order / qb_traversal (generalized ordering) ---
+    dict(digit_order=""),  # accepted: empty = OFF = the shipped decode chain
+    dict(digit_order="VGQB", qb_traversal="rev"),  # accepted on either path
+    dict(digit_order="BGVQ", persistent=True, num_persistent=228),  # accepted
+    # REJECTED: not a permutation of QBVG -- a non-bijective decode would not
+    # crash, it would write some query rows twice and leave others unwritten.
+    dict(digit_order="QQVG"),
+    # REJECTED: digit_order supersedes default_grid_order; exactly one may be set.
+    dict(digit_order="BGVQ", default_grid_order="hq_major"),
+    # REJECTED: unknown traversal.
+    dict(digit_order="BGVQ", qb_traversal="sideways"),
 ]
 
 

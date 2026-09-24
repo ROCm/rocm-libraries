@@ -28,7 +28,172 @@ DENSE_TILE_GEOMETRIES = MappingProxyType(
 )
 DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 
-_COMMON_PERSIST_DECODES = frozenset({"auto", "qb_major", "hkv_major"})
+_COMMON_PERSIST_DECODES = frozenset(
+    {"auto", "qb_major", "hkv_major", "hkv_minor"}
+)
+
+# XCD count every CDNA3/CDNA4 part this spec targets exposes. Only ``hkv_minor``
+# reads it: that decode's whole point is that the hardware's round-robin
+# ``xcd = linear_wgid % num_xcds`` lands on the kv-head index, which requires the
+# persistent CTA count to be a multiple of it. A 6-XCD part changes the modulus
+# and silently turns the decode into an arbitrary permutation, which is why the
+# legality check below is a hard reject rather than a best-effort.
+_PERSIST_XCD_MODULUS = 8
+
+
+def xcd_partitionable(num_kv_heads: int, modulus: int = _PERSIST_XCD_MODULUS) -> bool:
+    """Whether ``hkv_minor``'s kv-head -> XCD map confines each kv-head to ONE XCD.
+
+    The decode emits ``hkv = wi % num_kv_heads`` while the hardware assigns
+    ``xcd = wi % modulus``, so the two indices agree only when one of the moduli
+    divides the other:
+
+    * ``modulus % num_kv_heads == 0`` (1, 2, 4, 8): ``wi % modulus`` determines
+      ``wi % num_kv_heads``, so each XCD sees exactly one kv-head. The head is
+      replicated across ``modulus // num_kv_heads`` XCDs, which costs L2 capacity
+      but keeps every XCD's working set to a single head.
+    * ``num_kv_heads % modulus == 0`` (8, 16, 24, 32, 40, 48, ...): ``wi %
+      num_kv_heads`` determines ``wi % modulus``, so each kv-head lands on exactly
+      one XCD and each XCD holds ``num_kv_heads // modulus`` of them.
+
+    Anything else (12, 20, 28, 10, 6, ...) has ``1 < gcd < min(...)``, which splits
+    a single kv-head across ``num_kv_heads // gcd`` XCDs -- the case this rejects.
+
+    NOTE this supersedes an earlier power-of-2 test. Power-of-2 is sufficient but
+    NOT necessary: it wrongly rejected 24/40/48, where ``modulus`` divides the head
+    count and the identity holds exactly. It never wrongly accepted anything, so the
+    old guard was conservative rather than unsound -- but it excluded real shapes.
+    """
+    if num_kv_heads <= 0:
+        return False
+    return num_kv_heads % modulus == 0 or modulus % num_kv_heads == 0
+
+
+# --- EXPERIMENTAL: generalized work-index ordering ---------------------------
+#
+# Every shipped thread-block mapping is one point in a single space: a mixed-radix
+# decomposition of the linear work index over four digits. Naming them lets the
+# whole space be swept instead of hand-writing one decode per point.
+#
+#   Q  blk  query-block counter   radix NQB
+#   B  bt   batch element         radix batch
+#   V  hkv  kv head               radix num_kv_heads
+#   G  hql  query head within gqa radix gqa            (hq = hkv*gqa + hql)
+#
+# An order string lists the digits FASTEST FIRST, so "VBGQ" means
+# ``wi = ((blk*gqa + hql)*B + bt)*Hkv + hkv`` -- the shipped ``hkv_minor``.
+# The shipped decodes in this notation:
+#
+#   hkv_minor  VBGQ        hkv_major  BGQV        qb_major   BGVQ
+#
+# Note qb_major and hkv_major differ ONLY in their two SLOWEST digits, which makes
+# them a built-in test of "do the slow digits matter at all".
+DIGIT_LETTERS = ("Q", "B", "V", "G")
+
+# Canonical order strings for the shipped decodes; the sweep uses these to assert
+# the generic path reproduces the hand-written ones.
+SHIPPED_DIGIT_ORDERS = MappingProxyType(
+    {"hkv_minor": "VBGQ", "hkv_major": "BGQV", "qb_major": "BGVQ"}
+)
+
+QB_TRAVERSALS = ("asc", "rev", "fold")
+
+
+def parse_digit_order(order: str) -> tuple[str, ...]:
+    """Validate an order string and return it as a tuple, fastest digit first.
+
+    Raises rather than returning a flag: an unvalidated order silently produces a
+    non-bijective decode, which does not crash -- it writes some query rows twice
+    and leaves others unwritten, i.e. a wrong-answer bug that looks like a
+    tolerance failure.
+    """
+    letters = tuple(order.upper())
+    if len(letters) != len(DIGIT_LETTERS) or set(letters) != set(DIGIT_LETTERS):
+        raise ValueError(
+            f"digit_order must be a permutation of {''.join(DIGIT_LETTERS)!r}, "
+            f"got {order!r}"
+        )
+    return letters
+
+
+def digit_radices(nqb: int, batch: int, num_kv_heads: int, gqa: int) -> dict:
+    """Radix of each digit for a concrete shape."""
+    return {"Q": int(nqb), "B": int(batch), "V": int(num_kv_heads), "G": int(gqa)}
+
+
+def decode_plan(order: str, radices: dict) -> tuple[tuple, ...]:
+    """The emit plan for one order: a tuple of ``(kind, digits, radix)`` steps.
+
+    Three optimizations are applied here rather than in each builder, because
+    without them the generic decode emits more integer ops than the hand-written
+    decode it is being compared against -- and the comparison, not the codegen, is
+    what the sweep is for:
+
+    * ``elide``  -- a radix-1 digit is constant 0 and costs nothing. This is also
+      why the space collapses to 6 orders at ``B == 1`` and 2 for MHA.
+    * ``tail``   -- the slowest live digit needs no ``mod``; the remaining
+      quotient is already in range.
+    * ``fuse``   -- adjacent ``G`` then ``V`` (hql faster than hkv) decode as ONE
+      digit of radix ``Hq``, since ``hq = hkv*gqa + hql`` by definition. This is
+      exactly what ``qb_major`` does by hand: two ops, not four.
+    """
+    letters = parse_digit_order(order)
+    live = [d for d in letters if radices[d] > 1]
+    steps, i = [], 0
+    while i < len(live):
+        d = live[i]
+        nxt = live[i + 1] if i + 1 < len(live) else None
+        # Fuse only G-then-V, and only if they were adjacent in the FULL order
+        # too -- an elided digit between them would make the fused value wrong.
+        adjacent = nxt is not None and abs(letters.index(d) - letters.index(nxt)) == 1
+        if d == "G" and nxt == "V" and adjacent:
+            radix = radices["G"] * radices["V"]
+            steps.append(("fuse", ("G", "V"), radix, i + 2 >= len(live)))
+            i += 2
+            continue
+        steps.append(("digit", (d,), radices[d], i + 1 >= len(live)))
+        i += 1
+    for d in letters:
+        if radices[d] <= 1:
+            steps.append(("elide", (d,), 1, False))
+    return tuple(steps)
+
+
+def decode_reference(wi: int, order: str, radices: dict) -> dict:
+    """Pure-Python oracle for the generic decode -- the same arithmetic a builder
+    emits, used to prove equivalence with the hand-written decodes without a GPU."""
+    out = {d: 0 for d in DIGIT_LETTERS}
+    cur = wi
+    for kind, digits, radix, is_tail in decode_plan(order, radices):
+        if kind == "elide":
+            continue
+        val = cur if is_tail else cur % radix
+        if kind == "fuse":
+            out["G"] = val % radices["G"]
+            out["V"] = val // radices["G"]
+        else:
+            out[digits[0]] = val
+        if not is_tail:
+            cur //= radix
+    return out
+
+
+def traverse_qb(blk: int, nqb: int, traversal: str) -> int:
+    """Map a block counter in ``[0, NQB)`` to a query-block index.
+
+    ``asc`` leaves the most expensive block last; ``rev`` leaves the cheapest last
+    (LPT on a dispatch queue); ``fold`` pairs a cheap and an expensive block so a
+    CTA striding both halves has constant causal cost.
+    """
+    if traversal not in QB_TRAVERSALS:
+        raise ValueError(f"qb_traversal must be one of {QB_TRAVERSALS}, got {traversal!r}")
+    if nqb <= 1 or traversal == "asc":
+        return blk
+    if traversal == "rev":
+        return nqb - 1 - blk
+    half = nqb // 2
+    return blk if blk < half else nqb - 1 + half - blk
+
 
 # Signed 32-bit ceiling for tensor extents. See ``check_dense_spec_preflight``
 # check 4 for why the SIGNED bound binds even though the buffer-resource
@@ -137,6 +302,44 @@ class AttentionDenseSpec:
                 f"{sorted(self.supported_persist_decodes())}, "
                 f"got {self.persist_decode!r}"
             )
+        if self.persist_decode == "hkv_minor":
+            # hkv_minor exists to make the HARDWARE's workgroup->XCD round-robin
+            # land on the kv-head index: it places hkv in the LOW digit of the
+            # work index so that ``xcd == wi % num_xcds == hkv``. Each condition
+            # below is load-bearing for that identity, and a violated one does
+            # not produce a wrong answer -- it produces a CORRECT answer with the
+            # locality silently gone, which is the failure mode that reads as "the
+            # optimization does not work" instead of "the spec was illegal".
+            if not self.persistent:
+                raise ValueError("persist_decode='hkv_minor' requires persistent=True")
+            if not self.causal:
+                # The query-block fold carried over from hkv_major pairs a cheap
+                # and an expensive qb; with uniform (non-causal) cost that fold is
+                # a no-op reordering and the decode has no reason to exist.
+                raise ValueError("persist_decode='hkv_minor' requires causal=True")
+            if self.num_persistent % _PERSIST_XCD_MODULUS:
+                raise ValueError(
+                    f"persist_decode='hkv_minor' requires num_persistent "
+                    f"({self.num_persistent}) to be a multiple of "
+                    f"{_PERSIST_XCD_MODULUS}: XCD j receives exactly the work "
+                    f"items wi % {_PERSIST_XCD_MODULUS} == j only when the CTA "
+                    f"count is, and otherwise the kv-head->XCD identity this "
+                    f"decode is built on does not hold"
+                )
+            if not xcd_partitionable(self.num_kv_heads):
+                raise ValueError(
+                    f"persist_decode='hkv_minor' requires num_kv_heads "
+                    f"({self.num_kv_heads}) to divide or be divided by "
+                    f"{_PERSIST_XCD_MODULUS}: the decode's kv-head->XCD identity "
+                    f"is governed by gcd(num_kv_heads, {_PERSIST_XCD_MODULUS}), "
+                    f"and any other value spreads a single kv-head over several "
+                    f"XCDs instead of confining it to one"
+                )
+            if self.ragged or self.varlen or self.paged:
+                raise ValueError(
+                    "persist_decode='hkv_minor' is validated only for aligned "
+                    "dense attention (not ragged/varlen/paged)"
+                )
         if self.sliding_window < 0:
             raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
         if self.sliding_window > 0:
@@ -276,7 +479,22 @@ class AttentionDenseSpec:
         return ("lazyrs",) if self.lazy_rescale else ()
 
     def _persist_decode_name_part(self) -> str:
-        return "hkvmaj" if self.resolved_persist_decode == "hkv_major" else ""
+        """Symbol tag for the resolved decode -- EVERY non-qb_major decode must
+        return a distinct non-empty string.
+
+        ``qb_major`` is the untagged baseline, so a decode that emits different IR
+        and returns ``""`` collides with it in ``_DENSE_LAUNCHER_CACHE``, which is
+        keyed on ``kernel_name`` and whose ``assert art.kernel_name == key`` PASSES
+        on a collision -- serving the stale binary. An A/B against the baseline then
+        times the same kernel twice and reports ~1.000x, i.e. the knob looks inert
+        rather than broken. This kernel has shipped that exact bug twice
+        (``batch``, then ``waves_per_eu``); see the Gfx942AttentionDenseSpec
+        docstring.
+        """
+        return {
+            "hkv_major": "hkvmaj",
+            "hkv_minor": "hkvmin",
+        }.get(self.resolved_persist_decode, "")
 
     def kernel_name(self) -> str:
         parts = [
@@ -430,6 +648,15 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
 
 __all__ = [
     "AttentionDenseSpec",
+    "xcd_partitionable",
+    "DIGIT_LETTERS",
+    "QB_TRAVERSALS",
+    "SHIPPED_DIGIT_ORDERS",
+    "decode_plan",
+    "decode_reference",
+    "digit_radices",
+    "parse_digit_order",
+    "traverse_qb",
     "DEFAULT_DENSE_TILE_GEOMETRY",
     "DENSE_TILE_GEOMETRIES",
     "INT32_LIMIT",
