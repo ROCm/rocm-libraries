@@ -412,18 +412,18 @@
         },
         "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
           "arch": "gfx950",
-          "bytes": 50395,
+          "bytes": 22838,
           "family": "conv",
           "kernel_name": "irhash_conv_950_basic_b_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_cshuffle",
-          "sha256": "8bbdf4a1910e00d6eb4590098ad320bbd896ee11fbb9d7b0754d38078ce6000a",
+          "sha256": "38ee311fea9a4e5c00e4a220c6a230ee989db5fef4df975eeb78b6fe1dab1b86",
           "status": "ok"
         },
         "conv/gfx950/n1h8c16k32r3/basic_default": {
           "arch": "gfx950",
-          "bytes": 64236,
+          "bytes": 35938,
           "family": "conv",
           "kernel_name": "irhash_conv_950_basic_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_default",
-          "sha256": "75fca036909dd993cc811cb05c8d06ec2d9e205e875a8366687f54cd03e1c1bb",
+          "sha256": "0a0bd6674508dc25315639a775fea5c202fe33dee8611d2e084c61f47c3718e6",
           "status": "ok"
         },
         "conv/gfx950/n2h16c32k32r1": {
@@ -1617,18 +1617,18 @@
         },
         "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
           "arch": "gfx950",
-          "bytes": 50534,
+          "bytes": 22971,
           "family": "conv",
           "kernel_name": "irhash_conv_950_basic_b_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_cshuffle",
-          "sha256": "80da37bd539fa495c55f6c7bec0ebaa3a16d8a207dcf1e18d519f61a1eb1b789",
+          "sha256": "07df00c797d0664453a56b00691ef59150c9b8512a46ba9b00c464441a12abda",
           "status": "ok"
         },
         "conv/gfx950/n1h8c16k32r3/basic_default": {
           "arch": "gfx950",
-          "bytes": 64375,
+          "bytes": 36077,
           "family": "conv",
           "kernel_name": "irhash_conv_950_basic_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_default",
-          "sha256": "e712f2a45210cfb28be9e28bf43ef28b05042f2cfae87aa1c4d83b99ec859d31",
+          "sha256": "ef97e3df68a627ba468cf4e9a66592cc529bd1521b3dd20e1422995381364c9d",
           "status": "ok"
         },
         "conv/gfx950/n2h16c32k32r1": {
@@ -2822,18 +2822,18 @@
         },
         "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
           "arch": "gfx950",
-          "bytes": 50538,
+          "bytes": 22975,
           "family": "conv",
           "kernel_name": "irhash_conv_950_basic_b_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_cshuffle",
-          "sha256": "b30fed8bd47d12db2a05694a4a0d02338898461bf76d9864468c04d1f902e533",
+          "sha256": "c226cd0c1239454e8928b95a9e847825bf314c3f29a18237ad9aea3db3a645da",
           "status": "ok"
         },
         "conv/gfx950/n1h8c16k32r3/basic_default": {
           "arch": "gfx950",
-          "bytes": 64379,
+          "bytes": 36081,
           "family": "conv",
           "kernel_name": "irhash_conv_950_basic_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_default",
-          "sha256": "a0b6acb3748dae3ee5e3961503cb12b7a08bbf03d232f7baf24b726a0ba74bd3",
+          "sha256": "7a64ce1c297e125855241f895544397f90b56b956c43cf3d98873bee535a6e94",
           "status": "ok"
         },
         "conv/gfx950/n2h16c32k32r1": {

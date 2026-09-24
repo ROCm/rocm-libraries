@@ -1,0 +1,19 @@
+{% extends "common/base.h.jinja2" %}
+
+{% block target_tparams %}
+template<class Target, class input_type>
+{% endblock %}
+
+{% block config_guard scoped %}
+    ({% if not type.input_type.is_floating %}!{% endif %}rocprim::is_floating_point<input_type>::value){% if type.input_type.size_min > 0 %} 
+    && (sizeof(input_type) > {{ type.input_type.size_min }}){% endif %} 
+    && (sizeof(input_type) <= {{ type.input_type.size }})
+{% endblock %}
+
+{% block config_constructor -%}
+adjacent_find_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} } }
+{%- endblock %}
+
+{% block config_base_type -%}
+adjacent_find_config_params_base<input_type>
+{%- endblock %}
