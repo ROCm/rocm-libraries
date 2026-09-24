@@ -8,7 +8,8 @@ Covers:
   - CoalescedTileLoader.load_global() / .store_lds() IR structure
   - is_valid_spec rejects pipeline="basic" with async_dma=True
   - build_implicit_gemm_conv with pipeline="basic" produces a valid kernel
-    whose IR contains both buffer_load_vN and smem_store_vN ops
+    whose IR uses a bounded runtime scf.for_iter K-loop and contains both
+    buffer_load_vN and smem_store_vN ops
 """
 
 from __future__ import annotations
@@ -330,15 +331,13 @@ class TestBuildConvBasicPipeline:
         ]
         assert c_allocs, "cshuffle epilogue must allocate a C_smem tile"
 
-    def test_build_does_not_use_scf_for_iter(self):
-        """Unlike the simple K-loop (which uses scf.for_iter), pipeline='basic'
-        Python-unrolls the K loop — there should be no scf.for_iter in the IR."""
+    def test_build_uses_scf_for_iter(self):
+        """pipeline='basic' now emits a bounded runtime scf.for K-loop
+        (same structure as 'mem') so IR size is independent of K_gemm."""
         kernel = self._build()
         ops = _flatten(kernel.body, [])
-        for_iters = [op for op in ops if "for_iter" in op.name]
-        assert (
-            not for_iters
-        ), "pipeline='basic' K-loop is Python-unrolled; scf.for_iter must not appear"
+        for_ops = [op for op in ops if op.name == "scf.for"]
+        assert for_ops, "pipeline='basic' K-loop must use scf.for (runtime loop)"
 
 
 if __name__ == "__main__":  # pragma: no cover
