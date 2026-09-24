@@ -6,10 +6,10 @@
 from dataclasses import dataclass
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, SMEMModifiers, GLOBALModifiers, EXEC, ContinuousRegister, DSModifiers, MemTokenData
-from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBarrier, SCBranchSCC0, SCMovB32, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32, SEndpgm
+from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBarrier, SCBranchSCC0, SCMovB32, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32
 import abc
 from ..Component import Component
-from ..Common import log2, clusterEnabled, persistentSpatialCluster, persistentMulticast
+from ..Common import log2, clusterEnabled, persistentSpatialCluster
 from rocisa.enum import CacheScope
 from rocisa.functions import scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder
 from ..ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment
@@ -138,13 +138,27 @@ class WorkAssignment(Component):
         self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipSignal', electTag='PersistentMulticastElect')
         return module
 
-    def persistentMulticastProloguePrefetchHandshake(self, writer, kernel):
-        module = Module('Persistent multicast prologue prefetch cluster handshake')
-        if not persistentMulticast(kernel):
+    def persistentClusterNextTileArrive(self, writer, kernel):
+        """Arrive for the next tile's first-load cluster wait.
+
+        Peers multicast the next tile's prefetch into each other's LDS, so each
+        workgroup arrives only after all of its waves are done with LDS for the
+        current tile. Peers own the same number of blocks, so the has-next-tile
+        test is uniform across the cluster and the last tile leaves no arrive.
+        """
+        module = Module('Persistent cluster next-tile arrive')
+        if not persistentSpatialCluster(kernel):
             return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
-        module.addComment0('cluster B-multicast: bracket prologue double-buffer prefetch load with cluster handshake')
-        self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipPrefetchSignal', electTag='PersistentMulticastPrefetchElect', wait=True)
+        partition = Component.TileProcessingStrategy.find(writer).staticPartition()
+        skipArrive = Label(writer.labels.getNameInc('PersistentMC_SkipNextTileArrive'), '')
+        module.addComment0('cluster B-multicast: arrive for the next tile once this tile is done with LDS')
+        module.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment='no next tile: nothing to arrive for'))
+        module.add(SCBranchSCC1(labelName=skipArrive.getLabelName()))
+        module.add(SWaitCnt(dscnt=0, comment='LDS reads of this tile done'))
+        module.add(SBarrier(comment='all waves done with LDS before the cluster arrive'))
+        self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipTileSignal', electTag='PersistentMulticastTileElect')
+        module.add(skipArrive)
         return module
 
     def persistentMulticastZeroIterClusterWait(self, writer, kernel):
@@ -157,30 +171,6 @@ class WorkAssignment(Component):
         module.add(SCBranchSCC0(labelName=skipWait.getLabelName(), comment='>=1 full iteration: the first-load cluster wait pairs the arrive'))
         module.add(SBarrier(True, True, True, comment='cluster_barrier wait'))
         module.add(skipWait)
-        return module
-
-    def persistentClusterPadEarlyExit(self, writer, kernel):
-        module = Module('Persistent cluster pad early-exit')
-        if not persistentSpatialCluster(kernel):
-            return module
-        assert clusterEnabled(kernel['ClusterDim']), 'persistentClusterPadEarlyExit requires an enabled cluster'
-        module.addComment1('Persistent cluster multicast: exit padded boundary-cluster peers before the cluster barrier (grid rounded up to ClusterDim)')
-        padExit = Label(writer.labels.getNameInc('PersistentClusterPad_EarlyStop'), '')
-        padNoExit = Label(writer.labels.getNameInc('PersistentClusterPad_NoEarlyStop'), '')
-        module.add(SCmpGeU32(src0=sgpr('WorkGroup0'), src1=sgpr('NumWorkGroups0'), comment='padded if WorkGroup0 (M-tile) >= tilesM'))
-        module.add(SCBranchSCC1(labelName=padExit.getLabelName()))
-        with writer.allocTmpSgpr(1, tag='persistentClusterPad_tmpSgpr') as padTmp:
-            boundN = 'NumWorkGroups1'
-            if kernel['GlobalSplitU'] != 0:
-                module.add(SAndB32(dst=sgpr(padTmp.idx), src0=sgpr('GSU'), src1=writer.gsuMaskHex(kernel), comment='Restore GSU'))
-                module.add(SMulI32(dst=sgpr(padTmp.idx), src0=sgpr('NumWorkGroups1'), src1=sgpr(padTmp.idx), comment='tilesN * GSU'))
-                boundN = padTmp.idx
-            module.add(SCmpGeU32(src0=sgpr('WorkGroup1'), src1=sgpr(boundN), comment='padded if WorkGroup1 (N-tile) >= tilesN*GSU'))
-            module.add(SCBranchSCC1(labelName=padExit.getLabelName()))
-            module.add(SBranch(labelName=padNoExit.getLabelName()))
-            module.add(padExit)
-            module.add(SEndpgm(comment='padded work-group: exit before any cluster barrier/load (WAVEDONE frees -3 barrier slot)'))
-            module.add(padNoExit)
         return module
 
     @abc.abstractmethod
@@ -712,35 +702,26 @@ class StaticGrid(WorkAssignment):
 
         # No USO prologue: bit 29 is tested in place at each divergence site.
 
-        # Cluster multicast: exit padded boundary-cluster peers here, before the
-        # fold overwrites WorkGroup0 with the linear index and before the prologue
-        # cluster-barrier arrive, so their WAVEDONE frees the -3 barrier slot for
-        # the present peers. No-op unless this is the ForceDPOnly cluster path;
-        # the two-tile cluster instead defers the prologue arrive to AFTER the
-        # StreamK work-check (see below).
-        module.add(self.persistentClusterPadEarlyExit(writer, kernel))
-
-        # Cluster multicast: fold the 2-D (+batch) HW workgroup coords into the
-        # linear DP tile index the DP decode expects. WorkGroup0 = global M-tile
-        # (Cs B-peers M-adjacent), WorkGroup1 = global N-tile (Ck A-peers
-        # N-adjacent), WorkGroup2 = batch, so (M-fastest, matching tileIndexToWorkGroup):
-        #   PersistentWorkGroupIndex = WorkGroup2*(nWG0*nWG1) + WorkGroup1*nWG0 + WorkGroup0
-        # written into WorkGroup0 so the save below copies the final index. A 1-D
-        # [Cs, 1] cluster launches the same 2-D grid, so it folds identically.
+        # Cluster multicast: the host launches (Cs * clusters, Ck, 1), so after the
+        # cluster remap WorkGroup0 = cluster*Cs + peerX and WorkGroup1 = peerY. Fold
+        # them into the cluster-block rank the DataParallel decode expects:
+        #   rank = cluster*(Cs*Ck) + peerY*Cs + peerX
         if persistentSpatialCluster(kernel):
-            with writer.allocTmpSgpr(2, tag="ClusterDPFold") as tRes:
+            cs, ck = kernel["ClusterDim"]
+            with writer.allocTmpSgpr(1, tag="ClusterDPFold") as tRes:
                 t0 = tRes.idx
-                t1 = tRes.idx + 1
-                module.add(SMulI32(dst=sgpr(t0), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0"),
-                                   comment="DP fold: WorkGroup1 * nWG0 (N-tile row)"))
-                module.add(SMulI32(dst=sgpr(t1), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
-                                   comment="DP fold: nWG0 * nWG1 (tiles per batch)"))
-                module.add(SMulI32(dst=sgpr(t1), src0=sgpr(t1), src1=sgpr("WorkGroup2"),
-                                   comment="DP fold: batch * (nWG0*nWG1)"))
+                module.add(SAndB32(dst=sgpr(t0), src0=sgpr("WorkGroup0"), src1=hex(cs - 1),
+                                   comment="DP fold: peerX"))
+                module.add(SLShiftRightB32(dst=sgpr("WorkGroup0"), shiftHex=hex(log2(cs)), src=sgpr("WorkGroup0"),
+                                           comment="DP fold: cluster"))
+                module.add(SLShiftLeftB32(dst=sgpr("WorkGroup0"), shiftHex=hex(log2(cs * ck)), src=sgpr("WorkGroup0"),
+                                          comment="DP fold: cluster * Cs*Ck"))
                 module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t0),
-                                   comment="DP fold: + WorkGroup1*nWG0"))
-                module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t1),
-                                   comment="DP fold: PersistentWorkGroupIndex = batch*(nWG0*nWG1) + N*nWG0 + M"))
+                                   comment="DP fold: + peerX"))
+                module.add(SLShiftLeftB32(dst=sgpr(t0), shiftHex=hex(log2(cs)), src=sgpr("WorkGroup1"),
+                                          comment="DP fold: peerY * Cs"))
+                module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t0),
+                                   comment="DP fold: rank = cluster*Cs*Ck + peerY*Cs + peerX"))
 
         if skConstsInVgprs:
             module.add(VMovB32(dst=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"]), src=sgpr("WorkGroup0"),
@@ -751,13 +732,8 @@ class StaticGrid(WorkAssignment):
 
         # Cluster multicast: arrive once per workgroup at the cluster split barrier
         # here in the prologue, before the first tensor_load_to_lds, so it pairs
-        # the cluster-barrier pass's first-load wait.
-        #
-        # EXCEPTION -- the two-tile (StreamKForceDPOnly==0) cluster: its no-work
-        # peers only reveal themselves at the StreamK work-check below, so arriving
-        # here would over-count the -3 barrier. DEFER that arrive to just after the
-        # work-check. The ForceDPOnly cluster has already dropped its no-work peers
-        # in persistentClusterPadEarlyExit above, so it arrives here.
+        # the cluster-barrier pass's first-load wait. Every later tile's wait pairs
+        # the arrive at the persistent loop close.
         if persistentSpatialCluster(kernel):
             module.add(self.persistentMulticastPrologueSignal(writer, kernel))
 

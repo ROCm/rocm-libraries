@@ -207,7 +207,7 @@ class TestDeclareUndeclare:
         assert w.undefined == []
 
     def test_undeclare_keeps_maskB_live_frees_selfonly_maskA_under_pap(self):
-        # PAP re-applies the broadcast mask (MulticastMaskB) on every
+        # The broadcast mask (MulticastMaskB) is re-applied on every
         # persistent-loop TDM refresh, so it must stay live past the prologue;
         # freeing it makes those reuses reference an undeclared SGPR (assembly
         # failure). With Ck == 1 the A mask is self-only and is still freed so the
@@ -226,12 +226,12 @@ class TestDeclareUndeclare:
             w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2)))
         assert w.undefined == []
 
-    def test_undeclare_frees_both_without_pap(self):
-        # Same StreamK multicast kernel but PAP off: no persistent refresh, so both
-        # masks are freed in the prologue.
+    def test_undeclare_keeps_maskB_live_without_pap(self):
+        # PAP off: every persistent tile still re-emits the TDM descriptor setup,
+        # so the broadcast mask stays live and only the self-only A mask is freed.
         w = _StubWriter()
         _c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=False, clusterDim=(2, 1)))
-        assert w.undefined == ["MulticastMaskA", "MulticastMaskB"]
+        assert w.undefined == ["MulticastMaskA"]
 
 
 # --- computeMasks emitted asm ----------------------------------------------
@@ -314,9 +314,8 @@ class TestApplyToDescriptor:
         # PAP+StreamK: B broadcast mask still applied (stays live)
         ({"streamKMulticast": True, "pap": True, "clusterDim": (2, 1)}, "tdmBGroup1", "B", {},
          "s_or_b32 s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]"),
-        # no PAP: A mask remains live and is applied
-        ({"streamKMulticast": True, "pap": False, "clusterDim": (2, 1)}, "tdmAGroup1", "A", {},
-         "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]"),
+        # no PAP: the persistent self-only A mask is freed too -> emit nothing for A
+        ({"streamKMulticast": True, "pap": False, "clusterDim": (2, 1)}, "tdmAGroup1", "A", {}, None),
         # Ck > 1: A is a real multicast across the Ck peers -> applied
         ({"streamKMulticast": True, "pap": True, "clusterDim": (2, 2)},
          "tdmAGroup1", "A", {},
