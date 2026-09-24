@@ -85,6 +85,8 @@
 #define ROCWMMA_ARCH_GFX1201 __gfx1201__
 #elif defined(__gfx1250__) && ROCWMMA_DEVICE_COMPILE
 #define ROCWMMA_ARCH_GFX1250 __gfx1250__
+#elif defined(__gfx1250_strict__) && ROCWMMA_DEVICE_COMPILE
+#define ROCWMMA_ARCH_GFX1250 __gfx1250_strict__
 #elif !ROCWMMA_DEVICE_COMPILE
 #define ROCWMMA_ARCH_HOST 1
 #else

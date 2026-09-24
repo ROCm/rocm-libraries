@@ -144,6 +144,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_segmented.cpp
   unit_test_internal_collectives_search.cpp
   unit_test_internal_collectives_shfl.cpp
+  # read_first_lane 64-bit truncation (append-only leaf)
+  unit_test_internal_collectives_readfirstlane.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
@@ -178,6 +180,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   #10149: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_conversion_bsr.cpp
   unit_test_internal_conversion_extras.cpp
+  unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp
@@ -364,7 +367,13 @@ if(BUILD_CODE_COVERAGE)
   foreach(_cov_tgt rocsparse-unit-test rocsparse-unit-test-device)
     if(TARGET ${_cov_tgt})
       target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-      target_link_libraries(${_cov_tgt} PRIVATE -fprofile-instr-generate)
+      # Host-only instrumentation, as for the library target: device-side
+      # coverage crashes the HIP runtime at profile dump (AISPARSE-778).
+      target_compile_options(${_cov_tgt} PRIVATE
+        "SHELL:-Xarch_device -fno-profile-instr-generate"
+        "SHELL:-Xarch_device -fno-coverage-mapping")
+      target_link_options(${_cov_tgt} PRIVATE -u__llvm_profile_runtime)
+      target_link_libraries(${_cov_tgt} PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
     endif()
   endforeach()
 endif()

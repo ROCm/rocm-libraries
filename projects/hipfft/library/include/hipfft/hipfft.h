@@ -531,14 +531,16 @@ HIPFFT_EXPORT hipfftResult hipfftGetSizeMany64(hipfftHandle   plan,
                                                long long int  batch,
                                                size_t*        workSize);
 
-/*! @brief Return size of the work area size required for a rank-dimensional plan.
+/*! @brief Return size(s) of the work area(s) required for an initialized plan.
  *
- *  @param[in] plan Pointer to the FFT plan.
- *  @param[out] workSize Pointer to work area size (returned value).
+ *  @param[in] plan Pointer to the initialized FFT plan.
+ *  @param[out] workSize Pointer to work area size(s). As many values as the number
+ *  of (local) devices used by the plan are written (following the same order as
+ *  set via ::hipfftXtSetGPUs if more than one local device is used).
  *  */
 HIPFFT_EXPORT hipfftResult hipfftGetSize(hipfftHandle plan, size_t* workSize);
 
-/*! @brief Set the plan's auto-allocation flag.  The plan will allocate its own workarea.
+/*! @brief Set the plan's auto-allocation flag.  The plan will allocate its own workarea(s).
  *
  *  @param[in] plan Pointer to the FFT plan.
  *  @param[in] autoAllocate 0 to disable auto-allocation, non-zero to enable.
@@ -546,11 +548,20 @@ HIPFFT_EXPORT hipfftResult hipfftGetSize(hipfftHandle plan, size_t* workSize);
 HIPFFT_EXPORT hipfftResult hipfftSetAutoAllocation(hipfftHandle plan, int autoAllocate);
 
 /*! @brief Set the plan's work area.
- *
+ *  @note This function rejects multi-device plans. Use ::hipfftXtSetWorkArea instead.
  *  @param[in] plan Pointer to the FFT plan.
- *  @param[in] workArea Pointer to the work area (on device).
+ *  @param[in] workArea Pointer to the work area (must be accessible by the device).
  *  */
 HIPFFT_EXPORT hipfftResult hipfftSetWorkArea(hipfftHandle plan, void* workArea);
+
+/*! @brief Generalized version of ::hipfftSetWorkArea accepting multi-device plans.
+ *
+ *  @param[in] plan Pointer to the (possibly multi-device) FFT plan.
+ *  @param[in] workArea Array of pointer(s) to the plan's work area(s), which must
+ *  be accessible by the plan's used device(s) (in the same order as communicated
+ *  via ::hipfftXtSetGPUs, if used prior).
+ *  */
+HIPFFT_EXPORT hipfftResult hipfftXtSetWorkArea(hipfftHandle plan, void** workArea);
 
 /*! @brief Execute a (float) complex-to-complex FFT.
  *

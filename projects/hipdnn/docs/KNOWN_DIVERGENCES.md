@@ -11,6 +11,21 @@ The shim targets the cuDNN frontend v9 graph API surface exposed by
 `<hipdnn_compatibility/cudnn/cudnn_frontend.h>`. The v0.x / v8 builder and backend
 descriptor API surface is out of scope.
 
+## hipDNN extensions
+
+The shim exposes one method with no cuDNN frontend equivalent:
+
+`Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})` is a
+lightweight applicability probe forwarding to the native hipDNN method of the same
+name. It returns `OK` when at least one engine can run the graph and
+`GRAPH_NOT_SUPPORTED` when none can. Like the native method it auto-builds the
+operation graph when needed; it neither creates nor invalidates execution plans, so
+it may be called before or after `create_execution_plans`. A node-less graph has
+nothing to probe and is reported supported.
+
+Because it has no cuDNN counterpart, source that must also compile against real
+cuDNN cannot use it.
+
 ## Heuristic modes
 
 The shim accepts every cuDNN frontend `HeurMode_t` value, including `A`, `B`,

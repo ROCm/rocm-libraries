@@ -322,9 +322,10 @@ build_relocatable=false
 build_address_sanitizer=false
 gpu_architecture=all
 cpu_ref_lib=blis
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+tensile_logic="${script_dir}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
 tensile_cov=4
 tensile_fork=
-tensile_merge_files=
 tensile_tag=
 tensile_test_local_path=
 tensile_version=
@@ -427,12 +428,6 @@ while true; do
         -n|--no_tensile|--no-tensile)
             build_tensile=false
             shift ;;
-        --merge-files)
-            tensile_merge_files=true
-            shift ;;
-        -no-merge-files)
-            tensile_merge_files=false
-            shift 2;;
         -u|--use-custom-version)
             tensile_version=${2}
             shift 2;;
@@ -662,10 +657,6 @@ pushd .
     if [[ ${build_jobs} != $(nproc) ]]; then
       tensile_opt="${tensile_opt} -DTENSILELITE_BUILD_PARALLEL_LEVEL=${build_jobs}"
     fi
-  fi
-
-  if [[ "${tensile_merge_files}" == false ]]; then
-    tensile_opt="${tensile_opt} -DTensile_MERGE_FILES=OFF"
   fi
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then

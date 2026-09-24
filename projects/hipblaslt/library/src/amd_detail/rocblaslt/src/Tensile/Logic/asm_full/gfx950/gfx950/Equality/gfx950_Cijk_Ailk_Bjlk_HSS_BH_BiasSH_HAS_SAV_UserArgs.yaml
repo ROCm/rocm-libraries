@@ -287,7 +287,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
@@ -461,7 +461,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
@@ -638,7 +638,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
@@ -815,7 +815,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
@@ -989,7 +989,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
@@ -1166,7 +1166,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
@@ -1344,7 +1344,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
@@ -1521,7 +1521,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
@@ -1696,7 +1696,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
@@ -1872,7 +1872,7 @@ Solutions:
   GuaranteeNoPartialB: false
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
@@ -2057,7 +2057,7 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true

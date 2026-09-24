@@ -180,6 +180,8 @@ class SignatureDefault(Signature):
         # TODO: alpha and beta should be computeType
         if kernel["ProblemType"]["UseBeta"]:
             kernArgReg += max(1,int(writer.states.bpeCexternal/4)) # beta
+        else:
+            kernArgReg += max(1,int(writer.states.bpeCexternal/4)) # reserved even if unused
         kernArgReg += kernel["ProblemType"]["NumIndicesC"] # strides
         kernArgReg += kernel["ProblemType"]["NumIndicesC"] # strides
         kernArgReg += len(kernel["ProblemType"]["IndexAssignmentsA"]) # strides
@@ -235,8 +237,8 @@ class SignatureDefault(Signature):
 
         if writer.debugConfig.debugKernel:
             signature.addArg("AddressDbg", SVK.SIG_GLOBALBUFFER, "struct", "generic")
-        signature.addArg("D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
-        signature.addArg("C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+
+        # A/B input buffers
         signature.addArg("A", SVK.SIG_GLOBALBUFFER, srcValueTypeA, "generic")
         if kernel["ProblemType"]["MXBlockA"]:
             signature.addArg("MXSA", SVK.SIG_GLOBALBUFFER, "void", "generic")
@@ -248,27 +250,8 @@ class SignatureDefault(Signature):
             userArgumentsInfo.gemmArgumentSize += 8
         if kernel["ProblemType"]["MXBlockB"]:
             userArgumentsInfo.gemmArgumentSize += 8
-        if kernel["ProblemType"]["Sparse"]:
-            signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
-        # StreamKForceDPOnly (SK3 DP-first, gfx1250) never touches the workspace
-        # partials/fixup path, so AddressWS/AddressFlags are dead: they are dropped
-        # from the SGPR define (KernelWriter.py) and here from the .kd metadata. The
-        # host (ContractionSolution.cpp singleCallArgs) matches by not appending
-        # ws/Flags under streamKForceDPOnly, so the positional kernarg layout stays
-        # consistent host<->device.
-        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
-            signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
-            signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
-
-        for i in range(0, writer.states.d.numSgprStrides):
-            signature.addArg(              "strideD%u"%i, SVK.SIG_VALUE,               "u32")
-            userArgumentsInfo.gemmArgumentSize += 4
-
-        for i in range(0, writer.states.c.numSgprStrides):
-            signature.addArg(              "strideC%u"%i, SVK.SIG_VALUE,               "u32")
-            userArgumentsInfo.gemmArgumentSize += 4
-
+        # A/B strides
         for i in range(0, writer.states.a.numSgprStrides):
             signature.addArg(              "strideA%u"%i, SVK.SIG_VALUE,               "u32")
             userArgumentsInfo.gemmArgumentSize += 4
@@ -291,22 +274,20 @@ class SignatureDefault(Signature):
             for i in range(0, writer.states.m.numSgprStrides):
                 signature.addArg(   "strideMetadata%u"%i, SVK.SIG_VALUE,               "u32")
 
-        for idxChar in kernel["PackedC0IdxChars"][:-1]:
-            signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
-            signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
+        # metadata buffer
+        if kernel["ProblemType"]["Sparse"]:
+            signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
-        # Note: We use packed f16 if alpha and beta are f16
-        pack_cptValueType = 'pkf16' if kernel["ProblemType"]["ComputeDataType"].isHalf() else cptValueType
-        signature.addArg(   "alpha",        SVK.SIG_VALUE, pack_cptValueType)
-        if kernel["ProblemType"]["UseBeta"]:
-            signature.addArg("beta",        SVK.SIG_VALUE, pack_cptValueType)
-        # These are fixed sizes
-        userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize
-        userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.betaMaxSize
-
-        if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
-            signature.addArg( "ESMRuntimeSupported", SVK.SIG_VALUE,               "u32")
-            userArgumentsInfo.gemmArgumentSize += 4
+        # StreamKForceDPOnly (SK3 DP-first, gfx1250) never touches the workspace
+        # partials/fixup path, so AddressWS/AddressFlags are dead: they are dropped
+        # from the SGPR define (KernelWriter.py) and here from the .kd metadata. The
+        # host (ContractionSolution.cpp singleCallArgs) matches by not appending
+        # ws/Flags under streamKForceDPOnly, so the positional kernarg layout stays
+        # consistent host<->device.
+        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
+            if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
+                signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
+            signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
 
         if kernel["StreamK"] == 4:
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
@@ -346,6 +327,43 @@ class SignatureDefault(Signature):
             signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
             signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 8
+
+        # Note: We use packed f16 if alpha and beta are f16
+        pack_cptValueType = 'pkf16' if kernel["ProblemType"]["ComputeDataType"].isHalf() else cptValueType
+        signature.addArg(   "alpha",        SVK.SIG_VALUE, pack_cptValueType)
+        # The beta slot is always present, so the layout does not depend on UseBeta.
+        signature.addArg("beta" if kernel["ProblemType"]["UseBeta"] else "betapad",
+                                        SVK.SIG_VALUE, pack_cptValueType)
+
+        # ver3 places AddressWS after alpha/beta, see the StreamK block above.
+        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"] \
+           and kernel["InternalSupportParams"]["KernArgsVersion"] >= 3:
+            signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
+
+        # D/C output buffers
+        signature.addArg("D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+        signature.addArg("C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+
+        # C/D strides
+        for i in range(0, writer.states.d.numSgprStrides):
+            signature.addArg(              "strideD%u"%i, SVK.SIG_VALUE,               "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
+
+        for i in range(0, writer.states.c.numSgprStrides):
+            signature.addArg(              "strideC%u"%i, SVK.SIG_VALUE,               "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
+
+        for idxChar in kernel["PackedC0IdxChars"][:-1]:
+            signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
+            signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
+
+        # These are fixed sizes
+        userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize
+        userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.betaMaxSize
+
+        if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
+            signature.addArg( "ESMRuntimeSupported", SVK.SIG_VALUE,               "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
 
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")

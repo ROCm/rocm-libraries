@@ -71,7 +71,8 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.HasNonPackedTensors())
         return false;
 
-    return problem.IsDirectionBackwardData() && problem.IsLayoutDefault() &&
+    // Layout is asserted by the derived solvers that need it.
+    return problem.IsDirectionBackwardData() &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);
 #else
@@ -118,7 +119,9 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
             miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
             miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 1; }))
     {
-        n_gemm_strided_batched = in_n;
+        // Channel-last collapses the batch into M, so this is one unbatched GEMM.
+        n_gemm_strided_batched =
+            (problem.IsLayoutNHWC() && conv.group_count == 1) ? 1 : static_cast<int>(in_n);
     }
     // if not 1x1
     else
@@ -236,7 +239,8 @@ bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
     const auto wei_spatial =
         wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
-    return conv.GetSpatialDimension() == 2 &&
+    // The CNHW transpose kernels this path relies on are not layout agnostic.
+    return problem.IsLayoutDefault() && conv.GetSpatialDimension() == 2 &&
            miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
            miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 2; }) &&
@@ -467,6 +471,18 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto& conv  = problem.GetConv();
     const auto& wDesc = problem.GetWeights();
 
+    // This solver accepts NHWC only for single-group problems with no cast or f8 types.
+    //
+    // The NHWC branch of GetSolution calls hipBLASLt, whose wrapper dispatches on
+    // gemm_desc.dataType alone and never reads a_cast_type or b_cast_type, and which throws
+    // for f8 on every architecture except gfx942. Grouped NHWC has no branch there at all.
+    // Admitting cast types would also need the pair swapped, since that branch passes dy
+    // first while a_cast_type is filled from w.
+    const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
+                                !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
+    if(!problem.IsLayoutDefault() && !nhwc_supported)
+        return false;
+
     const auto spatial_dim = conv.GetSpatialDimension();
     const auto wei_spatial =
         wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
@@ -544,6 +560,10 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
             {
                 MIOPEN_LOG_FUNCTION("groupconv, 1x1");
             }
+            else if(problem.IsLayoutNHWC())
+            {
+                MIOPEN_LOG_FUNCTION("convolution, 1x1 channel-last");
+            }
             else
             {
                 MIOPEN_LOG_FUNCTION("convolution, 1x1");
@@ -557,7 +577,31 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
                 return tmp;
             }();
 
-            if(group_count > 1)
+            if(problem.IsLayoutNHWC())
+            {
+                // dx[N*spatial, C] = dy[N*spatial, K] * w[K, C].
+                auto desc        = gemm_desc;
+                desc.batch_count = 1;
+                desc.strideA     = 0;
+                desc.strideB     = 0;
+                desc.strideC     = 0;
+                desc.m           = static_cast<int>(in_n * out_spatial_size);
+                desc.n           = static_cast<int>(in_c);
+                desc.transA      = false;
+                desc.transB      = false;
+                desc.lda         = desc.k;
+                desc.ldb         = desc.n;
+                desc.ldc         = desc.n;
+
+                constexpr auto backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+                gemm_status = CallGemm(handle, desc, dy, 0, w, 0, dx, 0, backend);
+            }
+            else if(group_count > 1)
             {
                 float time = 0.f;
                 for(std::size_t i = 0; i < in_n; i++)
@@ -739,6 +783,10 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
     }
 
     if(!GemmBwdBase::IsApplicable(context, problem))
+        return false;
+
+    // Everything below goes through Im2Col/Col2Im, which addresses dx channel-first.
+    if(!problem.IsLayoutDefault())
         return false;
 
     return !GemmBwd1x1_stride2{}.IsApplicable(context, problem) &&

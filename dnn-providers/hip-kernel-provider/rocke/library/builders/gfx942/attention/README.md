@@ -40,6 +40,8 @@ torch reference — so it runs on any box with torch + a gfx942 GPU.
 |------|------|
 | `parity_unified_attention.py` | per-shape parity + latency harness; defines inline scenario groups (`default` / `fmha` / `creative`), builds the gfx942 spec **explicitly** (wide4 vs L4), and exposes the `HIPDNN_GFX942_*` lever knobs via `--scenario` |
 | `final_shapes_check.py` | the definitive correctness + perf check over every shape via the **production dispatcher** (`run_unified_attention_torch`), timed eager + graph against PyTorch's flash SDPA |
+| `prefill/gqa_head_fold_bench.py` | A/B for the **GQA head-fold** (`ALGORITHM.md` §6.4): the fold vs the same builder with the fold predicate forced false, over seqlens 512-16384 x `block_size` 16/32, correctness-checked per point |
+| `gqa_head_fold_case_study.md` | why the head-fold exists, the measured traffic + wall-clock evidence, and the levers that did **not** work |
 | `__init__.py` | package marker + module docstring |
 
 ## Running

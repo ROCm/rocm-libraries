@@ -68,27 +68,16 @@ struct WinnerKeyHash
     }
 };
 
-/// Do @p left and @p right rank the same candidates in the same order? Compares the
-/// `(kernelId, packId, dispatchId)` sequence positionally and ignores `timeMs`.
-///
-/// This is the write-back supersession test (see `writeBackToShard()`). The two obvious
-/// alternatives are both wrong. Comparing only the kernel-id *set* would treat a genuine
-/// reordering -- a driver or firmware change, a different thermal or clock regime, two
-/// kernels that actually swapped -- as no change and discard it forever, and here the
-/// order IS the payload. Comparing whole records including `timeMs` would never match,
-/// because a measured float essentially never repeats bit-for-bit, so every benchmarking
-/// run of an unchanged catalog would append a line.
-inline bool rankedIdsEqual(const WinnerRecord& left, const WinnerRecord& right)
+/// Why a benchmarked ranking is being written back, which is what separates the two rules
+/// below: a fresh miss adopts an existing entry for the key, and a re-benchmark triggered
+/// by a record that did not cover the current candidates appends a superseding line.
+enum class WinnerWriteCause
 {
-    return std::equal(left.begin(),
-                      left.end(),
-                      right.begin(),
-                      right.end(),
-                      [](const RankedEntry& a, const RankedEntry& b) {
-                          return a.kernelId == b.kernelId && a.packId == b.packId
-                                 && a.dispatchId == b.dispatchId;
-                      });
-}
+    /// No record existed for this key when the plan was built.
+    FRESH_MISS,
+    /// A record existed but was not usable for the current candidate set, so it was re-measured.
+    COVERAGE_REBENCHMARK,
+};
 
 /// Does @p record carry a measurement for every kernel in @p kernels? One-directional:
 /// entries in @p record absent from @p kernels do not fail coverage. Production

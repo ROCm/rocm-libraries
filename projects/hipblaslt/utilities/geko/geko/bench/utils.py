@@ -33,6 +33,16 @@ try:
 except (ModuleNotFoundError, AttributeError):
     SafeLoader = yaml.SafeLoader
 
+
+def is_built_custom_library(custom_lib_dir: str | Path) -> bool:
+    """Return True when custom_lib_dir contains compiled Tensile library artifacts."""
+    custom_lib_dir = Path(custom_lib_dir)
+    patterns = (
+        "library/**/TensileLibrary_lazy_gfx*.dat",
+        "library/**/TensileLibrary_lazy_gfx*.dat.zlib",
+    )
+    return any(any(custom_lib_dir.glob(pattern)) for pattern in patterns)
+
 def parse_benchmark_output(file: str | Path) -> pd.DataFrame:
     """
     Parse hipBLASLt benchmark output file into a pandas DataFrame.

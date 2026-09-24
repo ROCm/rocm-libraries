@@ -30,6 +30,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/wmma_scale_internal.h"
 
 #include <stdio.h> /* snprintf */
 #include <stdlib.h> /* atoi     */
@@ -75,6 +76,48 @@ static const char* h_elem_scalar(const rocke_type_t* t)
  * op.result (and the WMMA gate keys off the op_id *string* it is passed, not
  * op.attrs), so a synthetic op aliasing the same operands/results/regions and
  * reusing the original attrs map reproduces the Python emission exactly. */
+static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_mma_op_t* atom = rocke_gfx1250_scaled_wmma_from_op(op);
+    if(!atom)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
+    }
+    const rocke_scaled_wmma_op_t contract = rocke_scaled_wmma_contract(atom);
+    const rocke_scaled_wmma_op_t* spec = &contract;
+    const char* op_id = spec->op_id;
+    const bool scale16 = spec->scales.block_k == 16;
+    const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
+                                  : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
+    if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
+    {
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_NOTIMPL,
+                            "WMMA op '%s' is not available on %s",
+                            op_id,
+                            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
+    }
+    if(op->num_operands != 5 || op->num_results != 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s expects 5 operands and 1 result", op_id);
+    }
+    rocke_h_emitf(lw,
+                  "f32x8 %s = %s(%d, %s, %d, %s, (int16_t)0, %s, "
+                  "0, %d, %s, 0, %d, %s, false, false);",
+                  rocke_h_name(lw, op->results[0]),
+                  builtin,
+                  spec->matrix_formats[0],
+                  rocke_h_name(lw, op->operands[0]),
+                  spec->matrix_formats[1],
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]),
+                  spec->scale_formats[0],
+                  rocke_h_name(lw, op->operands[3]),
+                  spec->scale_formats[1],
+                  rocke_h_name(lw, op->operands[4]));
+    return lw->status;
+}
+
 static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const char* op_id;
@@ -90,6 +133,10 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(!op_id)
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
+    }
+    if(rocke_gfx1250_scaled_wmma(op_id))
+    {
+        return h_emit_gfx1250_scaled_wmma(lw, op);
     }
     snprintf(dotted, sizeof(dotted), "tile.%s", op_id);
     legacy_opcode = rocke_opcode_from_name(dotted);
@@ -284,6 +331,29 @@ static rocke_status_t rocke_h_op_tile_ds_swizzle_xor(rocke_h_lowerer_t* lw, cons
                   rocke_h_name(lw, r),
                   rocke_h_name(lw, data),
                   offset);
+    return lw->status;
+}
+
+static rocke_status_t rocke_h_op_tile_quad_perm(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_value_t* data = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    int64_t ctrl = 0;
+    if(!rocke_attr_get_int(&op->attrs, "ctrl", &ctrl))
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.quad_perm: missing 'ctrl'");
+    /* 0..255 is the whole legal range: ctrl packs four two-bit lane
+     * selectors. Reject instead of masking (see lower_llvm/crosslane.cpp). */
+    if(ctrl < 0 || ctrl > 255)
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_VALUE,
+                            "tile.quad_perm: ctrl must be in 0..255, got %lld",
+                            (long long)ctrl);
+    rocke_h_emitf(lw,
+                  "int %s = __builtin_amdgcn_update_dpp(%s, %s, %lld, 15, 15, 1);",
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, data),
+                  rocke_h_name(lw, data),
+                  (long long)ctrl);
     return lw->status;
 }
 
@@ -1306,6 +1376,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         {ROCKE_OP_TILE_DS_BPERMUTE, rocke_h_op_tile_ds_bpermute},
         {ROCKE_OP_TILE_DS_BPERMUTE_B64, rocke_h_op_tile_ds_bpermute_b64},
         {ROCKE_OP_TILE_DS_SWIZZLE_XOR, rocke_h_op_tile_ds_swizzle_xor},
+        {ROCKE_OP_TILE_QUAD_PERM, rocke_h_op_tile_quad_perm},
         {ROCKE_OP_TILE_MOV_DPP, rocke_h_op_tile_mov_dpp},
         {ROCKE_OP_TILE_PERMLANE32_SWAP, rocke_h_op_tile_permlane32_swap},
         {ROCKE_OP_TILE_PERM_B32, rocke_h_op_tile_perm_b32},

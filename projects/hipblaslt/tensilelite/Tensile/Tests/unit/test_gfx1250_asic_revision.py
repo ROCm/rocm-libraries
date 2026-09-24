@@ -590,6 +590,23 @@ def test_multicast_forced_off_on_gfx1250v0(_gp_gfx1250, gfx1250v0_iim, assembler
     assert sol["ClusterBarrier"] is True
 
 
+def test_sk_multicast_loads_forced_off_on_gfx1250v0(
+    _gp_gfx1250, gfx1250v0_iim, assembler, capsys
+):
+    """SK3 ForceDPOnly cluster stays Valid on v0; streamKMulticast is off."""
+    from Tensile.Common import streamKCluster, streamKMulticast
+
+    sol, out = _derive(
+        gfx1250v0_iim, assembler, capsys, MULTICAST_MI,
+        ClusterDim=[2, 1], StreamK=3, StreamKForceDPOnly=1, GlobalSplitU=0,
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert streamKCluster(sol)
+    assert sol["Multicast"] is False
+    assert streamKMulticast(sol) is False
+    assert sol["ClusterBarrier"] is True
+
+
 # =========================================================================== #
 # Naming invariant. The ASIC revisions are separate builds, so their kernels must NOT
 # be named apart -- an ASIC revision token in the name would desynchronize the shipped

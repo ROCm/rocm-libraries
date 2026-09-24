@@ -62,29 +62,29 @@ struct StockhamPartialPassKernel : public StockhamKernel
     std::vector<unsigned int> factors_pp_other;
     rocfft_transform_type     transform_type_pp;
 
-    Variable tile_index{"tile_index", "size_t"};
-    Variable num_of_tiles{"num_of_tiles", "size_t"};
+    Variable tile_index{"tile_index", "integer_type"};
+    Variable num_of_tiles{"num_of_tiles", "integer_type"};
     Variable in_bound{"in_bound", "bool"};
-    Variable thread{"thread", "unsigned int"}; // replacing tid_ver
-    Variable tid_hor{"tid_hor", "unsigned int"}; // id along row
-    Variable stride_in{"stride_in", "const size_t", true};
-    Variable stride_out{"stride_out", "const size_t", true};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)}; // replacing tid_ver
+    Variable tid_hor{"tid_hor", rtc_kint_type(KIntType::U32)}; // id along row
+    Variable stride_in{"stride_in", "const integer_type", true};
+    Variable stride_out{"stride_out", "const integer_type", true};
 
     Variable intrinsic_mode{"intrinsic_mode", "IntrinsicAccessType"};
     Variable apply_large_twiddle{"apply_large_twiddle", "bool"};
-    Variable large_twiddle_steps{"large_twiddle_steps", "size_t"};
-    Variable large_twiddle_base{"large_twiddle_base", "size_t"};
+    Variable large_twiddle_steps{"large_twiddle_steps", rtc_kint_type(KIntType::U32)};
+    Variable large_twiddle_base{"large_twiddle_base", rtc_kint_type(KIntType::U32)};
 
     Variable large_twiddles{"large_twiddles", "const scalar_type", true};
 
-    Variable stride_lds_pp{"stride_lds_pp", "unsigned int"};
-    Variable offset_lds_pp{"offset_lds_pp", "unsigned int"};
-    Variable offset_pp{"offset_pp", "unsigned int"};
-    Variable thread_pp{"thread_pp", "unsigned int"};
+    Variable stride_lds_pp{"stride_lds_pp", rtc_kint_type(KIntType::U32)};
+    Variable offset_lds_pp{"offset_lds_pp", rtc_kint_type(KIntType::U32)};
+    Variable offset_pp{"offset_pp", "integer_type"};
+    Variable thread_pp{"thread_pp", rtc_kint_type(KIntType::U32)};
     Variable twiddles_pp{"twiddles_pp", "const scalar_type", true, true};
     Variable twiddles_off_dim{"twiddles_off_dim", "const scalar_type", true, true};
-    Variable global_idx{"global_idx", "unsigned int"};
-    Variable transpose_idx{"transpose_idx", "unsigned int"};
+    Variable global_idx{"global_idx", "integer_type"};
+    Variable transpose_idx{"transpose_idx", "integer_type"};
 
     LDSColumnPattern lds_column_pattern = LDSColumnPattern::NON_INTERLEAVED;
 
@@ -809,7 +809,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
 
         Function f{function_name};
         f.arguments   = ArgumentList{global_idx};
-        f.return_type = "unsigned int";
+        f.return_type = "integer_type";
         f.qualifier   = "__device__";
 
         StatementList& body = f.body;

@@ -40,14 +40,9 @@ struct InvokeParams : public miopen::InvokeParams
                  ConstData_t x_,
                  const TensorDescriptor& yDesc_,
                  Data_t y_,
-                 miopenSoftmaxAlgorithm_t algorithm_,
-                 miopenSoftmaxMode_t mode_,
                  int x_offset_ = 0,
                  int y_offset_ = 0)
-        : algorithm(algorithm_),
-          mode(mode_),
-
-          xdxDesc(xDesc_),
+        : xdxDesc(xDesc_),
           x(x_),
           dx(nullptr),
 
@@ -57,8 +52,9 @@ struct InvokeParams : public miopen::InvokeParams
 
           dy(nullptr),
 
-          xdx_offset(x_offset_),
+          x_offset(x_offset_),
           y_offset(y_offset_),
+          dx_offset(0),
           dy_offset(0)
     {
         InitializeAlphaBeta(alpha_, beta_);
@@ -72,15 +68,10 @@ struct InvokeParams : public miopen::InvokeParams
                  ConstData_t dy_,
                  const TensorDescriptor& dxDesc_,
                  Data_t dx_,
-                 miopenSoftmaxAlgorithm_t algorithm_,
-                 miopenSoftmaxMode_t mode_,
                  int y_offset_  = 0,
-                 int dy_offset_ = 0,
-                 int dx_offset_ = 0)
-        : algorithm(algorithm_),
-          mode(mode_),
-
-          xdxDesc(dxDesc_),
+                 int dx_offset_ = 0,
+                 int dy_offset_ = 0)
+        : xdxDesc(dxDesc_),
           x(nullptr),
           dx(dx_),
 
@@ -91,8 +82,9 @@ struct InvokeParams : public miopen::InvokeParams
           dyDesc(dyDesc_),
           dy(dy_),
 
-          xdx_offset(dx_offset_),
+          x_offset(0),
           y_offset(y_offset_),
+          dx_offset(dx_offset_),
           dy_offset(dy_offset_)
     {
         InitializeAlphaBeta(alpha_, beta_);
@@ -104,8 +96,6 @@ struct InvokeParams : public miopen::InvokeParams
 public:
     float alpha;
     float beta;
-    miopenSoftmaxAlgorithm_t algorithm;
-    miopenSoftmaxMode_t mode;
 
     // xdxDesc is used for both forward and backward
     TensorDescriptor xdxDesc;
@@ -120,9 +110,9 @@ public:
     TensorDescriptor dyDesc;
     ConstData_t dy;
 
-    // xdx_offset is used for both forward and backward
-    int xdx_offset;
+    int x_offset;
     int y_offset;
+    int dx_offset;
     int dy_offset;
 
 private:

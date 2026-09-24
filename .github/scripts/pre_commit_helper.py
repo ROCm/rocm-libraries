@@ -21,10 +21,14 @@ Arguments:
     --default-ref         : Default branch reference used as the fallback base.
     --pushed-branch-name  : Name of the branch being pushed, used to build the
                             fetch refspec when --from-ref is not an origin/ ref.
+    --changed-files-file  : File that receives the newline-delimited changed
+                            paths for later workflow steps.
 
 Outputs (written to GITHUB_OUTPUT):
-    diff_ref      : The resolved diff base, consumed by pre-commit --from-ref.
-    changed_files : New line -separated, sorted list of changed files.
+    diff_ref           : The resolved diff base, consumed by pre-commit
+                         --from-ref.
+    changed_files_file : Path to the newline-delimited, sorted changed-file
+                         list.
 """
 
 from ci_utils import set_github_output, get_modified_paths
@@ -121,6 +125,12 @@ def main():
         required=True,
         help="name of branch to be pushed, if event is a push instance",
     )
+    parser.add_argument(
+        "--changed-files-file",
+        required=True,
+        type=Path,
+        help="file that receives the changed paths",
+    )
 
     args = parser.parse_args()
     try:
@@ -128,7 +138,10 @@ def main():
         set_github_output({"diff_ref": f"{from_ref}"})
         fetch_diff_base(from_ref, args.pushed_branch_name)
         changed_files = sparse_checkout_changed_projects(from_ref)
-        set_github_output({"changed_files": "\n".join(changed_files)})
+        args.changed_files_file.write_text(
+            "".join(f"{path}\n" for path in changed_files), encoding="utf-8"
+        )
+        set_github_output({"changed_files_file": str(args.changed_files_file)})
     except subprocess.CalledProcessError as e:
         if e.stderr:
             sys.stderr.write(e.stderr)

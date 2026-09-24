@@ -27,6 +27,7 @@ from functools import lru_cache
 from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
+from .LdsPaddingLimits import ldsBlockValues, ldsPadValues
 from .Types import IsaVersion
 
 ################################################################################
@@ -145,6 +146,7 @@ validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 
                            1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
                            3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
                            5376, 5632, 6144, 6656, 7168, 7680, 8192]
+validLdsPad = [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64]
 
 @lru_cache
 def makeValidWorkGroups():
@@ -347,6 +349,10 @@ validParameters = { # we need to make sure this matches develop
     # Need to allocate PGR+1 or PGR LDS buffer
     # Allocating PGR+1 LDS buffer is better for instruction scheduling.
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
+    # PrefetchGlobalReadA/B = -1: auto max-LDS pair. Both keys must be set or
+    # both omitted; Components/DecouplePGR.py holds the accepted combinations.
+    "PrefetchGlobalReadA": [-1] + list(range(16 + 1)),
+    "PrefetchGlobalReadB": [-1] + list(range(16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
@@ -419,6 +425,15 @@ validParameters = { # we need to make sure this matches develop
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
+    # StreamK persistent loop: keep the whole K extent of an operand (and its MX
+    # scales) resident in VGPRs across persistent iterations, so every tile after
+    # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
+    # traffic. Only valid when every tile a workgroup visits shares that operand,
+    # which the emitted size predicates enforce.
+    #   0 = off (default)
+    #   1 = A resident
+    #   2 = B resident -- planned, not implemented yet
+    "ReuseAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
@@ -632,7 +647,7 @@ validParameters = { # we need to make sure this matches develop
     #   (since C matrix is always coalesced in Free0 index direction and this assertion guarantees the index element multiple)
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32],
+    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Kernel generator will assume that the FreeIndex[1] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[1] is usually letter "J"
@@ -640,7 +655,7 @@ validParameters = { # we need to make sure this matches develop
     # Optimizations enabled by AssertFree1ElementMultiple>1:
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
+    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1011,9 +1026,9 @@ validParameters = { # we need to make sure this matches develop
     # performance so this has been deprecated and probably doesn't work
     # -1 means use same padding as the VectorWidth if TLU=0 else 0.  (Padding only helps when transpose is required)
     # With MatrixInstruciton: -1 means max(GRVW,MIInput) if TLU=0
-    "LdsPadA": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadA": validLdsPad,
     "LdsPadMXSA": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
-    "LdsPadB": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadB": validLdsPad,
     "LdsPadMXSB": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
     "LdsPadMetadata": [-1, 0, 1, 2, 3, 4, 8],
     # Padding boundary for LDS. defines block-size for pad insertion. for every 'LdsBlockSizePerPad' bytes, LDS padding (pad value from LdsPad parameter)
@@ -1052,6 +1067,7 @@ validParameters = { # we need to make sure this matches develop
     # gfx1250-only temporal-hint modifier.
     "TemporalHint": list(range(-1, 8)),
     "TemporalHintE": list(range(0, 8)),
+    "TemporalHintGate": list(range(0, 8)),
     "TemporalHintD": list(range(0, 8)),
     "TemporalHintC": list(range(0, 8)),
     "TemporalHintA": list(range(0, 8)),
@@ -1063,6 +1079,7 @@ validParameters = { # we need to make sure this matches develop
     # gfx1250-only non-volatile memory modifier.
     "NonVolatile": [-1, 0, 1],
     "NonVolatileE": [0, 1],
+    "NonVolatileGate": [0, 1],
     "NonVolatileD": [0, 1],
     "NonVolatileC": [0, 1],
     "NonVolatileA": [0, 1],
@@ -1099,7 +1116,7 @@ validParameters = { # we need to make sure this matches develop
     #
     # Custom kernels can be included in a BenchmarkProblemSizeGroup by having their name (without file extension) listed under the "CustomKernels"
     # category alongside InitialSolutionParameters, BenchmarkCommonParameters, etc...
-    "CustomKernelName": -1,
+    "CustomKernel": -1,
     # Will allow a kernel to be accepted even when checks determine it's not viable.
     # Intended for use with custom kernels which have confirmed to be correct
     "NoReject": [False, True],
@@ -1192,6 +1209,21 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
+    # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
+    # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
+    # not two heterogeneous regions in one instruction.
+    #
+    #   0  default. Leave grouping to defineTdmSgprs (usually {A,B}+{MXSA,MXSB}
+    #      when NumWaves>1). Hidden from the kernel name.
+    #   1  {A,MXSA} + {MXSB,B}, each scale on a data tensor's set. NumWaves>1.
+    #      Parity crosses the scales: waves 0,2 carry A+MXSB, 1,3 B+MXSA.
+    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #
+    # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
+    "TDMFuse": [0, 1, 2, 3],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
@@ -1234,6 +1266,28 @@ validParameters = { # we need to make sure this matches develop
     # 3: Use iterate-mode for both A and B
     "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
+
+
+def validParametersForArch(gfxName: str) -> dict:
+    """validParameters, widened where an architecture needs it.
+
+    Only gfx1250 resolves LdsPad and LdsBlockSizePerPad through a solver, and
+    only a config targeting it may name what that solver reports. Every other
+    architecture reads the table above, so a yaml for one can still name only
+    what it could before.
+
+    Returns a new dict rather than editing the table, which is a module-level
+    object every other reader shares.
+    """
+    if not gfxName.startswith("gfx1250"):
+        return validParameters
+    wider = dict(validParameters)
+    pads = sorted(set(validLdsPad) | ldsPadValues())
+    blocks = sorted(set(validLdsBlockSizePerPad) | ldsBlockValues())
+    wider["LdsPadA"] = wider["LdsPadB"] = pads
+    wider["LdsBlockSizePerPadA"] = wider["LdsBlockSizePerPadB"] = blocks
+    return wider
+
 
 newMIValidParameters = {
     "EnableF32XdlMathOp": [False, True],

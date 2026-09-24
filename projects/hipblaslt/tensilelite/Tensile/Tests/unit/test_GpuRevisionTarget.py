@@ -24,8 +24,8 @@ from unittest import mock
 
 import pytest
 
-from Tensile.CustomYamlLoader import load_logic_gfx_arch, load_logic_schedule_name
 from Tensile import GpuRevisionTarget as gpu_rev
+from Tensile.TensileLogic.ValidCorpusConsistency import find_gfx1250v0_overlay_violations
 
 pytestmark = pytest.mark.unit
 
@@ -63,8 +63,6 @@ _needs_hipblaslt_tasks = pytest.mark.skipif(
     hipblaslt_tasks is None, reason="hipBLASLt tasks.py (or invoke) not importable"
 )
 
-GFX1250 = "gfx1250"
-GFX1250V0 = "gfx1250v0"
 REVISION_OPT = "-DHIPBLASLT_ASIC_REVISION"
 
 
@@ -323,67 +321,32 @@ class TestBuildTaskCommandLine:
 # gfx1250 and the runtime resolves both to library/gfx1250/. A mis-tagged file
 # fails silently -- dropped from v0, or leaked into every v1 build -- so the
 # invariant is checked against the tree that actually ships.
+#
+# The enforcement point is ``TensileLogic --check-all``, via
+# ``Tensile.TensileLogic.ValidCorpusConsistency.find_gfx1250v0_overlay_violations``,
+# which runs whenever ``--architecture`` includes ``gfx1250v0`` or ``all``
+# (hipBLASLt's dedicated gfx1250v0 build always passes the former -- see
+# ``device-library/CMakeLists.txt``), regardless of whether the real
+# ``Logic/asm_full`` directory is present in *this* test environment. This
+# test is a convenience/local-dev signal, not the enforcement point -- hence
+# ``skipif`` (an unmet precondition), not ``xfail`` (an expected failure).
 # --------------------------------------------------------------------------- #
 _LOGIC_ROOT = (
     _TENSILELITE_ROOT.parent
     / "library" / "src" / "amd_detail" / "rocblaslt" / "src"
     / "Tensile" / "Logic" / "asm_full"
 )
-_OVERLAY_ROOT = _LOGIC_ROOT / GFX1250V0
 
-_needs_logic_dir = pytest.mark.xfail(
+_needs_logic_dir = pytest.mark.skipif(
     not _LOGIC_ROOT.is_dir(),
     reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
 )
 
 
-def _logic_root():
-    # Asserted, not skipped: the comprehensions below pass vacuously over a
-    # missing tree, and xfail_strict would turn that pass into a failure.
-    assert _LOGIC_ROOT.is_dir(), f"Logic root not found: {_LOGIC_ROOT}"
-    return _LOGIC_ROOT
-
-
-def _overlay_files():
-    return sorted((_logic_root() / GFX1250V0).rglob("*.yaml"))
-
-
 @_needs_logic_dir
-def test_the_overlay_ships_logic():
-    # An empty overlay is a broken state: a v0 build reports success having
-    # written a library with no solutions in it.
-    assert _overlay_files()
-
-
-@_needs_logic_dir
-def test_every_overlay_file_declares_the_asic_revision_schedule_name():
-    offenders = {
-        str(p.relative_to(_LOGIC_ROOT)): load_logic_schedule_name(p)
-        for p in _overlay_files()
-        if load_logic_schedule_name(p) != GFX1250V0
-    }
-    assert offenders == {}
-
-
-@_needs_logic_dir
-def test_every_overlay_file_keeps_the_base_architecture_name():
-    # ArchitectureName keys the master library and must stay the arch:
-    # TensileCreateLibrary rejects a stepping there, and library/gfx1250v0/ is a
-    # directory the runtime never reads.
-    offenders = {
-        str(p.relative_to(_LOGIC_ROOT)): load_logic_gfx_arch(p)
-        for p in _overlay_files()
-        if load_logic_gfx_arch(p) != GFX1250
-    }
-    assert offenders == {}
-
-
-@_needs_logic_dir
-def test_no_logic_outside_the_overlay_claims_the_asic_revision():
-    offenders = [
-        str(p.relative_to(_LOGIC_ROOT))
-        for p in sorted(_logic_root().rglob("*.yaml"))
-        if not p.is_relative_to(_OVERLAY_ROOT)
-        and load_logic_schedule_name(p) == GFX1250V0
-    ]
-    assert offenders == []
+def test_gfx1250v0_overlay_is_consistent():
+    """The overlay ships logic, every file in it declares
+    ``ScheduleName: gfx1250v0`` and keeps ``ArchitectureName: gfx1250``, and no
+    file outside it claims the ``gfx1250v0`` schedule name."""
+    violations = find_gfx1250v0_overlay_violations(_LOGIC_ROOT, overlay_required=True)
+    assert not violations, "\n".join(violations)

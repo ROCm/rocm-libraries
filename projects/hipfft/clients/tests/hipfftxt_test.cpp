@@ -595,6 +595,10 @@ private:
         else
             return static_cast<int>(remainder + (global_idx - split_global_idx) / min_span_per_dev);
     }
+
+public:
+    // Grow-to-max pool of work buffers keyed by device ID, reused across test instances
+    static inline std::map<int, gpubuf> work_pool;
 };
 
 static bool expects_successful_plan_creation(const spmd_hipfft_params& params)
@@ -613,6 +617,8 @@ static bool expects_successful_plan_creation(const spmd_hipfft_params& params)
 }
 
 // Creates and returns a hipFFT plan for the given params' GPU ids.
+// Work buffers come from spmd_hipfft_params::work_pool (growing if needed) and are
+// attached via hipfftXtSetWorkArea rather than auto-allocated.
 // If plan creation fails and expects_successful_plan_creation() is false, returns an
 // empty (invalid) wrapper without throwing. Throws ROCFFT_FAIL on unexpected failures.
 static hipfftHandle_wrapper_t make_plan(const spmd_hipfft_params& params)
@@ -628,6 +634,11 @@ static hipfftHandle_wrapper_t make_plan(const spmd_hipfft_params& params)
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw ROCFFT_FAIL("make_plan: hipfftXtSetGPUs failed (" + hipfftResult_string(hipfft_rt)
                           + ")");
+
+    hipfft_rt = hipfftSetAutoAllocation(plan, 0);
+    if(hipfft_rt != HIPFFT_SUCCESS)
+        throw ROCFFT_FAIL("make_plan: hipfftSetAutoAllocation failed ("
+                          + hipfftResult_string(hipfft_rt) + ")");
 
     std::vector<size_t> workSize(params.ngpus(), std::numeric_limits<size_t>::max());
     if(params.batch > 1)
@@ -691,6 +702,30 @@ static hipfftHandle_wrapper_t make_plan(const spmd_hipfft_params& params)
     {
         throw ROCFFT_FAIL("make_plan: some workSize entry was not written by plan creation");
     }
+
+    // Grow the work buffer pool if needed (gpubuf checks VRAM limits and throws on OOM)
+    std::vector<void*> work_ptrs(params.ngpus(), nullptr);
+    for(size_t i = 0; i < params.ngpus(); ++i)
+    {
+        if(workSize[i] > 0)
+        {
+            const int dev_id = params.gpus[i];
+            auto&     buf    = params.work_pool[dev_id];
+            if(buf.size() < workSize[i])
+            {
+                rocfft_scoped_device dev(dev_id);
+                if(buf.alloc(workSize[i]) != hipSuccess)
+                    throw DEVICEBUF_MEM_USAGE("make_plan: work buffer allocation failed on device "
+                                              + std::to_string(dev_id));
+            }
+            work_ptrs[i] = buf.data();
+        }
+    }
+    hipfft_rt = hipfftXtSetWorkArea(plan, work_ptrs.data());
+    if(hipfft_rt != HIPFFT_SUCCESS)
+        throw ROCFFT_FAIL("make_plan: hipfftXtSetWorkArea failed (" + hipfftResult_string(hipfft_rt)
+                          + ")");
+
     return plan;
 }
 
@@ -945,6 +980,11 @@ static hipfftLibXtDesc_wrapper_t make_xt_desc(const spmd_hipfft_params&     para
 // Parameterized test fixture for hipfftXt multi-GPU execution tests.
 class hipfftXtGeneralizedUsage : public ::testing::TestWithParam<spmd_hipfft_params>
 {
+public:
+    static void TearDownTestSuite()
+    {
+        spmd_hipfft_params::work_pool.clear();
+    }
 };
 
 // Verify that the I/O data distributed across GPU buffers in `desc` matches the

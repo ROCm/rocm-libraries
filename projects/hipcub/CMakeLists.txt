@@ -35,7 +35,7 @@ endif()
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.6.0")
+set(VERSION_STRING "4.7.0")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 2)
 set(HIPCUB_CCCL_VERSION_MINOR 8)
@@ -261,6 +261,11 @@ if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   set(CMAKE_CURRENT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR_OLD})
 else()
   add_subdirectory(hipcub)
+endif()
+
+if(BUILD_CODE_COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Xarch_host -fprofile-instr-generate")
 endif()
 
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))

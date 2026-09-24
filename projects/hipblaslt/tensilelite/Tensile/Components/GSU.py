@@ -347,11 +347,11 @@ class GSUOn(GSU):
                 writer.cmpNamedArgTypeEq(module, 2, "ArgType == 2 ?")
                 module.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
 
-            with writer.allocTmpSgpr(2,2, tag="GSU On graWorkGroup_tmpSgprD") as tmpSgprD:
-                module.add(SMovB64(dst=sgpr(tmpSgprD.idx,2), src=sgpr("AddressD",2), comment="tmp=Output"))
-                module.add(SMovB64(dst=sgpr("AddressD",2), src=sgpr("AddressTD",2), comment="D=Workspace"))
-                module.add(SMovB64(dst=sgpr("AddressTD",2), src=sgpr(tmpSgprD.idx,2), comment="TD=Output"))
-            module.add(extReadEpilogueLabeltmp)
+                with writer.allocTmpSgpr(2,2, tag="GSU On graWorkGroup_tmpSgprD") as tmpSgprD:
+                    module.add(SMovB64(dst=sgpr(tmpSgprD.idx,2), src=sgpr("AddressD",2), comment="tmp=Output"))
+                    module.add(SMovB64(dst=sgpr("AddressD",2), src=sgpr("AddressTD",2), comment="D=Workspace"))
+                    module.add(SMovB64(dst=sgpr("AddressTD",2), src=sgpr(tmpSgprD.idx,2), comment="TD=Output"))
+                module.add(extReadEpilogueLabeltmp)
 
         module.addComment("GSU-not-WGMapRR :nwg1 = (size%s + MT%s - 1) / MT%s;" \
             % (writer.states.tileChar1, writer.states.tileChar1, writer.states.tileChar1))
@@ -754,12 +754,12 @@ class GSUOn(GSU):
             if kernel["ProblemType"]["SupportUserArgs"]:
                 writer.cmpNamedArgTypeEq(module, 2, "ArgType == 2 ?")
                 module.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
-            module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprAccumTiles), src1="MTOffset", comment="accumNumTiles*(MT0*MT1*bpeC)"))
-            module.add(SAddU32(dst=sgpr("AddressTD"), src0=sgpr("AddressTD"), src1=sgpr(tmpSgpr0)))
-            module.add(SAddCU32(dst=sgpr("AddressTD+1"), src0=sgpr("AddressTD+1"), src1=0))
-            module.add(SAddU32(dst=sgpr("Synchronizer"), src0=sgpr("Synchronizer"), src1=hex(1638400)))
-            module.add(SAddCU32(dst=sgpr("Synchronizer+1"), src0=sgpr("Synchronizer+1"), src1=0))
-            module.add(extReadEpilogueLabeltmp)
+                module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprAccumTiles), src1="MTOffset", comment="accumNumTiles*(MT0*MT1*bpeC)"))
+                module.add(SAddU32(dst=sgpr("AddressTD"), src0=sgpr("AddressTD"), src1=sgpr(tmpSgpr0)))
+                module.add(SAddCU32(dst=sgpr("AddressTD+1"), src0=sgpr("AddressTD+1"), src1=0))
+                module.add(SAddU32(dst=sgpr("Synchronizer"), src0=sgpr("Synchronizer"), src1=hex(1638400)))
+                module.add(SAddCU32(dst=sgpr("Synchronizer+1"), src0=sgpr("Synchronizer+1"), src1=0))
+                module.add(extReadEpilogueLabeltmp)
 
         return module
 

@@ -40,30 +40,6 @@ namespace miopen {
 namespace solver {
 namespace legacy_ck {
 
-/// \todo Check which devices are currently supported
-static inline bool is_ck_supported_hardware(const Handle& handle)
-{
-    return (StartsWith(handle.GetDeviceName(), "gfx803") && handle.GetMaxComputeUnits() == 64) ||
-           StartsWith(handle.GetDeviceName(), "gfx900") ||
-           StartsWith(handle.GetDeviceName(), "gfx906") ||
-           StartsWith(handle.GetDeviceName(), "gfx908") ||
-           StartsWith(handle.GetDeviceName(), "gfx90a") ||
-           StartsWith(handle.GetDeviceName(), "gfx942") ||
-           StartsWith(handle.GetDeviceName(), "gfx950") ||
-           StartsWith(handle.GetDeviceName(), "gfx1030") ||
-           StartsWith(handle.GetDeviceName(), "gfx1031") ||
-           StartsWith(handle.GetDeviceName(), "gfx1100") ||
-           StartsWith(handle.GetDeviceName(), "gfx1101") ||
-           StartsWith(handle.GetDeviceName(), "gfx1102") ||
-           StartsWith(handle.GetDeviceName(), "gfx1103") ||
-           StartsWith(handle.GetDeviceName(), "gfx1150") ||
-           StartsWith(handle.GetDeviceName(), "gfx1151") ||
-           StartsWith(handle.GetDeviceName(), "gfx1152") ||
-           StartsWith(handle.GetDeviceName(), "gfx1153") ||
-           StartsWith(handle.GetDeviceName(), "gfx1200") ||
-           StartsWith(handle.GetDeviceName(), "gfx1201");
-}
-
 static inline bool is_support_amd_buffer_atomic_fadd(const std::string& device_name)
 {
     return StartsWith(device_name, "gfx908");

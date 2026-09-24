@@ -202,15 +202,24 @@ rocke_status_t
                      s->warp_tile_k,
                      s->pipeline ? s->pipeline : "mem",
                      s->epilogue ? s->epilogue : "default");
-    if(s->split_k > 1)
-    {
-        int pos = n;
-        n += snprintf(out + pos, out_cap - pos, "_spk%d", s->split_k);
-    }
+    /* Flag order must match Python's kernel_name_join flags dict:
+     * async, kouter, spk. C previously emitted spk before async, which only
+     * diverged for a spec setting both -- none exists -- but the K-outer flag
+     * sits between them, so the order is now load-bearing. */
     if(s->async_dma)
     {
         int pos = n;
         n += snprintf(out + pos, out_cap - pos, "_async");
+    }
+    if(s->lds_k_outer)
+    {
+        int pos = n;
+        n += snprintf(out + pos, out_cap - pos, "_kouter");
+    }
+    if(s->split_k > 1)
+    {
+        int pos = n;
+        n += snprintf(out + pos, out_cap - pos, "_spk%d", s->split_k);
     }
     if(n >= (int)out_cap)
         return ROCKE_ERR_VALUE;
@@ -481,6 +490,95 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      "WMMA dgrad does not support async_dma/unroll_k/chiplet_swizzle"
                      "/split_k>1 (non-wavelet) on %s",
                      arch);
+            return false;
+        }
+    }
+
+    /* K-outer transpose-read gates. Mirrors the DgradConvSpec.validate() and
+     * is_valid_dgrad_spec blocks; asymmetric on purpose (dtype_b/warp_tile_n
+     * only) because just the B tile flips. */
+    if(s->lds_k_outer)
+    {
+        /* Two regimes: gfx950 wave64 MFMA (ds_read_b64_tr_b16) and gfx1250
+         * wave32 WMMA (ds_load_tr16_b128). The arch and the wave must agree or
+         * the lane formula addresses a layout the hardware does not implement. */
+        const bool k_outer_950 = (strcmp(arch, "gfx950") == 0);
+        const bool k_outer_1250 = (strcmp(arch, "gfx1250") == 0);
+        if(!k_outer_950 && !k_outer_1250)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer requires gfx950 or gfx1250 (the LDS transpose "
+                     "read); got %s",
+                     arch);
+            return false;
+        }
+        const int want_wave = k_outer_950 ? 64 : 32;
+        if(s->wave_size != want_wave)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer on %s requires wave_size=%d; got %d",
+                     arch,
+                     want_wave,
+                     s->wave_size);
+            return false;
+        }
+        if(!(s->dtype_b && (strcmp(s->dtype_b, "bf16") == 0 || strcmp(s->dtype_b, "fp16") == 0)))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer requires a 16-bit B dtype (ds_read_tr16_b64 is a "
+                     "16-bit transpose read); got dtype_b=%s",
+                     s->dtype_b ? s->dtype_b : "(null)");
+            return false;
+        }
+        if(s->wave_size == 32)
+        {
+            /* One atom in the wave32 regime: gfx1250 WMMA 16x16x32. */
+            if(s->warp_tile_n != 16 || s->warp_tile_k != 32)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer on wave32 supports only the 16x16x32 atom "
+                         "(got %dx%dx%d)",
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k);
+                return false;
+            }
+        }
+        else if(s->warp_tile_n != 16 && s->warp_tile_n != 32)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer requires warp_tile_n in (16, 32); got %d",
+                     s->warp_tile_n);
+            return false;
+        }
+        if(s->lds_layout != NULL)
+        {
+            snprintf(reason, reason_cap, "lds_k_outer does not honour an explicit lds_layout");
+            return false;
+        }
+        if(s->async_dma)
+        {
+            snprintf(reason, reason_cap, "lds_k_outer is not supported with async_dma on dgrad");
+            return false;
+        }
+        /* Same shape of problem as async_dma: the alternate load path does not
+         * implement the K-outer tile. build_wavelet_loaders pins the B tile to
+         * (block_n, block_k) and takes the unswapped descriptor, so it writes
+         * M-outer into a K-outer allocation -- wrong row stride for every
+         * element, and out of bounds past B_smem when tile_n > tile_k.
+         * Matches Python is_valid_dgrad_spec and validate(). */
+        if(is_wavelet)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer is not supported with pipeline='wavelet' on dgrad "
+                     "(the wavelet loader writes the B tile M-outer into a K-outer "
+                     "allocation)");
             return false;
         }
     }
@@ -759,7 +857,8 @@ static const rocke_mmaop_t*
                                                             "fp32",
                                                             spec->warp_tile_m,
                                                             spec->warp_tile_n,
-                                                            spec->warp_tile_k);
+                                                            spec->warp_tile_k,
+                                                            nullptr);
     if(!op)
     {
         rocke_i_set_err(b,
@@ -1193,6 +1292,11 @@ struct tilde_dy_ctx_t
     rocke_value_t* c_Wo;
     rocke_value_t* c_K; // K_conv — innermost divisor in k_dg decomposition
     rocke_value_t* c0;
+    /* Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path -- mirrors the
+     * Python dy_descriptor. dg_M is N*Ho*Wo, materialised inside the descriptor
+     * at the same point Python creates it so the IR order matches. */
+    bool is_pointwise;
+    int dg_M;
 };
 
 static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
@@ -1204,6 +1308,21 @@ static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
     tilde_dy_ctx_t* ctx = (tilde_dy_ctx_t*)user;
     rocke_value_t* m_sub = rocke_b_add(b_, ctx->block_m_off, row);
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
+
+    // Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path. The tilde
+    // decomposition is the identity here, so the offset reduces exactly to
+    // m_sub*K + k_sub. Mirrors Python dy_descriptor.
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* pw_off = rocke_b_add(b_, rocke_b_mul(b_, m_sub, ctx->c_K), k_sub);
+        if(out_valid)
+        {
+            rocke_value_t* m_ok = rocke_b_cmp_lt(b_, m_sub, rocke_b_const_i32(b_, ctx->dg_M));
+            rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_sub, ctx->c_K);
+            *out_valid = rocke_b_land(b_, m_ok, k_ok);
+        }
+        return pw_off;
+    }
 
     // k_out innermost (CK-compatible): k_sub = ydot*xdot_slice*K + xdot*K + k_out
     // Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim K).
@@ -1259,6 +1378,8 @@ struct tilde_w_ctx_t
     rocke_value_t* c_K;
     rocke_value_t* c_C;
     rocke_value_t* c0;
+    /* Pointwise fast path -- mirrors the Python w_descriptor. */
+    bool is_pointwise;
 };
 
 static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
@@ -1270,6 +1391,20 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     tilde_w_ctx_t* ctx = (tilde_w_ctx_t*)user;
     rocke_value_t* c_val = rocke_b_add(b_, ctx->block_n_off, row);
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
+
+    // Pointwise fast path: Y == X == 1 means KYXC is just [K, cpg], so the
+    // offset is k_sub*C + c_val. Must stay in lockstep with the dy fast path.
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* pw_off = rocke_b_add(b_, rocke_b_mul(b_, k_sub, ctx->c_C), c_val);
+        if(out_valid)
+        {
+            rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_sub, ctx->c_K);
+            rocke_value_t* c_ok = rocke_b_cmp_lt(b_, c_val, ctx->c_C);
+            *out_valid = rocke_b_land(b_, k_ok, c_ok);
+        }
+        return pw_off;
+    }
 
     // Same k_out-innermost decomposition as _tilde_dy_descriptor (must match).
     // c (row axis) is stride-1 in KYXC; vectorised loads along c use vector_axis_row=true.
@@ -1297,6 +1432,19 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     if(out_valid)
         *out_valid = valid;
     return safe_offset;
+}
+
+/* K-outer coordinate swap: the K-outer tile is indexed (k, free) while
+ * _tilde_w_descriptor takes (free, k). The descriptor itself is untouched, so
+ * the global addressing and its OOB select stay byte-identical -- this is a
+ * swap, not a redesign. Mirrors _b_desc_fn in conv_implicit_gemm_dgrad.py. */
+static rocke_value_t* _tilde_w_descriptor_kouter(rocke_ir_builder_t* b_,
+                                                 rocke_value_t* row,
+                                                 rocke_value_t* col,
+                                                 rocke_value_t** out_valid,
+                                                 void* user)
+{
+    return _tilde_w_descriptor(b_, col, row, out_valid, user);
 }
 
 // ===========================================================================
@@ -1791,7 +1939,13 @@ static rocke_kernel_def_t*
     // ---- LDS ----
     rocke_conv_lds_layout_t lds_layout = _dgrad_effective_lds_layout(spec);
     int a_shape[2] = {block_m, lds_layout.row_stride};
+    /* A stays M-outer; only B flips. Mirrors the Python branch. */
     int b_shape_arr[2] = {block_n, lds_layout.row_stride};
+    if(spec->lds_k_outer)
+    {
+        b_shape_arr[0] = block_k;
+        b_shape_arr[1] = block_n + ROCKE_DGRAD_KOUTER_PAD;
+    }
     rocke_value_t* A_smem = rocke_b_smem_alloc(b, ab_ir, a_shape, 2, "A_smem");
     rocke_value_t* B_smem = rocke_b_smem_alloc(b, ab_ir, b_shape_arr, 2, "B_smem");
 
@@ -1871,9 +2025,49 @@ static rocke_kernel_def_t*
                             "dgrad tilde: no usable free-axis load_vec for B tile geometry");
             return NULL;
         }
-        if(spec->has_vector_size_b)
+        if(spec->lds_k_outer)
         {
-            load_vec_b = spec->vector_size_b;
+            /* Recompute in col mode over the swapped tile. choose_vec tests
+             * tile_rows in row mode and tile_cols in col mode, so both calls
+             * test the same extent against the same product: load_vec_b is
+             * invariant under the swap and only the LDS store changes. */
+            int cap = spec->has_vector_size_b
+                          ? (spec->vector_size_b < max_from_C ? spec->vector_size_b : max_from_C)
+                          : max_from_C;
+            int chosen_ko = 1;
+            rocke_status_t st_ko = rocke_coalesced_tile_loader_choose_vec_axis(
+                block_k, block_n, threads, cap, false, &chosen_ko);
+            if(st_ko != ROCKE_OK)
+            {
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "dgrad tilde: no usable K-outer load_vec for B tile geometry");
+                return NULL;
+            }
+            load_vec_b = chosen_ko;
+            axis_b_row = false;
+        }
+        else if(spec->has_vector_size_b)
+        {
+            /* Clamp, exactly as the K-outer branch above does. vector_size_* is
+             * a CAP, not a demand, so an explicit width wider than the tile
+             * geometry supports must be narrowed rather than obeyed. Taking it
+             * verbatim let a spec pass validation and then fail inside the
+             * coalesced tile loader. Emission-neutral: choose_vec's accepted
+             * set is a strict subset of vecs_per_thread's, so this yields
+             * exactly spec->vector_size_b wherever the verbatim path built. */
+            int cap_mo = spec->vector_size_b < max_from_C ? spec->vector_size_b : max_from_C;
+            int chosen_mo = 1;
+            rocke_status_t st_mo = rocke_coalesced_tile_loader_choose_vec_axis(
+                block_n, block_k, threads, cap_mo, true, &chosen_mo);
+            if(st_mo != ROCKE_OK)
+            {
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "dgrad tilde: no usable free-axis load_vec for B tile geometry");
+                return NULL;
+            }
+            load_vec_b = chosen_mo;
             axis_b_row = (load_vec_b > 1);
         }
         else if(chosen > 1)
@@ -1895,8 +2089,8 @@ static rocke_kernel_def_t*
     a_sync_loader.inner_dim = 0;
 
     rocke_coalesced_tile_loader_t b_sync_loader;
-    b_sync_loader.tile_rows = block_n;
-    b_sync_loader.tile_cols = block_k;
+    b_sync_loader.tile_rows = spec->lds_k_outer ? block_k : block_n;
+    b_sync_loader.tile_cols = spec->lds_k_outer ? block_n : block_k;
     b_sync_loader.block_size = threads;
     b_sync_loader.load_vec = load_vec_b;
     b_sync_loader.use_buffer_rsrc = true;
@@ -1958,6 +2152,8 @@ static rocke_kernel_def_t*
     dy_tctx.c_Wo = c_Wo;
     dy_tctx.c_K = c_K;
     dy_tctx.c0 = c0;
+    dy_tctx.is_pointwise = rocke_conv_problem_is_pointwise(p) && p->groups <= 1;
+    dy_tctx.dg_M = p->N * rocke_conv_problem_ho(p) * rocke_conv_problem_wo(p);
 
     tilde_w_ctx_t w_tctx;
     w_tctx.block_n_off = block_n_off_v;
@@ -1972,10 +2168,37 @@ static rocke_kernel_def_t*
     w_tctx.c_K = c_K;
     w_tctx.c_C = c_C;
     w_tctx.c0 = c0;
+    w_tctx.is_pointwise = rocke_conv_problem_is_pointwise(p) && p->groups <= 1;
 
     // ---- schedule ----
     rocke_schedule_policy_t schedule = rocke_schedule_policy_for_pipeline(b, spec->pipeline);
     rocke_schedule_policy_emit_prologue(&schedule, b);
+
+    /* Hoisted lane constants for the K-outer transpose read. Guarded because
+     * unconditional emission would add ops to every existing dgrad config and
+     * move every dgrad golden. Emitted here to match Python's position in the
+     * instruction stream (immediately after the schedule prologue). */
+    rocke_value_t* tr_lane_mod4 = NULL;
+    rocke_value_t* tr_grp16 = NULL;
+    /* Element type for the transpose read -- see rocke_conv_tr_elem_dtype.
+     * Type selection only, emits no IR, so it is computed unconditionally. */
+    const rocke_type_t* tr_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
+    if(spec->lds_k_outer && spec->wave_size == 64)
+    {
+        /* Python: b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)) -- evaluated
+         * strictly left-to-right. C argument order is unspecified, so sequence
+         * every operand into a temporary or the SSA numbering drifts. */
+        rocke_value_t* c4a = rocke_b_const_i32(b, 4);
+        rocke_value_t* m4 = rocke_b_mod(b, lane, c4a);
+        rocke_value_t* c4b = rocke_b_const_i32(b, 4);
+        tr_lane_mod4 = rocke_b_mul(b, m4, c4b);
+
+        /* Python: b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4)) */
+        rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+        rocke_value_t* m16 = rocke_b_mod(b, lane, c16);
+        rocke_value_t* c4c = rocke_b_const_i32(b, 4);
+        tr_grp16 = rocke_b_div(b, m16, c4c);
+    }
 
     // ---- helper lambda-equivalent: emit WMMA phase from LDS into accs ----
     // Used by both the wavelet and standard K-loop paths.
@@ -2011,6 +2234,27 @@ static rocke_kernel_def_t*
             {
                 rocke_value_t* atom_row
                     = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+                if(spec->lds_k_outer)
+                {
+                    /* B only: dgrad's A tile is genuinely still M-outer. This
+                     * branch existed in the MFMA phase but not here, so a
+                     * wave32 K-outer dgrad silently fell back to ordinary
+                     * M-outer smem loads in the C engine while Python emitted
+                     * the transpose read -- there was no gfx1250 dgrad parity
+                     * config to catch the divergence. */
+                    b_wma_cols[ni] = rocke_conv_tr_frag(b,
+                                                        lane,
+                                                        tr_lane_mod4,
+                                                        tr_grp16,
+                                                        B_src,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        spec->warp_tile_n,
+                                                        b_per_lane,
+                                                        spec->wave_size,
+                                                        tr_dtype);
+                    continue;
+                }
                 b_wma_cols[ni] = rocke_conv_emit_frag_smem_load(
                     b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, b_per_lane);
             }
@@ -2279,8 +2523,15 @@ static rocke_kernel_def_t*
 
         rocke_coalesced_tile_loader_load(
             b, &a_sync_loader, tid, A_smem, _tilde_dy_descriptor, &dy_tctx, dy_rsrc, NULL);
-        rocke_coalesced_tile_loader_load(
-            b, &b_sync_loader, tid, B_smem, _tilde_w_descriptor, &w_tctx, w_rsrc, NULL);
+        rocke_coalesced_tile_loader_load(b,
+                                         &b_sync_loader,
+                                         tid,
+                                         B_smem,
+                                         spec->lds_k_outer ? _tilde_w_descriptor_kouter
+                                                           : _tilde_w_descriptor,
+                                         &w_tctx,
+                                         w_rsrc,
+                                         NULL);
         rocke_b_sync(b);
 
         // MFMA phase
@@ -2316,6 +2567,28 @@ static rocke_kernel_def_t*
                 rocke_value_t* b_cols[ROCKE_CONV_MAX_ACCS];
                 for(int ni = 0; ni < mfmas_n; ni++)
                 {
+                    if(spec->lds_k_outer)
+                    {
+                        /* Python skips the b_row computation entirely on this
+                         * path, so emitting it here would add ops the Python
+                         * engine never emits. Operands sequenced into
+                         * temporaries to preserve left-to-right evaluation. */
+                        rocke_value_t* mn_c = rocke_b_const_i32(b, ni * spec->warp_tile_n);
+                        rocke_value_t* mn_base = rocke_b_add(b, warp_n_off, mn_c);
+                        rocke_value_t* k_c = rocke_b_const_i32(b, kk * spec->warp_tile_k);
+                        b_cols[ni] = rocke_conv_tr_frag(b,
+                                                        lane,
+                                                        tr_lane_mod4,
+                                                        tr_grp16,
+                                                        B_smem,
+                                                        mn_base,
+                                                        k_c,
+                                                        spec->warp_tile_n,
+                                                        b_per_lane,
+                                                        spec->wave_size,
+                                                        tr_dtype);
+                        continue;
+                    }
                     rocke_value_t* b_row = rocke_b_add(
                         b,
                         warp_n_off,

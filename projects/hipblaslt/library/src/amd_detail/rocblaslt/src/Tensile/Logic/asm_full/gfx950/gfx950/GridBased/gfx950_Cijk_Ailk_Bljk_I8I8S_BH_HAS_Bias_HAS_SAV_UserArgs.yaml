@@ -273,7 +273,7 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32

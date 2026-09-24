@@ -58,6 +58,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t */
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_lane_decode_t */
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* rocke_tensor_view_t */
+#include "rocke/helper_rocke.instances.common._moe_fused_mega_lds.h" /* LDS budget */
 #include "rocke/instance_moe_fused_mega_fp8.h" /* spec + levers (public) */
 #include "rocke/ir.h"
 
@@ -75,6 +76,26 @@ extern "C" {
 #define ROCKE_MOE_FP8_MAX_NNI 64
 #define ROCKE_MOE_FP8_MAX_ACCS 128
 #define ROCKE_MOE_FP8_MAX_DTLA_SLOTS 16
+
+/* ===================================================================== *
+ *  WHOLE-KERNEL LDS ACCOUNTING (Python `_lds_allocs`)
+ *
+ *  Hidden_smem, HiddenScale_smem, HiddenF32_smem, WarpAmax_smem and -- only
+ *  under use_dtla -- BStage_smem, in emitter declaration order. BStage_smem is
+ *  allocated unconditionally but only REFERENCED under use_dtla; the smem packer
+ *  dead-strips unreferenced allocations, so counting it otherwise would
+ *  over-charge the budget by the whole landing zone. Emits no IR.
+ * ===================================================================== */
+
+#define ROCKE_MOE_FP8_LDS_MAX_ALLOCS 5
+
+/* Writes the allocs into `out` and returns how many were written (4, or 5 with
+ * the DTLA landing zone). `levers` supplies the module-level _USE_X_DTLA the
+ * Python reads at call time; NULL means the import-time defaults. Keep in
+ * lock-step with the b.smem_alloc calls in rocke_build_moe_fused_mega_gemm_fp8. */
+size_t rocke_moe_fp8_lds_allocs(const rocke_fused_mega_kernel_spec_fp8_t* spec,
+                                const rocke_fused_mega_fp8_levers_t* levers,
+                                rocke_mega_lds_alloc_t out[ROCKE_MOE_FP8_LDS_MAX_ALLOCS]);
 
 /* ===================================================================== *
  *  rocke_moe_fp8_dtla_bundle_t

@@ -69,6 +69,7 @@ namespace TensileLite
             std::vector<double>           m_constantValues;
 
             bool        m_stridedBatched;
+            int         m_batchMode;
             bool        m_groupedGemm;
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;

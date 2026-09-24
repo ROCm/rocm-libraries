@@ -738,12 +738,11 @@ rocblaslt_status
                                         matmul_descr[i]->act0,
                                         matmul_descr[i]->act1,
                                         0,
-                                        // GSU region, per problem and shared
-                                        // across streams as it has always been.
-                                        // The Stream-K region is separate and is
-                                        // bound per stream in makeArgument().
-                                        (char*)handle->Synchronizer
-                                            + (i * _rocblaslt_handle::c_syncGsuSlotBytes),
+                                        // GSU region, per problem, shared across
+                                        // streams, null past the last slot. The
+                                        // separate Stream-K region is bound per
+                                        // stream in makeArgument().
+                                        handle->gsuFlagsForProblem(i),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
@@ -1421,10 +1420,10 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        // GSU region, per problem; Stream-K is
-                                        // bound per stream in makeArgument().
-                                        (char*)handle->Synchronizer
-                                            + (i * _rocblaslt_handle::c_syncGsuSlotBytes),
+                                        // GSU region, per problem and null past
+                                        // the last slot; Stream-K is bound per
+                                        // stream in makeArgument().
+                                        handle->gsuFlagsForProblem(i),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
