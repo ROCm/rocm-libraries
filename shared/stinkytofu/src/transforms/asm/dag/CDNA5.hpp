@@ -94,14 +94,12 @@ struct CDNA5Config {
     int dsReadPerCap;
     int globalReadPerWmma;
     int tensorLoadWmmaSpace;
-    // Cycle span the dsReadPerCap ceiling applies over. Paired with
-    // dsReadPerCap: the two together are the cap, and neither means anything
-    // without the other.
-    //
-    // Arch data, deliberately NOT read off a matrix op in the region. The
-    // ceiling protects the LDS return queue, so it has to be defined where no
-    // WMMA is -- in a region's tail and in a region that has none at all. A
-    // per-region scan gives 0 in exactly those cases.
+    // Fallback cycle span the dsReadPerCap ceiling applies over, used only
+    // where the region has no WMMA to take a real one from (see
+    // dsIssueCapSpan()): a region's tail, and a region with no matrix op at
+    // all. Everywhere else the span is the region's actual WMMA latency, so
+    // this is not the cap's normal rate -- it is what keeps the cap defined
+    // in the two cases a per-kernel value doesn't exist.
     int dsIssueCapSpanCycles;
 };
 
@@ -109,10 +107,9 @@ constexpr CDNA5Config kGfx1250Config = {
     /*dsReadPerCap=*/3,
     /*globalReadPerWmma=*/1,
     /*tensorLoadWmmaSpace=*/0,
-    // v_wmma_* is .cost = {1, 8} (Gfx1250Formats.def): issue 1, latency 8, so
-    // the co-issue window is 7 cycles. 8 here is the same number the old
-    // per-WMMA window had, which is what keeps the issue RATE unchanged while
-    // the ceiling's SCOPE widens.
+    // v_wmma_* is .cost = {1, 8} (Gfx1250Formats.def): issue 1, latency 8. Used
+    // as the fallback span only; a region with a matrix op sizes the window
+    // from that op's real latency instead (see dsIssueCapSpan()).
     /*dsIssueCapSpanCycles=*/8,
 };
 
@@ -498,39 +495,31 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Span of the rule (4) cap window, in cycles: at most dsReadPerCap
     // ds_loads may issue in any dsIssueCapSpan() cycles of the real timeline.
     //
-    // Arch data (config_), not a property of any matrix op in the region. The
-    // ceiling exists to stop the LDS return queue being overrun, which is true
-    // whether or not a WMMA is in flight, so the span has to be defined where
-    // none is -- the region tail, and a region containing no matrix op at all.
+    // Defaults to this region's actual WMMA latency (wmmaIssueConfig.latency),
+    // so the cap's rate matches how many ds_loads used to fit in one real WMMA
+    // window for THIS kernel's matrix format -- not a single arch-wide number
+    // that only reproduces the old per-WMMA rate for whichever format happens
+    // to cost exactly kGfx1250Config.dsIssueCapSpanCycles cycles. Different
+    // formats override their WMMA cost independently (HwInstDesc's
+    // matrixFmtCostOverrides), so a fixed constant binds a different amount
+    // per kernel purely from that mismatch, not from anything this PR changed
+    // about the scheduling rate.
     //
-    // This deliberately does NOT read wmmaIssueConfig.latency, which was the
-    // obvious source and is wrong three ways:
-    //   - it is the FIRST matrix op's latency in the region (see the scan in
-    //     onInit), while latencyCycles is overridden per matrix format pair via
-    //     HwInstDesc::matrixFmtCostOverrides -- so a region mixing formats
-    //     would size every window from whichever WMMA happened to come first;
-    //   - it is 0 in a region with no matrix op, and
-    //   - it is 0 for the whole region when loopConfig.unrollGemm is off, since
-    //     the scan sits below that early return.
-    // The last two are silent: they do not disable the cap, they shrink its
-    // window to nothing, which would make the ceiling bind far harder in
-    // exactly the regions it was never measured in.
+    // wmmaIssueConfig.latency is 0 in two cases where there is no per-kernel
+    // value to take, and both fall back to the arch constant:
+    //   - a region with no matrix op, and
+    //   - the whole region when loopConfig.unrollGemm is off, since the
+    //     onInitRegion scan that sets it sits below that early return.
+    // The ceiling protects the LDS return queue whether or not a WMMA is in
+    // flight, so it still has to be defined in both cases -- falling back to 0
+    // would expire every entry immediately and silently disable rule (4).
     //
-    // The arch value reproduces today's per-WMMA window length, so widening the
-    // ceiling's scope does not also change its rate. It is a rate-preserving
-    // choice, not a derived one: the queue-derived span is
-    // dsReadPerCap * dsReadThrottleLatency / dsReadQueueDepth, which puts the
-    // cap's long-run rate exactly at what the LDS queue sustains. Measured,
-    // that is ~2x tighter than today's and starves the scheduler of the
-    // ds_loads it uses to fill hazard gaps, so adopting it is a retune that
-    // needs dsReadPerCap re-tuned with it against hardware.
-    //
-    // dagFeatures.dsIssueCapSpanCycles overrides the arch value.
+    // dagFeatures.dsIssueCapSpanCycles overrides both.
     int dsIssueCapSpan() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsIssueCapSpanCycles;
-        const int resolved = cfg > 0 ? cfg : config_.dsIssueCapSpanCycles;
-        // A non-positive span is not a window anyone can mean, and a 0 would
-        // expire every entry immediately and silently disable rule (4).
+        const int resolved = cfg > 0 ? cfg
+                                     : (wmmaIssueConfig.latency > 0 ? wmmaIssueConfig.latency
+                                                                    : config_.dsIssueCapSpanCycles);
         assert(resolved > 0 && "arch config dsIssueCapSpanCycles must be positive");
         return resolved;
     }

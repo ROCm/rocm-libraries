@@ -317,6 +317,30 @@ class DAGSchedulerPassTest : public ::testing::Test {
         return createWmmaScaleF8_in(bb, destStart, src0Start);
     }
 
+    // Same opcode as createWmmaScaleF8, but FP4/FP4 operands: costOverride
+    // (Gfx1250Instructions.def) drops its cost from {1,8} to {1,4}. Exercises
+    // dsIssueCapSpan() taking a real per-kernel latency other than the arch
+    // fallback of 8.
+    StinkyInstruction* createWmmaScaleF4(int destStart, int src0Start) {
+        AsmIRBuilder builder(*bb, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_scale_f32_16x16x128_f8f6f4, arch);
+        if (!desc) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addDestReg(StinkyRegister("v", destStart, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Start, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Start, 8));
+        inst->addSrcReg(StinkyRegister("v", destStart, 8));
+        MatrixFmtModifiers fmtMod;
+        fmtMod.fmtA = MatrixFmt::FP4;
+        fmtMod.fmtB = MatrixFmt::FP4;
+        inst->addModifier(fmtMod);
+        // builder.create() does not re-run this on a modifier added after the
+        // fact (only updateHwInstDesc() does); without it latencyCycles stays
+        // the base 8 and the FP4 override never takes effect.
+        inst->resolveMatrixFmtOverrides();
+        return inst;
+    }
+
     StinkyInstruction* createMovableDsLoad(int destReg, int addrReg, int ldsToken) {
         StinkyInstruction* inst = createDsReadB128InBlock(bb, arch, destReg, addrReg);
         inst->addSrcReg(StinkyRegister(RegType::LDS, ldsToken, 1));
@@ -1467,6 +1491,58 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_HoldsInABlockWithNoWmma) {
     EXPECT_LE(maxConsecutiveDsLoads(*bb), 3)
         << "the cap must bind with no WMMA in the block; found " << maxConsecutiveDsLoads(*bb)
         << " consecutive ds_loads";
+}
+
+// dsIssueCapSpan() defaults to the region's real WMMA latency, not a single
+// arch-wide constant: v_wmma_scale_f32_16x16x128_f8f6f4 costs {1,8} normally
+// but {1,4} for FP4/FP4 operands (Gfx1250Instructions.def costOverride), so
+// the same opcode must produce two different spans depending on the operand
+// format actually used by this kernel.
+TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanDefaultsToTheRegionsRealWmmaLatency) {
+    createWmmaScaleF4(/*destStart=*/100, /*src0Start=*/0);
+    createMovableDsLoad(0, 80, 1);
+
+    PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+    std::ostringstream captured;
+    std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+    runPassWithUnrollGemm();
+    std::cerr.rdbuf(oldBuf);
+    PassManagerDebugConfig::clearDebugOnly();
+
+    const std::string marker = "[CDNA5 dsCap] dsReadPerCap=";
+    const size_t pos = captured.str().find(marker);
+    ASSERT_NE(pos, std::string::npos) << "expected the rule (4) cap trace; trace:\n"
+                                      << captured.str();
+    const size_t spanPos = captured.str().find("span=", pos);
+    ASSERT_NE(spanPos, std::string::npos);
+    const int span = std::stoi(captured.str().substr(spanPos + 5));
+    EXPECT_EQ(span, 4) << "an FP4/FP4 WMMA costs {1,4} (Gfx1250Instructions.def); the cap "
+                          "span must take that real latency, not the arch fallback of 8";
+}
+
+// Same scenario, FP8/FP8 operands: no costOverride entry matches, so the
+// opcode's base cost of {1,8} applies -- which happens to equal the arch
+// fallback, so this also covers the "no matrix op" / "unrollGemm off" cases
+// falling back to the same 8.
+TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanIsEightForTheDefaultFormat) {
+    createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
+    createMovableDsLoad(0, 80, 1);
+
+    PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+    std::ostringstream captured;
+    std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+    runPassWithUnrollGemm();
+    std::cerr.rdbuf(oldBuf);
+    PassManagerDebugConfig::clearDebugOnly();
+
+    const std::string marker = "[CDNA5 dsCap] dsReadPerCap=";
+    const size_t pos = captured.str().find(marker);
+    ASSERT_NE(pos, std::string::npos) << "expected the rule (4) cap trace; trace:\n"
+                                      << captured.str();
+    const size_t spanPos = captured.str().find("span=", pos);
+    ASSERT_NE(spanPos, std::string::npos);
+    const int span = std::stoi(captured.str().substr(spanPos + 5));
+    EXPECT_EQ(span, 8);
 }
 
 // ---------------------------------------------------------------------------

@@ -110,10 +110,9 @@ struct PassFeatureConfig {
         /// real timeline. Tuned alongside dsReadPerCap -- the pair is the cap,
         /// and neither means anything without the other.
         ///
-        /// 0 = use the per-arch default (CDNA5Config::dsIssueCapSpanCycles).
-        /// Deliberately not derived from a WMMA in the region: the cap has to
-        /// hold where none is in flight -- a region's tail, and a region with
-        /// no matrix op at all.
+        /// 0 = use the per-kernel default: the region's actual WMMA latency
+        /// (wmmaIssueConfig.latency), or the arch constant
+        /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
         int dsIssueCapSpanCycles = 0;
         int tensorLoadWmmaSpace = 0;
         /// Max cycle-distance between two adjacent barrier groups for
