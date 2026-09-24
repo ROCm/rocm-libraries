@@ -998,7 +998,11 @@ namespace
      * is served by the cache: a hit is counted only when an entry matched the
      * key that path looks up.
      */
-    bool extensionHeuristicHits(int64_t m, int64_t n, int64_t k, int32_t streamKMode)
+    // benchStyle sets the problem up the way hipblaslt-bench's C++ API run does:
+    // explicit strides and a GemmProblemType, and the epilogue's A and B
+    // scaling types set to scalar although there is no scale.
+    bool extensionHeuristicHits(
+        int64_t m, int64_t n, int64_t k, int32_t streamKMode, bool benchStyle = false)
     {
         hipblasLtHandle_t handle = nullptr;
         if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
@@ -1019,8 +1023,9 @@ namespace
 
             hipblaslt_ext::GemmPreference pref;
             pref.setMaxWorkspaceBytes(32 * 1024 * 1024);
-            pref.setStreamKTileSchedulingMode(
-                static_cast<hipblasLtStreamKTileSchedulingMode_t>(streamKMode));
+            if(streamKMode >= 0)
+                pref.setStreamKTileSchedulingMode(
+                    static_cast<hipblasLtStreamKTileSchedulingMode_t>(streamKMode));
 
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,
@@ -1039,7 +1044,26 @@ namespace
             inputs.setD(dD);
             inputs.setAlpha(&alpha);
             inputs.setBeta(&beta);
-            gemm.setProblem(m, n, k, 1, epilogue, inputs);
+            if(benchStyle)
+            {
+                epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
+                epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
+
+                hipblaslt_ext::GemmProblemType problemType;
+                problemType.setOpA(HIPBLAS_OP_N);
+                problemType.setOpB(HIPBLAS_OP_N);
+                problemType.setTypeA(HIP_R_16F);
+                problemType.setTypeB(HIP_R_16F);
+                problemType.setTypeC(HIP_R_16F);
+                problemType.setTypeD(HIP_R_16F);
+                problemType.setTypeCompute(HIPBLAS_COMPUTE_32F);
+                gemm.setProblem(
+                    m, n, k, 1, m, k, m, m, m * k, k * n, m * n, m * n, epilogue, inputs, problemType);
+            }
+            else
+            {
+                gemm.setProblem(m, n, k, 1, epilogue, inputs);
+            }
 
             std::vector<hipblasLtMatmulHeuristicResult_t> results;
             ok = gemm.algoGetHeuristic(1, pref, results) == HIPBLAS_STATUS_SUCCESS
@@ -2127,6 +2151,23 @@ namespace
             << "the extension looked up the mode its gemm was created with, not the one its "
                "preference set";
         EXPECT_FALSE(extensionHeuristicHits(1024, 512, 1024, HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF));
+    }
+
+    // A scalar scaling type with no scale scales nothing, the same as the unset
+    // type the C API leaves there, so a row tuned through the C API must serve
+    // an extension caller that sets it. hipblaslt-bench's C++ API run is one,
+    // and this is how it finds what its tuning pass recorded.
+    TEST_F(TuningCache, ExtensionScalarScalingWithoutScalesFindsTheCApiRow)
+    {
+        int launched = -1;
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Heuristic, -1, &launched));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode recorded nothing";
+
+        enterMode("cache", m_path);
+        EXPECT_TRUE(extensionHeuristicHits(1024, 512, 1024, -1, true))
+            << "the scaling type was keyed although nothing is scaled";
     }
 
 } // namespace

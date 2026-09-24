@@ -3316,8 +3316,21 @@ TensileLite::ProblemOverride
     po.hasBias    = problem.bias != nullptr;
     po.auxType    = static_cast<int32_t>(problem.aux_type);
 
-    po.scaleAFormat     = static_cast<int32_t>(problem.scaleAType);
-    po.scaleBFormat     = static_cast<int32_t>(problem.scaleBType);
+    // Without an A or B scale, a scalar or vector format scales nothing: the
+    // problem uses no scaling either way. The C API leaves the format unset
+    // there, while a C++ extension caller may set it to scalar, as
+    // hipblaslt-bench does, so it is keyed as unset. A block format shapes the
+    // problem on its own and is always keyed.
+    using ScalingFormat = RocblasltContractionProblem::ScalingFormat;
+    const bool scalesAB    = problem.scaleA != nullptr || problem.scaleB != nullptr;
+    auto       scaleFormat = [&](ScalingFormat format) {
+        const bool perTensor = format == ScalingFormat::None || format == ScalingFormat::Scalar
+                               || format == ScalingFormat::Vector;
+        return static_cast<int32_t>(perTensor && !scalesAB ? ScalingFormat::None : format);
+    };
+
+    po.scaleAFormat     = scaleFormat(problem.scaleAType);
+    po.scaleBFormat     = scaleFormat(problem.scaleBType);
     po.hasScaleA        = problem.scaleA != nullptr;
     po.hasScaleB        = problem.scaleB != nullptr;
     po.hasScaleC        = problem.scaleC != nullptr;
