@@ -34,21 +34,18 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                                             rocke_value_t* row_base,
                                             rocke_value_t* lane_group,
                                             uint64_t k0,
-                                            const rocke_tensor_storage_t* storage,
+                                            const char* dtype,
                                             const rocke_matrix_fragment_layout_t* layout,
-                                            const rocke_type_t* carrier_type)
+                                            const rocke_type_t* carrier_type,
+                                            int alignment_bytes)
 {
     return ckc::guard_builder(b, [&]() -> rocke_value_t* {
         if(!rocke_i_live(b))
             return NULL;
-        if(!storage || !storage->dtype || !layout || !carrier_type || !ptr || !row_base
-           || !lane_group)
+        if(!dtype || !layout || !carrier_type || !ptr || !row_base || !lane_group)
             ckc::raise_status(ROCKE_ERR_VALUE, "null matrix fragment argument");
-        uint64_t storage_bytes;
-        if(!rocke_tensor_storage_bytes(storage, &storage_bytes))
-            ckc::raise_status(ROCKE_ERR_VALUE, "invalid tensor storage descriptor");
-        if(storage_bytes == 0)
-            ckc::raise_status(ROCKE_ERR_VALUE, "matrix fragment requires nonempty tensor storage");
+        if(alignment_bytes <= 0 || (alignment_bytes & (alignment_bytes - 1)))
+            ckc::raise_status(ROCKE_ERR_VALUE, "alignment_bytes must be a positive power of two");
         const auto& packing = layout->fragment;
         rocke_matrix_fragment_layout_t checked;
         if(!rocke_matrix_fragment_layout_init(&checked,
@@ -58,23 +55,17 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                                               layout->lanes_per_group)
            || !packing.count || packing.count > INT_MAX || packing.carrier_count > INT_MAX)
             ckc::raise_status(ROCKE_ERR_VALUE, "invalid matrix fragment chunk layout");
-        const rocke_type_t* unit_type = rocke_storage_ir_type(storage->dtype->name);
+        const rocke_type_t* unit_type = rocke_storage_ir_type(dtype);
         if(!unit_type || ptr->type->kind != ROCKE_TYPE_PTR
            || !rocke_type_eq(ptr->type->pointee, unit_type))
             ckc::raise_status(ROCKE_ERR_VALUE, "matrix pointer storage type mismatch");
         const uint64_t unit_bytes = rocke_dtype_info(unit_type->name)->encoded_bits / 8;
-        if(storage->packing.element_bits != packing.packing.element_bits
-           || storage->packing.slot_bits != packing.packing.slot_bits || storage->base_bit_offset)
-            ckc::raise_status(ROCKE_ERR_VALUE,
-                              "matrix fragment requires matching packing and a zero bit origin");
-        const uint64_t span = packing.count * layout->lane_groups;
-        if(k0 > storage->cols || span > storage->cols - k0)
-            ckc::raise_status(ROCKE_ERR_VALUE, "matrix fragment exceeds the packed row");
+        if(rocke_dtype_info(dtype)->encoded_bits != packing.packing.element_bits)
+            ckc::raise_status(ROCKE_ERR_VALUE, "matrix dtype and packing width mismatch");
         uint64_t origin_bits, chunk_bytes;
-        if(!rocke_bit_packing_offset(&storage->packing, k0, &origin_bits)
+        if(!rocke_bit_packing_offset(&packing.packing, k0, &origin_bits)
            || !rocke_bit_packing_bytes(&packing.packing, layout->chunk_elements, 0, &chunk_bytes)
-           || origin_bits % (8 * unit_bytes) || chunk_bytes % unit_bytes
-           || storage->row_stride_bytes % unit_bytes)
+           || origin_bits % (8 * unit_bytes) || chunk_bytes % unit_bytes)
             ckc::raise_status(ROCKE_ERR_VALUE,
                               "matrix fragment is not aligned to pointer storage units");
         const rocke_dtype_info_t* carrier_info = rocke_dtype_info(carrier_type->name);
@@ -98,8 +89,7 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                   > (uint64_t(INT_MAX) + 1 - origin_bytes / unit_bytes) / chunk_units
                         / layout->lane_groups)
             ckc::raise_status(ROCKE_ERR_VALUE, "matrix fragment offset exceeds i32 range");
-        int alignment = gcd(gcd(storage->alignment_bytes, storage->row_stride_bytes),
-                            gcd(chunk_bytes, origin_bytes));
+        int alignment = gcd(alignment_bytes, gcd(chunk_bytes, origin_bytes));
         auto* lane_chunk = rocke_b_mul(b, lane_group, rocke_b_const_i32(b, chunk_units));
         auto* step_base = rocke_b_add(b, row_base, rocke_b_const_i32(b, origin_bytes / unit_bytes));
         /* Collect loads before concatenation to preserve Python SSA numbering. */

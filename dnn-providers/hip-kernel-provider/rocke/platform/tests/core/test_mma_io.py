@@ -19,7 +19,6 @@ from rocke.core.storage import (
     BitPacking,
     FragmentPacking,
     MatrixFragmentLayout,
-    TensorStorage,
 )
 from rocke.helpers.mma_io import (
     load_matrix_fragment,
@@ -69,12 +68,6 @@ def build_transport(dtype):
         for j, value in enumerate(values):
             b.global_store(o, b.const_i32(j), value, align=4)
     else:
-        storage = TensorStorage(
-            dtype,
-            (16, 128),
-            row_stride_bytes=(258 if typed else 97) if padded else None,
-            alignment_bytes=16,
-        )
         layout = (
             MatrixFragmentLayout(FragmentPacking(BitPacking(16), 32, 16, 32), 16, 2, 16)
             if typed
@@ -84,7 +77,15 @@ def build_transport(dtype):
         lane = b.mod(b.thread_id_x(), b.const_i32(32))
         group = b.div(lane, b.const_i32(16))
         value = load_matrix_fragment(
-            b, a, base, group, 0, storage=storage, layout=layout, carrier_type=carrier
+            b,
+            a,
+            base,
+            group,
+            0,
+            dtype=dtype,
+            layout=layout,
+            carrier_type=carrier,
+            alignment_bytes=(2 if typed else 1) if padded else 16,
         )
         for j in range(value.type.count):
             index = b.const_i32(j)
@@ -124,69 +125,43 @@ def test_native_helper_emits_identical_ir(dtype, route):
     assert actual.stdout == expected
 
 
-def test_reject_partial_fragment_and_wrong_pointer():
+def test_reject_bit_origin():
     b = IRBuilder("invalid_transport")
     ptr = b.param("A", PtrType(I8, "global"))
     zero = b.const_i32(0)
-    with pytest.raises(ValueError, match="exceeds"):
+    with pytest.raises(ValueError, match="aligned to pointer storage units"):
         load_matrix_fragment(
             b,
             ptr,
             zero,
             zero,
             1,
-            storage=TensorStorage("fp4", (16, 128)),
+            dtype="fp4",
             layout=scaled_matrix_layout("fp4", 16),
         )
-    with pytest.raises(ValueError, match="pointer storage type"):
+
+
+@pytest.mark.parametrize(
+    "dtype,alignment,error",
+    [("fp6", 3, "positive power of two"), ("fp4", 1, "packing width mismatch")],
+)
+def test_fragment_input_contract(dtype, alignment, error):
+    b = IRBuilder("invalid_fragment")
+    ptr = b.param("A", PtrType(I8, "global"))
+    zero = b.const_i32(0)
+    before = serialize(b.kernel)
+    with pytest.raises(ValueError, match=error):
         load_matrix_fragment(
             b,
             ptr,
             zero,
             zero,
             0,
-            storage=TensorStorage("fp8", (16, 128)),
-            layout=scaled_matrix_layout("fp8", 16),
+            dtype=dtype,
+            layout=scaled_matrix_layout("fp6", 16),
+            alignment_bytes=alignment,
         )
-
-
-@pytest.mark.parametrize("dtype", ["fp4", "fp6", "fp8", "f16", "bf16"])
-@pytest.mark.parametrize("shape", [(0, 128), (16, 0), (0, 0), (16, 128)])
-def test_fragment_load_requires_nonempty_storage(dtype, shape):
-    storage = TensorStorage(dtype, shape)
-    typed = dtype in ("f16", "bf16")
-    unit = storage_ir_type(dtype)
-    layout = (
-        MatrixFragmentLayout(FragmentPacking(BitPacking(16), 32, 16, 32), 16, 2, 16)
-        if typed
-        else scaled_matrix_layout(dtype, 16)
-    )
-    b = IRBuilder("empty_storage")
-    ptr = b.param("A", PtrType(unit, "global"))
-    zero = b.const_i32(0)
-    before = serialize(b.kernel)
-
-    def load():
-        return load_matrix_fragment(
-            b,
-            ptr,
-            zero,
-            zero,
-            0,
-            storage=storage,
-            layout=layout,
-            carrier_type=unit if typed else I32,
-        )
-
-    if 0 in shape:
-        assert storage.byte_size == 0
-        with pytest.raises(ValueError, match="nonempty tensor storage"):
-            load()
-        assert serialize(b.kernel) == before
-    else:
-        assert storage.byte_size > 0
-        assert load() is not None
-        assert "memref.global_load" in serialize(b.kernel)
+    assert serialize(b.kernel) == before
 
 
 @pytest.mark.parametrize("dtype", ["e8m0", "fp6", "f16"])
@@ -206,9 +181,6 @@ def test_fragment_offset_bounds(dtype, count, groups, k0, valid):
     # Padded FP6 and E8M0 use byte units; FP16 uses two-byte pointer units.
     bits = 16 if dtype == "f16" else 6 if dtype == "fp6" else 8
     packing = BitPacking(bits, 16 if dtype == "f16" else 8)
-    storage = TensorStorage(
-        dtype, (1, k0 + count * groups), slot_bits=packing.slot_bits
-    )
     layout = MatrixFragmentLayout(
         FragmentPacking(packing, count, 32, count * packing.slot_bits // 32),
         16,
@@ -221,12 +193,12 @@ def test_fragment_offset_bounds(dtype, count, groups, k0, valid):
     before = serialize(b.kernel)
     if valid:
         assert (
-            load_matrix_fragment(b, ptr, zero, zero, k0, storage=storage, layout=layout)
+            load_matrix_fragment(b, ptr, zero, zero, k0, dtype=dtype, layout=layout)
             is not None
         )
     else:
         with pytest.raises(ValueError, match="offset exceeds i32 range"):
-            load_matrix_fragment(b, ptr, zero, zero, k0, storage=storage, layout=layout)
+            load_matrix_fragment(b, ptr, zero, zero, k0, dtype=dtype, layout=layout)
         assert serialize(b.kernel) == before
 
 
@@ -238,29 +210,6 @@ def test_hip_declares_only_encountered_missing_vector_widths():
     source = lower_kernel_to_hip(build_transport("f16"), arch="gfx1250")
     assert source.count("using f16x32 =") == 1
     assert "using i8x24 =" not in source
-
-
-@pytest.mark.parametrize("dtype", ["f16", "bf16"])
-def test_reject_row_stride_not_in_pointer_units(dtype):
-    b = IRBuilder("odd_stride")
-    unit = storage_ir_type(dtype)
-    ptr = b.param("A", PtrType(unit, "global"))
-    zero = b.const_i32(0)
-    before = serialize(b.kernel)
-    with pytest.raises(ValueError, match="aligned to pointer storage units"):
-        load_matrix_fragment(
-            b,
-            ptr,
-            zero,
-            zero,
-            0,
-            storage=TensorStorage(dtype, (2, 64), row_stride_bytes=129),
-            layout=MatrixFragmentLayout(
-                FragmentPacking(BitPacking(16), 32, 16, 32), 16, 2, 16
-            ),
-            carrier_type=unit,
-        )
-    assert serialize(b.kernel) == before
 
 
 @pytest.mark.parametrize("dtype", ["fp8", "bf8"])
@@ -276,7 +225,7 @@ def test_byte_width_does_not_erase_pointer_identity(dtype):
             zero,
             zero,
             0,
-            storage=TensorStorage(dtype, (16, 128)),
+            dtype=dtype,
             layout=scaled_matrix_layout(dtype, 16),
         )
 

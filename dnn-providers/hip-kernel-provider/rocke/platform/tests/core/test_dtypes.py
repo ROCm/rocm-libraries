@@ -10,7 +10,6 @@ from rocke.core.dtypes import normalize_dtype
 from rocke.core.dtypes import dtype_info
 from rocke.core.arch.target import MmaScaleDType
 from rocke.core.ir import FP8E4M3, I8, IRBuilder, dtype_to_ir_type
-from rocke.core.storage import TensorStorage
 from rocke.helpers.mma_io import storage_ir_type
 from rocke.core.ir_serialize import parse, serialize
 from rocke.helpers.quant import (
@@ -102,7 +101,6 @@ def test_e4m3_shares_encoding_type_and_storage(spelling):
     assert dtype_info(spelling) is dtype_info("fp8e4m3")
     assert dtype_to_ir_type(spelling) is FP8E4M3
     assert storage_ir_type(spelling) is FP8E4M3
-    assert TensorStorage(spelling, (2, 128)) == TensorStorage("fp8e4m3", (2, 128))
     assert quant_ir_type(spelling) is FP8E4M3
     b = IRBuilder("e4m3_conversion")
     value = b.param("value", dtype_to_ir_type(spelling))

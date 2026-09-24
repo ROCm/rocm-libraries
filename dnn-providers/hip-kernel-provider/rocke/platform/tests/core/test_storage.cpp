@@ -65,9 +65,6 @@ static int emit(const char* dtype, bool hip)
     }
     else
     {
-        rocke_tensor_storage_t storage;
-        CHECK(rocke_tensor_storage_init(
-            &storage, dtype, 16, 128, padded ? (typed ? 258 : 97) : UINT64_MAX, 0, 0, 16));
         rocke_matrix_fragment_layout_t layout;
         if(typed)
         {
@@ -83,8 +80,8 @@ static int emit(const char* dtype, bool hip)
         auto* thread = rocke_b_thread_id_x(&b);
         auto* lane = rocke_b_mod(&b, thread, rocke_b_const_i32(&b, 32));
         auto* group = rocke_b_div(&b, lane, rocke_b_const_i32(&b, 16));
-        auto* value
-            = rocke_h_load_matrix_fragment(&b, a, base, group, 0, &storage, &layout, carrier);
+        auto* value = rocke_h_load_matrix_fragment(
+            &b, a, base, group, 0, dtype, &layout, carrier, padded ? (typed ? 2 : 1) : 16);
         CHECK(value && rocke_ir_builder_ok(&b));
         for(int j = 0; j < value->type->count; ++j)
         {
@@ -115,148 +112,34 @@ static int emit(const char* dtype, bool hip)
     return 0;
 }
 
-static int test_storage_validation()
+static int test_fragment_inputs()
 {
-    rocke_tensor_storage_t storage;
-    CHECK(rocke_tensor_storage_init(&storage, "fp6", 16, 128, 97, 0, 0, 16));
-    const auto layout = rocke_scaled_matrix_layout("fp6", 16);
-    for(int defect = 0; defect < 10; ++defect)
+    const struct
     {
-        auto invalid = storage;
-        switch(defect)
-        {
-        case 0:
-            invalid.dtype = NULL;
-            break;
-        case 1:
-            invalid.dtype = rocke_dtype_info("fp8");
-            break;
-        case 2:
-            invalid.packing.element_bits = 0;
-            break;
-        case 3:
-            invalid.packing.slot_bits = 0;
-            break;
-        case 4:
-            invalid.packing.slot_bits = 4;
-            break;
-        case 5:
-            invalid.row_stride_bytes = 95;
-            break;
-        case 6:
-            invalid.alignment_bytes = 0;
-            break;
-        case 7:
-            invalid.alignment_bytes = 3;
-            break;
-        case 8:
-            invalid.rows = UINT64_MAX;
-            break;
-        case 9:
-            invalid.base_bit_offset = UINT64_MAX;
-            break;
-        }
-        uint64_t bytes;
-        int shift;
-        CHECK(!rocke_tensor_storage_bytes(&invalid, &bytes));
-        CHECK(!rocke_tensor_storage_address(&invalid, 0, 0, &bytes, &shift));
+        const char* dtype;
+        const char* layout_dtype;
+        uint64_t k0;
+        int alignment;
+        const char* error;
+    } cases[] = {{"fp6", "fp6", 0, 3, "positive power of two"},
+                 {"fp4", "fp6", 0, 1, "packing width mismatch"},
+                 {"fp4", "fp4", 1, 1, "aligned to pointer storage units"},
+                 {"fp8", "fp8", 0, 1, "pointer storage type mismatch"},
+                 {"bf8", "bf8", 0, 1, "pointer storage type mismatch"}};
+    for(const auto& c : cases)
+    {
         rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "invalid_storage") == ROCKE_OK);
+        CHECK(rocke_ir_builder_init(&b, "invalid_fragment") == ROCKE_OK);
         auto* ptr = rocke_b_param(&b, "A", rocke_ptr_type(&b, rocke_i8(), "global"), NULL);
         auto* zero = rocke_b_const_i32(&b, 0);
-        CHECK(
-            !rocke_h_load_matrix_fragment(&b, ptr, zero, zero, 0, &invalid, &layout, rocke_i32()));
-        CHECK(!rocke_ir_builder_ok(&b));
-        rocke_ir_builder_free(&b);
-        if(defect < 8)
-        {
-            invalid.rows = 0;
-            CHECK(!rocke_tensor_storage_bytes(&invalid, &bytes));
-        }
-    }
-    for(const char* dtype : {"f16", "bf16", "fp8", "e4m3", "bf8"})
-    {
-        const auto* unit = rocke_storage_ir_type(dtype);
-        CHECK(unit && !rocke_type_eq(unit, rocke_i8()));
-        const bool typed = strcmp(dtype, "f16") == 0 || strcmp(dtype, "bf16") == 0;
-        rocke_tensor_storage_t direct = {rocke_dtype_info(dtype),
-                                         2,
-                                         128,
-                                         typed ? 257u : 129u,
-                                         0,
-                                         1,
-                                         {typed ? 16 : 8, typed ? 16 : 8}};
-        uint64_t bytes;
-        int shift;
-        CHECK(rocke_tensor_storage_bytes(&direct, &bytes));
-        CHECK(rocke_tensor_storage_address(&direct, 1, 0, &bytes, &shift));
-        CHECK(bytes == direct.row_stride_bytes && shift == 0);
-        rocke_matrix_fragment_layout_t fragment;
-        if(typed)
-        {
-            rocke_fragment_packing_t packing;
-            CHECK(rocke_fragment_packing_init(&packing, &direct.packing, 32, 16, 32));
-            CHECK(rocke_matrix_fragment_layout_init(&fragment, &packing, 16, 2, 16));
-        }
-        else
-            fragment = rocke_scaled_matrix_layout(dtype, 16);
-        rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "invalid_pointer_units") == ROCKE_OK);
-        auto* ptr
-            = rocke_b_param(&b, "A", rocke_ptr_type(&b, typed ? unit : rocke_i8(), "global"), NULL);
-        auto* zero = rocke_b_const_i32(&b, 0);
+        const auto layout = rocke_scaled_matrix_layout(c.layout_dtype, 16);
+        const int before = b.kernel->body->num_ops;
         CHECK(!rocke_h_load_matrix_fragment(
-            &b, ptr, zero, zero, 0, &direct, &fragment, typed ? unit : rocke_i32()));
-        CHECK(!rocke_ir_builder_ok(&b));
+            &b, ptr, zero, zero, c.k0, c.dtype, &layout, rocke_i32(), c.alignment));
+        CHECK(rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
+        CHECK(strstr(rocke_ir_builder_error(&b), c.error));
+        CHECK(b.kernel->body->num_ops == before);
         rocke_ir_builder_free(&b);
-    }
-    return 0;
-}
-
-static int test_empty_storage_load()
-{
-    for(const char* dtype : {"fp4", "fp6", "fp8", "f16", "bf16"})
-    {
-        const auto* unit = rocke_storage_ir_type(dtype);
-        const bool typed = strcmp(dtype, "f16") == 0 || strcmp(dtype, "bf16") == 0;
-        for(int shape = 0; shape < 4; ++shape)
-        {
-            const uint64_t rows = shape == 0 || shape == 2 ? 0 : 16;
-            const uint64_t cols = shape == 1 || shape == 2 ? 0 : 128;
-            rocke_tensor_storage_t storage;
-            CHECK(rocke_tensor_storage_init(&storage, dtype, rows, cols, UINT64_MAX, 0, 0, 1));
-            uint64_t bytes;
-            CHECK(rocke_tensor_storage_bytes(&storage, &bytes));
-            CHECK((bytes == 0) == (shape != 3));
-            rocke_matrix_fragment_layout_t layout;
-            if(typed)
-            {
-                rocke_fragment_packing_t fragment;
-                CHECK(rocke_fragment_packing_init(&fragment, &storage.packing, 32, 16, 32));
-                CHECK(rocke_matrix_fragment_layout_init(&layout, &fragment, 16, 2, 16));
-            }
-            else
-                layout = rocke_scaled_matrix_layout(dtype, 16);
-            rocke_ir_builder_t b;
-            CHECK(rocke_ir_builder_init(&b, "empty_storage") == ROCKE_OK);
-            auto* ptr = rocke_b_param(&b, "A", rocke_ptr_type(&b, unit, "global"), NULL);
-            auto* zero = rocke_b_const_i32(&b, 0);
-            const int before = b.kernel->body->num_ops;
-            auto* value = rocke_h_load_matrix_fragment(
-                &b, ptr, zero, zero, 0, &storage, &layout, typed ? unit : rocke_i32());
-            if(bytes == 0)
-            {
-                CHECK(!value && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
-                CHECK(strstr(rocke_ir_builder_error(&b), "nonempty tensor storage"));
-                CHECK(b.kernel->body->num_ops == before);
-            }
-            else
-            {
-                CHECK(value && rocke_ir_builder_ok(&b));
-                CHECK(b.kernel->body->num_ops > before);
-            }
-            rocke_ir_builder_free(&b);
-        }
     }
     return 0;
 }
@@ -280,18 +163,12 @@ static int test_fragment_offset_bounds()
         const int slot_bits = strcmp(dtype, "f16") == 0 ? 16 : 8;
         for(const auto& c : cases)
         {
-            rocke_tensor_storage_t storage;
-            CHECK(rocke_tensor_storage_init(&storage,
-                                            dtype,
-                                            1,
-                                            c.k0 + uint64_t(c.count) * c.groups,
-                                            UINT64_MAX,
-                                            slot_bits,
-                                            0,
-                                            1));
+            rocke_bit_packing_t packing;
+            CHECK(rocke_bit_packing_init(
+                &packing, strcmp(dtype, "fp6") == 0 ? 6 : slot_bits, slot_bits));
             rocke_fragment_packing_t fragment;
             CHECK(rocke_fragment_packing_init(
-                &fragment, &storage.packing, c.count, 32, c.count * slot_bits / 32));
+                &fragment, &packing, c.count, 32, c.count * slot_bits / 32));
             rocke_matrix_fragment_layout_t layout;
             CHECK(rocke_matrix_fragment_layout_init(&layout, &fragment, 16, c.groups, 1));
             rocke_ir_builder_t b;
@@ -301,7 +178,7 @@ static int test_fragment_offset_bounds()
             auto* zero = rocke_b_const_i32(&b, 0);
             const int before = b.kernel->body->num_ops;
             auto* value = rocke_h_load_matrix_fragment(
-                &b, ptr, zero, zero, c.k0, &storage, &layout, rocke_i32());
+                &b, ptr, zero, zero, c.k0, dtype, &layout, rocke_i32(), 1);
             if(c.valid)
                 CHECK(value && rocke_ir_builder_ok(&b));
             else
@@ -352,8 +229,7 @@ int main(int argc, char** argv)
         rocke_ir_builder_free(&b);
         return 0;
     }
-    CHECK(test_storage_validation() == 0);
-    CHECK(test_empty_storage_load() == 0);
+    CHECK(test_fragment_inputs() == 0);
     CHECK(test_fragment_offset_bounds() == 0);
     CHECK(rocke_dtype_info("e4m3") == rocke_dtype_info("fp8e4m3"));
     CHECK(rocke_dtype_to_ir_type("e4m3") == rocke_fp8e4m3());
@@ -459,17 +335,6 @@ int main(int argc, char** argv)
     CHECK(words[0] == 0xC0000000 && words[1] == 0xF000000F && words[2] == 3);
     CHECK(!rocke_bit_packing_bytes(&six, UINT64_MAX, 0, &values));
     CHECK(!rocke_fragment_packing_init(&fragment, &six, 16, 32, 2));
-    rocke_tensor_storage_t storage;
-    CHECK(rocke_tensor_storage_init(&storage, "bf6", 3, 5, 8, 0, 3, 1));
-    CHECK(rocke_tensor_storage_bytes(&storage, &values) && values == 21);
-    int shift;
-    CHECK(rocke_tensor_storage_address(&storage, 2, 4, &values, &shift));
-    CHECK(values == 19 && shift == 3);
-    CHECK(!rocke_tensor_storage_address(&storage, 3, 0, &values, &shift));
-    CHECK(!rocke_tensor_storage_init(&storage, "fp6", 3, 5, 3, 0, 0, 1));
-    CHECK(!rocke_tensor_storage_init(&storage, "fp8", UINT64_MAX, 3, 3, 0, 0, 1));
-    CHECK(rocke_tensor_storage_init(&storage, "fp4", 3, 0, 0, 0, 7, 1));
-    CHECK(rocke_tensor_storage_bytes(&storage, &values) && values == 0);
     for(const char* dtype : {"fp4", "fp6", "bf6", "e8m0", "e4m3", "e5m3"})
     {
         const auto* logical = rocke_dtype_to_ir_type(dtype);

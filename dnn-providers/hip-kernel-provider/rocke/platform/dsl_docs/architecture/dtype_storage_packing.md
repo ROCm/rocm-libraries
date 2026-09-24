@@ -3,7 +3,7 @@
 Matrix inputs and scales use three separate contracts:
 
 1. A logical dtype identifies the numerical encoding and its bit width.
-2. Tensor storage describes how elements occupy an addressable buffer.
+2. Bit packing describes how encoded patterns occupy bytes and carrier words.
 3. An instruction fragment describes lane mapping, carrier capacity, and padding.
 
 The selected atom determines supported operand combinations and instruction
@@ -13,7 +13,7 @@ selectors. An integer carrier does not identify the numerical format.
 
 - [Logical dtypes](#logical-dtypes)
 - [Common packing](#common-packing)
-- [Tensor storage](#tensor-storage)
+- [Fragment loads](#fragment-loads)
 - [Matrix and scale layouts](#matrix-and-scale-layouts)
 - [Mirroring and follow-up work](#mirroring-and-follow-up-work)
 
@@ -66,35 +66,36 @@ Host pack/unpack routines process bit patterns only. They do not round, clamp,
 decode floats, or apply scales. Their tests use literal expected bits and
 independent integer arithmetic; numerical tests remain separate.
 
-## Tensor storage
+## Fragment loads
 
-`TensorStorage` / `rocke_tensor_storage_t` initially supports a two-dimensional
-logical shape with a contiguous packed inner axis, an explicit byte row stride,
-bit offset, and base alignment. Nonnegative sizes and offsets are checked against
-the native uint64 range. A/B descriptors are independent.
+[`storage_ir_type`](../../python/rocke/helpers/mma_io.py) chooses an addressable
+unit from the logical dtype. FP4/FP6 use I8; FP8/BF8 retain their nominal pointer
+types despite occupying one byte per value. This function is separate from
+`dtype_to_ir_type`.
 
-For example, dense FP6 uses four elements in three bytes; `slot_bits=8` describes
-one six-bit pattern in each byte instead. Both have the same logical dtype.
-Address calculation includes the bit offset, and allocation bounds include the
-partial tail byte. Empty views require no accesses.
-Native size queries, address queries, and fragment loads revalidate the public
-storage descriptor, including dtype/packing consistency, stride, alignment, and
-allocation bounds, because C callers can construct or mutate these structs.
+`load_matrix_fragment` takes a dtype, fragment layout, caller-selected row base,
+lane group, and K origin. `row_base` counts pointer storage units. The optional
+`alignment_bytes` (default 1) guarantees alignment at that row address, before
+the loader adds K and lane/chunk offsets. For a buffer aligned to 16 bytes with
+97-byte row spacing, arbitrary rows only guarantee alignment 1; a typed FP16
+buffer with 258-byte row spacing guarantees alignment 2 and uses row offsets
+in units of two bytes.
 
-[`storage_ir_type`](../../python/rocke/helpers/mma_io.py) chooses an addressable unit. FP4/FP6 use I8
-units while retaining their logical identities in the storage descriptor.
-This function is deliberately separate from `dtype_to_ir_type`.
-FP8/BF8 retain nominal FP8/BF8 pointer types despite occupying one byte per value.
+The loader checks dtype/packing width, pointer identity, whole-unit chunk and
+origin alignment, carrier capacity, and static i32 displacement limits. It
+reduces the supplied alignment for chunk spacing and K origin. A 24-byte FP6
+chunk becomes 16-byte and 8-byte loads without reading past the chunk.
 
-The fragment loader accepts complete, byte-aligned chunks. It derives load
-alignment from base alignment, row stride, chunk spacing, and origin. A 24-byte
-FP6 chunk becomes 16-byte and 8-byte loads without reading past the chunk.
-Partial fragments and nonzero bit origins are rejected by this initial loader.
-Row strides must also be divisible by the pointer storage unit: an odd-byte
-FP16/BF16 stride is valid generic storage but cannot be loaded through a typed
-two-byte pointer. `row_base` is an element index in those storage units.
-The host bit packer writes a fresh, exclusively owned output buffer; concurrent
-packed stores are not provided.
+Tensor shape, strides, row selection, and allocation bounds belong to the
+caller. This helper always loads a complete fragment: the caller must guard
+empty or partial rows and provide a valid lane group. It is not a bounds-checked
+tensor view. Existing `TensorDescriptor`/`TensorView` integration is deferred;
+no separate tensor descriptor is introduced here.
+
+`BitPacking(6)` describes dense FP6; `BitPacking(6, 8)` describes one six-bit
+pattern per byte. Bit offsets and stream sizes are checked against uint64.
+Host packers support partial tail bytes and write fresh, exclusively owned
+buffers; concurrent packed stores are not provided.
 
 ## Matrix and scale layouts
 
@@ -128,7 +129,7 @@ absent from its fixed compatibility prologue.
 
 The shared descriptor/helper changes can be consumed by both FP4 and FP6
 branches. FP4/FP8 builder migration can use them directly. Future FP6 numerical
-integration should consume the six-bit storage and fragment descriptors and
+integration should consume the six-bit packing and fragment descriptors and
 retain separate target and conversion validation.
 
 First-class tensor-view/fragment IR nodes, arbitrary packed axes, masked partial

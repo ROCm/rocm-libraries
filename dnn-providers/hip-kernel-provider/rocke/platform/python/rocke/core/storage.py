@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from math import gcd
 from collections.abc import Sequence
 
-from .dtypes import DTypeInfo, dtype_info
-
 _MAX_BITS = (1 << 64) - 1
 
 
@@ -168,62 +166,3 @@ class MatrixFragmentLayout:
             * self.chunk_elements
             + element,
         )
-
-
-@dataclass(frozen=True)
-class TensorStorage:
-    """Two-dimensional storage with a contiguous packed inner axis.
-
-    Shape is logical. Row strides are bytes. Generic axis permutations and
-    negative strides are intentionally rejected by this initial interface.
-    """
-
-    dtype: str
-    shape: tuple[int, int]
-    row_stride_bytes: int | None = None
-    slot_bits: int | None = None
-    base_bit_offset: int = 0
-    alignment_bytes: int = 1
-
-    def __post_init__(self) -> None:
-        info = dtype_info(self.dtype)
-        object.__setattr__(self, "dtype", info.name)
-        if len(self.shape) != 2:
-            raise ValueError("storage requires a two-dimensional logical shape")
-        for dim in self.shape:
-            _checked(dim)
-        _checked(self.base_bit_offset)
-        if self.alignment_bytes <= 0 or self.alignment_bytes & (
-            self.alignment_bytes - 1
-        ):
-            raise ValueError("alignment_bytes must be a positive power of two")
-        row_bytes = self.packing.byte_size(self.shape[1], self.base_bit_offset)
-        stride = row_bytes if self.row_stride_bytes is None else self.row_stride_bytes
-        if _checked(stride) < row_bytes:
-            raise ValueError("row stride is smaller than the packed row")
-        object.__setattr__(self, "row_stride_bytes", stride)
-        _checked(self.byte_size)
-
-    @property
-    def info(self) -> DTypeInfo:
-        return dtype_info(self.dtype)
-
-    @property
-    def packing(self) -> BitPacking:
-        return BitPacking(self.info.encoded_bits, self.slot_bits)
-
-    @property
-    def byte_size(self) -> int:
-        rows, cols = self.shape
-        if rows == 0 or cols == 0:
-            return 0
-        return _checked(
-            (rows - 1) * self.row_stride_bytes
-            + self.packing.byte_size(cols, self.base_bit_offset)
-        )
-
-    def address(self, row: int, col: int) -> tuple[int, int]:
-        if not (0 <= row < self.shape[0] and 0 <= col < self.shape[1]):
-            raise ValueError("storage coordinate out of bounds")
-        bits = _checked(self.base_bit_offset + self.packing.bit_offset(col))
-        return _checked(row * self.row_stride_bytes + bits // 8), bits % 8
