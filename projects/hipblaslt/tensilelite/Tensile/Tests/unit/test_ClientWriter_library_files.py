@@ -79,6 +79,19 @@ def test_unions_files_across_archs(tmp_path, monkeypatch):
     assert library_list == expected
 
 
+def test_skips_arch_without_master(tmp_path, monkeypatch):
+    """Only the first ISA's client library is rebuilt, so other archs can have
+    shards but no master; they must not contribute one."""
+    monkeypatch.setitem(globalParameters, "LibraryFormat", "msgpack")
+    monkeypatch.setitem(globalParameters, "LazyLibraryLoading", True)
+    master, _ = _build_arch(tmp_path, "gfx942", "msgpack", lazy=True)
+    _write_library(CW.libraryDir(tmp_path, "gfx950"), SHARD.format(arch="gfx950"), "msgpack")
+
+    _, library_list = CW.clientLibraryFiles(tmp_path, ["gfx942", "gfx950"])
+
+    assert library_list == [master]
+
+
 def test_finds_stepping_output_subdir(tmp_path, monkeypatch):
     """A gfx1250v0 client build is written to library/gfx1250v0/, but its master
     keeps the ISA-derived gfx1250 suffix."""
