@@ -5,6 +5,12 @@
 if(GPU_TARGETS MATCHES "gfx125")
     add_gtest_executable(test_ck_tile_batched_contraction_tdm_wmma
         test_batched_contraction_tdm_wmma.cpp)
+    if(TARGET test_ck_tile_batched_contraction_tdm_wmma)
+        # "_wmma" drops gfx9 only; keep just the gfx125 targets (TDM hardware).
+        get_target_property(_contraction_tdm_archs test_ck_tile_batched_contraction_tdm_wmma HIP_ARCHITECTURES)
+        list(FILTER _contraction_tdm_archs INCLUDE REGEX "^gfx125")
+        set_property(TARGET test_ck_tile_batched_contraction_tdm_wmma PROPERTY HIP_ARCHITECTURES ${_contraction_tdm_archs})
+    endif()
 
     # Negative compile checks: each configuration must be rejected by a static_assert.
     # The object libraries are excluded from "all"; a ctest entry builds each one and

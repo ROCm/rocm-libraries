@@ -185,6 +185,11 @@ struct GroupedGemmKernel
     static_assert(!kTupleOnlyPipeline ||
                       IsTdmEpilogue(static_cast<const EpiloguePipeline*>(nullptr)),
                   "TDM grouped GEMM requires TdmEpilogue");
+    // TDM clips A/B/E against the tensor-view extents, so padded views would move the clip
+    // bound past the real M/N/K and let tail tiles touch adjacent data.
+    static_assert(!kTupleOnlyPipeline ||
+                      (!GemmPipeline::kPadM && !GemmPipeline::kPadN && !GemmPipeline::kPadK),
+                  "TDM grouped GEMM requires kPadM, kPadN and kPadK == false");
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {

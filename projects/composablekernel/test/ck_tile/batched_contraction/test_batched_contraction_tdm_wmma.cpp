@@ -409,10 +409,11 @@ TYPED_TEST(TestCkTileBatchedContractionTdm, RaggedK)
     this->template Run<1, 2, 2, 2>({{4}, {4, 32}, {2, 64}, {3, 48}});
 }
 
-// M_total = N_total = K_total = 1000: ragged in every dimension.
+// M_total = 200, N_total = 136, K_total = 100: ragged against the 64x64x32 tile in every
+// dimension.
 TYPED_TEST(TestCkTileBatchedContractionTdm, RaggedMNK)
 {
-    this->template Run<1, 2, 1, 2>({{2}, {8, 125}, {1000}, {10, 100}});
+    this->template Run<1, 2, 1, 2>({{2}, {4, 50}, {136}, {4, 25}});
 }
 
 TYPED_TEST(TestCkTileBatchedContractionTdm, SmallK)

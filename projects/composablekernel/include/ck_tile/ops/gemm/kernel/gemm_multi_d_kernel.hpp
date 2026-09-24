@@ -151,6 +151,11 @@ struct GemmKernelMultiD
                   "MultiD GEMM with a TDM pipeline supports only row-major E");
     static_assert(!kTupleOnlyPipeline || !UniversalGemmKernel::ClusterLaunch,
                   "MultiD GEMM with a TDM pipeline does not support cluster launch");
+    // TDM clips A/B/E against the tensor-view extents, so padded views would move the clip
+    // bound past the real M/N/K and let tail tiles touch adjacent data.
+    static_assert(!kTupleOnlyPipeline ||
+                      (!GemmPipeline::kPadM && !GemmPipeline::kPadN && !GemmPipeline::kPadK),
+                  "MultiD GEMM with a TDM pipeline requires kPadM, kPadN and kPadK == false");
 
     CK_TILE_HOST static auto GetName() -> const std::string
     {

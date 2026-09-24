@@ -71,6 +71,10 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
     if(GPU_TARGETS MATCHES "gfx125")
         add_gtest_executable(test_ck_tile_grouped_gemm_tdm_wmma test_grouped_gemm_tdm_wmma.cpp)
         if(TARGET test_ck_tile_grouped_gemm_tdm_wmma)
+            # "_wmma" drops gfx9 only; keep just the gfx125 targets (TDM hardware).
+            get_target_property(_grouped_tdm_archs test_ck_tile_grouped_gemm_tdm_wmma HIP_ARCHITECTURES)
+            list(FILTER _grouped_tdm_archs INCLUDE REGEX "^gfx125")
+            set_property(TARGET test_ck_tile_grouped_gemm_tdm_wmma PROPERTY HIP_ARCHITECTURES ${_grouped_tdm_archs})
             if(CK_USE_OCP_FP8)
                 target_compile_options(test_ck_tile_grouped_gemm_tdm_wmma
                     PRIVATE -DCK_TILE_USE_OCP_FP8)
