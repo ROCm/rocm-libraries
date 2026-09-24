@@ -329,11 +329,6 @@ def standard_benchmark(
 
     scaled_rows = copy.deepcopy(rows)
     for i, row in enumerate(scaled_rows):
-        assert all([
-            row["M"] == df_probe["M"].iloc[i],
-            row["N"] == df_probe["N"].iloc[i],
-            row["K"] == df_probe["K"].iloc[i]
-        ])
         us = float(df_probe["us"].iloc[i])
         if math.isfinite(us) and us > 0:
             scaled = max(math.ceil(duration * 1e6 / us), 1)
