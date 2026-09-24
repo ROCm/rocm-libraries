@@ -98,7 +98,7 @@ def _kernel(assignment="StaticGrid"):
 @pytest.mark.parametrize("tiles_m,tiles_n,batches,grid", [
     (1, 1, 1, 7), (1, 7, 1, 7), (1, 8, 1, 7), (3, 4, 3, 7), (9, 5, 2, 16),
 ])
-def test_native_emitted_grid_stride_covers_every_batched_tile_once(monkeypatch, tiles_m, tiles_n, batches, grid):
+def test_data_parallel_emitted_grid_stride_covers_every_batched_tile_once(monkeypatch, tiles_m, tiles_n, batches, grid):
     kernel = _kernel()
     processing, assignment = DataParallel(), StaticGrid()
     writer = _Writer(kernel, processing.tileWork(kernel))
