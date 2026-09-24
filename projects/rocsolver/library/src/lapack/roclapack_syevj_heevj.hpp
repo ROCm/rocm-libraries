@@ -84,11 +84,13 @@ __device__ void syevj_offd_measure(const rocblas_int n,
 
             // squaring halves the usable exponent range. Where either side saturates fall
             // back to magnitudes, which cannot: abstol is caller-supplied and uncapped, so
-            // a threshold can overflow even when the entry itself is unremarkable.
+            // a threshold can overflow even when the entry itself is unremarkable. The two
+            // roots must be combined before abstol scales them, or a mixed-scale pair
+            // overflows on the way to a representable threshold.
             S thr2 = abstol * abstol * dii * djj;
             bool notconv = (std::isfinite(a2) && std::isfinite(thr2))
                 ? (a2 > thr2)
-                : (std::abs(aij) > abstol * std::sqrt(dii) * std::sqrt(djj));
+                : (std::abs(aij) > abstol * (std::sqrt(dii) * std::sqrt(djj)));
 
             if(notconv)
                 exceed = 1;
@@ -2014,8 +2016,7 @@ ROCSOLVER_KERNEL void
 {
     rocblas_int n = half_blocks - 1;
 
-    auto cycle = [n = n](auto i) -> auto
-    {
+    auto cycle = [n = n](auto i) -> auto {
         using I = decltype(i);
         i = (i - 1) % (2 * n + 1) + 1;
         I j{};

@@ -23,7 +23,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Fixed SYEVJ/HEEVJ and GESVDJ returning an undiagonalized matrix, with `info = 0`, when one entry dominates the norm of the whole matrix.
 * Fixed SYEVJ/HEEVJ never reporting non-convergence for small matrices.
-* Fixed SYEVJ/HEEVJ declaring convergence for well-scaled matrices near the limits of the floating-point range, or when a large `abstol` overflowed the squared threshold.
+* Fixed SYEVJ/HEEVJ declaring convergence for well-scaled matrices near the limits of the floating-point range, or when a large `abstol` overflowed the convergence threshold.
 
 ### Known issues
 

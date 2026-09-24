@@ -260,3 +260,25 @@ TEST(checkin_lapack, SYEVJ_large_abstol_does_not_overflow_the_threshold)
         EXPECT_NEAR(hW[1], 2.0f, 1e-4f) << "abstol = " << abstol;
     }
 }
+
+/* The magnitude fallback must combine the two roots before abstol scales them.
+   Left-associated, abstol*sqrt(1e38) overflows and the threshold reads inf, so a
+   genuinely unconverged pair is skipped. dii is row i, so the large diagonal has
+   to sit last for the overflow to be reachable. */
+TEST(checkin_lapack, SYEVJ_mixed_scale_fallback_does_not_overflow)
+{
+    const rocblas_int n = 2;
+    vector<float> hA = {1e-38f, 2e20f, 2e20f, 1e38f};
+
+    for(float abstol : {1e20f, 1e10f})
+    {
+        vector<float> hW;
+        rocblas_int n_sweeps = -1, info = -1;
+        run_syevj(n, hA, hW, n_sweeps, info, abstol);
+
+        EXPECT_EQ(info, 0) << "abstol = " << abstol;
+        EXPECT_GT(n_sweeps, 0) << "abstol = " << abstol << ": the pair was never rotated";
+        EXPECT_NEAR(hW[0], -400.0f, 1.0f) << "abstol = " << abstol;
+        EXPECT_NEAR(double(hW[1]), 1e38, 1e33) << "abstol = " << abstol;
+    }
+}
