@@ -53,7 +53,7 @@
 // so the same pipeline type would get different ids in different TUs -- an ODR violation on its
 // own members, and strictly worse than a collision that at least reproduces.
 //
-// Usage. One producer wave feeding one consumer wave over a 2-slot ring:
+// Usage. Consumer waves first, then one producer wave, over a ring of kNumSlots LDS buffers:
 //
 //     template <typename Pipe>
 //     struct my_kernel
@@ -61,48 +61,39 @@
 //         using barrier_pipeline = Pipe;                 // required: names this kernel's pipeline
 //         using ring             = typename Pipe::template ring<0>;
 //
-//         CK_TILE_DEVICE void operator()(...) const
+//         CK_TILE_DEVICE void operator()(index_t num_steps, ...) const
 //         {
 //             if constexpr(ring::kIsSupported)           // must be template context to discard
 //             {
 //                 __shared__ T slots[kNumSlots][kElems]; // barriers cost no LDS; slots do
 //                 const auto bar = Pipe::template init<my_kernel>();   // collective, once
 //
-//                 if(wave_is_producer)
+//                 if(get_warp_id() < kNumConsumerWaves)  // wave-uniform role selection
 //                 {
-//                     using prod = typename ring::template producer<0>;
-//                     // Prime EVERY slot before the loop: on the first pass nothing has been
-//                     // drained, so wait() would block on a generation the consumer cannot
-//                     // complete. Retire the stores before publishing.
-//                     fill(0); __threadfence_block(); prod::template prime<0>(bar);
-//                     fill(1); __threadfence_block(); prod::template prime<1>(bar);
-//                     for(...)                            // every wave runs the SAME step count
-//                     {
-//                         prod::template wait<0>(bar);
-//                         fill(0); __threadfence_block(); prod::template publish<0>(bar);
-//                         prod::template wait<1>(bar);
-//                         fill(1); __threadfence_block(); prod::template publish<1>(bar);
-//                     }
+//                     ring::consumer::run(bar, num_steps, [&](auto slot, index_t step) {
+//                         consume(slots[slot], step);
+//                         __threadfence_block();         // retire the reads before release
+//                     });
 //                 }
 //                 else
 //                 {
-//                     using cons = typename ring::consumer;
-//                     for(...)
-//                     {
-//                         cons::template wait<0>(bar);
-//                         drain(0); __threadfence_block(); cons::template release<0>(bar);
-//                         cons::template wait<1>(bar);
-//                         drain(1); __threadfence_block(); cons::template release<1>(bar);
-//                     }
+//                     ring::template producer<0>::run(
+//                         bar,
+//                         num_steps,
+//                         [&](auto slot, index_t step) { fill(slots[slot], step); },
+//                         [](auto) { __threadfence_block(); });  // retire the stores
 //                 }
 //             }
 //         }
 //     };
 //
-// Rules the example encodes, each of which is a hang if broken: prime every slot before the
-// steady-state loop; never leave the loop early on either side; drive every wave through the
-// same number of steps; keep every ring call wave-uniform; producer<P> is a ROLE, so the caller
-// must map exactly one wave to each P.
+// run() walks every wave through one shared schedule, so the rules a hand-written loop must
+// keep -- prime every slot before the steady state, never leave the loop early, run the same
+// number of steps on both sides -- hold by construction. Two stay with the caller, each a hang
+// if broken: every wave passes the same wave-uniform num_steps, and exactly one wave plays each
+// producer<P>, which is a role, not an identity. The lower-level prime/wait/publish/release
+// remain for code that must interleave the handshake with other work; that code owns all of
+// the rules above.
 
 namespace ck_tile {
 
@@ -275,6 +266,117 @@ struct named_barrier_pipeline;
 
 namespace impl {
 
+/** How a ring walks its K steps: the one definition both of its sides share.
+ *
+ * A ring hangs when its sides disagree on how many steps there are or on which slot a step
+ * uses, so neither side spells its loop out; both walk this schedule with the same count. The
+ * slot reaches the body as a compile-time constant because S_BARRIER_SIGNAL/WAIT encode the id
+ * as a literal. The count may be anything, zero and ragged tails included, but must be
+ * wave-uniform: whole trips round the ring run unguarded, and only the tail branches.
+ */
+template <index_t NumSlots>
+struct ring_schedule
+{
+    /// Calls body(number<Slot>{}, step) for every step in [0, num_steps), in order.
+    template <typename Body>
+    CK_TILE_HOST_DEVICE static void for_each_step(index_t num_steps, Body&& body)
+    {
+        index_t first_step = 0;
+        for(; first_step + NumSlots <= num_steps; first_step += NumSlots)
+        {
+            static_for<0, NumSlots, 1>{}([&](auto slot) { body(slot, first_step + slot.value); });
+        }
+        static_for<0, NumSlots, 1>{}([&](auto slot) {
+            if(first_step + slot.value < num_steps)
+            {
+                body(slot, first_step + slot.value);
+            }
+        });
+    }
+};
+
+// Publishes a slot known only at run time. The slot must be wave-uniform.
+template <typename Ops, index_t NumSlots, typename Token>
+CK_TILE_HOST_DEVICE void publish_slot(Token token, index_t slot)
+{
+    static_for<0, NumSlots, 1>{}([&](auto s) {
+        if(s.value == slot)
+        {
+            Ops::template publish<s.value>(token);
+        }
+    });
+}
+
+// The producer side of the protocol. Generic over the role operations only so that a host test
+// can replay it against a model of the barrier semantics; kernels reach it through run().
+//
+// fill(slot, step) starts step's transfer into slot; retire(number<N>{}) returns once at most N
+// transfers are still in flight, oldest retiring first. Step k publishes step k - Lag, which
+// keeps Lag + 1 asynchronous transfers overlapping the consumers' math. Lag must stay below
+// NumSlots: otherwise a producer waits for the drain of a step it has not published.
+template <typename Ops,
+          index_t NumSlots,
+          index_t Lag,
+          typename Token,
+          typename Fill,
+          typename Retire>
+CK_TILE_HOST_DEVICE void
+drive_producer(Token token, index_t num_steps, Fill&& fill, Retire&& retire)
+{
+    static_assert(0 <= Lag && Lag < NumSlots,
+                  "a producer can leave at most NumSlots - 1 filled slots unpublished");
+
+    ring_schedule<NumSlots>::for_each_step(num_steps, [&](auto slot, index_t step) {
+        constexpr index_t kSlot = decltype(slot)::value;
+        // A slot's first use has no drain to wait for.
+        if(step >= NumSlots)
+        {
+            Ops::template wait<kSlot>(token);
+        }
+        fill(slot, step);
+        if(Lag == 0 || step >= Lag)
+        {
+            retire(number<Lag>{});
+            Ops::template publish<(kSlot + NumSlots - Lag) % NumSlots>(token);
+        }
+    });
+
+    // The last Lag fills are still unpublished; publish them oldest first.
+    if constexpr(Lag > 0)
+    {
+        retire(number<0>{});
+        static_for<0, Lag, 1>{}([&](auto i) {
+            const index_t step = num_steps - Lag + i.value;
+            if(step >= 0)
+            {
+                publish_slot<Ops, NumSlots>(token, step % NumSlots);
+            }
+        });
+    }
+
+    // Answer each used slot's final release, so every FREE generation completes and the ring
+    // ends at rest: reusable without re-arming, never holding signals nobody will wait on.
+    static_for<0, NumSlots, 1>{}([&](auto slot) {
+        if(slot.value < num_steps)
+        {
+            Ops::template wait<decltype(slot)::value>(token);
+        }
+    });
+}
+
+// The consumer side, generic for the same reason. drain(slot, step) consumes step from slot and
+// must retire its reads of the slot before returning: the slot is released straight after.
+template <typename Ops, index_t NumSlots, typename Token, typename Drain>
+CK_TILE_HOST_DEVICE void drive_consumer(Token token, index_t num_steps, Drain&& drain)
+{
+    ring_schedule<NumSlots>::for_each_step(num_steps, [&](auto slot, index_t step) {
+        constexpr index_t kSlot = decltype(slot)::value;
+        Ops::template wait<kSlot>(token);
+        drain(slot, step);
+        Ops::template release<kSlot>(token);
+    });
+}
+
 /** Per-slot producer/consumer handshake over a ring of LDS buffers.
  *
  * Decouples loader waves from compute waves: a producer blocks only when the slot it is about
@@ -304,11 +406,14 @@ namespace impl {
  *   producer:  [fill slot s; prime\<s\>() for every s]  then  { wait; fill; publish } per step
  *   consumer:  { wait; drain; release } per step
  *
+ * producer::run() and consumer::run() follow this sequence for any step count.
+ *
  * Neither side may leave the loop early. A wave that returns without signalling the
  * generations its peers are waiting on hangs them, and a wave cannot retroactively signal a
  * generation it has left. Ragged K must be handled by driving every wave through the same
- * number of steps. The converse is expected and harmless: after the last step each FREE
- * barrier holds unmatched consumer signals, because the producer has already left.
+ * number of steps. The converse -- consumer signals left unmatched on each FREE barrier after
+ * the last step -- does not hang, but the ring cannot be reused without re-arming. run()
+ * answers those final releases, so it leaves the ring at rest.
  *
  * Producer<P> is a role, not an identity: nothing binds P to the calling wave. Two waves that
  * both instantiate producer<0> leave FREE[1][*] with no waiter and hang. The caller owns that
@@ -390,6 +495,20 @@ struct named_barrier_slot_ring
         {
             named_barrier_signal<data_id<Slot>()>(named_barrier_pool<Pipeline>());
         }
+
+        /** Drive this producer through a whole K loop: first fills, steady state, ragged tail,
+         * the publishes the lag defers, and the waits that leave the ring at rest.
+         *
+         * @tparam Lag   Fills left in flight when one is published; below kNumSlots.
+         * @param fill   fill(number<Slot>{}, step) starts step's transfer into Slot.
+         * @param retire retire(number<N>{}) returns once at most N transfers are in flight.
+         */
+        template <index_t Lag = 0, typename Fill, typename Retire>
+        CK_TILE_DEVICE static void
+        run(token barriers, index_t num_steps, Fill&& fill, Retire&& retire)
+        {
+            drive_producer<producer, kNumSlots, Lag>(barriers, num_steps, fill, retire);
+        }
     };
 
     /// The consumer waves' view.
@@ -411,6 +530,17 @@ struct named_barrier_slot_ring
             static_for<0, kNumProducerWaves, 1>{}([](auto p) {
                 named_barrier_signal<free_id<p.value, Slot>()>(named_barrier_pool<Pipeline>());
             });
+        }
+
+        /** Drive the consumers through a whole K loop, in lockstep with every producer's run().
+         *
+         * @param drain drain(number<Slot>{}, step) consumes step from Slot and retires its reads
+         *              before returning; the slot goes back to the producers straight after.
+         */
+        template <typename Drain>
+        CK_TILE_DEVICE static void run(token barriers, index_t num_steps, Drain&& drain)
+        {
+            drive_consumer<consumer, kNumSlots>(barriers, num_steps, drain);
         }
     };
 
@@ -520,11 +650,17 @@ struct named_barrier_pipeline
         // any block shape. threadIdx.x alone does not: for a 2-D block it is true in every
         // wave, and for blockDim.x = 48 it is divergent *within* a wave -- and S_BARRIER_INIT
         // is scalar, so it arms regardless of EXEC.
-        const uint32_t linear_tid =
-            threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
-        if(linear_tid < static_cast<uint32_t>(get_warp_size()))
+        //
+        // Elsewhere there is nothing to arm, and the token stays inert because no ring
+        // operation compiles there; this is what lets kernels call init() on every target.
+        if constexpr(kIsSupported)
         {
-            static_for<0, kNumRings, 1>{}([](auto i) { ring<i.value>::arm(); });
+            const uint32_t linear_tid =
+                threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+            if(linear_tid < static_cast<uint32_t>(get_warp_size()))
+            {
+                static_for<0, kNumRings, 1>{}([](auto i) { ring<i.value>::arm(); });
+            }
         }
         __syncthreads();
         return token{};
