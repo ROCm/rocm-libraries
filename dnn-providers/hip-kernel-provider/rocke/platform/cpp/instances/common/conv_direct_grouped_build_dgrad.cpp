@@ -16,7 +16,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -155,8 +157,10 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
 
-    /* Params */
-    const rocke_type_t* f16ptr = rocke_ptr_type(b, rocke_f16(), "global");
+    /* Params — io_type = _io_type(p.dtype): f16 or bf16 IR type. */
+    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    const rocke_type_t* ioptr = rocke_ptr_type(b, io_type, "global");
+    const int is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0);
     rocke_param_opts_t ro = {0};
     ro.noalias = true;
     ro.noalias_set = true;
@@ -173,9 +177,9 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     wo_opts.align_set = true;
     rocke_param_opts_t none = {0};
 
-    rocke_value_t* A = rocke_b_param(b, "A", f16ptr, &ro);
-    rocke_value_t* Bp = rocke_b_param(b, "B", f16ptr, &ro);
-    rocke_value_t* D = rocke_b_param(b, "D", f16ptr, &wo_opts);
+    rocke_value_t* A = rocke_b_param(b, "A", ioptr, &ro);
+    rocke_value_t* Bp = rocke_b_param(b, "B", ioptr, &ro);
+    rocke_value_t* D = rocke_b_param(b, "D", ioptr, &wo_opts);
     rocke_value_t* A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), &none);
     rocke_value_t* B_bytes = rocke_b_param(b, "B_bytes", rocke_i32(), &none);
     rocke_value_t* D_bytes = rocke_b_param(b, "D_bytes", rocke_i32(), &none);
@@ -365,7 +369,8 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
                 rocke_value_t* k_byte_off = rocke_b_mul(b, k_iv, k_stride_bytes);
                 rocke_value_t* w_byte = rocke_b_add(b, w_off0_bytes, k_byte_off);
                 rocke_value_t* safe_w = rocke_b_select(b, tap_valid, w_byte, oob_sentinel);
-                rocke_value_t* w_h = rocke_b_buffer_load_f16(b, b_rsrc, safe_w, c0);
+                rocke_value_t* w_h = is_bf16 ? rocke_b_buffer_load_bf16(b, b_rsrc, safe_w, c0)
+                                             : rocke_b_buffer_load_f16(b, b_rsrc, safe_w, c0);
                 rocke_value_t* w_cast = rocke_b_cast_to_f32(b, w_h);
                 rocke_value_t* w_f32 = rocke_b_select(b, tap_valid, w_cast, zero_f32);
 
@@ -373,7 +378,8 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
                 rocke_value_t* dy_byte
                     = rocke_b_add(b, dy_off0_bytes, rocke_b_mul(b, k_iv, c_half_bytes));
                 rocke_value_t* safe_dy = rocke_b_select(b, tap_valid, dy_byte, oob_sentinel);
-                rocke_value_t* dy_h = rocke_b_buffer_load_f16(b, a_rsrc, safe_dy, c0);
+                rocke_value_t* dy_h = is_bf16 ? rocke_b_buffer_load_bf16(b, a_rsrc, safe_dy, c0)
+                                              : rocke_b_buffer_load_f16(b, a_rsrc, safe_dy, c0);
                 rocke_value_t* dy_cast = rocke_b_cast_to_f32(b, dy_h);
                 rocke_value_t* dy_f32 = rocke_b_select(b, tap_valid, dy_cast, zero_f32);
 
@@ -400,7 +406,12 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
         rocke_value_t* store_guard = rocke_b_land(b, c_in_ok, wi_ok);
         rocke_value_t* d_bytes = rocke_b_mul(b, d_off, c_half_bytes);
         rocke_value_t* safe_d = rocke_b_select(b, store_guard, d_bytes, oob_sentinel);
-        rocke_b_buffer_store_f16(b, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(b, acc));
+        rocke_value_t* acc_h
+            = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, acc) : rocke_b_trunc_f32_to_f16(b, acc);
+        if(is_bf16)
+            rocke_b_buffer_store_bf16(b, d_rsrc, safe_d, c0, acc_h);
+        else
+            rocke_b_buffer_store_f16(b, d_rsrc, safe_d, c0, acc_h);
     }
 
     rocke_value_t* hi_yield[1];
@@ -448,8 +459,10 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
 
-    /* Params */
-    const rocke_type_t* f16ptr = rocke_ptr_type(b, rocke_f16(), "global");
+    /* Params — io_type = _io_type(p.dtype): f16 or bf16 IR type. */
+    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    const rocke_type_t* ioptr = rocke_ptr_type(b, io_type, "global");
+    const int is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0);
     rocke_param_opts_t ro = {0};
     ro.noalias = true;
     ro.noalias_set = true;
@@ -466,9 +479,9 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
     wo_opts.align_set = true;
     rocke_param_opts_t none = {0};
 
-    rocke_value_t* A = rocke_b_param(b, "A", f16ptr, &ro);
-    rocke_value_t* Bp = rocke_b_param(b, "B", f16ptr, &ro);
-    rocke_value_t* D = rocke_b_param(b, "D", f16ptr, &wo_opts);
+    rocke_value_t* A = rocke_b_param(b, "A", ioptr, &ro);
+    rocke_value_t* Bp = rocke_b_param(b, "B", ioptr, &ro);
+    rocke_value_t* D = rocke_b_param(b, "D", ioptr, &wo_opts);
     rocke_value_t* A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), &none);
     rocke_value_t* B_bytes = rocke_b_param(b, "B_bytes", rocke_i32(), &none);
     rocke_value_t* D_bytes = rocke_b_param(b, "D_bytes", rocke_i32(), &none);
@@ -568,7 +581,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
             /* Python: select(ch_in_range, mul(w_off, c_half_bytes), oob_sentinel) */
             rocke_value_t* w_bytes = rocke_b_mul(b, w_off, c_half_bytes);
             rocke_value_t* safe_w = rocke_b_select(b, ch_in_range, w_bytes, oob_sentinel);
-            rocke_value_t* w_h = rocke_b_buffer_load_f16(b, b_rsrc, safe_w, c0);
+            rocke_value_t* w_h = is_bf16 ? rocke_b_buffer_load_bf16(b, b_rsrc, safe_w, c0)
+                                         : rocke_b_buffer_load_f16(b, b_rsrc, safe_w, c0);
             rocke_value_t* w_cast = rocke_b_cast_to_f32(b, w_h);
             weights_f32[r_const * p->KW + s_const]
                 = rocke_b_select(b, ch_in_range, w_cast, zero_f32);
@@ -638,7 +652,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
                 /* Python: select(valid, mul(dy_off, c_half_bytes), oob_sentinel) */
                 rocke_value_t* dy_bytes = rocke_b_mul(b, dy_off, c_half_bytes);
                 rocke_value_t* safe_dy = rocke_b_select(b, valid, dy_bytes, oob_sentinel);
-                rocke_value_t* dy_h = rocke_b_buffer_load_f16(b, a_rsrc, safe_dy, c0);
+                rocke_value_t* dy_h = is_bf16 ? rocke_b_buffer_load_bf16(b, a_rsrc, safe_dy, c0)
+                                              : rocke_b_buffer_load_f16(b, a_rsrc, safe_dy, c0);
                 rocke_value_t* dy_cast = rocke_b_cast_to_f32(b, dy_h);
                 rocke_value_t* dy_f32 = rocke_b_select(b, valid, dy_cast, zero_f32);
                 acc = rocke_b_fma(b, weights_f32[r_const * p->KW + s_const], dy_f32, acc);
@@ -658,7 +673,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
         rocke_value_t* store_guard = rocke_b_land(b, ch_in_range, wi_ok);
         rocke_value_t* d_bytes = rocke_b_mul(b, d_off, c_half_bytes);
         rocke_value_t* safe_d = rocke_b_select(b, store_guard, d_bytes, oob_sentinel);
-        rocke_b_buffer_store_f16(b, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(b, acc));
+        rocke_value_t* acc_h
+            = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, acc) : rocke_b_trunc_f32_to_f16(b, acc);
+        if(is_bf16)
+            rocke_b_buffer_store_bf16(b, d_rsrc, safe_d, c0, acc_h);
+        else
+            rocke_b_buffer_store_f16(b, d_rsrc, safe_d, c0, acc_h);
     }
 
     rocke_value_t* hi_yield[1];
