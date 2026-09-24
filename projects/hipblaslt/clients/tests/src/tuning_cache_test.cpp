@@ -5,7 +5,10 @@
 //
 // Everything here drives the public API with HIPBLASLT_TUNING_MODE and
 // HIPBLASLT_TUNING_CACHE_PATH, and asserts on the library's own hit / miss /
-// invalidated / tuned counters rather than on log text.
+// invalidated / tuned counters rather than on log text. The rules of the file
+// format and the store itself, such as which rows parse, which row wins and
+// when a key is tuned again, are tested without a device in
+// tuning_store_test.cpp; this file covers what needs one.
 //
 // The mode switch is latched on first use and the loaded-path set lives for the
 // process, so each test starts by calling hipblaslt_tuning_reset_for_test().
@@ -52,7 +55,6 @@ extern "C" void hipblaslt_tuning_lookup_tally_for_test(uint64_t* shapes,
 extern "C" int      hipblaslt_tuning_last_launch_for_test();
 extern "C" uint64_t hipblaslt_tuning_attempts_for_test();
 extern "C" void     hipblaslt_tuning_inject_failure_for_test(int stage);
-extern "C" void     hipblaslt_tuning_reset_as_privileged_for_test();
 
 #ifdef WIN32
 static int setenv(const char* name, const char* value, int overwrite)
@@ -791,71 +793,6 @@ namespace
         return true;
     }
 
-    /**
-     * Delete one named column, header cell and value cell, from every row.
-     *
-     * Produces what a file written by a build that predates the column looks
-     * like, which is the shape of every cache a user upgrades with.
-     */
-    bool dropColumn(const std::string& path, const std::string& column)
-    {
-        auto lines = readLines(path);
-        if(lines.empty())
-            return false;
-
-        auto split = [](const std::string& s) {
-            std::vector<std::string> out;
-            std::stringstream        ss(s);
-            std::string              cell;
-            while(std::getline(ss, cell, ','))
-            {
-                const auto b = cell.find_first_not_of(" \t");
-                const auto e = cell.find_last_not_of(" \t");
-                out.push_back(b == std::string::npos ? "" : cell.substr(b, e - b + 1));
-            }
-            return out;
-        };
-
-        auto join = [](const std::vector<std::string>& cells) {
-            std::ostringstream out;
-            for(size_t c = 0; c < cells.size(); c++)
-                out << (c ? "," : "") << cells[c];
-            return out.str();
-        };
-
-        bool changed = false;
-        for(size_t i = 0; i + 1 < lines.size(); i++)
-        {
-            if(lines[i].find("transA") == std::string::npos)
-                continue;
-
-            auto names  = split(lines[i]);
-            auto values = split(lines[i + 1]);
-            for(size_t c = 0; c < names.size(); c++)
-            {
-                if(names[c] != column)
-                    continue;
-                names.erase(names.begin() + c);
-                if(c < values.size())
-                    values.erase(values.begin() + c);
-                changed = true;
-                break;
-            }
-
-            lines[i]     = "    " + join(names);
-            lines[i + 1] = join(values);
-            i++;
-        }
-
-        if(!changed)
-            return false;
-
-        std::ofstream out(path, std::ios::trunc);
-        for(const auto& l : lines)
-            out << l << "\n";
-        return true;
-    }
-
     bool fileHasColumn(const std::string& path, const std::string& column)
     {
         for(const auto& line : readLines(path))
@@ -1043,45 +980,6 @@ namespace
             return out.good();
         }
         return false;
-    }
-
-    /**
-     * Cut every value row short just before the named column, leaving its header
-     * whole: what a process that died mid-append leaves behind.
-     */
-    bool truncateValueRowsBefore(const std::string& path, const std::string& column)
-    {
-        auto lines   = readLines(path);
-        bool changed = false;
-        for(size_t i = 0; i + 1 < lines.size(); i++)
-        {
-            if(lines[i].find("transA") == std::string::npos)
-                continue;
-
-            const auto names  = splitCells(lines[i]);
-            const auto values = splitCells(lines[i + 1]);
-            for(size_t c = 0; c < names.size() && c <= values.size(); c++)
-            {
-                if(names[c] != column)
-                    continue;
-
-                std::ostringstream kept;
-                for(size_t v = 0; v < c; v++)
-                    kept << (v ? "," : "") << values[v];
-                lines[i + 1] = kept.str();
-                changed      = true;
-                break;
-            }
-            i++;
-        }
-
-        if(!changed)
-            return false;
-
-        std::ofstream out(path, std::ios::trunc);
-        for(const auto& l : lines)
-            out << l << "\n";
-        return out.good();
     }
 
     /**
@@ -1466,97 +1364,6 @@ namespace
         EXPECT_GE(c.hits, 1u) << "stale row hid the valid row that followed it";
     }
 
-    // A row written by a newer hipBLASLt must be ignored, not read as if it were
-    // this build's format.
-    //
-    // A future schema keys on fields this parser cannot see, so interpreting one
-    // as the current version matches on the subset it happens to recognise and
-    // applies a kernel chosen for a problem that differs in the rest. The
-    // version was previously accepted as current whenever it was at least the
-    // current number, so this row replayed.
-    TEST_F(TuningCache, UnknownSchemaVersionIsRejected)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        ASSERT_GT(valueRowCount(m_path), 0u) << "tune mode recorded nothing";
-
-        ASSERT_TRUE(rewriteColumn(m_path, "schema_version", "99"));
-
-        enterMode("cache", m_path);
-        EXPECT_TRUE(runGemm(1024, 512, 1024)) << "ignoring a row must not fail the call";
-
-        const auto c = counters();
-        EXPECT_EQ(c.hits, 0u) << "a row from an unknown schema was replayed";
-    }
-
-    // Some strings are recognized as hipDataType values but are not legal GEMM
-    // tensor types. They must be rejected before the assert-based Tensile
-    // converter is called.
-    TEST_F(TuningCache, UnsupportedCurrentDatatypeIsRejected)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        ASSERT_TRUE(rewriteColumn(m_path, "a_type", "e8_r"));
-
-        enterMode("cache", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        EXPECT_EQ(counters().hits, 0u);
-    }
-
-    // A current-schema row missing a value for a key field must be dropped.
-    //
-    // stride_a is blanked because this shape's real batch stride is 0, so the
-    // empty cell parses to a value that matches and the row replays. That is the
-    // hazard: an empty cell is indistinguishable from a real zero, and a row
-    // truncated in one field is not trustworthy in the others either.
-    TEST_F(TuningCache, CurrentSchemaRowWithBlankKeyFieldIsRejected)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        ASSERT_GT(valueRowCount(m_path), 0u) << "tune mode recorded nothing";
-
-        ASSERT_TRUE(rewriteColumn(m_path, "stride_a", ""));
-
-        enterMode("cache", m_path);
-        EXPECT_TRUE(runGemm(1024, 512, 1024)) << "ignoring a row must not fail the call";
-
-        const auto c = counters();
-        EXPECT_EQ(c.hits, 0u) << "a row with no value for a key field was replayed";
-    }
-
-    TEST_F(TuningCache, CurrentSchemaNumericPrefixIsRejected)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        ASSERT_TRUE(rewriteColumn(m_path, "m", "1024junk"));
-
-        enterMode("cache", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        EXPECT_EQ(counters().hits, 0u);
-    }
-
-    // Recover after a process dies between writing a header and its value row.
-    // The orphan must not consume the next complete record's header.
-    TEST_F(TuningCache, TornHeaderDoesNotHideFollowingEntry)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        const auto complete = readLines(m_path);
-        ASSERT_GE(complete.size(), 3u);
-
-        {
-            std::ofstream out(m_path, std::ios::trunc);
-            out << complete[0] << "\n"
-                << complete[1] << "\n"
-                << complete[1] << "\n"
-                << complete[2] << "\n";
-        }
-
-        enterMode("cache", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        EXPECT_GE(counters().hits, 1u);
-    }
-
     // Sequential tuning on two devices must allocate and reuse scratch in each
     // device's address space rather than handing device 1 the pointer allocated
     // while device 0 was current.
@@ -1854,39 +1661,6 @@ namespace
             << "a partial entry was re-tuned under the ceiling that already stopped it";
     }
 
-    // The file is append-only, so a shape tuned partially and later properly
-    // ends up holding both rows. The superseded partial row must not keep the
-    // shape looking untuned, or the finished search is repeated on every process
-    // start for the life of the file.
-    TEST_F(TuningCache, PartialRowBesideCompleteRowDoesNotRetune)
-    {
-        // Two searches over different candidate pools, so the second is likely
-        // to land on a different kernel and leave two distinct entries under one
-        // key. If they do coincide the later row simply refreshes the earlier
-        // one, which this must also survive.
-        enterMode("tune", m_path);
-        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
-        hipblaslt_tuning_reset_for_test();
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        ASSERT_TRUE(rewriteColumn(m_path, "complete", "0"));
-        ASSERT_TRUE(rewriteColumn(m_path, "budget_ms", "1000"));
-
-        enterMode("tune", m_path);
-        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "16", 1);
-        hipblaslt_tuning_reset_for_test();
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-
-        const size_t before = valueRowCount(m_path);
-        ASSERT_GT(before, 1u) << "the finishing run did not append beside the partial row";
-
-        enterMode("tune", m_path);
-        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "16", 1);
-        hipblaslt_tuning_reset_for_test();
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        EXPECT_EQ(valueRowCount(m_path), before)
-            << "a superseded partial row kept the shape looking untuned";
-    }
-
     // The other half of that pair, and the one the row count cannot see. Not
     // re-tuning is only correct if the completed row is also the row that runs.
     // The file is append-only, so the finishing run leaves its winner behind the
@@ -1950,69 +1724,6 @@ namespace
         enterMode("tune", m_path);
         ASSERT_TRUE(runGemm(1024, 512, 1024));
         EXPECT_EQ(valueRowCount(m_path), before) << "a complete entry was re-tuned";
-    }
-
-    // A row in the format hipblaslt-bench has always written carries no
-    // completeness and no search, and must read as final. Reading it as partial
-    // would re-tune every shape of an existing tuning file on the first tune run,
-    // which is the stall this whole feature is trying to avoid.
-    TEST_F(TuningCache, LegacyRowIsNotRetuned)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        ASSERT_TRUE(reduceToLegacyRow(m_path)) << "tune mode recorded nothing";
-        ASSERT_EQ(valueRowCount(m_path), 1u);
-
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        EXPECT_EQ(valueRowCount(m_path), 1u) << "a legacy row was re-tuned as if it were partial";
-    }
-
-    // A current-schema row that lost its completion column is not trusted:
-    // whether tune mode revisits a row depends on it, and a missing value can
-    // no longer be told apart from a finished search.
-    TEST_F(TuningCache, CurrentSchemaRowWithoutItsCompletionColumnIsRejected)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        ASSERT_TRUE(dropColumn(m_path, "complete"));
-
-        enterMode("cache", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-
-        const auto c = counters();
-        EXPECT_EQ(c.loaded, 0u) << "a row with no completion column was loaded";
-        EXPECT_EQ(c.hits, 0u);
-    }
-
-    // A process that dies partway through an append leaves a value row shorter
-    // than its header. Cut before the completion columns, or between them, the
-    // prefix that survives is well formed and would otherwise read as a finished
-    // search.
-    TEST_F(TuningCache, TruncatedCurrentSchemaRowIsRejected)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        const auto written = readLines(m_path);
-        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
-
-        for(const char* cutBefore : {"complete", "budget_ms"})
-        {
-            SCOPED_TRACE(std::string("value row cut before ") + cutBefore);
-            {
-                std::ofstream out(m_path, std::ios::trunc);
-                for(const auto& l : written)
-                    out << l << "\n";
-            }
-            ASSERT_TRUE(truncateValueRowsBefore(m_path, cutBefore));
-
-            enterMode("cache", m_path);
-            ASSERT_TRUE(runGemm(1024, 512, 1024));
-
-            const auto c = counters();
-            EXPECT_EQ(c.loaded, 0u) << "a truncated row was loaded";
-            EXPECT_EQ(c.hits, 0u);
-        }
     }
 
     // A search the budget cuts short is attempted once per process. The retry
@@ -2340,39 +2051,6 @@ namespace
         EXPECT_EQ(c.misses, 1u);
     }
 
-    // Among rows that are all partial, the newest runs, whatever ceilings they
-    // were written under. In the normal workflow a later partial row exists only
-    // because a later run had a more generous ceiling, so the newest is also the
-    // most thorough; the older row's larger ceiling here pins the rule itself.
-    TEST_F(TuningCache, NewestPartialRowWinsAmongPartialRows)
-    {
-        const auto identities = candidateIdentities(1024, 512, 1024, 8);
-        if(identities.size() < 2)
-            GTEST_SKIP() << "this device offers one solution for the shape";
-
-        const auto& older = identities[0];
-        const auto& newer = identities[1];
-
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
-
-        ASSERT_TRUE(writeTwoRowsFromFirst(m_path,
-                                          {{"solution_index", std::to_string(older.first)},
-                                           {"kernel_name", older.second},
-                                           {"complete", "0"},
-                                           {"budget_ms", "60000"}},
-                                          {{"solution_index", std::to_string(newer.first)},
-                                           {"kernel_name", newer.second},
-                                           {"complete", "0"},
-                                           {"budget_ms", "1000"}}));
-
-        enterMode("cache", m_path);
-        int replayed = -1;
-        ASSERT_TRUE(runGemm(1024, 512, 1024, 0.0f, true, false, false, &replayed));
-        EXPECT_EQ(replayed, newer.first) << "replay used the older partial row " << older.first;
-    }
-
     // A finished search of a ranked prefix says nothing about the kernels past
     // it, so a run that searches more re-tunes the shape. A run that searches
     // less has nothing to add, and must not.
@@ -2395,36 +2073,6 @@ namespace
         ASSERT_TRUE(runGemm(1024, 512, 1024));
         EXPECT_EQ(valueRowCount(m_path), 2u)
             << "a narrower run re-tuned a shape that a wider search had finished";
-    }
-
-    // Each of these is part of the key, so a row that differs from the problem
-    // in one of them is loaded but serves nothing.
-    TEST_F(TuningCache, RowDifferingInAKeyColumnDoesNotMatch)
-    {
-        enterMode("tune", m_path);
-        ASSERT_TRUE(runGemm(1024, 512, 1024));
-        const auto written = readLines(m_path);
-        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
-
-        const std::vector<std::pair<std::string, std::string>> changes
-            = {{"lde", "12345"}, {"stride_e", "12345"}, {"uniform_summation_order", "1"}};
-        for(const auto& [column, value] : changes)
-        {
-            SCOPED_TRACE(column + "=" + value);
-            {
-                std::ofstream out(m_path, std::ios::trunc);
-                for(const auto& l : written)
-                    out << l << "\n";
-            }
-            ASSERT_TRUE(rewriteColumn(m_path, column, value));
-
-            enterMode("cache", m_path);
-            ASSERT_TRUE(runGemm(1024, 512, 1024));
-
-            const auto c = counters();
-            EXPECT_EQ(c.loaded, 1u) << "the row was rejected rather than keyed on the column";
-            EXPECT_EQ(c.hits, 0u);
-        }
     }
 
     // A conjugate transpose is keyed apart from a plain one. Both are "not N",
@@ -2477,20 +2125,4 @@ namespace
         EXPECT_FALSE(extensionHeuristicHits(1024, 512, 1024, HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF));
     }
 
-    // A process in a secure execution context (set-user-ID and the like) must
-    // not let an inherited environment turn tuning on: that would choose a file
-    // for it to write and minutes of GPU work for it to spend.
-    TEST_F(TuningCache, PrivilegedProcessIgnoresTheTuningEnvironment)
-    {
-        enterMode("tune", m_path);
-        hipblaslt_tuning_reset_as_privileged_for_test();
-
-        ASSERT_TRUE(runGemm(256, 256, 256));
-
-        EXPECT_FALSE(std::ifstream(m_path).good()) << "a privileged process wrote " << m_path;
-        EXPECT_EQ(hipblaslt_tuning_attempts_for_test(), 0u);
-
-        const auto c = counters();
-        EXPECT_EQ(c.hits + c.misses, 0u) << "a privileged process consulted the cache";
-    }
 } // namespace

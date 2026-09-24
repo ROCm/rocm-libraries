@@ -1,0 +1,40 @@
+# hipblaslt-tuning-store-test categories for TheRock's ctest presets.
+#
+# The tuning cache's file format and store, tested without a device. The whole
+# suite takes well under a second, so every tier runs all of it.
+
+test_categories:
+  quick:
+    description: "Tuning cache file format and store (host-only)"
+    test_patterns:
+      - "TuningStore.*"
+    labels:
+      - "quick"
+      - "smoke"
+
+  standard:
+    description: "Tuning cache file format and store (host-only)"
+    test_patterns:
+      - "TuningStore.*"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Tuning cache file format and store (host-only)"
+    test_patterns:
+      - "TuningStore.*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Tuning cache file format and store (host-only)"
+    test_patterns:
+      - "TuningStore.*"
+    labels:
+      - "full"
+      - "weekly"
+      - "hmm"

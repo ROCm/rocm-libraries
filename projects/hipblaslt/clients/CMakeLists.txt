@@ -211,6 +211,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         # This ensures we test the real library code, not stubs
         target_link_libraries(hipblaslt-test PRIVATE
             $<TARGET_OBJECTS:hipblaslt>
+            hipblaslt-tuning-store
             roc::tensilelite-host
             ${CMAKE_DL_LIBS}
         )
@@ -230,6 +231,18 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
             )
         endif()
     endif()
+
+    # The tuning cache's file format and store, tested on their own: no device,
+    # no solution library and no test hooks, so they run wherever the tests
+    # build.
+    add_executable(hipblaslt-tuning-store-test
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/src/tuning_store_test.cpp")
+    target_link_libraries(hipblaslt-tuning-store-test
+        PRIVATE
+            hipblaslt-tuning-store
+            GTest::gtest
+            GTest::gtest_main
+    )
 
     add_subdirectory(tests)
 endif()
