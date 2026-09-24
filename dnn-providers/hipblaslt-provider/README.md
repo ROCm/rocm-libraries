@@ -24,3 +24,12 @@ To build the plugin standalone, first install hipDNN and hipBLASLt on the system
 ## Operation support
 
 The list of supported operations is described in [Operation Support](docs/OperationSupport.md) documentation.
+
+## Project policies
+
+This plugin is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
+
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)

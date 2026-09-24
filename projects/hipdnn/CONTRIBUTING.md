@@ -8,6 +8,32 @@ Thank you for your interest in contributing to hipDNN!
 
 We're excited to have you join our community of contributors!
 
+______________________________________________________________________
+
+> **Security vulnerabilities** — do not open a public GitHub Issue. See [SECURITY.md](./SECURITY.md) for the private reporting process.
+
+______________________________________________________________________
+
+## Developer policies
+
+These policies apply to all forms of activity and engagement in this project.
+
+### Governance
+
+This project is covered by the
+[ROCm Project Governance](https://github.com/ROCm/TheRock/blob/main/GOVERNANCE.md),
+which also defines the code of conduct.
+
+### Licensing
+
+Code contributions to this project are covered under the terms of the
+[LICENSE](./LICENSE) file.
+
+### Communication channels
+
+Issue tracking, project planning, and code contributions are managed in GitHub.
+We use an open-source toolchain so that workflows can be easily replicated in any fork.
+
 ## Before You Start
 
 Before contributing, please review these essential documents to understand the project structure and goals:
@@ -34,6 +60,16 @@ All contributions must meet the following requirements before they can be merged
 - **Small PRs**: Please keep Pull Requests small and focused.
   - This makes reviews easier to digest.
   - It minimizes the potential for conflicts or large feature reverts if issues are discovered later.
+
+### Security Requirements
+
+Contributors must not:
+
+- Commit secrets, tokens, passwords, or credentials.
+- Introduce vulnerable dependencies without justification.
+- Bypass security controls or required security reviews.
+
+All contributions may be subject to automated security scanning.
 
 ### Code Quality Standards
 
