@@ -1316,7 +1316,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
         load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
 
-        move_tile_window(k_dram_window, {kN0, 0});
+        move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
         // The prologue issues two K prefetches: the first into ptrk0, which
         // k_lds_read_window is bound to and which mainloop() therefore consumes at
         // i_total_loops == 0, and the second into ptrk1, consumed at
@@ -1329,7 +1329,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         // i_total_loops == num_sink_loop - 2 check below).
         if constexpr(kHasSink)
         {
-            if(num_sink_loop == 1)
+            if(num_sink_loop == 1 && num_total_loop > 1)
             {
                 move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
             }
@@ -1362,16 +1362,19 @@ struct BlockFmhaPipelineQRKSVSTdm
             // fetch the first normal-region V tile from the wrong (pre-jump) address.
             if constexpr(kHasSink)
             {
-                if(i_total_loops == num_sink_loop - 1)
+                if(i_total_loops == num_sink_loop - 1 && i_total_loops + 1 < num_total_loop)
                 {
                     move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                 }
             }
-            move_tile_window(v_dram_window, {kN0, 0});
+            // Preserve the TDM counter schedule in the tail, but re-read the last
+            // valid tile instead of forming an unused out-of-allocation address.
+            move_tile_window(v_dram_window, {i_total_loops + 1 < num_total_loop ? kN0 : 0, 0});
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
 
             // STAGE 1, QK gemm
+            constexpr bool kQKNPairMajor = std::is_same_v<QDataType, bf16_t> && kM0 == 128;
             clear_tile(s_acc); // initialize C
 
             if constexpr(1 < k0_loops)
@@ -1399,7 +1402,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                         // On the final M iteration, reload pairs of K fragments after both
                         // WMMAs have consumed them for the last time. Grouping the four DS reads
                         // keeps the next head-dimension slice in the same register storage.
-                        gemm_0.RunWithAfterWarp(
+                        gemm_0.template RunWithAfterWarp<kQKNPairMajor>(
                             s_acc,
                             get_slice_tile(q_tile,
                                            sequence<0, i_k0 * kK0>{},
@@ -1437,11 +1440,26 @@ struct BlockFmhaPipelineQRKSVSTdm
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
             }
 
-            gemm_0(s_acc,
-                   get_slice_tile(q_tile,
-                                  sequence<0, (k0_loops - 1) * kK0>{},
-                                  sequence<kM0, k0_loops * kK0>{}),
-                   k_tile);
+            if constexpr(Problem::kProgressiveDsLoadK && kQKNPairMajor)
+            {
+                // Retain the reload-overlap traversal when consuming the final
+                // head-dimension slice, even though this slice has no reload.
+                gemm_0.template RunWithAfterWarp<kQKNPairMajor>(
+                    s_acc,
+                    get_slice_tile(q_tile,
+                                   sequence<0, (k0_loops - 1) * kK0>{},
+                                   sequence<kM0, k0_loops * kK0>{}),
+                    k_tile,
+                    [](auto, auto, auto) {});
+            }
+            else
+            {
+                gemm_0(s_acc,
+                       get_slice_tile(q_tile,
+                                      sequence<0, (k0_loops - 1) * kK0>{},
+                                      sequence<kM0, k0_loops * kK0>{}),
+                       k_tile);
+            }
 
             if constexpr(kBlockScale)
             {
@@ -1703,12 +1721,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             // case is instead handled in the prologue, see the comment there.
             if constexpr(kHasSink)
             {
-                if(i_total_loops == num_sink_loop - 2)
+                if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
                 {
                     move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                 }
             }
-            move_tile_window(k_dram_window, {kN0, 0});
+            move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
             load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 

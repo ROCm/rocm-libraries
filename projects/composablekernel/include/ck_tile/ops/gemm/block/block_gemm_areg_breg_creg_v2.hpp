@@ -357,7 +357,8 @@ struct BlockGemmARegBRegCRegV2
         }
     }
 
-    template <typename CBlockTensor,
+    template <bool NPairMajor = false,
+              typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor,
               typename AfterWarp>
@@ -409,10 +410,16 @@ struct BlockGemmARegBRegCRegV2
         constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-        static_ford<sequence<MIterPerWarp, NIterPerWarp, KIterPerWarp>>{}([&](auto mnk) {
-            constexpr auto mIter = number<mnk[number<0>{}]>{};
-            constexpr auto nIter = number<mnk[number<1>{}]>{};
-            constexpr auto kIter = number<mnk[number<2>{}]>{};
+        // Visit a pair of B fragments across M before advancing to the next pair.
+        // This preserves A reuse inside the pair and releases B early for a reload.
+        using Iterations = std::conditional_t<NPairMajor,
+                                             sequence<NIterPerWarp / 2, MIterPerWarp, 2, KIterPerWarp>,
+                                             sequence<1, MIterPerWarp, NIterPerWarp, KIterPerWarp>>;
+        static_ford<Iterations>{}([&](auto mnk) {
+            constexpr auto mIter = number<mnk[number<1>{}]>{};
+            constexpr auto nIter = number<mnk[number<0>{}] * (NPairMajor ? 2 : NIterPerWarp) +
+                                          mnk[number<2>{}]>{};
+            constexpr auto kIter = number<mnk[number<3>{}]>{};
 
             AWarpTensor a_warp_tensor;
             a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(

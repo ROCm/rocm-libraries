@@ -1557,17 +1557,31 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # dropout="f" so dropout workloads fall through to qr.
             # Logits soft cap is not implemented either, so pin logits="f".
             if hdim == 128 and hdim_v == 128:
+                tdm_masks = list(get_mask_map(mask_impl))
+                if dtype == "bf16" and mask_impl == "simplified":
+                    # Avoid carrying general-window mask state through the
+                    # causal main loop. Keep the simplified fallback for windows.
+                    tdm_masks.insert(0, "causal")
                 for logits, mask, bias, lse, sink in itertools.product(
                     ["f"],
-                    get_mask_map(mask_impl).keys(),
+                    tdm_masks,
                     BIAS_MAP.keys(),
                     ["t", "f"],
                     ["t", "f"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
+                    mask_constraint = CppConstraint()
+                    if mask_impl == "simplified" and mask == "causal":
+                        if bias != "no" or lse != "f" or sink != "f":
+                            continue
+                        # Top-left/bottom-right also describe finite windows;
+                        # the causal kernel has no lower-bound mask check.
+                        mask_constraint = CppConstraint(
+                            "a.window_size_left < 0 && a.window_size_right == 0"
+                        )
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
 
             # qr: generic pipeline fallback for trait combos not covered by
             # qr_tdm (e.g., bias, dropout, skip, d!=128).
