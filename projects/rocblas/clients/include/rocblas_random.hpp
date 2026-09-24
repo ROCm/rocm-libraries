@@ -24,7 +24,9 @@
 
 #include "rocblas.h"
 #include "rocblas_math.hpp"
-#if defined(__GLIBC__) && __GLIBC__ < 3 && __GLIBC_MINOR__ < 39
+// Older than glibc 2.39. Spelled out rather than "major < 3 && minor < 39", which only
+// happens to mean the same thing while glibc stays on major 2.
+#if defined(__GLIBC__) && (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 39))
 #undef _GLIBCXX_USE_C99_INTTYPES_TR1
 #endif
 #include <cinttypes>

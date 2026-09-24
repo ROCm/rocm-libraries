@@ -1,4 +1,4 @@
-/* ************************************************************************
+﻿/* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -66,42 +66,61 @@ namespace
         size_t m_was;
     };
 
-    // Reported as a bool rather than skipping here: GTEST_SKIP only returns from the
-    // function it appears in, so the decision has to be made in the test body.
-    template <typename T>
-    bool device_alloc_available()
-    {
-        device_vector<T> probe(1);
-        return probe.memcheck() == hipSuccess;
-    }
-
     size_t guarded_length(const Arguments& arg)
     {
         return arg.N > 0 ? size_t(arg.N) : 1024;
+    }
+
+    // Probed at the length the test will actually use, not one element: a one-element probe
+    // says nothing about whether N + two guard regions will fit, and every caller then does
+    // pointer arithmetic on the result, which is undefined behaviour on the null pointer a
+    // failed allocation hands back. Reported as a bool rather than skipping here, because
+    // GTEST_SKIP only returns from the function it appears in.
+    template <typename T>
+    bool device_alloc_available(const Arguments& arg)
+    {
+        device_vector<T> probe(guarded_length(arg));
+        return probe.memcheck() == hipSuccess;
+    }
+
+    // Streams the text of every intercepted failure, so a test that fails because it saw the
+    // wrong failures says which ones it saw.
+    std::string captured_failures(const ::testing::TestPartResultArray& failures)
+    {
+        std::string all;
+        for(int i = 0; i < failures.size(); ++i)
+        {
+            all += "\n  ";
+            all += failures.GetTestPartResult(i).message();
+        }
+        return all.empty() ? " (none)" : all;
     }
 
     // rocblas_init_nan / rocblas_nan_rng only force a NaN exponent; sign and mantissa are
     // random. A fixed fill value can therefore match live guard bytes and under-count the
     // mismatches, so the byte-level diagnostics are exercised by inverting the actual
     // m_guard bytes: every byte written is then guaranteed to differ.
-    template <typename T>
-    hipError_t overwrite_post_guard_inverted(device_vector<T>& dv, size_t first_elem, size_t n_elem)
+    //
+    // The range is a template parameter so the buffer is exactly the size this instantiation
+    // writes, and so an out-of-range range is a compile error rather than a stray write past
+    // the post-guard.
+    template <typename T, size_t FIRST_ELEM, size_t N_ELEM>
+    hipError_t overwrite_post_guard_inverted(device_vector<T>& dv)
     {
-        // Three elements of the widest supported type is the largest write any caller makes.
-        constexpr size_t c_max_flip_bytes = 3 * sizeof(rocblas_double_complex);
+        static_assert(N_ELEM > 0, "nothing to invert");
+        static_assert(FIRST_ELEM + N_ELEM <= c_guard_pad,
+                      "inverted range must stay inside the post-guard region");
 
-        const size_t n_bytes = n_elem * sizeof(T);
-        if(n_bytes > c_max_flip_bytes)
-            return hipErrorInvalidValue;
+        constexpr size_t n_bytes = N_ELEM * sizeof(T);
 
         const auto* src
-            = reinterpret_cast<const unsigned char*>(d_vector<T>::m_guard) + first_elem * sizeof(T);
-        unsigned char flipped[c_max_flip_bytes];
+            = reinterpret_cast<const unsigned char*>(d_vector<T>::m_guard) + FIRST_ELEM * sizeof(T);
+        unsigned char flipped[n_bytes];
         for(size_t i = 0; i < n_bytes; ++i)
             flipped[i] = static_cast<unsigned char>(~src[i]);
 
         return hipMemcpy(
-            static_cast<T*>(dv) + dv.nmemb() + first_elem, flipped, n_bytes, hipMemcpyDefault);
+            static_cast<T*>(dv) + dv.nmemb() + FIRST_ELEM, flipped, n_bytes, hipMemcpyDefault);
     }
 
     // Guard-detection tests: verify that device_vector_check catches writes into the
@@ -118,7 +137,7 @@ namespace
 
         // Checked before entering EXPECT_NONFATAL_FAILURE, where a skip or a fatal failure
         // would escape the wrapper and leave the process in a misleading state.
-        if(!device_alloc_available<T>())
+        if(!device_alloc_available<T>(arg))
             GTEST_SKIP() << "device allocation unavailable";
 
         // Overwrite the first element of the post-guard with zeros. The guard pattern is
@@ -129,15 +148,19 @@ namespace
         EXPECT_NONFATAL_FAILURE(
             {
                 device_vector<T> dv(guarded_length(arg));
-                // ASSERT (not EXPECT): if hipMemset fails, an EXPECT would emit a
-                // nonfatal failure whose message contains "post-guard";
-                // EXPECT_NONFATAL_FAILURE would then see one matching nonfatal failure
-                // and pass, masking the fact that the guard was never actually corrupted.
-                // ASSERT emits a fatal failure (kFatalFailure), which SingleFailureChecker
-                // treats as a type mismatch, so the test fails with a clear message rather
-                // than a false green.
+                // ASSERT, and a message that deliberately avoids the words this test
+                // matches on: if the allocation failed, the pointer is null and the
+                // arithmetic below would be undefined. A fatal failure makes
+                // SingleFailureChecker report a type mismatch instead of accepting this as
+                // the expected nonfatal failure.
+                ASSERT_EQ(dv.memcheck(), hipSuccess)
+                    << "device allocation failed; the guard was never corrupted";
+                // ASSERT, and again wording that stays clear of "post-guard": an EXPECT
+                // whose message contained the matched substring would be accepted by
+                // EXPECT_NONFATAL_FAILURE as the expected failure, masking the fact that
+                // the guard was never actually corrupted.
                 ASSERT_EQ(hipMemset(static_cast<T*>(dv) + dv.nmemb(), 0, sizeof(T)), hipSuccess)
-                    << "hipMemset failed; post-guard was never corrupted";
+                    << "hipMemset failed; the trailing guard was never corrupted";
             },
             "post-guard");
     }
@@ -149,7 +172,7 @@ namespace
         ASSERT_EQ(g_DVEC_PAD, c_guard_pad)
             << "guard pad was not set; pre-guard corruption cannot be detected";
 
-        if(!device_alloc_available<T>())
+        if(!device_alloc_available<T>(arg))
             GTEST_SKIP() << "device allocation unavailable";
 
         // Overwrite the last element of the pre-guard with zeros. The user pointer sits
@@ -158,9 +181,12 @@ namespace
         EXPECT_NONFATAL_FAILURE(
             {
                 device_vector<T> dv(guarded_length(arg));
-                // ASSERT (not EXPECT): same reasoning as testing_guard_post_overwrite.
+                // ASSERT, and wording that avoids the matched substring: same reasoning as
+                // testing_guard_post_overwrite.
+                ASSERT_EQ(dv.memcheck(), hipSuccess)
+                    << "device allocation failed; the guard was never corrupted";
                 ASSERT_EQ(hipMemset(static_cast<T*>(dv) - 1, 0, sizeof(T)), hipSuccess)
-                    << "hipMemset failed; pre-guard was never corrupted";
+                    << "hipMemset failed; the leading guard was never corrupted";
             },
             "pre-guard");
     }
@@ -172,7 +198,7 @@ namespace
         ASSERT_EQ(g_DVEC_PAD, c_guard_pad)
             << "guard pad was not set; the false-positive check is meaningless with pad == 0";
 
-        if(!device_alloc_available<T>())
+        if(!device_alloc_available<T>(arg))
             GTEST_SKIP() << "device allocation unavailable";
 
         // A clean alloc+free (guards intact) must produce exactly zero nonfatal GTest
@@ -187,18 +213,19 @@ namespace
                 ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
                 &failures);
             device_vector<T> dv(guarded_length(arg));
-            // If this allocation fails after the one-element probe succeeded, the
-            // destructor is a no-op and an empty `failures` array would greenwash
-            // the test. Record memcheck with EXPECT so a failed alloc shows up in
-            // `failures` and the final size check does not treat it as a clean pass.
+            // If this allocation fails despite the probe, the destructor is a no-op and an
+            // empty `failures` array would greenwash the test. Record memcheck with EXPECT
+            // so a failed alloc shows up in `failures` and the final size check does not
+            // treat it as a clean pass.
             EXPECT_EQ(dv.memcheck(), hipSuccess)
                 << "device allocation failed; guard check was never exercised";
             // Guards are not modified. dv is declared after reporter, so its
             // destructor runs first (reverse declaration order) while reporter
-            // is still intercepting — any EXPECT from device_vector_check is captured.
+            // is still intercepting â€” any EXPECT from device_vector_check is captured.
         }
         EXPECT_EQ(failures.size(), 0)
-            << "device_vector_check reported a spurious failure on an unmodified guard";
+            << "device_vector_check reported a spurious failure on an unmodified guard; captured:"
+            << captured_failures(failures);
     }
 
     // Byte-diagnostic tests: verify that device_vector_check reports the correct
@@ -212,18 +239,23 @@ namespace
         ASSERT_EQ(g_DVEC_PAD, c_guard_pad)
             << "guard pad was not set; the byte-count check is meaningless";
 
-        if(!device_alloc_available<T>())
+        if(!device_alloc_available<T>(arg))
             GTEST_SKIP() << "device allocation unavailable";
 
         // Three elements inverted, so the diagnostic must report 3 * sizeof(T) differing
-        // bytes whatever the random NaN payload in m_guard happens to be.
-        const std::string expected = std::to_string(3 * sizeof(T)) + " post-guard";
+        // bytes whatever the random NaN payload in m_guard happens to be. The trailing
+        // " of " matters: EXPECT_NONFATAL_FAILURE matches a plain substring, so without a
+        // delimiter on both sides an expected "6" would also be satisfied by a reported 16.
+        const std::string expected
+            = "post-guard corrupted: " + std::to_string(3 * sizeof(T)) + " of ";
 
         EXPECT_NONFATAL_FAILURE(
             {
                 device_vector<T> dv(guarded_length(arg));
-                ASSERT_EQ(overwrite_post_guard_inverted<T>(dv, 0, 3), hipSuccess)
-                    << "post-guard invert failed; byte-count diagnostic was never exercised";
+                ASSERT_EQ(dv.memcheck(), hipSuccess)
+                    << "device allocation failed; the guard was never corrupted";
+                ASSERT_EQ((overwrite_post_guard_inverted<T, 0, 3>(dv)), hipSuccess)
+                    << "invert failed; the byte-count diagnostic was never exercised";
             },
             expected);
     }
@@ -235,18 +267,22 @@ namespace
         ASSERT_EQ(g_DVEC_PAD, c_guard_pad)
             << "guard pad was not set; the first-byte-index check is meaningless";
 
-        if(!device_alloc_available<T>())
+        if(!device_alloc_available<T>(arg))
             GTEST_SKIP() << "device allocation unavailable";
 
         // Element 5 starts at byte offset 5 * sizeof(T) into the post-guard. The bytes
-        // before it are left intact, so that offset is the first mismatch.
-        const std::string expected = "first at byte " + std::to_string(5 * sizeof(T));
+        // before it are left intact, so that offset is the first mismatch. The trailing
+        // " (" bounds the number on the right, so an expected offset of 10 cannot be
+        // satisfied by a reported 10250.
+        const std::string expected = "first at offset " + std::to_string(5 * sizeof(T)) + " (";
 
         EXPECT_NONFATAL_FAILURE(
             {
                 device_vector<T> dv(guarded_length(arg));
-                ASSERT_EQ(overwrite_post_guard_inverted<T>(dv, 5, 1), hipSuccess)
-                    << "post-guard invert failed; first-byte-index diagnostic was never exercised";
+                ASSERT_EQ(dv.memcheck(), hipSuccess)
+                    << "device allocation failed; the guard was never corrupted";
+                ASSERT_EQ((overwrite_post_guard_inverted<T, 5, 1>(dv)), hipSuccess)
+                    << "invert failed; the first-byte-offset diagnostic was never exercised";
             },
             expected);
     }
@@ -261,25 +297,33 @@ namespace
         ASSERT_EQ(g_DVEC_PAD, c_guard_pad)
             << "guard pad was not set; both-guard corruption cannot be detected";
 
-        if(!device_alloc_available<T>())
+        if(!device_alloc_available<T>(arg))
             GTEST_SKIP() << "device allocation unavailable";
 
         // Capture failures from alloc+corrupt+destroy. hipMemset results are recorded
         // outside the reporter scope and checked after it closes so that an ASSERT inside
         // the intercepted scope cannot mask a real hipMemset failure.
-        hipError_t                     post_err = hipSuccess, pre_err = hipSuccess;
+        hipError_t alloc_err = hipSuccess, post_err = hipSuccess, pre_err = hipSuccess;
         ::testing::TestPartResultArray failures;
         {
             ::testing::ScopedFakeTestPartResultReporter reporter(
                 ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
                 &failures);
             device_vector<T> dv(guarded_length(arg));
-            post_err = hipMemset(static_cast<T*>(dv) + dv.nmemb(), 0, sizeof(T));
-            pre_err  = hipMemset(static_cast<T*>(dv) - 1, 0, sizeof(T));
+            // Recorded, not asserted: an ASSERT here would be intercepted along with the
+            // guard failures. The pointer is null if the allocation failed, so the memsets
+            // have to be skipped rather than applied to it.
+            alloc_err = dv.memcheck();
+            if(alloc_err == hipSuccess)
+            {
+                post_err = hipMemset(static_cast<T*>(dv) + dv.nmemb(), 0, sizeof(T));
+                pre_err  = hipMemset(static_cast<T*>(dv) - 1, 0, sizeof(T));
+            }
             // dv destructs here; device_vector_check fires and both EXPECT failures are captured.
         }
-        ASSERT_EQ(post_err, hipSuccess) << "hipMemset post-guard failed; test is inconclusive";
-        ASSERT_EQ(pre_err, hipSuccess) << "hipMemset pre-guard failed; test is inconclusive";
+        ASSERT_EQ(alloc_err, hipSuccess) << "device allocation failed; test is inconclusive";
+        ASSERT_EQ(post_err, hipSuccess) << "hipMemset of the trailing guard failed; inconclusive";
+        ASSERT_EQ(pre_err, hipSuccess) << "hipMemset of the leading guard failed; inconclusive";
 
         bool post_reported = false, pre_reported = false;
         for(int i = 0; i < failures.size() && (!post_reported || !pre_reported); ++i)
@@ -290,8 +334,10 @@ namespace
             if(!pre_reported && msg.find("pre-guard") != std::string::npos)
                 pre_reported = true;
         }
-        EXPECT_TRUE(post_reported) << "post-guard corruption was not reported";
-        EXPECT_TRUE(pre_reported) << "pre-guard corruption was not reported";
+        EXPECT_TRUE(post_reported)
+            << "post-guard corruption was not reported; captured:" << captured_failures(failures);
+        EXPECT_TRUE(pre_reported) << "pre-guard corruption was not reported; captured:"
+                                  << captured_failures(failures);
     }
 
     template <typename T>
@@ -396,6 +442,14 @@ namespace
     // host_alloc_hmm_count needs it.
     TEST_P(host_alloc, auxiliary)
     {
+        // Every case here mutates process-wide state: g_DVEC_PAD through scoped_pad_length,
+        // and the counter host_bytes_allocated reports. Concurrent copies would interfere
+        // with each other, so fail clearly rather than flakily if threads are ever added to
+        // the YAML.
+        ASSERT_LE(GetParam().threads, 1)
+            << "host_alloc tests mutate process-wide state and cannot run concurrently; "
+               "leave threads unset in host_alloc_gtest.yaml";
+
         RUN_TEST_ON_THREADS_STREAMS(rocblas_simple_dispatch<host_alloc_testing>(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(host_alloc);

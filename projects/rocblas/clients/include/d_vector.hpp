@@ -27,7 +27,9 @@
 #include "rocblas_test.hpp"
 #include "singletons.hpp"
 
-#if defined(__GLIBC__) && __GLIBC__ < 3 && __GLIBC_MINOR__ < 39
+// Older than glibc 2.39. Spelled out rather than "major < 3 && minor < 39", which only
+// happens to mean the same thing while glibc stays on major 2.
+#if defined(__GLIBC__) && (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 39))
 #undef _GLIBCXX_USE_C99_INTTYPES_TR1
 #endif
 #include <cinttypes>
@@ -38,6 +40,41 @@
 #endif
 
 #define MEM_MAX_GUARD_PAD 8192
+
+#ifdef GOOGLE_TEST
+// Reports which bytes of a guard region differ from the reference pattern. Called only
+// after memcmp has already found a difference, so the byte-by-byte scan is off the clean
+// path. Takes byte pointers and lives at file scope rather than being a member or lambda of
+// d_vector<T>, so it is compiled once instead of once per precision.
+inline void report_guard_corruption(const unsigned char* host,
+                                    const unsigned char* ref,
+                                    size_t               guard_bytes,
+                                    const char*          tag)
+{
+    size_t differing = 0, first = 0;
+    for(size_t i = 0; i < guard_bytes; ++i)
+        if(host[i] != ref[i])
+        {
+            if(!differing) // record the index of the first differing byte only once
+                first = i;
+            ++differing;
+        }
+
+    // Each number is delimited on both sides so that a test matching on "corrupted: 6 of "
+    // or "offset 10 (" cannot also be satisfied by 16 or 10250.
+    if(differing > 0)
+        ADD_FAILURE() << tag << "-guard corrupted: " << differing << " of " << guard_bytes
+                      << " byte(s) differ, first at offset " << first << " (expected 0x" << std::hex
+                      << static_cast<unsigned>(ref[first]) << ", got 0x"
+                      << static_cast<unsigned>(host[first]) << std::dec << ")";
+    else
+        // The caller establishes that memcmp found a difference, so finding none here means
+        // the two disagree: report that rather than returning silently and losing the
+        // corruption entirely.
+        ADD_FAILURE() << tag << "-guard mismatch reported, but no byte differs across "
+                      << guard_bytes << " byte(s); device_vector_check is inconsistent";
+}
+#endif
 
 //
 // Forward declaration of rocblas_init_nan
@@ -78,13 +115,20 @@ private:
     const size_t m_guard_len;
     const size_t m_bytes;
 
-#ifdef GOOGLE_TEST
     // Set only once both guard regions actually hold the pattern. Kept separate from
     // m_guard_len so a failed guard write disables checking without touching geometry.
-    bool m_guard_written = false;
+    //
+    // Declared unconditionally, and only *used* under GOOGLE_TEST. A member whose presence
+    // depends on GOOGLE_TEST would change sizeof(d_vector<T>) and the offset of use_HMM
+    // between translation units, while the template's member functions keep the same
+    // mangled names: rocblas-gemm-tune compiles its own sources without GOOGLE_TEST
+    // (clients/benchmarks/CMakeLists.txt) and links rocblas_clients_common, which is built
+    // with it (clients/common/CMakeLists.txt), so both layouts would meet in one binary.
+    [[maybe_unused]] bool m_guard_written;
 
+#ifdef GOOGLE_TEST
     // Guards one-time initialization of m_guard against concurrent construction.
-    // Declared only in GOOGLE_TEST builds, where the guard and call_once are used.
+    // A static member has no bearing on object layout, so this one stays conditional.
     static std::once_flag m_init_flag;
 #endif
 
@@ -112,6 +156,7 @@ public:
         , m_pad(std::min(g_DVEC_PAD, size_t(MEM_MAX_GUARD_PAD)))
         , m_guard_len(m_pad * sizeof(T))
         , m_bytes((s + m_pad * 2) * sizeof(T))
+        , m_guard_written(false)
         , use_HMM(HMM)
     {
         // Initialize m_guard with NaN bytes exactly once, even if multiple
@@ -124,6 +169,7 @@ public:
         , m_pad(0)
         , m_guard_len(0)
         , m_bytes(s ? s * sizeof(T) : sizeof(T)) // minimum one element: hipMalloc(0) is UB
+        , m_guard_written(false)
         , use_HMM(HMM)
     {
     }
@@ -213,30 +259,7 @@ public:
             return;
         }
 
-        // Called only when memcmp detected a difference; scans byte-by-byte to report the
-        // count and the index of the first differing byte, without paying the scan cost on
-        // the common (clean) path.
-        auto report_guard_corruption
-            = [](const unsigned char* host, const T* ref, size_t guard_bytes, const char* tag) {
-                  const auto* r         = reinterpret_cast<const unsigned char*>(ref);
-                  size_t      differing = 0, first = 0;
-                  for(size_t i = 0; i < guard_bytes; ++i)
-                      if(host[i] != r[i])
-                      {
-                          if(!differing) // record index of first differing byte only once
-                              first = i;
-                          ++differing;
-                      }
-                  // memcmp detected corruption before this lambda was called, so differing
-                  // must be > 0 and first is valid. The check defends against any future
-                  // caller that violates the precondition.
-                  if(differing > 0)
-                      ADD_FAILURE()
-                          << differing << " " << tag << "-guard byte(s) corrupted; first at byte "
-                          << first << " of " << guard_bytes << " (expected 0x" << std::hex
-                          << static_cast<unsigned>(r[first]) << ", got 0x"
-                          << static_cast<unsigned>(host[first]) << std::dec << ")";
-              };
+        const auto* reference = reinterpret_cast<const unsigned char*>(m_guard);
 
         // Post-guard first, because d still points at the user allocation. Each comparison is
         // gated on its own copy succeeding, so a failed read cannot leave the other region's
@@ -244,15 +267,15 @@ public:
         hipError_t status = hipMemcpy(host_guard.get(), d + m_size, m_guard_len, hipMemcpyDefault);
         EXPECT_EQ(status, hipSuccess)
             << "cannot read the guard after the allocation: " << hipGetErrorName(status);
-        if(status == hipSuccess && memcmp(host_guard.get(), m_guard, m_guard_len) != 0)
-            report_guard_corruption(host_guard.get(), m_guard, m_guard_len, "post");
+        if(status == hipSuccess && memcmp(host_guard.get(), reference, m_guard_len) != 0)
+            report_guard_corruption(host_guard.get(), reference, m_guard_len, "post");
 
         // Pre-guard sits m_pad elements below the user pointer.
         status = hipMemcpy(host_guard.get(), d - m_pad, m_guard_len, hipMemcpyDefault);
         EXPECT_EQ(status, hipSuccess)
             << "cannot read the guard before the allocation: " << hipGetErrorName(status);
-        if(status == hipSuccess && memcmp(host_guard.get(), m_guard, m_guard_len) != 0)
-            report_guard_corruption(host_guard.get(), m_guard, m_guard_len, "pre");
+        if(status == hipSuccess && memcmp(host_guard.get(), reference, m_guard_len) != 0)
+            report_guard_corruption(host_guard.get(), reference, m_guard_len, "pre");
 #endif
     }
 
