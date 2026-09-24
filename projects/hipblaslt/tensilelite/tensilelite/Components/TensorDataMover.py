@@ -62,7 +62,9 @@ class TensorDataMoverLoad(TensorDataMover):
         mod = Module()
         tc: str = tp["tensorChar"]
         tlu: int = tp["tlu"]
-        tIdx: int = 0 if tp["isA"] else 1
+        # The free axis, not the operand: a scale tensor is neither isA nor isB,
+        # and asking those would put A's scale on J and request StrideMXSAJ.
+        tIdx: int = tp["idx"]
         if kernel["ProblemType"]["Sparse"] and tp["isM"]:
             # Metadata follows the sparse tensor's free dimension, but A/B data tensors
             # keep their normal A->WG0 and B->WG1 mapping. Remapping data tensors here
