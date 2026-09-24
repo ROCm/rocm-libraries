@@ -1448,7 +1448,6 @@ struct BlockFmhaPipelineQRKSVSTdm
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
 
             // STAGE 1, QK gemm
-            constexpr bool kQKNPairMajor = std::is_same_v<QDataType, bf16_t> && kM0 == 128;
             clear_tile(s_acc); // initialize C
 
             if constexpr(1 < k0_loops)
@@ -1476,7 +1475,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                         // On the final M iteration, reload pairs of K fragments after both
                         // WMMAs have consumed them for the last time. Grouping the four DS reads
                         // keeps the next head-dimension slice in the same register storage.
-                        gemm_0.template RunWithAfterWarp<kQKNPairMajor>(
+                        gemm_0.template RunWithAfterWarp<true>(
                             s_acc,
                             get_slice_tile(q_tile,
                                            sequence<0, i_k0 * kK0>{},
@@ -1514,11 +1513,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
             }
 
-            if constexpr(Problem::kProgressiveDsLoadK && kQKNPairMajor)
+            if constexpr(Problem::kProgressiveDsLoadK)
             {
                 // Retain the reload-overlap traversal when consuming the final
                 // head-dimension slice, even though this slice has no reload.
-                gemm_0.template RunWithAfterWarp<kQKNPairMajor>(
+                gemm_0.template RunWithAfterWarp<true>(
                     s_acc,
                     get_slice_tile(q_tile,
                                    sequence<0, (k0_loops - 1) * kK0>{},
