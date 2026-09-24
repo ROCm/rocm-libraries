@@ -99,7 +99,7 @@ def _sweep_shape(
     _Spec3D, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(arch)
     from dataclasses import replace
 
-    base_seg = au._tiled_3d_spec_from_problem(problem)
+    base_seg = au._tiled_3d_spec_from_problem(problem, arch)
 
     rng = np.random.default_rng(seed)
     max_blocks = (kv_len + _BS - 1) // _BS
@@ -319,7 +319,7 @@ def main() -> int:
                     num_cus=256,
                 )
                 shipped = au._num_segments(
-                    p
+                    p, arch
                 )  # production value (gfx950 pre-bump clamp)
                 _sweep_shape(
                     arch,

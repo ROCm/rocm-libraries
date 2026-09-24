@@ -143,7 +143,7 @@ def test_explicit_caller_wins_any_arch():
         p.restore()
 
 
-def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0, clamp_arch=None):
+def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
     return UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -158,7 +158,6 @@ def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0, clamp_arch=
         use_sinks=False,
         num_cus=num_cus,
         target_ctas=tctas,
-        clamp_arch=clamp_arch,
     )
 
 
@@ -194,34 +193,50 @@ def test_target_ctas_threaded_through_problem():
     assert prob2._effective_target_ctas == 800  # 200*4
 
 
-def test_problem_lowercases_arch_for_the_clamp():
-    """``_problem`` lowercases ``req.arch`` into ``clamp_arch`` before it reaches
-    the clamp, which compares against lowercase literals ("gfx942" / "gfx950") --
-    an exact string match, so a mixed-case arch would silently skip the clamp
-    rather than error.
+def test_request_canonicalizes_arch_once():
+    """``AttentionRequest.__post_init__`` is the single arch authority.
 
-    Scope: this pins ``_problem``'s normalization ONLY. It is defence in depth,
-    not a reachable input -- the dispatch path rejects mixed case earlier, in
-    ``_request_errors``, because ``ArchTarget.from_gfx`` is case-sensitive
-    (``from_gfx("GFX950")`` raises ``KeyError``). Entry here is deliberately
-    below that gate. See ``test_request_layer_rejects_mixed_case_arch``.
+    Every arch comparison downstream is an exact ``==`` against a lowercase base
+    name, which is only sound if the request normalized first. Casing and target
+    -ID decoration (``:features``, ``-strict``) must therefore be gone by the
+    time ``req.arch`` is readable -- not fixed up at each comparison site.
     """
-    for raw in ("GFX950", "Gfx950", "gfx950"):
-        assert A._problem(_req(num_cus=200, arch=raw)).clamp_arch == "gfx950", raw
-    # Driven through _problem + _num_segments, casing must not change the segment
-    # count: both normalize to gfx950 and take the same clamp.
-    p_mixed = A._problem(_req(num_cus=256, arch="GFX950"))
-    p_lower = A._problem(_req(num_cus=256, arch="gfx950"))
-    assert au._num_segments(p_mixed) == au._num_segments(p_lower)
+    for raw in ("GFX950", "Gfx950", "gfx950", "gfx950:sramecc+", "GFX950:xnack-"):
+        assert _req(num_cus=200, arch=raw).arch == "gfx950", raw
+    assert _req(num_cus=200, arch="gfx942:xnack-").arch == "gfx942"
+    assert _req(num_cus=200, arch="gfx1250-strict").arch == "gfx1250"
+    # A missing arch stays missing: "" is how callers detect "none supplied",
+    # and None must not canonicalize into the plausible-looking string "none".
+    assert _req(num_cus=200, arch=None).arch == ""
+    assert _req(num_cus=200, arch="  ").arch == ""
 
 
-def test_request_layer_rejects_mixed_case_arch():
-    """Pins the reason the test above is defence in depth: the request layer is
-    case-sensitive, so a mixed-case arch never reaches ``_problem`` at all."""
-    for raw in ("GFX950", "Gfx950", "GFX942"):
-        errors = AC._request_errors(_req(num_cus=0, arch=raw))
-        assert any("unknown gfx target" in e for e in errors), (raw, errors)
+def test_canonical_arch_does_not_change_selection():
+    """Widening the accepted spelling must not move any selection outcome.
+
+    The decorated spellings were rejected outright before, so there is no
+    behaviour to preserve for them -- but the already-valid spellings must land
+    on exactly the segment count they landed on before.
+    """
+    p_suffixed = A._problem(_req(num_cus=256, arch="gfx950:sramecc+"))
+    p_plain = A._problem(_req(num_cus=256, arch="gfx950"))
+    assert au._num_segments(p_suffixed, "gfx950") == au._num_segments(p_plain, "gfx950")
+
+
+def test_request_layer_accepts_canonicalizable_arch():
+    """The request layer used to reject these; canonicalization is what fixed it.
+
+    ``_request_errors`` validates through ``ArchTarget.from_gfx``, an exact
+    lowercase dict lookup, so ``"GFX950"`` and ``"gfx950:sramecc+"`` were both
+    "unknown gfx target" before. They name a supported arch, so rejecting them
+    was a normalization gap, not a real capability limit.
+    """
+    for raw in ("GFX950", "Gfx950", "GFX942", "gfx950:sramecc+", "gfx942:xnack-"):
+        assert AC._request_errors(_req(num_cus=0, arch=raw)) == [], raw
     assert AC._request_errors(_req(num_cus=0, arch="gfx950")) == []
+    # Still rejected: canonicalization normalizes spelling, it does not invent
+    # support for an arch the catalog has no entry for.
+    assert AC._request_errors(_req(num_cus=0, arch="gfx404")) != []
 
 
 def test_segments_bounded_after_bump():
@@ -231,17 +246,29 @@ def test_segments_bounded_after_bump():
         au._RESOLVED_ATTENTION_ARCH = None
         p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
         # decode D128 kv8192: the bump is clamped -> no over-split (s120 == s304)
-        s120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=8192, batch=1))
-        s304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=8192, batch=1))
+        s120 = au._num_segments(
+            _prob(120, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942"
+        )
+        s304 = au._num_segments(
+            _prob(304, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942"
+        )
         assert s120 == s304, f"bump over-split D128 decode: {s120} -> {s304}"
         # kv boundary: 16385 and 32767 must STILL clamp (only kv>=32768 uncapped)
         for kv in (16385, 32767):
-            b120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=kv, batch=1))
-            b304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=kv, batch=1))
+            b120 = au._num_segments(
+                _prob(120, nq=32, nk=8, D=128, kv=kv, batch=1), "gfx942"
+            )
+            b304 = au._num_segments(
+                _prob(304, nq=32, nk=8, D=128, kv=kv, batch=1), "gfx942"
+            )
             assert b120 == b304, f"D128 kv={kv} must clamp: {b120} -> {b304}"
         # kv>=32768: uncapped -> the bump IS allowed to raise the split
-        u120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=32768, batch=1))
-        u304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=32768, batch=1))
+        u120 = au._num_segments(
+            _prob(120, nq=32, nk=8, D=128, kv=32768, batch=1), "gfx942"
+        )
+        u304 = au._num_segments(
+            _prob(304, nq=32, nk=8, D=128, kv=32768, batch=1), "gfx942"
+        )
         assert u304 > u120, f"kv32768 should scale: {u120} -> {u304}"
 
         # q>1 (prefill / spec-decode) D128: the else-branch clamp also holds
@@ -261,8 +288,8 @@ def test_segments_bounded_after_bump():
                 num_cus=num_cus,
             )
 
-        q120 = au._num_segments(qprob(120))
-        q304 = au._num_segments(qprob(304))
+        q120 = au._num_segments(qprob(120), "gfx942")
+        q304 = au._num_segments(qprob(304), "gfx942")
         assert q120 == q304, f"q>1 clamp must hold: {q120} -> {q304}"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
@@ -289,8 +316,8 @@ def test_gfx950_segments_conservatively_clamped():
             dict(nq=32, nk=4, D=64, kv=32768, batch=1),
         ]
         for c in cases:
-            s120 = au._num_segments(_prob(120, **c))
-            s256 = au._num_segments(_prob(256, **c))
+            s120 = au._num_segments(_prob(120, **c), "gfx950")
+            s256 = au._num_segments(_prob(256, **c), "gfx950")
             assert s120 == s256, f"gfx950 over-split {c}: {s120} -> {s256}"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
@@ -312,28 +339,28 @@ def test_target_ctas_bypasses_the_gfx950_clamp():
         au._RESOLVED_ATTENTION_ARCH = None
         p.attr(au, "_resolve_attention_arch", lambda: "gfx950")
         shape = dict(nq=8, nk=8, D=128, kv=8192, batch=1)  # num_2d=8 -> pre_bump 64
-        ceiling = au._pre_bump_segments(_prob(120, clamp_arch="gfx950", **shape))
+        ceiling = au._pre_bump_segments(_prob(120, **shape))
 
         # Default callers: clamped to the pre-bump ceiling regardless of the bump.
-        assert au._num_segments(_prob(120, clamp_arch="gfx950", **shape)) == ceiling
-        assert au._num_segments(_prob(256, clamp_arch="gfx950", **shape)) == ceiling
+        assert au._num_segments(_prob(120, **shape), "gfx950") == ceiling
+        assert au._num_segments(_prob(256, **shape), "gfx950") == ceiling
 
         # Explicit target_ctas: clamp steps aside, caller gets the raw split.
-        pinned = _prob(120, tctas=1024, clamp_arch="gfx950", **shape)
+        pinned = _prob(120, tctas=1024, **shape)
         raw = pinned.select_3d()[0].NUM_SEGMENTS_PER_SEQ
         assert (
             raw > ceiling
         ), f"shape no longer exercises the bypass: {raw} <= {ceiling}"
-        assert au._num_segments(pinned) == raw, (
+        assert au._num_segments(pinned, "gfx950") == raw, (
             "explicit target_ctas must bypass the gfx950 clamp: "
-            f"got {au._num_segments(pinned)}, want the unclamped {raw}"
+            f"got {au._num_segments(pinned, 'gfx950')}, want the unclamped {raw}"
         )
 
         # The bypass is scoped to gfx950's blanket clamp; gfx942 keeps its measured
         # carve-outs, which are NOT a target_ctas override surface.
         p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
-        g942 = _prob(120, tctas=1024, clamp_arch="gfx942", **shape)
-        assert au._num_segments(g942) <= au._pre_bump_segments(g942)
+        g942 = _prob(120, tctas=1024, **shape)
+        assert au._num_segments(g942, "gfx942") <= au._pre_bump_segments(g942)
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
         p.restore()
@@ -398,17 +425,24 @@ def test_gfx942_partition_routing_matches_develop():
             unfloored = A._problem(_req(num_cus=38, arch="gfx942", **shape))
             assert resolved.num_cus == 38, shape
             assert resolved.select_path() == unfloored.select_path(), shape
-            assert au._num_segments(resolved) == au._num_segments(unfloored), shape
+            assert au._num_segments(resolved, "gfx942") == au._num_segments(
+                unfloored, "gfx942"
+            ), shape
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
         p.restore()
 
 
 def test_segment_clamp_keys_on_request_arch():
-    """The split-KV clamp keys on the arch the problem TARGETS, not the running
-    box. When ``problem.clamp_arch`` is set the running-box resolver is never
-    consulted, so an off-box build targeting one arch can't pick up another
-    arch's clamp."""
+    """The split-KV clamp keys on the arch the caller TARGETS, never the box.
+
+    This used to be conditional: the clamp read ``problem.clamp_arch`` when set
+    and fell back to the running-box resolver when it wasn't, so an off-box
+    build only avoided another arch's clamp if the dispatcher remembered to fill
+    the field. ``_num_segments`` now takes the arch as a required argument, so
+    the fallback is gone and the assertion can be absolute -- the resolver is
+    not consulted at all, for either arch, with no field to set.
+    """
     p = _Patch()
     calls = {"n": 0}
 
@@ -420,12 +454,9 @@ def test_segment_clamp_keys_on_request_arch():
     try:
         au._RESOLVED_ATTENTION_ARCH = None
         p.attr(au, "_resolve_attention_arch", _spy)
-        # clamp_arch set -> resolver is never consulted.
-        au._num_segments(_prob(256, clamp_arch="gfx942", **shape))
-        assert calls["n"] == 0, "running-box arch consulted despite clamp_arch set"
-        # clamp_arch unset -> falls back to the running-box resolver.
-        au._num_segments(_prob(256, **shape))
-        assert calls["n"] >= 1, "running-box resolver not used as fallback"
+        for arch in ("gfx942", "gfx950"):
+            au._num_segments(_prob(256, **shape), arch)
+        assert calls["n"] == 0, "running-box arch consulted despite an explicit arch"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
         p.restore()
@@ -445,16 +476,16 @@ def test_every_auto_resolve_arch_clamps_the_split():
     uncapped (D256, or long-kv D128) would fail for a legitimate reason."""
     shape = dict(nq=8, nk=8, D=128, kv=2048, batch=1)
     for arch in sorted(AC._AUTO_RESOLVE_ARCHS):
-        prob = _prob(256, clamp_arch=arch, **shape)
+        prob = _prob(256, **shape)
         raw = prob.select_3d()[0].NUM_SEGMENTS_PER_SEQ
         ceiling = au._pre_bump_segments(prob)
         assert raw > ceiling, (
             f"test shape no longer exercises the clamp on {arch}: "
             f"raw {raw} <= ceiling {ceiling}"
         )
-        assert au._num_segments(prob) <= ceiling, (
+        assert au._num_segments(prob, arch) <= ceiling, (
             f"{arch} is in _AUTO_RESOLVE_ARCHS but has no segment clamp: "
-            f"split {au._num_segments(prob)} exceeds the pre-bump ceiling {ceiling}"
+            f"split {au._num_segments(prob, arch)} exceeds the pre-bump ceiling {ceiling}"
         )
 
 

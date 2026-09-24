@@ -117,10 +117,10 @@ def _problem(**kw) -> UnifiedAttentionProblem:
 def _reference_gfx942_fp16_flash(problem):
     """Independent reconstruction of the pre-refactor fp16-flash branch body."""
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl("gfx942")
-    num_warps = _select_gfx942_flash_num_warps(problem)
+    num_warps = _select_gfx942_flash_num_warps(problem, "gfx942")
     use_cfvst = _gfx942_flash_use_cfvst(problem)
     use_single = _gfx942_flash_use_single_buffer(problem)
-    use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
+    use_mask_limit = _enable_gfx942_flash_mask_limit(problem, "gfx942")
     return UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -134,10 +134,10 @@ def _reference_gfx942_fp16_flash(problem):
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
         num_warps=num_warps,
-        waves_per_eu=_select_2d_waves_per_eu(problem),
+        waves_per_eu=_select_2d_waves_per_eu(problem, "gfx942"),
         kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size=_select_2d_tile_size(problem),
-        block_m_per_warp=_select_2d_block_m_per_warp(problem),
+        tile_size=_select_2d_tile_size(problem, "gfx942"),
+        block_m_per_warp=_select_2d_block_m_per_warp(problem, "gfx942"),
         use_mfma_32x32x8=True,
         use_transposed_qk_32x32=True,
         use_transposed_scalar_state=use_mask_limit,
@@ -146,11 +146,11 @@ def _reference_gfx942_fp16_flash(problem):
         use_transposed_mask_limit=use_mask_limit,
         use_conflict_free_v_store=use_cfvst,
         use_k_single_buffer=use_single,
-        use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
-        ring_depth=_select_gfx942_flash_ring_depth(problem),
+        use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem, "gfx942"),
+        ring_depth=_select_gfx942_flash_ring_depth(problem, "gfx942"),
         k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
-        use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
-        use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
+        use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem, "gfx942"),
+        use_q_direct_global=_enable_gfx942_flash_q_direct(problem, "gfx942"),
         kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
     )
@@ -162,15 +162,15 @@ def _reference_gfx942_fp16_flash(problem):
 def _reference_gfx942_bf16_flash(problem):
     """Independent reconstruction of the pre-refactor bf16-flash branch body."""
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl("gfx942")
-    use_ring = _enable_gfx942_flash_k_sliced_ring(problem)
+    use_ring = _enable_gfx942_flash_k_sliced_ring(problem, "gfx942")
     if use_ring:
         nw = _gfx942_flash_wide_setting()
         single_k = False
         use_cfvst = True
     else:
-        nw, single_k = _gfx942_bf16_wide_geometry(problem)
+        nw, single_k = _gfx942_bf16_wide_geometry(problem, "gfx942")
         use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
-    use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
+    use_mask_limit = _enable_gfx942_flash_mask_limit(problem, "gfx942")
     return UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -184,9 +184,9 @@ def _reference_gfx942_bf16_flash(problem):
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
         num_warps=nw,
-        waves_per_eu=_select_2d_waves_per_eu(problem),
+        waves_per_eu=_select_2d_waves_per_eu(problem, "gfx942"),
         kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size=64 if use_ring else _gfx942_bf16_wide_tile_size(problem),
+        tile_size=64 if use_ring else _gfx942_bf16_wide_tile_size(problem, "gfx942"),
         block_m_per_warp=32,
         use_mfma_32x32x8=True,
         use_transposed_qk_32x32=True,
@@ -197,10 +197,10 @@ def _reference_gfx942_bf16_flash(problem):
         use_conflict_free_v_store=use_cfvst,
         use_k_single_buffer=single_k,
         use_k_sliced_ring=use_ring,
-        ring_depth=_select_gfx942_flash_ring_depth(problem),
+        ring_depth=_select_gfx942_flash_ring_depth(problem, "gfx942"),
         k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
-        use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
-        use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
+        use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem, "gfx942"),
+        use_q_direct_global=_enable_gfx942_flash_q_direct(problem, "gfx942"),
         kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
     )
@@ -217,9 +217,9 @@ def _reference_gfx942_generic(problem):
     transposed helpers hard-gate to gfx950, so on gfx942 they are off.
     """
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl("gfx942")
-    combo = _enable_combo_2d(problem)
+    combo = _enable_combo_2d(problem, "gfx942")
     combo_no_sw = combo and problem.sliding_window == 0
-    subflags = _enable_transposed_subflags(problem)
+    subflags = _enable_transposed_subflags(problem, "gfx942")
     scalar_state = combo or subflags
     skip_legacy_qreg = combo or subflags
     _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
@@ -236,28 +236,30 @@ def _reference_gfx942_generic(problem):
         use_alibi=problem.use_alibi,
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
-        num_warps=_select_2d_num_warps(problem),
-        waves_per_eu=_select_2d_waves_per_eu(problem),
+        num_warps=_select_2d_num_warps(problem, "gfx942"),
+        waves_per_eu=_select_2d_waves_per_eu(problem, "gfx942"),
         kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size=_select_2d_tile_size(problem),
-        block_m_per_warp=_select_2d_block_m_per_warp(problem),
-        use_mfma_32x32=_enable_mfma_32x32(problem),
-        use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
-        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
+        tile_size=_select_2d_tile_size(problem, "gfx942"),
+        block_m_per_warp=_select_2d_block_m_per_warp(problem, "gfx942"),
+        use_mfma_32x32=_enable_mfma_32x32(problem, "gfx942"),
+        use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem, "gfx942"),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(
+            problem, "gfx942"
+        ),
         use_transposed_scalar_state=scalar_state,
         use_transposed_mask_once=mask_opts,
         use_transposed_mask_limit=mask_opts,
         use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
-        use_early_v_schedule=_enable_early_v_schedule(problem),
+        use_early_v_schedule=_enable_early_v_schedule(problem, "gfx942"),
         use_fast_paged_kv_desc=(
             combo_no_sw
             and not problem.use_fp8
             and problem.num_query_heads == 64
             and problem.num_kv_heads == 8
-            and _select_2d_tile_size(problem) == 64
+            and _select_2d_tile_size(problem, "gfx942") == 64
         ),
-        use_register_pv=_enable_register_pv(problem),
-        use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
+        use_register_pv=_enable_register_pv(problem, "gfx942"),
+        use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem, "gfx942"),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
     )
 
@@ -275,21 +277,21 @@ def _reference_gfx950_generic(problem):
     from dataclasses import replace
 
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl("gfx950")
-    combo = _enable_combo_2d(problem)
+    combo = _enable_combo_2d(problem, "gfx950")
     combo_no_sw = combo and problem.sliding_window == 0
-    subflags = _enable_transposed_subflags(problem)
+    subflags = _enable_transposed_subflags(problem, "gfx950")
     scalar_state = combo or subflags
     skip_legacy_qreg = combo or subflags
     _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
     mask_opts = (combo_no_sw and not _bias_active) or subflags
     sched = {
-        "use_v_double_buffer": _enable_v_double_buffer(problem),
-        "use_sched_barrier": _enable_sched_barrier(problem),
+        "use_v_double_buffer": _enable_v_double_buffer(problem, "gfx950"),
+        "use_sched_barrier": _enable_sched_barrier(problem, "gfx950"),
     }
-    if _enable_softmax_mfma_interleave(problem):
+    if _enable_softmax_mfma_interleave(problem, "gfx950"):
         sched["use_softmax_mfma_interleave"] = True
         sched["softmax_interleave_mode"] = 1
-    if _enable_k_single_buffer(problem):
+    if _enable_k_single_buffer(problem, "gfx950"):
         sched["use_k_single_buffer"] = True
     spec = UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
@@ -303,32 +305,34 @@ def _reference_gfx950_generic(problem):
         use_alibi=problem.use_alibi,
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
-        num_warps=_select_2d_num_warps(problem),
-        waves_per_eu=_select_2d_waves_per_eu(problem),
+        num_warps=_select_2d_num_warps(problem, "gfx950"),
+        waves_per_eu=_select_2d_waves_per_eu(problem, "gfx950"),
         kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size=_select_2d_tile_size(problem),
-        block_m_per_warp=_select_2d_block_m_per_warp(problem),
-        use_mfma_32x32=_enable_mfma_32x32(problem),
-        use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
-        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
+        tile_size=_select_2d_tile_size(problem, "gfx950"),
+        block_m_per_warp=_select_2d_block_m_per_warp(problem, "gfx950"),
+        use_mfma_32x32=_enable_mfma_32x32(problem, "gfx950"),
+        use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem, "gfx950"),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(
+            problem, "gfx950"
+        ),
         use_transposed_scalar_state=scalar_state,
         use_transposed_mask_once=mask_opts,
         use_transposed_mask_limit=mask_opts,
         use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
-        use_early_v_schedule=_enable_early_v_schedule(problem),
+        use_early_v_schedule=_enable_early_v_schedule(problem, "gfx950"),
         use_fast_paged_kv_desc=(
             combo_no_sw
             and not problem.use_fp8
             and problem.num_query_heads == 64
             and problem.num_kv_heads == 8
-            and _select_2d_tile_size(problem) == 64
+            and _select_2d_tile_size(problem, "gfx950") == 64
         ),
-        use_register_pv=_enable_register_pv(problem),
-        use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
+        use_register_pv=_enable_register_pv(problem, "gfx950"),
+        use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem, "gfx950"),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
         **sched,
     )
-    if _kau._d256_gfx950_fast(problem):
+    if _kau._d256_gfx950_fast(problem, "gfx950"):
         spec = replace(spec, **_kau._d256_gfx950_spec_overrides())
     return spec
 
@@ -366,8 +370,8 @@ _COHORTS = [
     _Cohort(
         name="gfx942_fp16_flash",
         arch="gfx942",
-        spec_fn=lambda p: bld._spec_gfx942_fp16_flash(p),
-        gate=_enable_gfx942_fp16_flash,
+        spec_fn=lambda p: bld._spec_gfx942_fp16_flash(p, "gfx942"),
+        gate=lambda p: _enable_gfx942_fp16_flash(p, "gfx942"),
         # MHA fp16 (the dense_pipe cohort): long- and short-context.
         problems=[
             lambda: _problem(num_query_heads=16, num_kv_heads=16),
@@ -394,8 +398,8 @@ _COHORTS = [
     _Cohort(
         name="gfx942_bf16_flash",
         arch="gfx942",
-        spec_fn=lambda p: bld._spec_gfx942_bf16_flash(p),
-        gate=_enable_gfx942_bf16_flash,
+        spec_fn=lambda p: bld._spec_gfx942_bf16_flash(p, "gfx942"),
+        gate=lambda p: _enable_gfx942_bf16_flash(p, "gfx942"),
         # GQA bf16: hd128 (no-ring) and hd64 (ring) exercise both sub-branches.
         problems=[
             lambda: _problem(dtype="bf16"),
@@ -419,10 +423,10 @@ _COHORTS = [
     _Cohort(
         name="gfx942_generic",
         arch="gfx942",
-        spec_fn=lambda p: bld._spec_generic_2d_non_gfx950(p),
+        spec_fn=lambda p: bld._spec_generic_2d_non_gfx950(p, "gfx942"),
         # Generic = the fallthrough: reached when neither gfx942 flash gate fires.
-        gate=lambda p: not _enable_gfx942_bf16_flash(p)
-        and not _enable_gfx942_fp16_flash(p),
+        gate=lambda p: not _enable_gfx942_bf16_flash(p, "gfx942")
+        and not _enable_gfx942_fp16_flash(p, "gfx942"),
         # GQA short-context (small_q_narrow carve-out) falls through on both dtypes.
         problems=[
             lambda: _problem(
@@ -448,7 +452,7 @@ _COHORTS = [
     _Cohort(
         name="gfx950_generic",
         arch="gfx950",
-        spec_fn=lambda p: bld._spec_gfx950_generic(p),
+        spec_fn=lambda p: bld._spec_gfx950_generic(p, "gfx950"),
         # Every gfx950 2D problem is generic (no gfx950 flash branches; combo /
         # d256 all live inside this spec_fn), so the gate is unconditionally true.
         gate=lambda p: True,
@@ -497,7 +501,7 @@ class TestPerEngineSpecFns(unittest.TestCase):
                 for mk in c.problems:
                     p = mk()
                     self.assertEqual(
-                        asdict(bld._tiled_spec_from_problem(p)),
+                        asdict(bld._tiled_spec_from_problem(p, c.arch)),
                         asdict(c.spec_fn(p)),
                     )
 
@@ -510,7 +514,7 @@ class TestPerEngineSpecFns(unittest.TestCase):
             with self.subTest(cohort=c.name), _PinnedArch(c.arch):
                 p = c.foreign()
                 self.assertFalse(c.gate(p))
-                spec = bld._tiled_spec_from_problem(p)
+                spec = bld._tiled_spec_from_problem(p, c.arch)
                 self.assertEqual(getattr(spec, c.foreign_field), c.foreign_value)
 
 
@@ -520,7 +524,8 @@ def _reference_generic_3d(problem):
     gfx942 and gfx950 share one 3D path (the ``_gfx942_3d_*`` helpers self-gate),
     so a single reference covers both arches.
     """
-    UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(au._RESOLVED_ATTENTION_ARCH)
+    _arch = au._RESOLVED_ATTENTION_ARCH
+    UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(_arch)
     return UnifiedAttention3DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -530,15 +535,15 @@ def _reference_generic_3d(problem):
         use_sinks=problem.use_sinks,
         sliding_window=problem.sliding_window,
         has_softcap=problem.softcap > 0,
-        num_segments=_num_segments(problem),
+        num_segments=_num_segments(problem, _arch),
         use_alibi=problem.use_alibi,
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
-        waves_per_eu=_select_3d_waves_per_eu(problem),
+        waves_per_eu=_select_3d_waves_per_eu(problem, _arch),
         kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size_override=_gfx942_3d_tile_size_override(problem),
-        use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
-        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
+        tile_size_override=_gfx942_3d_tile_size_override(problem, _arch),
+        use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem, _arch),
+        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, _arch),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
     )
 
@@ -577,13 +582,13 @@ class TestGeneric3dSpecFn(unittest.TestCase):
             for kw in self._PROBLEMS:
                 p = self._decode_problem(**kw)
                 self.assertEqual(
-                    asdict(bld._spec_generic_3d(p)),
+                    asdict(bld._spec_generic_3d(p, arch)),
                     asdict(_reference_generic_3d(p)),
                     f"{arch} {kw}: spec_fn != reference",
                 )
                 self.assertEqual(
-                    asdict(bld._tiled_3d_spec_from_problem(p)),
-                    asdict(bld._spec_generic_3d(p)),
+                    asdict(bld._tiled_3d_spec_from_problem(p, arch)),
+                    asdict(bld._spec_generic_3d(p, arch)),
                     f"{arch} {kw}: pipeline does not delegate to spec_fn",
                 )
 

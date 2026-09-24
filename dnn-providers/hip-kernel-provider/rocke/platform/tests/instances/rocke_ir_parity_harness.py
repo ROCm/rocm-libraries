@@ -619,12 +619,12 @@ def build_attention_d256_gfx950(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx950_fast(problem):
+            if not _d256_gfx950_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 fast spec not selected under pinned arch {arch!r}; "
                     "would pin the fallback (no pad/interleave)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
                 raise RuntimeError(
                     "expected pad+interleave in the D256 fast spec; got "
@@ -654,12 +654,12 @@ def build_attention_d256_gfx942(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx942_fast(problem):
+            if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 gfx942 fast route not selected under pinned arch "
                     f"{arch!r}; would pin the fallback (slow scalar path)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             return build_gfx942_4warp_gqa(spec, arch=arch)
 
     return _build
@@ -705,7 +705,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
                     f"GQA head-fold not selected under pinned arch {arch!r}; "
                     "would pin the unfolded kernel"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             kernel = build_gfx942_4warp_gqa(spec, arch=arch)
             if not kernel.name.endswith("_4wgqa_fold"):
                 raise RuntimeError(

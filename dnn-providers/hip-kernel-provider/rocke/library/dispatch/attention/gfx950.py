@@ -49,6 +49,7 @@ def _dense_spec(req: OperatorRequest):
     )
 
     assert isinstance(req, AttentionRequest)
+    # Exact compare: ``arch`` is canonical by construction. See gfx942.py.
     if req.arch != "gfx950":
         raise ValueError(
             f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"

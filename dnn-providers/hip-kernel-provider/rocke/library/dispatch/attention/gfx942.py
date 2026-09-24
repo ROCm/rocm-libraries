@@ -84,7 +84,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             return False, "problem routes to 3D, not 2D"
         from kernels.common.attention_unified import _enable_gfx942_fp16_flash
 
-        if not _enable_gfx942_fp16_flash(problem):
+        if not _enable_gfx942_fp16_flash(problem, req.arch):
             return False, "gfx942 fp16 flash not eligible for this shape"
         return True, "ok"
 
@@ -170,6 +170,9 @@ def _dense_spec(req: OperatorRequest):
     )
 
     assert isinstance(req, AttentionRequest)
+    # Exact compare, deliberately: ``AttentionRequest.__post_init__`` has already
+    # canonicalized ``arch``, so a case- or suffix-insensitive compare here would
+    # be defending against an input shape that cannot reach this function.
     if req.arch != "gfx942":
         raise ValueError(
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"

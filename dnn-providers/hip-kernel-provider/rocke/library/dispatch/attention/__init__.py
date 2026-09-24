@@ -65,7 +65,7 @@ def dense_spec_for_request(req: AttentionRequest):
     """Return the concrete dense spec selected by an explicit ``req.arch``."""
     if not isinstance(req, AttentionRequest):
         raise TypeError(f"expected AttentionRequest, got {type(req).__name__}")
-    arch = req.arch.strip() if isinstance(req.arch, str) else ""
+    arch = req.arch  # canonical already: AttentionRequest.__post_init__
     if not arch:
         raise ValueError("attention dense dispatch requires an explicit arch")
     try:
