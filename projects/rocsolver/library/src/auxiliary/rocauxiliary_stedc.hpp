@@ -352,6 +352,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 }
 
 //--------------------------------------------------------------------------------------//
+/** STEDC_NORMALIZE_ENABLED returns false when the environment variable
+    ROCSOLVER_STEDC_NOSCALE is set to a non-zero integer, in which case STEDC_NORMALIZE_KERNEL
+    and STEDC_RESCALE_KERNEL are both skipped. It is read on every call so that it can be
+    toggled at runtime. **/
+inline bool stedc_normalize_enabled()
+{
+    const char* str = std::getenv("ROCSOLVER_STEDC_NOSCALE");
+    return str == nullptr || std::strtol(str, nullptr, 0) == 0;
+}
+
+//--------------------------------------------------------------------------------------//
 /** STEDC_DIVIDE_KERNEL implements the divide phase of the DC algorithm. It
     divides the input matrix into a 'blks' sub-blocks.
         - This kernel is to be called with as many groups in x as needed to cover all
@@ -2112,8 +2123,11 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
 
         // 0. normalize phase
         //-----------------------------
-        ROCSOLVER_LAUNCH_KERNEL((stedc_normalize_kernel<S>), dim3(1, batch_count), dim3(STEDC_BDIM),
-                                (I)0, stream, n, D + shiftD, strideD, E + shiftE, strideE, splits);
+        const bool normalize = stedc_normalize_enabled();
+        if(normalize)
+            ROCSOLVER_LAUNCH_KERNEL((stedc_normalize_kernel<S>), dim3(1, batch_count),
+                                    dim3(STEDC_BDIM), (I)0, stream, n, D + shiftD, strideD,
+                                    E + shiftE, strideE, splits);
 
         // 1. divide phase
         //-----------------------------
@@ -2268,8 +2282,9 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
 
         // 4. undo the normalization
         //----------------------
-        ROCSOLVER_LAUNCH_KERNEL((stedc_rescale_kernel<S>), dim3(1, batch_count), dim3(STEDC_BDIM),
-                                (I)0, stream, n, D + shiftD, strideD, splits);
+        if(normalize)
+            ROCSOLVER_LAUNCH_KERNEL((stedc_rescale_kernel<S>), dim3(1, batch_count),
+                                    dim3(STEDC_BDIM), (I)0, stream, n, D + shiftD, strideD, splits);
 
         // 5. update and sort
         //----------------------

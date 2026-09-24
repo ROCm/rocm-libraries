@@ -58,3 +58,20 @@ For more information, see :doc:`Use multi-level logging <../howto/logging>`.
         | Sets the full path name for profile logging output.
       - | Full path name for profile log files.
         | Falls back to ``ROCSOLVER_LOG_PATH`` if not set.
+
+Algorithm variables
+================================================================================
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``ROCSOLVER_STEDC_NOSCALE``
+        | Disables the normalization of the tridiagonal matrix that STEDC applies before
+          the divide-and-conquer phase. This also affects SYEVD and HEEVD. Read on every
+          call, so it can be changed at runtime.
+      - | 0: Normalization enabled (if not set)
+        | Non-zero integer: Normalization disabled
