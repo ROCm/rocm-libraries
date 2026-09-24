@@ -101,10 +101,80 @@ int computeDsLoadWmmaWindowsNeeded(int dsLoadCount, const DsLoadBudgetConfig& co
     return static_cast<int>(computeDsLoadWmmaWindowDistribution(dsLoadCount, config).size());
 }
 
-// The previous prefix-density implementation was intentionally removed. This
-// entry point now receives the barrier analysis computed by
-// CDNA5ReadyQueue::onInitRegion and keeps it as the input for the next budget
-// policy.
+// How CDNA5ReadyQueue consumes this budget. This function only assigns
+// per-window instruction counts. Every pick decision below lives in
+// src/transforms/asm/dag/CDNA5.hpp.
+//
+// Call. onInitRegion runs this after Layer 1/2/3 barrier thresholds are final,
+// and only when hideBudgetPrescanEnabled():
+//   hideBudget_ = analyzeWmmaHideBudget(deps.dag, hideBudgetBarriers,
+//       wmmaHideBudgetBase, dsLoadBudgetConfig());
+// An empty barriers vector leaves issueBudgetByWmmaIndex false. The scheduler
+// then looks budgets up by WMMA instruction identity and does not accumulate
+// dsLoadBudget.
+//
+// Arguments CDNA5 passes:
+//   barriers. One After record per source-token group (anchor is the group's
+//     front barrier) and one Before record per destination-token group (anchor
+//     is the back barrier). A group present in both estimators contributes
+//     both records. threshold is the final barrierWmmaThresholds_ value.
+//     dsLoadCount and dsLoadWmmaNeeded come from that estimator. overlap is
+//     the Layer-2 exclusive-overlap flag.
+//   wmmaHideBudgetBase. Taken from the first matrix instruction:
+//     max(0, latencyCycles - issueCycles - ldScaleCycles). ldScaleCycles is 1
+//     when that instruction's blockedScaleMask is non-zero, otherwise 0.
+//     Step 4 uses it as the non-ds fill target in the front half of windows,
+//     measured from an empty window. Already-assigned dsLoadBudget does not
+//     reduce that target.
+//   dsLoadConfig. dsReadPerCap(), dsReadQueueDepth(), dsReadThrottleLatency(),
+//     the throttle transition factor and entry count, and
+//     wmmaIssueConfig.latency. Non-positive dsReadPerCap makes both
+//     distributors fall back to an even split.
+//
+// Counters. onInitRegion zeros them. pickOneFromWMMA adds the just-opened
+// window when issueBudgetByWmmaIndex is set. The window index is
+// wmmaIssuedCountThisRegion_ - 1:
+//   cumulativeWmmaHideBudget_  += issueBudgetFor(windowIndex)
+//   cumulativeWmmaDsLoadBudget_ += dsLoadBudgetFor(windowIndex)
+// rememberPick counts every picked non-WMMA, including barriers and pseudos,
+// in nonWmmaIssuedThisRegion_. A picked ds_read also increments
+// dsLoadIssuedThisRegion_. Both counters are region-wide, so an early batch
+// and a fitting batch spend the same cumulative DS budget.
+//
+// Holding the next WMMA. Phase B sets blockWmmaForHideBudget while some
+// non-WMMA is still pickable and either
+// nonWmmaIssuedThisRegion_ < cumulativeWmmaHideBudget_ or
+// dsLoadIssuedThisRegion_ < cumulativeWmmaDsLoadBudget_. Catching up releases
+// the WMMA. That is what stops an early burst at this window's dsLoadBudget
+// instead of dumping the rest of the batch.
+//
+// Choosing a ds_read. findSmallestPickableNonWmma treats the DS budget as an
+// upper gate. dsLoadBudgetEnabled is true when hideBudget_.barriers is
+// non-empty. dsLoadBudgetPending is
+// dsLoadIssuedThisRegion_ < cumulativeWmmaDsLoadBudget_.
+//   The best dsReadPriority load tries the normal gates first, early or not.
+//   While dsCapWait is 0 it pays dsReadThrottleWait() only, and that wait must
+//   fit in the remaining WMMA scheduling space (coIssueCyclePos_ +
+//   dsSchedulingBudgetUsed_). dsCapWait comes from the sliding dsIssueCap_
+//   window (dsReadPerCap loads per dsIssueCapSpan() cycles). A full window
+//   used to be a hard reject. A load that is not early still pays that wait
+//   when it fits. Per-window dsLoadBudget does not replace that cap.
+//   If that attempt fails and the DS budget is still pending, the scan accepts
+//   a ready load in earlyDsLoads_ that
+//   does not overlap the active WMMA source. That pick uses wait 0, so it
+//   skips the cap and the throttle wait. A wait of 0 also sets dsWindowOk,
+//   which keeps VALU out of this pick.
+//
+// Which loads are early. Before this function runs, onInitRegion marks a
+// barrier group's matched ds_reads early when dsLoadWmmaNeeded is greater
+// than the span this analysis will fill. After uses
+// min(dsLoadWmmaNeeded, threshold). Before uses numWindows - threshold.
+// Overlap is the usual reason the span is short; the test is the comparison,
+// not the overlap flag. This mark does not subtract the After-only tail
+// reserve, so a batch that only loses windows to that reserve is not early.
+// Phase G (findOldestFallbackNonWmma) can still issue the best
+// ds_read when nothing else is pickable. It ignores earlyDsLoads_ and still
+// charges dsReadThrottleWait().
 RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                                        const std::vector<WmmaHideBudgetBarrierInfo>& barriers,
                                        int wmmaHideBudgetBase,
@@ -135,10 +205,8 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
     budget.windows.reserve(static_cast<size_t>(budget.wmmaInstructionCount));
     for (const dag::DAGNode& node : regionDag.nodes) {
         if (!isMatrixInstruction(*node.inst)) continue;
-        WmmaWindowBudget window;
-        window.wmma = node.inst;
         budget.windowIndex[node.inst] = budget.numWindows();
-        budget.windows.push_back(window);
+        budget.windows.push_back({});
     }
 
     auto addDsBudget = [&](int window, int count) {
@@ -147,6 +215,18 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
         target.dsLoadBudget += count;
         target.issueBudget += count;
     };
+
+    // After-overlap keeps this many windows free so one ds_load latency remains
+    // before the barrier. Before groups are not clipped.
+    int dsLoadLatency = 0;
+    for (const dag::DAGNode& node : regionDag.nodes) {
+        if (!isDSRead(*node.inst)) continue;
+        dsLoadLatency = std::max(dsLoadLatency, node.inst->latencyCycles);
+    }
+    const int dsReserveWindows = dsLoadLatency <= 0 || dsLoadConfig.wmmaLatency <= 0
+                                     ? 0
+                                     : dsLoadLatency / dsLoadConfig.wmmaLatency;
+    const int overlapUsableEnd = std::max(0, budget.numWindows() - dsReserveWindows);
 
     auto distributeEvenly = [&](int begin, int end, int dsLoads) {
         const int span = end - begin;
@@ -176,9 +256,55 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
             addDsBudget(begin + std::min(i, span - 1), distribution[static_cast<size_t>(i)]);
     };
 
+    // Overlap keeps the throttle shape (dsReadPerCap cap and throttle latency)
+    // for the prefix that fits in the legal span. Loads the model placed past
+    // that span fill the current smallest windows, one tier at a time. Once
+    // every window is at dsReadPerCap, that same pass is the even fill of the
+    // remainder; ties within a tier go to the earlier windows. The After caller
+    // clips its end to numWindows - (dsLoadLatency / wmmaLatency). Before groups
+    // pass their full span.
+    auto distributeOverlap = [&](int begin, int end, int dsLoads) {
+        const int span = end - begin;
+        if (span <= 0 || dsLoads <= 0) return;
+        if (dsLoadConfig.dsReadPerCap <= 0) {
+            distributeEvenly(begin, end, dsLoads);
+            return;
+        }
+
+        const std::vector<int> distribution =
+            computeDsLoadWmmaWindowDistribution(dsLoads, dsLoadConfig);
+        std::vector<int> counts(static_cast<size_t>(span), 0);
+        int placed = 0;
+        const int fitted = std::min(span, static_cast<int>(distribution.size()));
+        for (int i = 0; i < fitted; ++i) {
+            counts[static_cast<size_t>(i)] = distribution[static_cast<size_t>(i)];
+            placed += distribution[static_cast<size_t>(i)];
+        }
+
+        int leftover = dsLoads - placed;
+        while (leftover > 0) {
+            const int minCount = *std::min_element(counts.begin(), counts.end());
+            int holes = 0;
+            for (int count : counts)
+                if (count == minCount) ++holes;
+            const int give = std::min(leftover, holes);
+            int given = 0;
+            for (int& count : counts) {
+                if (given == give) break;
+                if (count != minCount) continue;
+                ++count;
+                ++given;
+            }
+            leftover -= give;
+        }
+
+        for (int i = 0; i < span; ++i) addDsBudget(begin + i, counts[static_cast<size_t>(i)]);
+    };
+
     // Step 2: distribute every Before barrier's DS loads over the WMMA windows at
-    // and after its final threshold. Overlapping groups preserve the existing
-    // even policy; non-overlapping groups use the throttle-shaped policy.
+    // and after its final threshold. Overlapping groups place the throttle shape
+    // first, then fill smaller holes with anything that does not fit.
+    // Non-overlapping groups use the throttle-shaped policy.
     for (const WmmaHideBudgetBarrierInfo& info : barriers) {
         if (info.position != WmmaHideBudgetBarrierPosition::Before) continue;
 
@@ -194,24 +320,28 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
         }
 
         if (info.overlap)
-            distributeEvenly(begin, budget.numWindows(), dsLoads);
+            distributeOverlap(begin, budget.numWindows(), dsLoads);
         else
             distributeByThrottle(begin, budget.numWindows(), dsLoads);
         PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis before] barrier=" << info.barrier
                              << " threshold=" << info.threshold << " begin=" << begin
                              << " end=" << budget.numWindows() << " dsLoadCount=" << dsLoads
-                             << " overlap=" << info.overlap
-                             << " policy=" << (info.overlap ? "even" : "throttle") << "\n");
+                             << " overlap=" << info.overlap << " policy="
+                             << (info.overlap ? "throttle-then-even" : "throttle") << "\n");
     }
 
     // Step 3: distribute every After barrier's DS loads from window 0 up to the
     // smaller of its required WMMA span and final threshold, using the same
-    // overlap-dependent policy as Before groups.
+    // overlap-dependent policy as Before groups. Overlap places the throttle
+    // shape first and even-fills smaller holes with the remainder.
     for (const WmmaHideBudgetBarrierInfo& info : barriers) {
         if (info.position != WmmaHideBudgetBarrierPosition::After) continue;
 
-        const int end =
+        int end =
             std::clamp(std::min(info.dsLoadWmmaNeeded, info.threshold), 0, budget.numWindows());
+        // Only After loads must finish one ds_load latency before the barrier.
+        // Before loads stay in the windows at and after their threshold.
+        if (info.overlap && overlapUsableEnd > 0) end = std::min(end, overlapUsableEnd);
         const int dsLoads = std::max(0, info.dsLoadCount);
         if (end == 0 || dsLoads == 0) {
             PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis after] barrier=" << info.barrier
@@ -222,26 +352,27 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
         }
 
         if (info.overlap)
-            distributeEvenly(0, end, dsLoads);
+            distributeOverlap(0, end, dsLoads);
         else
             distributeByThrottle(0, end, dsLoads);
-        PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis after] barrier=" << info.barrier
-                             << " threshold=" << info.threshold << " wmmaNeeded="
-                             << info.dsLoadWmmaNeeded << " begin=0" << " end=" << end
-                             << " dsLoadCount=" << dsLoads << " overlap=" << info.overlap
-                             << " policy=" << (info.overlap ? "even" : "throttle") << "\n");
+        PASS_DEBUG(
+            std::cerr << "[WmmaHideBudgetAnalysis after] barrier=" << info.barrier << " threshold="
+                      << info.threshold << " wmmaNeeded=" << info.dsLoadWmmaNeeded << " begin=0"
+                      << " end=" << end << " dsLoadCount=" << dsLoads << " overlap=" << info.overlap
+                      << " policy=" << (info.overlap ? "throttle-then-even" : "throttle") << "\n");
     }
 
     // Step 4: place remaining non-DS-load instructions in the first 50% of WMMA
-    // windows. Walk top-down first and fill each window to wmmaHideBudgetBase.
-    // Only after every front-half window reaches the base do we distribute any
-    // remainder evenly.
+    // windows. dsLoadBudget stays in issueBudget, but this fill treats every
+    // window as empty: walk top-down and give each window wmmaHideBudgetBase
+    // non-DS instructions. Only after every front-half window reaches that base
+    // do we distribute any remainder evenly.
     const int frontHalfEnd = (budget.numWindows() + 1) / 2;
     int remainingNonDs = budget.nonDsLoadInstructionCount;
     if (frontHalfEnd > 0 && remainingNonDs > 0) {
         for (int i = 0; i < frontHalfEnd && remainingNonDs > 0; ++i) {
             WmmaWindowBudget& window = budget.windows[static_cast<size_t>(i)];
-            const int deficit = std::max(0, budget.wmmaHideBudgetBase - window.issueBudget);
+            const int deficit = budget.wmmaHideBudgetBase;
             const int contribution = std::min(deficit, remainingNonDs);
             window.issueBudget += contribution;
             remainingNonDs -= contribution;
