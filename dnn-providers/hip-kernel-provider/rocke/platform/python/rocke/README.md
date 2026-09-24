@@ -67,10 +67,10 @@ python -m rocke
 Build and verify one generated example:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
@@ -78,7 +78,7 @@ Run the core unit test suite (the IR/lowering tests need no GPU; ~20
 harness/timer tests require a GPU):
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library \
   python tests/test_rocke.py
 ```
 

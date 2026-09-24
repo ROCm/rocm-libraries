@@ -3933,6 +3933,20 @@ try
     if(desc.inFields.empty() || desc.outFields.empty())
         return false;
 
+    // This path transforms in each brick's own layout and stores the results in
+    // temp buffers sized only for a packed layout, so it can only handle bricks
+    // whose data is packed contiguously.
+    auto all_bricks_contiguous = [](const std::vector<rocfft_field_t>& fields) {
+        return std::all_of(fields.begin(), fields.end(), [](const rocfft_field_t& field) {
+            return std::all_of(
+                field.bricks.begin(), field.bricks.end(), [](const rocfft_brick_t& brick) {
+                    return brick.layout.is_contiguous();
+                });
+        });
+    };
+    if(!all_bricks_contiguous(desc.inFields) || !all_bricks_contiguous(desc.outFields))
+        return false;
+
     // work out what FFT dimensions are already contiguous in the fields
     std::vector<size_t> contiguousInputDims;
     std::vector<size_t> contiguousOutputDims;

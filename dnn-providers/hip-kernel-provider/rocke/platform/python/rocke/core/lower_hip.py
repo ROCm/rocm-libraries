@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from .arch.wmma_scale import gfx1250_scaled_wmma
 from .ir import (
     KernelDef,
     Op,
@@ -39,6 +40,14 @@ _HIP_TYPE = {
     "f32": "float",
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
+}
+
+_HIP_UNSIGNED_INT_TYPE = {
+    "i1": "bool",
+    "i8": "uint8_t",
+    "i16": "uint16_t",
+    "i32": "uint32_t",
+    "i64": "uint64_t",
 }
 
 
@@ -112,11 +121,12 @@ _ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);
 _ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);
 _ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);
 _ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);
-_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8);
+_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);
 _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
 _ROCKE_VEC(int16_t, i16x, 4); _ROCKE_VEC(int16_t, i16x, 8);
 _ROCKE_VEC(int8_t, i8x, 1); _ROCKE_VEC(int8_t, i8x, 2);
 _ROCKE_VEC(int8_t, i8x, 4); _ROCKE_VEC(int8_t, i8x, 8); _ROCKE_VEC(int8_t, i8x, 16);
+_ROCKE_VEC(int8_t, i8x, 32); _ROCKE_VEC(int8_t, i8x, 48); _ROCKE_VEC(int8_t, i8x, 64);
 _ROCKE_VEC(bool, boolx, 2); _ROCKE_VEC(bool, boolx, 4); _ROCKE_VEC(bool, boolx, 8);
 _ROCKE_VEC(bool, boolx, 16);
 #undef _ROCKE_VEC
@@ -300,6 +310,9 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
+        if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
+            self._emit_wmma_gfx1250_scaled(op)
+            return
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no HIP lowering for op {op.name!r}")
@@ -403,8 +416,15 @@ class _Lowerer:
 
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
+        source_unsigned = _HIP_UNSIGNED_INT_TYPE.get(v.type.name)
+        if source_unsigned is None:
+            raise NotImplementedError(
+                f"HIP zext requires an integer scalar source, got {v.type.name!r}"
+            )
+        target = _type_to_hip(op.result.type)
         self._emit(
-            f"{_type_to_hip(op.result.type)} {_name(op.result)} = ({_type_to_hip(op.result.type)}){_name(v)};"
+            f"{target} {_name(op.result)} = "
+            f"({target})({source_unsigned}){_name(v)};"
         )
 
     def _op_arith_sext(self, op: Op) -> None:
@@ -510,7 +530,7 @@ class _Lowerer:
 
         The HIP source path has no ISA backend (it emits ``__builtin_amdgcn_*``
         directly), so the ``op_id`` is mapped back to the concrete
-        ``tile.<op_id>`` op and dispatched through the existing per-op handler.
+        ``tile.<op_id>`` op and passed through the shared operation dispatcher.
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
@@ -645,6 +665,26 @@ class _Lowerer:
             f"f32x8 {_name(op.result)} = "
             f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
             f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
+        )
+
+    def _emit_wmma_gfx1250_scaled(self, op: Op) -> None:
+        spec = gfx1250_scaled_wmma(op.name)
+        if spec is None:
+            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        op_id = spec.op_id
+        fmt0, fmt1 = spec.matrix_formats
+        self._require_wmma_arch(op_id)
+        a, b, c, a_scale, b_scale = op.operands
+        builtin = (
+            "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
+            if spec.scale16
+            else "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4"
+        )
+        self._emit(
+            f"f32x8 {_name(op.result)} = {builtin}("
+            f"{fmt0}, {_name(a)}, {fmt1}, {_name(b)}, (int16_t)0, {_name(c)}, "
+            f"0, {spec.scale_formats[0]}, {_name(a_scale)}, "
+            f"0, {spec.scale_formats[1]}, {_name(b_scale)}, false, false);"
         )
 
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
@@ -1928,6 +1968,22 @@ class _Lowerer:
         self._emit(
             f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
             f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, 1);"
+        )
+
+    def _op_tile_quad_perm(self, op: Op) -> None:
+        """Lower an eight-bit DPP quad-permute control word.
+
+        See :meth:`_op_tile_quad_perm` in ``lower_llvm.py``: ``ctrl``
+        packs four two-bit lane selectors, so ``0..255`` is the whole
+        legal range and out-of-range values are malformed IR.
+        """
+        (data,) = op.operands
+        ctrl = int(op.attrs["ctrl"])
+        if not 0 <= ctrl <= 255:
+            raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
+            f"{_name(data)}, {_name(data)}, {ctrl}, 15, 15, 1);"
         )
 
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:

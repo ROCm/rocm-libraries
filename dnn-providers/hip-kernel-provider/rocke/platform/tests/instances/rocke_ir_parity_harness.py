@@ -129,7 +129,7 @@ def build_conv(
     vector_size_c=None,
 ):
     def _build():
-        from rocke.instances.common.conv_implicit_gemm import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
@@ -177,11 +177,11 @@ def build_conv_wgrad(
     two_stage=False,
 ):
     def _build():
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             WgradConvSpec,
             build_implicit_gemm_conv_wgrad,
         )
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
@@ -225,11 +225,11 @@ def build_dgrad(
     split_k=1,
 ):
     def _build():
-        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             build_implicit_gemm_conv_dgrad,
         )
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
@@ -266,11 +266,11 @@ def build_conv_wgrad_reduce(
     """
 
     def _build():
-        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+        from kernels.common.conv_wgrad_workspace_reduce import (
             WgradReduceSpec,
             build_conv_wgrad_workspace_reduce,
         )
-        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
 
         # WgradReduceSpec only uses p for wg_M (= K) and wg_N (= Y*X*C).
         # Y=1, X=1 → wg_N = C = wg_N.
@@ -720,22 +720,22 @@ def build_attention_d128_swa_fold_gfx942(arch):
 def build_deep(kind, arch, **kw):
     def _build():
         if kind == "common":
-            from rocke.instances.common.deep_fused_conv_pool import (
+            from kernels.common.deep_fused_conv_pool import (
                 build_deep_fused_conv_pool,
                 make_deep_fused_conv_pool_spec,
             )
         elif kind == "gfx950":
-            from rocke.instances.gfx950.deep_fused_conv_pool import (
+            from kernels.gfx950.deep_fused_conv_pool import (
                 build_deep_fused_conv_pool,
                 make_deep_fused_conv_pool_spec,
             )
         elif kind == "gfx1201":
-            from rocke.instances.gfx1201.deep_fused_conv_pool import (
+            from kernels.gfx1201.deep_fused_conv_pool import (
                 build_deep_fused_conv_pool,
                 make_deep_fused_conv_pool_spec,
             )
         else:
-            from rocke.instances.gfx1151.deep_fused_conv_pool import (
+            from kernels.gfx1151.deep_fused_conv_pool import (
                 build_deep_fused_conv_pool,
                 make_deep_fused_conv_pool_spec,
             )
@@ -779,7 +779,7 @@ def build_direct_16c(
     double_buffer=True,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv16cSpec,
             DirectConvProblem,
             build_direct_conv_16c,
@@ -824,7 +824,7 @@ def build_direct_4c(
     block_groups=16,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
             build_direct_conv_4c,
@@ -868,7 +868,7 @@ def build_direct_8c(
     double_buffer=True,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv8cSpec,
             DirectConvProblem,
             build_direct_conv_8c,
@@ -913,7 +913,7 @@ def build_direct_32c(
     double_buffer=True,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv32cSpec,
             DirectConvProblem,
             build_direct_conv_32c,
@@ -957,7 +957,7 @@ def build_direct_depthwise(
     block_waves=2,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConvProblem,
             DirectDepthwiseSpec,
             build_direct_depthwise as _build_dw,
@@ -985,6 +985,98 @@ def build_direct_depthwise(
     return _build
 
 
+def build_direct_conv_dgrad(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    cpg,
+    kpg,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    *,
+    block_q=16,
+    block_groups=8,
+):
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvDgradSpec,
+            DirectConvProblem,
+            build_direct_conv_dgrad as _build_dgrad,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+        )
+        spec = DirectConvDgradSpec(
+            problem=p,
+            name=name,
+            block_q=block_q,
+            block_groups=block_groups,
+        )
+        return _build_dgrad(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_depthwise_dgrad(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    *,
+    block_w=8,
+    block_waves=1,
+):
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseDgradSpec,
+            build_direct_depthwise_dgrad as _build_dw_dgrad,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+        )
+        spec = DirectDepthwiseDgradSpec(
+            problem=p,
+            name=name,
+            block_w=block_w,
+            block_waves=block_waves,
+        )
+        return _build_dw_dgrad(spec, arch=arch)
+
+    return _build
+
+
 def build_grouped_gemm_case(name, arch, m, n, k, e):
     def _build():
         from rocke.instances.gfx950.grouped_gemm import (
@@ -995,6 +1087,31 @@ def build_grouped_gemm_case(name, arch, m, n, k, e):
         spec = GroupedGemmSpec(M=m, N=n, K=k, E=e, name=name)
         kernel, _bs, _tm, _tn = build_grouped_gemm(spec)
         return kernel
+
+    return _build
+
+
+def build_mxfp8_gemm_case(dtype, matrix_path):
+    def _build():
+        from rocke.instances.gfx1250.block_scaled_gemm import (
+            BlockScaledGemmSpec,
+            build_block_scaled_gemm,
+        )
+
+        return build_block_scaled_gemm(
+            BlockScaledGemmSpec(
+                name=f"irhash_mxfp8_{dtype}_{matrix_path}",
+                M=32,
+                N=48,
+                K=256,
+                dtype_a=dtype,
+                dtype_b=dtype,
+                dtype_c="bf16",
+                scale_dtype="e8m0",
+                matrix_path=matrix_path,
+                block_k=16 if matrix_path == "wmma_scale16" else 32,
+            )
+        )
 
     return _build
 
@@ -1273,6 +1390,16 @@ def cases():
             32,
         ),
     )
+
+    # Homogeneous FP8/BF8 with E8M0 scales, shared by source and installed gates.
+    for dtype in ("fp8e4m3", "bf8e5m2"):
+        for matrix_path in ("wmma_scale", "wmma_scale16"):
+            add(
+                "gemm",
+                f"gemm/gfx1250/mxfp8/{matrix_path}/{dtype}",
+                "gfx1250",
+                build_mxfp8_gemm_case(dtype, matrix_path),
+            )
 
     # Conv: problem-shape and arch variants.
     conv1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
@@ -1586,8 +1713,8 @@ def cases():
             epilogue="cshuffle",
         ),
     )
-    # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
-    # block-diagonal dW IR against silent drift. MFMA-only, so gfx942/gfx950.
+    # Grouped wgrad, grid-per-group (groups=4, cpg=kpg=16). Guards the per-group
+    # dW IR against silent drift. MFMA-only, so gfx942/gfx950.
     add(
         "conv_wgrad",
         "conv_wgrad/gfx942/n1h8c64k64r3_g4",
@@ -2558,7 +2685,10 @@ def cases():
     # The gfx950 16c cases exercise fold_k32=True (uses mfma_f32_16x16x32_f16).
     # The gfx942 16c case uses fold_k32=False (mfma_f32_16x16x16_f16 only).
     #
-    # C++ engine parity: not tracked — no C++ implementation exists yet.
+    # C++ engine parity: tracked for conv_direct_dgrad (see cases below);
+    # the 16c/4c/8c/32c/depthwise fprop variants have a C++ port but their
+    # golden is pinned to the Python emitter only (no separate cpp-vs-python
+    # differential gate for the fprop families in this harness).
 
     # --- 16c, gfx950, fold_k32=True (matches parity emit idx=0 and idx=1) ---
     add(
@@ -2765,6 +2895,94 @@ def cases():
             KW=3,
             PAD=1,
             block_w=16,
+            block_waves=1,
+        ),
+    )
+
+    # --- conv_direct_dgrad: grouped dgrad (scalar FMA, any cpg/kpg) ---
+    # Mirrors parity emit indices 12-14.  Both gfx950 and gfx942 are covered.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dgrad_n2h8_cpg16_bg8",
+        "gfx950",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_950_bg8",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            block_q=16,
+            block_groups=8,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dgrad_n2h8_cpg32_bg4",
+        "gfx950",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_950_cpg32_bg4",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=32,
+            kpg=32,
+            block_q=16,
+            block_groups=4,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx942/dgrad_n1h8_cpg16_bg8",
+        "gfx942",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_942_bg8",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            block_q=16,
+            block_groups=8,
+        ),
+    )
+    # --- conv_direct_dgrad: depthwise dgrad (cpg=kpg=1) ---
+    # Mirrors parity emit indices 15-16.  stride=2 exercises divisibility checks.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_n2h14_s1",
+        "gfx950",
+        build_direct_depthwise_dgrad(
+            "irhash_dw_dgrad_950_s1",
+            "gfx950",
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            stride=1,
+            block_w=8,
+            block_waves=1,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_n2h14_s2",
+        "gfx950",
+        build_direct_depthwise_dgrad(
+            "irhash_dw_dgrad_950_s2",
+            "gfx950",
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            stride=2,
+            block_w=8,
             block_waves=1,
         ),
     )
