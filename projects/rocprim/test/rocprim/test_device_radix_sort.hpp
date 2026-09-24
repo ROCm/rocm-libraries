@@ -1152,13 +1152,18 @@ void sort_pairs_double_buffer()
 template<bool UseGraphs = false>
 void sort_keys_over_4g()
 {
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type                                 = uint8_t;
     constexpr unsigned int start_bit               = 0;
     constexpr unsigned int end_bit                 = 8ull * sizeof(key_type);
     constexpr bool         debug_synchronous       = false;
     constexpr size_t       size                    = (1ull << 32) + 32;
     constexpr size_t       number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
-    hipStream_t            stream                  = 0;
+
+    hipStream_t stream = 0;
     if constexpr(UseGraphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
@@ -1168,10 +1173,6 @@ void sort_keys_over_4g()
     assert(std::is_unsigned<key_type>::value);
     std::vector<size_t> histogram(number_of_possible_keys, 0);
     const int           seed_value = rand();
-
-    const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
-    HIP_CHECK(hipSetDevice(device_id));
 
     std::vector<key_type> keys_input
         = test_utils::get_random_data_wrapped<key_type>(size,
