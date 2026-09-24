@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -793,10 +794,13 @@ void case_gfx1250_scaled_wmma()
             rocke_value_t* fragment = rocke_b_vec_concat(b, lo, hi);
             rocke_value_t* c = rocke_b_global_load_vN(b, accum, lane, rocke_f32(), 8, 0);
             rocke_value_t* scale = rocke_b_global_load(b, scales, lane, v.scale_type(), 1);
-            rocke_value_t* d = v.scale16 ? rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(
-                                               b, fragment, fragment, c, scale, scale)
-                                         : rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(
-                                               b, fragment, fragment, c, scale, scale);
+            const auto block = v.scale16 ? ROCKE_MMA_SCALE_K16 : ROCKE_MMA_SCALE_K32;
+            const rocke_mma_scale_filter_t scales_query = {"e8m0", "e8m0", block};
+            const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+            const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
+                &target->mma, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &scales_query);
+            rocke_value_t* extra[2] = {scale, scale};
+            rocke_value_t* d = rocke_b_mma(b, atom->op_id, fragment, fragment, c, extra, 2);
             rocke_b_global_store(b, accum, lane, rocke_b_vec_extract(b, d, 0), 1);
         };
         const char* name = v.scale16 ? "wmma_scale16" : "wmma_scale";
@@ -884,6 +888,59 @@ void case_opcode_names_are_aligned()
     }
 }
 
+/* Malformed result lists must reach the public lowering error boundary. */
+void case_wmma_result_count()
+{
+    for(bool integer : {false, true})
+    {
+        for(int count : {0, 2, 1})
+        {
+            rocke_ir_builder_t b;
+            if(rocke_ir_builder_init(&b, "wmma_result_count") != ROCKE_OK)
+            {
+                fail("rocke_ir_builder_init", __LINE__);
+                return;
+            }
+            auto* a = rocke_b_zero_vec(&b, integer ? rocke_i32() : rocke_f16(), integer ? 4 : 16);
+            auto* c = rocke_b_zero_vec(&b, integer ? rocke_i32() : rocke_f32(), 8);
+            auto* d = rocke_b_mma(&b,
+                                  integer ? "wmma_i32_16x16x16_iu8" : "wmma_f32_16x16x16_f16",
+                                  a,
+                                  a,
+                                  c,
+                                  nullptr,
+                                  0);
+            rocke_value_t* results[] = {d, d};
+            d->op->num_results = count;
+            d->op->results = count ? results : nullptr;
+            rocke_b_ret(&b);
+            char* out = nullptr;
+            char err[ROCKE_ERR_MSG_CAP] = {};
+            const auto status = rocke_lower_kernel_to_llvm_ex(
+                b.kernel, ROCKE_LLVM_FLAVOR_LLVM23, "gfx1151", &out, err, sizeof(err));
+            if(count == 1)
+            {
+                if(status != ROCKE_OK || !out)
+                    fail("valid WMMA failed", __LINE__);
+                else
+                    EXPECT_IR(std::string(out), integer ? "call <8 x i32>" : "call <8 x float>");
+            }
+            else
+            {
+                char expected[80];
+                snprintf(expected,
+                         sizeof(expected),
+                         "tile.mma: expected exactly one result, got %d",
+                         count);
+                if(status != ROCKE_ERR_VALUE || out || strcmp(err, expected) != 0)
+                    fail("malformed WMMA did not return its result-count error", __LINE__);
+            }
+            std::free(out);
+            rocke_ir_builder_free(&b);
+        }
+    }
+}
+
 struct TestCase
 {
     const char* name;
@@ -891,6 +948,7 @@ struct TestCase
 };
 
 const TestCase k_cases[] = {
+    {"wmma_result_count", case_wmma_result_count},
     {"ds_swizzle_raw_offset", case_ds_swizzle_raw_offset},
     {"quad_perm_hip", case_quad_perm_hip},
     {"quad_perm_rejects_invalid_input", case_quad_perm_rejects_invalid_input},

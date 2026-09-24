@@ -542,6 +542,39 @@ public:
     }
 
     /**
+     * @brief Get the ragged-offset multiplier for this tensor
+     * @return Multiplier applied to the stored ragged offset to recover the element
+     *         offset (`element_offset = stored_offset * multiplier`); default 1
+     */
+    int64_t get_ragged_offset_multiplier() const // NOLINT(readability-identifier-naming)
+    {
+        return _raggedOffsetMultiplier;
+    }
+
+    /**
+     * @brief Set the ragged-offset multiplier for this tensor
+     * @param value Multiplier applied to the stored ragged offset; must be >= 1. A
+     *        value of `H*D` lets a token-unit offset tensor be bound directly as the
+     *        ragged offset. Only meaningful when a ragged offset is also set.
+     * @return Reference to this for method chaining
+     */
+    TensorAttributes&
+        set_ragged_offset_multiplier(const int64_t value) // NOLINT(readability-identifier-naming)
+    {
+        _raggedOffsetMultiplier = value;
+        return *this;
+    }
+
+    /**
+     * @brief Check whether this tensor carries a non-default ragged-offset multiplier
+     * @return true if the multiplier differs from the default of 1
+     */
+    bool has_ragged_offset_multiplier() const // NOLINT(readability-identifier-naming)
+    {
+        return _raggedOffsetMultiplier != detail::DEFAULT_RAGGED_OFFSET_MULTIPLIER;
+    }
+
+    /**
      * @brief Fill unset attributes from graph context
      * @param graphAttributes The graph attributes to inherit from
      * @return Reference to this for method chaining
@@ -608,6 +641,15 @@ public:
         HIPDNN_RETURN_IF_TRUE(_alignment < 1,
                               ErrorCode::INVALID_VALUE,
                               "Tensor " + _name + " alignment must be >= 1");
+
+        HIPDNN_RETURN_IF_TRUE(_raggedOffsetMultiplier < 1,
+                              ErrorCode::INVALID_VALUE,
+                              "Tensor " + _name + " ragged offset multiplier must be >= 1");
+
+        HIPDNN_RETURN_IF_TRUE(has_ragged_offset_multiplier() && !has_ragged_offset(),
+                              ErrorCode::INVALID_VALUE,
+                              "Tensor " + _name
+                                  + " ragged offset multiplier requires a ragged offset");
 
         return {ErrorCode::OK, ""};
     }
@@ -693,6 +735,8 @@ private:
     std::shared_ptr<TensorAttributes> _raggedOffset; ///< nullptr = non-ragged
     int64_t _alignment
         = detail::DEFAULT_TENSOR_ALIGNMENT; ///< byte alignment of the physical buffer pointer
+    int64_t _raggedOffsetMultiplier
+        = detail::DEFAULT_RAGGED_OFFSET_MULTIPLIER; ///< stored_offset -> element_offset scale
 };
 typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph
