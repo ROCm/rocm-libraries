@@ -422,21 +422,11 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
 
 
 class TestGfx1250ScalarFp8Attention(unittest.TestCase):
-    # ``supports_native_unified_attention`` takes no arch argument -- it resolves
-    # the arch off the host device. Without a pin these gfx1250 gates inherit
-    # whatever the runner is, and on an fnuz-native arch (gfx942) the fp8 gate
-    # correctly rejects the OCP-declared problem built below. Pin the arch so the
-    # test asserts gfx1250 behaviour on any runner.
-    def setUp(self):
-        from kernels.common import attention_unified as au
-
-        self._old_arch = au._RESOLVED_ATTENTION_ARCH
-        au._RESOLVED_ATTENTION_ARCH = "gfx1250"
-
-    def tearDown(self):
-        from kernels.common import attention_unified as au
-
-        au._RESOLVED_ATTENTION_ARCH = self._old_arch
+    # The gates below take the arch as an argument, so this class needs no host
+    # pin: passing "gfx1250" asserts gfx1250 behaviour on any runner. Without an
+    # explicit arch an fnuz-native runner (gfx942) would correctly reject the
+    # OCP-declared fp8 problem built below, and the test would fail for a reason
+    # that has nothing to do with gfx1250.
 
     @staticmethod
     def _small_fp8_problem(**overrides):
@@ -463,7 +453,9 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
             supports_native_unified_attention,
         )
 
-        ok, reason = supports_native_unified_attention(self._small_fp8_problem())
+        ok, reason = supports_native_unified_attention(
+            self._small_fp8_problem(), "gfx1250"
+        )
         self.assertTrue(ok, reason)
         self.assertIn("supported", reason)
 
@@ -473,10 +465,10 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
         )
 
         ok_alibi, reason_alibi = supports_native_unified_attention(
-            self._small_fp8_problem(use_alibi=True)
+            self._small_fp8_problem(use_alibi=True), "gfx1250"
         )
         ok_qq, reason_qq = supports_native_unified_attention(
-            self._small_fp8_problem(use_qq_bias=True)
+            self._small_fp8_problem(use_qq_bias=True), "gfx1250"
         )
         self.assertFalse(ok_alibi)
         self.assertIn("ALiBi", reason_alibi)
@@ -589,7 +581,7 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
                 dtype=shape.dtype,
                 use_sinks=False,
             )
-            ok, why = supports_native_unified_attention(problem)
+            ok, why = supports_native_unified_attention(problem, "gfx1250")
             self.assertTrue(ok, f"prefill q{shape.q_len}: {why}")
             ll = lower_kernel_to_llvm(
                 build_unified_attention_2d(

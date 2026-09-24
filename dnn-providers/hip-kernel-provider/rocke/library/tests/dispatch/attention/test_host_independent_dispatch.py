@@ -273,11 +273,9 @@ _ARCH_IS_OPTIONAL = frozenset(
         "_gfx942_bf16_wide_geometry",
         "_gfx942_bf16_wide_tile_size",
         "_select_gfx942_flash_num_warps",
-        "attention_3d_workspace_nbytes",
         "build_unified_attention_2d",
         "build_unified_attention_3d",
         "build_unified_attention_reduce",
-        "supports_native_unified_attention",
     }
 )
 

@@ -446,7 +446,7 @@ def _reject_fp8_format_arch_mismatch(
 
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
-    arch: Optional[str] = None,
+    arch: str,
 ) -> Tuple[bool, str]:
     """Return whether CK DSL can run this problem without fallback today.
 
@@ -472,9 +472,7 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
-        rejected = _reject_fp8_format_arch_mismatch(
-            problem, arch or _resolve_attention_arch()
-        )
+        rejected = _reject_fp8_format_arch_mismatch(problem, arch)
         if rejected is not None:
             return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
@@ -3923,7 +3921,7 @@ def _attention_3d_workspace_specs(
 def attention_3d_workspace_nbytes(
     problem: UnifiedAttentionProblem,
     *,
-    arch: Optional[str] = None,
+    arch: str,
     device=None,
 ) -> int:
     """Return required split-KV 3D workspace bytes for `problem`.
@@ -3932,13 +3930,14 @@ def attention_3d_workspace_nbytes(
     usage before dispatch. The `device` value only matters for the
     eventual allocation, not byte accounting.
 
-    Pass ``arch`` to compute workspace for a specific target arch without
-    reading the live GPU device (cross-arch planning, AOT dispatch). When
-    omitted, falls back to the live device arch via ``_resolve_attention_arch()``.
+    ``arch`` is required: segmentation differs per arch, so a workspace sized
+    against the live device would be the wrong size for any cross-arch or AOT
+    query. Callers that genuinely mean "this box" pass the resolved arch
+    explicitly.
     """
     return WorkspacePool.required_nbytes(
         _attention_3d_workspace_specs(
-            problem, _num_segments(problem, arch or _resolve_attention_arch()), device
+            problem, _num_segments(problem, arch), device
         )
     )
 
@@ -4488,7 +4487,7 @@ def run_unified_attention_torch(
     # Scalar fallback. Uses the same KernelLauncher infrastructure as
     # the tiled paths so module load + arg lifetime + stream resolution
     # are handled by-construction.
-    ok, reason = supports_native_unified_attention(problem)
+    ok, reason = supports_native_unified_attention(problem, _launch_arch)
     if not ok:
         raise NotImplementedError(reason)
     key = _cache_key(problem)

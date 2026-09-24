@@ -724,7 +724,7 @@ class TestAttentionHelpers(unittest.TestCase):
             max_seqlen_k=2011,
             dtype="fp16",
         )
-        ok, reason = supports_native_unified_attention(p)
+        ok, reason = supports_native_unified_attention(p, "gfx950")
         self.assertTrue(ok)
         self.assertIn("supported", reason)
 
@@ -1772,7 +1772,9 @@ class TestAttentionHelpers(unittest.TestCase):
         # segm_output: 3 * 16 * 128 * 128 f32
         # segm_max/expsum: 2 * (3 * 16 * 128) f32
         expected = (3 * 16 * 128 * 128 + 2 * 3 * 16 * 128) * 4
-        self.assertEqual(attention_3d_workspace_nbytes(p), expected)
+        self.assertEqual(
+            attention_3d_workspace_nbytes(p, arch="gfx950"), expected
+        )
 
     def test_tiled_2d_support_gate_rejects_unsupported(self):
         from kernels import supports_tiled_2d
