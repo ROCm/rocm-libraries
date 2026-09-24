@@ -160,8 +160,19 @@ def _allocLROffsetRegs_tlu(tag, tile, ti, writer, kernel):
   XOR term itself is identical across the paired reads.  Both halves together
   make the XOR distribute over that term, and _emitSingleDsReadTLU1B16 carries it
   in the ds immediate instead of a register.  See _lraTileAssignment_tlu_b16.
+
+  One per M-tile of the strip is the UPPER bound, not the count.  The index is
+  mTileInStrip = sId0 % stackM and the scheduler walks sId0 over this wave's M
+  extent only (Kernel.py: `for mma0 in range(tiA.localMMATileGrid[0])`), so a
+  wave narrower than the stack -- a shared strip, where wavesPerStrip waves sit
+  side by side in one strip -- never reaches the top registers.  MT64x32
+  MIWT2_1 stacks 4 but covers 2, and the other two were built, given swap
+  masks, and XOR-swapped once per K iteration for the whole loop without ever
+  being used as an address.  At or above the stack height every residue is hit
+  and the clamp is inert.
   """
-  count = int(ti.lrSubtileShape[0]) if _isTLU1B16(ti) else 1
+  count = min(int(ti.lrSubtileShape[0]),
+              int(ti.localMMATileGrid[0])) if _isTLU1B16(ti) else 1
   tile.sharedVgprLROffset = [
       writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_tlu_sharedVgprLROffset")
       for _ in range(count)]
@@ -1185,10 +1196,23 @@ def _emitSingleDsReadTLU1B16(tileInfo, sId0, sId1, subIterK, dstTile):
 
   numRegs = len(dstTile.regList.indices)
   numReads = numRegs // REGS_PER_TR
-  assert len(tileInfo.sharedVgprLROffset) == stackM, (
+  # One register per M-tile of the strip the wave actually reaches.  That is
+  # capped by the wave's own M extent, not by the stack height: a shared strip
+  # holds several waves side by side, so stackM can exceed what this wave reads.
+  # _allocLROffsetRegs_tlu clamps to the same min().
+  numOffsetRegs = min(stackM, int(tileInfo.localMMATileGrid[0]))
+  assert len(tileInfo.sharedVgprLROffset) == numOffsetRegs, (
       "TLU=1 bf16 LR (%s): expected %d offset registers (one per M-tile of the "
-      "strip) but %d were allocated"
-      % (tileInfo.tc, stackM, len(tileInfo.sharedVgprLROffset)))
+      "strip this wave reaches: min(stackM=%d, perWaveMTiles=%d)) but %d were "
+      "allocated" % (tileInfo.tc, numOffsetRegs, stackM,
+                     int(tileInfo.localMMATileGrid[0]),
+                     len(tileInfo.sharedVgprLROffset)))
+  assert mTileInStrip < numOffsetRegs, (
+      "TLU=1 bf16 LR (%s): sId0=%d decomposes to mTileInStrip=%d but only %d "
+      "offset registers exist; the wave reaches further into the strip than "
+      "localMMATileGrid[0]=%d says"
+      % (tileInfo.tc, sId0, mTileInStrip, numOffsetRegs,
+         int(tileInfo.localMMATileGrid[0])))
   assert numReads <= g.readsPerTile, (
       "TLU=1 bf16 LR (%s): MMA tile needs %d transpose reads but the geometry "
       "gives only %d per M-tile"
