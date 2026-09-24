@@ -31,8 +31,8 @@ def _write_library(directory, stem, library_format):
     LibraryIO.write(str(directory / stem), {}, library_format)
 
 
-def _build_arch(root, arch, library_format, lazy):
-    arch_dir = CW.libraryDir(root, arch)
+def _build_arch(root, arch, library_format, lazy, out_dir=None):
+    arch_dir = CW.libraryDir(root, out_dir or arch)
     master = f"TensileLibrary_lazy_{arch}" if lazy else f"TensileLibrary_{arch}"
     _write_library(arch_dir, master, library_format)
     if lazy:
@@ -77,3 +77,18 @@ def test_unions_files_across_archs(tmp_path, monkeypatch):
     _, library_list = CW.clientLibraryFiles(tmp_path, ["gfx942", "gfx950"])
 
     assert library_list == expected
+
+
+def test_finds_stepping_output_subdir(tmp_path, monkeypatch):
+    """A gfx1250v0 client build is written to library/gfx1250v0/, but its master
+    keeps the ISA-derived gfx1250 suffix."""
+    monkeypatch.setitem(globalParameters, "LibraryFormat", "msgpack")
+    monkeypatch.setitem(globalParameters, "LazyLibraryLoading", True)
+    master, code_object = _build_arch(tmp_path, "gfx1250", "msgpack", lazy=True, out_dir="gfx1250v0")
+
+    co_list, library_list = CW.clientLibraryFiles(
+        tmp_path, ["gfx1250"], CW.computeOutputArchNames(["gfx1250v0"])
+    )
+
+    assert library_list == [master]
+    assert co_list == [code_object]
