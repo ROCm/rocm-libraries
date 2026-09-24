@@ -230,8 +230,8 @@ ExactLogic:
     - 1
     - 1
     - 17408
-  - - 2
-    - 790.1
+  - - 5
+    - 825.3
 - - - 16384
     - 1
     - 1
@@ -248,8 +248,8 @@ ExactLogic:
     - 1
     - 1
     - 6144
-  - - 2
-    - 825.6
+  - - 6
+    - 856.0
 IndexOrder:
 - 2
 - 3
@@ -1396,4 +1396,20 @@ Solutions:
   CustomKernelName: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
   NumElementsPerBatchStore: 1
   1LDSBuffer: 1
+- SolutionIndex: 5
+  CustomKernelName: Custom_W4A16_Decode_G32_W4_U1_A4_UnsignedBias8_gfx1151
+  BaseName: Custom_W4A16_Decode_G32_W4_U1_A4_UnsignedBias8_gfx1151
+  KernelNameMin: Custom_W4A16_Decode_G32_W4_U1_A4_UnsignedBias8_gfx1151
+  EnableMatrixInstruction: false
+  MatrixInstruction: []
+  SourceSwap: false
+  ConvertAfterDS: false
+- SolutionIndex: 6
+  CustomKernelName: Custom_W4A16_Decode_G32_W4_NativePerm_UnsignedBias8_gfx1151
+  BaseName: Custom_W4A16_Decode_G32_W4_NativePerm_UnsignedBias8_gfx1151
+  KernelNameMin: Custom_W4A16_Decode_G32_W4_NativePerm_UnsignedBias8_gfx1151
+  EnableMatrixInstruction: false
+  MatrixInstruction: []
+  SourceSwap: false
+  ConvertAfterDS: false
 TileSelectionIndices: null
