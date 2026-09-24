@@ -35,8 +35,8 @@ using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
 
 template <ck_tile::index_t M,
           bool UseDoubleKVLdsBuffer = false,
-          bool ProgressiveDsLoadK = false,
-          typename DataType = ck_tile::half_t>
+          bool ProgressiveDsLoadK   = false,
+          typename DataType         = ck_tile::half_t>
 using TestFmhaProblem =
     ck_tile::BlockFmhaPipelineProblem<DataType,
                                       DataType,
@@ -127,10 +127,10 @@ make_input(std::size_t element_count, int multiplier, int modulus, int center, f
 
 template <typename Problem>
 std::vector<typename Problem::ODataType> run_kernel(const ck_tile::DeviceMem& q_device,
-                                                   const ck_tile::DeviceMem& k_device,
-                                                   const ck_tile::DeviceMem& v_device,
-                                                   ck_tile::index_t seqlen_q,
-                                                   ck_tile::index_t seqlen_k = kSeqlenK)
+                                                    const ck_tile::DeviceMem& k_device,
+                                                    const ck_tile::DeviceMem& v_device,
+                                                    ck_tile::index_t seqlen_q,
+                                                    ck_tile::index_t seqlen_k = kSeqlenK)
 {
     using Kernel   = TestKernel<Problem>;
     using DataType = typename Problem::ODataType;
@@ -248,7 +248,8 @@ TYPED_TEST(QrTdmProgressiveKLdsM128, SingleKBlockProducesEquivalentOutput)
         GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
 
     constexpr ck_tile::index_t seqlen_q = 128;
-    const auto q = make_input<TypeParam>(kBatch * kHeads * seqlen_q * kHeadDim, 13, 29, 14, 0.03125f);
+    const auto q =
+        make_input<TypeParam>(kBatch * kHeads * seqlen_q * kHeadDim, 13, 29, 14, 0.03125f);
     const auto k = make_input<TypeParam>(kBatch * kHeads * kSeqlenK * kHeadDim, 7, 31, 15, 0.025f);
     const auto v = make_input<TypeParam>(kBatch * kHeads * kSeqlenK * kHeadDim, 11, 37, 18, 0.02f);
     const ck_tile::DeviceMem q_device(q.size() * sizeof(TypeParam));
@@ -258,10 +259,10 @@ TYPED_TEST(QrTdmProgressiveKLdsM128, SingleKBlockProducesEquivalentOutput)
     k_device.ToDevice(k.data());
     v_device.ToDevice(v.data());
 
-    const auto baseline =
-        run_kernel<TestFmhaProblem<128, true, false, TypeParam>>(q_device, k_device, v_device, seqlen_q);
-    const auto progressive =
-        run_kernel<TestFmhaProblem<128, true, true, TypeParam>>(q_device, k_device, v_device, seqlen_q);
+    const auto baseline = run_kernel<TestFmhaProblem<128, true, false, TypeParam>>(
+        q_device, k_device, v_device, seqlen_q);
+    const auto progressive = run_kernel<TestFmhaProblem<128, true, true, TypeParam>>(
+        q_device, k_device, v_device, seqlen_q);
 
     expect_finite_nonzero(baseline);
     expect_finite_nonzero(progressive);
@@ -275,7 +276,8 @@ TYPED_TEST(QrTdmProgressiveKLdsM128, MultipleKBlocksProduceEquivalentOutput)
 
     constexpr ck_tile::index_t seqlen_q = 128;
     constexpr ck_tile::index_t seqlen_k = 128;
-    const auto q = make_input<TypeParam>(kBatch * kHeads * seqlen_q * kHeadDim, 13, 29, 14, 0.03125f);
+    const auto q =
+        make_input<TypeParam>(kBatch * kHeads * seqlen_q * kHeadDim, 13, 29, 14, 0.03125f);
     const auto k = make_input<TypeParam>(kBatch * kHeads * seqlen_k * kHeadDim, 7, 31, 15, 0.025f);
     const auto v = make_input<TypeParam>(kBatch * kHeads * seqlen_k * kHeadDim, 11, 37, 18, 0.02f);
     const ck_tile::DeviceMem q_device(q.size() * sizeof(TypeParam));

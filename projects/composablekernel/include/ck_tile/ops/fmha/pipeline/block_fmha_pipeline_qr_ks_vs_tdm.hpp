@@ -80,6 +80,80 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
 
+    // Select independent local-max chains from the tensor distribution; no
+    // data type, pipeline feature, or physical register layout is assumed.
+    template <typename Tensor>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetRowMaxPartialCount()
+    {
+        using TensorType                = remove_cvref_t<Tensor>;
+        constexpr auto spans            = TensorType::get_distributed_spans();
+        constexpr index_t local_columns = container_reduce(spans[I1].impl_, multiplies<>{}, 1);
+        constexpr index_t preferred     = FmhaMask::IsMasking ? 2 : 4;
+        if constexpr(local_columns >= preferred && local_columns % preferred == 0)
+            return preferred;
+        else
+            return 0;
+    }
+
+    template <typename Tensor>
+    CK_TILE_DEVICE static auto ReduceRowMaxLocal(const Tensor& scores)
+    {
+        const auto f_max           = [](auto a, auto b) { return max(a, b); };
+        constexpr auto spans       = Tensor::get_distributed_spans();
+        constexpr index_t partials = GetRowMaxPartialCount<Tensor>();
+        if constexpr(partials > 0)
+        {
+            constexpr index_t local_columns = container_reduce(spans[I1].impl_, multiplies<>{}, 1);
+            constexpr auto columns =
+                make_naive_tensor_descriptor_packed(sequence_to_tuple_of_number(spans[I1].impl_));
+            constexpr auto distribution = make_static_tile_distribution(
+                ck_tile::detail::make_reduce_tile_distribution_encoding(
+                    Tensor::get_tile_distribution().get_static_tile_distribution_encoding(),
+                    sequence<1>{}));
+            auto maxima = make_static_distributed_tensor<SMPLComputeDataType>(distribution);
+            // Masked tiles favor fewer initialized chains; dense tiles favor
+            // four data-seeded chains. Keep the maxNum identity in both paths.
+            constexpr index_t cols_per_partial = local_columns / partials;
+            sweep_tile_span(spans[I0], [&](auto row) {
+                thread_buffer<SMPLComputeDataType, partials> partial;
+                if constexpr(FmhaMask::IsMasking)
+                {
+                    static_for<0, partials, 1>{}(
+                        [&](auto i) { partial(i) = -numeric<SMPLComputeDataType>::infinity(); });
+                }
+                sweep_tile_span(spans[I1], [&](auto col) {
+                    constexpr index_t offset = columns.calculate_offset(col.impl_);
+                    constexpr index_t group  = offset / cols_per_partial;
+                    if constexpr(!FmhaMask::IsMasking && offset % cols_per_partial == 0)
+                        partial(number<group>{}) = scores[make_tuple(row, col)];
+                    else
+                        partial(number<group>{}) =
+                            max(partial[number<group>{}], scores[make_tuple(row, col)]);
+                });
+                const auto local = [&]() {
+                    if constexpr(partials == 2)
+                        return max(partial[number<0>{}], partial[number<1>{}]);
+                    else
+                        return max(max(partial[number<0>{}], partial[number<1>{}]),
+                                   max(partial[number<2>{}], partial[number<3>{}]));
+                }();
+                if constexpr(FmhaMask::IsMasking)
+                    maxima(make_tuple(row)) = local;
+                else
+                {
+                    // Apply the original identity once, including for all-NaN rows.
+                    maxima(make_tuple(row)) = max(local, -numeric<SMPLComputeDataType>::infinity());
+                }
+            });
+            return maxima;
+        }
+        else
+        {
+            return block_tile_reduce<SMPLComputeDataType>(
+                scores, sequence<1>{}, f_max, -numeric<SMPLComputeDataType>::infinity());
+        }
+    }
+
     // A paired-half wave32 reduction has one partial in each 16-lane half.
     // Exchange those partials on VALU instead of putting a bpermute in the
     // LDS dependency queue. Other distributions retain the generic path.
@@ -1605,11 +1679,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }();
 
-            auto m_local = block_tile_reduce<SMPLComputeDataType>(
-                s_new,
-                sequence<1>{},
-                f_max,
-                -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
+            auto m_local = ReduceRowMaxLocal(s_new); // m_local = rowmax(S{j})
             ReduceRowSync(m_local, f_max);
 
             static_for<0, 12, 1>{}([&](auto i) {
