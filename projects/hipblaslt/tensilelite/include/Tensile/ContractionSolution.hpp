@@ -668,19 +668,22 @@ namespace TensileLite
         // WARNING: this is NOT ContractionSolution::requiredWorkspaceSize()'s return
         // value, even though the names are close. requiredWorkspaceSize() is the
         // separate, caller-facing implementation of the reserve-or-not rule -- it is
-        // what the allocator sizes the workspace buffer from. It reaches its answer
-        // by the same route: the reduction (getSKReduction(), or the SK4 /
-        // SK5-dynamic tree forcing), getSKGridImpl(), then
-        // streamKReconcileReduction() on the same (reduction, grid, tiles) triple,
-        // and finally partialTileSize(grid) for the byte count.
+        // what the allocator sizes the workspace buffer from. For generated
+        // kernels, both paths size parallel partial-result storage from the grid,
+        // after streamKReconcileReduction() demotes parallel to tree for split
+        // factors below two. At grid == tiles, the tree path needs no partials
+        // workspace. The parallel query additionally preserves the split-reduction
+        // sizing rules for bias-gradient and amaxD; this snapshot reports the
+        // partials buffer only.
         //
-        // That agreement is load-bearing rather than incidental: it is what lets the
-        // allocate-then-launch flow close. The allocator sizes from
-        // requiredWorkspaceSize(), that size is what problem.workspaceSize() reports
-        // on the subsequent launch, and re-deriving this snapshot against it reaches
-        // a self-consistent fixed point. All three implementations encode the same
-        // intended rule, by way of the same helpers -- change one, check the other
-        // two.
+        // Reduction selection still differs: this snapshot and
+        // resolveStreamKSettings() force tree for SK4 and SK5-dynamic, while
+        // requiredWorkspaceSize() always asks getSKReduction(). A fixed-grid
+        // override can preserve that difference; see requiredWorkspaceSize().
+        // Sharing the byte formula does not imply identical decisions in every
+        // mode. Changes to any of these three paths must be checked against the
+        // other two, including the allocate-then-launch flow where the queried
+        // size becomes problem.workspaceSize().
         size_t requiredWorkspaceBytes = 0;
         // recomputed: partials(+work-queue) bytes wanted, before the fit check against
         // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
@@ -1326,6 +1329,13 @@ namespace TensileLite
                                                    Hardware const* hardware) const;
 
     private:
+        // tiles is the total number of partial tiles, including batches and
+        // splits. The caller supplies it using either GSU tiles or a StreamK grid.
+        // Preserve the auxiliary-workspace rules even when gsu is zero or one.
+        size_t requiredWorkspaceSizeForSplitTiles(Problem const& problem,
+                                                 size_t         gsu,
+                                                 size_t         tiles) const;
+
         bool handwrittenCustomKernel() const;
 
         // Same StreamK grid / reduction solve() packs, including the
