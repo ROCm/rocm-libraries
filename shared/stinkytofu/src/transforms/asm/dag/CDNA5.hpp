@@ -399,6 +399,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
     InFlightQueue dsReadInflight_;
     int crossBBDsReadCount_ = 0;
     int crossBBDsReadResidual_ = 0;
+    // TEMPORARILY DISABLED: measured ~4.7% real regression on mxf8_tn_medium
+    // (real gfx1250 hardware, reproduced twice). Isolated by bisection to just
+    // this seeding call; every other commit in this PR ruled out. The carry
+    // itself is believed correct in principle (mirrors globalReadInflight_'s
+    // existing cross-BB carry) -- needs re-validation against hardware before
+    // re-enabling.
+    static constexpr bool kEnableDsReadCrossBBCarry = false;
 
     // Rule (4) ds_load issue cap (dagFeatures.dsReadPerCap), as a sliding
     // window on the real timeline: depth = the ceiling N, entry lifetime = the
@@ -2219,7 +2226,8 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     // Same credit-pool seeding for the ds_load (LDS return queue) pacer, so a
     // real loop re-entry doesn't model the queue as empty while hardware still
     // has the prior iteration's tail draining (see crossBBDsReadCount_).
-    if (dsReadQueueDepth() > 0 && crossBBDsReadCount_ > 0)
+    // kEnableDsReadCrossBBCarry: temporarily disabled, see its declaration.
+    if (kEnableDsReadCrossBBCarry && dsReadQueueDepth() > 0 && crossBBDsReadCount_ > 0)
         dsReadInflight_.seed(crossBBDsReadCount_, crossBBDsReadResidual_);
 }
 
