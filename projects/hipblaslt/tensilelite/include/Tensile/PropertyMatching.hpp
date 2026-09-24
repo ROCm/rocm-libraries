@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <functional>
 #include <iomanip>
+#include <iostream>
 #include <queue>
 #include <string>
 #include <tuple>
@@ -1128,21 +1129,24 @@ kd_tree_batch_1_again:
 
                 auto compM = [&count, Debug](Entry const& e, long const M) {
                     if(Debug)
-                        printf("[ %ld ,%ld,%ld,%ld]\n", e.key[0], e.key[1], e.key[2], e.key[3]);
+                        std::cout << "[ " << e.key[0] << " ," << e.key[1] << "," << e.key[2]
+                                  << "," << e.key[3] << "]\n";
                     count++;
                     return e.key[0] < M;
                 };
 
                 auto compN = [&count, Debug](Entry const& e, long const N) {
                     if(Debug)
-                        printf("[%ld, %ld ,%ld,%ld]\n", e.key[0], e.key[1], e.key[2], e.key[3]);
+                        std::cout << "[" << e.key[0] << ", " << e.key[1] << " ," << e.key[2]
+                                  << "," << e.key[3] << "]\n";
                     count++;
                     return e.key[1] < N;
                 };
 
                 auto compB = [&count, Debug](Entry const& e, long const B) {
                     if(Debug)
-                        printf("[%ld,%ld, %ld ,%ld]\n", e.key[0], e.key[1], e.key[2], e.key[3]);
+                        std::cout << "[" << e.key[0] << "," << e.key[1] << ", " << e.key[2]
+                                  << " ," << e.key[3] << "]\n";
                     count++;
                     return e.key[2] < B;
                 };

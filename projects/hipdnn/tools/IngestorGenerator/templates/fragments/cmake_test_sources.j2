@@ -1,0 +1,77 @@
+## Splice point 5: .../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt
+## Append these lines INSIDE the existing target_sources(hip_kernel_provider_tests
+## PRIVATE ...) block; do not replace the block. This tool's output tree places both
+## files under tests/ (see fragments header) while the provider's test tree nests
+## pack-scoped test files under packs/ (see TestConvFwdPack.cpp /
+## TestPointwisePacks.cpp) -- move both files there when splicing.
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Packs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Matchers.cpp
+
+{% if emitted.source_kind == 'kpack' %}
+{#
+   The pinned case list is READ OUT OF the suite template this same run renders, because
+   test_packs.cpp.j2 gates cases on has_heuristic, is_multi_pack and behavior_notes and a
+   second copy of those conditionals would disagree the moment either grew a case.
+
+   A case the extraction misses -- one whose TEST_F were wrapped across lines -- is left
+   out of the pin and reported by the census as registered-but-not-expected: red, not a
+   silently narrowed pin.
+-#}
+{% set packs_source %}{% include 'test_packs.cpp.j2' %}{% endset %}
+{% set case_marker = 'TEST_F(Test' ~ config.engine.pascal_name ~ 'Packs, ' %}
+{% set expected_cases = [] %}
+{% for line in packs_source.split('\n') if line.startswith(case_marker) %}
+{% set _ = expected_cases.append(line.split(case_marker)[1].split(')')[0] | trim) %}
+{% endfor %}
+## Splice point 5b: P/src/tests/CMakeLists.txt, beside the other per-pack-target
+## census calls that follow hkp_verify_embedded_sources(). Add this call:
+hkp_register_census_tests(TARGET hip_kernel_provider_tests
+                          PACK_NAME product
+                          SUITES Test{{ config.engine.pascal_name }}Packs
+                          EXPECTED_CASES
+{% for case in expected_cases %}
+                              {{ case }}
+{% endfor %}
+                          )
+##
+## `PACK_NAME product` addresses the `product` pack target, wired only where the shipped
+## root holds a descriptor AND at least one of them declares an architecture this build
+## packs for. A build whose GPU_TARGETS your bundle does not declare leaves production
+## packaging dormant: the call registers nothing and says so at STATUS, naming the
+## dormant pack, so leave it unguarded. A PACK_NAME no pack target carries is a configure
+## error, which is the typo this keeps visible.
+##
+## Commit your bundle under `E/descriptors/<producer>/<bundle>/` **before** splicing this
+## call, or the census runs against a shard without your descriptors.
+##
+## The call registers one CTest entry per arch the `product` pack target was wired with:
+## hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs,
+## running hip_kernel_provider_tests --gtest_filter=Test{{ config.engine.pascal_name }}Packs.*
+## with HIPDNN_TEST_CENSUS_SUITE=Test{{ config.engine.pascal_name }}Packs,
+## HIPDNN_TEST_EXPECTED_ARCH=<arch> and HIPDNN_DESCRIPTOR_DIR set to that pack target's
+## own out-root shard for <arch>, under the labels unit_test;hip-kernel-provider;host.
+## Declare a suite name at one pack target only: the CTest name carries no pack
+## component, so a second declaration is a configure error. Every registered case must
+## execute and pass without skipping in every iteration; missing suites,
+## filtered/disabled/sharded-out cases and zero iterations fail.
+##
+## EXPECTED_CASES is optional to configure and required for the census to mean what it
+## claims, since the guard's obligations come from the cases the suite registered. The
+## list above is read out of the suite this run rendered; re-splice whenever the bundle's
+## shape changes.
+{% else %}
+## Splice point 5b: nothing is registered for this direct-load engine by default.
+##
+## A direct-load engine's suite is censused, if at all, by a hand-added
+## `hkp_register_census_tests(TARGET hip_kernel_provider_tests PACK_NAME <set>
+## SUITES Test{{ config.engine.pascal_name }}Packs EXPECTED_CASES <case> <case> ...)`
+## call in `P/src/tests/CMakeLists.txt`, where `<set>` is the pack target for the
+## authored set this bundle writes into (`unit`, `integration`, `shared` or
+## `archive_fixture`). Census requires every case in the suite to execute without
+## skipping, so only declare a suite that reads this bundle's shard and no other.
+##
+## EXPECTED_CASES is optional to configure and required for the census to mean what it
+## claims: the guard's obligations come from the registered cases. Pin the TEST_F names.
+##
+## This bundle writes into: {{ config.authored_subpath }}
+{% endif %}
