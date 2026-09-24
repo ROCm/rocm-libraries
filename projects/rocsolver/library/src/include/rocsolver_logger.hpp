@@ -135,7 +135,7 @@ ROCSOLVER_BEGIN_NAMESPACE
         assert(isvalid_grid);                                                                       \
         bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
             && (block_.y <= 1024) && (1 <= block_.z) && (block_.z <= 1024)                          \
-            && ((block_.x + block_.y + block_.z) <= 1024);                                          \
+            && ((block_.x * block_.y * block_.z) <= 1024);                                          \
         if(!isvalid_block)                                                                          \
         {                                                                                           \
             std::cerr << "block( " << block_.x << " , " << block_.y << " , " << block_.z << " ) "   \
