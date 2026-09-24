@@ -296,6 +296,17 @@ def test_smoke_solution_emits_full_gfx1250_kernel(
     assert ".set sgprtdmMXSBGroup0, sgprtdmBGroup0+0" in source
 
 
+@pytest.mark.parametrize("blocks", [(16, 32), (32, 16), (16, 16)])
+def test_subtile_mx_block_16_is_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys, blocks):
+    blockA, blockB = blocks
+    params = _make_smoke_params(gfx1250_iim, ProblemType={"MXBlockA": blockA, "MXBlockB": blockB})
+    sol = Solution(params, False, True, False, assembler, gfx1250_iim)
+    out = capsys.readouterr().out
+    assert sol.get("Valid") is False
+    tc = "A" if blockA != 32 else "B"
+    assert f"UseSubtileImpl=1 requires MXBlock{tc}=32, got 16" in out
+
+
 def test_wave32_fp4_16x16_subtile_is_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys):
     from Tensile.Common.Architectures import gfxToIsa
     from Tensile.SolutionStructs.Validators.MatrixInstruction import (

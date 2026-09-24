@@ -2331,6 +2331,13 @@ class Solution(collections.abc.Mapping):
                  f"{_name}={_val} must be a power of two (LraTileAssignment vectorStaticRemainder fast path)")
           return
       if state["UseSubtileImpl"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
+        # Subtile scale geometries only model one scale per 32 K elements (no v_wmma_scale16).
+        for _tc in ("A", "B"):
+          _mxBlock = state["ProblemType"][f"MXBlock{_tc}"]
+          if _mxBlock and _mxBlock != 32:
+            reject(state, printRejectionReason,
+                   f"UseSubtileImpl=1 requires MXBlock{_tc}=32, got {_mxBlock}")
+            return
         if state["MIWaveTile"][0] % 2 != 0 or state["MIWaveTile"][1] % 2 != 0:
           reject(state, printRejectionReason,
                  "UseSubtileImpl=1 with MX datatype requires even MIWaveTile, got [%d, %d]"
