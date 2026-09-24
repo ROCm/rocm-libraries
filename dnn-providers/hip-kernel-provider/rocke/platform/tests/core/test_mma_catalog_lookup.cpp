@@ -391,7 +391,7 @@ static int test_scale_layouts_and_families()
                                          : rocke_mma_op_a_scale_layout(op, NULL);
                 CHECK(map && map->frag_len == count && map->wave_size == 32);
                 CHECK(map->role
-                      == (source ? ROCKE_MMA_ROLE_SRC1_SCALE : ROCKE_MMA_ROLE_SRC0_SCALE));
+                      == (source ? ROCKE_MMA_ROLE_SCALE_SRC1 : ROCKE_MMA_ROLE_SCALE_SRC0));
                 for(int slot = -1; slot <= count; ++slot)
                 {
                     rocke_ir_builder_t b;
@@ -402,7 +402,7 @@ static int test_scale_layouts_and_families()
                     if(slot < 0 || slot == count)
                     {
                         CHECK(!ok && !x && !y && b.status == ROCKE_ERR_VALUE);
-                        CHECK(strstr(b.err, source ? "'src1_scale'" : "'src0_scale'"));
+                        CHECK(strstr(b.err, source ? "'scale_src1'" : "'scale_src0'"));
                     }
                     else
                         CHECK(ok && x && y && b.status == ROCKE_OK);

@@ -65,8 +65,8 @@ typedef enum rocke_mma_role
     ROCKE_MMA_ROLE_SRC1, /* src1: coords (k, col) */
     ROCKE_MMA_ROLE_SRC2, /* src2: coords (row, col) */
     ROCKE_MMA_ROLE_DST, /* dst: coords (row, col) */
-    ROCKE_MMA_ROLE_SRC0_SCALE,
-    ROCKE_MMA_ROLE_SRC1_SCALE
+    ROCKE_MMA_ROLE_SCALE_SRC0,
+    ROCKE_MMA_ROLE_SCALE_SRC1
 } rocke_mma_role_t;
 
 /* The lane/slot -> tile-coordinate emitter. Given the builder, a runtime i32

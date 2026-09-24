@@ -73,7 +73,7 @@ def test_scale_coordinates(dtype, block_k, role):
     count = 128 // block_k
     assert getattr(atom, f"{role}_frag_len") == count
     assert (layout.role, layout.wave_size, layout.frag_len) == (
-        "src0_scale" if role == "a_scale" else "src1_scale",
+        "scale_src0" if role == "a_scale" else "scale_src1",
         32,
         count,
     )
@@ -110,9 +110,9 @@ def test_scale_defaults_and_unavailable_maps():
             for src in atom.srcs
         ),
     )
-    with pytest.raises(NotImplementedError, match="src0_scale"):
+    with pytest.raises(NotImplementedError, match="scale_src0"):
         unknown.a_scale_layout()
-    with pytest.raises(NotImplementedError, match="src1_scale"):
+    with pytest.raises(NotImplementedError, match="scale_src1"):
         unknown.b_scale_layout()
     # Adding scale maps does not invent unverified matrix operand maps.
     for accessor in (atom.a_layout, atom.b_layout):

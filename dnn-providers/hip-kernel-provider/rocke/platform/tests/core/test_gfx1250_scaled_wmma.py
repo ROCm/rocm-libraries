@@ -116,7 +116,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     "rocke.instances.gfx1250.block_scaled_gemm._native_scaled_atom",
                     return_value=atom,
                 ),
-                self.assertRaisesRegex(NotImplementedError, f"src{index}_scale"),
+                self.assertRaisesRegex(NotImplementedError, f"scale_src{index}"),
             ):
                 build_block_scaled_gemm(spec, arch="gfx1250")
             # Lowering prepacked operands needs the carrier contract, not a loader map.

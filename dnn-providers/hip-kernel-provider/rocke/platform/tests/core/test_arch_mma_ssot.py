@@ -682,8 +682,8 @@ def test_legacy_scaled_json_maps_to_the_same_indexed_contract():
     )
     atom = _build_mma_op(row)
     assert atom == ArchTarget.from_gfx("gfx1250").mma.by_op_id(row["op_id"])
-    assert atom.srcs[0].scale.layout.role == "src0_scale"
-    assert atom.srcs[1].scale.layout.role == "src1_scale"
+    assert atom.srcs[0].scale.layout.role == "scale_src0"
+    assert atom.srcs[1].scale.layout.role == "scale_src1"
     conflict = {
         **row,
         "srcs": [

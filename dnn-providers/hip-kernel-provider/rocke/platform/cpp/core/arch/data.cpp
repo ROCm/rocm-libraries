@@ -609,8 +609,8 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
             const char* role_txt = (m->role == ROCKE_MMA_ROLE_SRC0)         ? "src0"
                                    : (m->role == ROCKE_MMA_ROLE_SRC1)       ? "src1"
                                    : (m->role == ROCKE_MMA_ROLE_SRC2)       ? "src2"
-                                   : (m->role == ROCKE_MMA_ROLE_SRC0_SCALE) ? "src0_scale"
-                                   : (m->role == ROCKE_MMA_ROLE_SRC1_SCALE) ? "src1_scale"
+                                   : (m->role == ROCKE_MMA_ROLE_SCALE_SRC0) ? "scale_src0"
+                                   : (m->role == ROCKE_MMA_ROLE_SCALE_SRC1) ? "scale_src1"
                                                                             : "dst";
             b->status = ROCKE_ERR_VALUE;
             snprintf(b->err,
@@ -681,13 +681,13 @@ static void _wmma_gfx1250_b_scale(rocke_ir_builder_t* b,
  */
 
 static const rocke_layout_map_t lm_wmma_scale_k32_a
-    = {ROCKE_MMA_ROLE_SRC0_SCALE, 4, 32, _wmma_gfx1250_a_scale};
+    = {ROCKE_MMA_ROLE_SCALE_SRC0, 4, 32, _wmma_gfx1250_a_scale};
 static const rocke_layout_map_t lm_wmma_scale_k32_b
-    = {ROCKE_MMA_ROLE_SRC1_SCALE, 4, 32, _wmma_gfx1250_b_scale};
+    = {ROCKE_MMA_ROLE_SCALE_SRC1, 4, 32, _wmma_gfx1250_b_scale};
 static const rocke_layout_map_t lm_wmma_scale_k16_a
-    = {ROCKE_MMA_ROLE_SRC0_SCALE, 8, 32, _wmma_gfx1250_a_scale};
+    = {ROCKE_MMA_ROLE_SCALE_SRC0, 8, 32, _wmma_gfx1250_a_scale};
 static const rocke_layout_map_t lm_wmma_scale_k16_b
-    = {ROCKE_MMA_ROLE_SRC1_SCALE, 8, 32, _wmma_gfx1250_b_scale};
+    = {ROCKE_MMA_ROLE_SCALE_SRC1, 8, 32, _wmma_gfx1250_b_scale};
 
 /* --- mfma_f32_16x16x16_f16 / _bf16: src0/src1/src2/dst (frag 4/4/4/4, wave64) --- */
 static const rocke_layout_map_t lm_mfma_16x16x16_src0 = {ROCKE_MMA_ROLE_SRC0, 4, 64, _mfma_a_16x16};

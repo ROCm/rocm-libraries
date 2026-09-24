@@ -63,7 +63,7 @@ class LayoutMap:
     role
         ``"src0"``, ``"src1"``, ``"src2"``, or ``"dst"``. ``src0`` uses
         ``(row, k)``, ``src1`` uses ``(k, col)``, and ``src2``/``dst`` use
-        ``(row, col)`` coordinates. ``src0_scale`` and ``src1_scale`` use
+        ``(row, col)`` coordinates. ``scale_src0`` and ``scale_src1`` use
         ``(row, K-group)`` and ``(K-group, col)`` for logical scale elements.
     frag_len
         Number of fragment slots per lane for this role (the per-lane vector
@@ -247,7 +247,7 @@ class MmaOp:
         for i, src in enumerate(self.srcs):
             if src.scale is not None and src.scale.layout is not None:
                 layout = src.scale.layout
-                if layout.role != f"src{i}_scale" or layout.wave_size != self.wave_size:
+                if layout.role != f"scale_src{i}" or layout.wave_size != self.wave_size:
                     raise ValueError("scale layout does not match its source metadata")
         if self.family == "wmma_scaled":
             _normalize_mma_scales(
@@ -339,7 +339,7 @@ class MmaOp:
         scale = self.src(index).scale
         if scale is None or scale.layout is None:
             raise NotImplementedError(
-                f"no verified 'src{index}_scale' layout map for MMA op_id {self.op_id!r} "
+                f"no verified 'scale_src{index}' layout map for MMA op_id {self.op_id!r} "
                 f"({self.m}x{self.n}x{self.k}); add one to "
                 f"_MMA_FRAGMENT_INFO before consuming it"
             )
@@ -1413,7 +1413,7 @@ def _build_mma_op(o: dict) -> MmaOp:
                 dtype=scale_row["dtype"],
                 block_size=scale_row["block_size"],
                 frag_len=scale_len,
-                layout=_mk(f"{role}_scale", scale_len, scale_fn),
+                layout=_mk(f"scale_{role}", scale_len, scale_fn),
             )
             if scale_row is not None
             else None

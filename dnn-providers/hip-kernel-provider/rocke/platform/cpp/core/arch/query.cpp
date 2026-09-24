@@ -178,7 +178,7 @@ const rocke_layout_map_t*
     if(index < 0 || index >= 3)
         rocke_ati_q_set_err(b, ROCKE_ERR_VALUE, "MMA src index %d is outside [0, 3)", index);
     char role[16];
-    snprintf(role, sizeof(role), "src%d_scale", index);
+    snprintf(role, sizeof(role), "scale_src%d", index);
     return rocke_ati_require_layout(op, op ? op->srcs[index].scale_layout : NULL, role, b);
 }
 const rocke_layout_map_t* rocke_mma_op_a_scale_layout(const rocke_mma_op_t* op,

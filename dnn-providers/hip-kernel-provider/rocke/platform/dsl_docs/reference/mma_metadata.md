@@ -46,7 +46,8 @@ are separate from register byte packing and global tensor strides. Unscaled
 atoms default to zero scale fragments and absent maps. An unavailable map raises
 `NotImplementedError`, including for a scaled atom whose layout is not verified.
 The canonical accessor is `src_scale_layout(index)`; stored roles are
-`src0_scale` and `src1_scale`. The C source record owns `scale_dtype`,
+`scale_src0` and `scale_src1`, matching the ISA fields `SCALE_SRC0` and
+`SCALE_SRC1`. The C source record owns `scale_dtype`,
 `scale_block_size`, `scale_frag_len`, and `scale_layout`. Native consumers must
 rebuild for the indexed struct layout and role enum changes.
 
