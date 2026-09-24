@@ -939,6 +939,9 @@ def createLibraryLogic(
         solutionState["ISA"] = [isa[0], isa[1], isa[2]]
         if "ProblemType" in solutionState:
             del solutionState["ProblemType"]
+        # Codegen-only convenience DataType object (numBytes() at kernel-gen time); not
+        # serializable and not read by the runtime -- _WorkspaceSizePerElemC carries the info.
+        solutionState.pop("_WorkspaceDataType", None)
         solutionList.append(solutionState)
 
     if tileSelectionSolutions:
@@ -947,6 +950,7 @@ def createLibraryLogic(
             _removeDefaultVals(solutionState)
             if "ProblemType" in solutionState:
                 del solutionState["ProblemType"]
+            solutionState.pop("_WorkspaceDataType", None)
             solutionList.append(solutionState)
 
     exactLogicList = [[list(k), v] for k, v in exactLogic.items()] if exactLogic else None
