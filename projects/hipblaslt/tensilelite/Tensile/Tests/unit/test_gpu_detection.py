@@ -52,15 +52,15 @@ def test_visible_device_count(monkeypatch, rocr, hip, expected):
     assert visible_device_count() == expected
 
 
-@pytest.mark.parametrize("worker_id", ["gw0", "gw1", "gw2", "gw3"])
-def test_isolated_gpu_puts_every_worker_on_index_zero(monkeypatch, worker_id):
+@pytest.mark.parametrize("xdist_worker", ["gw0", "gw1", "gw2", "gw3"])
+def test_isolated_gpu_puts_every_worker_on_index_zero(monkeypatch, xdist_worker):
     monkeypatch.setenv("ROCR_VISIBLE_DEVICES", "5")
-    assert worker_gpu_index(worker_id) == 0
+    assert worker_gpu_index(xdist_worker) == 0
 
 
-@pytest.mark.parametrize("worker_id, expected", [("gw3", 3), ("gw9", 1)])
-def test_unisolated_workers_wrap_physical_gpus(worker_id, expected):
-    assert worker_gpu_index(worker_id) == expected
+@pytest.mark.parametrize("xdist_worker, expected", [("gw3", 3), ("gw9", 1)])
+def test_unisolated_workers_wrap_physical_gpus(xdist_worker, expected):
+    assert worker_gpu_index(xdist_worker) == expected
 
 
 def test_worker_id_without_number_returns_none():
