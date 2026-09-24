@@ -96,4 +96,4 @@ For detailed information on adding new operations or datatypes to the CPU Refere
 
 - [hipDNN Operation Support](./OperationSupport.md) - Central hub for hipDNN operation support
 - [CPU Graph Executor Design](./rfcs/0001_CpuGraphExecutorDesign.md) - Detailed architecture documentation
-- [Testing Plan](./testing/TestPlan.md) - Testing strategy and procedures
+- [Feature Release Test Plan](./feature_release/TestPlan.md) - Testing strategy and procedures
