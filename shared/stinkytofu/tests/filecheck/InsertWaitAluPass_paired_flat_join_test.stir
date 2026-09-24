@@ -1,0 +1,65 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass --print-output
+#
+# A flat_* holds an ordinal in BOTH order FIFOs, so either FIFO reaching the hide
+# count satisfies its vm_vsrc wait. That property must survive a join: it belongs to
+# the instruction that stamped the register, not to the path taken to reach the use.
+
+#--- The flat_prefetch is stamped before the branch and the other path never touches
+#--- v0, so nothing disagrees about the stamp. 11 ds_loads satisfy the LDS side, so
+#--- the wait is discharged even though the TEX side has no followers at all.
+# CHECK-LABEL: @paired_flat_survives_join
+# CHECK: "st.flat_prefetch_b8"
+# CHECK-NOT: vm_vsrc
+# CHECK: v0 = "st.v_mov_b32"
+st.func @paired_flat_survives_join() {
+^entry:
+  "st.flat_prefetch_b8"(v[0:1], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"("label_join", SCC0)
+  Successors: ^bb_side, ^label_join
+^bb_side:
+  v90 = "st.v_add_f32"(v91, v92) { issueCycles = 1, latencyCycles = 5 }
+  Successors: ^label_join
+^label_join:
+  v100 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v101 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v108 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v109 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v110 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Same shape, but the other path stamps v0 with a TEX-only prefetch. The merged
+#--- stamp is then no longer one op in both FIFOs, so the LDS count alone cannot
+#--- discharge it and the wait stands.
+# CHECK-LABEL: @paired_flat_lost_when_paths_disagree
+# CHECK: "st.s_wait_alu"
+# CHECK-SAME: vm_vsrc
+# CHECK-NEXT: v0 = "st.v_mov_b32"
+st.func @paired_flat_lost_when_paths_disagree() {
+^entry:
+  "st.flat_prefetch_b8"(v[0:1], s[64:65]) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"("label_join2", SCC0)
+  Successors: ^bb_side2, ^label_join2
+^bb_side2:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_join2
+^label_join2:
+  v100 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v101 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v108 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v109 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v110 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+}

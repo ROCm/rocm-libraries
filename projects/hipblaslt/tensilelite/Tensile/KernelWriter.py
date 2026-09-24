@@ -6470,7 +6470,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module = Module("body")
     module.add(Label("ASM_Start", "Main body of the asm kernel"))
     module.add(self.defineAndResources(kernel, tensorParametersA, tensorParametersB, tPM))
-    module.add(self.disableWmmaArbStall())
+    module.add(self.disableWmmaArbStall(kernel))
 
     # gfx1250 moves SK constants to VGPRs inside defineAndResources so the
     # freed SGPR slots can be reused before defineVariableSgprs runs.

@@ -56,7 +56,7 @@ TEST(HWModel, Gfx1250HazardRules) {
     const HWModel& hw = hwModelForArch(kGfx1250);
 
     ASSERT_EQ(hw.hazards.numRules, kNumCdna5HazardRules);
-    ASSERT_EQ(hw.hazards.numRules, 2);
+    ASSERT_EQ(hw.hazards.numRules, 3);
     ASSERT_NE(hw.hazards.rules, nullptr);
 
     // The model points at the shared table rather than carrying a copy.
@@ -64,11 +64,23 @@ TEST(HWModel, Gfx1250HazardRules) {
 
     EXPECT_STREQ(hw.hazards.rules[0].name, "SaluSgprToMemAddr");
     EXPECT_EQ(hw.hazards.rules[0].regType, RegType::S);
-    EXPECT_EQ(hw.hazards.rules[0].cycles, 8);
+    EXPECT_EQ(hw.hazards.rules[0].distance, 8);
+    EXPECT_EQ(hw.hazards.rules[0].dir, HazardDir::WriteThenRead);
+    EXPECT_EQ(hw.hazards.rules[0].unit, HazardUnit::Cycles);
 
     EXPECT_STREQ(hw.hazards.rules[1].name, "ValuVgprToVmemAddr");
     EXPECT_EQ(hw.hazards.rules[1].regType, RegType::V);
-    EXPECT_EQ(hw.hazards.rules[1].cycles, 32);
+    EXPECT_EQ(hw.hazards.rules[1].distance, 32);
+    EXPECT_EQ(hw.hazards.rules[1].dir, HazardDir::WriteThenRead);
+    EXPECT_EQ(hw.hazards.rules[1].unit, HazardUnit::Cycles);
+
+    // PipeOps rule: distance 0 in the table means the arch policy supplies it.
+    EXPECT_STREQ(hw.hazards.rules[2].name, "WmmaVgprSrcToDsWrite");
+    EXPECT_EQ(hw.hazards.rules[2].regType, RegType::V);
+    EXPECT_EQ(hw.hazards.rules[2].distance, 0);
+    EXPECT_EQ(hw.hazards.rules[2].dir, HazardDir::ReadThenWrite);
+    EXPECT_EQ(hw.hazards.rules[2].unit, HazardUnit::PipeOps);
+    EXPECT_NE(hw.hazards.rules[2].isPipeOp, nullptr);
 }
 
 // gfx1250v0 currently aliases gfx1250 field-for-field. This pins that it is a
@@ -105,4 +117,31 @@ TEST(HWModel, ConfiguredPassContextCachesMatchingModel) {
     PassContext ctx;
     ctx.setGemmTileConfig(cfg);
     EXPECT_EQ(&ctx.getHWModel(), &hwModelForArch(kGfx1250));
+}
+
+// The lookup key must stay unique and gfx1250v0 must keep mirroring gfx1250; no numbers pinned.
+TEST(HWModel, Gfx1250WaitHideFormTable) {
+    const HWModel& hw = hwModelForArch(kGfx1250);
+
+    // Two rows sharing a {costLatency, dstVgprs} key would make the lookup order-dependent.
+    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
+        for (size_t j = i + 1; j < hw.waitHide.forms.size(); ++j) {
+            const auto& a = hw.waitHide.forms[i];
+            const auto& b = hw.waitHide.forms[j];
+            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs)
+                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs;
+        }
+    }
+
+    // A deliberate alias, not an accidental fallthrough.
+    const HWModel& v0 = hwModelForArch(kGfx1250v0);
+    ASSERT_EQ(v0.waitHide.forms.size(), hw.waitHide.forms.size());
+    EXPECT_EQ(v0.waitHide.vmVsrcLds, hw.waitHide.vmVsrcLds);
+    EXPECT_EQ(v0.waitHide.vmVsrcTex, hw.waitHide.vmVsrcTex);
+    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
+        EXPECT_EQ(v0.waitHide.forms[i].costLatency, hw.waitHide.forms[i].costLatency);
+        EXPECT_EQ(v0.waitHide.forms[i].dstVgprs, hw.waitHide.forms[i].dstVgprs);
+        EXPECT_EQ(v0.waitHide.forms[i].xdlVaVdst, hw.waitHide.forms[i].xdlVaVdst);
+        EXPECT_EQ(v0.waitHide.forms[i].csmaccVaVdst, hw.waitHide.forms[i].csmaccVaVdst);
+    }
 }
