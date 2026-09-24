@@ -1324,8 +1324,15 @@ def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     kernel = build_attention_dense(tuned, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
     # The K row-group pad needs no gfx942 tag: the SHARED name already carries
-    # kpad{N} for it, so the gfx942 suffix ends at the waves-per-eu bump.
-    assert gfx942_kernel_name(tuned).endswith("_wpe4")
+    # kpad{N} for it.
+    #
+    # Membership, not endswith: this used to anchor on the end because wpe was the
+    # last gfx942 tag emitted, but the tag list is open -- dispatch now also picks
+    # a non-default non-persistent grid order, which appends after it. Anchoring on
+    # the end tested tag ORDER, which nothing depends on, and broke on an unrelated
+    # policy change. What this test is actually for is that the tuned wpe reaches
+    # the name at all.
+    assert "_wpe4" in gfx942_kernel_name(tuned)
     assert "_kpad8_" in gfx942_kernel_name(tuned)
 
 

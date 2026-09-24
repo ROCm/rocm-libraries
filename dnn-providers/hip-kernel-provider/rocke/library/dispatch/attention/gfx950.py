@@ -92,6 +92,23 @@ def _dense_spec(req: OperatorRequest):
         and not use_sinks
         and not ragged
     )
+    # Non-persistent grid order -- see the gfx942 sibling for the full rationale
+    # and the measurements. Same conclusion on both arches: the shipped
+    # `qb_major` puts the query block on the fastest grid axis, so every XCD
+    # touches every head and the causal cost imbalance is dispatched in the worst
+    # possible order. `bt_hkv_minor_rev` is grid=(B, Hq, nqb) -- batch fastest,
+    # kv-head as the head axis's low digit, query blocks descending.
+    #
+    # runtime_shape is PRESERVED: the head-axis unpack divides by the baked Hkv,
+    # never by batch or nqb, so this order emits no runtime-radix division and
+    # does not force the body onto a baked k-tile trip count.
+    #
+    # Gated on causal because that is what the mechanism needs: with uniform
+    # block cost the dispatch-order half of the win does not exist and `_rev`
+    # degenerates to the identity.
+    grid_order = ("bt_hkv_minor_rev"
+                  if (int(req.mask_type) != 0 and not persistent)
+                  else "qb_major")
     return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -107,6 +124,7 @@ def _dense_spec(req: OperatorRequest):
         persistent=persistent,
         num_persistent=np,
         persist_decode=decode,
+        default_grid_order=grid_order,
         ragged=ragged,
         sliding_window=sw,
         use_sinks=use_sinks,

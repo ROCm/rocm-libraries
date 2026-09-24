@@ -317,24 +317,31 @@ class AttentionDenseSpec:
                 # and an expensive qb; with uniform (non-causal) cost that fold is
                 # a no-op reordering and the decode has no reason to exist.
                 raise ValueError("persist_decode='hkv_minor' requires causal=True")
-            if self.num_persistent % _PERSIST_XCD_MODULUS:
-                raise ValueError(
-                    f"persist_decode='hkv_minor' requires num_persistent "
-                    f"({self.num_persistent}) to be a multiple of "
-                    f"{_PERSIST_XCD_MODULUS}: XCD j receives exactly the work "
-                    f"items wi % {_PERSIST_XCD_MODULUS} == j only when the CTA "
-                    f"count is, and otherwise the kv-head->XCD identity this "
-                    f"decode is built on does not hold"
-                )
-            if not xcd_partitionable(self.num_kv_heads):
-                raise ValueError(
-                    f"persist_decode='hkv_minor' requires num_kv_heads "
-                    f"({self.num_kv_heads}) to divide or be divided by "
-                    f"{_PERSIST_XCD_MODULUS}: the decode's kv-head->XCD identity "
-                    f"is governed by gcd(num_kv_heads, {_PERSIST_XCD_MODULUS}), "
-                    f"and any other value spreads a single kv-head over several "
-                    f"XCDs instead of confining it to one"
-                )
+            # NOTE two former guards were REMOVED here, deliberately:
+            #   num_persistent % num_xcds != 0
+            #   not xcd_partitionable(num_kv_heads)
+            # Neither was a correctness condition. The decode is a mixed-radix
+            # decomposition, hence a bijection for ANY radix set; both conditions
+            # only decide whether xcd = wi % num_xcds happens to coincide with
+            # the kv-head index, which is a SPEED property.
+            #
+            # Measured: the same mapping (digit order VBGQ) ran on Hkv=10
+            # (gcd(Hkv, num_xcds) == 2), exactly the geometry the second guard
+            # rejected -- 161 cells, zero correctness failures, max abs error
+            # ~3e-4. It is simply slower there, a median ~4% off the best variant
+            # on that path, and ties the best on some shapes. For the first
+            # guard: the shipped dispatch always passes a CU count, which is a
+            # multiple of num_xcds, so other values are legal but pointless and
+            # yield a worse mapping rather than a wrong answer.
+            #
+            # Enforcing a performance property as a construction error had a real
+            # cost: it made legal shapes UNBUILDABLE, which is why 40/10 appeared
+            # as a skip in every sweep. This is the second relaxation of the same
+            # guard (it was pow2-only before H4), so the mechanism was fixed
+            # rather than the threshold moved again. ``xcd_partitionable`` stays
+            # as the PREDICTOR the auto policy keys on -- see
+            # ``AttentionDenseSpec.resolved_persist_decode`` -- because Hkv vs
+            # num_xcds is the one shape variable that moves the policy's regret.
             if self.ragged or self.varlen or self.paged:
                 raise ValueError(
                     "persist_decode='hkv_minor' is validated only for aligned "
@@ -426,13 +433,22 @@ class AttentionDenseSpec:
 
     @property
     def resolved_persist_decode(self) -> str:
-        """Resolve the common auto policy to hkv-major or qb-major."""
+        """Resolve the common auto policy to hkv-major or qb-major.
+
+        ``xcd_partitionable`` is consulted here as a PREDICTOR, which is the role
+        it was demoted to when the hkv_minor construction guards were removed
+        (see ``__post_init__``). A kv head that does not divide or get divided by
+        the XCD count spreads across several chiplets, so the kv-head-locality
+        decodes have nothing to exploit -- that is a reason to not CHOOSE them,
+        not a reason to refuse to build them.
+        """
         if self.persist_decode != "auto":
             return self.persist_decode
         gqa = self.num_queries_per_kv
         nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         per_hkv = gqa * nqb * self.batch
-        if gqa > 1 and per_hkv >= 2 * self.num_persistent:
+        if (gqa > 1 and per_hkv >= 2 * self.num_persistent
+                and xcd_partitionable(self.num_kv_heads)):
             return "hkv_major"
         return "qb_major"
 

@@ -74,7 +74,7 @@ class TestDenseSpecArchRouter(unittest.TestCase):
 class TestDenseGqaPairWiring(unittest.TestCase):
     """Invariant-compatible shapes select a balanced GQA-local decode."""
 
-    def test_exact_llama3_8b_prefill_auto_selects_gqa_pair(self):
+    def test_exact_llama3_8b_prefill_auto_avoids_gqa_pair(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -88,8 +88,15 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             dense_persist_decode="auto",
         )
         spec = dense_spec_for_request(req)
-        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
-        self.assertIn("gqapair", spec.kernel_name())
+        # `auto` used to select gqa_pair on exactly this shape. It no longer
+        # does: measured head-to-head at matched num_persistent, the phase
+        # decodes are behind the best available variant on 12 of the 12 shapes
+        # where this policy selected them, by 0.6-6.2%. The builder arm is
+        # untouched -- see test_explicit_gqa_pair_passes_through_dispatcher.
+        self.assertNotIn(spec.resolved_persist_decode,
+                         ("gqa_pair", "gqa_pair_2phase"))
+        self.assertNotIn("gqapair", spec.kernel_name())
+        # wide_lds_dma is a separate policy and must be unaffected.
         self.assertTrue(spec.wide_lds_dma)
         self.assertIn("wdma", spec.kernel_name())
         self.assertEqual(spec.num_persistent, 256)
@@ -118,7 +125,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "persist_decode"):
             dense_spec_for_request(req)
 
-    def test_s4096_shape_selects_two_phase_pair_and_wide_dma(self):
+    def test_s4096_shape_keeps_wide_dma_without_two_phase_pair(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -132,12 +139,13 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             dense_persist_decode="auto",
         )
         spec = dense_spec_for_request(req)
-        self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
+        self.assertNotEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
+        self.assertNotIn("gqapair", spec.kernel_name())
+        # wide_lds_dma is gated independently of the decode and still applies.
         self.assertTrue(spec.wide_lds_dma)
-        self.assertIn("gqapair2", spec.kernel_name())
         self.assertIn("wdma", spec.kernel_name())
 
-    def test_bf16_shape_uses_invariant_compatible_fast_path(self):
+    def test_bf16_shape_keeps_fast_path_without_gqa_pair(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -151,10 +159,11 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             dense_persist_decode="auto",
         )
         spec = dense_spec_for_request(req)
-        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertNotIn(spec.resolved_persist_decode,
+                         ("gqa_pair", "gqa_pair_2phase"))
         self.assertTrue(spec.wide_lds_dma)
 
-    def test_s2048_h64_selects_two_phase_pair(self):
+    def test_s2048_h64_no_longer_selects_two_phase_pair(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=64,
@@ -168,7 +177,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             dense_persist_decode="auto",
         )
         spec = dense_spec_for_request(req)
-        self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
+        self.assertNotEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
         self.assertTrue(spec.wide_lds_dma)
 
     def test_explicit_two_phase_pair_passes_through_dispatcher(self):
@@ -189,7 +198,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
         self.assertTrue(spec.wide_lds_dma)
 
-    def test_exact_shape_with_sinks_keeps_gqa_pair(self):
+    def test_exact_shape_with_sinks_keeps_sinks_without_gqa_pair(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -203,7 +212,8 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             use_sinks=True,
         )
         spec = dense_spec_for_request(req)
-        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertNotIn(spec.resolved_persist_decode,
+                         ("gqa_pair", "gqa_pair_2phase"))
         self.assertTrue(spec.use_sinks)
         self.assertFalse(spec.wide_lds_dma)
 

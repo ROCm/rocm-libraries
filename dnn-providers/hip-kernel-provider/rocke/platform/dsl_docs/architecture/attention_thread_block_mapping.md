@@ -299,17 +299,39 @@ things worse, because ten geometries is too few to fit a table that transfers.
 | gfx942 persistent | `VGBQ.fold`, `BGVQ.fold` when `B > 1` | −1.40% | −13.94% |
 | gfx950 persistent | same pair | −2.16% | −20.08% |
 
-`VGQB.rev` is `np/hkv_minor` + reverse, which already ships — the change on that path is
-to make it the *default* in place of `qb_major`.
+**Superseded on the non-persistent path — `BVGQ` is better, and it is ONE order for
+everything.** The table above ranks orders reachable on the *shipped* grid, which is
+`(.., .., batch)` on both arches: batch is permanently the z-axis, the slowest digit, so
+only labels ending in `B` were expressible. Lifting that restriction takes one grid
+change, and then a single order dominates:
+
+| order (traversal per path) | gfx942/P | gfx942/np | gfx950/P | **worst** |
+|---|---:|---:|---:|---:|
+| **`BVGQ`** | −1.60% | −1.61% | −1.55% | **−1.61%** |
+| `VGBQ` | −1.62% | −2.01% | −1.60% | −2.01% |
+| `VGQB` | −2.08% | −1.26% | −2.92% | −2.92% |
+
+`BVGQ` with `rev` on the queued path and `fold` on the pinned one is never worse than
+−1.61% on any arch × path, and B=1 is its *strongest* slice. Measured against the old
+`qb_major` default: **+28.9% (gfx942) / +33.4% (gfx950)** geomean, never behind it on any
+of 96 shapes, zero correctness failures. It ships as the named order **`bt_hkv_minor_rev`**
+— grid `(B, Hq, nqb)`.
+
+Two details make it cheap. **Fuse `(hkv, hql)`, not `(bt, hq)`:** `hq = hkv*gqa + hql` is
+already a fused quantity the body needs for addressing, and *both* its radices are baked
+on both arches, so the unpack is a div/mod by a compile-time constant. Fusing batch onto
+an axis instead would divide by `batch`, which gfx950 takes as a kernarg — that would
+force `runtime_shape` off and silently switch the body to a baked k-tile trip count.
+And **the traversal must stay per-path**: forcing one traversal on both costs 4–6%
+worst-case, far more than the order choice, because queued wants LPT and pinned wants the
+causal pairing.
 
 **At B=1 no heuristic is needed at all.** One fixed variant is within **0.88% (gfx942) /
 0.49% (gfx950)** of the oracle, and every fitted policy improves on that by less than the
 noise band. B=1 is also where the label choice is free: `VGQB` / `VGBQ` / `VBGQ` / `BVGQ`
-are one kernel there. That freedom is worth spending deliberately, because **the four
-diverge sharply at B>=2 and the best label differs by path** — non-persistent wants the
-batch digit *last* (`VGQB`), persistent wants it *third* (`VGBQ`), and each is among the
-worst choices on the other path. Picking the wrong synonym costs 2–3 points of B>=2
-geomean for nothing.
+are one kernel there — the batch digit is elided. That freedom is worth spending
+deliberately, because **the four diverge sharply at B>=2**, and picking the wrong synonym
+costs 2–3 points of B>=2 geomean for nothing.
 
 **The only rule that generalises is `B > 1`.** Fitted predicates over `Hkv`, `gqa`, `NQB`,
 `W/CU` and their pairs do not transfer — on gfx950 a fitted rule is *worse* than no rule
@@ -407,15 +429,15 @@ across passes), and the gfx950 non-persistent path, which this sweep does not co
 7. **Thin coverage at B>1 and beyond ~16K sequence length.** The `hkv_minor` B>1 dilution
    (H6) is understood but unsolved, and the `reverse_qb` trend was still rising at the
    longest sequence measured.
-8. **Decide `gqa_pair`'s fate — now with a measurement, not a suspicion.** Controlled
-   head-to-head at matched `num_persistent` puts it behind the best variant on 12/12 of
-   the shapes where dispatch actually selects it, by 0.6–6.2%; see the section above. What
-   is left is a decision, not an experiment: gate it off, or delete both decodes. Deleting
-   is the larger change — they are separate builder arms, not a knob — so gating the
-   dispatch is the cheaper first step.
+8. ~~**Decide `gqa_pair`'s fate.**~~ **DONE — gated off.** Controlled head-to-head at
+   matched `num_persistent` put it behind the best variant on 12/12 of the shapes where
+   dispatch selected it, by 0.6–6.2%; see the section above. `resolved_persist_decode` no
+   longer selects either phase decode under `auto`. The builder arms are untouched and an
+   explicit `persist_decode="gqa_pair"` still works, so this gates the POLICY, not the
+   capability — deleting the arms remains available but is a larger change.
 9. **Revisit the XCD modulus.** `xcd_partitionable()` hardcodes 8. A part with a different
    XCD count silently turns the decode into an arbitrary permutation.
-10. **RECOMMENDED: demote both `hkv_minor` guards from errors to heuristic conditions.**
+10. ~~**RECOMMENDED: demote both `hkv_minor` guards.**~~ **DONE.**
     `AttentionDenseSpec.__post_init__` rejects `hkv_minor` unless
     `xcd_partitionable(num_kv_heads)` *and* `num_persistent % num_xcds == 0`. **Neither is
     a correctness condition.** A mixed-radix decode is a bijection for any radix set, and
@@ -436,8 +458,10 @@ across passes), and the gfx950 non-persistent path, which this sweep does not co
     both `raise`s, **keep `xcd_partitionable()`** as the named predicate the `auto`
     heuristic keys on — `Hkv` vs `num_xcds` is the one shape variable that moves the
     policy's regret — and let an explicit `persist_decode="hkv_minor"` build for any shape.
-    No test asserts the rejection, so this is a dispatch-policy change rather than a
-    contract change; still worth its own commit.
+    Both `raise`s are gone; `xcd_partitionable()` is retained and is now consulted by
+    `AttentionDenseSpec.resolved_persist_decode` as the predictor it was always meant to
+    be. `Hkv=10` and a non-multiple-of-`num_xcds` `num_persistent` both construct and
+    build again.
 
 ## Where the code lives
 

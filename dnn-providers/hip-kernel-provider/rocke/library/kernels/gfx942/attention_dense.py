@@ -703,6 +703,7 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
             "hq_major": "gridhq", "hq_major_rev": "gridhqrev",
             "hq_major_fold": "gridhqfold", "hkv_minor": "gridkvmin",
             "hkv_minor_rev": "gridkvminrev",
+            "bt_hkv_minor": "gridbtkv", "bt_hkv_minor_rev": "gridbtkvrev",
         }[spec.default_grid_order])
     # Tagged UNCONDITIONALLY, on both paths. The base kernel_name() appends
     # _persist_decode_name_part only under `if self.persistent`, so a
@@ -754,6 +755,12 @@ _IMPLEMENTED_GRID_ORDERS = frozenset({
     "qb_major",                                   # shipped: grid=(nqb,Hq,B)
     "hq_major", "hq_major_rev", "hq_major_fold",  # grid=(Hq,nqb,B), plain head
     "hkv_minor", "hkv_minor_rev",                 # grid=(Hq,nqb,B), kv-head low
+    # grid=(B, Hq, nqb): batch FASTEST, then kv-head, gqa lane, query block --
+    # digit order BVGQ. The orders above all leave batch on the z-axis, i.e. the
+    # slowest digit, which is the one thing they cannot vary; putting batch on x
+    # and fusing (hkv, hql) onto the head axis is what lifts that restriction,
+    # and it costs nothing because both of THOSE radices are baked.
+    "bt_hkv_minor", "bt_hkv_minor_rev",
 })
 
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
@@ -2225,6 +2232,28 @@ def _build_attention_dense_single_buffer(
         _nqb = Sq // BLOCK_M
         _qb, _hq, _bt = _digit_decode_values(b, b.block_id_x(), spec, _nqb, causal)
         _run_work_item(_qb, _hq, _bt)
+    elif spec.default_grid_order.startswith("bt_hkv_minor"):
+        # Digit order BVGQ: batch fastest, then kv-head, gqa lane, query block.
+        # grid = (B, Hq, nqb); linearisation is x-fastest, so the work index is
+        # bt + B*(a + Hq*blk) and the digits run bt, hkv, hql, blk -- BVGQ.
+        # xcd = (bt + B*hq) % num_xcds, so the batch element reaches the chiplet
+        # map at all, which is the one thing every order leaving batch on z
+        # cannot do.
+        #
+        # The head axis carries hkv as its LOW digit -- the same swizzle
+        # hkv_minor uses -- and the div/mod is by the BAKED Hkv, so no runtime
+        # division is emitted on either arch.
+        _nqb = Sq // BLOCK_M
+        _bt = b.block_id_x()
+        _a = b.block_id_y()
+        _hq = b.add(b.mul(b.mod(_a, b.const_i32(Hkv)), b.const_i32(gqa)),
+                    b.div(_a, b.const_i32(Hkv)))
+        _blk = b.block_id_z()
+        if spec.default_grid_order.endswith("_rev") and causal and _nqb > 1:
+            _qb = b.sub(b.const_i32(_nqb - 1), _blk)
+        else:
+            _qb = _blk
+        _run_work_item(_qb, _hq, _bt)
     elif spec.default_grid_order == "qb_major":
         _run_work_item(b.block_id_x(), b.block_id_y(), b.block_id_z())
     else:
@@ -2300,6 +2329,15 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
         # workgroup id itself. Same CTA count and same linearization as the 3-D
         # grid below, so the XCD round-robin sees an identical id sequence.
         return (nqb * spec.num_query_heads * spec.batch, 1, 1)
+    if spec.default_grid_order.startswith("bt_hkv_minor"):
+        # Digit order B,V,G,Q (batch fastest). x = batch, y = the HEAD axis with
+        # the kv-head as its low digit, z = query block. Fusing (hkv, hql) is the
+        # right pair: hq = hkv*gqa + hql is already a fused quantity the body
+        # needs for addressing, and BOTH its radices are baked on both arches --
+        # so the unpack is a div/mod by a compile-time constant. Fusing (bt, hq)
+        # onto one axis instead would divide by batch, which gfx950 takes as a
+        # kernarg. Grid shape and body MUST agree.
+        return (spec.batch, spec.num_query_heads, nqb)
     if spec.default_grid_order == "qb_major":
         return (nqb, spec.num_query_heads, spec.batch)
     # hq_major / hkv_minor both put the head axis on x; they differ only in how

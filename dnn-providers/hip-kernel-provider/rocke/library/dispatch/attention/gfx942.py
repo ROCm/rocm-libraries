@@ -198,6 +198,35 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
+    causal = int(req.mask_type) != 0
+    # Non-persistent grid order. `qb_major` -- grid=(nqb, Hq, B) -- was the
+    # shipped default and is the WORST of the six implemented orders: the
+    # hardware assigns xcd = linear_wgid % num_xcds and the grid linearizes
+    # x-fastest, so putting the query block on x makes every XCD touch every
+    # head, AND it dispatches all query blocks of a few heads together, whose
+    # causal costs differ by up to NQB-fold. `bt_hkv_minor_rev` fixes both and
+    # adds a third thing: grid=(B, Hq, nqb) puts BATCH on the fastest axis, the
+    # kv-head as the low digit of the head axis, and issues query blocks
+    # descending so the cheapest (not the most expensive) block is the tail.
+    # Batch reaching the chiplet map at all is what the older orders cannot do --
+    # they all leave it on z, the slowest digit.
+    #
+    # Measured over both architectures, all eight eligible production Hq/Hkv
+    # geometries, power-of-2 and non-power-of-2 seqlens, B=1..32, two passes
+    # each: qb_major wins on 7/60 configs at B=1 and NONE at any B>=2, and
+    # deleting it entirely costs 0.00%. Of all 24 digit orders, BVGQ (this one)
+    # has the best WORST CASE across both arches and both paths -- never below
+    # -1.61% of a per-shape oracle -- and it is the strongest at B=1, the primary
+    # target. Measured directly against the old default: +28.9% geomean. See
+    # platform/dsl_docs/architecture/attention_thread_block_mapping.md.
+    #
+    # Gated on causal because that is what the mechanism needs, not out of
+    # caution: with every query block costing the same, the dispatch-order half
+    # of the win does not exist and `_rev` degenerates to the identity.
+    # head_size is NOT gated -- D64 was measured separately and gains more, not
+    # less (the arithmetic per work item halves, so scheduling dominates).
+    grid_order = ("bt_hkv_minor_rev" if (causal and not persistent)
+                  else "qb_major")
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -205,11 +234,12 @@ def _dense_spec(req: OperatorRequest):
         num_query_heads=int(req.nhead_q),
         num_kv_heads=int(req.nhead_k),
         head_size=head_size,
-        causal=(int(req.mask_type) != 0),
+        causal=causal,
         dtype=dtype,
         block_m=bm,
         block_n=bn,
         persistent=persistent,
+        default_grid_order=grid_order,
         num_persistent=np,
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,

@@ -119,6 +119,12 @@ _GRID_ORDERS = frozenset({
     "qb_major",
     "hq_major", "hq_major_rev", "hq_major_fold",
     "hkv_minor", "hkv_minor_rev",
+    # grid=(B, Hq, nqb): digit order BVGQ -- batch FASTEST, then kv-head, gqa
+    # lane, query block. Every order above leaves batch on the z-axis, i.e. the
+    # slowest digit, so it never reaches xcd = linear_wgid % num_xcds at all.
+    # Fusing (hkv, hql) onto the head axis -- both radices BAKED -- is what frees
+    # the x-axis for batch without emitting a runtime-radix division.
+    "bt_hkv_minor", "bt_hkv_minor_rev",
 })
 
 
@@ -293,14 +299,27 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             and not self.paged
             and self.sliding_window == 0
         )
-        if aligned_causal and nqb % 2 == 0 and gqa % 2 == 0:
-            pair_np = nqb * self.num_kv_heads * self.batch
-            if self.num_persistent == pair_np:
-                return "gqa_pair"
-        if aligned_causal and nqb % 2 == 0 and gqa >= 2:
-            two_phase_np = nqb * self.num_kv_heads * self.batch * gqa // 2
-            if self.num_persistent == two_phase_np:
-                return "gqa_pair_2phase"
+        # gqa_pair / gqa_pair_2phase are NO LONGER auto-selected. They remain
+        # reachable by an explicit persist_decode, and the builder arms are
+        # untouched -- this gates the POLICY, not the capability.
+        #
+        # Measured head-to-head at matched num_persistent (so the decode is the
+        # only variable, not the occupancy) on the 12 shapes where this policy
+        # used to select them: behind the best available variant on 12 of 12, by
+        # 0.6% to 6.2%, median ~3%. Never a winner. A swept digit order took 7 of
+        # the 12 and a shipped decode the other 5; on the single shape where the
+        # phase decode beat every swept order it still lost to hkv_minor.
+        #
+        # They also fired by coincidence rather than by design: num_persistent
+        # must EQUAL nqb*Hkv*B (or W/2), while this policy passes the CU count,
+        # so the two matched on 7 and 5 of 100 measured shapes respectively --
+        # and on none at all at non-power-of-2 seqlens, where odd nqb fails the
+        # parity gate. See
+        # platform/dsl_docs/architecture/attention_thread_block_mapping.md.
+        #
+        # ``aligned_causal`` is kept: it is what an explicit request is still
+        # validated against below.
+        del aligned_causal
         return super().resolved_persist_decode
 
     @property
@@ -363,6 +382,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 "hq_major": "gridhq", "hq_major_rev": "gridhqrev",
                 "hq_major_fold": "gridhqfold", "hkv_minor": "gridkvmin",
                 "hkv_minor_rev": "gridkvminrev",
+                "bt_hkv_minor": "gridbtkv",
+                "bt_hkv_minor_rev": "gridbtkvrev",
             }[self.default_grid_order])
         # Tagged here rather than in _persist_decode_name_part because that hook
         # is only reached under `if self.persistent` in the base kernel_name();
@@ -552,7 +573,25 @@ def build_attention_dense(
         one_f = b.const_f32(1.0)
 
     _order = getattr(spec, "default_grid_order", "qb_major")
-    if _order == "qb_major":
+    if _order.startswith("bt_hkv_minor"):
+        # grid=(B, Hq, nqb). Work index is bt + B*(a + Hq*blk), so the digits run
+        # bt, hkv, hql, blk -- BVGQ. The head axis carries hkv as its LOW digit
+        # (the hkv_minor swizzle) and the div/mod is by the BAKED Hkv, so no
+        # runtime division is emitted even though batch and nqb are kernargs.
+        _a = b.block_id_y()
+        hq = b.add(
+            b.mul(b.mod(_a, b.const_i32(Hkv)), b.const_i32(gqa)),
+            b.div(_a, b.const_i32(Hkv)),
+        )
+        _bz = b.block_id_z()
+        _nqbv = b.div(
+            b.add(seqlen_q_p, b.const_i32(BLOCK_M - 1)), b.const_i32(BLOCK_M)
+        )
+        if _order.endswith("_rev") and causal:
+            qb = b.sub(b.sub(_nqbv, b.const_i32(1)), _bz)
+        else:
+            qb = _bz
+    elif _order == "qb_major":
         qb = b.block_id_x()
         hq = b.block_id_y()
     else:
@@ -590,7 +629,10 @@ def build_attention_dense(
             )
         else:
             qb = _by
-    bt = b.block_id_z()
+    # batch is on x for bt_hkv_minor (that is the point of the order), on z for
+    # every other grid order.
+    bt = (b.block_id_x() if _order.startswith("bt_hkv_minor")
+          else b.block_id_z())
     hkv = b.div(hq, b.const_i32(gqa))
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
 
@@ -2351,7 +2393,11 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     nqb = (
         spec.seqlen_q + spec.block_m - 1
     ) // spec.block_m  # ceil: ragged partial block
-    if getattr(spec, "default_grid_order", "qb_major") == "qb_major":
+    _order = getattr(spec, "default_grid_order", "qb_major")
+    if _order.startswith("bt_hkv_minor"):
+        # x = batch, y = head axis (kv-head low), z = query block.
+        return (spec.batch, spec.num_query_heads, nqb)
+    if _order == "qb_major":
         return (nqb, spec.num_query_heads, spec.batch)
     # Head axis on x. Grid shape and body MUST agree: a mismatch writes some
     # query rows twice and leaves others unwritten.
