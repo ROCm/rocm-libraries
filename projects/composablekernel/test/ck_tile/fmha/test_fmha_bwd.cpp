@@ -1108,7 +1108,8 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
                                  Values(std::tuple{0, 0, false}), // seed/offset/prefs
                                  // batch >= 2 and an even nhead >= 2 throughout. mask "0" keeps
                                  // every row attended, so a neutral head never combines a -inf
-                                 // sink with a fully masked row.
+                                 // sink with a fully masked row - that pairing is the subject of
+                                 // SinkGradNeutralHeadsMaskedRows below.
                                  Values(std::tuple{2, 2, -1, 516, 253, "0"},
                                         std::tuple{3, 4, 2, 259, -1, "0"},
                                         std::tuple{4, 2, -1, 200, 180, "0"}),
@@ -1154,6 +1155,92 @@ TEST_P(SinkGradNeutralHeads, DataTypeConfig)
 
     if(result == bwd_result::no_instance)
         GTEST_SKIP() << "No instance for sink_grad neutral-head check";
+    ASSERT_EQ(result, bwd_result::success);
+}
+
+// ============================================================================
+// A -inf sink meeting a fully masked row
+// ----------------------------------------------------------------------------
+// SinkGradNeutralHeads pins mask "0" so a neutral head never sees a row with no
+// attended key. This suite removes that restriction, which is the one case
+// where "-inf means no sink" stops being free: a fully masked row carries
+// lse == -inf as well, so exp(sink - lse) becomes exp(-inf - -inf) == NaN.
+//
+// Bottom-right causal with seqlen_q > seqlen_k produces such rows - row q
+// attends keys up to q - seqlen_q + seqlen_k, so the first seqlen_q - seqlen_k
+// rows attend nothing.
+//
+// The NaN had two independent reach conditions, hence both seqlen pairings
+// below. Let m = seqlen_q - seqlen_k:
+//   m % 32 != 0  a masked row shares an M tile with an attended one, so the
+//                kernel visits it and d_sink goes NaN (GetTileRangeAlongY
+//                rounds y_start down to a tile boundary).
+//   m % 32 == 0  the kernel skips the masked rows entirely, but the host
+//                reference still rescaled P by exp(lse_old - lse_new) there,
+//                and its NaN O is uploaded as a kernel input, so D = rowsum(O
+//                * dO) carries it into dQ and dK.
+// Both directions are covered per hdim, and every hdim here is a distinct
+// dot_do_o instantiation (72 is the head-dim-padded one).
+// ============================================================================
+// Only mode, head dim and shape vary here; everything else the runner takes is
+// pinned, so it is passed at the call site rather than as a one-element axis.
+using SinkGradMaskedRowsParam = std::tuple<mode_enum, std::tuple<int, int>, FmhaBwdDimsMaskParam>;
+
+class SinkGradNeutralHeadsMaskedRows : public TestWithParam<SinkGradMaskedRowsParam>
+{
+};
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
+                         SinkGradNeutralHeadsMaskedRows,
+                         Combine(Values(mode_enum::batch, mode_enum::group),
+                                 Values(std::tuple{64, -1},
+                                        std::tuple{72, -1}, // head-dim padded
+                                        std::tuple{128, -1}),
+                                 // every entry needs mask "2"/"b:*" and seqlen_q > seqlen_k
+                                 Values(std::tuple{2, 2, -1, 512, 128, "2"}, // m=384, tile aligned
+                                        std::tuple{2, 2, -1, 160, 128, "2"}, // m=32,  tile aligned
+                                        std::tuple{2, 2, -1, 129, 128, "2"}, // m=1,   partial tile
+                                        std::tuple{2, 2, -1, 161, 128, "2"}, // m=33,  partial tile
+                                        std::tuple{3, 4, 2, 259, 128, "2"},  // m=131, GQA
+                                        std::tuple{2, 2, -1, 512, 128, "b:64,0"}) // swa
+                                 ));
+TEST_P(SinkGradNeutralHeadsMaskedRows, DataTypeConfig)
+{
+    auto [mode, hdims, dims_mask]                              = GetParam();
+    auto [hdim_q, hdim_v]                                      = hdims;
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    auto result = fmha_bwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {seqlen_q},
+        {seqlen_k},
+        {-1},
+        {-1},
+        hdim_q,
+        hdim_v,
+        true,  // i_perm
+        true,  // o_perm
+        0,     // scale
+        "n",   // bias_str
+        false, // use_dbias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        true,  // sink_grad
+        false, // deterministic
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,
+        stream_config,
+        std::nullopt, // json
+        sink_regime::neutral_heads);
+
+    if(result == bwd_result::no_instance)
+        GTEST_SKIP() << "No instance for sink_grad masked-row check";
     ASSERT_EQ(result, bwd_result::success);
 }
 
