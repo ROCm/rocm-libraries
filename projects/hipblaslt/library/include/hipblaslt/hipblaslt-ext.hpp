@@ -31,8 +31,10 @@
 
 #pragma once
 #include "hipblaslt/hipblaslt.h"
+#include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_ext
@@ -1282,14 +1284,14 @@ namespace hipblaslt_ext
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,
-                                         hipblasLtHandle_t                  handle,
-                                         hipblasLtMatmulDesc_t              matmulDesc,
-                                         const void*                        alpha,
-                                         hipblasLtMatrixLayout_t            matA,
-                                         hipblasLtMatrixLayout_t            matB,
-                                         const void*                        beta,
-                                         hipblasLtMatrixLayout_t            matC,
-                                         hipblasLtMatrixLayout_t            matD,
-                                         size_t*                            workspaceSize,
-                                         int*                               returnAlgoCount);                      
+                                        hipblasLtHandle_t                 handle,
+                                        hipblasLtMatmulDesc_t             matmulDesc,
+                                        const void*                       alpha,
+                                        hipblasLtMatrixLayout_t           matA,
+                                        hipblasLtMatrixLayout_t           matB,
+                                        const void*                       beta,
+                                        hipblasLtMatrixLayout_t           matC,
+                                        hipblasLtMatrixLayout_t           matD,
+                                        size_t*                           workspaceSize,
+                                        int*                              returnAlgoCount);
 } // End of namespace hipblasltext

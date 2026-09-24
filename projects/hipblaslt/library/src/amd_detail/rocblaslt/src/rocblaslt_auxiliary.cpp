@@ -129,9 +129,7 @@ inline void heuristicResult_copy(rocblaslt_matmul_heuristic_result* heuristicRes
                                  size_t&                            maxWorkSpaceBytes,
                                  size_t&                            required_workspace_size)
 {
-    memcpy(heuristicResultsDest->algo.data,
-           heuristicResultsSrc->algo.data,
-           sizeof(heuristicResultsDest->algo.data));
+    heuristicResultsDest->algo = heuristicResultsSrc->algo;
     heuristicResultsDest->algo.max_workspace_bytes = maxWorkSpaceBytes;
     heuristicResultsDest->algo.fallback            = false;
     heuristicResultsDest->state                    = rocblaslt_status_success;

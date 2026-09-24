@@ -299,6 +299,8 @@ TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<voi
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
+TensileLite::ContractionInputs* ExtractInputsGemm(std::shared_ptr<void>);
+
 // Push the GemmPreference-supplied StreamK tile scheduling mode onto every
 // contraction problem currently carried by gemmData. Defined in
 // tensile_host.cpp because gemmData's concrete type

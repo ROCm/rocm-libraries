@@ -11,6 +11,34 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext-op.cpp"
 )
 
+if(HIPBLASLT_ENABLE_JIT)
+    find_package(ZLIB REQUIRED)
+    target_link_libraries(hipblaslt PRIVATE ZLIB::ZLIB)
+    target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
+    target_sources(hipblaslt PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp")
+endif()
+
+if(HIPBLASLT_BUILD_TESTING)
+    if(HIPBLASLT_ENABLE_JIT)
+        add_executable(hipblaslt-jit-api-test
+            "${PROJECT_SOURCE_DIR}/clients/tests/jit/public_gemm_test.cpp")
+        target_link_libraries(hipblaslt-jit-api-test PRIVATE roc::hipblaslt hip::device)
+        target_compile_features(hipblaslt-jit-api-test PRIVATE cxx_std_17)
+        set_target_properties(hipblaslt-jit-api-test PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+    else()
+        add_executable(hipblaslt-jit-disabled-test
+            "${PROJECT_SOURCE_DIR}/clients/tests/jit/disabled_api_test.cpp")
+        target_link_libraries(hipblaslt-jit-disabled-test PRIVATE roc::hipblaslt hip::host)
+        target_compile_features(hipblaslt-jit-disabled-test PRIVATE cxx_std_17)
+        set_target_properties(hipblaslt-jit-disabled-test PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+    endif()
+endif()
+
 # Exercise generator subprocess handling independently of GPU execution.
 if(HIPBLASLT_BUILD_TESTING)
     find_package(Threads REQUIRED)

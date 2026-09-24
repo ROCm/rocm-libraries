@@ -272,6 +272,8 @@ typedef enum rocblaslt_status_
     rocblaslt_status_not_initialized         = 10, /**< descriptor has not been initialized. */
     rocblaslt_status_type_mismatch           = 11, /**< index types do not match. */
     rocblaslt_status_requires_sorted_storage = 12, /**< sorted storage required. */
+    rocblaslt_status_not_supported           = 14, /**< provider does not support request. */
+    rocblaslt_status_execution_failed        = 15, /**< device submission failed. */
     rocblaslt_status_continue                = 13  /**< nothing preventing function to proceed. */
 } rocblaslt_status;
 
