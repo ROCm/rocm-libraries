@@ -4,7 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
@@ -307,6 +310,82 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
         {
             EXPECT_EQ(value, 0.0);
         }
+    }
+}
+
+TEST(TestLoadGraphAndTensors, LoadsRaggedBundle)
+{
+    const std::filesystem::path filepath
+        = getCurrentExecutableDirectory()
+          / "../lib/integration-test-bundles/quick/"
+            "SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small/Small.json";
+
+    if(!std::filesystem::exists(filepath))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
+        GTEST_SKIP();
+    }
+
+    auto basePath = filepath;
+    basePath.replace_extension();
+    const std::filesystem::path tensor0Path = basePath.string() + ".tensor0.bin";
+    if(!std::filesystem::exists(tensor0Path))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << tensor0Path.string());
+        GTEST_SKIP();
+    }
+
+    constexpr int64_t Q_UID = 0;
+    constexpr int64_t K_UID = 1;
+    constexpr int64_t V_UID = 2;
+    constexpr int64_t O_UID = 3;
+    constexpr int64_t QO_RAGGED_OFFSET_UID = 10;
+    constexpr int64_t KV_RAGGED_OFFSET_UID = 11;
+
+    const std::unordered_map<int64_t, int64_t> expectedRaggedOffsetUids{
+        {Q_UID, QO_RAGGED_OFFSET_UID},
+        {K_UID, KV_RAGGED_OFFSET_UID},
+        {V_UID, KV_RAGGED_OFFSET_UID},
+        {O_UID, QO_RAGGED_OFFSET_UID},
+    };
+
+    auto res = loadGraphAndTensors(filepath);
+
+    const auto graphWrapper = res.createGraphWrapper();
+    const auto& tensorAttributeMap = graphWrapper.getTensorMap();
+
+    ASSERT_EQ(res.tensorMap.size(), 6u);
+
+    const auto batchSize = tensorAttributeMap.at(Q_UID)->dims()->Get(0);
+    const std::vector<int64_t> expectedOffsetDims{batchSize + 1, 1, 1, 1};
+
+    for(const auto offsetUid : {QO_RAGGED_OFFSET_UID, KV_RAGGED_OFFSET_UID})
+    {
+        ASSERT_EQ(res.tensorMap.count(offsetUid), 1u);
+        const auto& offsetTensor = res.tensorMap.at(offsetUid);
+        EXPECT_EQ(offsetTensor->dims(), expectedOffsetDims);
+        EXPECT_FALSE(offsetTensor->raggedIterationInfo().has_value());
+    }
+
+    for(const auto& [uid, raggedOffsetUid] : expectedRaggedOffsetUids)
+    {
+        ASSERT_EQ(res.tensorMap.count(uid), 1u);
+        ASSERT_EQ(tensorAttributeMap.count(uid), 1u);
+
+        const auto* attributes = tensorAttributeMap.at(uid);
+        ASSERT_TRUE(attributes->ragged_offset_tensor_uid().has_value());
+        EXPECT_EQ(attributes->ragged_offset_tensor_uid().value(), raggedOffsetUid);
+
+        const auto& tensor = res.tensorMap.at(uid);
+        EXPECT_EQ(tensor->dims(),
+                  hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
+                      attributes->dims()));
+        EXPECT_TRUE(tensor->raggedIterationInfo().has_value());
+
+        const auto* raggedTensor
+            = dynamic_cast<const RaggedTensorBase<hipdnn_data_sdk::types::bfloat16>*>(tensor.get());
+        ASSERT_NE(raggedTensor, nullptr);
+        EXPECT_EQ(raggedTensor->raggedOffset(), res.tensorMap.at(raggedOffsetUid).get());
     }
 }
 

@@ -89,8 +89,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }
 
-// Sdpa forward with ragged tensors are currently not supported by the GPU Sdpa reference
-// TODO: Remove this test once it is supported
+// Ragged tensors are not yet supported by the GPU SDPA reference.
+// TODO(ALMIOPEN-2202): remove once supported.
 TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
