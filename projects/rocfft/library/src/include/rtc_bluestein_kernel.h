@@ -28,10 +28,11 @@
 struct RTCKernelBluesteinSingle : public RTCKernel
 {
     RTCKernelBluesteinSingle(const std::string&                       kernel_name,
+                             KIntType                                 itype,
                              std::shared_future<hipModule_wrapper_t>& module,
                              dim3                                     gridDim,
                              dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
     {
     }
 
@@ -45,6 +46,7 @@ struct RTCKernelBluesteinSingle : public RTCKernel
 struct RTCKernelBluesteinMulti : public RTCKernel
 {
     RTCKernelBluesteinMulti(const std::string&                       kernel_name,
+                            KIntType                                 itype,
                             ComputeScheme                            scheme,
                             size_t                                   N,
                             size_t                                   M,
@@ -53,7 +55,7 @@ struct RTCKernelBluesteinMulti : public RTCKernel
                             std::shared_future<hipModule_wrapper_t>& module,
                             dim3                                     gridDim,
                             dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
         , scheme(scheme)
         , N(N)
         , M(M)

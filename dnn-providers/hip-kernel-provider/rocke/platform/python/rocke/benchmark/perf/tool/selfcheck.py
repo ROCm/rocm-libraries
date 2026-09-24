@@ -5,8 +5,9 @@
 The decision layer on top of `report.diff`: it takes a previous and a current
 record of the same kernel and says *regressed / improved / within_noise* - but only
 flags a change that clears the **noise floor**, `max(threshold, noise_k * spread)`.
-Both metrics are lower-is-better (`busy_cycles`, or wall `ms_median` as fallback),
-so a positive percent change is slower.
+All metrics are lower-is-better: `busy_cycles`, else unprofiled wall `ms_median`,
+else `profiled_ms_median` when both records only have profiled timing. A positive
+percent change is slower; unlike timing sources are never compared.
 
 Why a noise floor and not a bare threshold: one run wobbles even on the cycle
 metric, so `aggregate` records a spread; gating on `noise_k * spread` stops the tool

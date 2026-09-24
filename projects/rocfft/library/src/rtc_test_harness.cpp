@@ -60,7 +60,7 @@ static bool is_cb_arg(const std::string& arg_name)
     return is_cb_ptr(arg_name) || is_cb_lds_bytes(arg_name);
 }
 
-// remove "const" qualifier, real_type_t, index_type from type
+// remove "const" qualifier, real_type_t, integer_type from type
 std::string cleanup_type(std::string type, const std::string& function_name)
 {
     if(type.compare(0, 6, "const ") == 0)
@@ -74,14 +74,14 @@ std::string cleanup_type(std::string type, const std::string& function_name)
         if(function_name.find("_half") != std::string::npos)
             type = "rocfft_fp16";
     }
-    // "index_type" is a typedef in the kernel source, which the harness
-    // does not include.  The kernel name says how wide it is.
-    if(type == "index_type")
+    // "integer_type" is a typedef in the kernel source.
+    // The kernel name says how wide it is.
+    if(type == "integer_type")
     {
-        if(function_name.find(rtc_index_name(IndexType::U64)) != std::string::npos)
-            type = rtc_index_type(IndexType::U64);
-        else if(function_name.find(rtc_index_name(IndexType::U32)) != std::string::npos)
-            type = rtc_index_type(IndexType::U32);
+        if(function_name.find(rtc_kint_name(KIntType::U64)) != std::string::npos)
+            type = rtc_kint_type(KIntType::U64);
+        else if(function_name.find(rtc_kint_name(KIntType::U32)) != std::string::npos)
+            type = rtc_kint_type(KIntType::U32);
     }
     return type;
 }
@@ -108,6 +108,9 @@ std::string test_harness_init(const Function& f)
     else if(name.find("_half") != std::string::npos)
         scalar_type += "rocfft_fp16";
     scalar_type += "> scalar_type;\n";
+
+    std::string integer_type
+        = "typedef " + std::string(rtc_kint_type(KIntType::U32)) + " integer_type;\n";
 
     StatementList globals;
     globals += CommentLines{"declare globals for kernel " + name};
@@ -151,7 +154,7 @@ std::string test_harness_init(const Function& f)
 
     Variable kargs{"kargs", "RTCKernelArgs"};
 
-    return scalar_type + globals.render() + init.render();
+    return scalar_type + integer_type + globals.render() + init.render();
 }
 
 // generate source code for "launch_kernel" test harness function
@@ -186,8 +189,8 @@ std::string test_harness_launch(const Function& f)
             launch.body += Call{"kargs.append_int", {arg.name}};
         else if(actual_type == "unsigned int")
             launch.body += Call{"kargs.append_unsigned_int", {arg.name}};
-        else if(actual_type == rtc_index_type(IndexType::U64))
-            launch.body += Call{"kargs.append_index", {arg.name, "IndexType::U64"}};
+        else if(actual_type == "unsigned long long")
+            launch.body += Call{"kargs.append_unsigned_long_long", {arg.name}};
         else if(actual_type == "double")
             launch.body += Call{"kargs.append_double", {"1.0"}};
         else if(actual_type == "float")
@@ -341,6 +344,7 @@ void write_standalone_test_harness(const Function& f, const std::string& src)
     main_file << gpubuf_h;
     main_file << hip_object_wrapper_h;
     main_file << callback_h;
+    main_file << rtc_generator_h;
     main_file << rtc_kernel_h;
     main_file << rtc_kernel_cpp;
     main_file << rtc_test_harness_helper_cpp;
