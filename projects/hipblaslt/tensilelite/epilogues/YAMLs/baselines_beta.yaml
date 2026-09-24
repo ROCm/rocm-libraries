@@ -6,13 +6,23 @@ TestParameters:
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
+  ExitOnFails: 0
+  KeepBuildTmp: True
+  SleepPercent: 50
+  EnqueuesPerSync: 7
+  NumWarmups: 5
+  KernelTime: true
   NumElementsToValidate: 0
   ExitOnFails: 0
-  PrintSolutionRejectionReason: True
   KernelTime: True
-  KeepBuildTmp: True
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  PreciseKernelTime: false
   DataInitTypeBeta: 1
   CpuThreads: 1
+  Device: 0
+  SkipSlowSolutionRatio: 0.0
+  RotatingBufferSize: 1024
 
 BenchmarkProblems:
 
@@ -31,7 +41,7 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: False
       Batched: True
-      # StridedBatched: True
+      StridedBatched: True
 
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -87,7 +97,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [8192, 8192, 1, 8192]
+            - Exact: [2048, 16384, 1, 2048]
 
   ########################################
   # OVERHEAD PROBE A: beta*C only (UseBeta=True, no PartialRMS/ResidualAdd)
@@ -103,7 +113,7 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      # StridedBatched: True
+      StridedBatched: True
 
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -159,11 +169,11 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [8192, 8192, 1, 8192]
+            - Exact: [2048, 16384, 1, 2048]
 
 
 LibraryLogic:
   ScheduleName: "partialrms_residualadd_storebf16d_bf16_k1_winner"
   DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
   ArchitectureName: "gfx950"
-  LibraryType: "Prediction"
+  LibraryType: "Equality"

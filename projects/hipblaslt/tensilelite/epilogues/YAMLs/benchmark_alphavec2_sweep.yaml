@@ -14,13 +14,24 @@ TestParameters:
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
+  SleepPercent: 0
+  EnqueuesPerSync: 20
+  NumWarmups: 20
+  KernelTime: true
   NumElementsToValidate: 0
-  ExitOnFails: 0
-  PrintSolutionRejectionReason: True
-  KernelTime: True
-  KeepBuildTmp: True
-  DataInitTypeBeta: 1
-  CpuThreads: 1
+  DataInitTypeBeta: 12
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeD: 12
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  PreciseKernelTime: false
+  Device: 0
+  SkipSlowSolutionRatio: 0.0
+  # PrintSolutionRejectionReason: true
+  KeepBuildTmp: true
+  RotatingBufferSize: 1024
+
 
 BenchmarkProblems:
 
@@ -89,12 +100,11 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1, 24, 4, 1, 4]  # MT 384x256 (160KB)
           - [16, 16, 32, 1,  1, 32, 2, 1, 4]  # MT 512x128 (160KB)
         - PrefetchGlobalRead: [0, 1, 2]
-        - PrefetchLocalRead: [0]
+        - PrefetchLocalRead: [0, 1]
         - DepthU: [64, 128, 192]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [0, 3]
         - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
+        - StreamK: [0, 3]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -106,10 +116,12 @@ BenchmarkProblems:
             - Exact: [4096, 4096, 1, 4096]
             - Exact: [8192, 8192, 1, 8192]
             - Exact: [16384, 2048, 1, 2048]
+            - Exact: [2048, 16384, 1, 2048]
             - Exact: [16384, 11264, 1, 2048]
+            - Exact: [11264, 16384, 1, 2048]
 
 LibraryLogic:
   ScheduleName: "alphavec2_sweep_bf16_k1"
   DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
   ArchitectureName: "gfx950"
-  LibraryType: "Prediction"
+  LibraryType: "Equality"
