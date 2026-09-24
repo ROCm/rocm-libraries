@@ -11,6 +11,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     * GEHD2
     * GEHRD
 
+* Support added for the gfx1250-strict architecture.
+
 ### Changed
 
 * `abstol` in SYEVJ/HEEVJ, GESVDJ, and SYGVJ/HEGVJ is now a relative tolerance, requiring every off-diagonal element to satisfy `|a_ij| <= abstol * sqrt(|a_ii| * |a_jj|)`. Callers that tuned `abstol` may see a different number of sweeps, and a value that converged before may now run to `max_sweeps` and report `info = 1`.

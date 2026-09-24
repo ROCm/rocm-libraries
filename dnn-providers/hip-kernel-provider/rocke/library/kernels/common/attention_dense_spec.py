@@ -246,11 +246,20 @@ class AttentionDenseSpec:
         declaration lives on the spec that owns the body rather than in the
         shared key function.
 
-        NOTE: this does not yet drive the symbol name. ``batch`` has never
-        appeared in the dense name on any path, so a spec that bakes batch and
-        one that does not are homonyms. Harmless for in-process dispatch, where
-        the cache key is the identity; a blocker for AOT packaging and for
-        per-batch specialization, where the symbol IS the identity.
+        NOTE: this does not drive the symbol name -- each spec curates its own
+        name parts by hand, and the two must be kept in sync deliberately.
+
+        Getting that wrong is not cosmetic: a field dropped from the key but kept
+        in the name gives two specs that share ONE cache slot two DIFFERENT
+        symbols, and ``run_attention_dense_torch``'s ``assert art.kernel_name ==
+        spec.kernel_name()`` then fires on the second one served from that slot.
+        ``Gfx942AttentionDenseSpec`` is the live example: it appends ``_b{batch}``
+        (batch sized its buffer-resource extents), so declaring ``batch`` here
+        obliged it to drop that token in the same change.
+
+        Deriving the name FROM this tuple would make the two correct by
+        construction. It does not today, which is the blocker for AOT packaging
+        and per-batch specialization, where the symbol IS the identity.
         """
         return ()
 

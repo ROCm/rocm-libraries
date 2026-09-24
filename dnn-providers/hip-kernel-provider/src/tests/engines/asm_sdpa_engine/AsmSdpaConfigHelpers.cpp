@@ -110,7 +110,7 @@ GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
     return tc;
 }
 
-std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase)
+SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
 {
     using namespace hipdnn_frontend;
     using namespace hipdnn_frontend::graph;
@@ -218,9 +218,10 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
     {
         stats->set_output(true);
         stats->set_data_type(DataType::FLOAT);
+        return {graph, stats};
     }
 
-    return graph;
+    return {graph, nullptr};
 }
 
 } // namespace asm_sdpa_engine

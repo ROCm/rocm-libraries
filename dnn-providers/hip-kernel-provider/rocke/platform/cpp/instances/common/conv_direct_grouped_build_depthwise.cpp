@@ -28,7 +28,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -74,8 +76,10 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 
+    ctx->is_bf16 = (ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0) ? 1 : 0;
     {
-        const rocke_type_t* f16ptr = rocke_ptr_type(b, rocke_f16(), "global");
+        const rocke_type_t* io_type = rocke_b_io_ir_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
+        const rocke_type_t* ioptr = rocke_ptr_type(b, io_type, "global");
         rocke_param_opts_t ro;
         rocke_param_opts_t wo;
         rocke_param_opts_t none;
@@ -87,8 +91,8 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
         ro.readonly_set = true;
         ro.align = 16;
         ro.align_set = true;
-        ctx->A = rocke_b_param(b, "A", f16ptr, &ro);
-        ctx->Bp = rocke_b_param(b, "B", f16ptr, &ro);
+        ctx->A = rocke_b_param(b, "A", ioptr, &ro);
+        ctx->Bp = rocke_b_param(b, "B", ioptr, &ro);
 
         wo = (rocke_param_opts_t){0};
         wo.noalias = true;
@@ -97,7 +101,7 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
         wo.writeonly_set = true;
         wo.align = 16;
         wo.align_set = true;
-        ctx->D = rocke_b_param(b, "D", f16ptr, &wo);
+        ctx->D = rocke_b_param(b, "D", ioptr, &wo);
 
         none = (rocke_param_opts_t){0};
         ctx->A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), &none);
@@ -253,7 +257,8 @@ void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx)
                                                        ctx->ch_in_range,
                                                        rocke_b_mul(b, w_off, ctx->c_half_bytes),
                                                        ctx->oob_sentinel);
-                w_h = rocke_b_buffer_load_f16(b, ctx->b_rsrc, safe_w, ctx->c0);
+                w_h = ctx->is_bf16 ? rocke_b_buffer_load_bf16(b, ctx->b_rsrc, safe_w, ctx->c0)
+                                   : rocke_b_buffer_load_f16(b, ctx->b_rsrc, safe_w, ctx->c0);
                 ctx->weights_f32[r_const][s_const] = rocke_b_select(
                     b, ctx->ch_in_range, rocke_b_cast_to_f32(b, w_h), ctx->zero_f32);
             }
@@ -333,7 +338,8 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
                     load_ok = rocke_b_land(b, valid, ctx->ch_in_range);
                     safe_off = rocke_b_select(
                         b, load_ok, rocke_b_mul(b, a_off, ctx->c_half_bytes), ctx->oob_sentinel);
-                    a_h = rocke_b_buffer_load_f16(b, ctx->a_rsrc, safe_off, ctx->c0);
+                    a_h = ctx->is_bf16 ? rocke_b_buffer_load_bf16(b, ctx->a_rsrc, safe_off, ctx->c0)
+                                       : rocke_b_buffer_load_f16(b, ctx->a_rsrc, safe_off, ctx->c0);
                     a_f32 = rocke_b_select(b, load_ok, rocke_b_cast_to_f32(b, a_h), ctx->zero_f32);
 
                     for(r_const = 0; r_const < KH; ++r_const)
@@ -379,8 +385,13 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
                                                 out_q_ok,
                                                 rocke_b_mul(b, d_off, ctx->c_half_bytes),
                                                 ctx->oob_sentinel);
-                        acc_h = rocke_b_trunc_f32_to_f16(b, ctx->acc[w_out][P_FLUSH]);
-                        rocke_b_buffer_store_f16(b, ctx->d_rsrc, safe_d, ctx->c0, acc_h);
+                        acc_h = ctx->is_bf16
+                                    ? rocke_b_trunc_f32_to_bf16(b, ctx->acc[w_out][P_FLUSH])
+                                    : rocke_b_trunc_f32_to_f16(b, ctx->acc[w_out][P_FLUSH]);
+                        if(ctx->is_bf16)
+                            rocke_b_buffer_store_bf16(b, ctx->d_rsrc, safe_d, ctx->c0, acc_h);
+                        else
+                            rocke_b_buffer_store_f16(b, ctx->d_rsrc, safe_d, ctx->c0, acc_h);
                     }
                 }
             }
@@ -500,7 +511,8 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
                     ok = rocke_b_land(b, rocke_b_land(b, valid, j_valid), ctx->ch_in_range);
                     safe_off = rocke_b_select(
                         b, ok, rocke_b_mul(b, a_off, ctx->c_half_bytes), ctx->oob_sentinel);
-                    a_h = rocke_b_buffer_load_f16(b, ctx->a_rsrc, safe_off, ctx->c0);
+                    a_h = ctx->is_bf16 ? rocke_b_buffer_load_bf16(b, ctx->a_rsrc, safe_off, ctx->c0)
+                                       : rocke_b_buffer_load_f16(b, ctx->a_rsrc, safe_off, ctx->c0);
                     a_f32 = rocke_b_select(b, ok, rocke_b_cast_to_f32(b, a_h), ctx->zero_f32);
 
                     for(r_const = 0; r_const < KH; ++r_const)
@@ -564,8 +576,12 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
 
                 safe_d = rocke_b_select(
                     b, store_ok, rocke_b_mul(b, d_off, ctx->c_half_bytes), ctx->oob_sentinel);
-                rocke_b_buffer_store_f16(
-                    b, ctx->d_rsrc, safe_d, ctx->c0, rocke_b_trunc_f32_to_f16(b, acc_val));
+                if(ctx->is_bf16)
+                    rocke_b_buffer_store_bf16(
+                        b, ctx->d_rsrc, safe_d, ctx->c0, rocke_b_trunc_f32_to_bf16(b, acc_val));
+                else
+                    rocke_b_buffer_store_f16(
+                        b, ctx->d_rsrc, safe_d, ctx->c0, rocke_b_trunc_f32_to_f16(b, acc_val));
 
                 /* Unconditional static reset */
                 new_accs[P_FLUSH_j * BLOCK_W + w_out] = ctx->zero_f32;

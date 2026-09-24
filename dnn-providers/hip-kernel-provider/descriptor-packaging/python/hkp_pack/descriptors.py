@@ -227,6 +227,39 @@ def _reject_nonbare_arch(archs, where):
             raise HkpPackError(f"{where}: arch '{arch}' is not usable -- {hint}")
 
 
+def _validate_provenance(provenance, where, *, produced=False):
+    """Shape of one `provenance` block, wherever it is declared.
+
+    A KDP and the kernels under it declare the same `specialization_contract`
+    object, so one rule covers both and an unusable declaration fails at the
+    document that wrote it.
+
+    `effective_spec` is the producing compiler's statement about what it observed,
+    so an authored input claiming one is refused. `produced` is true only for a
+    shipped `kpack` kernel, never for a KDP, which has no payload bytes to bind.
+    """
+    if not isinstance(provenance, dict):
+        raise HkpPackError(f"{where}: provenance must be an object")
+    if not produced and "effective_spec" in provenance:
+        raise HkpPackError(
+            f"{where}: provenance.effective_spec is reserved for the producing "
+            "compiler and cannot be authored"
+        )
+    if "specialization_contract" in provenance:
+        contract = provenance["specialization_contract"]
+        if (
+            not isinstance(contract, dict)
+            or set(contract) != {"schema_version", "consumers"}
+            or contract["schema_version"] != 1
+            or not isinstance(contract["consumers"], list)
+            or not contract["consumers"]
+        ):
+            raise HkpPackError(
+                f"{where}: specialization_contract must be "
+                "{'schema_version': 1, 'consumers': [...]} with at least one consumer"
+            )
+
+
 def _validate_embedded_source_file(source_file, where):
     """Reject an embedded_source `source_file` that cannot act as an identity.
 
@@ -275,6 +308,7 @@ def _validate_ukd_fields(ukd, where, log=print):
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
     kind = ks["kind"]
+    _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
     if kind == "hip":
         _require(ks, ["source", "entry"], where)
         if "build" not in ks:
@@ -336,6 +370,7 @@ def _validate_kdp(desc, log=print):
             f"{where} 'arch' must be a list of strings (empty = wildcard)"
         )
     _reject_nonbare_arch(arch, where)
+    _validate_provenance(doc.get("provenance", {}), where)
     kds = doc["kernelDescriptors"]
     if not isinstance(kds, list) or not kds:
         raise HkpPackError(f"{where} 'kernelDescriptors' must be a non-empty list")
