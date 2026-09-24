@@ -62,28 +62,19 @@ def _cast_element(b: Any, value: Any, src: Any, dst: Any) -> Any:
         f"expected src==dst or src=='f32'"
     )
 
-def emit_tensor_coordinates(
-    b: Any, encoding: WarpDistributionEncoding, thread: Any, register_index: int
-) -> tuple[Any, ...]:
-    """IR-emitting ``calculate_x``: (runtime ``thread`` id SSA, compile-time register) -> coords.
-
-    Takes only the raw thread id and decomposes it across ALL partition buckets (the wave partition
-    is outer, the lane partition inner -- so the low ``wave_size`` positions read as the lane, the
-    high positions as the wave). The verb therefore never has to know about waves: single-wave
-    (NDimP=1) and block-wide ``wave_dist`` (NDimP=2) are the same code, driven by ``thread`` alone.
-    Places the compile-time register indices, then reconstructs each X coordinate innermost-stride-1.
-    Returns ONE SSA coordinate per X-dim (2 for an MMA fragment, N for a data tile).
+def emit_lane_contributors(
+    b: Any, encoding: WarpDistributionEncoding, thread: Any
+) -> dict[tuple[int, int], Any]:
+    """The thread-only partition decomposition, factored out of :func:`emit_tensor_coordinates` so a
+    per-register loop can emit it ONCE. It depends on ``thread`` alone (never the register index), so
+    hoisting it keeps each store/load address ``base + <compile-time constant>`` -- which the LLVM
+    LoadStoreVectorizer needs to see to merge consecutive scalar stores into a wide ``dwordx4``:
+    re-deriving the lane ``mod``/``div`` per register instead makes each address a structurally
+    distinct expression the vectorizer cannot relate.
+    Decomposes across ALL partition buckets, wave partition outer -> lane inner (last fastest):
+    ``thread % wave_size`` falls out as the lane, ``thread // wave_size`` as the wave.
     """
-    register_buckets = list(
-        zip(encoding.register_to_rh_major, encoding.register_to_rh_minor)
-    )
-    register_lengths = [encoding.bucket_length(*bucket) for bucket in register_buckets]
-
     contributor: dict[tuple[int, int], Any] = {}
-
-    # Decompose the runtime thread id across all partition buckets, wave partition outer -> lane
-    # inner (last = fastest). `thread % wave_size` falls out as the lane, `thread // wave_size` as
-    # the wave -- no caller-supplied wave/lane split.
     partition_buckets: list[tuple[int, int]] = []
     for majors, minors in zip(encoding.lane_to_rh_major, encoding.lane_to_rh_minor):
         partition_buckets.extend(zip(majors, minors))
@@ -96,8 +87,25 @@ def emit_tensor_coordinates(
             divided = thread if suffix == 1 else b.div(thread, b.const_i32(suffix))
             contributor[partition_buckets[position]] = b.mod(divided, b.const_i32(length))
         suffix *= length
+    return contributor
 
-    # Compile-time register index -> per-bucket contributor (last fastest).
+
+def emit_coordinates_for_register(
+    b: Any,
+    encoding: WarpDistributionEncoding,
+    lane_contributors: dict[tuple[int, int], Any],
+    register_index: int,
+) -> tuple[Any, ...]:
+    """Place the compile-time ``register_index`` and reconstruct each X coordinate innermost-stride-1,
+    reusing the hoisted ``lane_contributors`` (:func:`emit_lane_contributors`). The lane terms are
+    SHARED SSA across registers; only the register terms (compile-time constants) vary -- so
+    consecutive registers' coordinates, and thus addresses, differ by a constant. Returns ONE SSA
+    coordinate per X-dim (2 for an MMA fragment, N for a data tile).
+    """
+    register_buckets = list(zip(encoding.register_to_rh_major, encoding.register_to_rh_minor))
+    register_lengths = [encoding.bucket_length(*bucket) for bucket in register_buckets]
+
+    contributor = dict(lane_contributors)  # copy -- never mutate the hoisted lane map
     remainder = register_index
     register_values = [0] * len(register_lengths)
     for position in reversed(range(len(register_lengths))):
@@ -118,6 +126,23 @@ def emit_tensor_coordinates(
             stride *= levels[level]
         coordinates.append(coordinate if coordinate is not None else b.const_i32(0))
     return tuple(coordinates)
+
+
+def emit_tensor_coordinates(
+    b: Any, encoding: WarpDistributionEncoding, thread: Any, register_index: int
+) -> tuple[Any, ...]:
+    """IR-emitting ``calculate_x``: (runtime ``thread`` id SSA, compile-time register) -> coords.
+
+    Thin composition of :func:`emit_lane_contributors` (the thread-only decomposition) + a single
+    :func:`emit_coordinates_for_register`. A loop over registers should instead call
+    ``emit_lane_contributors`` ONCE and ``emit_coordinates_for_register`` per register, so the lane
+    ``mod``/``div`` is emitted once and the addresses stay ``base + <constant>`` (which the store
+    vectorizer needs to widen a strided global store). Single-wave (NDimP=1) and block-wide ``wave_dist``
+    (NDimP=2) are the same code, driven by ``thread`` alone. Returns ONE SSA coordinate per X-dim.
+    """
+    return emit_coordinates_for_register(
+        b, encoding, emit_lane_contributors(b, encoding, thread), register_index
+    )
 
 def fill_fragment(b: Any, fragment: Fragment, scalar: Any) -> None:
     """Set every register of `fragment` to `scalar`, element-wise (no layout, no addressing).
@@ -145,6 +170,36 @@ def _address(b: Any, window: TensorWindow, positions: list[Any]) -> Any:
         term = pos if stride == 1 else b.mul(pos, b.const_i32(stride))
         address = term if address is None else b.add(address, term)
     return address
+
+def _register_coord_offsets(
+    encoding: WarpDistributionEncoding, register_index: int
+) -> tuple[int, ...]:
+    """The register's COMPILE-TIME contribution to each X coordinate (lane buckets contribute 0) --
+    the same value :func:`emit_coordinates_for_register` places, computed in pure Python. Lets the
+    global store emit ``address = base + <constant>``: the lane base-address is computed ONCE and this
+    fixed per-register offset (linearized by the tensor strides) is added, so consecutive registers'
+    addresses differ by a constant and the store vectorizer merges them into ``dwordx4``. It is
+    bit-exact with the per-register reconstruction by linearity of ``_address``."""
+    register_buckets = list(zip(encoding.register_to_rh_major, encoding.register_to_rh_minor))
+    register_lengths = [encoding.bucket_length(*bucket) for bucket in register_buckets]
+    remainder = register_index
+    register_values = [0] * len(register_lengths)
+    for position in reversed(range(len(register_lengths))):
+        register_values[position] = remainder % register_lengths[position]
+        remainder //= register_lengths[position]
+    reg_const = dict(zip(register_buckets, register_values))
+    offsets: list[int] = []
+    for x_dim, levels in enumerate(encoding.hierarchical_lengths):
+        coord = 0
+        stride = 1
+        for level in reversed(range(len(levels))):
+            value = reg_const.get((x_dim + 1, level))
+            if value is not None:
+                coord += value * stride
+            stride *= levels[level]
+        offsets.append(coord)
+    return tuple(offsets)
+
 
 def _origin_misaligned(origin: Any, extent: int) -> bool:
     """True when `origin` is a COMPILE-TIME int NOT on the tile grid (`origin % extent != 0`): a tile
@@ -397,10 +452,26 @@ def store_fragment(
     # range-checked to [1, natural run]. The built-in bool swizzle preserves its run.
     if lds:
         vw = _swizzle_vw(lds_swizzle, vw, align)
+    # Global path: compute the LANE base-address ONCE (register 0 = the thread-only address, no register
+    # offset), then emit each store as base + <compile-time constant> -- the fixed per-register coordinate
+    # offset linearized by the strides. Consecutive registers' addresses then differ by a constant, which
+    # the backend store vectorizer merges into wide dwordx4 transactions; re-deriving the full address per
+    # register (the lane mod/div rebuilt each time) instead leaves every store a distinct expression it
+    # cannot relate, so ANY strided global store this verb emits stays scalar/narrow -- the C epilogue is
+    # just the visible case. Bit-exact with the per-register reconstruction by linearity of _address. The
+    # LDS path keeps the plain wrapper (its wide ds_write already vectorizes).
+    base_positions: list[Any] = []
+    base_address: Any = None
+    if not lds:
+        base_coords = emit_coordinates_for_register(
+            b, fragment.tile_desc.layout, emit_lane_contributors(b, fragment.tile_desc.layout, thread), 0
+        )
+        base_positions = _positions(b, window, base_coords)
+        base_address = _address(b, window, base_positions)
     for register in range(0, fragment.tile_desc.register_count, vw):
-        coords = emit_tensor_coordinates(b, fragment.tile_desc.layout, thread, register)
-        positions = _positions(b, window, coords)
         if lds:
+            coords = emit_tensor_coordinates(b, fragment.tile_desc.layout, thread, register)
+            positions = _positions(b, window, coords)
             if lds_swizzle:
                 swz = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
                 positions = swz(b, positions)
@@ -416,9 +487,15 @@ def store_fragment(
                     vec = b.vec_insert(vec, el, i)
                 b.smem_store_vN(ptr, positions, vec, vw)
             continue
+        deltas = _register_coord_offsets(fragment.tile_desc.layout, register)
+        positions = [
+            base_positions[axis] if d == 0 else b.add(base_positions[axis], b.const_i32(d))
+            for axis, d in enumerate(deltas)
+        ]
+        offset = sum(d * window.tensor.strides[axis] for axis, d in enumerate(deltas))
+        address = base_address if offset == 0 else b.add(base_address, b.const_i32(offset))
         element = b.vec_extract(fragment.value, register)
         value = _cast_element(b, element, fragment.dtype, out_dtype)
-        address = _address(b, window, positions)
         mask = _clip_mask(b, window, positions, fragment.tile_desc.shape)
         if mask is None:
             b.global_store(ptr, address, value, align=align)
