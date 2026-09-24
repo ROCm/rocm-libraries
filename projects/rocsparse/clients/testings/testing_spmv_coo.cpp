@@ -116,8 +116,8 @@ void testing_spmv_coo_extra(const Arguments& arg)
     // nnz just beyond 2^32 so at least one block has a block index whose
     // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
     const I nnz = two_pow_32 + 512;
-    const I m   = 2;
-    const I n   = 2;
+    const I m   = 65537;
+    const I n   = 65536;
 
     const rocsparse_index_base base  = rocsparse_index_base_zero;
     const rocsparse_datatype   ttype = get_datatype<T>();
@@ -137,9 +137,10 @@ void testing_spmv_coo_extra(const Arguments& arg)
     CHECK_HIP_ERROR(hipMemset(dval, 0, sizeof(T) * nnz));
     CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * m));
 
-    // x = [0, 1] so only column 1 contributes.
-    const T hx[2] = {static_cast<T>(0), static_cast<T>(1)};
-    CHECK_HIP_ERROR(hipMemcpy(dx, hx, sizeof(T) * n, hipMemcpyHostToDevice));
+    // x = e_1, so only column 1 contributes.
+    CHECK_HIP_ERROR(hipMemset(dx, 0, sizeof(T) * n));
+    const T hx1 = static_cast<T>(1);
+    CHECK_HIP_ERROR(hipMemcpy(static_cast<T*>(dx) + 1, &hx1, sizeof(T), hipMemcpyHostToDevice));
 
     // The probe lives past the 2^32 boundary. It is the only non-zero that
     // targets row 1 / column 1, so its contribution to y[1] is isolated from
