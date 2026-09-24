@@ -42,6 +42,7 @@ endif()
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   project( rocfft-clients-tests LANGUAGES CXX C )
+  include( ../cmake/buildopts.cmake )
 endif()
   
 set(CMAKE_CXX_STANDARD 20)

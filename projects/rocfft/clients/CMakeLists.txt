@@ -48,6 +48,7 @@ set( ROCFFT_CLIENTS_BUILD_SCOPE ON )
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   project( rocfft-clients LANGUAGES CXX C )
+  include( ../cmake/buildopts.cmake )
   set( BUILD_CLIENTS_SAMPLES ON )
   set( BUILD_CLIENTS_TESTS ON )
   set( BUILD_CLIENTS_BENCH ON )
