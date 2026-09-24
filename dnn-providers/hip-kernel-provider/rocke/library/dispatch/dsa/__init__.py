@@ -29,7 +29,7 @@ from rocke.dispatch.core import (
     stable_json_hash,
 )
 
-from . import gfx942
+from . import gfx942, gfx950
 from .common import (
     FAMILY,
     DSA_INDEXER_ABI_VERSION,
@@ -44,7 +44,7 @@ from .common import (
 DSA_INDEXER_REGISTRY = CandidateRegistry(
     FAMILY, dim_vocabulary=DSA_INDEXER_DIM_VOCABULARY, require_build=True
 )
-for _module in (gfx942,):
+for _module in (gfx942, gfx950):
     _module.register(DSA_INDEXER_REGISTRY)
 
 

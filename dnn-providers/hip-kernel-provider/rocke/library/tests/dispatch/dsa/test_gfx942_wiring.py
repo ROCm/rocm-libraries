@@ -31,17 +31,25 @@ from dispatch.dsa import (  # noqa: E402
 
 
 def _req(**over) -> IndexerRequest:
-    base = dict(seqlen_q=8, seqlen_k=64, n_index_heads=4, index_head_dim=16,
-                arch="gfx942", block_size=64)
+    base = dict(
+        seqlen_q=8,
+        seqlen_k=64,
+        n_index_heads=4,
+        index_head_dim=16,
+        arch="gfx942",
+        block_size=64,
+    )
     base.update(over)
     return IndexerRequest(**base)
 
 
 class TestRegistration(unittest.TestCase):
-    def test_both_candidates_registered(self):
+    def test_gfx942_candidates_registered(self):
+        # The shared registry also holds the gfx950 candidates; assert the gfx942
+        # pair is present rather than an exact set.
         names = {c.name for c in indexer_candidates()}
-        self.assertEqual(
-            names, {"lightning_indexer_gfx942_mfma", "lightning_indexer_gfx942"}
+        self.assertLessEqual(
+            {"lightning_indexer_gfx942_mfma", "lightning_indexer_gfx942"}, names
         )
 
     def test_candidate_has_builder(self):
@@ -54,7 +62,9 @@ class TestRegistration(unittest.TestCase):
 
 class TestRouting(unittest.TestCase):
     def test_aligned_selects_mfma(self):
-        res = dispatch_lightning_indexer(_req(seqlen_q=16, seqlen_k=64, index_head_dim=128))
+        res = dispatch_lightning_indexer(
+            _req(seqlen_q=16, seqlen_k=64, index_head_dim=128)
+        )
         self.assertEqual(res.candidate.name, "lightning_indexer_gfx942_mfma")
         self.assertEqual(res.candidate.algorithm, "mfma_v1")
         self.assertEqual(res.spec.body, "mfma")
@@ -86,9 +96,16 @@ class TestRouting(unittest.TestCase):
 
 
 class TestGates(unittest.TestCase):
-    def test_arch_gate_rejects_gfx950(self):
+    def test_gfx950_now_supported(self):
+        # gfx950 is a supported arch; it selects the gfx950 candidate.
+        res = dispatch_lightning_indexer(
+            _req(seqlen_q=16, index_head_dim=128, arch="gfx950")
+        )
+        self.assertEqual(res.candidate.name, "lightning_indexer_gfx950_mfma")
+
+    def test_arch_gate_rejects_unsupported(self):
         with self.assertRaises(ValueError):
-            dispatch_lightning_indexer(_req(arch="gfx950"))
+            dispatch_lightning_indexer(_req(arch="gfx1151"))
 
     def test_wrong_op_rejected(self):
         with self.assertRaises(ValueError):

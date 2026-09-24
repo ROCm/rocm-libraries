@@ -1,18 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Golden LLVM-IR stability test for the gfx942 lightning-indexer kernel.
+"""Golden LLVM-IR stability test for the gfx950 lightning-indexer kernel.
 
-Pins the Python-lowered LLVM IR for a few representative indexer specs. CPU-only:
-no GPU, no comgr. This is the byte-identity anchor for the DSA indexer family
-(the KDA-style golden-sha tier; there is no hand-written C++ mirror).
+Same arch-neutral kernel as gfx942 (kernels/common/lightning_indexer.py), lowered
+for gfx950 -- the emitted IR differs per arch, so gfx950 carries its own golden.
+CPU-only: no GPU, no comgr.
 
 Run or re-bless from ``rocke/library``::
 
-    python tests/run_all.py --only dsa_indexer_gfx942
-    python tests/test_dsa_indexer_gfx942_golden.py --write
-
-Review the IR change before re-blessing the hashes.
+    python tests/test_dsa_indexer_gfx950_golden.py --write
 """
 
 from __future__ import annotations
@@ -26,9 +23,9 @@ from typing import Callable
 _TESTS = Path(__file__).resolve().parent
 _LIBRARY = _TESTS.parent
 _PLATFORM_PYTHON = _LIBRARY.parent / "platform" / "python"
-_GOLDEN = _TESTS / "golden" / "dsa_indexer_gfx942_ir_sha256.json"
+_GOLDEN = _TESTS / "golden" / "dsa_indexer_gfx950_ir_sha256.json"
 _FLAVORS = ("llvm20", "llvm22")
-_ARCH = "gfx942"
+_ARCH = "gfx950"
 
 for _path in (str(_LIBRARY), str(_PLATFORM_PYTHON)):
     if _path not in sys.path:
@@ -36,12 +33,7 @@ for _path in (str(_LIBRARY), str(_PLATFORM_PYTHON)):
 
 
 def _cases() -> dict[str, Callable]:
-    """Representative builders for the gfx942 lightning indexer.
-
-    Two model-shaped cases (DeepSeek H_I=64, GLM H_I=32) plus a small case, all
-    at D_I=128 (the real index_head_dim). seqlen only sizes the grid, so it is
-    kept small to keep the golden cheap.
-    """
+    """Representative builders for the gfx950 lightning indexer (both bodies)."""
     from kernels.common.lightning_indexer import (
         IndexerSpec,
         IndexerTileSpec,
@@ -49,23 +41,15 @@ def _cases() -> dict[str, Callable]:
     )
 
     return {
-        "dsa_indexer_gfx942/deepseek_hi64": lambda: build_lightning_indexer(
-            IndexerSpec(n_index_heads=64, index_head_dim=128, seqlen_q=8, seqlen_k=64)
+        "dsa_indexer_gfx950/deepseek_hi64": lambda: build_lightning_indexer(
+            IndexerSpec(n_index_heads=64, index_head_dim=128, seqlen_q=8, seqlen_k=64),
+            arch=_ARCH,
         ),
-        "dsa_indexer_gfx942/glm_hi32": lambda: build_lightning_indexer(
-            IndexerSpec(n_index_heads=32, index_head_dim=128, seqlen_q=8, seqlen_k=64)
+        "dsa_indexer_gfx950/glm_hi32": lambda: build_lightning_indexer(
+            IndexerSpec(n_index_heads=32, index_head_dim=128, seqlen_q=8, seqlen_k=64),
+            arch=_ARCH,
         ),
-        "dsa_indexer_gfx942/small": lambda: build_lightning_indexer(
-            IndexerSpec(
-                n_index_heads=4,
-                index_head_dim=16,
-                seqlen_q=8,
-                seqlen_k=32,
-                tile=IndexerTileSpec(block_size=64),
-            )
-        ),
-        # MFMA body (matrix-core), 16-aligned shapes, one wave64.
-        "dsa_indexer_gfx942/mfma_deepseek_hi64": lambda: build_lightning_indexer(
+        "dsa_indexer_gfx950/mfma_deepseek_hi64": lambda: build_lightning_indexer(
             IndexerSpec(
                 n_index_heads=64,
                 index_head_dim=128,
@@ -73,9 +57,10 @@ def _cases() -> dict[str, Callable]:
                 seqlen_k=64,
                 body="mfma",
                 tile=IndexerTileSpec(block_size=64),
-            )
+            ),
+            arch=_ARCH,
         ),
-        "dsa_indexer_gfx942/mfma_glm_hi32": lambda: build_lightning_indexer(
+        "dsa_indexer_gfx950/mfma_glm_hi32": lambda: build_lightning_indexer(
             IndexerSpec(
                 n_index_heads=32,
                 index_head_dim=128,
@@ -83,7 +68,8 @@ def _cases() -> dict[str, Callable]:
                 seqlen_k=64,
                 body="mfma",
                 tile=IndexerTileSpec(block_size=64),
-            )
+            ),
+            arch=_ARCH,
         ),
     }
 
@@ -105,7 +91,7 @@ def _sha_for(build: Callable, flavor: str) -> tuple[str, int]:
 def _build_doc() -> dict:
     cases = _cases()
     return {
-        "schema": "dsa_indexer_gfx942.ir_golden_sha256/v1",
+        "schema": "dsa_indexer_gfx950.ir_golden_sha256/v1",
         "flavors": {
             flavor: {
                 "cases": {
@@ -119,24 +105,24 @@ def _build_doc() -> dict:
     }
 
 
-def test_dsa_indexer_gfx942_ir_matches_golden():
+def test_dsa_indexer_gfx950_ir_matches_golden():
     assert _GOLDEN.exists(), (
-        f"missing gfx942 indexer golden fixture; generate it with "
+        f"missing gfx950 indexer golden fixture; generate it with "
         f"`python {Path(__file__).name} --write`"
     )
     golden = json.loads(_GOLDEN.read_text())
-    assert golden.get("schema") == "dsa_indexer_gfx942.ir_golden_sha256/v1"
+    assert golden.get("schema") == "dsa_indexer_gfx950.ir_golden_sha256/v1"
 
     flavor = _current_flavor()
     assert flavor in golden.get("flavors", {}), (
-        f"no gfx942 indexer golden recorded for LLVM flavor {flavor!r}; "
+        f"no gfx950 indexer golden recorded for LLVM flavor {flavor!r}; "
         "review and re-bless the fixture"
     )
 
     cases = _cases()
     recorded = golden["flavors"][flavor]["cases"]
     assert set(recorded) == set(cases), (
-        "gfx942 indexer golden case set drifted: "
+        "gfx950 indexer golden case set drifted: "
         f"recorded={sorted(recorded)}, current={sorted(cases)}"
     )
 
@@ -148,7 +134,7 @@ def test_dsa_indexer_gfx942_ir_matches_golden():
             drift.append(
                 f"{cid}: {want} -> {got} ({recorded[cid]['bytes']} -> {nbytes} bytes)"
             )
-    assert not drift, "gfx942 indexer LLVM IR drift vs golden:\n  " + "\n  ".join(drift)
+    assert not drift, "gfx950 indexer LLVM IR drift vs golden:\n  " + "\n  ".join(drift)
 
 
 if __name__ == "__main__":
@@ -157,4 +143,4 @@ if __name__ == "__main__":
         _GOLDEN.write_text(json.dumps(_build_doc(), indent=2, sort_keys=True) + "\n")
         print(f"wrote {_GOLDEN}")
     else:
-        test_dsa_indexer_gfx942_ir_matches_golden()
+        test_dsa_indexer_gfx950_ir_matches_golden()
