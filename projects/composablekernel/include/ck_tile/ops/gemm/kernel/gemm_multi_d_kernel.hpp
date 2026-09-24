@@ -9,6 +9,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/host/concat.hpp"
+#include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/host/stream_utils.hpp"
 #include "ck_tile/core/utility/env.hpp"
@@ -135,6 +136,22 @@ struct GemmKernelMultiD
     static constexpr index_t NumBTensor = 1;
     static constexpr index_t NumDTensor = DsDataType::size();
 
+    /// @brief True for TDM pipelines (CompTDM V1, and V2 through inheritance): they expose
+    /// skipCheckValidLaunchParams and accept only tuple A/B windows.
+    static constexpr bool kTupleOnlyPipeline =
+        UniversalGemmKernel::has_skip_check_valid_launch_params::value;
+
+    template <typename T>
+    using has_tdm_multi_d_epilogue_marker = decltype(T::kIsTdmMultiDEpilogue);
+
+    static_assert(!kTupleOnlyPipeline ||
+                      is_detected<has_tdm_multi_d_epilogue_marker, EpiloguePipeline>::value,
+                  "MultiD GEMM with a TDM pipeline requires TdmMultiDEpilogue");
+    static_assert(!kTupleOnlyPipeline || std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>,
+                  "MultiD GEMM with a TDM pipeline supports only row-major E");
+    static_assert(!kTupleOnlyPipeline || !UniversalGemmKernel::ClusterLaunch,
+                  "MultiD GEMM with a TDM pipeline does not support cluster launch");
+
     CK_TILE_HOST static auto GetName() -> const std::string
     {
         return UniversalGemmKernel::GetName();
@@ -183,6 +200,20 @@ struct GemmKernelMultiD
         if(kargs.k_batch > 1)
         {
             return false;
+        }
+
+        if constexpr(kTupleOnlyPipeline)
+        {
+            // The universal check returns early for TDM pipelines; the D tensor layouts are
+            // checked at compile time by TdmMultiDEpilogue.
+            if(!ck_tile::is_gfx125_supported())
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("MultiD GEMM with a TDM pipeline requires gfx1250!");
+                }
+                return false;
+            }
         }
 
         return UniversalGemmKernel::IsSupportedArgument(kargs);

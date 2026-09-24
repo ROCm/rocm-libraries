@@ -1150,6 +1150,13 @@ struct UniversalGemmKernel
     {
         // Route Ds through 64-bit global load/store when the large-tensor global path is active.
         [[maybe_unused]] constexpr bool kDGlobalLoad = UseLargeTensorGlobalLoad();
+        // TDM pipelines run with kPadM/kPadN = false (TDM clips A/B/E in hardware), but D tensors
+        // are still read with regular tile loads in the epilogue. The TDM path only accepts
+        // row-major D, so force the contiguous (N) pad: a partial N tile then reads zeros instead
+        // of running past the row end into the next row. Rows past M are already outside the
+        // buffer range and read as zero. Only TDM kernels with Ds are affected.
+        constexpr bool kTdmD  = has_skip_check_valid_launch_params::value && NumDTensor > 0;
+        constexpr bool kPadDN = GemmPipeline::kPadN || kTdmD;
 
         // Step 1: Create tensor views
         const auto& ds_tensor_view = generate_tuple(
@@ -1173,7 +1180,7 @@ struct UniversalGemmKernel
                         ds_tensor_view[i],
                         make_tuple(number<TilePartitioner::MPerBlock>{},
                                    number<TilePartitioner::NPerBlock>{}),
-                        MakeBlockPadSequence<kDGlobalLoad, true, GemmPipeline::kPadN, false>());
+                        MakeBlockPadSequence<kDGlobalLoad, true, kPadDN, false>());
                 }
                 else
                 {
