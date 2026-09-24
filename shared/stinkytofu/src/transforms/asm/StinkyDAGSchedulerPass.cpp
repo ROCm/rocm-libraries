@@ -439,6 +439,44 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
+    // Group matrix ops into accumulator packs. Tensile emits one pack as a run
+    // over disjoint C destinations, then starts the next pack by reusing C+0.
+    // The ready queue may prefetch DS inputs across consumers within a pack,
+    // but must not spend leftover window slots on the next pack.
+    unsigned wmmaPack = 0;
+    std::vector<StinkyRegister> packDests;
+    int priorMatrixDest = -1;
+    for (unsigned i = 0; i < regionSize; ++i) {
+        StinkyInstruction& inst = *dagNodes[i].inst;
+        if (!isMatrixInstruction(inst)) continue;
+
+        bool startsNextPack = false;
+        int matrixDest = -1;
+        for (const StinkyRegister& dst : inst.getDestRegs()) {
+            if (!dst.isRegister() || isPseudoReg(dst)) continue;
+            if (matrixDest < 0) matrixDest = static_cast<int>(dst.reg.idx);
+            for (const StinkyRegister& prior : packDests) {
+                if (dst.isOverlap(prior)) {
+                    startsNextPack = true;
+                    break;
+                }
+            }
+            if (startsNextPack) break;
+        }
+        // A region can begin halfway through a pack, so its next pack may wrap
+        // from C+56 to C+0 without overlapping a destination seen in-region.
+        if (matrixDest >= 0 && priorMatrixDest >= 0 && matrixDest < priorMatrixDest)
+            startsNextPack = true;
+        if (startsNextPack) {
+            ++wmmaPack;
+            packDests.clear();
+        }
+        dagNodes[i].wmmaPack = wmmaPack;
+        priorMatrixDest = matrixDest;
+        for (const StinkyRegister& dst : inst.getDestRegs())
+            if (dst.isRegister() && !isPseudoReg(dst)) packDests.push_back(dst);
+    }
+
     // Pre-scan: assign dsReadPriority. Lower = pick first.
     // If any feedsWmma (wmmaParentValuQueue) node touches an input family
     // (A / B / MXSA / MXSB), every ds_load of those families is issued first so
