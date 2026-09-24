@@ -723,7 +723,38 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("vlcnt") = -1, nb::arg("vscnt") = -1, nb::arg("dlcnt") = -1,
             nb::arg("dscnt") = -1, nb::arg("kmcnt") = -1,
             "Set per-counter s_waitcnt values (forwarded to SWaitCntData; gfx12+ "
-            "legalizeWaitCnt splits the s_waitcnt into typed waits)");
+            "legalizeWaitCnt splits the s_waitcnt into typed waits)")
+        .def(
+            "set_sdelayalu",
+            [](LogicalInstruction& inst, int id0Type, int id0Cnt, bool hasId1, int skip,
+               int id1Type, int id1Cnt) {
+                // Map rocisa DelayALUType ints (VALU=0, TRANS=1, SALU=2, OTHER=3)
+                // to SDelayAluData::InstType by name, matching the native
+                // ToStinkyTofuUtils::convertSDelayAluData switch.
+                auto toInst = [](int t) -> SDelayAluData::InstType {
+                    switch (t) {
+                        case 0:
+                            return SDelayAluData::InstType::VALU;
+                        case 1:
+                            return SDelayAluData::InstType::TRANS;
+                        case 2:
+                            return SDelayAluData::InstType::SALU;
+                        default:
+                            return SDelayAluData::InstType::NO_DEP;
+                    }
+                };
+                if (hasId1) {
+                    inst.sdelayalu = SDelayAluData(toInst(id0Type), static_cast<int8_t>(id0Cnt),
+                                                   static_cast<int8_t>(skip), toInst(id1Type),
+                                                   static_cast<int8_t>(id1Cnt));
+                } else {
+                    inst.sdelayalu = SDelayAluData(toInst(id0Type), static_cast<int8_t>(id0Cnt));
+                }
+            },
+            nb::arg("id0_type"), nb::arg("id0_cnt"), nb::arg("has_id1") = false,
+            nb::arg("skip") = 0, nb::arg("id1_type") = 3, nb::arg("id1_cnt") = 0,
+            "Set s_delay_alu data (SDelayAluData); id types are rocisa DelayALUType ints "
+            "(VALU=0, TRANS=1, SALU=2, OTHER=3), mapped by name like the native path");
 
     // ========================================================================
     // Auto-generated Python bindings for all IR instructions (~273 classes)
