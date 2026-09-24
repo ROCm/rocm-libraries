@@ -235,12 +235,18 @@ _RESOLVED_ATTENTION_ARCH: Optional[str] = None
 
 
 def _resolve_attention_arch() -> str:
-    """Pick the build/launch target for the tiled attention kernels.
+    """Pick the LAUNCH target for the tiled attention kernels.
 
-    These launch paths compile-then-run on the local device, so the target
-    must match the running GPU. Query the runtime; fall back to gfx950 (the
-    only arch the tiled MFMA path supports today) when the device arch is
-    unavailable (e.g. CPU-only static tests / cross-compile harnesses).
+    Launch only. Every *selection* decision in this module now takes ``arch``
+    as an argument, so a selector that calls this is reading the wrong arch by
+    construction -- the whole point is that a choice made for one arch must be
+    reproducible off-box. The remaining callers all compile-then-run on the
+    local device, where the target genuinely must match the running GPU.
+
+    Query the runtime; fall back to gfx950 when the device arch is unavailable
+    (CPU-only static tests, cross-compile harnesses). The fallback is a
+    default, not a capability statement: ``_tiled_2d_impl`` routes gfx942 and
+    gfx1250 as well.
 
     **Memoized process-wide.** The device arch never changes within a process,
     yet the launch hot path resolves it ~20x per call (every selector that
