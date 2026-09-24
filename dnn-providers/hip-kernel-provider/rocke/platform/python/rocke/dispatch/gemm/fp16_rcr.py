@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Callable, Sequence, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 from ...core.arch import ArchTarget
 from ...helpers.manifest import gemm_args_signature
@@ -368,6 +368,36 @@ def _spec_gfx1250_wmma_small(req: GemmRequest, name: str) -> UniversalGemmSpec:
     )
 
 
+# Largest M/N at which the gfx1250 128x128 candidate was verified to produce
+# correct results. Above it the emitted kernel aborts the queue with
+# HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION.
+_GFX1250_WMMA_128_MAX_MN = 2048
+
+
+def _gfx1250_wmma_128_shape_guard(req: GemmRequest) -> Tuple[bool, str]:
+    """Decline shapes where the 128x128 gfx1250 kernel is known to fault.
+
+    Verified on hardware: correct at 1920x1920 (grid 15x15) and 2048x2048
+    (16x16), faults at 2176x2176 (17x17) and every larger square tried, and at
+    2048x4096 / 4096x2048 -- i.e. whenever **either** grid dimension exceeds 16.
+    The 256x256 candidate does not share the limit (clean to 16384x16384,
+    grid 64x64), so this is specific to this kernel, not to the grid size.
+
+    The root cause is not yet identified, so the bound is empirical rather than
+    derived; it is deliberately the last *verified-good* value rather than the
+    first failing one. Declining here makes the request fall through, which is
+    the behaviour that existed before this candidate was added -- dispatching a
+    kernel that aborts the queue is strictly worse than reporting no support.
+    """
+    if req.M > _GFX1250_WMMA_128_MAX_MN or req.N > _GFX1250_WMMA_128_MAX_MN:
+        return False, (
+            f"gfx1250 128x128 candidate is verified only to "
+            f"M,N <= {_GFX1250_WMMA_128_MAX_MN} (got M={req.M}, N={req.N}); "
+            "larger shapes fault at launch"
+        )
+    return True, "ok"
+
+
 def _make_candidate(
     *,
     name: str,
@@ -375,7 +405,18 @@ def _make_candidate(
     priority: int,
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
     arches: Tuple[str, ...],
+    extra_support: Optional[Callable[[GemmRequest], Tuple[bool, str]]] = None,
 ) -> KernelCandidate:
+    """Register one candidate.
+
+    ``extra_support`` is an optional per-candidate veto, applied after the
+    shared checks. It exists for a candidate whose *emitted kernel* is known
+    to be wrong outside some range: the shared predicates only see the spec,
+    so they cannot tell. Declining is strictly better than dispatching a
+    kernel that faults -- the request falls through to the next candidate, or
+    reports no support, which is what happened before the candidate existed.
+    """
+
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
@@ -384,6 +425,10 @@ def _make_candidate(
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
+        if extra_support is not None:
+            ok, why = extra_support(req)
+            if not ok:
+                return False, why
         spec = spec_fn(req, name)
         ok, why = gemm_config_supported(
             support_query_from_universal_spec(spec, arch=req.arch)
@@ -489,6 +534,7 @@ GEMM_FP16_REGISTRY.extend(
             priority=10,
             spec_fn=_spec_gfx1250_wmma,
             arches=_GFX1250_WMMA,
+            extra_support=_gfx1250_wmma_128_shape_guard,
         ),
         _make_candidate(
             name="universal_gemm_fp16_gfx1250_wmma_small",
