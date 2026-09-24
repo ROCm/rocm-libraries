@@ -2372,7 +2372,7 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
-    // absolute tolerance for evaluating when the algorithm has converged
+    // relative tolerance for evaluating when the algorithm has converged
     S eps = get_epsilon<S>();
     S atol = (abstol <= 0 ? eps : abstol);
 

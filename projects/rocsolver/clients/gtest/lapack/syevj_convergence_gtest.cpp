@@ -117,19 +117,19 @@ void run_gesvdj(rocblas_int n,
 
 /* Runs syevj directly (no normal equations), so the input scale reaches the
    convergence test unsquared. */
-template <typename T>
+template <typename T, typename S = T>
 void run_syevj(rocblas_int n,
                const vector<T>& hA,
-               vector<T>& hW,
+               vector<S>& hW,
                rocblas_int& n_sweeps,
                rocblas_int& info,
-               T abstol = T(0))
+               S abstol = S(0))
 {
     rocblas_local_handle handle;
 
     device_strided_batch_vector<T> dA(size_t(n) * n, 1, size_t(n) * n, 1);
-    device_strided_batch_vector<T> dW(n, 1, n, 1);
-    device_strided_batch_vector<T> dres(1, 1, 1, 1);
+    device_strided_batch_vector<S> dW(n, 1, n, 1);
+    device_strided_batch_vector<S> dres(1, 1, 1, 1);
     device_strided_batch_vector<rocblas_int> dsweeps(1, 1, 1, 1);
     device_strided_batch_vector<rocblas_int> dinfo(1, 1, 1, 1);
 
@@ -147,7 +147,7 @@ void run_syevj(rocblas_int n,
         rocblas_stride(n), dinfo.data(), 1));
 
     hW.resize(n);
-    CHECK_HIP_ERROR(hipMemcpy(hW.data(), dW.data(), sizeof(T) * n, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(hW.data(), dW.data(), sizeof(S) * n, hipMemcpyDeviceToHost));
     CHECK_HIP_ERROR(hipMemcpy(&n_sweeps, dsweeps.data(), sizeof(rocblas_int), hipMemcpyDeviceToHost));
     CHECK_HIP_ERROR(hipMemcpy(&info, dinfo.data(), sizeof(rocblas_int), hipMemcpyDeviceToHost));
 }
@@ -281,4 +281,32 @@ TEST(checkin_lapack, SYEVJ_mixed_scale_fallback_does_not_overflow)
         EXPECT_NEAR(hW[0], -400.0f, 1.0f) << "abstol = " << abstol;
         EXPECT_NEAR(double(hW[1]), 1e38, 1e33) << "abstol = " << abstol;
     }
+}
+
+/* HEEVJ shares syevj_offd_measure but reaches std::norm/std::abs on a complex
+   entry and std::real on the diagonal. A dominant axis must not mask the
+   Hermitian 2x2 block either: exact eigenvalues are 0.5, 1.5 and K. */
+TEST(checkin_lapack, HEEVJ_dominant_axis_does_not_mask_block)
+{
+    const rocblas_int n = 3;
+    const float K = 1e8f; // above the 5.9e6 turn-on for syevj called directly
+    using C = rocblas_float_complex;
+
+    // [[1, 0.5i, 0], [-0.5i, 1, 0], [0, 0, K]]
+    vector<C> hA(size_t(n) * n, C(0, 0));
+    hA[0 + 0 * n] = C(1, 0);
+    hA[1 + 1 * n] = C(1, 0);
+    hA[2 + 2 * n] = C(K, 0);
+    hA[0 + 1 * n] = C(0, 0.5);
+    hA[1 + 0 * n] = C(0, -0.5);
+
+    vector<float> hW;
+    rocblas_int n_sweeps = -1, info = -1;
+    run_syevj<C, float>(n, hA, hW, n_sweeps, info);
+
+    EXPECT_EQ(info, 0);
+    EXPECT_GT(n_sweeps, 0) << "the Jacobi loop never ran";
+    EXPECT_NEAR(hW[0], 0.5f, 1e-4f);
+    EXPECT_NEAR(hW[1], 1.5f, 1e-4f);
+    EXPECT_NEAR(double(hW[2]), double(K), double(K) * 1e-5);
 }
