@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -2031,7 +2032,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             stride_a[i] = do_batched[i] ? arg.stride_a[i] : lda[i] * A_col[i];
             stride_b[i] = do_batched[i] ? arg.stride_b[i] : ldb[i] * B_col[i];
             stride_c[i] = do_batched[i] ? arg.stride_c[i] : ldc[i] * N[i];
-            stride_d[i] = do_batched[i] ? arg.stride_c[i] : ldd[i] * N[i];
+            stride_d[i] = do_batched[i] ? arg.stride_d[i] : ldd[i] * N[i];
             stride_e[i] = do_batched[i] ? arg.stride_e[i] : lde[i] * N[i];
         }
         else
@@ -3297,14 +3298,21 @@ void testing_matmul_with_bias(const Arguments& arg,
             //// copy data from CPU to device end
             if(size_D_copy[i])
             {
+                // BLAS computes in place in D_gold, so seed beta*C using D's
+                // layout even when C and D have different leading dimensions or strides.
+                const size_t elementBytes = realDataTypeSize(To);
+                std::memset(hD_gold[i].buf(), 0, hD_gold[i].getNumBytes());
+                hipblaslt_copy_matrix(hC[i].as<char>(),
+                                       hD_gold[i].as<char>(),
+                                       M[i] * elementBytes,
+                                       N[i],
+                                       ldc[i] * elementBytes,
+                                       ldd[i] * elementBytes,
+                                       stride_c[i] * elementBytes,
+                                       stride_d[i] * elementBytes,
+                                       num_batches[i]);
                 if(epilogue_on[i])
-                {
-                    transform_buf(hC[i], hD_gold_epl[i], To, Talpha);
-                }
-                else
-                {
-                    copy_buf(hC[i], hD_gold[i], To);
-                }
+                    transform_buf(hD_gold[i], hD_gold_epl[i], To, Talpha);
             }
             if(epilogue_on[i])
             {
@@ -3618,7 +3626,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                 //// copy data from CPU to device end
                 if(size_D_copy[i])
                 {
-                    copy_buf(hC[batchCount], hD_gold[batchCount], To);
+                    // Each pointer-array entry contains one matrix. Seed the
+                    // in-place BLAS reference using D's leading dimension.
+                    const size_t elementBytes = realDataTypeSize(To);
+                    std::memset(hD_gold[batchCount].buf(), 0, hD_gold[batchCount].getNumBytes());
+                    hipblaslt_copy_matrix(hC[batchCount].as<char>(),
+                                          hD_gold[batchCount].as<char>(),
+                                          M[i] * elementBytes,
+                                          N[i],
+                                          ldc[i] * elementBytes,
+                                          ldd[i] * elementBytes);
                 }
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
