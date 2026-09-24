@@ -69,4 +69,8 @@ table TensorAttributes {
     is_runtime_pass_by_value: bool = false;
     ragged_offset_tensor_uid: long = null (cache_uid);
     alignment: long = 16;
+    // Recovers the element offset from a coarser stored ragged offset:
+    // element_offset = stored_offset * ragged_offset_multiplier. Default 1 = element units.
+    // Folded by value into the cache key (execution-affecting), unlike the sibling uid above.
+    ragged_offset_multiplier: long = 1;
 }
