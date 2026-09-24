@@ -163,15 +163,14 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_malloc(std::size_t n)
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_calloc(std::size_t n, std::size_t sz)
 {
-  constexpr auto max_size = (std::numeric_limits<std::size_t>::max)();
-  if (sz != 0 && n > max_size / sz)
+  std::size_t bytes{};
+  if (__builtin_mul_overflow(n, sz, &bytes))
   {
     errno = ENOMEM;
     return nullptr;
   }
 
-  const auto bytes = n * sz;
-  auto p           = __hipstdpar_malloc(bytes);
+  auto p = __hipstdpar_malloc(bytes);
   if (!p)
   {
     // A zero-sized request may return nullptr; nullptr alone does not imply ENOMEM.
@@ -263,14 +262,14 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_realloc_array(void* p,
 {
   // Checked before reallocating: a wrapped product of zero would be taken as a
   // request to free p, leaving the caller holding a dangling pointer.
-  constexpr auto max_size = (std::numeric_limits<std::size_t>::max)();
-  if (sz != 0 && n > max_size / sz)
+  std::size_t bytes{};
+  if (__builtin_mul_overflow(n, sz, &bytes))
   {
     errno = ENOMEM;
     return nullptr;
   }
 
-  return __hipstdpar_realloc(p, n * sz);
+  return __hipstdpar_realloc(p, bytes);
 }
 
 extern "C" inline __attribute__((used)) void __hipstdpar_free(void* p)
