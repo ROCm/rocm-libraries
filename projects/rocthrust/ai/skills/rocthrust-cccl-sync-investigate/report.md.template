@@ -1,21 +1,19 @@
 # CCCL → rocThrust Sync Investigation: <CURRENT_TAG> → <TO_TAG>
 
 Step 0 pre-sync investigation. This report catalogs everything that changed in
-the targeted CCCL release(s) so a future rocThrust code sync can be planned
-and scoped. It is descriptive intelligence — it does **not** merge any code.
-
-> **No downstream pipeline yet.** There is currently no `rocthrust-cccl-sync`
-> / `-resolve` / `-finalize` / `-tickets` skill to hand this report off to.
-> This is a known gap; treat §5 and Handoff below as forward-compatible
-> scaffolding for when those skills exist.
+the targeted CCCL release(s) so the rocThrust code sync can be planned
+and scoped. It is descriptive intelligence — it does **not** port any code.
+The sync itself is driven by `rocthrust-cccl-sync-todo` → `-resolve` →
+`-finalize`; see Handoff below. (There is no `-tickets` skill yet; §5 is
+forward-compatible scaffolding for one.)
 
 ## Summary
 
 - **JIRA ticket**: <JIRA_TICKET>
 - **Repo**: `ROCm/rocm-libraries` — rocThrust lives at `projects/rocthrust/`
 - **Base branch**: `<SYNC_BASE>` (default `origin/develop`)
-- **Targeted CCCL tag(s)**: `<PENDING_TAGS>` (one merge per tag, oldest-first —
-  once a sync driver exists; for now this is just scoping)
+- **Targeted CCCL tag(s)**: `<PENDING_TAGS>` (ported commit-by-commit,
+  oldest-first, on one sync branch for the confirmed range)
 - **Upstream commit range**: `<CURRENT_TAG>..<TO_TAG>` scoped to `thrust/thrust/`
   — `<N_COMMITS>` commits, `<N_FILES>` files changed
 - **Maintenance-branch drift**: `<BRANCH_DRIFT_STATUS>` (from
@@ -97,7 +95,7 @@ directories already exercise new upstream APIs.
 Commits in `<CURRENT_TAG>..<TO_TAG>` (scoped to `thrust/thrust/`) that touch
 files listed in `sensitive-files.md` (AMD-heavily-customized areas), rename/
 move files, change public APIs/ABI, or add CUDA intrinsics / inline PTX. These
-are the conflict and build-break hot spots for a future sync. When a commit
+are the porting and build-break hot spots for the sync. When a commit
 deletes a file rocThrust has an AMD-only equivalent for (or vice versa), state
 that explicitly rather than assuming either side is authoritative. Hyperlink
 each commit: `[<short-sha>](https://github.com/NVIDIA/cccl/commit/<full-sha>)`.
@@ -138,13 +136,14 @@ Captured now so this report is ready to consume once that skill exists.
 
 ## Handoff
 
-- **No `rocthrust-cccl-sync` driver skill exists yet** — this is a known gap.
-  For now, this report is the scoping artifact a human uses to plan a manual
-  sync attempt (see [PR #10464](https://github.com/ROCm/rocm-libraries/pull/10464)
-  for the last real attempt, later reverted).
-- Recommended sync order (once a driver exists): <PENDING_TAGS> (oldest-first).
-- Expected hot-spot files (pre-seed for a future resolver): see
-  `sensitive-files.md` (DRAFT).
+- **Next step**: run `rocthrust-cccl-sync-todo` for the confirmed
+  `<CURRENT_TAG>..<TO_TAG>` range to create the sync branch and `todo.md`,
+  then `rocthrust-cccl-sync-resolve` and `rocthrust-cccl-sync-finalize`.
+  (See [PR #10464](https://github.com/ROCm/rocm-libraries/pull/10464) for the
+  last real sync attempt, later reverted.)
+- Recommended sync order: <PENDING_TAGS> (oldest-first).
+- Expected hot-spot files (flagged with `⚠` in `todo.md` and cross-checked by
+  `rocthrust-cccl-sync-resolve`): see `sensitive-files.md` (DRAFT).
 - Open questions for the human: <list>, including whether Current version signal A/B agreement
   above is trustworthy enough to commit to `<CURRENT_TAG>` as the true
   baseline. If **Maintenance-branch drift** above reported `DRIFT`, this must

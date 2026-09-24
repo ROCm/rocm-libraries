@@ -1,21 +1,25 @@
 ---
 name: rocthrust-cccl-sync-investigate
-description: Step 0 (prototype) of a future CCCL→rocThrust sync. Investigates exactly what changed in the targeted CCCL release(s) BEFORE any code is merged. Determines which CCCL version rocThrust is currently aligned with (from a primary signal plus three weaker corroborating signals, since no version.mk-equivalent exists), the next CCCL release(s) to sync, then catalogs new features, new CMake options/feature macros, test/benchmark coverage gaps, and commits likely to be problematic for rocThrust. Produces an investigation report. Use when asked to investigate, scope, or survey an upcoming CCCL sync into rocThrust (i.e. "what changed in CCCL 3.1?").
+description: Step 0 of the CCCL→rocThrust sync pipeline (investigate → todo → resolve → finalize). Investigates exactly what changed in the targeted CCCL release(s) BEFORE any code is merged. Determines which CCCL version rocThrust is currently aligned with (from a primary signal plus three weaker corroborating signals, since no version.mk-equivalent exists), the next CCCL release(s) to sync, then catalogs new features, new CMake options/feature macros, test/benchmark coverage gaps, and commits likely to be problematic for rocThrust. Produces an investigation report. Use when asked to investigate, scope, or survey an upcoming CCCL sync into rocThrust (i.e. "what changed in CCCL 3.1?").
 ---
 
-# CCCL → rocThrust Sync — Step 0: Investigate (prototype)
+# CCCL → rocThrust Sync — Step 0: Investigate
 
-This skill runs **before** any code is merged. It produces a written
+This skill runs **before** any code is ported. It produces a written
 investigation of everything that changed in the CCCL release(s) about to be
-synced into rocThrust, so a future code sync can be planned and scoped. It is
-purely **descriptive intelligence** — it does not merge, resolve, or build
+synced into rocThrust, so the code sync can be planned and scoped. It is
+purely **descriptive intelligence** — it does not port, resolve, or build
 anything.
 
-> **Prototype status.** The downstream pipeline this skill would feed — a
-> `rocthrust-cccl-sync` driver, `-resolve`, `-finalize` — **does not exist
-> yet**. Running this skill produces a scoping report and nothing more;
-> there is no next skill to hand off to. That is a known gap, not an
-> oversight — see Handoff below.
+It is the first stage of the sync pipeline, followed by:
+
+- **`rocthrust-cccl-sync-todo`** — creates the sync branch and writes
+  `todo.md`, the ordered list of upstream commits to port. It reuses this
+  report's confirmed `CURRENT_TAG`/`TO_TAG` rather than recomputing them.
+- **`rocthrust-cccl-sync-resolve`** — ports the `todo.md` commits one at a
+  time, strictly in order.
+- **`rocthrust-cccl-sync-finalize`** — pre-landing checks, `THRUST_VERSION`
+  bump, and CHANGELOG entry once every `todo.md` item is ticked.
 
 ## What this skill mutates
 
@@ -416,10 +420,8 @@ Report to the user:
 - The version delta (`CURRENT_TAG` → `PENDING_TAGS`) and signal-agreement status.
 - Counts: new features, new CMake options/macros, test/benchmark coverage
   gaps, problematic commits.
-- **Known gap**: there is no `rocthrust-cccl-sync` driver (or `-resolve` /
-  `-finalize`) skill yet to hand this off to. The report is a scoping
-  artifact for a human-led sync attempt for now — building those downstream
-  skills is a natural next step once this investigate stage has been
-  dogfooded against a real repo.
+- **Next step**: once the human has reviewed the report, run
+  `rocthrust-cccl-sync-todo` to create the sync branch and `todo.md` for the
+  confirmed `CURRENT_TAG..TO_TAG` range.
 - Whether the report is ticket-ready per Phase E, for whenever a tickets skill
   exists.
