@@ -904,9 +904,11 @@ endif()
 # ~6.5 MB shared library without pulling hipblaslt's ~1.6 GB of Tensile kernel
 # binaries. See AIHPBLAS-4434.
 #
-# Guard on the target TYPE rather than BUILD_SHARED_LIBS: that variable is not
-# reliably set at this scope (it is assigned further down, near line 805), so
-# testing it here would silently skip the component in a shared build.
+# Guard on the target TYPE rather than BUILD_SHARED_LIBS: at this scope
+# BUILD_SHARED_LIBS holds HIPBLASLT_BUILD_SHARED_LIBS, which describes
+# libhipblaslt, not tensilelite-host. The two are set independently
+# (TENSILELITE_BUILD_SHARED_LIBS vs HIPBLASLT_BUILD_SHARED_LIBS), so only the
+# target's own TYPE says whether there is a .so to package.
 if(TARGET tensilelite-host)
     get_target_property(_tensilelite_host_type tensilelite-host TYPE)
     if(_tensilelite_host_type STREQUAL "SHARED_LIBRARY")
@@ -954,28 +956,6 @@ if(TARGET tensilelite-host)
         rocm_package_add_rpm_dependencies(COMPONENT runtime
             DEPENDS "libtensilelite-host.so.1()(64bit)")
 
-        # Lockstep pin. The soname capability above is the correctness
-        # mechanism; this is the release policy on top of it: hipblaslt,
-        # hipsparselt and tensilelite-host are intended to move together
-        # within one ROCm release, so the dependency is an exact version
-        # rather than a floor.
-        #
-        # CPACK_PACKAGE_VERSION is only computed inside rocm_create_package
-        # (ROCMCreatePackage.cmake:281 and :296), which runs after this point,
-        # so recompute the same value from the same inputs.
-        #
-        # Note this pins VERSION only, not VERSION-RELEASE. Two builds from
-        # different commits share a VERSION and differ only in RELEASE (the
-        # git tag from rocm_get_git_commit_tag), so this does not detect
-        # commit-level ABI drift. Only a SOVERSION bump does -- see D7.
-        rocm_get_patch_version(_tensilelite_rocm_patch)
-        set(_tensilelite_pkg_version
-            "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
-        if(_tensilelite_rocm_patch)
-            set(_tensilelite_pkg_version
-                "${_tensilelite_pkg_version}.${_tensilelite_rocm_patch}")
-        endif()
-
         # Same component-shadows-global rule applies on the Debian side.
         if(CPACK_DEBIAN_PACKAGE_DEPENDS)
             rocm_package_add_deb_dependencies(COMPONENT runtime
@@ -989,13 +969,12 @@ if(TARGET tensilelite-host)
             endif()
         endif()
 
-        rocm_package_add_rpm_dependencies(COMPONENT runtime
-            DEPENDS "tensilelite-host = ${_tensilelite_pkg_version}")
+        # Debian gets no soname dependency here, so name the package. No
+        # version constraint: tensilelite-host is versioned with hipBLASLt only
+        # until it has a version of its own, and an exact pin would record that
+        # coupling in package metadata. The SOVERSION is the ABI contract.
         rocm_package_add_deb_dependencies(COMPONENT runtime
-            DEPENDS "tensilelite-host (= ${_tensilelite_pkg_version})")
-
-        unset(_tensilelite_rocm_patch)
-        unset(_tensilelite_pkg_version)
+            DEPENDS "tensilelite-host")
     endif()
     unset(_tensilelite_host_type)
 endif()
