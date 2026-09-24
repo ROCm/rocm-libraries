@@ -524,15 +524,16 @@ def build_kda_chunkwise_gfx942(kind, arch, **over):
     return _build
 
 
-def build_lightning_indexer_gfx942(arch, **over):
-    """Build one representative gfx942 lightning-indexer kernel.
+def build_lightning_indexer_case(arch, **over):
+    """Build one representative lightning-indexer kernel for ``arch``.
 
-    Overrides are plain ``IndexerSpec`` fields; ``block_size`` is lifted into the
-    tile spec so the case table stays flat.
+    The kernel is arch-neutral (gfx942/gfx950); ``arch`` only selects the lowering
+    target. Overrides are plain ``IndexerSpec`` fields; ``block_size`` is lifted
+    into the tile spec so the case table stays flat.
     """
 
     def _build():
-        from kernels.gfx942.lightning_indexer import (
+        from kernels.common.lightning_indexer import (
             IndexerSpec,
             IndexerTileSpec,
             build_lightning_indexer,
@@ -3096,22 +3097,69 @@ def cases():
             build_kda_chunkwise_gfx942(_kind, "gfx942", **_over),
         )
 
-    # gfx942 lightning indexer (DSA scoring, bf16): scalar-v1 model-shaped cases
-    # (DeepSeek H_I=64, GLM H_I=32) at D_I=128 plus a small case, and the MFMA
-    # (matrix-core) body on 16-aligned shapes.
-    for _case_id, _over in (
-        ("deepseek_hi64", {"n_index_heads": 64, "index_head_dim": 128, "seqlen_q": 8, "seqlen_k": 64}),
-        ("glm_hi32", {"n_index_heads": 32, "index_head_dim": 128, "seqlen_q": 8, "seqlen_k": 64}),
-        ("small", {"n_index_heads": 4, "index_head_dim": 16, "seqlen_q": 8, "seqlen_k": 32, "block_size": 64}),
-        ("mfma_deepseek_hi64", {"n_index_heads": 64, "index_head_dim": 128, "seqlen_q": 16, "seqlen_k": 64, "body": "mfma", "block_size": 64}),
-        ("mfma_glm_hi32", {"n_index_heads": 32, "index_head_dim": 128, "seqlen_q": 16, "seqlen_k": 64, "body": "mfma", "block_size": 64}),
-    ):
-        add(
-            "lightning_indexer",
-            f"lightning_indexer/gfx942/{_case_id}",
-            "gfx942",
-            build_lightning_indexer_gfx942("gfx942", **_over),
-        )
+    # Lightning indexer (DSA scoring, bf16) on gfx942 and gfx950 -- the kernel is
+    # arch-neutral, so both lower the same specs (scalar-v1 model-shaped cases:
+    # DeepSeek H_I=64, GLM H_I=32, a small case; plus the MFMA body on 16-aligned
+    # shapes). The emitted IR differs per arch, so each carries its own golden.
+    for _arch in ("gfx942", "gfx950"):
+        for _case_id, _over in (
+            (
+                "deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "small",
+                {
+                    "n_index_heads": 4,
+                    "index_head_dim": 16,
+                    "seqlen_q": 8,
+                    "seqlen_k": 32,
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+        ):
+            add(
+                "lightning_indexer",
+                f"lightning_indexer/{_arch}/{_case_id}",
+                _arch,
+                build_lightning_indexer_case(_arch, **_over),
+            )
 
     return out
 

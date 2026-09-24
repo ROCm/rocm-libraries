@@ -42,7 +42,7 @@ from rocke.helpers.compile import compile_kernel  # noqa: E402
 from rocke.run_manifest import run_manifest  # noqa: E402
 
 from builders.gfx942.dsa.manifest import make_lightning_indexer_manifest  # noqa: E402
-from kernels.gfx942.lightning_indexer import (  # noqa: E402
+from kernels.common.lightning_indexer import (  # noqa: E402
     IndexerSpec,
     IndexerTileSpec,
     build_lightning_indexer,
@@ -56,7 +56,9 @@ def _ints(s: str) -> list[int]:
     return [int(x) for x in s.split(",") if x.strip()]
 
 
-def _run_one(seqlen_q, seqlen_k, n_index_heads, index_head_dim, body, verify):
+def _run_one(
+    seqlen_q, seqlen_k, n_index_heads, index_head_dim, body, verify, arch=_ARCH
+):
     # The MFMA body pins one wave64; the scalar body uses a wider workgroup.
     block = 64 if body == "mfma" else 256
     spec = IndexerSpec(
@@ -67,7 +69,7 @@ def _run_one(seqlen_q, seqlen_k, n_index_heads, index_head_dim, body, verify):
         body=body,
         tile=IndexerTileSpec(block_size=block),
     )
-    artifact = compile_kernel(build_lightning_indexer(spec, arch=_ARCH), arch=_ARCH)
+    artifact = compile_kernel(build_lightning_indexer(spec, arch=arch), arch=arch)
     manifest = make_lightning_indexer_manifest(
         artifact=artifact,
         spec=spec,
@@ -90,22 +92,39 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--n-index-heads", default="32")
     ap.add_argument("--index-head-dim", type=int, default=128)
     ap.add_argument("--body", default="both", choices=["scalar", "mfma", "both"])
+    ap.add_argument("--arch", default="gfx942", choices=["gfx942", "gfx950"])
     ap.add_argument("--verify", action="store_true")
     ns = ap.parse_args(argv)
 
     bodies = ["scalar", "mfma"] if ns.body == "both" else [ns.body]
-    print(f"# lightning indexer sweep (gfx942), seqlen_q={ns.seqlen_q}")
+    print(f"# lightning indexer sweep ({ns.arch}), seqlen_q={ns.seqlen_q}")
     print("# body    seqlen_k  H_I  D_I   ms         GB/s      verify")
     for hi in _ints(ns.n_index_heads):
         for sk in _ints(ns.seqlen_k):
             for body in bodies:
                 aligned = not (ns.seqlen_q % 16 or sk % 16 or ns.index_head_dim % 16)
                 if body == "mfma" and not aligned:
-                    print(f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} (skip: mfma needs 16-aligned)")
+                    print(
+                        f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} (skip: mfma needs 16-aligned)"
+                    )
                     continue
-                s = _run_one(ns.seqlen_q, sk, hi, ns.index_head_dim, body, ns.verify)
-                v = "ok" if (not ns.verify or s.bad_count == 0) else f"BAD {s.bad_count}/{s.total}"
-                print(f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} {s.ms:<10.4g} {s.gbps:<9.4g} {v}")
+                s = _run_one(
+                    ns.seqlen_q,
+                    sk,
+                    hi,
+                    ns.index_head_dim,
+                    body,
+                    ns.verify,
+                    arch=ns.arch,
+                )
+                v = (
+                    "ok"
+                    if (not ns.verify or s.bad_count == 0)
+                    else f"BAD {s.bad_count}/{s.total}"
+                )
+                print(
+                    f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} {s.ms:<10.4g} {s.gbps:<9.4g} {v}"
+                )
     return 0
 
 

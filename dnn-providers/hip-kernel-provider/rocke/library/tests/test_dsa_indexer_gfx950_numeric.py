@@ -1,13 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-GPU numeric lane for the gfx942 lightning indexer (torch-free).
+"""On-GPU numeric lane for the gfx950 lightning indexer (torch-free).
 
-Compiles the kernel, launches it through the numpy ``run_manifest`` path, and
-checks the emitted scores against the CPU oracle in
-``builders.gfx942.dsa.hostpack.ref_indexer_scores``. Gated on an actual gfx942
-device via a torch-free probe, so it skips cleanly on any other host (this lane
-cannot run on gfx90a/gfx950).
+Same as the gfx942 numeric lane but compiled and launched for gfx950. Gated on an
+actual gfx950 device via a torch-free probe, so it skips cleanly on any other host.
 """
 
 from __future__ import annotations
@@ -38,24 +35,22 @@ def _gpu_arch() -> str:
 
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.skipif("gfx942" not in _gpu_arch(), reason="needs a gfx942 GPU"),
+    pytest.mark.skipif("gfx950" not in _gpu_arch(), reason="needs a gfx950 GPU"),
 ]
 
-_ARCH = "gfx942"
-# One multiply per fp8/bf16 pair plus per-head weights stay in f32; the score is
-# a ranking input, so a relaxed relative tolerance is the correct gate.
+_ARCH = "gfx950"
 _TOL = 3e-2
 
 
 @pytest.mark.parametrize(
     "Q,Sk,HI,D,block,q_pos_base,body",
     [
-        (8, 64, 4, 16, 64, 0, "scalar"),  # small, decode-like base
-        (8, 128, 32, 128, 256, 0, "scalar"),  # GLM-shaped H_I=32, D_I=128
-        (4, 96, 8, 128, 128, 50, "scalar"),  # nonzero causal offset
-        (16, 64, 32, 128, 64, 0, "mfma"),  # MFMA, GLM-shaped, 16-aligned
-        (32, 128, 64, 128, 64, 0, "mfma"),  # MFMA, DeepSeek-shaped, multi-tile
-        (16, 96, 8, 128, 64, 48, "mfma"),  # MFMA, nonzero causal offset
+        (8, 64, 4, 16, 64, 0, "scalar"),
+        (8, 128, 32, 128, 256, 0, "scalar"),
+        (4, 96, 8, 128, 128, 50, "scalar"),
+        (16, 64, 32, 128, 64, 0, "mfma"),
+        (32, 128, 64, 128, 64, 0, "mfma"),
+        (16, 96, 8, 128, 64, 48, "mfma"),
     ],
 )
 def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):

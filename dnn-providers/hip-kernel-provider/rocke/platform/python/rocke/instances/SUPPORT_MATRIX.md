@@ -104,13 +104,14 @@ as described in the notes.
 
 ## Sparse attention (DSA lightning indexer)
 
-Added with the DSA lightning-indexer family. The gfx942 ✅ is compile- and
-golden-verified (spec, wiring, and IR sha); on-GPU numeric parity runs on a
-gfx942 device and is not implied by the ✅ here.
+Added with the DSA lightning-indexer family. The kernel is arch-neutral
+(`kernels/common/lightning_indexer.py`): the ✅ cells are compile- and
+golden-verified (spec, wiring, IR sha, Python/C++ byte-identity); on-GPU numeric
+parity runs on the matching device and is not implied by the ✅ here.
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
-| `lightning_indexer` | ✅ | ❌ | ❌ | bf16 only; score-only DSA scorer (no softmax/value); scalar-reduction v1; MFMA score body and fp8 are later phases; gfx950 not yet |
+| `lightning_indexer` | ✅ | ✅ | ❌ | bf16; score-only DSA scorer (no softmax/value); scalar body (decode/unaligned/oracle) + MFMA body (16-aligned prefill); fp8 is a later phase; gfx1151 (RDNA wave32) unsupported |
 
 ## Linear attention / recurrent-state decode
 

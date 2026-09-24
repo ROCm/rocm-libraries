@@ -22,7 +22,7 @@ for _path in (str(_LIBRARY), str(_PLATFORM_PYTHON)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from kernels.gfx942.lightning_indexer import (  # noqa: E402
+from kernels.common.lightning_indexer import (  # noqa: E402
     LDS_LIMIT,
     IndexerSpec,
     IndexerTileSpec,
@@ -36,8 +36,13 @@ _ARCH = "gfx942"
 
 
 def _spec(**over) -> IndexerSpec:
-    base = dict(n_index_heads=4, index_head_dim=16, seqlen_q=8, seqlen_k=32,
-                tile=IndexerTileSpec(block_size=64))
+    base = dict(
+        n_index_heads=4,
+        index_head_dim=16,
+        seqlen_q=8,
+        seqlen_k=32,
+        tile=IndexerTileSpec(block_size=64),
+    )
     base.update(over)
     return IndexerSpec(**base)
 
@@ -47,10 +52,15 @@ class TestValidator(unittest.TestCase):
         ok, why = is_valid_spec(_spec(), arch="gfx942")
         self.assertTrue(ok, why)
 
-    def test_rejects_gfx950(self):
+    def test_accepts_gfx950(self):
         ok, why = is_valid_spec(_spec(), arch="gfx950")
+        self.assertTrue(ok, why)
+
+    def test_rejects_unsupported_arch(self):
+        # An RDNA wave32 part: no CDNA MFMA path.
+        ok, why = is_valid_spec(_spec(), arch="gfx1151")
         self.assertFalse(ok)
-        self.assertIn("gfx942", why)
+        self.assertIn("gfx942/gfx950", why)
 
     def test_rejects_bad_dtype(self):
         ok, why = is_valid_spec(_spec(dtype="f16"), arch=_ARCH)
@@ -63,7 +73,9 @@ class TestValidator(unittest.TestCase):
         self.assertIn("wave_size", why)
 
     def test_rejects_oversize_block(self):
-        ok, why = is_valid_spec(_spec(tile=IndexerTileSpec(block_size=2048)), arch=_ARCH)
+        ok, why = is_valid_spec(
+            _spec(tile=IndexerTileSpec(block_size=2048)), arch=_ARCH
+        )
         self.assertFalse(ok)
         self.assertIn("1024", why)
 
@@ -81,8 +93,13 @@ class TestBudget(unittest.TestCase):
 
 class TestKernelName(unittest.TestCase):
     def test_geometry_in_name(self):
-        name = _spec(n_index_heads=32, index_head_dim=128, seqlen_q=8, seqlen_k=64,
-                     tile=IndexerTileSpec(block_size=256)).kernel_name()
+        name = _spec(
+            n_index_heads=32,
+            index_head_dim=128,
+            seqlen_q=8,
+            seqlen_k=64,
+            tile=IndexerTileSpec(block_size=256),
+        ).kernel_name()
         self.assertIn("HI32", name)
         self.assertIn("D128", name)
         self.assertIn("bf16", name)
@@ -108,13 +125,19 @@ class TestBuildAndLower(unittest.TestCase):
 
     def test_invalid_spec_raises(self):
         with self.assertRaises(ValueError):
-            build_lightning_indexer(_spec(), arch="gfx950")
+            build_lightning_indexer(_spec(), arch="gfx1151")
 
 
 class TestMfmaBody(unittest.TestCase):
     def _mfma(self, **over) -> IndexerSpec:
-        base = dict(n_index_heads=32, index_head_dim=128, seqlen_q=16, seqlen_k=64,
-                    body="mfma", tile=IndexerTileSpec(block_size=64))
+        base = dict(
+            n_index_heads=32,
+            index_head_dim=128,
+            seqlen_q=16,
+            seqlen_k=64,
+            body="mfma",
+            tile=IndexerTileSpec(block_size=64),
+        )
         base.update(over)
         return IndexerSpec(**base)
 
@@ -123,7 +146,9 @@ class TestMfmaBody(unittest.TestCase):
         self.assertTrue(ok, why)
 
     def test_requires_wave_block(self):
-        ok, why = is_valid_spec(self._mfma(tile=IndexerTileSpec(block_size=256)), arch=_ARCH)
+        ok, why = is_valid_spec(
+            self._mfma(tile=IndexerTileSpec(block_size=256)), arch=_ARCH
+        )
         self.assertFalse(ok)
         self.assertIn("block_size", why)
 

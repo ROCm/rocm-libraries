@@ -169,12 +169,13 @@ one D_I vector per token).
 
 | File | Spec | Doc |
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
-| `gfx942/lightning_indexer.py` | `IndexerSpec`, `IndexerTileSpec` | `instances/dsa.md` |
+| `common/lightning_indexer.py` | `IndexerSpec`, `IndexerTileSpec` | `instances/dsa.md` |
 
-One kernel today: the scalar-reduction v1 (bf16, gfx942). The MFMA score body and
-the fp8 phase are later additions. Dispatch is `library/dispatch/dsa/`
-(`dispatch_lightning_indexer`) in its own registry, so a DSA request never selects
-a standard-attention kernel and vice versa.
+Arch-neutral kernel on gfx942 and gfx950 (bf16), with two bodies: a scalar
+reduction (decode, unaligned shapes, correctness oracle) and an MFMA matrix-core
+body (16-aligned prefill). fp8 is a later phase. Dispatch is
+`library/dispatch/dsa/` (`dispatch_lightning_indexer`) in its own registry, so a
+DSA request never selects a standard-attention kernel and vice versa.
 
 ## Cross-Family Capability Matrix
 
