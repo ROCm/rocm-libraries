@@ -110,7 +110,7 @@ jobs:
 
   setup:
     needs: [ci-env]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@87745c75f27e2d5221b2ed75f3e0c2cfc462dbc2 # users/geomin12/path-based-external-2
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@11215c286055734ce9ac2e45b92ba8825d902683 # users/geomin12/path-based-external-2
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -174,7 +174,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@87745c75f27e2d5221b2ed75f3e0c2cfc462dbc2 # users/geomin12/path-based-external-2
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@11215c286055734ce9ac2e45b92ba8825d902683 # users/geomin12/path-based-external-2
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -188,7 +188,7 @@ jobs:
       changed_projects: ${{ needs.setup.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 87745c75f27e2d5221b2ed75f3e0c2cfc462dbc2 # users/geomin12/path-based-external-2
+      ref: 11215c286055734ce9ac2e45b92ba8825d902683 # users/geomin12/path-based-external-2
     permissions:
       contents: read
       id-token: write
@@ -201,7 +201,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@87745c75f27e2d5221b2ed75f3e0c2cfc462dbc2 # users/geomin12/path-based-external-2
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@11215c286055734ce9ac2e45b92ba8825d902683 # users/geomin12/path-based-external-2
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -213,7 +213,7 @@ jobs:
       changed_projects: ${{ needs.setup.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 87745c75f27e2d5221b2ed75f3e0c2cfc462dbc2 # users/geomin12/path-based-external-2
+      ref: 11215c286055734ce9ac2e45b92ba8825d902683 # users/geomin12/path-based-external-2
     permissions:
       contents: read
       id-token: write
@@ -255,7 +255,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 87745c75f27e2d5221b2ed75f3e0c2cfc462dbc2 # users/geomin12/path-based-external-2
+          ref: 11215c286055734ce9ac2e45b92ba8825d902683 # users/geomin12/path-based-external-2
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

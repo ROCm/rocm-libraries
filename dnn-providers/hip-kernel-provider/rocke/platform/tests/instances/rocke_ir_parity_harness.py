@@ -1091,6 +1091,31 @@ def build_grouped_gemm_case(name, arch, m, n, k, e):
     return _build
 
 
+def build_mxfp8_gemm_case(dtype, matrix_path):
+    def _build():
+        from rocke.instances.gfx1250.block_scaled_gemm import (
+            BlockScaledGemmSpec,
+            build_block_scaled_gemm,
+        )
+
+        return build_block_scaled_gemm(
+            BlockScaledGemmSpec(
+                name=f"irhash_mxfp8_{dtype}_{matrix_path}",
+                M=32,
+                N=48,
+                K=256,
+                dtype_a=dtype,
+                dtype_b=dtype,
+                dtype_c="bf16",
+                scale_dtype="e8m0",
+                matrix_path=matrix_path,
+                block_k=16 if matrix_path == "wmma_scale16" else 32,
+            )
+        )
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1365,6 +1390,16 @@ def cases():
             32,
         ),
     )
+
+    # Homogeneous FP8/BF8 with E8M0 scales, shared by source and installed gates.
+    for dtype in ("fp8e4m3", "bf8e5m2"):
+        for matrix_path in ("wmma_scale", "wmma_scale16"):
+            add(
+                "gemm",
+                f"gemm/gfx1250/mxfp8/{matrix_path}/{dtype}",
+                "gfx1250",
+                build_mxfp8_gemm_case(dtype, matrix_path),
+            )
 
     # Conv: problem-shape and arch variants.
     conv1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
@@ -1678,8 +1713,8 @@ def cases():
             epilogue="cshuffle",
         ),
     )
-    # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
-    # block-diagonal dW IR against silent drift. MFMA-only, so gfx942/gfx950.
+    # Grouped wgrad, grid-per-group (groups=4, cpg=kpg=16). Guards the per-group
+    # dW IR against silent drift. MFMA-only, so gfx942/gfx950.
     add(
         "conv_wgrad",
         "conv_wgrad/gfx942/n1h8c64k64r3_g4",

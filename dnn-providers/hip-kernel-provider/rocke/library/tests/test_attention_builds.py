@@ -95,6 +95,61 @@ def _compile_or_skip(kernel, *, arch: str):
         pytest.skip(f"comgr toolchain unavailable: {e}")
 
 
+# Two shipped attention kernels are tuned to sit at the VGPR ceiling their
+# occupancy target dictates, and the compiler holds that occupancy by spilling a
+# handful of dwords rather than dropping a resident wave -- the correct trade, not
+# a regression. Erasing the spill would mean either halving occupancy (e.g. the
+# gfx942 tiled-2d kernel wants 354 VGPR unconstrained; forcing scratch==0 drops it
+# to 1 wave/EU) or ~100 VGPR of register-pressure surgery on a perf-tuned kernel
+# -- a bad deal for the 20-40 B of scratch, which costs no *incremental* occupancy
+# once VGPR is already pegged at the ceiling. So these named kernels carry
+# per-kernel budgets; every other kernel keeps the strict defaults (0 scratch, no
+# occupancy floor). The key is the exact kernel name, so if the shipped geometry
+# changes (and with it the name) the budget evaporates and strict checking
+# returns.
+#
+# The two budget axes catch DIFFERENT regressions, and neither subsumes the other
+# -- a kernel is healthy only if both hold:
+#
+#   * ``max_scratch_bytes`` -- how much the kernel may spill. Catches spill GROWTH
+#     at fixed occupancy: a change that balloons register demand while VGPR stays
+#     pegged at the ceiling just spills more (e.g. 40 B -> 400 B) at unchanged
+#     occupancy, so an occupancy check is blind to it; the byte bound is not. Kept
+#     tight enough that a real blow-up (spill into the hundreds) still fails.
+#   * ``min_waves_per_simd`` -- the occupancy the kernel is tuned for. Catches an
+#     occupancy DROP: a change that pushes register or LDS pressure past the point
+#     where the tuned wave count still fits. The scratch bound cannot see this --
+#     spilling is exactly the mechanism that holds occupancy constant -- so it is a
+#     distinct signal. Occupancy is the static multi-limiter estimate
+#     (``benchmark.perf.occupancy.estimate_occupancy_detail``: min over VGPR / AGPR
+#     / LDS / workgroup / wave cap, no GPU). Its per-arch caps are still PROVISIONAL
+#     (gfx942 in particular models a conservative 8 waves/SIMD) pending rocprofv3
+#     calibration on real hardware, so treat it as a floor, not an exact oracle.
+_KERNEL_RESOURCE_BUDGETS = {
+    # gfx950 dense persistent prefill: the 512-thread (8-wave) workgroup pins VGPR
+    # at the 256 ceiling independent of waves_per_eu; it needs a hair more -> 20 B.
+    # Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
+    # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
+    # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
+    "rocke_uattn2d_tiled_d128_b64_h32kv8_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
+        "max_scratch_bytes": 64,
+        "min_waves_per_simd": 2,
+    },
+}
+
+# Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
+# longer matches any built kernel (name drift from a re-tuned selector) becomes a
+# red test rather than a silently-orphaned entry -- see
+# ``test_every_declared_budget_was_exercised``. The scratch bound already fails
+# loud on drift (its default is 0); the occupancy floor defaults to no check, so
+# without this a renamed kernel would just stop being floored.
+_SEEN_KERNEL_NAMES: set = set()
+
+
 def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     """Assert the emitted HSACO fits ``arch``'s resource budget.
 
@@ -108,7 +163,14 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     - **Register (VGPR) over-subscription** -- the compiler does NOT fail; it
       *spills to scratch* and the kernel still compiles, then runs at reduced
       occupancy with scratch traffic. A pass/fail compile check is blind to this,
-      so we assert ``scratch_bytes == 0`` as the arch-agnostic no-spill signal.
+      so we assert ``scratch_bytes`` stays within its no-spill budget (0 for all
+      but a few occupancy-bound shipped kernels; see
+      ``_KERNEL_RESOURCE_BUDGETS``).
+    - **Occupancy drop** -- a change can push register/LDS pressure past the point
+      where the kernel's tuned wave count still fits; the scratch bound cannot see
+      this (spilling holds occupancy constant), so for kernels with a declared
+      ``min_waves_per_simd`` we also assert the static multi-limiter occupancy stays
+      at or above that floor.
 
     Resource fields come from ``group_segment_fixed_size`` /
     ``private_segment_fixed_size`` in the code object, read via ``llvm-readelf``
@@ -130,6 +192,8 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
             pytest.skip(f"HSACO introspection tool unavailable: {e}")
 
     name = kernel_name or "kernel"
+    if kernel_name:
+        _SEEN_KERNEL_NAMES.add(kernel_name)
     lds = res.lds_bytes
     if lds is None:  # pragma: no cover - metadata shape drift
         pytest.skip("could not parse group_segment_fixed_size from HSACO")
@@ -137,13 +201,40 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
         f"{name} LDS {lds} B exceeds {arch} cap {cap} B (over by {lds - cap} B) "
         f"-- comgr codegen rejection at larger tiles / seq"
     )
-    # Register overflow does not fail the compile -- it spills. Any scratch use is
-    # a register-budget regression (occupancy cliff), so treat it as a failure.
+    budgets = _KERNEL_RESOURCE_BUDGETS.get(kernel_name, {})
+    # Register overflow does not fail the compile -- it spills. Scratch use above
+    # the kernel's budget (0 unless it is a known occupancy-bound kernel) is a
+    # register-budget regression, so treat it as a failure.
     scratch = res.scratch_bytes
     if scratch is not None:
-        assert scratch == 0, (
-            f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}) "
-            f"-- register over-subscription; kernel compiles but loses occupancy"
+        max_scratch = budgets.get("max_scratch_bytes", 0)
+        assert scratch <= max_scratch, (
+            f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}), "
+            f"over its {max_scratch} B budget -- register over-subscription; kernel "
+            f"compiles but loses occupancy"
+        )
+    # Occupancy floor: for kernels tuned to a known wave count, assert the static
+    # multi-limiter occupancy has not fallen below it. Complementary to the scratch
+    # bound above -- catches an occupancy drop the byte count cannot see.
+    min_waves = budgets.get("min_waves_per_simd")
+    if min_waves is not None:
+        from rocke.benchmark.perf.occupancy import estimate_occupancy_detail
+
+        det = estimate_occupancy_detail(hsaco, arch)
+        if not det:
+            # A declared floor with no occupancy model for this arch is an author
+            # error, not an environment condition -- the readelf-unavailable case
+            # already pytest.skip'd above, so {} here means "arch not in _ARCH_CAPS"
+            # (e.g. a gfx1250 budget). Skip loudly rather than pass the floor silently.
+            pytest.skip(
+                f"no occupancy model for {arch}; cannot enforce the "
+                f"min_waves_per_simd floor for {name}"
+            )
+        occ = det["waves_per_simd"]
+        assert occ >= min_waves, (
+            f"{name} achieves {occ} waves/SIMD on {arch} "
+            f"(limiter {det.get('limited_by')}, VGPR {res.vgpr_count}), below "
+            f"its tuned floor of {min_waves} -- occupancy regression"
         )
 
 
@@ -2771,6 +2862,344 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         )
 
 
+class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
+    """The gfx942 twin of :class:`TestAttentionDenseRuntimeShapeCollision`.
+
+    Same property, same failure mode, different body -- and the gfx942 body is
+    the one with an extra way to get it wrong. Its ``kernel_name()`` appends
+    ``_b{batch}`` on top of the base name, so dropping batch from the cache key
+    without dropping it from the symbol gives two specs that share ONE cache
+    slot two DIFFERENT names -- which the ``assert art.kernel_name ==
+    spec.kernel_name()`` in ``run_attention_dense_torch`` trips on the second
+    shape served from the cache. The name assertion below covers that.
+
+    The control uses ``persistent`` rather than ``sliding_window``: gfx942
+    rejects sliding_window in ``supports_attention_dense``, so a swa spec never
+    reaches the builder at all and could not lower for the comparison.
+    """
+
+    # fp16 is arbitrary here -- every dtype takes the same runtime-shape cut now
+    # that the exp2_fast policy reads compile-time config only.
+    # test_bf16_d128_default_is_on_the_runtime_path covers the bf16 D128 config
+    # that used to be excluded.
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        block_n=64,
+        causal=True,
+        dtype="fp16",
+    )
+
+    # Far apart in every dimension and across the block_m/block_n tiling
+    # boundaries -- and straddling the exp2_fast cut at 4096 -- so a baked trip
+    # count, partial-tile predicate, buffer extent, or shape-dependent policy
+    # shows a hash split.
+    _SHAPES = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192))
+
+    @staticmethod
+    def _spec(**kw):
+        from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+        return Gfx942AttentionDenseSpec(**kw)
+
+    @staticmethod
+    def _ir_sha(spec):
+        import hashlib
+
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx942.attention_dense import build_attention_dense
+
+        kernel = build_attention_dense(spec, arch="gfx942")
+        return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
+
+    def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
+        """Shapes that collapse to one cache key must emit one kernel -- and,
+        on gfx942, one symbol name."""
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        base = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(
+            base.runtime_shape,
+            "test setup error: the base gfx942 spec is not on the runtime-shape path",
+        )
+        self.assertEqual(base.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv"))
+
+        keys, irs, names = {}, {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                irs[shape] = self._ir_sha(spec)
+                names[shape] = spec.kernel_name()
+
+        self.assertEqual(
+            len(set(keys.values())),
+            1,
+            f"runtime-shape gfx942 specs did not share one cache key: {self._SHAPES}",
+        )
+        self.assertEqual(
+            len(set(irs.values())),
+            1,
+            "gfx942 specs sharing ONE cache key lowered to DIFFERENT IR "
+            + repr({s: irs[s][:12] for s in self._SHAPES})
+            + " -- a shape field reached codegen on the runtime path, so "
+            "_DENSE_LAUNCHER_CACHE will serve the first-compiled binary for "
+            "every other shape.",
+        )
+        # gfx942-only: the b{batch} token must drop with the rest of the shape,
+        # or run_attention_dense_torch's kernel-name assert fires on the second
+        # shape served from the shared cache slot.
+        self.assertEqual(
+            len(set(names.values())),
+            1,
+            "gfx942 specs sharing ONE cache key produced DIFFERENT kernel names "
+            + repr(sorted(set(names.values())))
+            + " -- a shape token is still in kernel_name(), so the cached "
+            "launcher's symbol will not match the second spec's name.",
+        )
+        for shape, name in names.items():
+            for tok in (f"_b{shape[0]}", f"sq{shape[1]}", f"sk{shape[2]}"):
+                self.assertNotIn(
+                    tok,
+                    name,
+                    f"runtime-shape gfx942 name still carries {tok!r}: {name}",
+                )
+
+    def test_grid_still_varies_per_shape_under_one_cache_key(self):
+        """One binary, but a fresh launch grid for every shape.
+
+        The guard above deliberately collapses these specs onto ONE cache key and
+        ONE kernel. That is only correct if the launch geometry is still recomputed
+        per shape: the body derives its query block / query head / batch work item
+        from ``block_id_{x,y,z}``, so a grid memoized alongside the launcher would
+        leave the tail of the larger shapes uncomputed and over-launch the smaller
+        ones. ``attention_dense_grid`` reads the spec, not the cache, and must
+        therefore give a DISTINCT triple for each of ``_SHAPES``.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import attention_dense_grid
+
+        base = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(
+            base.runtime_shape,
+            "test setup error: the base gfx942 spec is not on the runtime-shape path",
+        )
+
+        keys, grids = {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                grids[shape] = attention_dense_grid(spec)
+
+        self.assertEqual(
+            len(set(keys.values())),
+            1,
+            f"test setup error: these shapes no longer share one cache key: {keys}",
+        )
+        self.assertEqual(
+            len(set(grids.values())),
+            len(self._SHAPES),
+            "gfx942 runtime-shape specs sharing ONE cache key produced a repeated "
+            "launch grid " + repr(grids) + " -- the grid stopped tracking the "
+            "problem shape, so the single binary that cache slot serves is launched "
+            "with the wrong CTA count for every shape but the first.",
+        )
+
+    def test_baked_shape_specs_split_both_key_and_ir(self):
+        """Control: off the runtime path, each shape keeps its own key and IR.
+
+        Without it, a builder that ignored batch/seqlen_q/seqlen_kv entirely --
+        emitting one kernel that is wrong everywhere -- would satisfy the guard
+        above vacuously. ``persistent`` is the only way off the runtime path on
+        gfx942; ragged/varlen/paged/swa are rejected by
+        ``supports_attention_dense`` and never reach the builder.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        # num_persistent must not exceed the work space nqb*Hq*B of the SMALLEST
+        # shape under test, or spec construction rejects it.
+        base = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
+        self.assertFalse(
+            base.runtime_shape,
+            "test setup error: persistent no longer leaves the runtime path",
+        )
+        self.assertEqual(base.runtime_param_fields, ())
+
+        keys, irs = {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                irs[shape] = self._ir_sha(spec)
+
+        self.assertEqual(
+            len(set(keys.values())),
+            len(self._SHAPES),
+            "baked-shape gfx942 specs shared a cache key; shape must split "
+            "identity when it is not a runtime kernel argument",
+        )
+        self.assertEqual(
+            len(set(irs.values())),
+            len(self._SHAPES),
+            "baked-shape gfx942 specs lowered to identical IR; the builder is "
+            "ignoring shape on a path that bakes it, so the guard test above "
+            "would pass vacuously",
+        )
+
+    def test_bf16_d128_default_is_on_the_runtime_path(self):
+        """bf16 D128 at the exp2_fast tri-state default is one binary per shape.
+
+        This config was once excluded from the runtime path, because the policy
+        then cut on ``seqlen_q``: the emitted softmax was a function of the shape,
+        and since ``_tuning_name_tags`` emits no token when the resolved value
+        matches the policy, two shapes straddling the cut would have shared a cache
+        key AND a kernel name while lowering to different IR -- a stale binary that
+        the name assert in ``run_attention_dense_torch`` cannot catch.
+
+        The policy now reads compile-time config only, so the exclusion is gone.
+        Asserted in the strong direction, byte-level: the same body must lower for
+        shapes on either side of the retired 4096 boundary. If someone reintroduces
+        a shape term in :func:`_use_exp2_fast`, the sha comparison fails here rather
+        than silently reopening the collision.
+        """
+        from dataclasses import replace
+
+        bf16 = self._spec(**{**self._BASE_KWARGS, "dtype": "bf16"})
+        self.assertTrue(
+            bf16.runtime_shape,
+            "bf16 D128 lowers one body for every shape; it belongs on the "
+            "runtime path",
+        )
+        self.assertEqual(bf16.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv"))
+
+        lo = replace(bf16, seqlen_q=2048, seqlen_kv=2048)
+        hi = replace(bf16, seqlen_q=4096, seqlen_kv=4096)
+        self.assertEqual(
+            lo.resolved_use_exp2_fast(),
+            hi.resolved_use_exp2_fast(),
+            "_use_exp2_fast reads the problem shape again; a shape-dependent "
+            "policy collides two bodies in one cache slot under a single name",
+        )
+        self.assertEqual(self._ir_sha(lo), self._ir_sha(hi))
+        self.assertEqual(lo.kernel_name(), hi.kernel_name())
+
+    def test_persistent_stays_baked(self):
+        """The gating holds the excluded sub-mode baked, through the shipped
+        dispatch factory rather than a hand-built spec.
+
+        The cheap CPU counterpart of the 5 unchanged ``persist_*`` cases in the
+        gfx942 IR golden: this fails fast with a readable message if the
+        predicate is ever loosened, instead of surfacing as an opaque hash diff.
+        """
+        from dispatch.attention.gfx942 import _dense_spec
+        from dispatch.attention.common import AttentionRequest
+
+        req = AttentionRequest(
+            batch=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            nhead_q=32,
+            nhead_k=8,
+            hdim_q=128,
+            hdim_v=128,
+            arch="gfx942",
+            dtype="bf16",
+            mask_type=1,  # causal
+        )
+        spec = _dense_spec(req)
+        if not spec.persistent:
+            self.skipTest(
+                "shipped gfx942 dispatch no longer selects persistent for this "
+                "shape; the golden's persist_* cases remain the binding check"
+            )
+        self.assertFalse(spec.runtime_shape)
+        self.assertEqual(spec.runtime_param_fields, ())
+        name = spec.kernel_name()
+        for tok in (f"sq{spec.seqlen_q}", f"sk{spec.seqlen_kv}", f"_b{spec.batch}"):
+            self.assertIn(
+                tok,
+                name,
+                f"persistent gfx942 name lost the baked token {tok!r}: {name}",
+            )
+
+    def test_signature_matches_the_built_kernels_params(self):
+        """``attention_dense_signature`` is checked against the kernel it describes.
+
+        The signature mirrors the ``b.param`` order in ``build_attention_dense`` BY
+        HAND, and a skew mis-binds kernargs at launch -- corrupting results on GPU
+        only. Comparing it to a hand-written list cannot catch that, since both
+        sides are hand-written; the ground truth has to be the built
+        :class:`~rocke.core.ir.KernelDef`, whose ``params`` are the kernargs the
+        emitted body actually reads. Both arms are covered: the runtime-shape path
+        (q/k/v/o + scale + the three i32 shape args) and the baked persistent path,
+        whose body declares no shape params, so an extra kernarg there would be
+        read as garbage.
+        """
+        from rocke.core.ir import PtrType
+        from rocke.helpers.spec import ptr_type_str
+        from kernels.gfx942.attention_dense import (
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        def expected_type_str(param):
+            """The signature-side type string for a built ``Param``.
+
+            Pointers are compared field-by-field rather than by string: the
+            signature spells them ``ptr<f16, global>`` while ``PtrType.name`` is
+            ``ptr<f16,global>``, so the structured route through ``pointee`` /
+            ``space`` (re-rendered by the same ``ptr_type_str`` the signature
+            builder uses) is both exact and whitespace-agnostic.
+            """
+            if isinstance(param.type, PtrType):
+                return ptr_type_str(param.type.pointee.name, param.type.space)
+            return param.type.name
+
+        rt = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(rt.runtime_shape)
+        baked = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
+        self.assertFalse(baked.runtime_shape)
+
+        for arm, spec in (("runtime-shape", rt), ("baked", baked)):
+            with self.subTest(arm=arm):
+                params = build_attention_dense(spec, arch="gfx942").params
+                sig = attention_dense_signature(spec)
+                self.assertEqual(
+                    [a["name"] for a in sig],
+                    [p.name for p in params],
+                    f"gfx942 {arm} ABI: attention_dense_signature does not match "
+                    "the b.param order the builder emits; the launcher would pack "
+                    "kernargs into the wrong slots",
+                )
+                self.assertEqual(
+                    [a["type"] for a in sig],
+                    [expected_type_str(p) for p in params],
+                    f"gfx942 {arm} ABI: attention_dense_signature disagrees with "
+                    "the built kernel on a param type",
+                )
+
+        # The runtime path's whole point: exactly three extra i32 shape kernargs,
+        # after scale.
+        self.assertEqual(
+            [a["name"] for a in attention_dense_signature(rt)][
+                len(attention_dense_signature(baked)) :
+            ],
+            ["batch", "seqlen_q", "seqlen_kv"],
+            "runtime-shape gfx942 ABI is not the baked ABI plus the three shape args",
+        )
+
+
 # ---------------------------------------------------------------------
 # AttentionDenseSpec — the shared supports() preflight
 # ---------------------------------------------------------------------
@@ -3490,6 +3919,25 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         self.assertTrue(hasattr(mod, "_time_lane_ms"))
         self.assertFalse(hasattr(mod, "_time_torch_call_loop"))
         self.assertFalse(hasattr(mod, "_time_rocke_call_loop"))
+
+
+# Module-level so it collects/runs after the class-based budget tests above.
+def test_every_declared_budget_was_exercised():
+    """A budget key that matches no built kernel (name drift from a re-tuned
+    selector -- these names carry tokens like wpe2 / persist256 / ksring that get
+    re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
+    test: every ``_KERNEL_RESOURCE_BUDGETS`` key must have been handed to
+    ``_assert_resources_fit`` by some test in this run.
+
+    Skips under a partial selection (``pytest -k``) that builds none of the
+    budgeted kernels, so the check is meaningful on a full-file / CI run without
+    false-failing an unrelated targeted run."""
+    if not _SEEN_KERNEL_NAMES:
+        pytest.skip("no budgeted kernels built in this selection")
+    orphaned = set(_KERNEL_RESOURCE_BUDGETS) - _SEEN_KERNEL_NAMES
+    assert (
+        not orphaned
+    ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"
 
 
 if __name__ == "__main__":
