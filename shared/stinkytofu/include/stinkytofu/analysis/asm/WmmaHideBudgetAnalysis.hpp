@@ -81,7 +81,6 @@ STINKYTOFU_EXPORT int computeDsLoadWmmaWindowsNeeded(int dsLoadCount,
 
 /// Number of non-WMMA instructions assigned to one matrix-op window.
 struct WmmaWindowBudget {
-    StinkyInstruction* wmma = nullptr;
     /// Non-WMMA instructions the scheduling policy assigns to this window.
     int issueBudget = 0;
     /// DS reads assigned to this window. Included in issueBudget.

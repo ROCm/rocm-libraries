@@ -756,15 +756,38 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetUsesThrottleDistributionWithoutOverla
         EXPECT_EQ(throttled.windows[i].issueBudget, expectedThrottled[i]);
     }
 
+    // The throttle shape fits in the 8-window span, so overlap keeps it.
     barriers.front().overlap = true;
     const RegionHideBudget overlapped =
         analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0, config);
-    const std::vector<int> expectedEven{1, 1, 1, 1, 1, 1, 0, 0};
-    ASSERT_EQ(overlapped.windows.size(), expectedEven.size());
-    for (size_t i = 0; i < expectedEven.size(); ++i) {
-        EXPECT_EQ(overlapped.windows[i].dsLoadBudget, expectedEven[i]);
-        EXPECT_EQ(overlapped.windows[i].issueBudget, expectedEven[i]);
+    ASSERT_EQ(overlapped.windows.size(), expectedThrottled.size());
+    for (size_t i = 0; i < expectedThrottled.size(); ++i) {
+        EXPECT_EQ(overlapped.windows[i].dsLoadBudget, expectedThrottled[i]);
+        EXPECT_EQ(overlapped.windows[i].issueBudget, expectedThrottled[i]);
     }
+
+    // Span 4 is shorter than the 6-window throttle shape [2, 0, 1, 1, 1, 1].
+    // Keep [2, 0, 1, 1], then put the 2 leftover loads into the smallest holes.
+    barriers.front().threshold = 4;
+    const RegionHideBudget overlappedShort =
+        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0, config);
+    const std::vector<int> expectedHoleFill{0, 0, 0, 0, 2, 2, 1, 1};
+    ASSERT_EQ(overlappedShort.windows.size(), expectedHoleFill.size());
+    for (size_t i = 0; i < expectedHoleFill.size(); ++i) {
+        EXPECT_EQ(overlappedShort.windows[i].dsLoadBudget, expectedHoleFill[i]);
+        EXPECT_EQ(overlappedShort.windows[i].issueBudget, expectedHoleFill[i]);
+    }
+
+    // Span 2 cannot hold 6 loads at dsReadPerWmma=2. After both windows reach
+    // the cap, the 2 leftover loads raise them evenly.
+    barriers.front().threshold = 6;
+    const RegionHideBudget overlappedAboveCap =
+        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0, config);
+    const std::vector<int> expectedAboveCap{0, 0, 0, 0, 0, 0, 3, 3};
+    ASSERT_EQ(overlappedAboveCap.windows.size(), expectedAboveCap.size());
+    for (size_t i = 0; i < expectedAboveCap.size(); ++i)
+        EXPECT_EQ(overlappedAboveCap.windows[i].dsLoadBudget, expectedAboveCap[i]);
+    barriers.front().threshold = 0;
 
     // Throttle rounding alone places both overflow loads in one latency window,
     // but dsReadPerCap=1 is the hard cap and therefore takes precedence.
@@ -784,6 +807,54 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetUsesThrottleDistributionWithoutOverla
     ASSERT_EQ(transitionRounded.windows.size(), expectedTransitionRounded.size());
     for (size_t i = 0; i < expectedTransitionRounded.size(); ++i)
         EXPECT_EQ(transitionRounded.windows[i].dsLoadBudget, expectedTransitionRounded[i]);
+}
+
+TEST_F(DAGSchedulerPassTest, OverlapDistributionReservesOneDsLatencyBeforeEnd) {
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16,
+                                    /*src0Start=*/200 + i * 16);
+    StinkyInstruction* ds = createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/0);
+    ds->latencyCycles = 12;
+
+    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
+    std::vector<WmmaHideBudgetBarrierInfo> barriers{
+        {/*barrier=*/nullptr, WmmaHideBudgetBarrierPosition::Before,
+         /*threshold=*/0, /*dsLoadCount=*/6, /*dsLoadWmmaNeeded=*/5, /*overlap=*/false},
+    };
+    DsLoadBudgetConfig config;
+    config.dsReadPerCap = 2;
+    config.dsReadQueueDepth = 2;
+    config.dsReadThrottleLatency = 8;
+    config.wmmaLatency = 4;
+
+    // The tail reserve does not apply to Before groups, overlap or not.
+    const RegionHideBudget throttled =
+        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0, config);
+    const std::vector<int> expectedBefore{2, 0, 1, 1, 1, 1, 0, 0};
+    ASSERT_EQ(throttled.windows.size(), expectedBefore.size());
+    for (size_t i = 0; i < expectedBefore.size(); ++i)
+        EXPECT_EQ(throttled.windows[i].dsLoadBudget, expectedBefore[i]);
+
+    barriers.front().overlap = true;
+    const RegionHideBudget overlappedBefore =
+        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0, config);
+    ASSERT_EQ(overlappedBefore.windows.size(), expectedBefore.size());
+    for (size_t i = 0; i < expectedBefore.size(); ++i)
+        EXPECT_EQ(overlappedBefore.windows[i].dsLoadBudget, expectedBefore[i]);
+
+    // 12 / 4 = 3 reserved windows. After overlap may occupy only the first 5,
+    // and the 1 leftover fills the smallest hole.
+    barriers.front().position = WmmaHideBudgetBarrierPosition::After;
+    barriers.front().threshold = 8;
+    barriers.front().dsLoadWmmaNeeded = 8;
+    const RegionHideBudget overlappedAfter =
+        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0, config);
+    const std::vector<int> expectedAfter{2, 1, 1, 1, 1, 0, 0, 0};
+    ASSERT_EQ(overlappedAfter.windows.size(), expectedAfter.size());
+    for (size_t i = 0; i < expectedAfter.size(); ++i) {
+        EXPECT_EQ(overlappedAfter.windows[i].dsLoadBudget, expectedAfter[i]);
+        EXPECT_EQ(overlappedAfter.windows[i].issueBudget, expectedAfter[i]);
+    }
 }
 
 TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsSplitBarrierGroupOnce) {
@@ -892,6 +963,35 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsPickedNodesRatherThanIssueCycle
     EXPECT_EQ(budget.nonWmmaInstructionCount, 3);
     EXPECT_EQ(budget.nonDsLoadInstructionCount, 3);
     EXPECT_EQ(budget.windows[0].issueBudget, 3);
+}
+
+TEST_F(DAGSchedulerPassTest, NonDsFillIgnoresExistingDsLoadBudget) {
+    for (int i = 0; i < 4; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16,
+                                    /*src0Start=*/200 + i * 16);
+    for (int i = 0; i < 4; ++i)
+        createVAddInBlock(bb, arch, /*destReg=*/300 + i, /*src0Reg=*/310, /*src1Reg=*/311);
+
+    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
+    const std::vector<WmmaHideBudgetBarrierInfo> barriers{
+        {/*barrier=*/nullptr, WmmaHideBudgetBarrierPosition::Before,
+         /*threshold=*/0, /*dsLoadCount=*/3, /*dsLoadWmmaNeeded=*/0, /*overlap=*/false},
+    };
+
+    const RegionHideBudget budget =
+        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/2);
+
+    // 3 DS loads spread over 4 windows. The front half still receives a full
+    // base of 2 non-DS instructions on top of those loads.
+    ASSERT_EQ(budget.windows.size(), 4u);
+    EXPECT_EQ(budget.windows[0].dsLoadBudget, 1);
+    EXPECT_EQ(budget.windows[1].dsLoadBudget, 1);
+    EXPECT_EQ(budget.windows[2].dsLoadBudget, 1);
+    EXPECT_EQ(budget.windows[3].dsLoadBudget, 0);
+    EXPECT_EQ(budget.windows[0].issueBudget, 3);
+    EXPECT_EQ(budget.windows[1].issueBudget, 3);
+    EXPECT_EQ(budget.windows[2].issueBudget, 1);
+    EXPECT_EQ(budget.windows[3].issueBudget, 0);
 }
 
 TEST_F(DAGSchedulerPassTest, WmmaHideBudgetHoldsNextWmmaUntilAssignedWorkIssues) {
@@ -1974,6 +2074,38 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_HideBudgetKeepsFreeWorkAheadOfThrott
     EXPECT_LT(positionOf(*body, freeValu), positionOf(*body, throttledDs))
         << "while the cumulative WMMA hide budget is pending, free VALU still "
            "outranks a DS blocked by throttle pacing / the per-WMMA DS cap";
+}
+
+// The after-barrier batch's throttle shape is longer than the span left after
+// the overlap split. Those loads may spend the pending hide budget even though
+// dsReadPerWmma is 1. A free VALU is the competing candidate that would
+// otherwise take the slot the cap denies.
+TEST_F(DAGSchedulerPassTest, ShortSpanDsBatchBypassesCapWhileBudgetPending) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 3; ++i)
+        createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/100 + i * 16,
+                                       /*src0Start=*/400 + i * 16);
+    // The last WMMA reads the before-side ds_load so that group has a consumer.
+    // Its registers stay off the after-side loads.
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/148, /*src0Start=*/500);
+    StinkyInstruction* earlyA = createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200,
+                                                    /*ldsToken=*/0);
+    StinkyInstruction* earlyB = createMovableDsLoad(/*destReg=*/4, /*addrReg=*/204,
+                                                    /*ldsToken=*/0);
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/0);
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/208, /*ldsToken=*/1);
+    StinkyInstruction* freeValu =
+        createVAddInBlock(body, arch, /*destReg=*/300, /*src0Reg=*/301, /*src1Reg=*/302);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/16, /*throttleLatency=*/64,
+                              /*perWmma=*/1, /*drainLatency=*/64,
+                              /*transitionFactor=*/1.0, /*transitionEntries=*/0,
+                              /*enableWmmaHideBudgetPrescan=*/true);
+
+    EXPECT_LT(positionOf(*body, earlyA), positionOf(*body, freeValu));
+    EXPECT_LT(positionOf(*body, earlyB), positionOf(*body, freeValu));
 }
 
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_BudgetedDsBeatsRealStallWhenNoFreeWork) {
