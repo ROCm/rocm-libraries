@@ -1640,7 +1640,29 @@ namespace hipblaslt_ext
     }
     namespace experimental::jit::tensilelite
     {
-        hipblasStatus_t createBackend(const Options&, Backend& backend, Diagnostics& diagnostics)
+        hipblasStatus_t getGemmAlgo(hipblasLtHandle_t handle,
+                                                hipblasLtMatmulDesc_t desc,
+                                                const void* alpha,
+                                                const void* A,
+                                                hipblasLtMatrixLayout_t layoutA,
+                                                const void* B,
+                                                hipblasLtMatrixLayout_t layoutB,
+                                                const void* beta,
+                                                const void* C,
+                                                hipblasLtMatrixLayout_t layoutC,
+                                                void* D,
+                                                hipblasLtMatrixLayout_t layoutD,
+                                                const Options& options,
+                                                size_t maxWorkspaceBytes,
+                                                hipblasLtMatmulHeuristicResult_t& result,
+                                                Diagnostics& diagnostics)
+        {
+            result = {};
+            result.state = HIPBLAS_STATUS_NOT_SUPPORTED;
+            diagnostics.message = "JIT requires HIPBLASLT_ENABLE_JIT=ON";
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+        hipblasStatus_t createBackend(const Options&, Backend& backend, jit::Diagnostics& diagnostics)
         {
             backend     = {};
             diagnostics = {"TensileLite", "JIT requires HIPBLASLT_ENABLE_JIT=ON"};

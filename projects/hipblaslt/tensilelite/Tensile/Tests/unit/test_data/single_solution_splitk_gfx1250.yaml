@@ -30,7 +30,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [1]
         - DepthU: [64]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - ExpandPointerSwap: [false]
         - TransposeLDS: [0]
         - GlobalSplitU: [4]

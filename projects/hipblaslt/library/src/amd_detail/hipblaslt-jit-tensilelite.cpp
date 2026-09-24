@@ -218,7 +218,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                                     const jit::detail::Target&           target,
                                     size_t                               workspaceLimit,
                                     std::shared_ptr<const jit::detail::KernelBundle>& bundle,
-                                    Diagnostics& diagnostics) const override
+                                    jit::Diagnostics& diagnostics) const override
             {
                 bundle.reset();
                 diagnostics.backend = "TensileLite";
@@ -277,7 +277,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
     }
 
     hipblasStatus_t
-        createBackend(const Options& options, jit::Backend& backend, Diagnostics& diagnostics)
+        createBackend(const Options& options, jit::Backend& backend, jit::Diagnostics& diagnostics)
     {
         backend     = {};
         diagnostics = {"TensileLite", ""};

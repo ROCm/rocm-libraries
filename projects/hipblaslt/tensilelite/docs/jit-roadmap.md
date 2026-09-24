@@ -1,11 +1,14 @@
 # JIT implementation roadmap
 
-Just-in-time (JIT) compilation lets an application request GPU code for its
-operation when it runs. This roadmap connects the one-solution builder to a
-generic request interface, a TensileLite provider, and hipBLASLt execution.
-The table distinguishes components available at this layer from later work.
-GEMM is the initial operation; the common request and backend types are intended
-to support other operations without describing them as matrix multiplication.
+Just-in-time (JIT) compilation lets an application generate GPU code for its
+operation when it runs. The first reviewable stack accepts an explicit YAML
+recipe through the direct TensileLite API, compiles and loads the complete
+kernel/helper bundle, and executes it through existing hipBLASLt C/C++ GEMM APIs.
+The generic request API is a separate stack above that working basic path.
+Prediction and benchmark integration are implemented in the later layer
+above the generic API and sample.
+AIHPBLAS-4801 remains partial: separate planning/cache protocols and broader
+modeled-input coverage are deferred.
 
 ## Component flow and current status
 
@@ -24,10 +27,11 @@ without inventing a replacement recipe. Compilation does not benchmark recipes.
 | --- | --- | --- |
 | One-solution builder | Implemented | One YAML recipe and target produce a complete kernel/helper bundle through `Tensile.SingleSolution` and the existing validators/compiler |
 | Ranked recipe selector | Implemented | Supplied candidates and problem facts produce one validated recipe or rejection reasons; `Tensile.JitGemm` calls the builder without running a model |
+| Direct TensileLite API and sample | Implemented in the basic stack | Explicit YAML and GEMM descriptors produce a checked algorithm; sample `29_hipblaslt_jit_gemm` exercises C/C++ execution |
 | Generic JIT interface and TensileLite provider | Implemented | Opaque `Request` and configured `Backend` produce an owned `Solution`; provider settings stay outside the common types |
 | GEMM request and execution adapters | Implemented | `makeGemmRequest` captures existing descriptors; `getGemmAlgo` connects a compiled GEMM solution to C/C++ execution |
-| Public sample | Implemented | Application buffers and descriptors pass through the generic API using an explicit recipe and checked C/C++ execution |
-| Provider prediction and benchmark | Implemented | Origami ranks matrix instructions, reduction depths and cache hints; a private plan is consumed immediately by the selector/builder before benchmark checks and timing |
+| Generic sample | Implemented in this layer | Sample `30_hipblaslt_generic_jit_gemm` uses the generic API with an explicit recipe and checked C/C++ execution; the direct sample remains available |
+| Provider prediction and benchmark | Implemented in this layer | Origami ranks matrix instructions, reduction depths and cache hints; a private plan is consumed immediately by the selector/builder before benchmark checks and timing |
 
 ## Planned components
 
@@ -53,6 +57,41 @@ these components without turning every request into a TensileLite recipe.
 The [single-solution guide](single-solution.md) explains how to compile a supplied
 recipe and inspect its complete bundle.
 Its ranked-selection section describes candidate validation and rejection diagnostics.
+The [direct API guide](../../docs/jit-tensilelite.md) covers the basic path and its sample.
 The [JIT API guide](../../docs/jit.md) explains backend configuration, request ownership, GEMM adapters and execution lifetime.
-The [public sample](../../clients/samples/29_hipblaslt_jit_gemm/README.md) shows application code that requests and runs a solution.
-The [benchmark guide](../../clients/bench/README.jit.md) explains automatic selection, numerical checks and current model limits.
+
+## Review stack and evidence
+
+The basic stack is [process execution (#12552)](https://github.com/ROCm/rocm-libraries/pull/12552),
+[artifact loading (#12563)](https://github.com/ROCm/rocm-libraries/pull/12563),
+[direct GEMM (#12564)](https://github.com/ROCm/rocm-libraries/pull/12564), and
+[sample/CI (#12565)](https://github.com/ROCm/rocm-libraries/pull/12565).
+The optional [generic API (#12461)](https://github.com/ROCm/rocm-libraries/pull/12461)
+is based on that final basic tip. The direct API and sample remain available above it.
+
+The basic driver passed all ten routes on native gfx950, including numerical
+C/C++ execution, expected failures and disabled-JIT behavior. The gfx1250 SIA4
+fixture was generated and compiled with a compatible compiler. The shared
+workflow configures native gfx90a, gfx942, gfx950 and gfx1250 runners; those
+configured targets are distinct from completed local evidence.
+
+KFA standardization, performance timing policy and additional prediction work
+are separate follow-ups and do not gate the basic explicit-recipe path.
+
+## Separate follow-ups
+
+KFA metadata convergence remains a separate follow-up: have TensileLite emit
+the agreed KFA encoding, then use the same selection and execution path for
+generated and existing KFA kernels. Preserve argument ABI/padding, main/helper
+order, predicates, grid/cluster/LDS, workspace and synchronization. Prove
+packed-argument and launch equivalence before consolidating paths.
+
+`HIPBLASLT_JIT_DEBUG=timing`, `progress`, or `timing,progress` is planned, not
+implemented. Timing will provide final compilation-stage and total durations;
+progress will report stage transitions while compilation runs. Categories are
+independent. Unset or empty adds no new collection, observer or debug files.
+Preserve existing logs, bundle/error semantics and benchmark timing boundaries.
+
+AIHPBLAS-4801 remains partial. A reusable planning/cache protocol and complete
+modeled-input contract remain future work beyond the generic interface and
+initial provider prediction implemented here.

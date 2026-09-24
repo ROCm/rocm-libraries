@@ -1,5 +1,12 @@
 # Request and execute JIT solutions
 
+The [direct TensileLite API](jit-tensilelite.md) accepts an explicit YAML recipe
+and returns a GEMM algorithm in one call. That API and the
+[direct sample](../clients/samples/29_hipblaslt_jit_gemm/README.md) remain available.
+This guide describes the optional generic interface layered above that path.
+Both interfaces share one provider implementation and algorithm registry.
+The direct entry point always requires a recipe and explicitly selects TensileLite.
+
 The installed `hipblaslt/hipblaslt-jit.hpp` exposes a backend-neutral request API.
 `getJitAlgo` accepts an operation request and configured backend and returns an
 owned solution bundle. The bundle includes the kernels and helpers needed for
@@ -34,7 +41,7 @@ cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
   -DHIPBLASLT_BUILD_TESTING=ON \
   -DHIPBLASLT_ENABLE_DEVICE=OFF -DGPU_TARGETS=gfx950 \
   -DPython_EXECUTABLE="$project_python" -DPython3_EXECUTABLE="$project_python"
-cmake --build "$project_build" --target _rocisa hipblaslt-jit-api-test --parallel
+cmake --build "$project_build" --target _rocisa hipblaslt-jit-generic-api-test --parallel
 export PYTHONPATH="$project_build/tensilelite/rocisa:$project_build/tensilelite:$project_root/projects/hipblaslt/tensilelite"
 ```
 
@@ -43,7 +50,10 @@ bundles do not depend on a prebuilt hipBLASLt device library.
 
 The `jit` CMake preset enables this feature for a new configuration. The
 commands above show how to enable it in an existing build. The shared workflow
-runs the public API regression executable and an independent test backend.
+configures native gfx90a, gfx942, gfx950 and gfx1250 runners for both API variants
+and an independent test backend. Local integration execution is validated on
+gfx950; the gfx1250 SIA4 fixture also has separate compilation evidence.
+Configured targets do not imply completed native runs.
 
 ## Algorithm lifetime and validation
 

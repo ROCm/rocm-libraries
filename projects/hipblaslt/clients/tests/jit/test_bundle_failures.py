@@ -4,7 +4,7 @@
 
 Run after the numeric executable has produced a valid helper-inclusive bundle.
 A substitute generator copies and damages that bundle, so every case traverses
-the public request/selection API and C GEMM execution.
+the direct TensileLite API and C GEMM execution.
 """
 
 import argparse
