@@ -18,6 +18,9 @@ from dispatch.attention import (
 )
 from rocke.dispatch.core import spec_identity
 
+# The full tuning space is millions of specs per shape; sample each candidate.
+_SAMPLE = dict(tuning_sample=4, seed=0)
+
 
 def _gfx942_fp16_mha(**kw) -> AttentionRequest:
     base = dict(
@@ -56,8 +59,8 @@ class TestSweepSpace(unittest.TestCase):
     def test_covers_unified_tuning_but_excludes_dense_specs(self):
         with _PinnedArch("gfx942"):
             req = _gfx942_fp16_mha()
-            combos = registered_attention_combos(req)
-            specs = attention_sweep_space(req)
+            combos = registered_attention_combos(req, **_SAMPLE)
+            specs = attention_sweep_space(req, **_SAMPLE)
         names = {c.name for c, _spec in combos}
         self.assertIn("attention_gfx942_dense", names)
         self.assertTrue(any(c.algorithm == "unified_tuning" for c, _ in combos))
@@ -71,7 +74,7 @@ class TestSweepSpace(unittest.TestCase):
 
     def test_specs_are_deduped(self):
         with _PinnedArch("gfx942"):
-            specs = attention_sweep_space(_gfx942_fp16_mha())
+            specs = attention_sweep_space(_gfx942_fp16_mha(), **_SAMPLE)
         self.assertEqual(len(specs), len({spec_identity(s) for s in specs}))
 
     def test_sweep_matches_manual_candidate_selection(self):
@@ -79,21 +82,21 @@ class TestSweepSpace(unittest.TestCase):
             req = _gfx942_fp16_mha()
             manual = []
             seen = set()
-            for _candidate, spec in registered_attention_combos(req):
+            for _candidate, spec in registered_attention_combos(req, **_SAMPLE):
                 if not hasattr(spec, "path"):
                     continue
                 key = spec_identity(spec)
                 if key not in seen:
                     seen.add(key)
                     manual.append(spec)
-            specs = attention_sweep_space(req)
+            specs = attention_sweep_space(req, **_SAMPLE)
         self.assertEqual(list(specs), manual)
 
     def test_dispatch_all_is_one_result_per_combo(self):
         with _PinnedArch("gfx942"):
             req = _gfx942_fp16_mha()
-            combos = registered_attention_combos(req)
-            results = dispatch_attention_all(req)
+            combos = registered_attention_combos(req, **_SAMPLE)
+            results = dispatch_attention_all(req, **_SAMPLE)
         self.assertGreater(len(results), 1)
         self.assertEqual(len(results), len(combos))
         self.assertEqual(

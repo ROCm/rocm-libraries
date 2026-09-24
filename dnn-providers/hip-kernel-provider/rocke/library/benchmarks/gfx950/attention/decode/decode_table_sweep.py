@@ -120,6 +120,9 @@ def list_combos(args) -> int:
                 req,
                 candidate_prefix=args.candidate_prefix,
                 tuning_id_prefix=args.tuning_id_prefix,
+                tuning_sample=args.tuning_sample,
+                seed=args.seed,
+                sweep_level=args.sweep_level,
             )
         )
         print(f"\n{label} Sq=1 Sk={s} Hq={hq} Hkv={hkv} D={d}  n={len(combos)}")
@@ -249,6 +252,9 @@ def sweep(args) -> list[dict]:
                     base,
                     candidate_prefix=args.candidate_prefix,
                     tuning_id_prefix=args.tuning_id_prefix,
+                    tuning_sample=args.tuning_sample,
+                    seed=args.seed,
+                    sweep_level=args.sweep_level,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -427,6 +433,19 @@ def main() -> int:
     ap.add_argument("--only-model", default="")
     ap.add_argument("--candidate-prefix", default="")
     ap.add_argument("--tuning-id-prefix", default="")
+    ap.add_argument(
+        "--sweep-level",
+        choices=("production", "full"),
+        default="production",
+        help="production walks the curated stacks. full samples every kernel knob",
+    )
+    ap.add_argument(
+        "--tuning-sample",
+        type=int,
+        default=256,
+        help="with --sweep-level full: random legal specs per tuning candidate, "
+        "seeded by --seed (0 = the full stream). Ignored for production",
+    )
     ap.add_argument("--output-json", default="")
     ap.add_argument(
         "--list-only",

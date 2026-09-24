@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from itertools import islice
 from unittest import mock
 
 import kernels.common.attention_unified as au
@@ -250,28 +251,59 @@ class TestAttentionTuningRegistry(unittest.TestCase):
         )
         self.assertEqual(result.spec.kernel_spec.num_segments, 64)
 
-    def _specs_for(self, prefix, **req_kw):
+    def _specs_for(self, prefix, sample=0, **req_kw):
+        """Full stream for small candidates; ``sample`` random specs otherwise."""
         candidate = next(c for c in attention_candidates() if c.name.startswith(prefix))
         req = replace(
             _request(**req_kw),
             algorithm=candidate.algorithm,
             spec_id=candidate.spec_id,
         )
-        return candidate.sweep_space(req)
+        if sample:
+            return tuple(candidate.sample_space(req, sample, 0))
+        return tuple(candidate.sweep_space(req))
 
     def test_narrow_codepath_registers_the_sched_barrier_lever(self):
         """The fence is emitted only in the narrow QK loop, so that is the
-        codepath that has to offer it -- with its mask, which changes codegen."""
-        specs = self._specs_for("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
+        codepath that has to offer it -- with its mask, which changes codegen.
+
+        Production offers the three masks the curated stacks shipped. The full
+        knob space offers every mask the kernel accepts.
+        """
+        from dispatch.attention.tuning_common import (
+            _PROD_SCHED_BARRIER_MASKS,
+            _SCHED_BARRIER_MASKS,
+            configure_sweep,
+        )
+
+        prefix = "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm"
+        specs = self._specs_for(prefix)
         masks = {
             s.kernel_spec.sched_barrier_mask
             for s in specs
             if s.kernel_spec.use_sched_barrier
         }
-        self.assertEqual(masks, {0, 0x008, 0x108})
+        self.assertEqual(masks, set(_PROD_SCHED_BARRIER_MASKS))
+        configure_sweep("full", 0)
+        try:
+            full = self._specs_for(prefix)
+        finally:
+            configure_sweep("production", 0)
+        full_masks = {
+            s.kernel_spec.sched_barrier_mask
+            for s in full
+            if s.kernel_spec.use_sched_barrier
+        }
+        self.assertEqual(full_masks, set(_SCHED_BARRIER_MASKS))
+        wide = self._specs_for(
+            "attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm", sample=256
+        )
+        self.assertFalse(any(s.kernel_spec.use_sched_barrier for s in wide))
 
     def test_transposed_codepath_registers_q_reread(self):
-        specs = self._specs_for("attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm")
+        specs = self._specs_for(
+            "attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm", sample=256
+        )
         self.assertTrue(any(s.kernel_spec.use_q_reread for s in specs))
         # Re-read needs a surviving Q_lds; direct-register Q never stages one.
         self.assertFalse(
@@ -285,12 +317,12 @@ class TestAttentionTuningRegistry(unittest.TestCase):
         """The 2D emitter rejects that pair, and it does so at build time rather
         than in ``__post_init__`` -- so an offered spec would survive selection
         and only fail once a sweep tried to build it."""
-        for prefix in (
-            "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
-            "attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm",
+        for prefix, sample in (
+            ("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm", 0),
+            ("attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm", 256),
         ):
             with self.subTest(candidate=prefix):
-                for spec in self._specs_for(prefix):
+                for spec in self._specs_for(prefix, sample=sample):
                     ks = spec.kernel_spec
                     self.assertFalse(
                         ks.use_sched_barrier and ks.use_softmax_mfma_interleave
@@ -307,7 +339,7 @@ class TestAttentionTuningRegistry(unittest.TestCase):
             algorithm=candidate.algorithm,
             spec_id=candidate.spec_id,
         )
-        specs = candidate.sweep_space(req)
+        specs = tuple(islice(candidate.sweep_space(req), 500))
         self.assertGreater(len(specs), 1)
         self.assertEqual(len(specs), len({repr(s) for s in specs}))
         self.assertTrue(all(s.path == "2d" for s in specs))

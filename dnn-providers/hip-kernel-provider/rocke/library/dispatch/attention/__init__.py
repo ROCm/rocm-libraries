@@ -108,6 +108,9 @@ def iter_registered_attention_combos(
     *,
     candidate_prefix: str = "",
     tuning_id_prefix: str = "",
+    tuning_sample: int = 0,
+    seed: int = 0,
+    sweep_level: str = "production",
 ) -> Iterator[Tuple[KernelCandidate, object]]:
     """Yield each executable ``(candidate, spec)`` that can launch ``req``.
 
@@ -116,13 +119,24 @@ def iter_registered_attention_combos(
     Routing-only unified path labels are not executable and are omitted.
     ``req.algorithm`` still filters when it is not ``auto``. ``spec_id``
     likewise, except the gfx950 dense family id admits every dense variant.
+
+    ``sweep_level="production"`` (the default) walks the curated knob stacks
+    exhaustively and ignores ``tuning_sample``. ``sweep_level="full"`` draws
+    ``tuning_sample`` random legal specs per tuning candidate from every kernel
+    knob, dead ends included (0 walks that stream, which is millions of specs
+    per shape on the transposed paths).
     """
     if not isinstance(req, AttentionRequest):
         raise TypeError(f"expected AttentionRequest, got {type(req).__name__}")
+    from .tuning_common import configure_sweep
+
+    sample = configure_sweep(sweep_level, tuning_sample)
     for candidate, spec in ATTENTION_EXECUTION_REGISTRY.iter_combos(
         req,
         candidate_prefix=candidate_prefix,
         spec_id_alias=_gfx950_dense_family_alias,
+        sample=sample,
+        seed=seed,
     ):
         if (
             candidate.algorithm == "unified_tuning"
@@ -138,6 +152,9 @@ def registered_attention_combos(
     *,
     candidate_prefix: str = "",
     tuning_id_prefix: str = "",
+    tuning_sample: int = 0,
+    seed: int = 0,
+    sweep_level: str = "production",
 ) -> Tuple[Tuple[KernelCandidate, object], ...]:
     """Materialized :func:`iter_registered_attention_combos`."""
     return tuple(
@@ -145,6 +162,9 @@ def registered_attention_combos(
             req,
             candidate_prefix=candidate_prefix,
             tuning_id_prefix=tuning_id_prefix,
+            tuning_sample=tuning_sample,
+            seed=seed,
+            sweep_level=sweep_level,
         )
     )
 
@@ -181,6 +201,9 @@ def iter_dispatch_attention_all(
     *,
     candidate_prefix: str = "",
     tuning_id_prefix: str = "",
+    tuning_sample: int = 0,
+    seed: int = 0,
+    sweep_level: str = "production",
 ) -> Iterator[DispatchResult]:
     """Yield each :func:`attention_dispatch_result` for ``req``."""
     if _request_errors(req):
@@ -189,6 +212,9 @@ def iter_dispatch_attention_all(
         req,
         candidate_prefix=candidate_prefix,
         tuning_id_prefix=tuning_id_prefix,
+        tuning_sample=tuning_sample,
+        seed=seed,
+        sweep_level=sweep_level,
     ):
         yield attention_dispatch_result(req, candidate, spec)
 
@@ -229,23 +255,33 @@ def attention_sweep_space(
     *,
     candidate_prefix: str = "",
     tuning_id_prefix: str = "",
+    tuning_sample: int = 0,
+    seed: int = 0,
+    limit: int = 0,
+    sweep_level: str = "production",
 ) -> Sequence[object]:
     """Every concrete engine/configuration available to a sweep.
 
     Unlike normal dispatch, this deliberately probes opt-in executable
     candidates and expands ``candidate.sweep_space``. Production
     ``algorithm='auto'`` selection remains on ``ATTENTION_ROUTE_REGISTRY.supported``
-    and never sees tuning candidates.
+    and never sees tuning candidates. ``sweep_level`` selects the curated
+    stacks (``production``) or the sampled full knob space (``full``).
+    ``limit`` stops after that many specs; the stream is only materialized
+    up to what is returned.
     """
     if _request_errors(req):
         return ()
     assert isinstance(req, AttentionRequest)
     specs = []
     seen = set()
-    for _candidate, spec in registered_attention_combos(
+    for _candidate, spec in iter_registered_attention_combos(
         req,
         candidate_prefix=candidate_prefix,
         tuning_id_prefix=tuning_id_prefix,
+        tuning_sample=tuning_sample,
+        seed=seed,
+        sweep_level=sweep_level,
     ):
         # This API feeds the unified paged-attention harness, whose input ABI
         # requires a path-bearing 2D/3D spec. Dense and WMMA remain available
@@ -256,6 +292,8 @@ def attention_sweep_space(
         if h not in seen:
             seen.add(h)
             specs.append(spec)
+            if limit and len(specs) >= limit:
+                break
     return tuple(specs)
 
 
@@ -264,6 +302,9 @@ def dispatch_attention_all(
     *,
     candidate_prefix: str = "",
     tuning_id_prefix: str = "",
+    tuning_sample: int = 0,
+    seed: int = 0,
+    sweep_level: str = "production",
 ) -> Tuple[DispatchResult, ...]:
     """Every eligible attention kernel for ``req``, including opt-in variants.
 
@@ -275,6 +316,9 @@ def dispatch_attention_all(
             req,
             candidate_prefix=candidate_prefix,
             tuning_id_prefix=tuning_id_prefix,
+            tuning_sample=tuning_sample,
+            seed=seed,
+            sweep_level=sweep_level,
         )
     )
 

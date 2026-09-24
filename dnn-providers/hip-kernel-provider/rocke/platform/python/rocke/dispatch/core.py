@@ -452,6 +452,13 @@ class KernelCandidate:
     ``algorithm='auto'``. Sweeps still see it through ``include_opt_in``.
     """
 
+    sample_space: Callable[[OperatorRequest, int, int], Iterable[Any]] | None = None
+    """``sample_space(request, n, seed)`` draws up to ``n`` distinct legal specs.
+
+    For candidates whose ``sweep_space`` is too large to walk. Without it a
+    sampled sweep falls back to the full ``sweep_space``.
+    """
+
     def built(self, spec: Any, arch: str) -> Any:
         """Build this candidate's IR for ``spec`` on ``arch``."""
         if self.build is None:
@@ -822,6 +829,8 @@ class CandidateRegistry:
         include_opt_in: bool = True,
         selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
         spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        sample: int = 0,
+        seed: int = 0,
     ) -> Iterable[Tuple[KernelCandidate, Any]]:
         """Yield each ``(candidate, spec)`` that can launch ``request``.
 
@@ -830,6 +839,10 @@ class CandidateRegistry:
         own ``algorithm`` / ``spec_id``, and expands ``candidate.sweep_space``.
         Production :meth:`select` is unchanged and still never sees an opt-in
         candidate under ``algorithm='auto'``.
+
+        ``sample > 0`` draws up to that many specs per candidate through
+        ``candidate.sample_space`` (seeded by ``seed``) instead of the full
+        ``sweep_space``.
 
         Pin matching always goes through :func:`selector_matches`. ``selector_ok``
         adds a further constraint; it does not replace the pin. ``spec_id_alias``
@@ -860,8 +873,12 @@ class CandidateRegistry:
             ok, _why = candidate.admits(probe)
             if not ok:
                 continue
+            if sample > 0 and candidate.sample_space is not None:
+                specs = candidate.sample_space(probe, int(sample), int(seed))
+            else:
+                specs = candidate.sweep_space(probe)
             yielded = False
-            for spec in candidate.sweep_space(probe):
+            for spec in specs:
                 yielded = True
                 yield candidate, spec
             if not yielded:

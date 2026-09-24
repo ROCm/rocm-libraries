@@ -10,7 +10,7 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from rocke.core.arch import validate_arch
@@ -3207,21 +3207,6 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     return base
 
 
-def _explicit_spec_key(spec, *, builder_kind: str, compile_backend: str) -> Tuple:
-    """Hashable, field-complete identity for a dispatcher-provided spec."""
-    if not is_dataclass(spec):
-        raise TypeError(
-            f"explicit attention spec must be a dataclass, got {type(spec)}"
-        )
-    return (
-        "explicit",
-        _resolve_attention_arch(),
-        str(builder_kind),
-        str(compile_backend),
-        tuple((f.name, repr(getattr(spec, f.name))) for f in fields(spec)),
-    )
-
-
 def _3d_signature(dtype: str, *, kv_dtype: Optional[str] = None):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -3378,8 +3363,7 @@ def _run_3d_tiled(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     use_graph: bool = True,
-    explicit_spec=None,
-    explicit_reduce_spec=None,
+    tuning_spec=None,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -3390,21 +3374,16 @@ def _run_3d_tiled(
       3. Launch the 3D segment kernel with grid
          `(total_num_q_blocks, num_kv_heads, num_segments)`.
       4. Launch the reduce kernel with grid `(total_q, num_query_heads, 1)`.
+
+    ``tuning_spec`` replaces the heuristic segment/reduce specs with the
+    dispatcher's explicit pair.
     """
-    num_segments = (
-        int(explicit_spec.num_segments)
-        if explicit_spec is not None
-        else _num_segments(problem)
-    )
-    cache_key = (
-        _explicit_spec_key(
-            explicit_spec,
-            builder_kind="tiled_3d",
-            compile_backend="llvm",
-        )
-        if explicit_spec is not None
-        else _tiled_3d_cache_key(problem)
-    )
+    if tuning_spec is not None:
+        num_segments = int(tuning_spec.kernel_spec.num_segments)
+        cache_key = tuning_spec.cache_key()
+    else:
+        num_segments = _num_segments(problem)
+        cache_key = _tiled_3d_cache_key(problem)
     capturing = _torch_stream_capturing()
     if use_graph and _enable_3d_graph_replay(problem) and not capturing:
         graph_key = (
@@ -3455,8 +3434,7 @@ def _run_3d_tiled(
                 k_scale=k_scale,
                 v_scale=v_scale,
                 use_graph=False,
-                explicit_spec=explicit_spec,
-                explicit_reduce_spec=explicit_reduce_spec,
+                tuning_spec=tuning_spec,
             )
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
@@ -3483,8 +3461,7 @@ def _run_3d_tiled(
                         k_scale=k_scale,
                         v_scale=v_scale,
                         use_graph=False,
-                        explicit_spec=explicit_spec,
-                        explicit_reduce_spec=explicit_reduce_spec,
+                        tuning_spec=tuning_spec,
                     )
             _3D_GRAPHS[graph_key] = graph
             _3D_GRAPH_REFS[graph_key] = (
@@ -3513,11 +3490,7 @@ def _run_3d_tiled(
     # only remaining per-call cost is packing args and issuing two
     # ``hipModuleLaunchKernel`` calls on the caller's stream.
     prepared = _get_3d_pipeline(
-        problem,
-        cache_key,
-        num_segments,
-        explicit_spec=explicit_spec,
-        explicit_reduce_spec=explicit_reduce_spec,
+        problem, cache_key, num_segments, tuning_spec=tuning_spec
     )
     segm_output, segm_max, segm_expsum = prepared.workspace(
         problem, num_segments, q.device
@@ -3659,11 +3632,18 @@ def _launch_3d_pipeline(prepared, seg_vals, red_vals, stream, *, capturing: bool
     )
 
 
+# The dispatcher's ``AttentionTuningSpec`` satisfies this; the runtime only
+# compiles ``build()`` under ``cache_key()`` and launches its geometry.
 _EXPLICIT_TUNING_ATTRS = (
     "arch",
     "path",
     "kernel_spec",
-    "builder_kind",
+    "compile_backend",
+    "allow_unsupported",
+    "cache_key",
+    "build",
+    "launch_grid",
+    "launch_block",
     "with_num_kv_blocks",
 )
 
@@ -3685,14 +3665,12 @@ def _require_explicit_tuning_spec(tuning_spec) -> None:
 def _explicit_path_supported(
     problem: UnifiedAttentionProblem, tuning_spec, kind: str
 ) -> Tuple[bool, str]:
-    """Problem-shape support for an explicit spec.
+    """Problem-shape support for a path, with or without an explicit spec.
 
     A tuning spec is a knob combination, not proof the problem is runnable.
-    ``allow_unsupported=True`` is the only bypass, and it is visible on the spec.
+    ``AttentionTuningSpec.allow_unsupported`` is the only bypass.
     """
-    if tuning_spec is not None and bool(
-        getattr(tuning_spec, "allow_unsupported", False)
-    ):
+    if tuning_spec is not None and tuning_spec.allow_unsupported:
         return True, f"explicit {kind} tuning spec (unsupported override)"
     if kind == "3d":
         return supports_native_unified_attention_3d_tiled(problem)
@@ -3996,46 +3974,39 @@ def _get_3d_pipeline(
     cache_key: Tuple,
     num_segments: int,
     *,
-    explicit_spec=None,
-    explicit_reduce_spec=None,
+    tuning_spec=None,
 ) -> _Attention3DPrepared:
     prepared_key = cache_key + ("total_q", int(problem.total_q))
     if prepared_key in _3D_PIPELINES:
         return _3D_PIPELINES[prepared_key]
     if cache_key not in _ATTN_3D_TILED_CACHE:
         arch = _resolve_attention_arch()
-        (
-            _,
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_3d_tiled,
-            build_unified_attention_reduce_tiled,
-            _,
-        ) = _tiled_3d_impl(arch)
-        seg_spec = (
-            explicit_spec
-            if explicit_spec is not None
-            else _tiled_3d_spec_from_problem(problem)
-        )
-        reduce_spec = explicit_reduce_spec
-        if reduce_spec is None:
-            reduce_spec = UnifiedAttentionReduceTiledSpec(
-                head_size=problem.head_size,
-                num_query_heads=problem.num_query_heads,
-                num_kv_heads=problem.num_kv_heads,
-                dtype=problem.dtype,
-                num_segments=num_segments,
-                waves_per_eu=_select_3d_waves_per_eu(problem),
+        if tuning_spec is not None:
+            seg_kernel, red_kernel = tuning_spec.build(arch)
+        else:
+            (
+                _,
+                UnifiedAttentionReduceTiledSpec,
+                build_unified_attention_3d_tiled,
+                build_unified_attention_reduce_tiled,
+                _,
+            ) = _tiled_3d_impl(arch)
+            seg_kernel = build_unified_attention_3d_tiled(
+                _tiled_3d_spec_from_problem(problem), arch=arch
             )
-        seg_art = compile_kernel(
-            build_unified_attention_3d_tiled(seg_spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-        )
-        red_art = compile_kernel(
-            build_unified_attention_reduce_tiled(reduce_spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-        )
+            red_kernel = build_unified_attention_reduce_tiled(
+                UnifiedAttentionReduceTiledSpec(
+                    head_size=problem.head_size,
+                    num_query_heads=problem.num_query_heads,
+                    num_kv_heads=problem.num_kv_heads,
+                    dtype=problem.dtype,
+                    num_segments=num_segments,
+                    waves_per_eu=_select_3d_waves_per_eu(problem),
+                ),
+                arch=arch,
+            )
+        seg_art = compile_kernel(seg_kernel, arch=arch, capture_ir_text=False)
+        red_art = compile_kernel(red_kernel, arch=arch, capture_ir_text=False)
         _ATTN_3D_TILED_CACHE[cache_key] = (
             seg_art.hsaco,
             seg_art.kernel_name,
@@ -4049,8 +4020,8 @@ def _get_3d_pipeline(
         signature=_3d_signature(
             problem.dtype,
             kv_dtype=(
-                explicit_spec.kv_storage_dtype
-                if explicit_spec is not None
+                tuning_spec.kernel_spec.kv_storage_dtype
+                if tuning_spec is not None
                 else _kv_storage_dtype(problem)
             ),
         ),
@@ -4190,34 +4161,28 @@ def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
     *,
-    explicit_spec=None,
-    builder_kind: str = "tiled",
-    compile_backend: Optional[str] = None,
+    tuning_spec=None,
 ) -> KernelLauncher:
     if cache_key in _2D_LAUNCHERS:
         return _2D_LAUNCHERS[cache_key]
     if cache_key not in _ATTN_TILED_CACHE:
         arch = _resolve_attention_arch()
-        _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
-        spec = (
-            explicit_spec
-            if explicit_spec is not None
-            else _tiled_spec_from_problem(problem)
-        )
-        route = None if explicit_spec is not None else _gfx942_4warp_route(problem)
-        if builder_kind == "gfx942_4warp_gqa":
-            from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
-
-            kernel = build_gfx942_4warp_gqa(spec, arch=arch)
-        elif route is not None:
-            # Distinct 4-warp GQA paged builder (keyed separately in
-            # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged ABI
-            # as the default builder. Parity+ with AITER @Sq4096/8192 (vs the
-            # 1-warp std-QK's 0.55x).
-            kernel = route.builder(spec, arch=arch)
+        if tuning_spec is not None:
+            kernel = tuning_spec.build(arch)
+            backend = tuning_spec.compile_backend
         else:
-            kernel = build_unified_attention_2d_tiled(spec, arch=arch)
-        backend = compile_backend or _select_2d_compile_backend(problem)
+            _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
+            spec = _tiled_spec_from_problem(problem)
+            route = _gfx942_4warp_route(problem)
+            if route is not None:
+                # Distinct 4-warp GQA paged builder (keyed separately in
+                # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged
+                # ABI as the default builder. Parity+ with AITER @Sq4096/8192
+                # (vs the 1-warp std-QK's 0.55x).
+                kernel = route.builder(spec, arch=arch)
+            else:
+                kernel = build_unified_attention_2d_tiled(spec, arch=arch)
+            backend = _select_2d_compile_backend(problem)
         if backend == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
 
@@ -4234,8 +4199,8 @@ def _get_2d_launcher(
             include_bt_stride=True,
             include_qq_bias_stride=True,
             kv_dtype=(
-                explicit_spec.kv_storage_dtype
-                if explicit_spec is not None
+                tuning_spec.kernel_spec.kv_storage_dtype
+                if tuning_spec is not None
                 else _kv_storage_dtype(problem)
             ),
         ),
@@ -4296,34 +4261,16 @@ def _get_2d_launch_meta(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
     *,
-    explicit_spec=None,
-    builder_kind: str = "tiled",
+    tuning_spec=None,
 ) -> _Attention2DLaunchMeta:
     meta_key = cache_key + ("total_q", int(problem.total_q))
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
-    if explicit_spec is not None:
-        if builder_kind == "gfx942_4warp_gqa":
-            meta = _Attention2DLaunchMeta(
-                grid=gfx942_4warp_launch_grid(problem), block=(256, 1, 1)
-            )
-        else:
-            block_m = int(explicit_spec.block_m)
-            block_q = (
-                block_m // problem.num_queries_per_kv
-                if problem.num_queries_per_kv <= block_m
-                else 1
-            )
-            qblocks = problem.total_q // block_q + problem.num_seqs
-            if bool(getattr(explicit_spec, "use_q_major_grid", False)):
-                grid = (int(qblocks), int(problem.num_kv_heads), 1)
-            else:
-                grid = (int(problem.num_kv_heads), int(qblocks), 1)
-            meta = _Attention2DLaunchMeta(
-                grid=grid,
-                block=(64 * int(explicit_spec.num_warps), 1, 1),
-            )
+    if tuning_spec is not None:
+        meta = _Attention2DLaunchMeta(
+            grid=tuning_spec.launch_grid(problem), block=tuning_spec.launch_block()
+        )
         _2D_LAUNCH_META[meta_key] = meta
         return meta
     route = _gfx942_4warp_route(problem)
@@ -4541,12 +4488,7 @@ def run_unified_attention_torch(
                 stream=int(stream),
                 k_scale=k_scale,
                 v_scale=v_scale,
-                explicit_spec=(
-                    tuning_spec.kernel_spec if tuning_spec is not None else None
-                ),
-                explicit_reduce_spec=(
-                    tuning_spec.reduce_spec if tuning_spec is not None else None
-                ),
+                tuning_spec=tuning_spec,
             )
         if backend == "3d":
             raise NotImplementedError(reason_3d)
@@ -4592,24 +4534,12 @@ def run_unified_attention_torch(
             # selectors (skip the 17-field dataclass build). Spec is only
             # built on cache miss inside _get_2d_launcher and for grid
             # math below.
-            if tuning_spec is not None:
-                explicit_spec = tuning_spec.kernel_spec
-                key = _explicit_spec_key(
-                    explicit_spec,
-                    builder_kind=tuning_spec.builder_kind,
-                    compile_backend=tuning_spec.compile_backend,
-                )
-                launcher = _get_2d_launcher(
-                    problem,
-                    key,
-                    explicit_spec=explicit_spec,
-                    builder_kind=tuning_spec.builder_kind,
-                    compile_backend=tuning_spec.compile_backend,
-                )
-            else:
-                explicit_spec = None
-                key = _tiled_cache_key(problem)
-                launcher = _get_2d_launcher(problem, key)
+            key = (
+                tuning_spec.cache_key()
+                if tuning_spec is not None
+                else _tiled_cache_key(problem)
+            )
+            launcher = _get_2d_launcher(problem, key, tuning_spec=tuning_spec)
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -4635,14 +4565,7 @@ def run_unified_attention_torch(
             # The dispatcher must launch with the same BLOCK_Q/threads the
             # kernel was built for. Cache that fixed metadata per kernel key so
             # repeated same-shape calls avoid selector math on the hot path.
-            meta = _get_2d_launch_meta(
-                problem,
-                key,
-                explicit_spec=explicit_spec,
-                builder_kind=(
-                    tuning_spec.builder_kind if tuning_spec is not None else "tiled"
-                ),
-            )
+            meta = _get_2d_launch_meta(problem, key, tuning_spec=tuning_spec)
             return launcher(
                 vals,
                 config=LaunchConfig(

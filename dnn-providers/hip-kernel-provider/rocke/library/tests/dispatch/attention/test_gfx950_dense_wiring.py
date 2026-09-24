@@ -949,7 +949,9 @@ class TestGfx950DenseVariants(unittest.TestCase):
             seqlen_k=2048,
             algorithm="auto",
         )
-        names = {c.name for c, _spec in registered_attention_combos(req)}
+        names = {
+            c.name for c, _spec in registered_attention_combos(req, tuning_sample=2)
+        }
         self.assertIn("attention_gfx950_dense", names)
         self.assertIn("attention_gfx950_dense_grid_bm128", names)
         self.assertNotIn("attention_unified_2d", names)
@@ -967,7 +969,7 @@ class TestGfx950DenseVariants(unittest.TestCase):
             dtype="bf16",
             algorithm="auto",
         )
-        combos = registered_attention_combos(req)
+        combos = registered_attention_combos(req, tuning_sample=2)
         names = {c.name for c, _spec in combos}
         self.assertNotIn("attention_gfx950_d256", names)
         self.assertFalse(

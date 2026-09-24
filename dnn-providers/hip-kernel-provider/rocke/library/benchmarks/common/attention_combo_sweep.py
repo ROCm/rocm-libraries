@@ -8,17 +8,32 @@ derivation and no ``sys.path`` mutation):
 
     python -m benchmarks.common.attention_combo_sweep --arch gfx942 --list-only
     rocke-attention-combo-sweep --candidate-prefix attention_gfx950_u2d_narrow
+
+The full unified-tuning space is millions of specs per shape, so each tuning
+candidate is randomly sampled (``--tuning-sample``, 0 walks everything). Host
+validation (build + verify + lower) runs on ``--jobs`` worker processes, and
+isolated GPU runs are spread over ``--gpus``. Configs whose lowered IR matches
+one already validated for the shape are recorded as ``duplicate`` and not run.
 """
 
 from __future__ import annotations
 
 import argparse
+import collections
+import hashlib
 import json
 import math
+import os
+import pickle
+import queue
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from contextlib import ExitStack
+from typing import NamedTuple, Optional
 
 from dispatch.attention import (
     ATTENTION_EXECUTION_REGISTRY,
@@ -203,7 +218,7 @@ def _dense_tensors(req, seed: int):
     }
 
 
-def _lower_kernel(kernel, spec, arch: str) -> None:
+def _lower_kernel(kernel, spec, arch: str) -> str:
     backend = str(getattr(spec, "compile_backend", "llvm") or "llvm")
     if backend == "hipcc":
         from rocke.core.lower_hip import lower_kernel_to_hip
@@ -211,16 +226,27 @@ def _lower_kernel(kernel, spec, arch: str) -> None:
         source = lower_kernel_to_hip(kernel, arch=arch)
         if " __global__ " not in source and "__global__" not in source:
             raise ValueError("HIP lowering produced no __global__ kernel")
-        return
+        return source
     from rocke.core.lower_llvm import lower_kernel_to_llvm
 
     ir = lower_kernel_to_llvm(kernel, arch=arch)
     if "define" not in ir:
         raise ValueError("LLVM lowering produced no function definition")
+    return ir
 
 
-def host_validate(result) -> str | None:
-    """CPU-side gate used before any isolated GPU launch."""
+class Validation(NamedTuple):
+    reason: Optional[str]
+    ir_digest: Optional[str] = None
+
+
+def validate_config(result) -> Validation:
+    """CPU-side gate used before any GPU launch.
+
+    ``ir_digest`` hashes the lowered code with kernel names blanked: names
+    carry every knob tag, so two specs whose extra knob the kernel ignores
+    differ only in the name.
+    """
     from rocke.core.verify import verify_or_raise
     from rocke.dispatch.core import opt_in_probe
 
@@ -228,18 +254,61 @@ def host_validate(result) -> str | None:
         probe = opt_in_probe(result.request, result.candidate)
         ok, why = result.candidate.admits(probe)
         if not ok:
-            return f"capability/support: {why}"
+            return Validation(f"capability/support: {why}")
         built = result.build()
         kernels = built if isinstance(built, tuple) else (built,)
         if not kernels or any(getattr(k, "name", None) in (None, "") for k in kernels):
-            return "build produced no named kernel"
+            return Validation("build produced no named kernel")
         arch = str(result.request.arch)
+        digest = hashlib.sha256()
         for kernel in kernels:
             verify_or_raise(kernel)
-            _lower_kernel(kernel, result.spec, arch)
+            code = _lower_kernel(kernel, result.spec, arch)
+            digest.update(str(code).replace(str(kernel.name), "@kernel").encode())
     except Exception as exc:  # noqa: BLE001
-        return f"{type(exc).__name__}: {exc}"
-    return None
+        return Validation(f"{type(exc).__name__}: {exc}")
+    return Validation(None, digest.hexdigest())
+
+
+def host_validate(result) -> str | None:
+    """Failure reason from :func:`validate_config`, or ``None``."""
+    return validate_config(result).reason
+
+
+def _validate_payload(payload) -> Validation:
+    """Process-pool entry: rebuild the result from picklable parts."""
+    req, candidate_name, spec = payload
+    candidate = ATTENTION_EXECUTION_REGISTRY.get(candidate_name)
+    return validate_config(attention_dispatch_result(req, candidate, spec))
+
+
+def _validated(items, pool, window: int):
+    """Yield ``(index, req, result, Validation)`` in input order.
+
+    With a pool, up to ``window`` configs are validated concurrently; the
+    stream stays lazy so a million-spec shape is never materialized.
+    """
+    if pool is None:
+        for index, req, result in items:
+            verdict = None if result is None else validate_config(result)
+            yield index, req, result, verdict
+        return
+    pending = collections.deque()
+    for index, req, result in items:
+        future = (
+            None
+            if result is None
+            else pool.submit(
+                _validate_payload, (req, result.candidate.name, result.spec)
+            )
+        )
+        pending.append((index, req, result, future))
+        while len(pending) >= window:
+            index0, req0, result0, fut0 = pending.popleft()
+            yield index0, req0, result0, None if fut0 is None else fut0.result()
+    while pending:
+        index0, req0, result0, fut0 = pending.popleft()
+        yield index0, req0, result0, None if fut0 is None else fut0.result()
 
 
 def _iter_results(req, args):
@@ -247,6 +316,9 @@ def _iter_results(req, args):
         req,
         candidate_prefix=args.candidate_prefix,
         tuning_id_prefix=args.tuning_id_prefix,
+        tuning_sample=int(getattr(args, "tuning_sample", 0) or 0),
+        seed=int(getattr(args, "seed", 0) or 0),
+        sweep_level=getattr(args, "sweep_level", "production"),
     )
 
 
@@ -271,6 +343,11 @@ def iter_shard(args):
 def _resolve_pinned(args):
     from dataclasses import replace
 
+    if getattr(args, "run_pickle", ""):
+        with open(args.run_pickle, "rb") as fh:
+            req, candidate_name, spec = pickle.load(fh)
+        candidate = ATTENTION_EXECUTION_REGISTRY.get(candidate_name)
+        return req, attention_dispatch_result(req, candidate, spec)
     req = next(_requests(args))
     candidate = ATTENTION_EXECUTION_REGISTRY.get(args.run_candidate)
     pinned = replace(
@@ -407,24 +484,32 @@ def _child_argv(args, req, result) -> list:
         str(req.seqlen_k),
     ]
     argv += ["--causal"] if args.causal else ["--no-causal"]
-    key = _spec_key(result.spec)
-    if getattr(result.spec, "tuning_id", ""):
-        argv += ["--run-tuning-id", result.spec.tuning_id]
-    else:
-        argv += ["--run-spec-key", key]
     if args.no_check:
         argv += ["--no-check"]
     return argv
 
 
-def _run_isolated(args, req, result, index: int) -> dict:
+def _run_isolated(args, req, result, index: int, gpu: Optional[str] = None) -> dict:
+    """Run one validated config in a child process, optionally pinned to ``gpu``.
+
+    The child receives the exact spec by pickle, so it never re-walks the
+    candidate's sweep space to find a ``tuning_id``.
+    """
     row = _row_skeleton(req, result.candidate, result.spec, index)
+    env = None
+    if gpu is not None:
+        env = dict(os.environ, HIP_VISIBLE_DEVICES=str(gpu))
+        row["gpu"] = str(gpu)
+    fd, spec_path = tempfile.mkstemp(suffix=".pkl", prefix="attn_sweep_")
     try:
+        with os.fdopen(fd, "wb") as fh:
+            pickle.dump((req, result.candidate.name, result.spec), fh)
         proc = subprocess.run(
-            _child_argv(args, req, result),
+            _child_argv(args, req, result) + ["--run-pickle", spec_path],
             capture_output=True,
             text=True,
             timeout=args.config_timeout or None,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         row.update(
@@ -432,10 +517,14 @@ def _run_isolated(args, req, result, index: int) -> dict:
             reason=f"no result within {args.config_timeout}s",
         )
         return row
+    finally:
+        os.unlink(spec_path)
     for line in reversed([ln for ln in proc.stdout.splitlines() if ln.strip()]):
         try:
             parsed = json.loads(line)
             parsed["index"] = index
+            if gpu is not None:
+                parsed["gpu"] = str(gpu)
             return parsed
         except json.JSONDecodeError:
             continue
@@ -509,42 +598,107 @@ def run_one(args) -> int:
     return 0 if row["status"] == "ok" else 1
 
 
+def _gpu_ids(args) -> list:
+    spec = str(getattr(args, "gpus", "") or "").strip()
+    if not spec:
+        return []
+    if spec.isdigit():
+        return [str(i) for i in range(int(spec))]
+    return [g.strip() for g in spec.split(",") if g.strip()]
+
+
+def _unsupported_row(req, index: int) -> dict:
+    row = _shape_fields(req)
+    row.update(
+        index=index,
+        candidate="",
+        algorithm="",
+        spec_id="",
+        tuning_id="",
+        kernel_name="",
+        kind="",
+        status="unsupported",
+        reason="no executable attention candidate admits this shape",
+    )
+    return row
+
+
 def sweep(args) -> int:
+    jobs = max(1, int(getattr(args, "jobs", 1) or 1))
+    gpus = _gpu_ids(args) if args.isolate else []
     print(
-        f"[sweep] isolate={'on' if args.isolate else 'off'} on {args.arch}", flush=True
+        f"[sweep] isolate={'on' if args.isolate else 'off'} jobs={jobs} "
+        f"gpus={','.join(gpus) or 'default'} on {args.arch}",
+        flush=True,
     )
     rows = []
     sink = open(args.output_jsonl, "w", encoding="utf-8") if args.output_jsonl else None
     started = time.time()
     inited = False
+    first_by_ir: dict = {}
+    free_gpus: queue.Queue = queue.Queue()
+    for gpu in gpus:
+        free_gpus.put(gpu)
+    running: collections.deque = collections.deque()
+
+    def on_free_gpu(req, result, index):
+        gpu = free_gpus.get()
+        try:
+            return _run_isolated(args, req, result, index, gpu=gpu)
+        finally:
+            free_gpus.put(gpu)
+
+    def drain(limit: int) -> None:
+        while len(running) > limit:
+            _emit(running.popleft().result(), rows, sink, args)
+
     try:
-        for index, req, result in iter_shard(args):
-            if result is None:
-                row = _shape_fields(req)
-                row.update(
-                    index=index,
-                    candidate="",
-                    algorithm="",
-                    spec_id="",
-                    tuning_id="",
-                    kernel_name="",
-                    kind="",
-                    status="unsupported",
-                    reason="no executable attention candidate admits this shape",
-                )
-            else:
-                reason = host_validate(result)
-                if reason:
+        with ExitStack() as stack:
+            pool = (
+                stack.enter_context(ProcessPoolExecutor(max_workers=jobs))
+                if jobs > 1
+                else None
+            )
+            gpu_pool = (
+                stack.enter_context(ThreadPoolExecutor(max_workers=len(gpus)))
+                if gpus
+                else None
+            )
+            for index, req, result, verdict in _validated(
+                iter_shard(args), pool, window=4 * jobs
+            ):
+                if result is None:
+                    _emit(_unsupported_row(req, index), rows, sink, args)
+                    continue
+                if verdict.reason:
                     row = _row_skeleton(req, result.candidate, result.spec, index)
-                    row.update(status="invalid", reason=reason)
-                elif args.isolate:
+                    row.update(status="invalid", reason=verdict.reason)
+                    _emit(row, rows, sink, args)
+                    continue
+                if verdict.ir_digest:
+                    ir_key = (tuple(sorted(_shape_fields(req).items())), verdict.ir_digest)
+                    twin = first_by_ir.setdefault(ir_key, _spec_key(result.spec))
+                    if twin != _spec_key(result.spec):
+                        row = _row_skeleton(req, result.candidate, result.spec, index)
+                        row.update(
+                            status="duplicate",
+                            reason=f"lowered IR identical to {twin}",
+                        )
+                        _emit(row, rows, sink, args)
+                        continue
+                if gpu_pool is not None:
+                    running.append(gpu_pool.submit(on_free_gpu, req, result, index))
+                    drain(2 * len(gpus))
+                    continue
+                if args.isolate:
                     row = _run_isolated(args, req, result, index)
                 else:
                     if not inited:
                         init_torch_first()
                         inited = True
                     row = _run_result(req, result, args, index)
-            _emit(row, rows, sink, args)
+                _emit(row, rows, sink, args)
+            drain(0)
     finally:
         if sink is not None:
             sink.close()
@@ -566,7 +720,7 @@ def sweep(args) -> int:
         )
     # host_validate runs only after registry admission. An "invalid" row is
     # therefore a broken registered candidate, not an unsupported request.
-    return 1 if counts.keys() - {"ok", "unsupported"} else 0
+    return 1 if counts.keys() - {"ok", "unsupported", "duplicate"} else 0
 
 
 def _emit(row, rows, sink, args):
@@ -610,6 +764,32 @@ def main() -> int:
     ap.add_argument("--candidate-prefix", default="")
     ap.add_argument("--tuning-id-prefix", default="")
     ap.add_argument(
+        "--sweep-level",
+        choices=("production", "full"),
+        default="production",
+        help="production walks the curated stacks exhaustively (no dead-end "
+        "knobs). full samples every kernel knob, dead ends included",
+    )
+    ap.add_argument(
+        "--tuning-sample",
+        type=int,
+        default=256,
+        help="with --sweep-level full: random legal specs per tuning candidate, "
+        "seeded by --seed (0 walks the full stream). Ignored for production",
+    )
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help="worker processes for host validation (build + verify + lower)",
+    )
+    ap.add_argument(
+        "--gpus",
+        default="",
+        help="isolated GPU runs in parallel: a count ('8') or device ids "
+        "('0,1,2,3'); empty runs one config at a time on the default device",
+    )
+    ap.add_argument(
         "--limit",
         type=int,
         default=0,
@@ -647,12 +827,13 @@ def main() -> int:
     ap.add_argument("--run-candidate", default="")
     ap.add_argument("--run-tuning-id", default="")
     ap.add_argument("--run-spec-key", default="")
+    ap.add_argument("--run-pickle", default="", help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.arch is None:
         args.arch = _default_arch()
     if args.list_only:
         return list_only(args)
-    if args.run_candidate:
+    if args.run_candidate or args.run_pickle:
         return run_one(args)
     return sweep(args)
 

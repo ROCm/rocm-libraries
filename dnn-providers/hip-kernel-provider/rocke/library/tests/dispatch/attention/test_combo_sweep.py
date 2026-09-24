@@ -123,7 +123,9 @@ class TestComboSweepLifecycle(unittest.TestCase):
         with (
             mock.patch.object(sweep, "iter_shard", return_value=[(0, req, result)]),
             mock.patch.object(
-                sweep, "host_validate", return_value="IR verification failed"
+                sweep,
+                "validate_config",
+                return_value=sweep.Validation("IR verification failed"),
             ),
             mock.patch.object(sweep, "init_torch_first") as init_torch,
             mock.patch.object(sweep.subprocess, "run") as run,

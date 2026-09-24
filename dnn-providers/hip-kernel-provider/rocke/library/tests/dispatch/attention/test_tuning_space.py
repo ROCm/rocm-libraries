@@ -1,11 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Dependency-valid, unique, bounded attention tuning space."""
+"""Dependency-valid, unique, complete attention tuning space."""
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
 from dataclasses import replace
+from itertools import islice
 
 from dispatch.attention import (
     AttentionRequest,
@@ -15,10 +17,15 @@ from dispatch.attention import (
     dispatch_attention_all,
 )
 from dispatch.attention.tuning_common import (
+    _CODEPATH_KNOBS,
+    KNOWN_WRONG_KNOBS,
     AttentionGeometryVariant,
     _gfx950_tuning_lds_bytes,
     _supports_tuning_spec,
+    tuning_axes,
 )
+from dispatch.attention.tuning_specs import _SEMANTIC_FIELDS
+from kernels.common.attention_unified import _tiled_2d_impl, _tiled_3d_impl
 from kernels.gfx942.attention_tiled_2d import UnifiedAttention2DTiledSpec as Gfx942Spec
 from kernels.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec as Gfx950Spec
 
@@ -39,14 +46,37 @@ def _request(arch="gfx950", **kw):
     return AttentionRequest(**base)
 
 
-def _specs_for(prefix, **req_kw):
+def _specs_for(prefix, n=200, **req_kw):
+    """The first ``n`` specs of the (possibly million-spec) sweep stream."""
     candidate = next(c for c in attention_candidates() if c.name.startswith(prefix))
     req = replace(
         _request(**req_kw),
         algorithm=candidate.algorithm,
         spec_id=candidate.spec_id,
     )
-    return candidate, req, candidate.sweep_space(req)
+    return candidate, req, tuple(islice(candidate.sweep_space(req), n))
+
+
+def _sampled(prefix, n, seed=0, **req_kw):
+    candidate = next(c for c in attention_candidates() if c.name.startswith(prefix))
+    req = replace(
+        _request(**req_kw),
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+    )
+    return tuple(candidate.sample_space(req, n, seed))
+
+
+_GEOMETRY_FIELDS = frozenset(
+    {
+        "num_warps",
+        "block_m_per_warp",
+        "tile_size",
+        "waves_per_eu",
+        "num_segments",
+        "tile_size_override",
+    }
+)
 
 
 _GFX950_2D_VARIANT = AttentionGeometryVariant(
@@ -59,29 +89,55 @@ _GFX950_2D_VARIANT = AttentionGeometryVariant(
 
 
 class TestTuningSpace(unittest.TestCase):
-    def test_gfx950_cardinality_is_bounded(self):
-        req = replace(_request(), algorithm="unified_tuning")
-        n = sum(
-            1
-            for _c, _s in __import__(
-                "dispatch.attention", fromlist=["registered_attention_combos"]
-            ).registered_attention_combos(req)
-            if _c.algorithm == "unified_tuning"
-        )
-        self.assertGreater(n, 1)
-        self.assertLessEqual(n, 5000)
+    def test_every_kernel_tuning_field_is_swept(self):
+        for arch in ("gfx942", "gfx950"):
+            for path, spec_type in (
+                ("2d", _tiled_2d_impl(arch)[0]),
+                ("3d", _tiled_3d_impl(arch)[0]),
+            ):
+                with self.subTest(arch=arch, path=path):
+                    swept = {
+                        name
+                        for axis in tuning_axes(arch, path)
+                        for choice in axis.choices
+                        for name, _value in choice
+                    }
+                    codepath = {
+                        name
+                        for (owner, _cp), knobs in _CODEPATH_KNOBS.items()
+                        if owner == arch
+                        for name in knobs
+                    }
+                    fields = {f.name for f in dataclasses.fields(spec_type)}
+                    missing = (
+                        fields
+                        - _SEMANTIC_FIELDS
+                        - _GEOMETRY_FIELDS
+                        - swept
+                        - codepath
+                        - KNOWN_WRONG_KNOBS[arch]
+                    )
+                    self.assertFalse(missing, sorted(missing))
 
-    def test_gfx942_cardinality_is_bounded(self):
-        from dispatch.attention import registered_attention_combos
+    def test_sampling_draws_distinct_reproducible_specs(self):
+        prefix = "attention_gfx942_u2d_transposed_x8_nw2_mw32_t4xb_llvm"
+        first = _sampled(prefix, 32, seed=3, arch="gfx942")
+        again = _sampled(prefix, 32, seed=3, arch="gfx942")
+        other = _sampled(prefix, 32, seed=4, arch="gfx942")
+        ids = [s.tuning_id for s in first]
+        self.assertEqual(len(ids), 32)
+        self.assertEqual(len(set(ids)), 32)
+        self.assertEqual(ids, [s.tuning_id for s in again])
+        self.assertNotEqual(ids, [s.tuning_id for s in other])
 
-        req = replace(_request("gfx942"), algorithm="unified_tuning")
-        n = sum(
-            1
-            for c, _s in registered_attention_combos(req)
-            if c.algorithm == "unified_tuning"
+    def test_sampling_stops_at_a_small_space(self):
+        specs = _sampled(
+            "attention_gfx950_u3d_splitkv_seg64_t1xb",
+            256,
+            seqlen_q=1,
+            seqlen_k=4096,
         )
-        self.assertGreater(n, 1)
-        self.assertLessEqual(n, 1500)
+        self.assertEqual(len(specs), 5)
 
     def test_tuning_ids_are_unique_and_hashed(self):
         _candidate, _req, specs = _specs_for(
@@ -229,10 +285,8 @@ class TestTuningSpace(unittest.TestCase):
         self.assertTrue(specs)
         self.assertFalse(any(s.kernel_spec.use_k_hbm_direct for s in specs))
 
-    def test_named_stacks_cover_independent_knobs(self):
-        _c, _req, specs = _specs_for(
-            "attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm"
-        )
+    def test_sampling_reaches_independent_knobs(self):
+        specs = _sampled("attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm", 256)
         flags = {
             "use_q_reread": False,
             "use_q_direct_reg": False,
@@ -314,6 +368,8 @@ class TestTuningSpace(unittest.TestCase):
         for prefix, expect_specs in (
             ("attention_gfx950_u2d_narrow_nw8_mw16_t8xb_llvm", True),
             ("attention_gfx950_u2d_narrow_nw4_mw16_t8xb_hipcc", True),
+            # Curated production stacks have no single-K buffer on wide32, and
+            # the baseline exceeds LDS on this 8x tile.
             ("attention_gfx950_u2d_wide32_nw4_mw32_t8xb_llvm", False),
             ("attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm", True),
         ):
@@ -346,6 +402,68 @@ class TestTuningSpace(unittest.TestCase):
         self.assertTrue(route)
         self.assertTrue(all(c.opt_in for c in route))
         self.assertTrue(all(c.opt_in for c in execution))
+
+    def test_full_sample_includes_dead_end_knobs(self):
+        """Dead ends stay out of KNOWN_WRONG_KNOBS and in the sampled sweep."""
+        cases = (
+            (
+                "attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm",
+                "gfx950",
+                "use_q_reread",
+            ),
+            (
+                "attention_gfx942_u2d_transposed_x8_nw2_mw32_t4xb_llvm",
+                "gfx942",
+                "use_conflict_free_v",
+            ),
+        )
+        for prefix, arch, knob in cases:
+            with self.subTest(knob=knob):
+                self.assertNotIn(knob, KNOWN_WRONG_KNOBS[arch])
+                specs = _sampled(prefix, 256, seed=0, arch=arch)
+                self.assertTrue(any(getattr(s.kernel_spec, knob) for s in specs))
+
+    def test_production_sweep_excludes_dead_end_knobs(self):
+        from dispatch.attention.tuning_common import DEAD_END_KNOBS
+
+        cases = (
+            (
+                "attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm",
+                "gfx950",
+                "use_q_reread",
+            ),
+            (
+                "attention_gfx942_u2d_transposed_x8_nw2_mw32_t4xb_llvm",
+                "gfx942",
+                "use_conflict_free_v",
+            ),
+        )
+        for prefix, arch, knob in cases:
+            with self.subTest(candidate=prefix):
+                _c, _req, specs = _specs_for(prefix, n=10000, arch=arch)
+                self.assertGreater(len(specs), 1)
+                self.assertLess(len(specs), 500)
+                for spec in specs:
+                    for dead in DEAD_END_KNOBS[arch]:
+                        self.assertFalse(getattr(spec.kernel_spec, dead, False), knob)
+
+    def test_full_space_wide32_8x_fits_with_single_k_buffer(self):
+        """Baseline exceeds LDS; the full space still fits via single-K."""
+        from dispatch.attention.tuning_common import configure_sweep
+
+        prefix = "attention_gfx950_u2d_wide32_nw4_mw32_t8xb_llvm"
+        configure_sweep("full", 0)
+        try:
+            _c, _req, specs = _specs_for(prefix, n=80)
+        finally:
+            configure_sweep("production", 0)
+        self.assertTrue(specs)
+        self.assertTrue(any(s.kernel_spec.use_k_single_buffer for s in specs))
+        for tuning_spec in specs:
+            ok, why = _supports_tuning_spec(
+                _GFX950_2D_VARIANT, tuning_spec.kernel_spec
+            )
+            self.assertTrue(ok, (tuning_spec.tuning_id, why))
 
 
 class TestAutoDispatchUnchanged(unittest.TestCase):

@@ -17,7 +17,7 @@ from dispatch.attention import (
     attention_dispatch_result,
 )
 from dispatch.attention.bindings import bind_dense_attention_torch
-from dispatch.attention.common import _problem
+from dispatch.attention.common import AttentionTuningSpec, _problem
 from dispatch.attention.gfx942 import _dense_spec as _dense_spec_gfx942
 from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
 from dispatch.attention.tuning_common import (
@@ -43,6 +43,17 @@ def _req(**kw) -> AttentionRequest:
     )
     base.update(kw)
     return AttentionRequest(**base)
+
+
+_TUNING_FIELDS = dict(
+    path="2d",
+    arch="gfx950",
+    builder_kind="tiled",
+    compile_backend="llvm",
+    candidate_name="attention_gfx950_u2d_test",
+    tuning_id="test@0",
+    kernel_spec=object(),
+)
 
 
 class TestReviewFollowups(unittest.TestCase):
@@ -194,10 +205,16 @@ class TestReviewFollowups(unittest.TestCase):
         old = au._RESOLVED_ATTENTION_ARCH
         try:
             au._RESOLVED_ATTENTION_ARCH = "gfx950"
-            ok, _why = au._explicit_path_supported(problem, SimpleNamespace(), "2d")
+            ok, _why = au._explicit_path_supported(problem, None, "2d")
+            self.assertFalse(ok)
+            ok, _why = au._explicit_path_supported(
+                problem, AttentionTuningSpec(**_TUNING_FIELDS), "2d"
+            )
             self.assertFalse(ok)
             ok, why = au._explicit_path_supported(
-                problem, SimpleNamespace(allow_unsupported=True), "2d"
+                problem,
+                AttentionTuningSpec(**_TUNING_FIELDS, allow_unsupported=True),
+                "2d",
             )
             self.assertTrue(ok)
             self.assertIn("unsupported override", why)
@@ -205,13 +222,7 @@ class TestReviewFollowups(unittest.TestCase):
             au._RESOLVED_ATTENTION_ARCH = old
 
     def test_tuning_spec_backend_conflict_raises(self):
-        spec = SimpleNamespace(
-            arch="gfx950",
-            path="3d",
-            kernel_spec=object(),
-            builder_kind="tiled_3d",
-            with_num_kv_blocks=lambda _n: None,
-        )
+        spec = AttentionTuningSpec(**dict(_TUNING_FIELDS, path="3d"))
         old = au._RESOLVED_ATTENTION_ARCH
         try:
             au._RESOLVED_ATTENTION_ARCH = "gfx950"

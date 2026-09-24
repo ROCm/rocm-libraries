@@ -95,7 +95,15 @@ for result in dispatch_attention_all(request):
     binding.launch(stream=stream)
 ```
 
-Use `candidate_prefix` and `tuning_id_prefix` when enumerating large spaces.
+Each tuning candidate has two sweep levels. `sweep_level="production"` (the
+default) walks the curated stacks exhaustively. Those stacks leave off the
+dead-end knobs (`use_q_reread` on gfx950, `use_conflict_free_v` on gfx942).
+Dead ends are not `KNOWN_WRONG_KNOBS`. `sweep_level="full"` samples every other
+kernel knob, dead ends included; that stream is millions of specs per shape on
+the transposed paths, so pass `tuning_sample=n, seed=s` to draw `n` random
+legal specs per candidate.
+`candidate_prefix` / `tuning_id_prefix` narrow either walk. Production
+`algorithm="auto"` selection does not see these candidates.
 
 ## Capability versus support
 
@@ -131,6 +139,20 @@ only problem semantics such as dtype, masks, heads, and cache addressing.
 It does **not** call production selection heuristics or silently resize an
 invalid point. Concrete kernel validators remain the final structural gate;
 dispatcher support in `tuning_common.py` applies tuning-policy exclusions.
+
+The knob space is data: one `KnobAxis` per kernel tuning field in
+`tuning_common.py`, ordered so each knob's prerequisites come first. A
+depth-first walk asks the kernel's own `__post_init__` validator about each
+prefix and prunes the ones that fail. Sub-knobs such as `sched_barrier_mask`
+only vary while their gate is on, and knobs documented as inert off the
+transposed path are excluded, so the walk does not emit duplicate kernels.
+`KNOWN_WRONG_KNOBS` holds out knobs with a failed reference sweep.
+
+The resulting `AttentionTuningSpec` is also the runtime's launch contract:
+`run_unified_attention_torch(tuning_spec=...)` compiles `spec.build()` under
+`spec.cache_key()` and launches with `spec.launch_grid(problem)` /
+`spec.launch_block()`. The runtime never decodes `builder_kind`, and the
+dispatcher's `grid` / `block` call the same methods.
 
 Each `AttentionTuningSpec.tuning_id` contains a readable geometry/WPE prefix
 plus a stable hash over:
@@ -178,7 +200,8 @@ from the gfx942 spec rather than from a free field.
 - `generic.py` — candidates that cover more than one architecture.
 - `gfx942.py`, `gfx950.py`, `gfx1250.py` — architecture-owned candidates.
 - `gfx942_tuning.py`, `gfx950_tuning.py` — finite geometry catalogs.
-- `tuning_common.py` — candidate construction, named stacks, support filtering,
+- `tuning_common.py` — candidate construction, the per-arch knob axes, the
+  pruned depth-first enumeration and random sampler, support filtering,
   stable IDs, and sweep expansion.
 - `tuning_specs.py` — shared explicit kernel-spec/build construction.
 - `bindings.py` — shared Torch execution adapters.

@@ -27,6 +27,9 @@ def run_sweep(
     candidate_prefix="",
     tuning_id_prefix="",
     limit=0,
+    tuning_sample=0,
+    seed=0,
+    sweep_level="production",
 ):
     """Time every engine the dispatcher registry offers for this problem.
 
@@ -35,11 +38,12 @@ def run_sweep(
     *supported* candidate), groups the offered engines by their launched path,
     and times each distinct path via ``run_unified_attention_torch``.
 
-    The sweep space includes the opt-in tuning candidates. Use
-    ``candidate_prefix`` / ``tuning_id_prefix`` to narrow it to one geometry or
-    codepath, and ``limit`` caps how many specs are timed (0 = no cap). An
-    unfiltered, uncapped call is only sensible on a registry with the tuning
-    candidates excluded.
+    The sweep space includes the opt-in tuning candidates. ``sweep_level``
+    ``production`` (the default) walks the curated stacks. ``full`` samples
+    every kernel knob: pass ``tuning_sample`` / ``seed`` (0 walks the full
+    stream, millions of specs per shape on the transposed paths).
+    ``candidate_prefix`` / ``tuning_id_prefix`` narrow one geometry or
+    codepath, and ``limit`` caps how many specs are timed (0 = no cap).
 
     Returns a dict keyed by launched path. Each value is either a timed entry
     ``{"ms", "engines", "kernel", "out"}`` or -- if that one path raised --
@@ -84,9 +88,11 @@ def run_sweep(
         req,
         candidate_prefix=candidate_prefix,
         tuning_id_prefix=tuning_id_prefix,
+        tuning_sample=tuning_sample,
+        seed=seed,
+        limit=limit,
+        sweep_level=sweep_level,
     )
-    if limit and len(specs) > limit:
-        specs = specs[:limit]
     entries = {}
     tensors_validated = False
     for spec in specs:

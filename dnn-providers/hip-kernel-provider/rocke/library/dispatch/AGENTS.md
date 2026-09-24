@@ -58,13 +58,20 @@ Lower priority number = higher precedence. Generic candidates (10) remain the
 fallback for everything a specialized candidate does not claim.
 
 The priority-30 tuning candidates are generated from
-`GFX942_TUNING_VARIANTS` and `GFX950_TUNING_VARIANTS`. Each candidate's `sweep_space` expands named schedule
-stacks and a small set of legal micro-axes (not a valu×memory Cartesian
-product). gfx950 stays at or below 5K specs per representative shape; gfx942
-stays at or below 1.5K. They reject `algorithm="auto"` before constructing a
-spec, so normal dispatch does not pay the enumeration cost and the historical
-winner is unchanged. Sweeps probe them with `algorithm="unified_tuning"` and
-execute the returned `AttentionTuningSpec`.
+`GFX942_TUNING_VARIANTS` and `GFX950_TUNING_VARIANTS` (geometry: codepath,
+tile, warps, rows per warp, segments, compile backend). Every other tuning
+field on the tiled kernel specs is a declared `KnobAxis` in `tuning_common.py`
+(`_GFX950_2D_AXES`, `_GFX942_2D_AXES`, `_3D_AXES`); `test_tuning_space.py`
+fails if a kernel field is on no axis. Axes are ordered prerequisites-first,
+and the space is walked depth-first with the kernel's own spec validator
+pruning illegal prefixes. There is no size cap: the full space is millions of
+specs per shape on the transposed paths, so `sweep_space` is a lazy stream and
+`sample_space(req, n, seed)` draws `n` random legal specs per candidate. Held
+out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They reject
+`algorithm="auto"` before constructing a spec, so normal dispatch does not pay
+the enumeration cost and the historical winner is unchanged. Sweeps probe them
+with `algorithm="unified_tuning"` and execute the returned
+`AttentionTuningSpec`, which also owns its build, cache key, and launch grid.
 
 Production `dispatch_attention` uses `ATTENTION_ROUTE_REGISTRY` (path labels
 plus pin-able specialized candidates). `registered_attention_combos` /
@@ -223,7 +230,8 @@ Migration is incremental — one cohort at a time.
    The dispatcher still decides only `(path, head_size, block_size)`, and the C++
    parity identity is unchanged (see the top of this doc).
 4. **Test** byte-identity + non-interference (see the
-   `test_per_engine_spec_fns.py` -- table-driven, one entry per cohort), then
+   `library/tests/test_per_engine_spec_fns.py` -- table-driven, one entry per
+   cohort), then
    GPU-verify the cohort's arch (kernel name / built spec unchanged vs pre-change).
 
 Migrated so far (all builder-layer spec_fns in
@@ -265,12 +273,21 @@ the registry offers and records which engine names mapped to it. Contract tests:
 KDA, grouped conv, MoE, and norm is the family `*_sweep_space` /
 `dispatch_*_all` wrappers.
 
-**The sweep space is large, and the lanes that walk it must be filtered.** One
-gfx950 prefill shape offers ~65k specs, because each tuning candidate expands
-its knob space per request. Every consumer therefore takes
-`candidate_prefix` / `tuning_id_prefix`: `run_sweep` (exposed as
-`--sweep-candidate-prefix` / `--sweep-tuning-id-prefix` / `--sweep-limit` on
-both prefill benches) and the table sweeps under
+**Two sweep levels.** `production` (the default) walks the curated named stacks
+exhaustively. Those stacks leave off the knobs the kernels label as dead ends
+(`use_q_reread` on gfx950, `use_conflict_free_v` on gfx942). Dead ends are not
+`KNOWN_WRONG_KNOBS`; that set is only gfx942 `use_k_hbm_direct`, which stays
+out of both levels. `full` is the sampled non-production space: every other
+kernel knob, dead ends included. A single gfx942 transposed-x8 geometry has
+roughly 16M legal knob settings, so `full` is consumed by sampling:
+`tuning_sample` / `seed` (default 256, 0 walks the full stream). Sampling is a
+random walk uniform at each knob decision, not uniform over the whole legal
+set. `production` ignores `tuning_sample`.
+
+Every consumer takes `sweep_level` plus `candidate_prefix` / `tuning_id_prefix`:
+`run_sweep` (exposed as `--sweep-level` / `--sweep-tuning-sample` /
+`--sweep-seed` / `--sweep-candidate-prefix` / `--sweep-tuning-id-prefix` /
+`--sweep-limit` on both prefill benches) and the table sweeps under
 `benchmarks/gfx950/attention/{decode,prefill}/`.
 
 `benchmarks/common/attention_combo_sweep.py` is the arch-parameterized HW lane:
@@ -279,6 +296,9 @@ gfx950, launches dense and unified specs through their respective runners,
 checks each against an SDPA reference, and streams one JSONL row per config so a
 fault loses only the config that caused it. It names no candidate — the set
 comes from the registry, so registering a candidate is enough to have it swept.
+Host validation (build + verify + lower) runs on `--jobs` worker processes;
+isolated GPU runs are spread across `--gpus`; a config whose lowered code
+matches one already validated for the shape is a `duplicate` and is not run.
 `--list-only` runs on a CPU host; `--limit`/`--offset` make a full run
 resumable.
 

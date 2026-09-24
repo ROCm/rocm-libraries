@@ -41,7 +41,8 @@ def _req(**kw):
 
 def dump_shape(label, req):
     print(f"\n=== {label} ===")
-    combos = registered_attention_combos(req)
+    # One spec per tuning candidate: this lists which candidates admit ``req``.
+    combos = registered_attention_combos(req, tuning_sample=1)
     print("registry combos:")
     for cand, spec in combos:
         path = getattr(spec, "path", type(spec).__name__)

@@ -44,7 +44,7 @@ bind to until phase 6 moves the routing policy up.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
@@ -389,6 +389,12 @@ class AttentionTuningSpec:
     and defer geometry.  A tuning candidate returns this wrapper instead: the
     exact arch spec, builder choice, compile backend, and optional 3D reduce
     spec are serializable and therefore participate in dispatch/cache identity.
+
+    It is also the whole launch contract the runtime needs:
+    ``run_unified_attention_torch(tuning_spec=...)`` compiles :meth:`build`
+    under :meth:`cache_key` and launches with :meth:`launch_grid` /
+    :meth:`launch_block`, so the runtime never decodes ``builder_kind``.
+    ``allow_unsupported`` skips the runtime's problem-shape support check.
     """
 
     path: str
@@ -402,9 +408,75 @@ class AttentionTuningSpec:
     num_kv_blocks: int = 0
     reduce_spec: Any = None
     tuning_id_prefix: str = ""
+    allow_unsupported: bool = False
 
     def kernel_name(self) -> str:
         return self.kernel_spec.kernel_name()
+
+    def cache_key(self) -> Tuple:
+        """Field-complete launcher-cache identity of the kernel(s) built."""
+
+        def items(spec):
+            if spec is None:
+                return None
+            if not is_dataclass(spec):
+                raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
+            return tuple((f.name, repr(getattr(spec, f.name))) for f in fields(spec))
+
+        return (
+            "explicit",
+            self.arch,
+            self.builder_kind,
+            self.compile_backend,
+            items(self.kernel_spec),
+            items(self.reduce_spec),
+        )
+
+    def build(self, arch: str | None = None):
+        """IR for this spec: one kernel for 2D, ``(segment, reduce)`` for 3D."""
+        from .tuning_specs import (
+            build_explicit_attention_2d,
+            build_explicit_attention_3d,
+        )
+
+        arch = arch or self.arch
+        if self.path == "3d":
+            return build_explicit_attention_3d(
+                self.kernel_spec, self.reduce_spec, arch=arch
+            )
+        if self.builder_kind == "gfx942_4warp_gqa":
+            from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+            return build_gfx942_4warp_gqa(self.kernel_spec, arch=arch)
+        return build_explicit_attention_2d(self.kernel_spec, arch=arch)
+
+    def launch_grid(self, problem: UnifiedAttentionProblem) -> Tuple[int, int, int]:
+        ks = self.kernel_spec
+        if self.path == "3d":
+            block_q = max(1, 16 // problem.num_queries_per_kv)
+            qblocks = problem.total_q // block_q + problem.num_seqs
+            return (int(qblocks), int(problem.num_kv_heads), int(ks.num_segments))
+        if self.builder_kind == "gfx942_4warp_gqa":
+            from kernels.common.attention_unified import gfx942_4warp_launch_grid
+
+            return gfx942_4warp_launch_grid(problem)
+        block_m = int(ks.block_m)
+        block_q = (
+            block_m // problem.num_queries_per_kv
+            if problem.num_queries_per_kv <= block_m
+            else 1
+        )
+        qblocks = int(problem.total_q // block_q + problem.num_seqs)
+        if bool(getattr(ks, "use_q_major_grid", False)):
+            return (qblocks, int(problem.num_kv_heads), 1)
+        return (int(problem.num_kv_heads), qblocks, 1)
+
+    def launch_block(self) -> Tuple[int, int, int]:
+        if self.path == "3d":
+            return (64, 1, 1)
+        if self.builder_kind == "gfx942_4warp_gqa":
+            return (256, 1, 1)
+        return (64 * int(self.kernel_spec.num_warps), 1, 1)
 
     def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
         """Refresh runtime-addressing state after the paged cache is known."""

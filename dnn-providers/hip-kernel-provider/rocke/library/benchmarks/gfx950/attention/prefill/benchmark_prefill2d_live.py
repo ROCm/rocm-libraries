@@ -728,9 +728,23 @@ def main() -> int:
         "--sweep-candidate-prefix",
         default="",
         help="restrict the 'sweep' lane to candidates whose name starts with this "
-        "(e.g. attention_gfx950_u2d_transposed32). The registry offers tens of "
-        "thousands of tuning specs per shape, so narrow it or use --sweep-limit.",
+        "(e.g. attention_gfx950_u2d_transposed32).",
     )
+    ap.add_argument(
+        "--sweep-level",
+        choices=("production", "full"),
+        default="production",
+        help="production walks the curated stacks in the 'sweep' lane. "
+        "full samples every kernel knob; see --sweep-tuning-sample",
+    )
+    ap.add_argument(
+        "--sweep-tuning-sample",
+        type=int,
+        default=256,
+        help="with --sweep-level full: random legal specs per tuning candidate "
+        "(0 = the full stream). Ignored for production",
+    )
+    ap.add_argument("--sweep-seed", type=int, default=0)
     ap.add_argument(
         "--sweep-tuning-id-prefix",
         default="",
@@ -907,6 +921,9 @@ def main() -> int:
                         candidate_prefix=args.sweep_candidate_prefix,
                         tuning_id_prefix=args.sweep_tuning_id_prefix,
                         limit=args.sweep_limit,
+                        tuning_sample=args.sweep_tuning_sample,
+                        seed=args.sweep_seed,
+                        sweep_level=args.sweep_level,
                     )
                     if not sweep_entries:
                         print(f"  [sweep] no eligible engines for {tag} sw={sw}")
