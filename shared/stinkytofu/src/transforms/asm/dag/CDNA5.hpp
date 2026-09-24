@@ -709,6 +709,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Synthetic throttle cycles charged to DS placement in the current WMMA.
     // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
     int dsSchedulingBudgetUsed_ = 0;
+    // Exact consumer focus used outside a steady-state loop, where there is no
+    // next-iteration latency to hide and younger DS work only pollutes FIFO.
+    int dsWindowFocusWmmaId_ = INT_MAX;
 
     // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
     // producer's result is safe to consume (e.g. ds_load LDS->VGPR, 56 cyc). Any
@@ -952,10 +955,17 @@ class CDNA5ReadyQueue : public ReadyQueue {
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
                           bool allowHiddenStall = false, const DAGNode* mustFeed = nullptr) const;
     std::pair<DAGNode*, int> findMostReadyWMMA() const;
+    // Earliest still-blocked matrix op a queued parent VALU feeds. nullptr if none.
+    DAGNode* earliestBlockedWmmaFedByReadyParent() const;
     // WMMA Phase B is about to issue, or the blocked WMMA currently being
     // unlocked by wmmaParentValuQueue. nullptr if neither exists.
     DAGNode* selectTargetWmma() const;
     bool parentFeedsWmma(const DAGNode* parent, const DAGNode* wmma) const;
+    bool wmmaStillPending(const DAGNode* wmma) const;
+    // DAG id of the earliest pending matrix consumer.
+    int earliestPendingWmmaId(const DAGNode* ds) const;
+    bool dsFeedsPendingWmma(const DAGNode* ds) const;
+    bool dsFeedsIssuedOnlyWmma(const DAGNode* ds) const;
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
     // Phase B unlock path: a ready parent VALU of selectTargetWmma() that can
     // issue now (co-issue window / RAW / dest-overlap gates). nullptr if none.
@@ -1259,6 +1269,8 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         ++dsIssuedThisRegion_;
         dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsIssueCap_.push(dsIssueCapSpan());
+        const int wmmaId = earliestPendingWmmaId(node);
+        dsWindowFocusWmmaId_ = std::min(dsWindowFocusWmmaId_, wmmaId);
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -1579,25 +1591,108 @@ bool CDNA5ReadyQueue::parentFeedsWmma(const DAGNode* parent, const DAGNode* wmma
     return regionDag_->graph[parent->id].contains(wmma->id);
 }
 
-// Ready WMMA if one can issue; otherwise the most-ready matrix successor of a
-// ready parent VALU (the WMMA currently being unlocked). Ties: smallest DAG id.
-DAGNode* CDNA5ReadyQueue::selectTargetWmma() const {
-    if (!wmmaQueue.empty()) return findMostReadyWMMA().first;
+bool CDNA5ReadyQueue::wmmaStillPending(const DAGNode* wmma) const {
+    if (!wmma) return false;
+    // Not yet ready, or ready and still waiting in the WMMA queue.
+    return wmma->inDegree > 0 || wmmaQueue.contains(const_cast<DAGNode*>(wmma));
+}
+
+// DAG id of the earliest still-pending matrix consumer of this ds_load
+// (directly, or via a parent VALU). INT_MAX if none.
+int CDNA5ReadyQueue::earliestPendingWmmaId(const DAGNode* ds) const {
+    int best = INT_MAX;
+    if (!ds || !regionDag_ || ds->id >= regionDag_->graph.size()) return best;
+    auto consider = [this, &best](DAGNode* n) {
+        if (n && isMatrixInstruction(*n->inst) && wmmaStillPending(n))
+            best = std::min(best, static_cast<int>(n->id));
+    };
+    for (unsigned succId : regionDag_->graph[ds->id]) {
+        if (succId >= regionDag_->nodes.size()) continue;
+        DAGNode* succ = const_cast<DAGNode*>(&regionDag_->nodes[succId]);
+        consider(succ);
+        if (!succ->feedsWmma || succ->id >= regionDag_->graph.size()) continue;
+        for (unsigned mId : regionDag_->graph[succ->id]) {
+            if (mId >= regionDag_->nodes.size()) continue;
+            consider(const_cast<DAGNode*>(&regionDag_->nodes[mId]));
+        }
+    }
+    return best;
+}
+
+// True when this ds_load still has a not-yet-issued matrix consumer in the
+// region (directly, or via a parent VALU). Loop-carried / next-iter preloads
+// whose only WMMA users already issued return false.
+bool CDNA5ReadyQueue::dsFeedsPendingWmma(const DAGNode* ds) const {
+    return earliestPendingWmmaId(ds) != INT_MAX;
+}
+
+// Loop-carried next-iter preload: its only matrix consumers in this region
+// already issued (the loop-head WMMAs). Independent filler loads have no
+// matrix consumer and must not take this path.
+bool CDNA5ReadyQueue::dsFeedsIssuedOnlyWmma(const DAGNode* ds) const {
+    if (dsFeedsPendingWmma(ds)) return false;
+    if (!ds || !regionDag_ || ds->id >= regionDag_->graph.size()) return false;
+    auto isIssuedMatrix = [this](const DAGNode* n) {
+        return isMatrixInstruction(*n->inst) && !wmmaStillPending(n);
+    };
+    for (unsigned succId : regionDag_->graph[ds->id]) {
+        if (succId >= regionDag_->nodes.size()) continue;
+        DAGNode* succ = const_cast<DAGNode*>(&regionDag_->nodes[succId]);
+        if (isIssuedMatrix(succ)) return true;
+        if (!succ->feedsWmma || succ->id >= regionDag_->graph.size()) continue;
+        for (unsigned mId : regionDag_->graph[succ->id]) {
+            if (mId >= regionDag_->nodes.size()) continue;
+            DAGNode* m = const_cast<DAGNode*>(&regionDag_->nodes[mId]);
+            if (isIssuedMatrix(m)) return true;
+        }
+    }
+    return false;
+}
+
+// Earliest matrix op that a queued parent VALU still has to unlock, in program
+// order. Ordering by DAG id rather than data-readiness is deliberate:
+// getMaxSrcDataWait only sees producers that have already issued and are still
+// counting down, so a later WMMA whose ds_loads are not out yet reports wait 0
+// and outranks an earlier one that is legitimately waiting on in-flight loads.
+// That inversion is what pulls a far-future WMMA's operand setup ahead of the
+// nearest one's.
+DAGNode* CDNA5ReadyQueue::earliestBlockedWmmaFedByReadyParent() const {
     if (!regionDag_ || wmmaParentValuQueue.empty()) return nullptr;
 
     DAGNode* best = nullptr;
-    std::tuple<int, int> bestKey{INT_MAX, 0};
     for (DAGNode* parent : wmmaParentValuQueue) {
         if (parent->id >= regionDag_->graph.size()) continue;
         for (unsigned succId : regionDag_->graph[parent->id]) {
             if (succId >= regionDag_->nodes.size()) continue;
             DAGNode* succ = const_cast<DAGNode*>(&regionDag_->nodes[succId]);
             if (!isMatrixInstruction(*succ->inst)) continue;
-            considerBest(succ, std::make_tuple(getMaxSrcDataWait(succ), (int)succ->id), best,
-                         bestKey);
+            // in-degree 0 means every predecessor already issued, so nothing in
+            // wmmaParentValuQueue feeds it and it needs no unlocking.
+            if (succ->inDegree == 0) continue;
+            if (best == nullptr || succ->id < best->id) best = succ;
         }
     }
     return best;
+}
+
+// Ready WMMA if one can issue; otherwise the blocked matrix op a ready parent
+// VALU is unlocking. Ties: smallest DAG id.
+DAGNode* CDNA5ReadyQueue::selectTargetWmma() const {
+    // Every WMMA in wmmaQueue has in-degree 0, so no queued parent VALU feeds
+    // one: naming it the target makes pickFreeBest(mustFeed=...) match nothing
+    // and leaves the unlock path dead for as long as any other WMMA is ready.
+    // Aim at the nearest still-blocked WMMA a queued parent can unlock --
+    // during the co-issue window so that parent rides the in-flight WMMA, and
+    // after the window too so a later already-ready WMMA (C+32, wait 0) cannot
+    // drain before an earlier one that only needs its v_perm (C+24).
+    DAGNode* blocked = earliestBlockedWmmaFedByReadyParent();
+    if (coIssueCyclePos_ < activeWmmaLatency_ && blocked) return blocked;
+    if (!wmmaQueue.empty()) {
+        DAGNode* ready = findMostReadyWMMA().first;
+        if (blocked && ready && blocked->id < ready->id) return blocked;
+        return ready;
+    }
+    return blocked;
 }
 
 // Pick a WMMA: start a new co-issue timeline from its coIssueWindow,
@@ -1661,6 +1756,8 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
             cumulativeWmmaHideBudget_ += hideBudget_.issueBudgetFor(node->inst);
         }
     }
+    dsWindowFocusWmmaId_ = INT_MAX;
+
     globalReadCounter = 0;
     // (A) RAW: stamp the WMMA's dest (accumulator) data-ready latency.
     // (B) elapse: record the timeline touch for all its operands.
@@ -2483,10 +2580,40 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // point, no side effects here.
     decidePromote();
 
-    // Pre-compute the best DS read by dsReadPriority once for all phases.
+    // Pre-compute the best DS read once for all phases. While any ready
+    // ds_load still unlocks an unissued WMMA, pick among those only — a
+    // next-iter preload can have a better dsReadPriority (loop-head affinity)
+    // and would otherwise occupy the LDS queue in front of that load, forcing
+    // s_wait_dscnt 0. Independent filler loads (no pending WMMA consumer) keep
+    // competing on dsReadPriority as before. Among pending feeders, prefer the
+    // load that unlocks the earliest still-pending WMMA so a later consumer's
+    // load cannot occupy leftover DS-cap slots and drive s_wait_dscnt 2.
     DAGNode* pickedDS = nullptr;
+    bool pickedPending = false;
+    int pickedEarly = INT_MAX;
+    const bool holdIssuedOnlyPreload = wmmaIssueConfig.issuedCount > 0;
     for (DAGNode* n : localReadQueue) {
-        if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
+        if (holdIssuedOnlyPreload && dsFeedsIssuedOnlyWmma(n)) continue;
+        const int early = earliestPendingWmmaId(n);
+        const bool pending = early != INT_MAX;
+        if (!pickedDS || (pending && !pickedPending) ||
+            (pending == pickedPending &&
+             (early < pickedEarly ||
+              (early == pickedEarly && n->dsReadPriority < pickedDS->dsReadPriority)))) {
+            pickedDS = n;
+            pickedPending = pending;
+            pickedEarly = early;
+        }
+    }
+    // Steady-state loops need look-ahead across consumers to hide four-load
+    // groups across multiple WMMA windows. At a tail, retain exact-consumer
+    // focus: there is no next iteration to prepare, and younger loads would
+    // only sit ahead of the current consumer in DS FIFO.
+    if (pickedDS) {
+        const Loop* loop = getLoop();
+        const bool inSteadyLoop = loop && currentBB_ && loop->contains(currentBB_);
+        if (!inSteadyLoop && dsWindowFocusWmmaId_ != INT_MAX && pickedEarly > dsWindowFocusWmmaId_)
+            pickedDS = nullptr;
     }
 
     // Diagnostic: classify what would stop this ds_load right now. Read both
@@ -3002,6 +3129,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     regionDag_ = &deps.dag;
     carryQueuedWar();
     wmmaIssuedCountThisRegion_ = 0;
+    dsWindowFocusWmmaId_ = INT_MAX;
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering

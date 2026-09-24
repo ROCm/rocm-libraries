@@ -327,6 +327,10 @@ class ReadySetByDAGid {
         set.erase(node);
     }
 
+    bool contains(DAGNode* node) const {
+        return set.contains(node);
+    }
+
     using iterator = std::set<DAGNode*, CompareByDAGid>::iterator;
     using const_iterator = std::set<DAGNode*, CompareByDAGid>::const_iterator;
 
