@@ -198,6 +198,56 @@ def subtileStackForTLU1(state, tc, mtTiles):
 SUBTILE_STACK_SIZES_B16 = (4, 2)
 
 
+# ds_read's offset field is 16-bit unsigned.  Mirrors _DS_IMM_LIMIT in
+# Components/Subtile/SubtileLREmit.py, which asserts the same bound at emit.
+_SUBTILE_DS_IMM_LIMIT = 1 << 16
+
+
+def _subtileMaxLRDsOffset(subtileSize, localGrid, globalGrid):
+  """Largest ds immediate the swizzled non-TLU=1 LR path builds, in bytes.
+
+  emitSingleDsRead walks `sId0 * subtileSize + sId1 * globalGrid[0] *
+  subtileSize`, and the scheduler drives sId0/sId1 over the *local* subtile
+  grid, so the last read is the last local subtile of the last K-window.
+  """
+  return ((int(localGrid[0]) - 1) * int(subtileSize)
+          + (int(localGrid[1]) - 1) * int(globalGrid[0]) * int(subtileSize))
+
+
+def _subtileLRDsImmediateReason(tileInfo):
+  """Why tensor tc's local reads cannot be addressed, or None when they can.
+
+  The swizzled non-TLU=1 LR path (emitSingleDsRead) carries the whole subtile /
+  K-window walk in the ds immediate off a single per-lane base register.  Unlike
+  the TLU=1 bf16 path it has no staging register to hold the 64 KB-aligned top,
+  so once the walk reaches the 16-bit field the operand simply cannot be
+  addressed and the emitted `ds_read_b128 ... offset:65536` is rejected by the
+  assembler ("expected a 16-bit unsigned offset").  Reject here so the solution
+  never reaches codegen -- the emit-time assert would otherwise abort the whole
+  Tensile run rather than skipping one kernel.
+
+  The bound is the largest offset that path builds: the last local subtile row
+  plus the last K-window, both in units of subtileSize.  Measured exact against
+  MT 256/288/320/352/384 on the B operand of an NN bf16 subtile kernel.
+  """
+  # Lazy import: see validateSubtileGRKPartition.
+  from Tensile.Components.Subtile.Kernel import LRTag_TLU1
+  lr = getattr(tileInfo, "lr", None)
+  if lr is not None and isinstance(lr.config.tag, LRTag_TLU1):
+    return None   # TLU=1: staged through sharedVgprLRBigOffset (bf16) or fits (fp4)
+  localGrid = tileInfo.localSubtileGrid
+  globalGrid = tileInfo.globalSubtileGrid
+  maxOffset = _subtileMaxLRDsOffset(tileInfo.subtileSize, localGrid, globalGrid)
+  if maxOffset < _SUBTILE_DS_IMM_LIMIT:
+    return None
+  return ("UseSubtileImpl=1 local reads on tensor %s outgrow the 16-bit ds "
+          "immediate: the last subtile of localSubtileGrid=%s over "
+          "globalSubtileGrid=%s needs offset %d (limit %d) and this LR path has "
+          "no staging register (MacroTile=%d)"
+          % (tileInfo.tc, tuple(localGrid), tuple(globalGrid), maxOffset,
+             _SUBTILE_DS_IMM_LIMIT, int(tileInfo.macroTile)))
+
+
 def subtileStackForB16TLU1(state, tc, mtTiles):
   """Stack height for a TLU=1 bf16/fp16 operand, or None when neither fits.
 
@@ -230,6 +280,10 @@ def validateSubtileGRKPartition(state, printRejectionReason):
     sharingReason = _subtileStripSharingReason(state, tc, mtTiles, stack)
     if sharingReason:
       reject(state, printRejectionReason, sharingReason)
+      return False
+    dsImmReason = _subtileLRDsImmediateReason(tileInfo)
+    if dsImmReason:
+      reject(state, printRejectionReason, dsImmReason)
       return False
     loadRatioGR = tileInfo.loadRatioGR
     localSubtileGrid = tileInfo.localSubtileGrid

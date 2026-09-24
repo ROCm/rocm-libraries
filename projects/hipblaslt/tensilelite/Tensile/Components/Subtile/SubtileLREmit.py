@@ -1327,6 +1327,20 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
   numRegs = len(dstTile.regList.indices)
   numReadsForTile = numRegs // REGS_PER_DS_READ
 
+  # Unlike _emitSingleDsReadTLU1B16, this path carries the whole subtile /
+  # K-window walk in the ds immediate with no staging register to fall back on,
+  # so an operand whose LDS region outgrows the 16-bit field cannot be addressed
+  # at all.  Catch it here rather than emitting assembly the assembler rejects
+  # with "expected a 16-bit unsigned offset"; _subtileLRDsImmediateReason keeps
+  # the solution from reaching codegen in the first place.
+  assert 0 <= offset < _DS_IMM_LIMIT, (
+      "Subtile LR (%s): ds offset %d does not fit the 16-bit ds immediate "
+      "(subtile=[%u, %u], subtileSize=%d, globalSubtileGrid=%s); this LR path "
+      "has no staging register.  MacroTile=%d should have been rejected by "
+      "_subtileLRDsImmediateReason"
+      % (tileInfo.tc, offset, sId0, sId1, int(tileInfo.subtileSize),
+         tuple(tileInfo.globalSubtileGrid), int(tileInfo.macroTile)))
+
   module = Module()
   for readIdx in range(numReadsForTile):
     addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
