@@ -115,11 +115,12 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | 6: Default (automatically pick the optimal workgroup count)
 
     * - | ``TENSILE_GRIDBASED_KDTREE``
-        | Indexes grid-based solution-selection tables with a k-d tree instead of a linear scan.
+        | Force-enables the k-d tree index on grid-based solution-selection tables, which are otherwise scanned linearly.
+        | Enable-only: it can switch the index on for tables that do not ask for it, but it can never switch it off. A table that declares ``UseKdTree: true`` in its library-logic file already uses the index with this variable unset, and no value of this variable changes that.
         | Affects which kernel is selected, not the result it computes.
-      - | Unset or 0: Use the ``UseKdTree`` value each grid-based table declares in its library-logic file. Tables that do not declare it use a linear scan.
-        | Non-zero: Enable the k-d tree index for every table, including those that do not declare it.
-        | For a table that declares ``UseKdTree: true``, this variable cannot turn the index off. Set the key to ``false`` in the logic file and rebuild the device library instead.
+      - | Unset or 0: Each grid-based table uses the ``UseKdTree`` value declared in its library-logic file. Tables that do not declare it are scanned linearly.
+        | Non-zero: Enable the index for every grid-based table, in addition to those already declaring ``UseKdTree: true``.
+        | To disable the index for a table that declares ``UseKdTree: true``, remove the key (or set it to ``false``) in that table's library-logic file and rebuild the device library. This cannot be done at runtime.
 
     * - | ``TENSILE_STREAMK_FIXED_GRID``
         | Overrides default grid size with specified number of workgroups for Stream-K kernels.
