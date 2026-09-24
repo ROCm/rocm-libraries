@@ -1,0 +1,36 @@
+# AddressSanitizer runtime suppressions for hipDNN tests.
+#
+# Keep this file in sync with dnn-providers/cmake/asan-suppressions.txt. The two
+# trees configure independently (dnn-providers can build standalone), so each
+# needs its own copy.
+#
+# ONLY interceptor-detected errors can be suppressed here. ASan supports
+# interceptor_name, interceptor_via_fun, interceptor_via_lib and odr_violation
+# and nothing else — a direct instrumented load/store cannot be suppressed.
+#
+# ---------------------------------------------------------------------------
+# rocBLAS/Tensile lazy library-load data race
+#   AIBTINFRA-48 · https://github.com/ROCm/rocm-libraries/issues/8869
+#
+# A lazily-loaded Tensile placeholder library is read on T0 (findBestKeyMatch,
+# a 32-byte key compare via the memcmp/bcmp interceptor) while an std::async
+# loader thread spawned from TensileHost::get_library_and_adapter deserializes
+# into the same matching table and reallocates its backing vector.
+#
+# The race fires on first GEMM activity for a problem class and is NOT specific
+# to any operation: all three convolution directions reproduce it identically
+# (14/14 isolated runs). It is upstream library code, not hipDNN, and it is
+# equally present in non-ASAN builds where nothing detects it.
+#
+# ⚠️ VERIFICATION STATUS: this pattern has NOT yet been observed to match.
+# A run with print_suppressions=1 completed cleanly but reported a suppression
+# tally of ZERO, meaning the crash stopped for some other reason (most likely
+# eager symbolizer init perturbing startup timing, which shifts the race
+# window). Treat this entry as unproven until a run reports a non-zero tally.
+# See Research/ALMIOPEN-2673-tensile-trigger-experiment.md.
+interceptor_via_fun:*findBestKeyMatch*
+
+# Fallback, deliberately NOT enabled: this suppresses every interceptor-detected
+# error arriving from librocblas, which would also hide genuinely new rocBLAS
+# memory bugs. Enable only if the narrow entry above proves unmatchable.
+# interceptor_via_lib:librocblas.so

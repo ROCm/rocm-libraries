@@ -190,6 +190,18 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
     # variable) so a stale/poisoned entry cannot mask a failure across runs.
     set(HIPDNN_TEST_MIOPEN_CACHE_DIR "${CMAKE_BINARY_DIR}/miopen_test_cache")
 
+    # Suppressions for interceptor-detected errors in upstream libraries. Copied into the build
+    # tree so the path handed to the runtime is absolute: tests run from varying working
+    # directories, and ASan aborts at startup if it cannot read the file.
+    set(HIPDNN_ASAN_SUPPRESSIONS "${CMAKE_BINARY_DIR}/asan-suppressions.txt")
+    configure_file(${CMAKE_CURRENT_LIST_DIR}/asan-suppressions.txt
+                   ${HIPDNN_ASAN_SUPPRESSIONS} COPYONLY)
+
+    # print_suppressions=1 makes the runtime report a match tally at exit. Without it a stale or
+    # unmatchable pattern silently suppresses nothing while still looking configured.
+    set(HIPDNN_ASAN_OPTIONS
+        "ASAN_OPTIONS=suppressions=${HIPDNN_ASAN_SUPPRESSIONS}:print_suppressions=1")
+
     # Set environment variables for Address Sanitizer.
     # HSA_XNACK is only required for device-side ASAN (not HOST_ASAN).
     # ASAN_SYMBOLIZER_PATH is set to the LLVM symbolizer to make the output from leak detection
@@ -197,13 +209,13 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
     if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
         set(TEST_ENVIRONMENT "ASAN_SYMBOLIZER_PATH=${CMAKE_SYMBOLIZER}" "HSA_XNACK=1"
                              "MIOPEN_CUSTOM_CACHE_DIR=${HIPDNN_TEST_MIOPEN_CACHE_DIR}"
-                             # "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
+                             "${HIPDNN_ASAN_OPTIONS}"
         )
     else()
         # HOST_ASAN only needs the symbolizer, not HSA_XNACK
         set(TEST_ENVIRONMENT "ASAN_SYMBOLIZER_PATH=${CMAKE_SYMBOLIZER}"
                              "MIOPEN_CUSTOM_CACHE_DIR=${HIPDNN_TEST_MIOPEN_CACHE_DIR}"
-                             # "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
+                             "${HIPDNN_ASAN_OPTIONS}"
         )
     endif()
     message(VERBOSE "ASAN ${CMAKE_CURRENT_SOURCE_DIR} TEST_ENVIRONMENT=${TEST_ENVIRONMENT}")
