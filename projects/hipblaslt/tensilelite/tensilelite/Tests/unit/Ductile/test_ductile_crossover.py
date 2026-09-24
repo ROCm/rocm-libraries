@@ -131,7 +131,7 @@ class TestHalfUniformCrossover:
         draw is all-False (0 swaps, forces the re-roll) and the second is all-True
         (4 swaps, satisfies the loop).
         """
-        from Tensile.ductile.core import crossover as crossover_mod
+        from tensilelite.ductile.core import crossover as crossover_mod
 
         pa = Individual({"DepthU": 0, "SourceSwap": 0, "A": 0, "B": 0}, F=1.0)
         pb = Individual({"DepthU": 1, "SourceSwap": 1, "A": 1, "B": 1}, F=2.0)

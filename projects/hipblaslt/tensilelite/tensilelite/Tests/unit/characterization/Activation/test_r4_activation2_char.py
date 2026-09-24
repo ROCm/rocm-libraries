@@ -43,7 +43,7 @@ import importlib
 import shutil
 
 import pytest
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
