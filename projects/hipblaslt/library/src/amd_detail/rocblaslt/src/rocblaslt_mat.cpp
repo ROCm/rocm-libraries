@@ -253,6 +253,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags  = streamKFlags;
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue      = matmul_descr->fused_epilogue;
@@ -467,6 +468,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue = matmul_descr->fused_epilogue;
@@ -480,8 +482,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
         return rocblaslt_status_invalid_value;
     }
 #endif
-
-
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -534,6 +534,9 @@ rocblaslt_status
 
     for(int i = 0; i < matmul_descr.size(); i++)
     {
+        if(isDeviceScalarAlphaPointerMode(matmul_descr[i]->pointermode))
+            return rocblaslt_status_not_implemented;
+
         // matrix A
         int64_t num_rows_a     = matA[i]->m;
         int64_t num_cols_a     = matA[i]->n;
@@ -606,7 +609,9 @@ rocblaslt_status
         int64_t            lde, batch_stride_e;
         bool               gradient;
         rocblaslt_epilogue epilogue    = matmul_descr[i]->epilogue;
-        const void*        alphaVecPtr = matmul_descr[i]->pointermode ? alpha[i] : nullptr;
+        const void* alphaVecPtr = isScaleAlphaVecPointerMode(matmul_descr[i]->pointermode)
+                                      ? alpha[i]
+                                      : nullptr;
         if(validArgs == rocblaslt_status_continue)
             validArgs = rocblaslt_epilogue_valid_args(epilogue, // add alpha
                                                       num_rows_d,
@@ -890,7 +895,7 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         hipDataType alpha_type = matA->type;
         hipDataType beta_type  = matD->type;
         
-        // alpha is a device pointer when scaleAlpha_vector (pointermode != 0) is set;
+        // alpha is a device pointer when a ScaleAlphaVec pointer mode is set;
         // avoid CPU dereference which causes an access violation on Windows.
         auto alpha_scalar = (!matmul_descr->pointermode && alpha)
                             ? get_alpha_beta_scalar(alpha_type, alpha)
@@ -923,7 +928,9 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
             workspace,
             "workSpaceSizeInBytes",
             workspaceSizeInBytes,
-            (matmul_descr->pointermode) ? "alphaVector" : "alpha",
+            isDeviceScalarAlphaPointerMode(matmul_descr->pointermode)
+                ? "alphaDeviceScalar"
+                : (matmul_descr->pointermode ? "alphaVector" : "alpha"),
             alpha_scalar, 
             "beta",
             beta_scalar,

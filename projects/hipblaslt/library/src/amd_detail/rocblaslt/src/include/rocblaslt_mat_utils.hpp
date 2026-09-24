@@ -164,6 +164,17 @@ inline rocblaslt_status
     return rocblaslt_status_continue;
 }
 
+inline bool isScaleAlphaVecPointerMode(rocblaslt_pointer_mode pointermode)
+{
+    return pointermode == rocblaslt_pointer_mode_alpha_device_vector_beta_host
+           || pointermode == rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext;
+}
+
+inline bool isDeviceScalarAlphaPointerMode(rocblaslt_pointer_mode pointermode)
+{
+    return pointermode == rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext;
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
@@ -323,6 +334,15 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            = rocblaslt_pointer_mode_host)
 {
     rocblaslt_status status = rocblaslt_status_continue;
+
+    // The current Matmul host path dereferences both scalars. Keep DEVICE reserved until
+    // device-resident alpha and beta plumbing is implemented; MatrixTransform handles it separately.
+    if(pointermode == rocblaslt_pointer_mode_device)
+        return rocblaslt_status_not_implemented;
+
+    if(pointermode != rocblaslt_pointer_mode_host
+       && !isScaleAlphaVecPointerMode(pointermode))
+        return rocblaslt_status_invalid_value;
 
     if(!(type_a == HIP_R_32F && type_b == HIP_R_32F && type_c == HIP_R_32F && type_d == HIP_R_32F)
        && compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -698,7 +718,8 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             batch_offset_d,
                                             matmul_descr->pointermode);
 
-    const void* alphaVecPtr     = matmul_descr->pointermode ? alpha : nullptr;
+    const void* alphaVecPtr
+        = isScaleAlphaVecPointerMode(matmul_descr->pointermode) ? alpha : nullptr;
     auto        epilogue_status = rocblaslt_epilogue_valid_args(matmul_descr->epilogue,
                                                          num_rows_d,
                                                          num_cols_d,
