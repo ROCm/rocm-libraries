@@ -647,6 +647,7 @@ class PersistentLoopOn(PersistentLoop):
     def closePersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop closePersistentLoop")
         module.add(Label("PersistentLoopClose", ""))
+        module.add(Component.WorkAssignment.find(writer).persistentClusterNextTileArrive(writer, kernel))
         if kernel.get("DebugPersistentKernelLoopForever", False):
             with writer.allocTmpSgpr(3, tag="PersistentLoop_close") as tmp:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmp))

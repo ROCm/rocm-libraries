@@ -291,10 +291,11 @@ def assert_cluster_barrier_balanced(src, base):
     waits: the last-iteration guard's zero-iteration skip-edge wait, or the
     first-load wait on the >=1-iteration fall-through. Both waits are emitted
     statically but only one executes on any given path, so the static wait count
-    is exactly one greater than the signal count; every other arrive (including a
-    config's dedicated prologue-prefetch handshake) is a self-contained arrive/wait
-    pair. Any other imbalance would leave a cluster wait unpaired and stall the
-    cluster waves.
+    is exactly one greater than the signal count; every other arrive is a
+    self-contained arrive/wait pair. A persistent cluster that walks several tiles
+    also arrives at the loop close for each later tile, so it has two static arrive
+    sites for those two waits and the counts are equal. Any other imbalance would
+    leave a cluster wait unpaired and stall the cluster waves.
 
     Barriers inside cloned bodies are discounted the same way (see
     ``_count_cluster_barriers``): InsertClusterBarrierPass anchors the Rule 3
@@ -303,9 +304,12 @@ def assert_cluster_barrier_balanced(src, base):
     copies of which exactly one runs.
     """
     n_signal, n_wait = _count_cluster_barriers(src)
-    assert n_wait == n_signal + 1, (
+    per_tile_arrive = "label_PersistentMC_SkipNextTileArrive:" in src
+    expected = n_signal if per_tile_arrive else n_signal + 1
+    assert n_wait == expected, (
         f"Kernel {base!r}: unexpected cluster barrier balance: "
-        f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == signal + 1, "
+        f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == "
+        f"{'signal' if per_tile_arrive else 'signal + 1'}, "
         "both counted outside cloned bodies)"
     )
 

@@ -64,7 +64,7 @@ from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled, persistentMulticast, \
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
   swizzleGeometry
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
@@ -5493,6 +5493,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if not self.states.doShadowInit:
         self.removeSgprVarFromPool("SrdWS")
       module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
+      if isPersistent(kernel):
+        module.add(Component.TileProcessingStrategy.find(self).skipPhantomTileStore(self, kernel))
       if not self.states.doShadowInit:
         self.removeSgprVarFromPool("SrdD")
         self.removeSgprVarFromPool("SrdC")
@@ -5716,16 +5718,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["PrefetchGlobalRead"] >= 2:
         for idxPgr in range(1, kernel["PrefetchGlobalRead"]):
           module.add(self.openPrefetchGlobalRead2orMore(kernel, idxPgr))
-          # StreamKMulticast: the cooperative-multicast loads emitted below for
-          # this prefetch stage sit inside the single-iteration guard branch,
-          # past the generic per-load cluster-barrier bracketing boundary.
-          # Bracket them with a self-contained cluster-scope handshake so every
-          # multicast load stays synchronized and signal/wait counts stay
-          # balanced. Gated on persistentMulticast (cluster + TDM broadcast):
-          # gfx1250v0 has the cluster launch but no peer ld_bcst to keep in lockstep.
-          if persistentMulticast(kernel):
-            assignment = Component.WorkAssignment.find(self)
-            module.add(assignment.persistentMulticastProloguePrefetchHandshake(self, kernel))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
           # In scheduling, we always schedule lwa first then lwb second,
           # Putting lwb in lwa's code object can easily change the order.
@@ -6980,6 +6972,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.removeSgprVarFromPool(grIncName)
 
     module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
+    if isPersistent(kernel):
+      module.add(Component.TileProcessingStrategy.find(self).skipPhantomTileStore(self, kernel))
     if not self.states.doShadowInit:
       module.add(self.globalWriteWorkGroupInit(kernel))
 
@@ -7131,13 +7125,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
-                               # StreamKMulticast gates the per-iteration cooperative-broadcast
-                               # drain in InsertClusterBarrierPass Rule 3 (mainloop): with PGR>=2
-                               # an `s_wait_tensorcnt 0` is emitted after the cooperative
-                               # tensor_load group so the broadcast retires before the back edge.
-                               # Requires TDM multicast, not just a cluster: without a peer
-                               # ld_bcst that wait has nothing to retire (gfx1250v0).
-                               "StreamKMulticast": bool(persistentMulticast(kernel)),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.

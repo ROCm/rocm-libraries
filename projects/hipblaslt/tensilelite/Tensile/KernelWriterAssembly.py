@@ -2666,21 +2666,13 @@ class KernelWriterAssembly(KernelWriter):
     Writes the reduced-bit masks into maskColSgpr/maskRowSgpr and returns True;
     returns False (no write) where the caller must fall back to the full mask.
 
-    The Stream-K ForceDPOnly cluster multicast IS handled: at this (kernel-init)
-    point WorkGroup0/1 hold the raw M-tile/N-tile coords (the linear PersistentWorkGroupIndex
-    fold runs later in StreamK.preLoop), the ClusterDim axes are Cs (X/M,
-    B-multicast) and Ck (Y/N, A-multicast), and the grid is rounded up to a
-    ClusterDim multiple, so the same validX/validY reduction applies. Its padded
-    peers early-exit in WorkAssignment.persistentClusterPadEarlyExit, so the surviving
-    peers' ld_bcst must wait only on the present lanes. The two-tile
-    (StreamKForceDPOnly==0) Stream-K cluster is excluded: WorkGroup0 there is the
-    linear work index rather than an M-tile, so it derives Multicast=False and
-    emits no multicast masks to reduce (cluster reduction only, as on develop).
+    Persistent kernels keep the full mask: their launch has no padded peers, and a
+    DataParallel cluster peer past the tile edge still issues its multicast loads
+    (see DataParallel.tileIndexToWorkGroup).
     """
     cx = kernel["ClusterDim"][0]
     cy = kernel["ClusterDim"][1]
-    if not ((cx > 1 or cy > 1)
-            and (not isPersistent(kernel) or persistentSpatialCluster(kernel))):
+    if not ((cx > 1 or cy > 1) and not isPersistent(kernel)):
       return False
 
     module.addComment0("reduce multicast mask to real WGs in cluster")
@@ -10361,6 +10353,9 @@ class KernelWriterAssembly(KernelWriter):
                 kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
             strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
             lastIterEnd = Label(self.rapLabel("LoopEnd%s%s"%(loopChar, strNtab)), "")
+            if persistentSpatialCluster(kernel):
+              assignment = Component.WorkAssignment.find(self)
+              module.add(assignment.persistentMulticastZeroIterClusterWait(self, kernel))
             module.add(SCBranchSCC1(labelName=lastIterEnd.getLabelName(), \
                        comment="skip to unrollLoop end loop%s iter b/c numIter==0" % loopChar))
           else:

@@ -25,7 +25,6 @@ from config_harness import (
     assert_assembles,
     assert_cluster_barrier_balanced,
     assert_real_gfx1250_kernels,
-    assert_split_multicast_masks,
     emit_kernels_from_config,
 )
 
@@ -59,8 +58,11 @@ def test_streamk_cluster_coop_load_gfx1250_emits_assembly():
         assert "workaround" not in src, (
             f"Kernel {base!r}: ttmp reread emitted under ClusterDim != [1, 1]"
         )
-        # Auto-derived cooperative multicast: one mask per operand descriptor.
-        assert_split_multicast_masks(src, base)
+        # Auto-derived cooperative multicast: B broadcasts along Cs. With Ck == 1
+        # the A mask is self-only and freed after the prologue, so only B is bound.
+        assert "s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]" in src, (
+            f"Kernel {base!r} missing B-broadcast mask on the B descriptor"
+        )
         # The multicast loads carry the cluster-scope barrier handshake
         # (s_barrier_signal/wait -3) that keeps the C cluster peers in lockstep.
         assert "s_barrier_signal -3" in src, (

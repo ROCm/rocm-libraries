@@ -16,22 +16,20 @@ The cluster shapes:
   * ``[2, 2]`` -- Cs = 2 X-peers reuse B and Ck = 2 Y-peers on N-adjacent tiles
     reuse A, so BOTH operands are multicast.
 
-Both shapes take the same code path: one work-group per output tile, the HW
-work-group coords folded into the linear tile index, padded boundary peers
-exiting before the cluster barrier, and the broadcast masks bound onto the TDM
-descriptors. Ck is a spatial N-tiling axis, never a K-split, so a K-slice decode
-must be absent.
+Both shapes take the same code path: each hardware cluster is folded into a
+persistent cluster rank that walks whole Cs x Ck tile blocks, a peer past the
+tile edge aliases the edge tile and skips its store, and the broadcast masks are
+bound onto the TDM descriptors for every tile. Each tile's first-load cluster wait
+pairs the prologue arrive (first tile) or the loop-close arrive (later tiles).
+Ck is a spatial N-tiling axis, never a K-split, so a K-slice decode must be absent.
 
 The PrefetchGlobalRead variants:
 
   * ``PrefetchGlobalRead=1`` -- the single-buffered prologue.
   * ``PrefetchGlobalRead=2`` with K > DepthU -- the prologue emits a second,
-    double-buffered ("LDS1") cooperative multicast prefetch load. That load sits
-    inside the single-iteration guard branch, past the generic per-load
-    cluster-barrier bracketing boundary, so
-    ``WorkAssignment.persistentMulticastProloguePrefetchHandshake`` has to bracket it with
-    a dedicated cluster-scope split-barrier handshake of its own -- otherwise a
-    peer can issue the prefetch while another peer is still behind the guard.
+    double-buffered ("LDS1") cooperative multicast prefetch load. The loop-close
+    arrive follows every LDS read of the previous tile, so the first-load wait
+    covers both prefetch buffers and the LDS1 load needs no handshake of its own.
 
 CPU-only: no GPU required. The emit harness instantiates rocisa and runs
 Python+rocisa codegen without compiling or launching any GPU kernels.
@@ -82,91 +80,66 @@ def _emit(pgr, cluster_dim):
                                     cluster_dim=cluster_dim)
 
 
-def _skip_prefetch_handshake_brackets_load(src):
-    """Return True iff the prologue prefetch (LDS1) multicast load is bracketed.
+def _next_tile_arrive_follows_lds_drain(src):
+    """Return True iff the loop-close arrive runs after the tile's LDS work.
 
-    The double-buffered prologue prefetch load sits in the ``skipPGR2`` guard
-    segment. The dedicated handshake elects wave 0 (branch to
-    ``PersistentMC_SkipPrefetchSignal``), signals ``-3``, then all waves wait ``-3``
-    immediately before the LDS1 ``tensor_load_to_lds`` group.
+    Between the ``PersistentLoopClose`` label and the back edge, the arrive skips
+    the last tile, drains LDS, joins the workgroup, and then wave 0 signals ``-3``.
     """
     lines = src.splitlines()
     for i, ln in enumerate(lines):
-        if "label_PersistentMC_SkipPrefetchSignal:" not in ln:
+        if not ln.startswith("label_PersistentLoopClose:"):
             continue
-        # A cluster-scope wait must follow the skip label, before the LDS1 load.
-        window = lines[i : i + 6]
-        has_wait = any("s_barrier_wait -3" in w for w in window)
-        has_load = any("tensor_load_to_lds" in w for w in window)
-        # A wave-0 signal must precede the skip label.
-        pre = lines[max(0, i - 4) : i]
-        has_signal = any("s_barrier_signal -3" in p for p in pre)
-        if has_wait and has_load and has_signal:
-            return True
+        window = lines[i : i + 32]
+        text = "\n".join(window)
+        order = ["label_PersistentMC_SkipNextTileArrive", "s_wait_dscnt 0",
+                 "s_barrier_wait -1", "s_barrier_signal -3",
+                 "label_PersistentMC_SkipNextTileArrive:"]
+        pos = [text.find(token) for token in order]
+        return all(p >= 0 for p in pos) and pos == sorted(pos)
     return False
-
-
-@pytest.mark.parametrize("missing", [None, "signal", "wait", "load"])
-def test_prefetch_handshake_matcher_uses_emitted_label(missing):
-    """Check the matcher without a gfx1250 assembler or a complete kernel.
-
-    Use the label from the real assignment emitter and synthetic barrier/load
-    text, so label renames cannot silently break the hardware-gated assertion.
-    Each barrier and the following load must still be present.
-    """
-    from types import SimpleNamespace
-
-    from rocisa.code import Label
-    from Tensile.Component import Component
-
-    writer = SimpleNamespace(
-        labels=SimpleNamespace(getNameInc=lambda name: name),
-        sgprPool=SimpleNamespace(checkOut=lambda size, tag: 40, checkIn=lambda reg: None),
-        states=SimpleNamespace(asmCaps={"HasClusterBarrier": True}),
-    )
-    kernel = {
-        "TileProcessingStrategy": "DataParallel", "WorkAssignment": "StaticGrid",
-        "ClusterDim": [4, 1], "Multicast": True,
-    }
-    handshake = Component.WorkAssignment.StaticGrid().persistentMulticastProloguePrefetchHandshake(
-        writer, kernel)
-    labels = [str(item).strip() for item in handshake.flatitems() if isinstance(item, Label)]
-    assert len(labels) == 1
-    parts = {
-        "signal": "s_barrier_signal -3",
-        "label": labels[0],
-        "wait": "s_barrier_wait -3",
-        "load": "tensor_load_to_lds v0, s[0:3], 0",
-    }
-    src = "\n".join(text for kind, text in parts.items() if kind != missing)
-    assert _skip_prefetch_handshake_brackets_load(src) is (missing is None)
 
 
 @pytest.mark.parametrize("pgr, cluster_dim", _ARMS, ids=_ARM_IDS)
 def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
     """Each (PGR, cluster shape) arm emits real assembly (err==0) with the
-    tile-index fold, the padded-peer exit, and both multicast masks bound to
-    their descriptors."""
+    cluster-block fold and walk, phantom-tile handling, the per-tile cluster
+    arrive, and both multicast masks bound to their descriptors."""
     results = _emit(pgr, cluster_dim)
     assert_real_gfx1250_kernels(results)
     for base, src, _err in results:
         assert_assembles(src, base)
-        # One work-group per tile: the HW coords are folded into the linear index.
-        assert "DP fold: WorkGroup1 * nWG0 (N-tile row)" in src, (
-            f"Kernel {base!r} missing the N-tile-row fold (WorkGroup1*nWG0)"
+        assert "DP fold: rank = cluster*Cs*Ck + peerY*Cs + peerX" in src, (
+            f"Kernel {base!r} missing the cluster-rank fold"
         )
-        assert "DP fold: PersistentWorkGroupIndex = batch*(nWG0*nWG1) + N*nWG0 + M" in src, (
-            f"Kernel {base!r} missing the linear tile-index fold"
+        assert "totalTiles = blocks * Cs*Ck" in src, (
+            f"Kernel {base!r} missing the whole-block tile bound"
         )
-        # The grid is rounded up to the cluster, so padded peers must exit before
-        # the first cluster barrier or their peers wait on an arrive that never
-        # comes.
-        assert "padded work-group: exit before any cluster barrier/load" in src, (
-            f"Kernel {base!r} missing the padded boundary-peer early exit"
+        assert "N tile = blockN*Ck + peerY" in src, (
+            f"Kernel {base!r} missing the cluster-block tile decode"
         )
-        # Both masks are bound: B broadcasts along Cs, A along Ck (self-only when
-        # Ck == 1).
-        assert_split_multicast_masks(src, base)
+        # Every peer stays in the cluster for every block, so there is no pad exit
+        # and a peer past the tile edge only skips its store.
+        assert "padded work-group: exit before any cluster barrier/load" not in src, (
+            f"Kernel {base!r} still emits the padded boundary-peer early exit"
+        )
+        assert "phantom tiles skip the store" in src, (
+            f"Kernel {base!r} missing the phantom-tile store skip"
+        )
+        assert _next_tile_arrive_follows_lds_drain(src), (
+            f"Kernel {base!r} loop-close arrive does not follow the tile's LDS drain"
+        )
+        # Multicast loads keep their prefetch pipelining: no per-iteration drain.
+        assert "retire cooperative tensor_load_to_lds" not in src, (
+            f"Kernel {base!r} drains every cooperative load in the main loop"
+        )
+        # B broadcasts along Cs and is bound for every tile. A is bound too unless
+        # Ck == 1, where its self-only mask is freed after the prologue.
+        assert "s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]" in src, (
+            f"Kernel {base!r} missing B-broadcast mask on the B descriptor"
+        )
+        if cluster_dim[1] > 1:
+            assert_split_multicast_masks(src, base)
         mask_a = _MASK_A[cluster_dim]
         assert f"s[sgprMulticastMaskA], {mask_a}" in src, (
             f"Kernel {base!r} A mask is not {mask_a} for ClusterDim={list(cluster_dim)}"
@@ -180,8 +153,8 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
             f"Kernel {base!r} missing cluster-scope barrier wait (-3)"
         )
         assert_cluster_barrier_balanced(src, base)
-        # Absent peers are handled structurally (pad-exit + reduced masks), so the
-        # runtime "is this cluster usable" selection guard must not be emitted.
+        # Edge peers are handled structurally (phantom tiles), so the runtime
+        # "is this cluster usable" selection guard must not be emitted.
         assert "nWG0 aligned to C?" not in src, (
             f"Kernel {base!r} emitted the runtime multicast selection guard"
         )
@@ -194,11 +167,10 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
             assert "skipPGR2" in src, (
                 f"Kernel {base!r} missing the PGR2 prologue double-buffer region"
             )
-            # That load sits past the generic bracketing boundary, so it needs its
-            # own cluster-scope handshake.
-            assert _skip_prefetch_handshake_brackets_load(src), (
-                f"Kernel {base!r} PGR2 prologue prefetch load is NOT bracketed by "
-                f"a cluster-scope -3 handshake"
+            # The first-load wait covers both prefetch buffers, so the LDS1 load
+            # issues right behind the LDS0 load.
+            assert "PersistentMC_SkipPrefetchSignal" not in src, (
+                f"Kernel {base!r} serializes the PGR2 prefetch behind a cluster handshake"
             )
 
 

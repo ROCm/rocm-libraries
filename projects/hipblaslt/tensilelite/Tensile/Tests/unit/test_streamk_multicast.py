@@ -239,6 +239,16 @@ class TestValidation:
         assert _validateStreamKMulticast(
             _mc_state(), False, _isa_map(has_cluster_barrier=False)) is False
 
+    def test_reject_space_filling_algo(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            _mc_state(SpaceFillingAlgo=[1]), False, _isa_map()) is False
+
+    def test_reject_reuse_across_persistent(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            _mc_state(ReuseAcrossPersistent=1), False, _isa_map()) is False
+
 
 class TestTDMInstValidation:
     """The tightened TDMInst check: StreamKMulticast requires TDMInst == 3 (the
@@ -275,11 +285,10 @@ class TestMulticastGate:
         st = _mc_state(Multicast=True)
         assert streamKMulticast(st)
 
-    def test_prefetch_handshake_inert_without_multicast(self):
+    def test_next_tile_arrive_inert_without_cluster(self):
         from Tensile.Components.WorkAssignment import StaticGrid
-        assignment = StaticGrid()
-        mod = assignment.persistentMulticastProloguePrefetchHandshake(
-            writer=None, kernel=_mc_state(Multicast=False))
+        mod = StaticGrid().persistentClusterNextTileArrive(
+            writer=None, kernel=_mc_state(ClusterDim=[1, 1]))
         items = mod.flatitems() if hasattr(mod, "flatitems") else mod.items()
         assert list(items) == []
 

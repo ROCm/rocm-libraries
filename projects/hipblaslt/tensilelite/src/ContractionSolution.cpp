@@ -2641,15 +2641,12 @@ namespace TensileLite
             if(sizeMapping.isDataParallel()
                && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1))
             {
-                // DataParallel cluster multicast [Cs, Ck]: launch a grid spanning
-                // the full M x N tile space -- gridX = nWG0 (M-tiles), gridY = nWG1
-                // (N-tiles), gridZ = batch -- so the common spatial tile mapping
-                // gives each work-group exactly one tile and the
-                // Cs X-peers of a cluster always land M-adjacent (sharing B). A 1-D
-                // [Cs, 1] cluster is the Ck == 1 case of the same launch. The
-                // round-up below pads non-multiple extents; launch.grid == tiles here.
-                rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
-                // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
+                // DataParallel cluster multicast [Cs, Ck]: launch.grid is a whole
+                // number of clusters, laid out (Cs * clusters, Ck, 1) so the kernel
+                // folds each hardware cluster into one persistent cluster rank.
+                rv.numWorkGroups.x = launch.grid / sizeMapping.clusterDim.y;
+                rv.numWorkGroups.y = sizeMapping.clusterDim.y;
+                rv.numWorkGroups.z = 1;
             }
             else
             {
@@ -2674,23 +2671,13 @@ namespace TensileLite
         rv.clusterDim = sizeMapping.clusterDim;
 
         // The HIP driver rejects a cluster launch whose grid is not divisible by
-        // clusterDim, so round up. The grid set above holds the REAL extents and
-        // need not be a cluster multiple. The extra padded work-groups early-exit
-        // in the DP tile-mapping prologue (persistentClusterPadEarlyExit)
-        // BEFORE the -3 cluster barrier, so their
-        // WAVEDONE decrements the barrier's live member count, and the surviving
-        // peers' broadcast masks are trimmed to the present lanes
-        // (computeMulticastMaskReduction).
-        //
-        // Only the DataParallel cluster multicast needs this: it is the path whose
-        // grid spans the real M x N tile space and whose padded peers have a
-        // pad-exit. A StreamK cluster keeps the existing launch --
-        // its 1-D launch.grid is not a tile space and it has no pad-exit, so rounding
-        // up would only add work-groups that run the whole Stream-K prologue
-        // before falling out on an empty iteration range.
-        bool persistentSpatialCluster = sizeMapping.isPersistent()
-                                  && sizeMapping.isDataParallel() && enableCluster;
-        if(enableCluster && (!sizeMapping.isPersistent() || persistentSpatialCluster))
+        // clusterDim, so round the tile-space grid of a non-persistent kernel up.
+        // Its padded work-groups early-exit before the cluster barrier and the
+        // surviving peers' broadcast masks are trimmed to the present lanes
+        // (computeMulticastMaskReduction). The DataParallel cluster grid above is
+        // already a whole number of clusters. A StreamK cluster keeps the existing
+        // launch -- its 1-D launch.grid is not a tile space and it has no pad-exit.
+        if(enableCluster && !sizeMapping.isPersistent())
         {
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
             rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
@@ -2957,11 +2944,11 @@ namespace TensileLite
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
         if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
         {
-            // DataParallel version-1 cluster kernels decode spatial workgroup coordinates.
-            // Match the generated-kernel launch, including padded boundary peers.
-            rv.numWorkGroups.x = RoundUpToMultiple(tiles.x, sizeMapping.clusterDim.x);
-            rv.numWorkGroups.y = RoundUpToMultiple(tiles.y, sizeMapping.clusterDim.y);
-            rv.numWorkGroups.z = tiles.z;
+            // DataParallel version-1 cluster kernels fold hardware clusters into
+            // cluster ranks. Match the generated-kernel launch.
+            rv.numWorkGroups.x = launch.grid / sizeMapping.clusterDim.y;
+            rv.numWorkGroups.y = sizeMapping.clusterDim.y;
+            rv.numWorkGroups.z = 1;
         }
         bool hasNumWorkGroupsArg = std::any_of(
             customKernel.args.begin(), customKernel.args.end(),
@@ -6923,10 +6910,26 @@ namespace TensileLite
             if(self.sizeMapping.isDataParallel())
             {
                 if(outSelectedGrid) *outSelectedGrid = grid;
-                if(self.sizeMapping.clusterDim.x * self.sizeMapping.clusterDim.y > 1)
+                const size_t clusterSize
+                    = self.sizeMapping.clusterDim.x * self.sizeMapping.clusterDim.y;
+                if(clusterSize > 1)
                 {
-                    grid = tiles;
-                    if(outClusterDPGridClamp) *outClusterDPGridClamp = true;
+                    // Each cluster walks whole Cs x Ck tile blocks, so the grid is a
+                    // whole number of clusters and at most one cluster per block.
+                    dim3 workGroupSize, tileGrid;
+                    self.calculateGrid(workGroupSize, tileGrid, problem);
+                    const size_t blocks
+                        = size_t{CeilDivide(tileGrid.x, self.sizeMapping.clusterDim.x)}
+                          * CeilDivide(tileGrid.y, self.sizeMapping.clusterDim.y) * tileGrid.z;
+                    size_t clusters = std::max(grid / clusterSize, size_t{1});
+                    // PrefetchAcrossPersistent issues the next tile's multicast loads
+                    // while partners may still read LDS, so it keeps one block per cluster.
+                    if(self.sizeMapping.prefetchAcrossPersistent)
+                    {
+                        clusters = blocks;
+                        if(outClusterDPGridClamp) *outClusterDPGridClamp = true;
+                    }
+                    grid = std::max(std::min(clusters, blocks), size_t{1}) * clusterSize;
                 }
                 else
                 {

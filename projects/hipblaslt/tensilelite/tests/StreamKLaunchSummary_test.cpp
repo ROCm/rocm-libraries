@@ -673,11 +673,11 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryNaWorkQueueWhenNotDynamic)
 }
 
 // ---------------------------------------------------------------------------
-// DataParallel/StaticGrid uses one workgroup per output tile when spatial
-// cluster peers require multicast. The canonical resolver exposes the selected
-// grid and the clamped launch grid, with no reduction or partial workspace.
+// DataParallel/StaticGrid spatial clusters walk whole Cs x Ck tile blocks, so
+// the launch grid is the selected grid in whole clusters, with no reduction or
+// partial workspace.
 // ---------------------------------------------------------------------------
-TEST(PersistentLaunchSummaryTest, ClusterDataParallelClampsGridToTiles)
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelGridIsWholeClusters)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
@@ -687,16 +687,58 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelClampsGridToTiles)
     auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.persistentDynamicGrid = 0;
     auto launch = solution.resolvePersistentSettings(problem, device);
-    EXPECT_TRUE(launch.clusterGridClamp);
+    EXPECT_FALSE(launch.clusterGridClamp);
     EXPECT_EQ(launch.selectedGrid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(launch.totalTiles, 32u * 33u);
-    EXPECT_EQ(launch.grid, launch.totalTiles);
+    EXPECT_EQ(launch.grid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(launch.reduction, origami::reduction_t::none);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
 }
 
 // ---------------------------------------------------------------------------
-// The clamp requires whole-tile processing and spatial cluster peers. An
+// The selected grid rounds down to whole clusters, keeps at least one cluster,
+// and never exceeds one cluster per tile block (16 x 17 blocks of 2 x 2 tiles).
+// ---------------------------------------------------------------------------
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelGridRoundsToClustersAndBlocks)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.persistentDynamicGrid = 0;
+    const std::vector<std::pair<int, size_t>> cases = {{30, 28u}, {1, 4u}, {5000, 16u * 17u * 4u}};
+    for(auto [fixedGrid, expectedGrid] : cases)
+    {
+        device.persistentFixedGrid = fixedGrid;
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.grid, expectedGrid) << "fixed grid " << fixedGrid;
+        EXPECT_FALSE(launch.clusterGridClamp);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PrefetchAcrossPersistent issues the next tile's multicast loads while cluster
+// partners may still read LDS, so it keeps one cluster per tile block.
+// ---------------------------------------------------------------------------
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelPrefetchAcrossPersistentUsesOneBlockPerCluster)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+    solution.sizeMapping.prefetchAcrossPersistent = 1;
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.persistentDynamicGrid = 0;
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_TRUE(launch.clusterGridClamp);
+    EXPECT_EQ(launch.grid, 16u * 17u * 4u);
+}
+
+// ---------------------------------------------------------------------------
+// Cluster grids require whole-tile processing and spatial cluster peers. An
 // unsupported policy pair is rejected; partial StreamK and K-only clusters
 // retain their selected grid.
 // ---------------------------------------------------------------------------
@@ -753,15 +795,16 @@ TEST(PersistentLaunchSummaryTest, DataParallelSummaryUsesCanonicalFields)
         EXPECT_NE(text.find("PersistentGrid=" + std::to_string(launch.grid)), std::string::npos);
         EXPECT_EQ(text.find("StreamK"), std::string::npos);
         EXPECT_EQ(text.find("forceDPOnly"), std::string::npos);
-        EXPECT_EQ(launch.clusterGridClamp, clustered);
+        EXPECT_FALSE(launch.clusterGridClamp);
     }
 }
 
 // ---------------------------------------------------------------------------
-// A fixed-grid override selects 32 workgroups, then the spatial cluster clamp
-// sets the launch grid to the tile count. The summary exposes both values.
+// A fixed-grid override selects 32 workgroups, which is already a whole number
+// of 2 x 2 clusters, so the spatial cluster launches it as is. The summary
+// exposes both values.
 // ---------------------------------------------------------------------------
-TEST(PersistentLaunchSummaryTest, SpatialClusterClampOverridesFixedGrid)
+TEST(PersistentLaunchSummaryTest, SpatialClusterKeepsWholeClusterFixedGrid)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
@@ -773,8 +816,8 @@ TEST(PersistentLaunchSummaryTest, SpatialClusterClampOverridesFixedGrid)
     device.persistentFixedGrid = 32;
     auto launch = solution.resolvePersistentSettings(problem, device);
     EXPECT_EQ(launch.selectedGrid, 32u);
-    EXPECT_TRUE(launch.clusterGridClamp);
-    EXPECT_EQ(launch.grid, launch.totalTiles);
+    EXPECT_FALSE(launch.clusterGridClamp);
+    EXPECT_EQ(launch.grid, 32u);
     std::ostringstream output;
     solution.printPersistentLaunchSummary(output, problem, launch);
     const auto text = output.str();
