@@ -45,7 +45,10 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 #define STEDC_BDIM 512 // Number of threads per thread-block used in main stedc kernels
-#define STEDC_SOLVE_BDIM 4 // Number of threads per thread-block used in solver kernel
+
+// Upper bound to number of threads of solver kernel (target number of threads is wave size; set
+// as max of wave sizes accross all supported architectures or larger).
+#define STEDC_SOLVE_BDIM 64
 
 // bit indicating base deflation candidate
 #define L_F_BCAND_BIT 0
@@ -717,11 +720,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     constexpr int F_TCAND = 1 << L_F_TCAND_BIT;
 
     // find deflate candidates
-    int i = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
+    rocblas_int i = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
     if(i < n)
     {
-        int next = (i + 1) < n ? (i + 1) : i;
-        int prev = (i > 0) ? (i - 1) : 0;
+        rocblas_int next = std::min(i + 1, n - 1);
+        rocblas_int prev = std::max(i - 1, 0);
         S tol = tolsD[i];
         S d = md[i];
         S dn = md[next];
@@ -1177,11 +1180,1095 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     }
 }
 
+// ---------------------------------------------------------------------------
+// DPP helpers -- AMDGCN GFX8+ only (register-to-register, no crossbar)
+// ---------------------------------------------------------------------------
+namespace stedc_detail
+{
+
+// WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
+// following should fall back into a generic, safe, implementation if no
+// architecture is detected.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)                                 \
+    && (defined(__GFX8__) || defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__) \
+        || defined(__GFX12__))
+
+template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl, typename T>
+__device__ inline T move_dpp_T(T v)
+{
+    static_assert(sizeof(T) % 4 == 0, "move_dpp_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __builtin_amdgcn_mov_dpp(src[w], dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+    return out;
+}
+
+template <int swizzle_mask, typename T>
+__device__ inline T ds_swizzle_T(T v)
+{
+    static_assert(sizeof(T) % 4 == 0, "ds_swizzle_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __builtin_amdgcn_ds_swizzle(src[w], swizzle_mask);
+    return out;
+}
+
+template <typename T>
+__device__ inline T shfl_bcast_T(T v, int src_lane)
+{
+    static_assert(sizeof(T) % 4 == 0, "shfl_bcast_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __shfl(src[w], src_lane);
+    return out;
+}
+
+#endif // AMDGCN GFX8+
+
+template <typename S>
+__device__ __forceinline__ void reduce_wave_sum(S& val)
+{
+// WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
+// following should fall back into a generic, safe, implementation if no
+// architecture is detected.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)                                 \
+    && (defined(__GFX8__) || defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__) \
+        || defined(__GFX12__))
+    // Require positive identification of the target so that debug builds (where __GFXxx__
+    // macros are absent) safely fall through to the shuffle fallback below.
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    // RDNA: wavefront=32, row_bcast DPP not available on GFX11.
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    // CDNA (GFX8/GFX9): wavefront=64, row_bcast available.
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
+
+    // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
+    val += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val); // quad_perm:[1,0,3,2]  shift 1
+    val += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val); // quad_perm:[2,3,0,1]  shift 2
+    val += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val); // row_ror:4            shift 4
+    val += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val); // row_ror:8            shift 8
+
+    // Step 5: broadcast lane-15 result into lanes 16-31.
+    if constexpr(is_cdna)
+        val += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val); // row_bcast:15 (CDNA)
+    else
+        val += ds_swizzle_T<0x1e0>(val); // GFX11 equivalent via ds_swizzle
+
+    // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
+    if constexpr(is_cdna)
+        val += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val); // row_bcast:31
+
+    // Result is in the last lane; broadcast to all lanes.
+    val = shfl_bcast_T(val, warpSize - 1);
+
+#else
+    // Shuffle fallback.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+    {
+        val += __shfl_down(val, r);
+    }
+
+    val = __shfl(val, 0);
+#endif
+}
+
+template <typename S>
+__device__ __forceinline__ void reduce_wave_sum(S& val1, S& val2, S& val3)
+{
+// WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
+// following should fall back into a generic, safe, implementation if no
+// architecture is detected.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)                                 \
+    && (defined(__GFX8__) || defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__) \
+        || defined(__GFX12__))
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
+
+    // All three chains advance in lock-step using distinct registers, giving the
+    // instruction scheduler visibility of three independent DPP chains simultaneously
+    // and allowing it to fill DPP read-after-write latency slots across chains.
+    val1 += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val1); // quad_perm:[1,0,3,2]
+    val2 += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val2);
+    val3 += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val3);
+
+    val1 += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val1); // quad_perm:[2,3,0,1]
+    val2 += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val2);
+    val3 += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val3);
+
+    val1 += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val1); // row_ror:4
+    val2 += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val2);
+    val3 += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val3);
+
+    val1 += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val1); // row_ror:8
+    val2 += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val2);
+    val3 += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val3);
+
+    if constexpr(is_cdna)
+    {
+        val1 += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val1); // row_bcast:15
+        val2 += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val2);
+        val3 += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val3);
+
+        val1 += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val1); // row_bcast:31
+        val2 += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val2);
+        val3 += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val3);
+    }
+    else
+    {
+        val1 += ds_swizzle_T<0x1e0>(val1);
+        val2 += ds_swizzle_T<0x1e0>(val2);
+        val3 += ds_swizzle_T<0x1e0>(val3);
+    }
+
+    val1 = shfl_bcast_T(val1, warpSize - 1);
+    val2 = shfl_bcast_T(val2, warpSize - 1);
+    val3 = shfl_bcast_T(val3, warpSize - 1);
+
+#else
+    reduce_wave_sum(val1);
+    reduce_wave_sum(val2);
+    reduce_wave_sum(val3);
+#endif
+}
+
+} // namespace stedc_detail
+
+template <typename S, typename I, bool OVERRIDE_3RD_ORDER_SCHEME = false>
+__device__ I laed4_alt(I n,
+                       I i,
+                       S* delta,
+                       S* z,
+                       S rho,
+                       S& dlam,
+                       S eps = std::numeric_limits<S>::epsilon() / S(2.),
+                       S ssfmin = std::numeric_limits<S>::min(),
+                       I MAXIT = 50)
+{
+    i = i + 1;
+    auto lam_abs = [](auto x) -> auto
+    {
+        return std::abs(x);
+    };
+    auto lam_sqr = [](auto x) -> auto
+    {
+        return x * x;
+    };
+    auto lam_sqrt = [](auto x) -> auto
+    {
+        return std::sqrt(x);
+    };
+    auto lam_max = [](auto x, auto y) -> auto
+    {
+        return std::max(x, y);
+    };
+    auto lam_min = [](auto x, auto y) -> auto
+    {
+        return std::min(x, y);
+    };
+
+    S zz[3]{};
+    struct X_t
+    {
+        S* x_;
+        __device__ X_t(S* x)
+            : x_(x)
+        {
+        }
+
+        __device__ S& operator()(int j)
+        {
+            return x_[j - 1];
+        }
+
+    } Z(z), ZZ(zz), DELTA(delta);
+
+    S tau, eta = S(0.), dltlb, dltub;
+    S psi, dpsi, phi, dphi, rhoinv, midpt;
+    S del, a, b, c, w, erretm, erretm2, temp, dw, temp1, prew;
+    I ii, niter, orgati, iim1, iip1;
+    bool swtch3, swtch;
+
+    S d1 = DELTA(1);
+    S di = DELTA(i);
+    S dnm1 = DELTA(n - 1);
+    S dn = DELTA(n);
+
+    rhoinv = S(1.) / rho;
+    I info = 0;
+
+    if(n == 1)
+    {
+        dlam = d1 + rho * Z(1) * Z(1);
+        DELTA(1) = S(1.);
+    }
+    else if(i == n)
+    {
+        ii = n - 1;
+        niter = 1;
+        //
+        //        Initial guess
+        //
+        //        If ||Z||_2 is not one, then midpt should be set to
+        //        rho * ||Z||_2^2 / S(2.)
+        //
+        midpt = rho / S(2.);
+
+        psi = S(0.);
+        for(int j = 1 + hipThreadIdx_x; j <= n - 2; j += hipBlockDim_x)
+        {
+            S dj = (DELTA(j) - di) - midpt;
+            psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
+        }
+        stedc_detail::reduce_wave_sum(psi);
+
+        c = rhoinv + psi;
+        w = c + Z(ii) * Z(ii) / ((DELTA(ii) - di) - midpt) + Z(n) * Z(n) / ((dn - di) - midpt);
+        if(w <= S(0.))
+        {
+            temp = Z(n - 1) * Z(n - 1) / (dn - dnm1 + rho) + Z(n) * Z(n) / rho;
+            if(c <= temp)
+            {
+                tau = rho;
+            }
+            else
+            {
+                del = dn - dnm1;
+                a = -c * del + Z(n - 1) * Z(n - 1) + Z(n) * Z(n);
+                b = Z(n) * Z(n) * del;
+                if(a < S(0.))
+                {
+                    tau = S(2.) * b / (lam_sqrt(a * a + S(4.) * b * c) - a);
+                }
+                else
+                {
+                    tau = (a + lam_sqrt(a * a + S(4.) * b * c)) / (S(2.) * c);
+                }
+            }
+            //
+            //           It can be proved that
+            //               D(n)+rho/2 <= LAMBDA(n) < D(n)+tau <= D(n)+rho
+            //
+            dltlb = midpt;
+            dltub = rho;
+        }
+        else
+        {
+            del = dn - dnm1;
+            a = -c * del + Z(n - 1) * Z(n - 1) + Z(n) * Z(n);
+            b = Z(n) * Z(n) * del;
+            if(a < S(0.))
+            {
+                tau = S(2.) * b / (lam_sqrt(a * a + S(4.) * b * c) - a);
+            }
+            else
+            {
+                tau = (a + lam_sqrt(a * a + S(4.) * b * c)) / (S(2.) * c);
+            }
+            //
+            //           It can be proved that
+            //               D(n) < D(n)+tau < LAMBDA(n) < D(n)+rho/2
+            //
+            dltlb = S(0.);
+            dltub = midpt;
+        }
+        for(int j = 1 + hipThreadIdx_x; j <= n; j += hipBlockDim_x)
+        {
+            DELTA(j) = (DELTA(j) - di) - tau;
+        }
+        __syncthreads();
+        //
+        //        Evaluate psi and the derivative dpsi
+        //
+        dpsi = S(0.);
+        psi = S(0.);
+        erretm = S(0.);
+        for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
+        {
+            temp = Z(j) / DELTA(j);
+            psi = psi + Z(j) * temp;
+            dpsi = dpsi + temp * temp;
+            erretm = erretm + psi;
+        }
+        stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
+        erretm = lam_abs(erretm);
+        //
+        //        Evaluate phi and the derivative dphi
+        //
+        temp = Z(n) / DELTA(n);
+        phi = Z(n) * temp;
+        dphi = temp * temp;
+        erretm = S(8.) * (-phi - psi) + erretm - phi + rhoinv + lam_abs(tau) * (dpsi + dphi);
+        w = rhoinv + phi + psi;
+        //
+        //        Test for convergence
+        //
+        if(lam_abs(w) <= eps * erretm)
+        {
+            dlam = di + tau;
+            return info;
+        }
+        if(w <= S(0.))
+        {
+            dltlb = lam_max(dltlb, tau);
+        }
+        else
+        {
+            dltub = lam_min(dltub, tau);
+        }
+        //
+        //        Calculate the new step
+        //
+        niter = niter + 1;
+        c = w - DELTA(n - 1) * dpsi - DELTA(n) * dphi;
+        a = (DELTA(n - 1) + DELTA(n)) * w - DELTA(n - 1) * DELTA(n) * (dpsi + dphi);
+        b = DELTA(n - 1) * DELTA(n) * w;
+        // REVIEW
+        if(c < S(0.))
+        {
+            c = lam_abs(c);
+        }
+        if(c <= S(0.))
+        {
+            eta = -w / (dpsi + dphi);
+        }
+        else if(a >= S(0.))
+        {
+            eta = (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+        }
+        else
+        {
+            eta = S(2.) * b / (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+        }
+        //
+        //        Note, eta should be positive if w is negative, and
+        //        eta should be negative otherwise. However,
+        //        if for some reason caused by roundoff, eta*w > 0,
+        //        we simply use one Newton step instead. This way
+        //        will guarantee eta*w < 0.
+        //
+        if(w * eta > S(0.))
+        {
+            eta = -w / (dpsi + dphi);
+        }
+        temp = tau + eta;
+        if(temp > dltub || temp < dltlb)
+        {
+            if(w < S(0.))
+            {
+                eta = (dltub - tau) / S(2.);
+            }
+            else
+            {
+                eta = (dltlb - tau) / S(2.);
+            }
+        }
+        for(int j = 1 + hipThreadIdx_x; j <= n; j += hipBlockDim_x)
+        {
+            DELTA(j) = DELTA(j) - eta;
+        }
+        __syncthreads();
+
+        tau = tau + eta;
+        //
+        //        Evaluate psi and the derivative dpsi
+        //
+        dpsi = S(0.);
+        psi = S(0.);
+        erretm = S(0.);
+        for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
+        {
+            temp = Z(j) / DELTA(j);
+            psi = psi + Z(j) * temp;
+            dpsi = dpsi + temp * temp;
+            erretm = erretm + psi;
+        }
+        stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
+        erretm = lam_abs(erretm);
+        //
+        //        Evaluate phi and the derivative dphi
+        //
+        temp = Z(n) / DELTA(n);
+        phi = Z(n) * temp;
+        dphi = temp * temp;
+        erretm = S(8.) * (-phi - psi) + erretm - phi + rhoinv + lam_abs(tau) * (dpsi + dphi);
+        w = rhoinv + phi + psi;
+        //
+        //        Main loop to update the values of the array DELTA
+        //
+        for(niter = niter + 1; niter <= MAXIT; ++niter)
+        {
+            //
+            //           Test for convergence
+            //
+            if(lam_abs(w) <= eps * erretm)
+            {
+                dlam = di + tau;
+                return info;
+            }
+            if(w <= S(0.))
+            {
+                dltlb = lam_max(dltlb, tau);
+            }
+            else
+            {
+                dltub = lam_min(dltub, tau);
+            }
+            //
+            //           Calculate the new step
+            //
+            c = w - DELTA(n - 1) * dpsi - DELTA(n) * dphi;
+            a = (DELTA(n - 1) + DELTA(n)) * w - DELTA(n - 1) * DELTA(n) * (dpsi + dphi);
+            b = DELTA(n - 1) * DELTA(n) * w;
+            if(a >= S(0.))
+            {
+                eta = (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+            }
+            else
+            {
+                eta = S(2.) * b / (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+            }
+            //
+            //           Note, eta should be positive if w is negative, and
+            //           eta should be negative otherwise. However,
+            //           if for some reason caused by roundoff, eta*w > 0,
+            //           we simply use one Newton step instead. This way
+            //           will guarantee eta*w < 0.
+            //
+            if(w * eta > S(0.))
+            {
+                eta = -w / (dpsi + dphi);
+            }
+            temp = tau + eta;
+            if(temp > dltub || temp < dltlb)
+            {
+                if(w < S(0.))
+                {
+                    eta = (dltub - tau) / S(2.);
+                }
+                else
+                {
+                    eta = (dltlb - tau) / S(2.);
+                }
+            }
+            for(int j = 1 + hipThreadIdx_x; j <= n; j += hipBlockDim_x)
+            {
+                DELTA(j) = DELTA(j) - eta;
+            }
+            __syncthreads();
+            tau = tau + eta;
+            //
+            //           Evaluate psi and the derivative dpsi
+            //
+            dpsi = S(0.);
+            psi = S(0.);
+            erretm = S(0.);
+            for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
+            {
+                temp = Z(j) / DELTA(j);
+                psi = psi + Z(j) * temp;
+                dpsi = dpsi + temp * temp;
+                erretm = erretm + psi;
+            }
+            stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
+            erretm = lam_abs(erretm);
+            //
+            //           Evaluate phi and the derivative dphi
+            //
+            temp = Z(n) / DELTA(n);
+            phi = Z(n) * temp;
+            dphi = temp * temp;
+            erretm = S(8.) * (-phi - psi) + erretm - phi + rhoinv + lam_abs(tau) * (dpsi + dphi);
+            w = rhoinv + phi + psi;
+        }
+        //
+        //        Return with info = 1, niter = MAXIT and not converged
+        //
+        info = 1;
+        dlam = di + tau;
+    }
+    else
+    {
+        //
+        //        The case for i < n
+        //
+        niter = 1;
+        I ip1 = i + 1;
+        S dip1 = DELTA(ip1);
+        //
+        //        Calculate initial guess
+        //
+        del = dip1 - di;
+        midpt = del / S(2.);
+        psi = S(0.);
+        for(int j = 1 + hipThreadIdx_x; j <= i - 1; j += hipBlockDim_x)
+        {
+            S dj = (DELTA(j) - di) - midpt;
+            psi = psi + Z(j) * Z(j) / dj;
+        }
+        stedc_detail::reduce_wave_sum(psi);
+
+        phi = S(0.);
+        for(int j = n - hipThreadIdx_x; j >= i + 2; j -= hipBlockDim_x)
+        {
+            S dj = (DELTA(j) - di) - midpt;
+            phi = phi + Z(j) * Z(j) / dj;
+        }
+        stedc_detail::reduce_wave_sum(phi);
+
+        c = rhoinv + psi + phi;
+        w = c + Z(i) * Z(i) / (-midpt) + Z(ip1) * Z(ip1) / ((dip1 - di) - midpt);
+        if(w > S(0.))
+        {
+            //
+            //           d(i) < the ith eigenvalue < (d(i)+d(i+1))/2
+            //
+            //           We choose d(i) as origin.
+            //
+            orgati = true;
+            a = c * del + Z(i) * Z(i) + Z(ip1) * Z(ip1);
+            b = Z(i) * Z(i) * del;
+            if(a > S(0.))
+            {
+                tau = S(2.) * b / (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+            }
+            else
+            {
+                tau = (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+            }
+            dltlb = S(0.);
+            dltub = midpt;
+        }
+        else
+        {
+            //
+            //           (d(i)+d(i+1))/2 <= the ith eigenvalue < d(i+1)
+            //
+            //           We choose d(i+1) as origin.
+            //
+            orgati = false;
+            a = c * del - Z(i) * Z(i) - Z(ip1) * Z(ip1);
+            b = Z(ip1) * Z(ip1) * del;
+            if(a < S(0.))
+            {
+                tau = S(2.) * b / (a - lam_sqrt(lam_abs(a * a + S(4.) * b * c)));
+            }
+            else
+            {
+                tau = -(a + lam_sqrt(lam_abs(a * a + S(4.) * b * c))) / (S(2.) * c);
+            }
+            dltlb = -midpt;
+            dltub = S(0.);
+        }
+        if(orgati)
+        {
+            ii = i;
+        }
+        else
+        {
+            ii = i + 1;
+        }
+        iim1 = ii - 1;
+        iip1 = ii + 1;
+        S diim1 = DELTA(iim1);
+        S diip1 = DELTA(iip1);
+        if(orgati)
+        {
+            for(int j = 1 + hipThreadIdx_x; j <= n; j += hipBlockDim_x)
+            {
+                DELTA(j) = (DELTA(j) - di) - tau;
+            }
+        }
+        else
+        {
+            for(int j = 1 + hipThreadIdx_x; j <= n; j += hipBlockDim_x)
+            {
+                DELTA(j) = (DELTA(j) - dip1) - tau;
+            }
+        }
+        __syncthreads();
+        //
+        //        Evaluate psi and the derivative dpsi
+        //
+        dpsi = S(0.);
+        psi = S(0.);
+        erretm = S(0.);
+        for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
+        {
+            temp = Z(j) / DELTA(j);
+            psi = psi + Z(j) * temp;
+            dpsi = dpsi + temp * temp;
+            erretm = erretm + psi;
+        }
+        stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
+        erretm = lam_abs(erretm);
+        //
+        //        Evaluate phi and the derivative dphi
+        //
+        dphi = S(0.);
+        phi = S(0.);
+        erretm2 = S(0.);
+        for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+        {
+            temp = Z(j) / DELTA(j);
+            phi = phi + Z(j) * temp;
+            dphi = dphi + temp * temp;
+            erretm2 = erretm2 + phi;
+        }
+        stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
+        erretm += erretm2;
+        w = rhoinv + phi + psi;
+        //
+        //        w is the value of the secular function with
+        //        its ii-th element removed.
+        //
+        swtch3 = false;
+        if(!OVERRIDE_3RD_ORDER_SCHEME)
+        {
+            if(orgati)
+            {
+                if(w < S(0.))
+                {
+                    swtch3 = true;
+                }
+            }
+            else
+            {
+                if(w > S(0.))
+                {
+                    swtch3 = true;
+                }
+            }
+            if(ii == 1 || ii == n)
+            {
+                swtch3 = false;
+            }
+        }
+        temp = Z(ii) / DELTA(ii);
+        dw = dpsi + dphi + temp * temp;
+        temp = Z(ii) * temp;
+        w = w + temp;
+        erretm = S(8.) * (phi - psi) + erretm + S(2.) * rhoinv + S(3.) * lam_abs(temp)
+            + lam_abs(tau) * dw;
+        //
+        //        Test for convergence
+        //
+        if(lam_abs(w) <= eps * erretm)
+        {
+            if(orgati)
+            {
+                dlam = di + tau;
+            }
+            else
+            {
+                dlam = dip1 + tau;
+            }
+
+            return info;
+        }
+        if(w <= S(0.))
+        {
+            dltlb = lam_max(dltlb, tau);
+        }
+        else
+        {
+            dltub = lam_min(dltub, tau);
+        }
+        //
+        //        Calculate the new step
+        //
+        niter = niter + 1;
+        if(OVERRIDE_3RD_ORDER_SCHEME || !swtch3)
+        {
+            if(orgati)
+            {
+                c = w - DELTA(ip1) * dw - (di - dip1) * lam_sqr(Z(i) / DELTA(i));
+            }
+            else
+            {
+                c = w - DELTA(i) * dw - (dip1 - di) * lam_sqr(Z(ip1) / DELTA(ip1));
+            }
+            a = (DELTA(i) + DELTA(ip1)) * w - DELTA(i) * DELTA(ip1) * dw;
+            b = DELTA(i) * DELTA(ip1) * w;
+            if(c == S(0.))
+            {
+                if(a == S(0.))
+                {
+                    if(orgati)
+                    {
+                        a = Z(i) * Z(i) + DELTA(ip1) * DELTA(ip1) * (dpsi + dphi);
+                    }
+                    else
+                    {
+                        a = Z(ip1) * Z(ip1) + DELTA(i) * DELTA(i) * (dpsi + dphi);
+                    }
+                }
+                eta = b / a;
+            }
+            else if(a <= S(0.))
+            {
+                eta = (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+            }
+            else
+            {
+                eta = S(2.) * b / (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+            }
+        }
+        else
+        {
+            //
+            //           Interpolation using THREE most relevant poles
+            //
+            temp = rhoinv + psi + phi;
+            if(orgati)
+            {
+                temp1 = Z(iim1) / DELTA(iim1);
+                temp1 = temp1 * temp1;
+                c = temp - DELTA(iip1) * (dpsi + dphi) - (diim1 - diip1) * temp1;
+                ZZ(1) = Z(iim1) * Z(iim1);
+                ZZ(3) = DELTA(iip1) * DELTA(iip1) * ((dpsi - temp1) + dphi);
+            }
+            else
+            {
+                temp1 = Z(iip1) / DELTA(iip1);
+                temp1 = temp1 * temp1;
+                c = temp - DELTA(iim1) * (dpsi + dphi) - (diip1 - diim1) * temp1;
+                ZZ(1) = DELTA(iim1) * DELTA(iim1) * (dpsi + (dphi - temp1));
+                ZZ(3) = Z(iip1) * Z(iip1);
+            }
+            ZZ(2) = Z(ii) * Z(ii);
+            info = slaed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin, MAXIT);
+            if(info != 0)
+            {
+                return info;
+            }
+        }
+        //
+        //        Note, eta should be positive if w is negative, and
+        //        eta should be negative otherwise. However,
+        //        if for some reason caused by roundoff, eta*w > 0,
+        //        we simply use one Newton step instead. This way
+        //        will guarantee eta*w < 0.
+        //
+        if(w * eta >= S(0.))
+        {
+            eta = -w / dw;
+        }
+        temp = tau + eta;
+        if(temp > dltub || temp < dltlb)
+        {
+            if(w < S(0.))
+            {
+                eta = (dltub - tau) / S(2.);
+            }
+            else
+            {
+                eta = (dltlb - tau) / S(2.);
+            }
+        }
+        prew = w;
+        for(int j = 1 + hipThreadIdx_x; j <= n; j += hipBlockDim_x)
+        {
+            DELTA(j) = DELTA(j) - eta;
+        }
+        __syncthreads();
+        //
+        //        Evaluate psi and the derivative dpsi
+        //
+        dpsi = S(0.);
+        psi = S(0.);
+        erretm = S(0.);
+        for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
+        {
+            temp = Z(j) / DELTA(j);
+            psi = psi + Z(j) * temp;
+            dpsi = dpsi + temp * temp;
+            erretm = erretm + psi;
+        }
+        stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
+        erretm = lam_abs(erretm);
+        //
+        //        Evaluate phi and the derivative dphi
+        //
+        dphi = S(0.);
+        phi = S(0.);
+        erretm2 = S(0.);
+        for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+        {
+            temp = Z(j) / DELTA(j);
+            phi = phi + Z(j) * temp;
+            dphi = dphi + temp * temp;
+            erretm2 = erretm2 + phi;
+        }
+        stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
+        erretm += erretm2;
+        temp = Z(ii) / DELTA(ii);
+        dw = dpsi + dphi + temp * temp;
+        temp = Z(ii) * temp;
+        w = rhoinv + phi + psi + temp;
+        erretm = S(8.) * (phi - psi) + erretm + S(2.) * rhoinv + S(3.) * lam_abs(temp)
+            + lam_abs(tau + eta) * dw;
+        swtch = false;
+        if(orgati)
+        {
+            if(-w > lam_abs(prew) / S(10.))
+            {
+                swtch = true;
+            }
+        }
+        else
+        {
+            if(w > lam_abs(prew) / S(10.))
+            {
+                swtch = true;
+            }
+        }
+        tau = tau + eta;
+        //
+        //        Main loop to update the values of the array   DELTA
+        //
+        for(niter = niter + 1; niter < MAXIT; ++niter)
+        {
+            //
+            //           Test for convergence
+            //
+            if(lam_abs(w) <= eps * erretm)
+            {
+                if(orgati)
+                {
+                    dlam = di + tau;
+                }
+                else
+                {
+                    dlam = dip1 + tau;
+                }
+
+                return info;
+            }
+            if(w <= S(0.))
+            {
+                dltlb = lam_max(dltlb, tau);
+            }
+            else
+            {
+                dltub = lam_min(dltub, tau);
+            }
+            //
+            //           Calculate the new step
+            //
+            if(OVERRIDE_3RD_ORDER_SCHEME || !swtch3)
+            {
+                if(!swtch)
+                {
+                    if(orgati)
+                    {
+                        c = w - DELTA(ip1) * dw - (di - dip1) * lam_sqr(Z(i) / DELTA(i));
+                    }
+                    else
+                    {
+                        c = w - DELTA(i) * dw - (dip1 - di) * lam_sqr(Z(ip1) / DELTA(ip1));
+                    }
+                }
+                else
+                {
+                    temp = Z(ii) / DELTA(ii);
+                    if(orgati)
+                    {
+                        dpsi = dpsi + temp * temp;
+                    }
+                    else
+                    {
+                        dphi = dphi + temp * temp;
+                    }
+                    c = w - DELTA(i) * dpsi - DELTA(ip1) * dphi;
+                }
+                a = (DELTA(i) + DELTA(ip1)) * w - DELTA(i) * DELTA(ip1) * dw;
+                b = DELTA(i) * DELTA(ip1) * w;
+                if(c == S(0.))
+                {
+                    if(a == S(0.))
+                    {
+                        if(!swtch)
+                        {
+                            if(orgati)
+                            {
+                                a = Z(i) * Z(i) + DELTA(ip1) * DELTA(ip1) * (dpsi + dphi);
+                            }
+                            else
+                            {
+                                a = Z(ip1) * Z(ip1) + DELTA(i) * DELTA(i) * (dpsi + dphi);
+                            }
+                        }
+                        else
+                        {
+                            a = DELTA(i) * DELTA(i) * dpsi + DELTA(ip1) * DELTA(ip1) * dphi;
+                        }
+                    }
+                    eta = b / a;
+                }
+                else if(a <= S(0.))
+                {
+                    eta = (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+                }
+                else
+                {
+                    eta = S(2.) * b / (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+                }
+            }
+            else
+            {
+                //
+                //              Interpolation using 3 most relevant poles
+                //
+                temp = rhoinv + psi + phi;
+                if(swtch)
+                {
+                    c = temp - DELTA(iim1) * dpsi - DELTA(iip1) * dphi;
+                    ZZ(1) = DELTA(iim1) * DELTA(iim1) * dpsi;
+                    ZZ(3) = DELTA(iip1) * DELTA(iip1) * dphi;
+                }
+                else
+                {
+                    if(orgati)
+                    {
+                        temp1 = Z(iim1) / DELTA(iim1);
+                        temp1 = temp1 * temp1;
+                        c = temp - DELTA(iip1) * (dpsi + dphi) - (diim1 - diip1) * temp1;
+                        ZZ(1) = Z(iim1) * Z(iim1);
+                        ZZ(3) = DELTA(iip1) * DELTA(iip1) * ((dpsi - temp1) + dphi);
+                    }
+                    else
+                    {
+                        temp1 = Z(iip1) / DELTA(iip1);
+                        temp1 = temp1 * temp1;
+                        c = temp - DELTA(iim1) * (dpsi + dphi) - (diip1 - diim1) * temp1;
+                        ZZ(1) = DELTA(iim1) * DELTA(iim1) * (dpsi + (dphi - temp1));
+                        ZZ(3) = Z(iip1) * Z(iip1);
+                    }
+                }
+                info = slaed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin,
+                             MAXIT);
+                if(info != 0)
+                {
+                    return info;
+                }
+            }
+            //
+            //           Note, eta should be positive if w is negative, and
+            //           eta should be negative otherwise. However,
+            //           if for some reason caused by roundoff, eta*w > 0,
+            //           we simply use one Newton step instead. This way
+            //           will guarantee eta*w < 0.
+            //
+            if(w * eta >= S(0.))
+            {
+                eta = -w / dw;
+            }
+            temp = tau + eta;
+            if(temp > dltub || temp < dltlb)
+            {
+                if(w < S(0.))
+                {
+                    eta = (dltub - tau) / S(2.);
+                }
+                else
+                {
+                    eta = (dltlb - tau) / S(2.);
+                }
+            }
+            /* * */
+            for(int j = 1 + hipThreadIdx_x; j <= n; j += hipBlockDim_x)
+            {
+                DELTA(j) = DELTA(j) - eta;
+            }
+            __syncthreads();
+            tau = tau + eta;
+            prew = w;
+            //
+            //           Evaluate psi and the derivative dpsi
+            //
+            dpsi = S(0.);
+            psi = S(0.);
+            erretm = S(0.);
+            for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
+            {
+                temp = Z(j) / DELTA(j);
+                psi = psi + Z(j) * temp;
+                dpsi = dpsi + temp * temp;
+                erretm = erretm + psi;
+            }
+            stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
+            erretm = lam_abs(erretm);
+            //
+            //           Evaluate phi and the derivative dphi
+            //
+            dphi = S(0.);
+            phi = S(0.);
+            erretm2 = S(0.);
+            for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+            {
+                temp = Z(j) / DELTA(j);
+                phi = phi + Z(j) * temp;
+                dphi = dphi + temp * temp;
+                erretm2 = erretm2 + phi;
+            }
+            stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
+            erretm += erretm2;
+            temp = Z(ii) / DELTA(ii);
+            dw = dpsi + dphi + temp * temp;
+            temp = Z(ii) * temp;
+            w = rhoinv + phi + psi + temp;
+            erretm = S(8.) * (phi - psi) + erretm + S(2.) * rhoinv + S(3.) * lam_abs(temp)
+                + lam_abs(tau) * dw;
+            if(w * prew > S(0.) && lam_abs(w) > lam_abs(prew) / S(10.))
+            {
+                swtch = !swtch;
+            }
+        }
+        //
+        //        Return with info = 1, niter = MAXIT and not converged
+        //
+        info = 1;
+        if(orgati)
+        {
+            dlam = di + tau;
+        }
+        else
+        {
+            dlam = dip1 + tau;
+        }
+    }
+
+    return info;
+}
+
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGEVALUES_KERNEL solves the secular equation for every pair of sub-blocks
     that need to be merged.
         - Call this kernel with batch_count groups in y, and as many groups in x as needed
-          to cover n (i.e. n_groups_x * groups_size_x >= n). Groups are size STEDC_SOLVE_BDIM **/
+          to cover n (i.e. n_groups_x * groups_size_x >= n). Workgroup size is STEDC_SOLVE_BDIM
+          (= warp size). **/
 
 template <typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
@@ -1215,8 +2302,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
     S* tempgemm = tempgemmA + bid * get_tempgemm_size(n);
     S* etmpd = ptr_etmpd(n, tempgemm);
 
+#if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
+    // Reference path: STEDC_SOLVE_BDIM threads per block, each thread owns one eigenvalue
     int i = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
-    if(i < n)
+    if(i >= n)
+        return;
+#else
+    // Updated path: one block (one warp) per eigenvalue
+    int i = hipBlockIdx_x;
+#endif
+
     {
         S p = r1p[i];
         rocblas_int p1 = nps[i];
@@ -1236,20 +2331,19 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
             // 'etmpd' will be updated with the distances D - lambda_i.
             // deflated values are not changed.
             rocblas_int linfo;
+            S dlam{};
 
 #if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
-            linfo = slaed4(dd, cc, etmpd + i * n, z + p1, std::abs(p), evs[i]);
+            // Each thread independently computes its own eigenvalue
+            linfo = slaed4(dd, cc, etmpd + i * n, z + p1, std::abs(p), dlam);
+            evs[i] = (p < 0) ? -dlam : dlam;
 #else
-            if(cc == dd - 1)
-                linfo = seq_solve_ext(dd, etmpd + i * n, z + p1, std::abs(p), evs + i, eps, ssfmin,
-                                      ssfmax);
-            else
-                linfo = seq_solve(dd, etmpd + i * n, z + p1, std::abs(p), cc, evs + i, eps, ssfmin,
-                                  ssfmax);
+            linfo = laed4_alt<S, rocblas_int>(dd, cc, etmpd + i * n, z + p1, std::abs(p), dlam);
+            if(hipThreadIdx_x == 0)
+            {
+                evs[i] = (p < 0) ? -dlam : dlam;
+            }
 #endif
-
-            if(p < 0)
-                evs[i] *= -1;
         }
     }
 }
@@ -2064,11 +3158,19 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                     stream, n, ptr_vecs(n, tempgemm), 0, n, get_tempgemm_size(n), V,
                                     0, ldv, strideV, splits);
 
+#if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
             rocblas_int numgrps_solve = (n - 1) / STEDC_SOLVE_BDIM + 1;
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>),
                                     dim3(numgrps_solve, batch_count), dim3(STEDC_SOLVE_BDIM), 0,
                                     stream, k, n, D + shiftD, strideD, E + shiftE, strideE, tmpz,
                                     tempgemm, splits, eps, ssfmin, ssfmax);
+#else
+            const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+            ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>), dim3(n, batch_count),
+                    dim3(props->warpSize), 0, stream, k, n, D + shiftD, strideD,
+                    E + shiftE, strideE, tmpz, tempgemm, splits, eps, ssfmin,
+                    ssfmax);
+#endif
 
             ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Rescale_kernel<S>), dim3(n, batch_count),
                                     dim3(STEDC_BDIM), 0, stream, k, n, D + shiftD, strideD,
@@ -2189,7 +3291,6 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         ROCSOLVER_LAUNCH_KERNEL(stedc_sort<T>, dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, n,
                                 tmpz, n, D + shiftD, strideD, (T*)tempgemm, 0, n, n * n, C, shiftC,
                                 ldc, strideC);
-
         rocblas_set_pointer_mode(handle, old_mode);
     }
 
