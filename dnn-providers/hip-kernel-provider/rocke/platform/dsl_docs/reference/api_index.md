@@ -2,6 +2,9 @@
 
 Top-level re-exports from `rocke` and `rocke.helpers`. Use this as a quick lookup when reading other docs.
 
+For `MmaOp` fields, scale layouts, and `MmaCatalog` selection rules, see
+[MMA metadata and queries](mma_metadata.md).
+
 ## `from rocke import ...`
 
 ```text

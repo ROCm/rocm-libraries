@@ -67,13 +67,13 @@ void testing_tpmv_bad_arg(const Arguments& arg)
     DAPI_EXPECT(rocblas_status_invalid_pointer,
                 rocblas_tpmv_fn,
                 (handle, uplo, transA, diag, N, dAp, nullptr, incx));
-    // If N is 64 bit
-    if(arg.api & c_API_64)
+    // If N is 64 bit and API is not 64 bit, then N truncation seen as negative value
+    if(!(arg.api & c_API_64))
     {
         int64_t n_over_int32 = 2147483649;
         DAPI_EXPECT(rocblas_status_invalid_size,
                     rocblas_tpmv_fn,
-                    (nullptr, uplo, transA, diag, n_over_int32, dAp, dx, incx));
+                    (handle, uplo, transA, diag, n_over_int32, dAp, dx, incx));
     }
 }
 
@@ -92,6 +92,7 @@ void testing_tpmv(const Arguments& arg)
     rocblas_fill         uplo   = char2rocblas_fill(char_uplo);
     rocblas_operation    transA = char2rocblas_operation(char_transA);
     rocblas_diagonal     diag   = char2rocblas_diagonal(char_diag);
+    bool                 HMM    = arg.HMM;
     rocblas_local_handle handle{arg};
 
     bool invalid_size = N < 0 || !incx;
@@ -112,8 +113,8 @@ void testing_tpmv(const Arguments& arg)
     HOST_MEMCHECK(host_vector<T>, hres, (N, incx));
 
     // Allocate device memory
-    DEVICE_MEMCHECK(device_matrix<T>, dAp, (1, rocblas_packed_matrix_size(N), 1));
-    DEVICE_MEMCHECK(device_vector<T>, dx, (N, incx));
+    DEVICE_MEMCHECK(device_matrix<T>, dAp, (1, rocblas_packed_matrix_size(N), 1, HMM));
+    DEVICE_MEMCHECK(device_vector<T>, dx, (N, incx, HMM));
 
     // Initialize data on host memory
     rocblas_init_matrix(
@@ -161,8 +162,9 @@ void testing_tpmv(const Arguments& arg)
                 rocblas_local_handle handle_copy{arg};
 
                 // Allocate device memory
-                DEVICE_MEMCHECK(device_matrix<T>, dAp_copy, (1, rocblas_packed_matrix_size(N), 1));
-                DEVICE_MEMCHECK(device_vector<T>, dx_copy, (N, incx));
+                DEVICE_MEMCHECK(
+                    device_matrix<T>, dAp_copy, (1, rocblas_packed_matrix_size(N), 1, HMM));
+                DEVICE_MEMCHECK(device_vector<T>, dx_copy, (N, incx, HMM));
 
                 CHECK_HIP_ERROR(dAp_copy.transfer_from(hAp));
 
