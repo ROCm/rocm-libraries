@@ -3130,9 +3130,12 @@ class SDelayAlu(Instruction):
     """``s_delay_alu`` shim matching ``rocisa::SDelayAlu``.
 
     Operand is the gfx12+ ``instid0`` / ``instskip`` / ``instid1`` encoding,
-    not a single integer immediate. stinkytofu's Python SDelayAlu binding
-    currently asserts on SDelayAluData, so ``to_stinky_logical`` still
-    emits an SNop placeholder restored by ``code._postprocess_delay_alu_placeholder``.
+    not a single integer immediate. ``to_stinky_logical`` builds a real
+    ``stinkytofu.SDelayAlu`` and attaches the ``SDelayAluData`` modifier via
+    ``set_sdelayalu`` -- the same modifier the native ToStinkyTofuUtils path
+    attaches (``convertSDelayAluData``) -- so both backends carry identical
+    s_delay_alu into the pipeline (matters at OptLevel 0, where RemoveDelayAlu
+    is gated off and the incoming delay_alu feeds the wait/hazard passes).
     """
 
     __slots__ = ("instid0type", "instid0cnt", "instskipCnt", "instid1type", "instid1cnt")
@@ -3210,7 +3213,19 @@ class SDelayAlu(Instruction):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SNop(_st.Register(0), "DELAY_ALU:" + self._operand_text())
+        # src0 is a dummy: s_delay_alu carries no register operand (the native
+        # path skips registers). The emitter renders it from the SDelayAluData
+        # modifier via custom operands, so the placeholder register is ignored.
+        inst = _st.SDelayAlu(_st.Register(0), self.comment)
+        inst.set_sdelayalu(
+            id0_type=self.instid0type,
+            id0_cnt=self.instid0cnt,
+            has_id1=self.hasInstID1(),
+            skip=0 if self.instskipCnt is None else self.instskipCnt,
+            id1_type=int(DelayALUType.OTHER) if self.instid1type is None else self.instid1type,
+            id1_cnt=0 if self.instid1cnt is None else self.instid1cnt,
+        )
+        return inst
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
