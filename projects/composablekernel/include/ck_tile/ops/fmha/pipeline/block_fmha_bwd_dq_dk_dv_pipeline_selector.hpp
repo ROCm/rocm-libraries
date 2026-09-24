@@ -9,6 +9,11 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_ldsacc_kr_ktr_vr.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_trload_kr_ktr_vr.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_trload_qr_qtr_dor.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_trload_qr_qtr_dor_tdm.hpp"
+
+#ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM
+#define CK_TILE_FMHA_BWD_TRLOAD_TDM 0
+#endif
 
 namespace ck_tile {
 
@@ -23,9 +28,14 @@ class BlockFmhaBwdDQDKDVPipelineSelector
     template <typename... TS>
     using type_ =
         std::conditional_t<Problem::kUseTrLoad,
-                           std::conditional_t<is_decode,
-                                              BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR<TS...>,
-                                              BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR<TS...>>,
+                           std::conditional_t<
+                               is_decode,
+#if CK_TILE_FMHA_BWD_TRLOAD_TDM
+                               BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM<TS...>,
+#else
+                               BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR<TS...>,
+#endif
+                               BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR<TS...>>,
                            // LdsAcc is the IGLP pipeline with the dK/dV
                            // accumulators moved to LDS, so it slots in wherever
                            // IGLP would have been chosen. It outranks has_dpad1:

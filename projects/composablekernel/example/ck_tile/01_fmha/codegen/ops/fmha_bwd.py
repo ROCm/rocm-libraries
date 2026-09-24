@@ -346,6 +346,10 @@ class FmhaBwdDQDKDVTileSize:
     # kN0*headdim/kBlockSize VGPRs per accumulator, which is what gets gfx1250
     # back to 2 waves/SIMD at headdim >= 128.
     lds_acc: bool = False
+    # Emit this tile only for masked instances. Inverse of the nomask_only that
+    # the LdsAcc switch retired; the decode tile needs it because QrQtrDor wins
+    # on nomask short-q and loses badly on causal short-q.
+    mask_only: bool = False
     # Q/dO ring depth for this instance; 0 defers to CK_TILE_FMHA_BWD_QDO_SLOTS.
     # Only meaningful on unmasked instances -- masked ones resolve to
     # CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED first.
@@ -603,6 +607,13 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
                 FmhaBwdDQDKDVTileSize( 32,  32,  64,  32,  64,  32,  32,   64,   64,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  2, 32, dispatch_min_grid=768, allow_mask=True),
+                # hdim 32 cannot use the trload decode path: WarpAlignmentBytes=128
+                # forces K2*K3 = 64 bf16 elements per warp row segment, and hdim 32
+                # only has 32 -- K_remain underflows to 0 in MakeXDramTileDistribution.
+                FmhaBwdDQDKDVTileSize( 32,  32, 128,  32, 128,  32,  32,  128,  128,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  1, 32, dispatch_min_grid=768, allow_mask=True, mask_only=True),
+                # hdim 256 decode spills: 32 threads cannot hold Q/Q^T/dO at that
+                # headdim (1024 VGPRs capped, ~2.4 KB scratch), and it measured
+                # -55% on nomask. Needs the multi-warp rework first.
             ]  # fmt: skip
         if dtype in ["fp16", "bf16"]:
             return [
@@ -1201,6 +1212,8 @@ def get_bwd_blobs(
             if (mode == "group") and (spad1d == "f"):
                 continue
             if ("no" not in mask) and tile.seq_q_limit != 0 and not tile.allow_mask:
+                continue
+            if ("no" in mask) and tile.mask_only:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue
