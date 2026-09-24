@@ -740,6 +740,10 @@ class LogicalScheduler:
         self._preloop_emitted: Optional[EmittedSchedule] = None
         self._ngll_emitted: Optional[EmittedSchedule] = None
         self._nll_emitted: Optional[EmittedSchedule] = None
+        # The four-deep tail (see build_tail_merged) and the scheduler that
+        # produced it; the latter owns the tile maps the emitter needs.
+        self._tail_merged_emitted: Optional[EmittedSchedule] = None
+        self._tail_merged_scheduler: Optional['LogicalScheduler'] = None
         # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are
         # unused or freed for reuse within the tail loop.
         self._tail_unused_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
@@ -858,20 +862,19 @@ class LogicalScheduler:
                 <= self._lr_tile_set_count(cfg.numSubIterK // g.k, t)}
 
     def _span_ngll_merge_enabled(self) -> bool:
-        """Is the NGLL folded into the NLL per partition?
+        """Does the tail run all four of a partition's k-subiterations?
 
         Asked at two very distant points -- register allocation and emission --
-        and they have to agree, so both go through here. Allocating for a merge
-        that does not happen only wastes registers, but emitting a merge that
+        and they have to agree, so both go through here. Allocating for a tail
+        that is never emitted only wastes registers, but emitting one that
         allocation did not plan for aliases the two unroll iterations onto one
         set of tiles. This deliberately ignores the emission-side nll_ft
         condition: it is the conservative direction.
 
-        Off by default, because the merge is still wrong -- see
-        _plsinSpanNgllPartitions for what the concatenation breaks. Turning it on
-        costs a few VGPRs on top of that, and several library tiles already sit
-        within single digits of the 256 cap, where an overflow is a hard build
-        failure rather than a silent drop.
+        Off by default while the four-deep tail (build_tail_merged) is being
+        brought up. It costs A the registers to stay live across four k-steps,
+        and several library tiles already sit within single digits of the 256
+        cap, where an overflow is a hard build failure rather than a silent drop.
         """
         if self.config.pgr < 2 or not self.config.blockSched:
             return False
@@ -3129,7 +3132,8 @@ class LogicalScheduler:
     def build_nll(self) -> EmittedSchedule:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
         WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n). WaitGR counts are
-        zeroed only when no LR(n) remains in the last subIterK slot."""
+        zeroed only when no LR(n) remains in the last subIterK slot.
+        """
         assert self._emitted is not None, "call build() first"
 
         if self.config.pgr == 0:
@@ -3195,6 +3199,136 @@ class LogicalScheduler:
 
         self._nll_emitted = nll
         return nll
+
+    def build_tail_merged(self) -> Optional[EmittedSchedule]:
+        """Schedule the last two DepthU as one body, four k-subiterations deep.
+
+        The tail is the one place a partition can run more than one DepthU: by
+        then the global loads have stopped, so both halves of the double buffer
+        are readable at once and together hold four k-steps of data that is
+        already resident. Running them back to back is what lets partition p
+        reach its final accumulator early enough for its store to drain
+        underneath partition p+1's MFMAs.
+
+        Splicing the NGLL and NLL schedules to get there does not work, and the
+        reason generalises: place_LRs places each read one partition ahead of
+        the MFMAs that consume it, so a schedule carries a skew measured against
+        the body it was built for. Two bodies of length two cannot be joined
+        into one of length four without invalidating both skews -- 48 of the 64
+        accumulators ended up reading a different LDS offset. So this schedules
+        the four-deep body outright and takes its NLL, which is already "no
+        global loads, no reads for the next macro tile" -- exactly the tail.
+
+        Doubling numSubIterK alone would describe one 512-deep buffer. Pinning
+        numUnroll to 2 is what makes it two 256-deep ones: it halves _per_uid_k,
+        so insert_gr_lr_inc emits its unroll-swap LRInc at the k1/k2 boundary
+        and the body switches buffers in its middle, which is the physical
+        layout we actually have. The scales need the same pin even though
+        multi-DU proper leaves them at 1 -- multi-DU gets a scale region that is
+        genuinely twice as deep, whereas here the region is the one the
+        surrounding kernel reserved and the second half has to cross over.
+        """
+        assert self._emitted is not None, "call build() first"
+        if self.config.pgr < 2 or not self._span_ngll_merge_enabled():
+            self._tail_merged_emitted = None
+            return None
+
+        cfg = copy.deepcopy(self.config)
+        cfg.numSubIterK = self.config.numSubIterK * 2
+        cfg.numUnroll = {t: 2 for t in self.config.numUnroll}
+
+        sub = LogicalScheduler(cfg)
+        sub.build()
+        sub.build_nll()
+
+        self._tail_merged_scheduler = sub
+        self._tail_merged_emitted = sub._nll_emitted
+        # Both bodies index the same physical tile lists, so the allocation has
+        # to cover whichever of them needs more. The four-deep body trades here
+        # rather than simply costing more: A doubles because it stays live
+        # across all four k-steps, while B's peak drops, because a partition now
+        # consumes its whole B slice in one go instead of holding it across the
+        # round robin.
+        for tensor, peak in sub.tile_peaks.items():
+            self.tile_peaks[tensor] = max(self.tile_peaks.get(tensor, 0), peak)
+        return self._tail_merged_emitted
+
+    # Ops describing the global-read side of a body: the loads themselves, the
+    # pointer advances, and the wait/barrier pair that orders them against the
+    # local reads. They move between bodies as a unit.
+    _TAIL_GR_OPS = ('gr', 'gr_inc', 'wait_gr', 'sync')
+
+    def _splice_tail_gr_skeleton(self, tail_3d, ngll_3d, nll_3d) -> None:
+        """Give the four-deep tail the global-read skeleton of the pair it replaces.
+
+        The four-deep body assumes both of its DepthU were already loaded when
+        it starts, which is true of a body preceded by another four-deep body.
+        Here it is preceded by the two-deep mainloop, which only ever loads one
+        DepthU ahead, so B's loads for the tail's second half are still owed --
+        the NGLL is where the original schedule paid them, and dropping it left
+        the last DepthU multiplying against whatever was in LDS from before.
+
+        These ops move between bodies in a way the local reads could not. An LR
+        is placed a partition ahead of the MFMAs it feeds, so it only means
+        anything relative to the body it was scheduled in. A GR addresses LDS
+        through the write pointer and the MFMAs never name it, so it carries no
+        such relationship and stays correct wherever it is placed.
+
+        They do not keep their partition, though. The NGLL spread its loads
+        across all four partitions and got away with it because nothing read
+        that buffer until the NLL began. Here partition 0 reaches k2 -- and so
+        reads the buffer -- while partitions 1 to 3 have yet to run at all, so
+        every load has to be issued, and waited on, inside partition 0's first
+        half. That is much less cover than the NGLL gave them, and is the price
+        of the reordering rather than a detail of it.
+        """
+        numK = self.config.numSubIterK
+
+        for partition in tail_3d:
+            for k, dst_list in enumerate(partition):
+                dropped = {em.moduleId for em in dst_list
+                           if em.opType in self._TAIL_GR_OPS}
+                # The four-deep body's own wait/barrier ops belong to the loads
+                # it thought it already had; they go out with them.
+                partition[k] = self._rewire_before(dst_list, dropped)
+
+        def graft(dst_list, src_ops):
+            nextId = max((em.moduleId for em in dst_list), default=-1) + 1
+            carried = [copy.deepcopy(em) for em in src_ops]
+            remap = {em.moduleId: nextId + i for i, em in enumerate(carried)}
+            for em in carried:
+                em.moduleId = remap[em.moduleId]
+                # A link out of the carried set (into an LR, say) has no
+                # counterpart here, so the op becomes its own chain root --
+                # which is what gr and wait_gr already are.
+                em.before = remap.get(em.before)
+            dst_list.extend(carried)
+
+        # Loads and pointer advances: every partition's, into partition 0. They
+        # have to keep their order relative to each other, because a gr_inc
+        # swaps the write pointer the loads before it addressed through -- the
+        # NGLL issues all three B loads and only then advances, and reversing
+        # any of that sends a load into the buffer being read. Taking the loads
+        # and the advances as two groups reproduces that order exactly, since
+        # the NGLL has no advance before its last load.
+        flat = [em for part in ngll_3d for slot in part for em in slot]
+        graft(tail_3d[0][0], [em for em in flat if em.opType == 'gr'])
+        graft(tail_3d[0][numK - 1], [em for em in flat if em.opType == 'gr_inc'])
+
+        # One wait/barrier pair closes them out, at the end of the first half.
+        # The NGLL had one per partition; they were all waiting for the same
+        # loads, and here the loads are all in one place.
+        last_ngll = ngll_3d[-1][numK - 1]
+        graft(tail_3d[0][numK - 1],
+              [em for em in last_ngll if em.opType in ('wait_gr', 'sync')])
+
+        # The NLL's pair stays per-partition: it orders the tail's reads against
+        # the next macro tile's writes, which is still a per-partition question.
+        for pi, partition in enumerate(tail_3d):
+            for k, src_list in enumerate(nll_3d[pi]):
+                graft(partition[k + numK],
+                      [em for em in src_list
+                       if em.opType in self._TAIL_GR_OPS])
 
     def build_tailloop_pgr0(self) -> List[List[List[EmittedModule]]]:
         """Template for Tailloop based on PGR0 schedule.
@@ -4995,38 +5129,6 @@ class LogicalScheduler:
         return relaxed
 
     @staticmethod
-    def _plsinSpanNgllPartitions(ngll_3d, nll_3d):
-        """Run each partition's NGLL and NLL K-steps back to back.
-
-        A partition's drain cannot start until its accumulators are final, which is
-        after its LAST K-step. Emitting the NGLL and the NLL as separate regions means
-        every partition finishes its NGLL step before any partition begins its NLL
-        step, so nothing is final until well into the NLL and the NGLL's load-free
-        MFMAs ahead of it can never serve as cover -- measured as 79 of the 222
-        load-free MFMAs going unused. Concatenating the two K-step lists per partition
-        makes partition 0 final much earlier and hands the whole load-free window to
-        the weave instead of only its tail.
-
-        Both structures are [partition][subIterK], and _emitLoop walks the subIterK
-        list in order, so the concatenation is the entire reordering.
-
-        INCORRECT AS WRITTEN -- gated off by _span_ngll_merge_enabled. The local
-        reads are placed one partition ahead of the MFMAs that consume them, so a
-        partition's operands are fetched during an earlier partition's slots.
-        Concatenating per partition drops each partition's NLL in between, which
-        puts those MFMAs ahead of their own reads: in the emitted MT256x256 tail,
-        48 of the 64 accumulators take an operand from a different LDS offset than
-        the split schedule gives them, and the whole B tile for the first partition
-        is not read until the very end. The read multiset is unchanged, which is
-        why this looks like a pure reordering and still returns wrong results.
-        Pairing ngll[p+1] with nll[p], or re-running place_LRs over the merged
-        2*numSubIterK slot list, is what the skew actually asks for.
-        """
-        if not ngll_3d or not nll_3d or len(ngll_3d) != len(nll_3d):
-            return None
-        return [list(ngll_3d[p]) + list(nll_3d[p]) for p in range(len(nll_3d))]
-
-    @staticmethod
     def _plsinRegisterKeys(container):
         """Comparable identities for a register container, symbolic or resolved.
 
@@ -5872,22 +5974,33 @@ class LogicalScheduler:
 
         # Fall-through from last mainloop copy
         nll_ft = (last + pgr) % uf
-        # Give the staged drain the NGLL's load-free MFMAs as cover by folding the
-        # NGLL into the NLL per partition. Restricted to the fall-through: when
-        # nll_ft == 0 a SkipToNLL label has to sit between the two regions for the
-        # preloop-skip path to jump at, and folding would swallow its target.
+        # Give the staged drain the NGLL's load-free MFMAs as cover by replacing
+        # both regions with one body that runs all four of the partition's
+        # k-subiterations (build_tail_merged). Restricted to the fall-through:
+        # when nll_ft == 0 a SkipToNLL label has to sit between the two regions
+        # for the preloop-skip path to jump at, and one body swallows its target.
         nll_ft_3d = self._nll_per_unroll[nll_ft]
         # Must be the same predicate allocation used. Re-reading the env here is
         # how the two silently disagreed: registers were reserved for a merged
         # tail that was never emitted, so the kernel paid the VGPRs and kept the
         # split schedule.
-        spanNgll = hasNGLL and nll_ft != 0 and self._span_ngll_merge_enabled()
+        spanNgll = (hasNGLL and nll_ft != 0
+                    and self._span_ngll_merge_enabled()
+                    and self._tail_merged_emitted is not None
+                    # Diagnostic only, and the one case where the two are meant
+                    # to disagree: it keeps the flag's allocation and emits the
+                    # split pair anyway, which is what separates "the merged
+                    # body is wrong" from "the allocation the flag switches on
+                    # is wrong". Leave it at 1 for any real build.
+                    and plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL_EMIT", "1") != "0")
+        # unroll_iter for the fall-through NLL. The four-deep body covers both
+        # DepthU itself, so it has no parity copies and was populated at 0.
+        # Kept separate from nll_ft, which still has to decide where the
+        # SkipToNLL label goes -- overwriting it would emit that label twice.
+        nll_ft_ui = nll_ft
         if spanNgll:
-            merged = self._plsinSpanNgllPartitions(
-                self._ngll_per_unroll[(last + 1) % uf], nll_ft_3d)
-            spanNgll = merged is not None
-            if spanNgll:
-                nll_ft_3d = merged
+            nll_ft_ui = 0
+            nll_ft_3d = self._tail_merged_emitted
         if hasNGLL and not spanNgll:
             module.addComment0(f"NGLL_C{last}")
             module.add(self._emitNgllMaybeFused(writer, kernel, f"NGLL_C{last}",
@@ -5898,7 +6011,7 @@ class LogicalScheduler:
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
                                   inject_pap_after_nll_drain(nll_ft_3d),
                                   fusedExitLabel=(plsinFusedExitLabel if plsin else None),
-                                  unroll_iter=nll_ft))
+                                  unroll_iter=nll_ft_ui))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
         if plsin:
             with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
@@ -6246,15 +6359,18 @@ class LogicalScheduler:
 
         from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
 
-        emitter = InstructionEmitter(
-            writer, kernel, self.config,
-            tileInfoA, tileInfoB, dtileInfo,
-            self.vgprTilesA, self.vgprTilesB,
-            scaleTileInfoA, scaleTileInfoB,
-            self.vgprTilesSA, self.vgprTilesSB,
-            tensorParametersA=tensorParametersA,
-            tensorParametersB=tensorParametersB,
-        )
+        def make_emitter(config):
+            return InstructionEmitter(
+                writer, kernel, config,
+                tileInfoA, tileInfoB, dtileInfo,
+                self.vgprTilesA, self.vgprTilesB,
+                scaleTileInfoA, scaleTileInfoB,
+                self.vgprTilesSA, self.vgprTilesSB,
+                tensorParametersA=tensorParametersA,
+                tensorParametersB=tensorParametersB,
+            )
+
+        emitter = make_emitter(self.config)
 
         # Rebuild all loop variants from current _emitted (which now has
         # vgpr_tile_maps populated by assign_vgpr_tiles, unlike the stale
@@ -6281,6 +6397,30 @@ class LogicalScheduler:
             nll_copy = copy.deepcopy(self._nll_emitted)
             emitter.populate(nll_copy, unroll_iter=ui)
             self._nll_per_unroll.append(nll_copy)
+
+        # The four-deep tail is built here rather than in build() so it sees the
+        # same post-assign_vgpr_tiles state the other variants do. It has no
+        # per-unroll copies: covering both DepthU is the whole point, so there
+        # is no parity left to alternate and unroll_iter 0 is the only one.
+        self.build_tail_merged()
+        if self._tail_merged_emitted is not None:
+            # Emitted through its own scheduler's config, not this one's. The
+            # LDS offset a ds_read gets is k modulo numSubIterK/numUnroll, so
+            # emitting a four-deep body against the two-deep config sends its
+            # last two k-steps off the end of the buffer instead of back to the
+            # start of the other one. The physical tile lists are shared, so the
+            # registers it names are still this kernel's.
+            make_emitter(self._tail_merged_scheduler.config).populate(
+                self._tail_merged_emitted, unroll_iter=0)
+            # Spliced after population so each side keeps the instructions its
+            # own config produced: the GR ops are lifted from the already
+            # emitted two-deep bodies, at the same unroll_iter the emission
+            # site would have used for them.
+            uf = self.unroll_factor
+            self._splice_tail_gr_skeleton(
+                self._tail_merged_emitted,
+                self._ngll_per_unroll[0],
+                self._nll_per_unroll[(uf - 1 + self.config.pgr) % uf])
 
         self._emitter = emitter
 

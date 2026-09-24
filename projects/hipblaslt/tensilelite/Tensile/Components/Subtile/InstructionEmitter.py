@@ -240,10 +240,21 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            # Same uid-local fold as A/B above, and inert for the same reason:
+            # numUnroll > 1 for a scale tensor means its LDS region holds one
+            # uid's worth of k and the base register swaps between them, so k
+            # has to come back to the start of the region rather than running
+            # past its end. Multi-DU proper leaves the scales at numUnroll == 1
+            # — there the region really does span every k — so only the
+            # four-deep tail takes this branch.
+            nUnroll = self.config.numUnroll.get(tensor, 1)
+            k_start = placement.tiles.subIterK_start
+            if nUnroll > 1:
+                k_start %= self._per_uid_k[tensor]
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
-                kGroupIdx = placement.tiles.subIterK_start // ti.lrSubtileShape[1]
+                kGroupIdx = k_start // ti.lrSubtileShape[1]
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
