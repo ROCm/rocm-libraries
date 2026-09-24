@@ -9,12 +9,14 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/host/concat.hpp"
+#include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/host/stream_utils.hpp"
 #include "ck_tile/core/utility/env.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/utility/persistent_async_input_scheduler.hpp"
 #include "ck_tile/core/arch/workgroup_barrier.hpp"
+#include "ck_tile/ops/gemm/kernel/wavelet_utils.hpp"
 
 namespace ck_tile {
 
@@ -212,7 +214,11 @@ struct UniversalGemmKernel
     using AElementWise = remove_cvref_t<typename GemmPipeline::AElementWise>;
     using BElementWise = remove_cvref_t<typename GemmPipeline::BElementWise>;
 
-    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
+    // Wavelet pipelines launch load waves beyond the math waves BlockGemm maps onto the C tile.
+    static constexpr index_t kBlockSize = GemmPipelineLaunchBlockSize<GemmPipeline>;
+
+    /// Named barriers this kernel arms for GemmPipeline; void when it synchronises without them.
+    using barrier_pipeline = barrier_pipeline_of_t<GemmPipeline>;
 
     // Detect persistent kernel support to select appropriate entry point
     struct has_persistent_kernel
@@ -525,6 +531,18 @@ struct UniversalGemmKernel
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
+        if constexpr(!std::is_void_v<barrier_pipeline>)
+        {
+            // Other targets compile only the pipeline's inert fallback.
+            if(!is_gfx125_supported())
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Hardware named barriers require gfx1250!");
+                }
+                return false;
+            }
+        }
         if constexpr(has_skip_check_valid_launch_params::value)
         {
             return true;
@@ -1332,16 +1350,39 @@ struct UniversalGemmKernel
             amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k));
 
         // Run GEMM cooperatively by whole workgroup.
-        const auto& c_block_tile = GemmPipeline{}.template operator()(
-            as_block_window, AElementWise{}, bs_block_window, BElementWise{}, num_loop, smem_ptr);
+        const auto& c_block_tile = [&]() {
+            if constexpr(std::is_void_v<barrier_pipeline>)
+            {
+                return GemmPipeline{}.template operator()(as_block_window,
+                                                          AElementWise{},
+                                                          bs_block_window,
+                                                          BElementWise{},
+                                                          num_loop,
+                                                          smem_ptr);
+            }
+            else
+            {
+                // init() is collective, so every wave arms before any touches a barrier.
+                return GemmPipeline{}.template operator()(
+                    as_block_window,
+                    AElementWise{},
+                    bs_block_window,
+                    BElementWise{},
+                    num_loop,
+                    smem_ptr,
+                    barrier_pipeline::template init<SelfType>());
+            }
+        }();
 
         const index_t k_batch = amd_wave_read_first_lane(kargs.k_batch);
         // Run Epilogue Pipeline
         if(k_batch == 1)
         {
-            auto c_block_window = MakeCBlockWindows<memory_operation_enum::set>(
-                e_ptr, kargs, block_idx_m, block_idx_n);
-            EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+            RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
+                auto c_block_window = MakeCBlockWindows<memory_operation_enum::set>(
+                    e_ptr, kargs, block_idx_m, block_idx_n);
+                EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+            });
         }
 #if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
         else
@@ -1349,9 +1390,11 @@ struct UniversalGemmKernel
             if constexpr(EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
                          !is_any_of<EDataType, fp16_t, bf16_t>::value)
             {
-                auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
-                    e_ptr, kargs, block_idx_m, block_idx_n);
-                EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+                RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
+                    auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
+                        e_ptr, kargs, block_idx_m, block_idx_n);
+                    EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+                });
             }
         }
 #endif
