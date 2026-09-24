@@ -38,7 +38,14 @@ def _integer(value, minimum=0):
 
 
 def _implementationParameters(request):
-    """Keep physical scale layout separate from modeled tuning parameters."""
+    """Bind Tensile's layout parameter to the supplied scale buffers.
+
+    Scale modes, types and layout affect performance and belong to the problem
+    being predicted. They are fixed for every candidate in this request: this
+    selector does not rearrange buffers when a candidate needs another layout.
+    The returned values record those descriptor constraints separately from
+    the predictor's choices; they do not imply that scaling has no cost.
+    """
     problem = request["problem"]
     modes = {"None", "Scalar", "Vector", "Block_32_UE8M0", "Block_16_UE8M0",
              "Block_32_UE4M3", "Block_16_UE4M3", "Block_32_UE5M3", "Block_16_UE5M3",
@@ -190,8 +197,12 @@ def _configuration(request, candidate):
         final.append({"BiasTypeArgs": [value.toChar() for value in biasTypes]})
     if problemType.get("ActivationType") in ("all", "hipblaslt_all"):
         final.append({"ActivationArgs": [[{"Enum": "none"}]]})
-    # Physical layout comes from descriptors, independently of candidate tuning.
-    parameters = {**candidate["parameters"], **_implementationParameters(request)}
+    # Fill omitted/Auto layout from the request, but preserve explicit predictor
+    # choices. Selection rejects concrete conflicts before deriving a solution.
+    parameters = dict(candidate["parameters"])
+    for name, value in _implementationParameters(request).items():
+        if parameters.get(name, "Auto") == "Auto":
+            parameters[name] = value
     return {
         "GlobalParameters": {
             "PrintLevel": 0,
@@ -214,6 +225,15 @@ def _descriptorRejection(solution, request):
     return None
 
 
+def _candidateDescriptorRejection(candidate, request):
+    for name, required in _implementationParameters(request).items():
+        supplied = candidate["parameters"].get(name)
+        # Malformed values still go through Tensile's parameter validation.
+        if supplied in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle") and supplied != required:
+            return f"Candidate {name}={supplied} conflicts with descriptor {name}={required}"
+    return None
+
+
 def _select(request, configPath, derive):
     from Tensile.Common import state
     from Tensile.Common.GlobalParameters import defaultSolution
@@ -223,6 +243,10 @@ def _select(request, configPath, derive):
     rejections = []
     candidates = request["candidates"]
     for candidate in candidates:
+        reason = _candidateDescriptorRejection(candidate, request)
+        if reason:
+            rejections.append({"candidate_id": candidate["id"], "reason": reason})
+            continue
         config = _configuration(request, candidate)
         diagnostics = io.StringIO()
         try:

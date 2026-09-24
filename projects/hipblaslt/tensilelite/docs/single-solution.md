@@ -182,18 +182,39 @@ run Origami or measure kernel latency. If all supplied candidates are rejected,
 the request fails with their IDs and rejection reasons. It does not add default
 or native-instruction candidates, and an empty parameter recipe is rejected.
 
-Physical MX layout belongs to `problem.mx_scale_format` and is independent of
-tuning. Named `scale_mode_a` and `scale_mode_b` preserve the descriptor modes.
+Scale participation, block size, datatypes and physical layout affect performance
+and are inputs to prediction. They describe the supplied problem and buffers, so
+they remain fixed while this selector tries the ranked candidates. Named
+`scale_mode_a` and `scale_mode_b` preserve the descriptor modes; the provider maps
+them to Tensile's `MXScaleFormat`. A supplied `problem.mx_scale_format` must agree.
 The gfx950 subtile backend requires `HostPreSwizzle` with
 `Block_32_UE8M0_32_8_EXT`; natural scales are not implemented by that backend.
 The gfx1250 TDM backend requires `InMemorySwizzle` with its ordinary block-scale
-modes. A candidate cannot change the supplied physical layout.
+modes. The selector does not rearrange scale buffers. A candidate may supply a
+matching `MXScaleFormat`; an omitted value or `Auto` binds to the descriptor
+layout. An explicit conflicting layout rejects that candidate before solution
+derivation, and selection continues in the supplied order. It is never silently
+replaced with another layout.
 
-The same supplied tuning parameters can be reused with another input or scale
-datatype combination, provided Tensile validates that combination. The MX recipe
-reuse test in `Tensile/Tests/unit/test_JitGemm.py` compiles both operand orders
-and supported scale formats with one fixed gfx1250 recipe. This checks generation
-and compilation; numerical correctness and performance require execution on that GPU.
+The `implementation_parameters` report records these descriptor-bound values;
+its name does not mean they are absent from the performance model. This module
+consumes supplied rankings and preserves `model_assumptions`. A caller whose
+model omits scale-handling costs must disclose that limitation there.
+
+Datatype recipe reuse is limited to equivalent input and scale type families.
+Normalize each type to its bit width and number kind (integer or floating point).
+The A/B input pair and the A/B scale pair must each preserve their normalized
+types, allowing independent permutations within each pair. FP8 and BF8 share
+one floating-point class, as do FP6 and BF6; FP8×FP6 and FP4×FP4 are different
+families. Other problem facts, including dimensions, scaling participation,
+block sizes and physical layouts, must remain compatible with the prediction.
+Tensile still validates every concrete datatype combination.
+
+The MX tests in `Tensile/Tests/unit/test_JitGemm.py` group reuse checks by those
+families, including operand permutations and equal-width floating-point formats.
+They check generation and compilation, not equal kernel latency or numerical
+correctness. Predicted costs belong to the supplied problem; successful compilation
+does not establish that a ranking or measured performance transfers to another one.
 
 Bundles generated through this entry point additionally contain
 `jit_prediction`. The record includes selected tuning parameters, descriptor

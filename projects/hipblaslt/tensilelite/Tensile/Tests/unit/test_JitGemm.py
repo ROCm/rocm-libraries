@@ -540,6 +540,61 @@ def test_descriptor_layout_is_preserved_separately_from_tuning(
     assert metadata["resolved_parameters"]["MXScaleFormat"] == layout
 
 
+@pytest.mark.parametrize("predicted_layout", ["HostPreSwizzle", "Auto"])
+def test_predicted_layout_preserves_supplied_and_bound_values(
+    mx_layout_request, tmp_path, predicted_layout
+):
+    request = mx_layout_request
+    request["candidates"][0]["parameters"]["MXScaleFormat"] = predicted_layout
+
+    def derive(config, label):
+        parameters = config["BenchmarkProblems"][0][1]["ForkParameters"]
+        assert {"MXScaleFormat": ["HostPreSwizzle"]} in parameters
+        return {**solution(), "MXScaleFormat": "HostPreSwizzle"}
+
+    _, _, metadata = JG._select(request, tmp_path / "selected.yaml", derive)
+    assert metadata["selected_parameters"]["MXScaleFormat"] == predicted_layout
+    assert metadata["implementation_parameters"] == {"MXScaleFormat": "HostPreSwizzle"}
+    assert metadata["resolved_parameters"]["MXScaleFormat"] == "HostPreSwizzle"
+
+
+@pytest.mark.parametrize("compatible_candidate", [False, True])
+def test_conflicting_predicted_layout_is_rejected_before_derivation(
+    mx_layout_request, tmp_path, compatible_candidate
+):
+    request = mx_layout_request
+    conflicting = request["candidates"][0]
+    conflicting["parameters"]["MXScaleFormat"] = "NoSwizzle"
+    if compatible_candidate:
+        request["candidates"].append(
+            {"id": 1, "predicted_cycles": None,
+             "parameters": {"StaggerU": 0, "MXScaleFormat": "HostPreSwizzle"}})
+    # The initial configuration is also used to initialize the build toolchain;
+    # it must not silently replace an explicit predictor choice.
+    parameters = JG._configuration(request, conflicting)["BenchmarkProblems"][0][1]["ForkParameters"]
+    assert {"MXScaleFormat": ["NoSwizzle"]} in parameters
+    attempted = []
+
+    def derive(config, label):
+        attempted.append(label)
+        return {**solution(), "MXScaleFormat": "HostPreSwizzle"}
+
+    output = tmp_path / "selected.yaml"
+    if compatible_candidate:
+        _, _, metadata = JG._select(request, output, derive)
+        assert attempted == ["caller.parameters candidate 1"]
+        assert metadata["candidate_id"] == 1
+        assert metadata["rejections"] == [{
+            "candidate_id": 0,
+            "reason": "Candidate MXScaleFormat=NoSwizzle conflicts with descriptor MXScaleFormat=HostPreSwizzle",
+        }]
+    else:
+        with pytest.raises(SS.SingleSolutionConfigError, match="0: Candidate MXScaleFormat=NoSwizzle"):
+            JG._select(request, output, derive)
+        assert attempted == []
+        assert not output.exists()
+
+
 @pytest.mark.parametrize("layout", ["Auto", None])
 def test_descriptor_layout_must_be_explicit(mx_layout_request, tmp_path, layout):
     mx_layout_request["problem"]["mx_scale_format"] = layout
@@ -641,31 +696,35 @@ def test_shared_instruction_validator_rejects_first_candidate_before_build(predi
     assert selected["selected_parameters"] == request["candidates"][1]["parameters"]
 
 
-@pytest.mark.parametrize("a,b,scale,mode", [
-    ("F8", "F6", "E8", "Block_32_UE8M0"),
-    ("F6", "F8", "E8", "Block_32_UE8M0"),
-    ("F4", "F4", "E8", "Block_32_UE8M0"),
-    ("F4", "F4", "F8", "Block_32_UE4M3"),
-    ("F4", "F4", "E5M3", "Block_32_UE5M3"),
+@pytest.mark.parametrize("variants", [
+    pytest.param([
+        ("F8", "F6", "E8", "Block_32_UE8M0"),
+        ("B8", "F6", "E8", "Block_32_UE8M0"),
+        ("F8", "B6", "E8", "Block_32_UE8M0"),
+        ("F6", "F8", "E8", "Block_32_UE8M0"),
+        ("F6", "B8", "E8", "Block_32_UE8M0"),
+        ("B6", "F8", "E8", "Block_32_UE8M0"),
+    ], id="float8-float6-inputs"),
+    pytest.param([
+        ("F4", "F4", "E8", "Block_32_UE8M0"),
+        ("F4", "F4", "F8", "Block_32_UE4M3"),
+        ("F4", "F4", "E5M3", "Block_32_UE5M3"),
+    ], id="float4-float4-inputs"),
 ])
-def test_mx_operand_and_scale_types_reuse_one_tuning_recipe_cross_compiles(problem_type_request, tmp_path, a, b, scale, mode):
-    """Reuse gfx1250 MX tile/transport tuning; compile every legal type swap.
+def test_mx_equivalent_datatype_families_reuse_recipe_cross_compiles(
+    problem_type_request, tmp_path, variants
+):
+    """Compile reuse within one input-width family, with 8-bit floating scales.
 
-    The common tile/transport recipe comes from the gfx12 MX TDM family.
-    The -1 vector widths let Solution derive the widths required by each type.
+    The two families are independent cases, not a reuse claim between 8x6 and
+    4x4 inputs. Within each, number kinds and the input/scale width pairs stay
+    fixed, as do scale participation, block size and physical layout.
+    The recipe comes from the gfx12 MX TDM family; -1 derives vector widths.
     FP8/FP6 requires E8 scales; FP4 supports matching E8, E4M3 or E5M3 scales.
+    BF8/BF6 are substituted separately: the supported GEMM table does not yet
+    include BF8xBF6 or BF6xBF8, despite their equivalent datatype widths/kinds.
     These are compiler checks, not measurements of numerical accuracy or speed.
     """
-    request = problem_type_request
-    request.update(architecture="gfx1250", model="caller.shared-mx-recipe")
-    request["problem_type"].update(
-        DataType=a, DataTypeA=a, DataTypeB=b, MacDataTypeA=a, MacDataTypeB=b,
-        MXBlockA=32, MXBlockB=32, DataTypeMXSA=scale, DataTypeMXSB=scale)
-    p = request["problem"]
-    p.update(m=128, n=128, k=512, batch=1, mx_scale_format="InMemorySwizzle",
-             scale_mode_a=mode, scale_mode_b=mode)
-    for tensor in "abcd":
-        p[f"strides_{tensor}"] = [1, 512 if tensor in "ab" else 128, 65536]
     parameters = {
         "MatrixInstruction": [16, 16, 128, 1, 1, 2, 2, 2, 2], "DepthU": 128,
         "TDMInst": 3, "ScheduleIterAlg": 4, "LocalReadVectorWidth": -1,
@@ -674,10 +733,33 @@ def test_mx_operand_and_scale_types_reuse_one_tuning_recipe_cross_compiles(probl
         "GlobalReadVectorWidthA": -1, "GlobalReadVectorWidthB": -1,
         "UseSgprForGRO": 0, "ForceDisableShadowInit": True,
     }
-    request["candidates"] = [{"id": 0, "predicted_cycles": None, "parameters": parameters}]
-    manifest = compile_request(request, tmp_path)
-    selected = manifest["jit_prediction"]
-    assert selected["selected_parameters"] == parameters
-    assert selected["problem_type"] == request["problem_type"]
-    assert selected["implementation_parameters"] == {"MXScaleFormat": "InMemorySwizzle"}
-    assert selected["rejections"] == []
+    for a, b, scale, mode in variants:
+        request = copy.deepcopy(problem_type_request)
+        request.update(architecture="gfx1250", model="caller.equivalent-mx-types")
+        request["problem_type"].update(
+            DataType=a, DataTypeA=a, DataTypeB=b, MacDataTypeA=a, MacDataTypeB=b,
+            MXBlockA=32, MXBlockB=32, DataTypeMXSA=scale, DataTypeMXSB=scale)
+        p = request["problem"]
+        p.update(m=128, n=128, k=512, batch=1, mx_scale_format="InMemorySwizzle",
+                 scale_mode_a=mode, scale_mode_b=mode)
+        for tensor in "abcd":
+            p[f"strides_{tensor}"] = [1, 512 if tensor in "ab" else 128, 65536]
+        # Exercise the real CLI's initial configuration as well as selection:
+        # a conflicting first prediction must not prevent a later valid build.
+        request["candidates"] = [
+            {"id": 7, "predicted_cycles": None,
+             "parameters": {**parameters, "MXScaleFormat": "NoSwizzle"}},
+            {"id": 0, "predicted_cycles": None, "parameters": parameters},
+        ]
+        case_path = tmp_path / f"{a}-{b}-{scale}"
+        case_path.mkdir()
+        manifest = compile_request(request, case_path)
+        selected = manifest["jit_prediction"]
+        assert selected["candidate_id"] == 0
+        assert selected["selected_parameters"] == parameters
+        assert selected["problem_type"] == request["problem_type"]
+        assert selected["implementation_parameters"] == {"MXScaleFormat": "InMemorySwizzle"}
+        assert selected["rejections"] == [{
+            "candidate_id": 7,
+            "reason": "Candidate MXScaleFormat=NoSwizzle conflicts with descriptor MXScaleFormat=InMemorySwizzle",
+        }]
