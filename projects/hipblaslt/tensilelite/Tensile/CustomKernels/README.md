@@ -40,3 +40,25 @@ Each `.s` overrides `LocalReadVectorWidth{A,B}` back to `-1` in its
 `assignDerivedParameters`, and `calLRVW` only tolerates
 `LocalReadVectorWidthA < MIInputPerThread` on the auto path; fed back its own
 derived value it rejects the solution.
+
+## Q27B group-32 unsigned decode
+
+The Q27B Equality grid selects three decode schedules. The K=5120 shapes use
+`Custom_W4A16_Decode_G32_W4_UnsignedBias8_gfx1151`. K=17408 uses the `_U1_A4`
+variant, with an unroll factor of one and four independent dot-product
+accumulators. K=6144 uses `_NativePerm`, with compiler-native packed FP16
+arithmetic and byte permutations for the activation pairs. All three round
+scaled weights to FP16 before the FP32 dot products and use the same universal
+argument layout.
+
+Regenerate the two additional kernels from the `tensilelite/` directory with
+the ROCm compiler on PATH:
+
+```sh
+python Tensile/CustomKernels/Source/generate_w4a16_decode.py --group-size 32 --load-width 4 --unroll 1 --accumulators 4
+python Tensile/CustomKernels/Source/generate_w4a16_decode.py --group-size 32 --load-width 4 --native-permute
+```
+
+Compare the complete Equality library with `hipblaslt-bench --rotating 512
+--adaptive --use_gpu_timer`; numerical validation should also cover odd M,
+padded row strides, and K values that take the scalar-load fallback.

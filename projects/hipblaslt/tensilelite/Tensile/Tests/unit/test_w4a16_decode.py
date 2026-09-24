@@ -18,7 +18,7 @@ GENERAL = "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB{group}ZPU8_UserArgs_MT64x160x64
 DIRECTORY = Path(__file__).parents[2] / "CustomKernels"
 
 
-@pytest.mark.parametrize("group,suffix", [(32, "_W4")])
+@pytest.mark.parametrize("group,suffix", [(32, "_W4"), (32, "_W4_U1_A4"), (32, "_W4_NativePerm")])
 def test_decode_selection_bounds(group, suffix):
     config = readCustomKernelConfig(NAME.format(group=group, suffix=suffix), DIRECTORY)
     equal = ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", config["AssertSizeEqual"]))
@@ -39,7 +39,7 @@ def test_decode_selection_bounds(group, suffix):
     assert not support["SupportCustomStaggerU"]
 
 
-@pytest.mark.parametrize("group,suffix", [(32, "_W4")])
+@pytest.mark.parametrize("group,suffix", [(32, "_W4"), (32, "_W4_U1_A4"), (32, "_W4_NativePerm")])
 def test_decode_universal_arguments_match_matrix_kernel(group, suffix):
     def metadata(name):
         config, _ = getCustomKernelConfigAndAssembly(name, DIRECTORY)
@@ -87,7 +87,9 @@ def test_q27b_equality_dispatch_keys():
     for row in serialized["table"]:
         solution = logic["Solutions"][row["index"]]
         if row["key"][1] == 1:
-            assert solution["CustomKernelName"] == NAME.format(group=32, suffix="_W4")
+            suffix = {17408: "_W4_U1_A4", 6144: "_W4_NativePerm"}.get(
+                row["key"][3], "_W4")
+            assert solution["CustomKernelName"] == NAME.format(group=32, suffix=suffix)
         else:
             assert solution["EnableMatrixInstruction"]
             assert solution["WorkGroupMapping"] in (1, 4)
