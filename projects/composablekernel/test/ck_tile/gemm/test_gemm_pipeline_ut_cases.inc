@@ -31,14 +31,9 @@ TYPED_TEST(TEST_SUITE_NAME, SmallM)
             if constexpr(std::is_same_v<typename TestFixture::ALayout,
                                         ck_tile::tensor_layout::gemm::ColumnMajor>)
             {
-#define XSTRINGIFY(s) STRINGIFY(s)
-#define STRINGIFY(s) #s
-                constexpr std::string_view suite_name = XSTRINGIFY(TEST_SUITE_NAME);
-#undef STRINGIFY
-#undef XSTRINGIFY
-                if constexpr(suite_name == "TestCkTileGemmPipelineCompTDMWmma")
+                if constexpr(TestFixture::IsTdm)
                 {
-                    // TestCkTileGemmPipelineCompTDMWmma can handle non-dword-aligned cases
+                    // TDM pipelines can handle non-dword-aligned cases
                     this->Run(M, N, K);
                 }
                 else
@@ -115,14 +110,9 @@ TYPED_TEST(TEST_SUITE_NAME, MidLargeM)
                 }
                 else
                 {
-#define XSTRINGIFY(s) STRINGIFY(s)
-#define STRINGIFY(s) #s
-                    constexpr std::string_view suite_name = XSTRINGIFY(TEST_SUITE_NAME);
-#undef STRINGIFY
-#undef XSTRINGIFY
-                    if constexpr(suite_name == "TestCkTileGemmPipelineCompTDMWmma")
+                    if constexpr(TestFixture::IsTdm)
                     {
-                        // TestCkTileGemmPipelineCompTDMWmma can handle non-dword-aligned cases
+                        // TDM pipelines can handle non-dword-aligned cases
                         this->Run(M, N, K);
                     }
                     else
@@ -202,11 +192,7 @@ TYPED_TEST(TEST_SUITE_NAME, NotSupportedArgument)
     constexpr bool PadN = false;
     constexpr bool PadK = false;
 
-#define XSTRINGIFY(s) STRINGIFY(s)
-#define STRINGIFY(s) #s
-
-    constexpr std::string_view suite_name = XSTRINGIFY(TEST_SUITE_NAME);
-    if constexpr(suite_name == "TestCkTileGemmPipelineCompTDMWmma")
+    if constexpr(TestFixture::IsTdm)
     {
         using ADataType = TestFixture::ADataType;
         using BDataType = TestFixture::BDataType;
@@ -219,15 +205,11 @@ TYPED_TEST(TEST_SUITE_NAME, NotSupportedArgument)
         }
         else
         {
-            GTEST_SKIP()
-                << "TestCkTileGemmPipelineCompTDMWmma only supports A and B packed size of 1";
+            GTEST_SKIP() << "TDM pipelines only support A and B packed size of 1";
         }
     }
     else
     {
         EXPECT_THROW((this->template Run<PadM, PadN, PadK>(M, N, K)), std::runtime_error);
     }
-
-#undef STRINGIFY
-#undef XSTRINGIFY
 }

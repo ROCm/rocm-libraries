@@ -30,6 +30,12 @@ enum struct GemmPipelineType
     CompTDMV2
 };
 
+// Pipelines that load A and B with TDM: no padding, no split-K (TdmEpilogue), ragged extents.
+constexpr bool is_tdm_pipeline(GemmPipelineType pt)
+{
+    return pt == GemmPipelineType::CompTDMV1 || pt == GemmPipelineType::CompTDMV2;
+}
+
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout layout_)
 {
@@ -191,10 +197,7 @@ struct GemmEpilogueTypeSelector
 };
 
 template <GemmPipelineType PT, typename Problem>
-struct GemmEpilogueTypeSelector<
-    PT,
-    Problem,
-    std::enable_if_t<PT == GemmPipelineType::CompTDMV1 || PT == GemmPipelineType::CompTDMV2>>
+struct GemmEpilogueTypeSelector<PT, Problem, std::enable_if_t<is_tdm_pipeline(PT)>>
 {
     using epilogue = ck_tile::TdmEpilogue<Problem>;
 };
@@ -209,9 +212,7 @@ struct PipelineDefaultParams
 };
 
 template <GemmPipelineType PT>
-struct PipelineDefaultParams<
-    PT,
-    std::enable_if_t<PT == GemmPipelineType::CompTDMV1 || PT == GemmPipelineType::CompTDMV2>>
+struct PipelineDefaultParams<PT, std::enable_if_t<is_tdm_pipeline(PT)>>
 {
     static constexpr bool PadM       = false;
     static constexpr bool PadN       = false;
@@ -243,6 +244,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
     using CDataType                    = std::tuple_element_t<6, Tuple>;
     static constexpr auto Scheduler    = std::tuple_element_t<12, Tuple>::value;
     static constexpr auto PipelineType = std::tuple_element_t<13, Tuple>::value;
+    static constexpr bool IsTdm        = is_tdm_pipeline(PipelineType);
 
     static constexpr ck_tile::index_t M_Tile = std::tuple_element_t<7, Tuple>{};
     static constexpr ck_tile::index_t N_Tile = std::tuple_element_t<8, Tuple>{};
@@ -465,9 +467,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
         }
         // for TDM it used tdm_epilogue which don't support split-k
         if constexpr(PipelineType == GemmPipelineType::CompV4 ||
-                     PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v ||
-                     PipelineType == GemmPipelineType::CompTDMV1 ||
-                     PipelineType == GemmPipelineType::CompTDMV2 ||
+                     PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v || IsTdm ||
                      std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
             // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline
