@@ -212,8 +212,10 @@ class AQuantKernelConfig:
         self.validate_target()
 
     def validate_target(self, gfx_arch=None):
-        """Reject known unsafe gfx1250 overrides, including mutable configs."""
+        """Reject unsupported targets and known unsafe gfx1250 overrides."""
         arch = self.gfx_arch if gfx_arch is None else gfx_arch
+        if arch:
+            _validate_arch(arch)
         _reject_i4_on_gfx1250(self.variant_key, arch)
         if (_is_gfx1250(arch)
                 and self.variant_key in ("fp8", "bf8")

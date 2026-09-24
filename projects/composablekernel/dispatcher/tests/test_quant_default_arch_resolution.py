@@ -196,6 +196,19 @@ def test_aquant_direct_config_and_mutations_are_validated(monkeypatch):
     assert calls == []
 
 
+@pytest.mark.parametrize("arch", ("gfx1200", "gfx1201:xnack-", "gfx12500", "gfx1250x"))
+def test_aquant_direct_config_rejects_unsupported_arch(arch):
+    module = MODULES["aquant"]
+    config = module.default_fp8_config(gfx_arch="gfx1250")
+    arguments = {**asdict(config), "gfx_arch": arch}
+    with pytest.raises(ValueError, match="Unsupported GPU architecture"):
+        module.AQuantKernelConfig(**arguments)
+    config = module.default_fp8_config(gfx_arch="gfx1250")
+    config.gfx_arch = arch
+    with pytest.raises(ValueError, match="Unsupported GPU architecture"):
+        config.to_codegen_config()
+
+
 def test_aquant_sweep_rejects_unsafe_explicit_tile(tmp_path):
     import json
 
