@@ -861,22 +861,21 @@ class LogicalScheduler:
         """Is the NGLL folded into the NLL per partition?
 
         Asked at two very distant points -- register allocation and emission --
-        and they have to agree. Allocating for a merge that does not happen only
-        wastes registers, but emitting a merge that allocation did not plan for
-        aliases the two unroll iterations onto one set of tiles, which is the
-        silent clobber that has kept SPAN_NGLL off. So this deliberately ignores
-        the emission-side nll_ft condition: it is the conservative direction.
+        and they have to agree, so both go through here. Allocating for a merge
+        that does not happen only wastes registers, but emitting a merge that
+        allocation did not plan for aliases the two unroll iterations onto one
+        set of tiles. This deliberately ignores the emission-side nll_ft
+        condition: it is the conservative direction.
 
-        Follows the tile scope the rest of block scheduling uses rather than
-        matching on MFMA-tile counts, so a tile outside that scope cannot be
-        dragged in by happening to share an 8x8 grid. That matters beyond
-        tidiness: the merge costs a few VGPRs and several library tiles already
-        sit within single digits of the 256 cap, where an overflow is a hard
-        build failure rather than a silent drop.
+        Off by default, because the merge is still wrong -- see
+        _plsinSpanNgllPartitions for what the concatenation breaks. Turning it on
+        costs a few VGPRs on top of that, and several library tiles already sit
+        within single digits of the 256 cap, where an overflow is a hard build
+        failure rather than a silent drop.
         """
         if self.config.pgr < 2 or not self.config.blockSched:
             return False
-        return plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "1") != "0"
+        return plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "0") != "0"
 
     def _lr_tile_set_count(self, num_k_groups: int = 1,
                            tensor: Optional[str] = None) -> int:
@@ -4339,12 +4338,16 @@ class LogicalScheduler:
         the MT>256x256 set, which cannot give the lending up either -- without it
         those kernels need 284 VGPRs against a 256 cap.
         """
-        if plsinDebugEnv("TENSILE_PLSIN_STAGED_STORE", "0") == "0":
+        # Same scope Kernel.py used to pick the partition count, so a tile that
+        # was split for staging always gets the stages. Reading the env a second
+        # time here would let the two drift: the split would happen and the drain
+        # would stay monolithic, which is the worst of both -- the extra LDS
+        # re-reads of a partitioned loop with none of the overlap that pays for
+        # them.
+        if not self.config.blockSched:
             return 0
         # Test-only: keep the partition split but leave the store monolithic, to
-        # separate "partitioned compute" from "staged store" when bisecting. The
-        # partition count is chosen in Kernel.py off plsinStagingEligible, which
-        # reads TENSILE_PLSIN_STAGED_STORE and not this, so partitions survive.
+        # separate "partitioned compute" from "staged store" when bisecting.
         if plsinDebugEnv("TENSILE_PLSIN_STORE_STAGES_OFF", "0") != "0":
             return 0
         if weaveGroups != {} or lendTiles:
@@ -5006,6 +5009,18 @@ class LogicalScheduler:
 
         Both structures are [partition][subIterK], and _emitLoop walks the subIterK
         list in order, so the concatenation is the entire reordering.
+
+        INCORRECT AS WRITTEN -- gated off by _span_ngll_merge_enabled. The local
+        reads are placed one partition ahead of the MFMAs that consume them, so a
+        partition's operands are fetched during an earlier partition's slots.
+        Concatenating per partition drops each partition's NLL in between, which
+        puts those MFMAs ahead of their own reads: in the emitted MT256x256 tail,
+        48 of the 64 accumulators take an operand from a different LDS offset than
+        the split schedule gives them, and the whole B tile for the first partition
+        is not read until the very end. The read multiset is unchanged, which is
+        why this looks like a pure reordering and still returns wrong results.
+        Pairing ngll[p+1] with nll[p], or re-running place_LRs over the merged
+        2*numSubIterK slot list, is what the skew actually asks for.
         """
         if not ngll_3d or not nll_3d or len(ngll_3d) != len(nll_3d):
             return None
@@ -5862,8 +5877,11 @@ class LogicalScheduler:
         # nll_ft == 0 a SkipToNLL label has to sit between the two regions for the
         # preloop-skip path to jump at, and folding would swallow its target.
         nll_ft_3d = self._nll_per_unroll[nll_ft]
-        spanNgll = (hasNGLL and nll_ft != 0
-                    and plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "0") != "0")
+        # Must be the same predicate allocation used. Re-reading the env here is
+        # how the two silently disagreed: registers were reserved for a merged
+        # tail that was never emitted, so the kernel paid the VGPRs and kept the
+        # split schedule.
+        spanNgll = hasNGLL and nll_ft != 0 and self._span_ngll_merge_enabled()
         if spanNgll:
             merged = self._plsinSpanNgllPartitions(
                 self._ngll_per_unroll[(last + 1) % uf], nll_ft_3d)
