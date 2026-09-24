@@ -76,7 +76,8 @@ void run_gesvdj(rocblas_int n,
                 vector<T>& hS,
                 rocblas_int& n_sweeps,
                 rocblas_int& info,
-                rocblas_int max_sweeps = 100)
+                rocblas_int max_sweeps = 100,
+                T abstol = T(0))
 {
     rocblas_local_handle handle;
 
@@ -99,7 +100,7 @@ void run_gesvdj(rocblas_int n,
     CHECK_HIP_ERROR(hipMemcpy(dA.data(), hA.data(), sizeof(T) * hA.size(), hipMemcpyHostToDevice));
 
     CHECK_ROCBLAS_ERROR(rocsolver_gesvdj(false, handle, rocblas_svect_all, rocblas_svect_all, n, n,
-                                         dA.data(), n, rocblas_stride(n) * n, T(0), dres.data(),
+                                         dA.data(), n, rocblas_stride(n) * n, abstol, dres.data(),
                                          max_sweeps, dsweeps.data(), dS.data(), rocblas_stride(n),
                                          dU.data(), n, rocblas_stride(n) * n, dV.data(), n,
                                          rocblas_stride(n) * n, dinfo.data(), 1));
@@ -113,7 +114,12 @@ void run_gesvdj(rocblas_int n,
 /* Runs syevj directly (no normal equations), so the input scale reaches the
    convergence test unsquared. */
 template <typename T>
-void run_syevj(rocblas_int n, const vector<T>& hA, vector<T>& hW, rocblas_int& n_sweeps, rocblas_int& info)
+void run_syevj(rocblas_int n,
+               const vector<T>& hA,
+               vector<T>& hW,
+               rocblas_int& n_sweeps,
+               rocblas_int& info,
+               T abstol = T(0))
 {
     rocblas_local_handle handle;
 
@@ -133,7 +139,7 @@ void run_syevj(rocblas_int n, const vector<T>& hA, vector<T>& hW, rocblas_int& n
 
     CHECK_ROCBLAS_ERROR(rocsolver_syevj_heevj(
         false, handle, rocblas_esort_ascending, rocblas_evect_original, rocblas_fill_upper, n,
-        dA.data(), n, rocblas_stride(n) * n, T(0), dres.data(), 100, dsweeps.data(), dW.data(),
+        dA.data(), n, rocblas_stride(n) * n, abstol, dres.data(), 100, dsweeps.data(), dW.data(),
         rocblas_stride(n), dinfo.data(), 1));
 
     hW.resize(n);
@@ -220,5 +226,25 @@ TEST(checkin_lapack, SYEVJ_extreme_scale_still_converges)
         EXPECT_EQ(info, 0) << "scale = " << scale;
         EXPECT_GT(n_sweeps, 0) << "scale = " << scale << ": the Jacobi loop never ran";
         EXPECT_NEAR(double(hW[0]), 0.5 * scale, 0.5 * scale * 1e-5) << "scale = " << scale;
+    }
+}
+
+/* abstol is caller-supplied and uncapped, so abstol*abstol can overflow while the
+   threshold it stands for is unremarkable. [[1e-20, 2], [2, 1e-20]] has eigenvalues
+   -2 and 2, and abstol=1e20 puts the threshold at exactly 1. */
+TEST(checkin_lapack, SYEVJ_large_abstol_does_not_overflow_the_threshold)
+{
+    const rocblas_int n = 2;
+    vector<float> hA = {1e-20f, 2.0f, 2.0f, 1e-20f};
+
+    for(float abstol : {1e20f, 1e10f, 1.0f})
+    {
+        vector<float> hW;
+        rocblas_int n_sweeps = -1, info = -1;
+        run_syevj(n, hA, hW, n_sweeps, info, abstol);
+
+        EXPECT_EQ(info, 0) << "abstol = " << abstol;
+        EXPECT_NEAR(hW[0], -2.0f, 1e-4f) << "abstol = " << abstol;
+        EXPECT_NEAR(hW[1], 2.0f, 1e-4f) << "abstol = " << abstol;
     }
 }
