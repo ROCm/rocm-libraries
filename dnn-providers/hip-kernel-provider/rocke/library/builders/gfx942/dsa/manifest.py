@@ -88,7 +88,9 @@ def make_lightning_indexer_manifest(
     )
 
 
-def _shape(manifest: dict, shape: Optional[Tuple[int, int, int]]) -> Tuple[int, int, int]:
+def _shape(
+    manifest: dict, shape: Optional[Tuple[int, int, int]]
+) -> Tuple[int, int, int]:
     if shape is None or shape == (0, 0, 0):
         ds = manifest.get("default_shape", list(_DEFAULT_SHAPE))
         if len(ds) != 3:
