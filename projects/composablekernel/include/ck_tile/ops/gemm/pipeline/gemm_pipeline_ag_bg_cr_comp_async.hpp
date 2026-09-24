@@ -442,11 +442,15 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             clear_tile(c_block_tile);
 
             // read A(1), B(1) from DRAM to LDS window(1)
-            // and advance the DRAM windows
-            Base::GlobalPrefetchAsync(
-                a_copy_lds_window1, a_async_tile_windows[number<0>{}], a_dram_tile_window_step);
-            Base::GlobalPrefetchAsync(
-                b_copy_lds_window1, b_async_tile_windows[number<0>{}], b_dram_tile_window_step);
+            // and advance the DRAM windows;
+            // with a single K tile there is no tile 1, loading it would read past the K extent
+            if constexpr(TailNum != TailNumber::One)
+            {
+                Base::GlobalPrefetchAsync(
+                    a_copy_lds_window1, a_async_tile_windows[number<0>{}], a_dram_tile_window_step);
+                Base::GlobalPrefetchAsync(
+                    b_copy_lds_window1, b_async_tile_windows[number<0>{}], b_dram_tile_window_step);
+            }
 
             // tile distribution for the register tiles
             constexpr auto ALdsTileDistr =
@@ -567,13 +571,19 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                         // LDS window(0) contents are overwritten by global prefetch, need to sync
                         block_sync_lds();
                         // read A(i+1), B(i+1) from DRAM to LDS window(0)
-                        // and advance the DRAM windows
-                        Base::GlobalPrefetchAsync(a_copy_lds_window0,
-                                                  a_async_tile_windows[number<0>{}],
-                                                  a_dram_tile_window_step);
-                        Base::GlobalPrefetchAsync(b_copy_lds_window0,
-                                                  b_async_tile_windows[number<0>{}],
-                                                  b_dram_tile_window_step);
+                        // and advance the DRAM windows; with an even num_loop (tail Two) the
+                        // last pong would fetch tile num_loop, past the K extent, so skip it.
+                        // With tail Three num_loop is odd and i+1 < num_loop always holds, so
+                        // the check is folded away and the hot loop stays a single block.
+                        if(TailNum == TailNumber::Three || i_global_read + 1 < num_loop)
+                        {
+                            Base::GlobalPrefetchAsync(a_copy_lds_window0,
+                                                      a_async_tile_windows[number<0>{}],
+                                                      a_dram_tile_window_step);
+                            Base::GlobalPrefetchAsync(b_copy_lds_window0,
+                                                      b_async_tile_windows[number<0>{}],
+                                                      b_dram_tile_window_step);
+                        }
                         // C(i-2) = A(i-2) @ B(i-2)
                         block_gemm(c_block_tile,
                                    a_block_tile1,
@@ -630,6 +640,14 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             // 2 block gemms remaining
             {
                 {
+                    // Defense in depth: the async write to LDS window(1) from the last ping is
+                    // already drained by the full-drain fence at the start of the last pong
+                    // (whose own prefetch is skipped above), so this wait is redundant today.
+                    // With num_loop == 2 there is no hot loop: window(1) is filled in the
+                    // prologue and drained by the prologue's full-drain fence.
+                    // It keeps the tail correct if the hot-loop fences are ever relaxed to a
+                    // partial wait count.
+                    block_sync_lds_direct_load();
                     // read A(num_loop), B(num_loop) from LDS window(1) to pipeline registers(1)
                     Base::LocalPrefetch(a_block_tile1, a_lds_ld_window1, is_a_load_tr_v);
                     Base::LocalPrefetch(b_block_tile1, b_lds_ld_window1, is_b_load_tr_v);

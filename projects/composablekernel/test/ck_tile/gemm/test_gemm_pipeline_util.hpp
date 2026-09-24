@@ -25,6 +25,7 @@ enum struct GemmPipelineType
     CompV4,
     CompV6,
     CompAsync,
+    CompAsyncV2,
     CompAsyncEightWaves,
     CompTDMV1,
     CompTDMV2
@@ -153,6 +154,15 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompAsync, Problem>
     using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsync<Problem>;
 
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsync"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompAsyncV2, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsyncV2<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsyncV2<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsyncV2"; }
 };
 
 template <typename Problem>
@@ -291,6 +301,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
 
         constexpr bool DoubleSmemBuffer = (PipelineType == GemmPipelineType::CompV4 ||
                                            PipelineType == GemmPipelineType::CompAsync ||
+                                           PipelineType == GemmPipelineType::CompAsyncV2 ||
                                            PipelineType == GemmPipelineType::CompTDMV1 ||
                                            PipelineType == GemmPipelineType::CompTDMV2);
 
@@ -465,12 +476,14 @@ class TestCkTileGemmPipeline : public ::testing::Test
         }
         // for TDM it used tdm_epilogue which don't support split-k
         if constexpr(PipelineType == GemmPipelineType::CompV4 ||
+                     PipelineType == GemmPipelineType::CompAsyncV2 ||
                      PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v ||
                      PipelineType == GemmPipelineType::CompTDMV1 ||
                      PipelineType == GemmPipelineType::CompTDMV2 ||
                      std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
-            // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline
+            // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline.
+            // CompAsyncV2 pins k_batch = 1 so the tests control num_loop (tail) exactly.
             k_batches_ = {1};
         }
         else
