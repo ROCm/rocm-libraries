@@ -23,22 +23,53 @@ SOFTWARE.
 */
 
 #include <atomic>
+#include <cmath>
+#include <limits>
+#include <type_traits>
 
 #include "host_tensor_executors.hpp"
 #include "rpp_cpu_simd_math.hpp"
+
+// Rounds to the nearest integer and saturates to T's representable range. Add/Subtract/Multiply
+// below are shared between the ND arithmetic-tensor ops (which must saturate on overflow, per
+// the RPP convention used everywhere else and the test suite's golden model) and the F32/F16
+// tensor add/subtract/multiply (which must not be touched) -- callers gate this on
+// std::is_integral_v<T> so the float/half paths are unaffected.
+template <typename T>
+static inline T saturate_arithmetic_result(double value) {
+    constexpr double lo = static_cast<double>(std::numeric_limits<T>::lowest());
+    constexpr double hi = static_cast<double>(std::numeric_limits<T>::max());
+    value = std::nearbyint(value);
+    if (value < lo) return static_cast<T>(lo);
+    if (value > hi) return static_cast<T>(hi);
+    return static_cast<T>(value);
+}
 
 // Arithmetic operation structures that encapsulate scalar and SIMD ops
 template <typename T>
 struct Add {
     static inline void scalar_op(T* dst, T* src1, T* src2) {
-        *dst = *src1 + *src2;
+        if constexpr (std::is_integral_v<T>)
+            *dst = saturate_arithmetic_result<T>(static_cast<double>(*src1) +
+                                                 static_cast<double>(*src2));
+        else
+            *dst = *src1 + *src2;
     }
 
     static inline __m256i simd_op(__m256i& a, __m256i& b) {
-        if constexpr (std::is_same<T, Rpp8u>::value || std::is_same<T, Rpp8s>::value)
-            return _mm256_add_epi8(a, b);
-        else if constexpr (std::is_same<T, Rpp16s>::value || std::is_same<T, Rpp16u>::value)
-            return _mm256_add_epi16(a, b);
+        // 8/16-bit lanes use AVX2's native saturating add. 32-bit lanes have no native
+        // saturating add; the dispatcher routes U32/I32 add through the (saturating) scalar
+        // path instead (vectorIncrement forced to 0 in tensor_binary_bitwise_op_dispatch_int_
+        // host_tensor), so this branch is never reached at runtime -- kept only so the template
+        // still compiles and returns.
+        if constexpr (std::is_same<T, Rpp8u>::value)
+            return _mm256_adds_epu8(a, b);
+        else if constexpr (std::is_same<T, Rpp8s>::value)
+            return _mm256_adds_epi8(a, b);
+        else if constexpr (std::is_same<T, Rpp16u>::value)
+            return _mm256_adds_epu16(a, b);
+        else if constexpr (std::is_same<T, Rpp16s>::value)
+            return _mm256_adds_epi16(a, b);
         else if constexpr (std::is_same<T, Rpp32s>::value || std::is_same<T, Rpp32u>::value)
             return _mm256_add_epi32(a, b);
     }
@@ -51,14 +82,24 @@ struct Add {
 template <typename T>
 struct Subtract {
     static inline void scalar_op(T* dst, T* src1, T* src2) {
-        *dst = *src1 - *src2;
+        if constexpr (std::is_integral_v<T>)
+            *dst = saturate_arithmetic_result<T>(static_cast<double>(*src1) -
+                                                 static_cast<double>(*src2));
+        else
+            *dst = *src1 - *src2;
     }
 
     static inline __m256i simd_op(__m256i& a, __m256i& b) {
-        if constexpr (std::is_same<T, Rpp8u>::value || std::is_same<T, Rpp8s>::value)
-            return _mm256_sub_epi8(a, b);
-        else if constexpr (std::is_same<T, Rpp16s>::value || std::is_same<T, Rpp16u>::value)
-            return _mm256_sub_epi16(a, b);
+        // Same reasoning as Add::simd_op above: 8/16-bit lanes saturate natively; 32-bit lanes
+        // are routed through the scalar path by the dispatcher and never reach this branch.
+        if constexpr (std::is_same<T, Rpp8u>::value)
+            return _mm256_subs_epu8(a, b);
+        else if constexpr (std::is_same<T, Rpp8s>::value)
+            return _mm256_subs_epi8(a, b);
+        else if constexpr (std::is_same<T, Rpp16u>::value)
+            return _mm256_subs_epu16(a, b);
+        else if constexpr (std::is_same<T, Rpp16s>::value)
+            return _mm256_subs_epi16(a, b);
         else if constexpr (std::is_same<T, Rpp32s>::value || std::is_same<T, Rpp32u>::value)
             return _mm256_sub_epi32(a, b);
     }
@@ -71,10 +112,18 @@ struct Subtract {
 template <typename T>
 struct Multiply {
     static inline void scalar_op(T* dst, T* src1, T* src2) {
-        *dst = *src1 * *src2;
+        if constexpr (std::is_integral_v<T>)
+            *dst = saturate_arithmetic_result<T>(static_cast<double>(*src1) *
+                                                 static_cast<double>(*src2));
+        else
+            *dst = *src1 * *src2;
     }
 
     static inline __m256i simd_op(__m256i& a, __m256i& b) {
+        // U16/I16/U32/I32 multiply has no native AVX2 saturating primitive (mullo_epi16/epi32
+        // only produce the low, wrapping half of the product); the dispatcher routes those
+        // through the scalar path instead (vectorIncrement forced to 0), so these two branches
+        // are never reached at runtime -- kept only so the template still compiles and returns.
         if constexpr (std::is_same<T, Rpp16u>::value || std::is_same<T, Rpp16s>::value)
             return _mm256_mullo_epi16(a, b);
         else if constexpr (std::is_same<T, Rpp32s>::value || std::is_same<T, Rpp32u>::value)
@@ -85,11 +134,10 @@ struct Multiply {
             __m256i a_hi = _mm256_unpackhi_epi8(a, avx_px0);
             __m256i b_hi = _mm256_unpackhi_epi8(b, avx_px0);
 
+            // Exact 8x8->16-bit product (max 255*255 = 65025 fits in uint16). Saturate-pack it
+            // straight back down to 8 bits instead of masking to the low byte, which wrapped.
             __m256i prod_lo = _mm256_mullo_epi16(a_lo, b_lo);
             __m256i prod_hi = _mm256_mullo_epi16(a_hi, b_hi);
-
-            prod_lo = _mm256_and_si256(prod_lo, avx_mask8);
-            prod_hi = _mm256_and_si256(prod_hi, avx_mask8);
 
             return _mm256_packus_epi16(prod_lo, prod_hi);
         } else if constexpr (std::is_same<T, Rpp8s>::value) {
@@ -102,11 +150,11 @@ struct Multiply {
             __m256i b_hi =
                 _mm256_srai_epi16(_mm256_slli_epi16(_mm256_unpackhi_epi8(b, avx_px0), 8), 8);
 
+            // Exact signed 8x8->16-bit product (range [-16384, 16129] fits in int16). Saturate-
+            // pack it straight back down to 8 bits instead of masking to the low byte, which
+            // wrapped.
             __m256i prod_lo = _mm256_mullo_epi16(a_lo, b_lo);
             __m256i prod_hi = _mm256_mullo_epi16(a_hi, b_hi);
-
-            prod_lo = _mm256_and_si256(prod_lo, avx_mask8);
-            prod_hi = _mm256_and_si256(prod_hi, avx_mask8);
 
             return _mm256_packs_epi16(prod_lo, prod_hi);
         }
@@ -2171,15 +2219,26 @@ RppStatus tensor_binary_bitwise_op_dispatch_int_host_tensor(
     RpptOp tensorOp, RpptBroadcastMode broadcastMode, Rpp32u* srcPtr1roiTensor,
     Rpp32u* srcPtr2roiTensor, rpp::Handle& handle) {
     int vectorIncrement = 32;  // Vector Increment for U8/I8 datatype
-    if ((srcPtr1GenericDescPtr->dataType == RpptDataType::U16) ||
-        (srcPtr1GenericDescPtr->dataType == RpptDataType::I16))
+    bool is16BitInt = (srcPtr1GenericDescPtr->dataType == RpptDataType::U16) ||
+                      (srcPtr1GenericDescPtr->dataType == RpptDataType::I16);
+    bool is32BitInt = (srcPtr1GenericDescPtr->dataType == RpptDataType::U32) ||
+                      (srcPtr1GenericDescPtr->dataType == RpptDataType::I32);
+    if (is16BitInt)
         vectorIncrement = 16;  // Vector Increment for U16/I16 datatype
-    else if ((srcPtr1GenericDescPtr->dataType == RpptDataType::U32) ||
-             (srcPtr1GenericDescPtr->dataType == RpptDataType::I32))
+    else if (is32BitInt)
         vectorIncrement = 8;  // Vector Increment for U32/I32 datatype
 
     if ((tensorOp == RPP_TENSOR_OP_DIVIDE) &&
         (srcPtr1GenericDescPtr->dataType == RpptDataType::U32))
+        vectorIncrement = 0;
+    // AVX2 has no native saturating add/subtract for 32-bit lanes, and no native saturating
+    // multiply above 8-bit lanes (see Add/Subtract/Multiply::simd_op above). For those
+    // type/op combinations, force every element through the scalar path -- which does saturate
+    // -- instead of hand-rolling wide-lane saturation.
+    else if (((tensorOp == RPP_TENSOR_OP_ADD) || (tensorOp == RPP_TENSOR_OP_SUBTRACT)) &&
+             is32BitInt)
+        vectorIncrement = 0;
+    else if ((tensorOp == RPP_TENSOR_OP_MULTIPLY) && (is16BitInt || is32BitInt))
         vectorIncrement = 0;
 
     if constexpr (std::is_same_v<T1, T2>) {

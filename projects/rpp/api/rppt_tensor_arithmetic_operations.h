@@ -206,19 +206,20 @@ RppStatus rppt_log1p(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppP
  * \details Performs element-wise addition of two N-dimensional tensors.
  *          For every axis, the two input tensors must either have the same length or one of them
  * must be 1. DISABLE_BROADCAST can be chosen as broadcastMode only when every sample in the batch
- * has identical dimensions. \param [in] srcPtr1 source1 tensor in HIP memory (for HIP backend) or
- * HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor in HIP memory (for HIP backend)
- * or HOST memory (for HOST backend) \param [in] srcGenericDescPtr1 source1 tensor descriptor \param
- * [in] srcGenericDescPtr2 source2 tensor descriptor \param [out] dstPtr destination tensor in HIP
- * memory (for HIP backend) or HOST memory (for HOST backend) \param [in] dstGenericDescPtr
- * destination tensor descriptor \param [in] broadcastMode enum to represent broadcasting mode is
- * disabled or not, can be set based on input tensor shape \param [in] roiTensor1 values to
- * represent dimensions of first input tensor \param [in] roiTensor2 values to represent dimensions
- * of second input tensor \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref
- * rppCreate()</tt> \param [in] executionBackend Backend type (RPP_HOST_BACKEND or RPP_HIP_BACKEND)
- * \return A <tt> \ref RppStatus</tt> enumeration.
- * \retval RPP_SUCCESS Successful completion.
- * \retval RPP_ERROR* Unsuccessful completion.
+ * has identical dimensions. For integer destination dtypes, the exact result is rounded to the
+ * nearest integer and saturated to the destination dtype's representable range (it does not
+ * wrap). Floating-point destination dtypes are not clamped. \param [in] srcPtr1 source1 tensor in
+ * HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor
+ * in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcGenericDescPtr1
+ * source1 tensor descriptor \param [in] srcGenericDescPtr2 source2 tensor descriptor \param [out]
+ * dstPtr destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend)
+ * \param [in] dstGenericDescPtr destination tensor descriptor \param [in] broadcastMode enum to
+ * represent broadcasting mode is disabled or not, can be set based on input tensor shape \param
+ * [in] roiTensor1 values to represent dimensions of first input tensor \param [in] roiTensor2
+ * values to represent dimensions of second input tensor \param [in] rppHandle RPP HIP/HOST handle
+ * created with <tt>\ref rppCreate()</tt> \param [in] executionBackend Backend type
+ * (RPP_HOST_BACKEND or RPP_HIP_BACKEND) \return A <tt> \ref RppStatus</tt> enumeration. \retval
+ * RPP_SUCCESS Successful completion. \retval RPP_ERROR* Unsuccessful completion.
  */
 RppStatus rppt_tensor_add_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                                  RpptGenericDescPtr srcGenericDescPtr1,
@@ -232,19 +233,20 @@ RppStatus rppt_tensor_add_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
  * \details Performs element-wise subtraction of two N-dimensional tensors.
  *          For every axis, the two input tensors must either have the same length or one of them
  * must be 1. DISABLE_BROADCAST can be chosen as broadcastMode only when every sample in the batch
- * has identical dimensions. \param [in] srcPtr1 source1 tensor in HIP memory (for HIP backend) or
- * HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor in HIP memory (for HIP backend)
- * or HOST memory (for HOST backend) \param [in] srcGenericDescPtr1 source1 tensor descriptor \param
- * [in] srcGenericDescPtr2 source2 tensor descriptor \param [out] dstPtr destination tensor in HIP
- * memory (for HIP backend) or HOST memory (for HOST backend) \param [in] dstGenericDescPtr
- * destination tensor descriptor \param [in] broadcastMode enum to represent broadcasting mode is
- * disabled or not, can be set based on input tensor shape \param [in] roiTensor1 values to
- * represent dimensions of first input tensor \param [in] roiTensor2 values to represent dimensions
- * of second input tensor \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref
- * rppCreate()</tt> \param [in] executionBackend Backend type (RPP_HOST_BACKEND or RPP_HIP_BACKEND)
- * \return A <tt> \ref RppStatus</tt> enumeration.
- * \retval RPP_SUCCESS Successful completion.
- * \retval RPP_ERROR* Unsuccessful completion.
+ * has identical dimensions. For integer destination dtypes, the exact result is rounded to the
+ * nearest integer and saturated to the destination dtype's representable range (it does not
+ * wrap). Floating-point destination dtypes are not clamped. \param [in] srcPtr1 source1 tensor in
+ * HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor
+ * in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcGenericDescPtr1
+ * source1 tensor descriptor \param [in] srcGenericDescPtr2 source2 tensor descriptor \param [out]
+ * dstPtr destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend)
+ * \param [in] dstGenericDescPtr destination tensor descriptor \param [in] broadcastMode enum to
+ * represent broadcasting mode is disabled or not, can be set based on input tensor shape \param
+ * [in] roiTensor1 values to represent dimensions of first input tensor \param [in] roiTensor2
+ * values to represent dimensions of second input tensor \param [in] rppHandle RPP HIP/HOST handle
+ * created with <tt>\ref rppCreate()</tt> \param [in] executionBackend Backend type
+ * (RPP_HOST_BACKEND or RPP_HIP_BACKEND) \return A <tt> \ref RppStatus</tt> enumeration. \retval
+ * RPP_SUCCESS Successful completion. \retval RPP_ERROR* Unsuccessful completion.
  */
 RppStatus rppt_tensor_subtract_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                                       RpptGenericDescPtr srcGenericDescPtr1,
@@ -258,19 +260,20 @@ RppStatus rppt_tensor_subtract_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
  * \details Performs element-wise multiplication of two N-dimensional tensors.
  *          For every axis, the two input tensors must either have the same length or one of them
  * must be 1. DISABLE_BROADCAST can be chosen as broadcastMode only when every sample in the batch
- * has identical dimensions. \param [in] srcPtr1 source1 tensor in HIP memory (for HIP backend) or
- * HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor in HIP memory (for HIP backend)
- * or HOST memory (for HOST backend) \param [in] srcGenericDescPtr1 source1 tensor descriptor \param
- * [in] srcGenericDescPtr2 source2 tensor descriptor \param [out] dstPtr destination tensor in HIP
- * memory (for HIP backend) or HOST memory (for HOST backend) \param [in] dstGenericDescPtr
- * destination tensor descriptor \param [in] broadcastMode enum to represent broadcasting mode is
- * disabled or not, can be set based on input tensor shape \param [in] roiTensor1 values to
- * represent dimensions of first input tensor \param [in] roiTensor2 values to represent dimensions
- * of second input tensor \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref
- * rppCreate()</tt> \param [in] executionBackend Backend type (RPP_HOST_BACKEND or RPP_HIP_BACKEND)
- * \return A <tt> \ref RppStatus</tt> enumeration.
- * \retval RPP_SUCCESS Successful completion.
- * \retval RPP_ERROR* Unsuccessful completion.
+ * has identical dimensions. For integer destination dtypes, the exact result is rounded to the
+ * nearest integer and saturated to the destination dtype's representable range (it does not
+ * wrap). Floating-point destination dtypes are not clamped. \param [in] srcPtr1 source1 tensor in
+ * HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor
+ * in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcGenericDescPtr1
+ * source1 tensor descriptor \param [in] srcGenericDescPtr2 source2 tensor descriptor \param [out]
+ * dstPtr destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend)
+ * \param [in] dstGenericDescPtr destination tensor descriptor \param [in] broadcastMode enum to
+ * represent broadcasting mode is disabled or not, can be set based on input tensor shape \param
+ * [in] roiTensor1 values to represent dimensions of first input tensor \param [in] roiTensor2
+ * values to represent dimensions of second input tensor \param [in] rppHandle RPP HIP/HOST handle
+ * created with <tt>\ref rppCreate()</tt> \param [in] executionBackend Backend type
+ * (RPP_HOST_BACKEND or RPP_HIP_BACKEND) \return A <tt> \ref RppStatus</tt> enumeration. \retval
+ * RPP_SUCCESS Successful completion. \retval RPP_ERROR* Unsuccessful completion.
  */
 RppStatus rppt_tensor_multiply_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                                       RpptGenericDescPtr srcGenericDescPtr1,
