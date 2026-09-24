@@ -148,7 +148,7 @@ else:
         raise AssertionError("did not select a grouped GEMM configuration")
 '''
     result = subprocess.run(
-        [sys.executable, "-I", "-c", script, str(ROOT / "tests" / (module + ".py"))],
+        [sys.executable, "-E", "-c", script, str(ROOT / "tests" / (module + ".py"))],
         cwd=tmp_path, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -160,7 +160,8 @@ else:
     ("gfx1250:xnack-", (16, 16, 32)),
 ])
 def test_multi_abd_warp_tile_in_fresh_standalone_interpreter(arch, expected, tmp_path):
-    # -I prevents pytest's other modules and PYTHONPATH from hiding missing paths.
+    # -E ignores PYTHONPATH so pytest's sys.path cannot hide a missing path. Not -I:
+    # it also drops user site-packages, where pytest itself may be installed.
     # Suppress only hardware detection; exercise the real module and tile lookup.
     script = '''import runpy, sys
 from types import SimpleNamespace
@@ -170,7 +171,7 @@ with patch("subprocess.run", return_value=SimpleNamespace(stdout="")):
 print(namespace["TestMultiAbdGemmGpu"]._fp16_warp_tile(sys.argv[2]))
 '''
     result = subprocess.run([
-        sys.executable, "-I", "-c", script,
+        sys.executable, "-E", "-c", script,
         str(ROOT / "tests/test_multi_abd_gpu_correctness.py"), arch,
     ], cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
