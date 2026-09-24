@@ -31,6 +31,7 @@ from copy import deepcopy
 from typing import Dict
 
 from Tensile import __version__
+from Tensile.Toolchain.Component import get_rocm_version
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -947,24 +948,12 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     # The alternative would be to install the `distro` package.
     # See https://docs.python.org/3.7/library/platform.html#platform.linux_distribution
 
-    # The following try except block computes the hipcc version
-    # TODO: hipcc is deprecated, this block should be removed.
     try:
-        compiler = "hipcc"
-        output = subprocess.run(
-            [compiler, "--version"], check=True,
-            stdout=subprocess.PIPE,
-            # Avoids some warning spam on Windows.
-            stderr=subprocess.DEVNULL,
-        ).stdout.decode()
-
-        for line in output.split("\n"):
-            if "HIP version" in line:
-                globalParameters["HipClangVersion"] = line.split()[2]
-                print1("# Found hipcc version " + globalParameters["HipClangVersion"])
-
-    except (subprocess.CalledProcessError, OSError) as e:
-        printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
+        version = get_rocm_version()
+        globalParameters["HipClangVersion"] = f"{version.major}.{version.minor}.{version.patch}"
+        print1("# Found ROCm version " + globalParameters["HipClangVersion"])
+    except RuntimeError as e:
+        printWarning("Failed to determine ROCm version: {}".format(e))
 
     ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
 

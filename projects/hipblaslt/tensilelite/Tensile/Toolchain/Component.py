@@ -113,17 +113,19 @@ def _read_hip_build_version(path: Path) -> Optional[str]:
 
 
 def _read_version_from_root(root: Path) -> Optional[str]:
-    """Read the HIP build version, with the ROCm release as a last fallback."""
+    """Read the HIP build version from HIP metadata files only.
+
+    Reads share/hip/version and include/hip/hip_version.h, which contain the
+    HIP build version including the patch/build number used for feature gating.
+    The ROCm release file (.info/version) is intentionally excluded — it contains
+    only the release version and silently drops the build number, which can cause
+    incorrect feature detection when patch-level thresholds are checked.
+    """
     for relative_path in (Path("share/hip/version"), Path("include/hip/hip_version.h")):
         version_str = _read_hip_build_version(root / relative_path)
         if version_str:
             return version_str
-
-    try:
-        version_str = (root / ".info" / "version").read_text().strip()
-    except OSError:
-        return None
-    return version_str or None
+    return None
 
 
 def get_rocm_version() -> SemanticVersion:

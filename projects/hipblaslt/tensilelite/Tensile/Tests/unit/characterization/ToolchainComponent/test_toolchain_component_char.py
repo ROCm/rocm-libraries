@@ -87,31 +87,24 @@ def test_get_rocm_version_uses_rocm_version_env(monkeypatch, tmp_path):
     assert C.get_rocm_version() == SemanticVersion(6, 4, 0)
 
 
-@pytest.mark.parametrize(
-    "version_str, expected_version",
-    [
-        pytest.param(
-            "7.1.0",
-            SemanticVersion(7, 1, 0),
-            id="simple_version",
-        ),
-        pytest.param(
-            "7.1.25424-4179531dcd",
-            SemanticVersion(7, 1, 25424),
-            id="build_suffix",
-        ),
-    ],
-)
-def test_get_rocm_version_reads_info_version_file(
-    monkeypatch, tmp_path, version_str, expected_version
-):
-    """get_rocm_version reads .info/version when ROCM_VERSION is not set."""
+def test_get_rocm_version_rejects_info_version_only(monkeypatch, tmp_path):
+    """get_rocm_version raises when only .info/version exists.
+
+    .info/version contains the ROCm release version (e.g. 6.4.0) which lacks
+    the HIP build number needed for feature gating. It is intentionally excluded
+    from the discovery chain; callers must set ROCM_VERSION or provide a ROCm
+    install that includes share/hip/version or include/hip/hip_version.h.
+    """
     info_dir = tmp_path / ".info"
     info_dir.mkdir()
-    (info_dir / "version").write_text(version_str)
+    (info_dir / "version").write_text("6.4.0")
     monkeypatch.delenv("ROCM_VERSION", raising=False)
     monkeypatch.setenv("ROCM_PATH", str(tmp_path))
-    assert C.get_rocm_version() == expected_version
+    import shutil as _shutil
+    monkeypatch.setattr(_shutil, "which", lambda name: None)
+    monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "nonexistent")
+    with pytest.raises(RuntimeError, match="Failed to get ROCm version"):
+        C.get_rocm_version()
 
 
 @pytest.mark.parametrize(

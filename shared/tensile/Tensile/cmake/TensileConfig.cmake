@@ -82,6 +82,19 @@ else()
     set(TENSILE_STATIC_ONLY OFF CACHE BOOL "Disable exporting symbols from shared library.")
 endif()
 
+# Find HIP in the package scope before add_subdirectory so HIP_VERSION is
+# available here. add_subdirectory creates a child scope and variables set
+# there (including HIP_VERSION from find_package(HIP)) do not propagate back,
+# leaving TensileCreateLibraryFiles with an empty ROCM_VERSION.
+if(TENSILE_USE_HIP)
+  file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" Tensile_ROCM_PATH)
+  find_package(HIP REQUIRED CONFIG PATHS ${Tensile_ROCM_PATH} /opt/rocm)
+  set(Tensile_HIP_VERSION "${HIP_VERSION}")
+  if(NOT Tensile_HIP_VERSION)
+    message(FATAL_ERROR "The HIP package did not provide HIP_VERSION")
+  endif()
+endif()
+
 add_subdirectory("${Tensile_ROOT}/Source" "Tensile")
 
 # Output target: ${Tensile_VAR_PREFIX}_LIBRARY_TARGET. Ensures that the libs get built in Tensile_OUTPUT_PATH/library.
@@ -232,7 +245,7 @@ function(TensileCreateLibraryFiles
   endif()
   set(ENV_PATH_ARG "PATH=${ESC_PATH}")
   set(CommandLine
-    "${CMAKE_COMMAND}" -E env "PATH=${ESC_PATH}" "ROCM_VERSION=${HIP_VERSION}" --
+    "${CMAKE_COMMAND}" -E env "PATH=${ESC_PATH}" "ROCM_VERSION=${Tensile_HIP_VERSION}" --
     ${CommandLine})
   message(STATUS "Tensile_CREATE_COMMAND: ${CommandLine}")
 
