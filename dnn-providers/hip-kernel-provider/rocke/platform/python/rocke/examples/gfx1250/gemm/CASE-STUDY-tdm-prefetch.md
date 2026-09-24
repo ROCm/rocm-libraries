@@ -39,6 +39,20 @@ which conclusions had to be thrown away.
 > below as the tuning record and the target to restore — not as a description
 > of the shipped candidate.
 
+> **The magnitudes need re-validating.** These ratios were taken in an earlier
+> measurement environment. Ratios are supposed to survive a change of
+> environment, but at least one lever demonstrably did not: the split barrier
+> (not in this table, and not enabled by any registered candidate) measured
+> `1.11x` at `K=65536` then and `1.008x` on re-measurement. A lever that hides
+> latency stops paying once the kernel is no longer bound by what it was
+> hiding.
+>
+> So read every row as measured-at-the-time. The *ordering* of the ladder is
+> likely still right — each step addresses a different bottleneck — but the
+> magnitudes should not be quoted without a re-run, and the
+> `% of LDS-fed ceiling` column is normalized against a ceiling that has since
+> been re-measured.
+
 Registered as `universal_gemm_fp16_gfx1250_wmma_tdm` (priority 5) in
 `dispatch/gemm/fp16_rcr.py` — see the note above for why it registers `w2x2` /
 depth 2 rather than the `w4x2` / depth 3 this study measures. The `128x128`
