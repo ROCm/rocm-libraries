@@ -3556,6 +3556,14 @@ namespace TensileLite
                 {
                     auto rotatingAllocatedSize
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
+                    // getRotatingSize counts epilogue output tensors (PARTIALBUF/MXSCALE/...) that
+                    // the pool allocation (core A..METADATA tensors) does not, so the requested
+                    // rotatingNum can exceed the pool. Clamp it to the copies that actually fit.
+                    if(rotatingSize > 0)
+                        rotatingNum = std::min(
+                            rotatingNum,
+                            static_cast<int32_t>(rotatingAllocatedSize / rotatingSize));
+                    totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
                         std::cout << "Rotating buffer size: " << rotatingAllocatedSize
@@ -3619,6 +3627,14 @@ namespace TensileLite
                 {
                     auto rotatingAllocatedSize
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
+                    // getRotatingSize counts epilogue output tensors (PARTIALBUF/MXSCALE/...) that
+                    // the pool allocation (core A..METADATA tensors) does not, so the requested
+                    // rotatingNum can exceed the pool. Clamp it to the copies that actually fit.
+                    if(rotatingSize > 0)
+                        rotatingNum = std::min(
+                            rotatingNum,
+                            static_cast<int32_t>(rotatingAllocatedSize / rotatingSize));
+                    totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
                         std::cout << "Rotating buffer size: " << rotatingAllocatedSize

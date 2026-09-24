@@ -1072,7 +1072,15 @@ namespace TensileLite
             }
         }
 
-        if(internalArgsSupport.version < 3)
+        // The kernel generator (KernelWriter.py) emits the modern kernarg layout
+        // (A/B first, then alpha/beta, then D/C) for every Tensile-generated kernel
+        // regardless of KernArgsVersion, so the positional packing below must match
+        // it whenever the solution was generated. Only legacy prebuilt version < 3
+        // kernels (customKernel.generated == false) keep the classic D/C/A/B order.
+        bool const useModernArgLayout
+            = internalArgsSupport.version >= 3 || customKernel.generated;
+
+        if(!useModernArgLayout)
         {
             bool singleWSD = false;
             if(resolvedGlobalAccumulation == 1
@@ -1150,7 +1158,7 @@ namespace TensileLite
             args.template append<void const* const*>("batchB", inputs.batchB);
         }
 
-        if(internalArgsSupport.version < 3)
+        if(!useModernArgLayout)
         {
             if(problemType.sparse)
                 args.template append<unsigned char const*>("metadata", inputs.metadata);
@@ -1187,7 +1195,7 @@ namespace TensileLite
         size_t startStrideAB = problemType.useInitialStridesAB ? 0 : 1;
         size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
 
-        if(internalArgsSupport.version < 3)
+        if(!useModernArgLayout)
         {
             // Pass wsStride if it's not in MBSK mode
             bool gsuWSStride
@@ -1253,13 +1261,13 @@ namespace TensileLite
                                                metadata.strides()[i]);
         }
 
-        if(internalArgsSupport.version >= 3)
+        if(useModernArgLayout)
         {
             if(problemType.sparse)
                 args.template append<unsigned char const*>("metadata", inputs.metadata);
 
             // See the version < 3 branch above for why streamKForceDPOnly must not
-            // append ws/Flags. In ver3 only Flags stays here; ws is appended after
+            // append ws/Flags. In the modern layout only Flags stays here; ws is appended after
             // alpha/beta.
             if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
                 && sizeMapping.streamKForceDPOnly == 0)
@@ -1275,7 +1283,7 @@ namespace TensileLite
             }
         }
 
-        if(internalArgsSupport.version < 3)
+        if(!useModernArgLayout)
         {
             args.append("alpha", inputs.alpha, problem.alphaType());
 
@@ -1542,7 +1550,7 @@ namespace TensileLite
             }
         }
 
-        if(internalArgsSupport.version >= 3)
+        if(useModernArgLayout)
         {
             args.append("alpha", inputs.alpha, problem.alphaType());
 
@@ -1568,7 +1576,7 @@ namespace TensileLite
                     args.append("beta_2", 0.0f, problem.betaType());
             }
 
-            // ver3 places AddressWS after alpha/beta, see the StreamK block above.
+            // The modern layout places AddressWS after alpha/beta, see the StreamK block above.
             if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
                 && sizeMapping.streamKForceDPOnly == 0)
             {
