@@ -3,7 +3,7 @@
 """Solution-validation guards for HalfPLR on StreamK (SK3) on gfx1250.
 
 These are the unit-test replacement for the former
-``Tensile/Tests/common/streamk/gfx1250/core/sk_halfplr_reject.yaml`` negative
+``tensilelite/Tests/common/streamk/gfx1250/core/sk_halfplr_reject.yaml`` negative
 config. Instead of round-tripping a benchmark run to inspect ``reject:`` log
 lines, we build a fully-derived gfx1250 StreamK HalfPLR ``Solution`` in-process
 and assert that each incompatible knob is rejected with its exact diagnostic,

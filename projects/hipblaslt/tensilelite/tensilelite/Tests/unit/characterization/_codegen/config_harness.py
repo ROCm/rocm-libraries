@@ -635,7 +635,7 @@ def assert_split_multicast_masks(src, base):
 # Defaults to the small single-permutation fp32_nt gemm config relative to the
 # Tensile package root.
 
-_SMOKE_DEFAULT_CONFIG = "Tensile/Tests/common/gemm/fp32_nt.yaml"
+_SMOKE_DEFAULT_CONFIG = "tensilelite/Tests/common/gemm/fp32_nt.yaml"
 
 
 def _smoke(config_path=_SMOKE_DEFAULT_CONFIG):

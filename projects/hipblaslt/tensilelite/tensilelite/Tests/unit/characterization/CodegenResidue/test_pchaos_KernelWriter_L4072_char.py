@@ -99,7 +99,7 @@ def test_halfplra_derivation_site_is_bitwise_and():
     import ast
     import textwrap
 
-    target_file = resolve_tensile_path("Tensile/SolutionStructs/Solution.py")
+    target_file = resolve_tensile_path("tensilelite/SolutionStructs/Solution.py")
     with open(target_file) as fh:
         source = fh.read()
 

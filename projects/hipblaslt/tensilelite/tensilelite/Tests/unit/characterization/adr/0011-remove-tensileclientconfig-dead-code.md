@@ -55,7 +55,7 @@ touched; it is out of scope for this repo's TensileLite tree.
 This is a real source deletion, a deliberate departure from the
 characterization pass's add-only rule, committed separately as a cleanup at
 the user's explicit direction (2026-06-03). Full `-m unit`
-(`Tensile/Tests/unit`) showed **2466 passed / 201 skipped both before and
+(`tensilelite/Tests/unit`) showed **2466 passed / 201 skipped both before and
 after** the removal — no regression.
 
 **Process note (why this ADR exists as a retrofit):** this decision went

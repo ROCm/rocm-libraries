@@ -16,7 +16,7 @@ exact files this test read and had to carry a matching `.ambr` update; PR
 #10750 (unrelated bf16_r tuning) then failed the same test for a reason that
 had nothing to do with its own diff. Root-caused by Brad Nemanich: "The
 TensileLite tests should never look under `library/src`." Confirmed via grep
-this was the *only* file anywhere under `Tensile/Tests/unit/characterization/`
+this was the *only* file anywhere under `tensilelite/Tests/unit/characterization/`
 referencing `library/src` / `asm_full` / `amd_detail` / `rocblaslt/src` — an
 isolated defect, not a pattern used elsewhere in the suite.
 

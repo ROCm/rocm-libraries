@@ -53,8 +53,8 @@ _GFX950_CAFS_CFG = os.path.join(_DESIGNED, "gfx950", "localread_cafs_fp8.yaml")
 # gfx950: xfp32 (TF32 emulation) wider VectorWidth for lrvwTile>1 / indexTranpose
 # (already exists; re-used here to exercise lines 1090-1135)
 _GFX950_XFP32_CFG = os.path.join(
-    os.path.dirname(_HERE),  # Tensile/Tests/unit/
-    os.pardir,               # Tensile/Tests/
+    os.path.dirname(_HERE),  # tensilelite/Tests/unit/
+    os.pardir,               # tensilelite/Tests/
     os.pardir,               # Tensile/
     "common", "gemm", "gfx950", "xfp32.yaml",
 )

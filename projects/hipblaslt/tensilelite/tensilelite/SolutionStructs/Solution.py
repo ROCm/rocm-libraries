@@ -403,7 +403,7 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
 # Tensile/Common/ValidParameters.py to keep the registry and its derived
 # type map co-located (and to keep the Common -> Solution import direction).
 # They are re-imported above and re-exported here for the existing test
-# module (Tensile/Tests/unit/test_validateParameterTypes.py) that imports
+# module (tensilelite/Tests/unit/test_validateParameterTypes.py) that imports
 # them from Solution.
 
 _cacheHintTensors = ("A", "B", "C", "D", "E", "Gate", "MXSA", "MXSB", "WS", "Metadata")

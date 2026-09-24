@@ -26,7 +26,7 @@ _CONFIG = os.path.normpath(
         os.path.dirname(__file__),
         os.pardir,  # characterization/
         os.pardir,  # unit/
-        os.pardir,  # Tensile/Tests/
+        os.pardir,  # tensilelite/Tests/
         "common", "comm", "gfx950", "fused_a2a.yaml",
     )
 )

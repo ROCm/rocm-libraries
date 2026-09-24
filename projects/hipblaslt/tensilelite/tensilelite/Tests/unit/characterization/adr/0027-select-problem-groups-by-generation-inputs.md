@@ -21,7 +21,7 @@ solution search while ignoring runtime-only benchmark inputs.
 List selectors with:
 
 ```console
-PYTHONPATH=. python Tensile/Tests/unit/characterization/_codegen/list_config_fingerprints.py <config.yaml>
+PYTHONPATH=. python tensilelite/Tests/unit/characterization/_codegen/list_config_fingerprints.py <config.yaml>
 ```
 
 When a selector changes, compare the selected problem type and generation

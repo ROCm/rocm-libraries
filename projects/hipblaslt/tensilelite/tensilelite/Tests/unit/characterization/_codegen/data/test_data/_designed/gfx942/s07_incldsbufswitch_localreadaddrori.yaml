@@ -12,7 +12,7 @@
 # so IncLdsBufSwitch = True.  PGR>=3 is only accepted with DirectToLdsA and
 # DirectToLdsB, PrefetchLocalRead>=1, ScheduleIterAlg==3 (Solution.py:5580-5586),
 # so this config uses the working gfx942 DirectToLds recipe from
-# Tensile/Tests/common/gemm/dtl.yaml (fp16 HPA NN, WorkGroup[16,16,1],
+# tensilelite/Tests/common/gemm/dtl.yaml (fp16 HPA NN, WorkGroup[16,16,1],
 # LocalReadVectorWidth 4, DirectToLds 1) with PrefetchGlobalRead bumped to 3.
 GlobalParameters:
   SyncsPerBenchmark: 0

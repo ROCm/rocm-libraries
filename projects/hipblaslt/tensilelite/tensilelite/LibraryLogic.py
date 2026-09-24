@@ -233,6 +233,7 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
        None)
 
 
+
 ################################################################################
 # LogicAnalyzer
 ################################################################################
@@ -398,6 +399,7 @@ class LogicAnalyzer:
       dataFileName = dataFileNameList[fileIdx]
       self.addFromCSV(dataFileName, self.numSolutionsPerGroup[fileIdx], \
           self.solutionGroupMap[fileIdx])
+
 
 
     #print self.data
@@ -637,6 +639,7 @@ class LogicAnalyzer:
 
     print("Winners", winners)
     self.pruneSolutions(winners)
+
 
 
   ##############################################################################
@@ -883,6 +886,7 @@ class LogicAnalyzer:
     return ruleList
 
 
+
   ##############################################################################
   ##############################################################################
   ###
@@ -890,6 +894,7 @@ class LogicAnalyzer:
   ###
   ##############################################################################
   ##############################################################################
+
 
 
   ##############################################################################

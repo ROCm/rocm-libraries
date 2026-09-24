@@ -20,17 +20,17 @@ from config_harness import assert_config_emits
 pytestmark = pytest.mark.unit
 
 _CONFIGS = [
-    ("Tensile/Tests/common/streamk/sk_mx32f4_quick.yaml", "2e0992e2bc4e", "gfx942", 4, {-2: 1, 0: 1}),
-    ("Tensile/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf8_halfplr_tdm_pap.yaml", "5561f832a587", "gfx1250", 4, {0: 4}),
-    ("Tensile/Tests/common/streamk/gfx950/sk_sgemm_pap.yaml", "4146780e2267", "gfx950", 192, {0: 8}),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_bgemm_tdm_split.yaml", "4750bc69b2d4", "gfx1250", 12, {0: 6}),
-    ("Tensile/Tests/common/streamk/gfx950/sk_mxf4gemm_pap.yaml", "f2f27dee45a5", "gfx950", 256, {0: 4}),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml", "fdd3c5989126", "gfx1250", 64, {0: 8}),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm_split.yaml", "fcc5bf59b1ff", "gfx1250", 4, {0: 2}),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_halfplr_f8gemm_tdm.yaml", "cbc02c6dda8a", "gfx1250", 18, {0: 8}),
-    ("Tensile/Tests/common/streamk/sk_dynamic.yaml", "57651b14bf0b", "gfx942", 20, {-2: 4, 0: 4}),
-    ("Tensile/Tests/common/streamk/sk_dynamic_work_stealing.yaml", "999f59a57a05", "gfx942", 4, {0: 4}),
-    ("Tensile/Tests/common/streamk/sk_hybrid_work_stealing.yaml", "f8b0fe059641", "gfx942", 4, {0: 4}),
+    ("tensilelite/Tests/common/streamk/sk_mx32f4_quick.yaml", "2e0992e2bc4e", "gfx942", 4, {-2: 1, 0: 1}),
+    ("tensilelite/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf8_halfplr_tdm_pap.yaml", "5561f832a587", "gfx1250", 4, {0: 4}),
+    ("tensilelite/Tests/common/streamk/gfx950/sk_sgemm_pap.yaml", "4146780e2267", "gfx950", 192, {0: 8}),
+    ("tensilelite/Tests/common/streamk/gfx1250/core/sk_bgemm_tdm_split.yaml", "4750bc69b2d4", "gfx1250", 12, {0: 6}),
+    ("tensilelite/Tests/common/streamk/gfx950/sk_mxf4gemm_pap.yaml", "f2f27dee45a5", "gfx950", 256, {0: 4}),
+    ("tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml", "fdd3c5989126", "gfx1250", 64, {0: 8}),
+    ("tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm_split.yaml", "fcc5bf59b1ff", "gfx1250", 4, {0: 2}),
+    ("tensilelite/Tests/common/streamk/gfx1250/core/sk_halfplr_f8gemm_tdm.yaml", "cbc02c6dda8a", "gfx1250", 18, {0: 8}),
+    ("tensilelite/Tests/common/streamk/sk_dynamic.yaml", "57651b14bf0b", "gfx942", 20, {-2: 4, 0: 4}),
+    ("tensilelite/Tests/common/streamk/sk_dynamic_work_stealing.yaml", "999f59a57a05", "gfx942", 4, {0: 4}),
+    ("tensilelite/Tests/common/streamk/sk_hybrid_work_stealing.yaml", "f8b0fe059641", "gfx942", 4, {0: 4}),
 ]
 
 _IDS = [f"{c[0].rsplit('/', 1)[-1][:-5]}-group-{c[1]}" for c in _CONFIGS]

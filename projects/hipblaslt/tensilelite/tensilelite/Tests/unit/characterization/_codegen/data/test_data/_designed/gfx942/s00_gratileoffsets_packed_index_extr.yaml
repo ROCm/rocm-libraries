@@ -12,7 +12,7 @@
 #   NOTE: the packed-index targets (len(PackedIndices)>1) are unreachable from a
 #   plain GEMM ProblemType (single free index per tensor) -> Category B for emit.
 #
-# Derived from Tensile/Tests/common/gemm/swizzleA.yaml (HSS TN SWIZZLED_A).
+# Derived from tensilelite/Tests/common/gemm/swizzleA.yaml (HSS TN SWIZZLED_A).
 # ForkParameters trimmed: WorkGroup LSU=2 only, GSU=1 -> few solutions.
 GlobalParameters:
   SyncsPerBenchmark: 0

@@ -21,7 +21,7 @@
 ################################################################################
 """Corpus-clean CI test.
 
-Walks every input YAML under Tensile/Tests/common/ and Tests/unit/test_data/
+Walks every input YAML under tensilelite/Tests/common/ and Tests/unit/test_data/
 and asserts each one loads + parses + section-validates without raising
 ConfigTypeError. This enforces the tree-cleanliness invariant going forward:
 any new test YAML with a typo'd type fails this gate.

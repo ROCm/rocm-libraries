@@ -32,7 +32,7 @@ from Tensile.Tests.gpu_detection import has_arch
 # prevent test_config.py's findConfigs() from picking it up as a standalone
 # parametrized test.  This config is only meant to be used by the tests below.
 #
-# Trimmed from Tensile/Tests/common/gemm/fp16_tn.yaml to a single solution
+# Trimmed from tensilelite/Tests/common/gemm/fp16_tn.yaml to a single solution
 # (one MatrixInstruction) and a single benchmark problem size.
 _CONFIG = """\
 GlobalParameters:
