@@ -489,14 +489,13 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     /* split_k == 0 puts the split degree in a kernel argument, so the K-slice
      * length is unknown at build time; the async and unrolled k-loops both need
      * a compile-time trip count. Mirrors the Python validator. */
-    if(s->split_k == 0
-       && (s->async_dma || s->unroll_k || (s->pipeline && strcmp(s->pipeline, "basic") == 0)))
+    if(s->split_k == 0 && (s->async_dma || s->unroll_k))
     {
         if(reason && reason_cap)
             snprintf(reason,
                      reason_cap,
                      "wgrad split_k=0 (runtime degree) is incompatible with "
-                     "async_dma/unroll_k/pipeline='basic': those pipelines need a "
+                     "async_dma/unroll_k: those pipelines need a "
                      "compile-time iteration count. Use a fixed split_k >= 1.");
         return false;
     }
@@ -570,34 +569,26 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
-    /* Both loops are unrolled at build time, one full load+mfma body per K
-     * iteration, so a deep reduction explodes compile time and code size. A
-     * build-practicality bound, not a hardware one. This used to guard 'basic'
-     * only, which left async uncapped and let a low split-K degree unroll five
-     * figures of bodies into one kernel. Mirrors Python. */
+    /* async_dma is Python-unrolled; a deep reduction explodes compile time.
+     * Mirrors Python is_valid_wgrad_spec. */
+    if(s->async_dma)
     {
-        const bool is_basic = s->pipeline && strcmp(s->pipeline, "basic") == 0;
-        if(is_basic || s->async_dma)
+        const int spk = (s->split_k > 1) ? s->split_k : 1;
+        const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
+        const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
+        if(k_iters > ROCKE_MAX_UNROLLED_K_ITERS)
         {
-            const char* label = is_basic ? "pipeline='basic'" : "async_dma";
-            const int spk = (s->split_k > 1) ? s->split_k : 1;
-            const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
-            const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
-            if(k_iters > ROCKE_MAX_UNROLLED_K_ITERS)
-            {
-                if(reason && reason_cap)
-                    snprintf(reason,
-                             reason_cap,
-                             "%s would unroll to %d K iterations "
-                             "(slice_k=%d, tile_k=%d), over the %d limit; "
-                             "raise split_k or tile_k",
-                             label,
-                             k_iters,
-                             slice_k,
-                             s->tile_k,
-                             ROCKE_MAX_UNROLLED_K_ITERS);
-                return false;
-            }
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "async_dma would unroll to %d K iterations "
+                         "(slice_k=%d, tile_k=%d), over the %d limit; "
+                         "raise split_k or tile_k",
+                         k_iters,
+                         slice_k,
+                         s->tile_k,
+                         ROCKE_MAX_UNROLLED_K_ITERS);
+            return false;
         }
     }
 
@@ -1964,12 +1955,16 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->kloop_k_lo = k_lo;
     /* Python: slice_k = wg_K if k_hi is None else wg_K_padded() // split_k
      *         K_iters = ceil(slice_k / block_k)
-     * k_hi is None exactly when split_k == 1. */
+     * k_hi is None exactly when split_k == 1.
+     * split_k == 0 (runtime degree): the trip count is unknown at build time;
+     * kloop_simple uses c_K_gemm (the runtime upper bound) directly via
+     * scf_for_iter so kloop_num_iters is not consulted -- leave it 0. */
     {
         const int wgk = rocke_wgrad_conv_spec_wg_K(spec);
-        const int slice_k
-            = (k_hi_v == NULL) ? wgk : (rocke_wgrad_conv_spec_wg_K_padded(spec) / spec->split_k);
-        ctx->kloop_num_iters = (slice_k + ctx->block_k - 1) / ctx->block_k;
+        const int slice_k = (k_hi_v == NULL) ? wgk
+                            : (split_k == 0) ? 0 /* runtime: no static trip count */
+                                             : (rocke_wgrad_conv_spec_wg_K_padded(spec) / split_k);
+        ctx->kloop_num_iters = (slice_k > 0) ? (slice_k + ctx->block_k - 1) / ctx->block_k : 0;
     }
 
     /* Chiplet swizzle */
@@ -2488,8 +2483,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
-    else if(spec->pipeline && strcmp(spec->pipeline, "basic") == 0)
-        rocke_conv_emit_kloop_basic(&ctx);
     else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else

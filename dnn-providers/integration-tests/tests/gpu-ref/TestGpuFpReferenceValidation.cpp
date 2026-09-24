@@ -339,6 +339,26 @@ TYPED_TEST(TestGpuIntValidation, EmptyTensorsPasses)
     ASSERT_TRUE(validator.allClose(ref, impl));
 }
 
+// Tensor::fillWithSentinelValue() leaves the type's maximum in an unwritten integer
+// output. If neither the engine nor the reference wrote an element, both sides hold it
+// and are equal, and the comparison must still fail, as CpuIntReferenceValidation does.
+TYPED_TEST(TestGpuIntValidation, SentinelValueFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<TypeParam> ref({4});
+    Tensor<TypeParam> impl({4});
+    ref.fillWithValue(static_cast<TypeParam>(1));
+    impl.fillWithValue(static_cast<TypeParam>(1));
+    ref.memory().hostData()[2] = std::numeric_limits<TypeParam>::max();
+    impl.memory().hostData()[2] = std::numeric_limits<TypeParam>::max();
+
+    const GpuIntReferenceValidation<TypeParam> gpu;
+    const CpuIntReferenceValidation<TypeParam> cpu;
+    EXPECT_FALSE(gpu.allClose(ref, impl));
+    EXPECT_FALSE(cpu.allClose(ref, impl));
+}
+
 // ============================================================================
 // Factory function tests
 // ============================================================================
@@ -690,6 +710,33 @@ TYPED_TEST(TestGpuFpStridedValidation, RefPackedImplStridedPasses)
     }
 
     // Copy by logical index so impl has the same logical values in NHWC layout
+    copyByLogicalIndex(impl, ref);
+
+    const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
+    ASSERT_TRUE(validator.allClose(ref, impl));
+}
+
+// NCHW-packed and NHWC-packed are both packed, but pair different logical elements at
+// the same memory offset. Only identical strides may take the linear fast path.
+TYPED_TEST(TestGpuFpStridedValidation, DifferentlyPackedLayoutsCompareLogically)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {2, 3, 4, 5};
+    const std::vector<int64_t> nhwcStrides = {60, 1, 15, 3};
+    Tensor<TypeParam> ref(dims); // packed NCHW
+    Tensor<TypeParam> impl(dims, nhwcStrides); // packed NHWC
+
+    ASSERT_TRUE(ref.isPacked());
+    ASSERT_TRUE(impl.isPacked());
+
+    std::vector<int64_t> indices(4, 0);
+    for(size_t i = 0; i < ref.elementCount(); ++i)
+    {
+        ref(indices) = static_cast<TypeParam>(static_cast<float>(i) * 0.1f);
+
+        incrementIndices(indices, dims);
+    }
     copyByLogicalIndex(impl, ref);
 
     const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
