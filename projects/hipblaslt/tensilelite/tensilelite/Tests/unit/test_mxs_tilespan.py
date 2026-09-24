@@ -43,7 +43,7 @@ except Exception as exc:  # pragma: no cover - environment guard
     _Comp = None
     _IMPORT_ERR = exc
 
-# The `unit` marker is applied automatically by Tensile/Tests/conftest.py
+# The `unit` marker is applied automatically by tensilelite/Tests/conftest.py
 # (pytest_collection_modifyitems tags every test by its top-level dir), so only
 # the rocisa-availability skip guard is declared here.
 pytestmark = pytest.mark.skipif(

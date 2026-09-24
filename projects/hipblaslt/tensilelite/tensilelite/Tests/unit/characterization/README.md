@@ -36,7 +36,7 @@ These tests require the standard TensileLite dev environment with **`rocisa` bui
 Run the full unit suite (characterization tests are marked `-m unit` and collected by the existing `testpaths`):
 
 ```bash
-pytest -m unit Tensile/Tests/unit
+pytest -m unit tensilelite/Tests/unit
 ```
 
 ### Coverage is path-mode
@@ -45,14 +45,14 @@ Always measure coverage with `--cov=Tensile` — a **filesystem path**, never a 
 
 ```bash
 pytest -m unit -n4 --cov=Tensile --cov-config=pyproject.toml \
-  --cov-report=term-missing Tensile/Tests/unit
+  --cov-report=term-missing tensilelite/Tests/unit
 ```
 
 A dotted `--cov` target (e.g. `--cov=Tensile.Common.DataType`) re-imports `rocisa` and SIGABRTs on duplicate nanobind registration. To read a single module's row, grep the term-missing output (the single-file path prefix does not filter the report):
 
 ```bash
 pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
-  --cov-report=term-missing Tensile/Tests/unit | grep "Common/DataType.py"
+  --cov-report=term-missing tensilelite/Tests/unit | grep "Common/DataType.py"
 ```
 
 Line coverage = `(Stmts - Miss) / Stmts`.
@@ -83,7 +83,7 @@ even when the overall number looks fine.
 ### What the coverage number counts: the union of two suites
 
 The tests that run here are really two suites: the **characterization** tests (this directory) and
-the **pure unit** tests (the rest of `Tensile/Tests/unit`). Coverage is measured on the **union** of
+the **pure unit** tests (the rest of `tensilelite/Tests/unit`). Coverage is measured on the **union** of
 the two. A line counts as covered if *either* suite reaches it. The floors are measured on that
 union, so a per-file floor pins "coverage from characterization or unit, whichever reaches this
 line", not characterization alone.
@@ -201,7 +201,7 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
 2. **Raise the per-file floors.** Ratchet the baseline against that report:
 
    ```bash
-   python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
+   python tensilelite/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
    ```
 
    Each file's floor rises to its current coverage (rounded to two decimals), and a file with no
@@ -214,7 +214,7 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
    naming it:
 
    ```bash
-   python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update \
+   python tensilelite/Tests/unit/characterization/tools/coverage_ratchet.py update \
        --current coverage.json \
        --allow-lower=Tensile/Components/Subtile/SubtileGREmit.py
    ```
@@ -257,7 +257,7 @@ An opt-in local **pre-commit hook** runs the unit + characterization tests affec
 
      ```bash
      pytest <node-id> --snapshot-update
-     # e.g. Tensile/Tests/unit/characterization/DataType/test_datatype_char.py::test_foo
+     # e.g. tensilelite/Tests/unit/characterization/DataType/test_datatype_char.py::test_foo
      ```
 
      Read every changed line in the `.ambr` diff and explain the behavior change in your PR description. If the change pins or flips a known-wrong behavior, record a new ADR under `adr/` (or supersede the existing one). A golden diff is a reviewed behavior change, not a chore.

@@ -29,41 +29,41 @@ P = pathlib.Path
 
 
 def test_module_dotted_paths():
-    assert hook.module_dotted(P("Tensile/Common/Utilities.py")) == "Tensile.Common.Utilities"
-    assert hook.module_dotted(P("Tensile/__init__.py")) == "Tensile"
-    assert hook.module_dotted(P("Tensile/Common/__init__.py")) == "Tensile.Common"
-    assert hook.module_dotted(P("Tensile/data.yaml")) is None
+    assert hook.module_dotted(P("tensilelite/Common/Utilities.py")) == "tensilelite.Common.Utilities"
+    assert hook.module_dotted(P("tensilelite/__init__.py")) == "tensilelite"
+    assert hook.module_dotted(P("tensilelite/Common/__init__.py")) == "tensilelite.Common"
+    assert hook.module_dotted(P("tensilelite/data.yaml")) is None
 
 
 def test_referenced_modules_collects_imports_and_strings(tmp_path):
     f = tmp_path / "test_sample.py"
     f.write_text(
-        "import Tensile.Common.Utilities\n"
-        "from Tensile.Common import Utilities\n"
+        "import tensilelite.Common.Utilities\n"
+        "from tensilelite.Common import Utilities\n"
         "from . import sibling\n"
-        "m = importlib.import_module('Tensile.Foo.Bar')\n"
-        "patch('Tensile.Baz.qux')\n",
+        "m = importlib.import_module('tensilelite.Foo.Bar')\n"
+        "patch('tensilelite.Baz.qux')\n",
         encoding="utf-8",
     )
     refs = hook.referenced_modules(f)
-    assert "Tensile.Common.Utilities" in refs
-    assert "Tensile.Common" in refs
-    assert "Tensile.Foo.Bar" in refs
-    assert "Tensile.Baz.qux" in refs
+    assert "tensilelite.Common.Utilities" in refs
+    assert "tensilelite.Common" in refs
+    assert "tensilelite.Foo.Bar" in refs
+    assert "tensilelite.Baz.qux" in refs
     assert "sibling" not in refs
 
 
 def test_tests_for_module_respects_dotted_boundary():
     index = {
-        P("test_a.py"): {"Tensile.Common.Utilities"},
-        P("test_b.py"): {"Tensile.Common"},
-        P("test_c.py"): {"Tensile.CommonOther"},
-        P("test_d.py"): {"Tensile.Common.Utilities.sub"},
+        P("test_a.py"): {"tensilelite.Common.Utilities"},
+        P("test_b.py"): {"tensilelite.Common"},
+        P("test_c.py"): {"tensilelite.CommonOther"},
+        P("test_d.py"): {"tensilelite.Common.Utilities.sub"},
     }
-    assert hook.tests_for_module("Tensile.Common", index) == {
+    assert hook.tests_for_module("tensilelite.Common", index) == {
         P("test_a.py"), P("test_b.py"), P("test_d.py")
     }
-    assert hook.tests_for_module("Tensile.Common.Utilities", index) == {
+    assert hook.tests_for_module("tensilelite.Common.Utilities", index) == {
         P("test_a.py"), P("test_d.py")
     }
 
@@ -73,12 +73,12 @@ def test_classify_staged_buckets():
         TL / "pyproject.toml",
         TL / "scripts" / "helper.py",
         TL / "rocisa" / "src.cpp",
-        TL / "Tensile" / "Tests" / "unit" / "conftest.py",
-        TL / "Tensile" / "Tests" / "unit" / "__snapshots__" / "x.ambr",
-        TL / "Tensile" / "Tests" / "unit" / "test_x.py",
-        TL / "Tensile" / "Tests" / "common" / "test_y.py",
-        TL / "Tensile" / "Common" / "Utilities.py",
-        TL / "Tensile" / "Common" / "data.yaml",
+        TL / "tensilelite" / "Tests" / "unit" / "conftest.py",
+        TL / "tensilelite" / "Tests" / "unit" / "__snapshots__" / "x.ambr",
+        TL / "tensilelite" / "Tests" / "unit" / "test_x.py",
+        TL / "tensilelite" / "Tests" / "common" / "test_y.py",
+        TL / "tensilelite" / "Common" / "Utilities.py",
+        TL / "tensilelite" / "Common" / "data.yaml",
     ]
     broad, tests, sources, ignored = hook.classify_staged(staged)
     broad_str = set(broad)
@@ -87,16 +87,16 @@ def test_classify_staged_buckets():
     assert "rocisa/src.cpp (native ext)" in broad_str
     assert any("conftest.py" in b for b in broad_str)
     assert any("__snapshots__" in b for b in broad_str)
-    assert P("Tensile/Tests/unit/test_x.py") in tests
-    assert sources == [P("Tensile/Common/Utilities.py")]
+    assert P("tensilelite/Tests/unit/test_x.py") in tests
+    assert sources == [P("tensilelite/Common/Utilities.py")]
     assert any("Tests/common/test_y.py" in b for b in broad_str)
-    assert P("Tensile/Common/data.yaml") in ignored
+    assert P("tensilelite/Common/data.yaml") in ignored
 
 
 def test_classify_staged_test_support_triggers_full_suite():
     staged = [
-        TL / "Tensile" / "Tests" / "unit" / "streamk5_test_helpers.py",
-        TL / "Tensile" / "Tests" / "unit" / "characterization" / "_codegen" / "data" / "gfx908" / "BBS.yaml",
+        TL / "tensilelite" / "Tests" / "unit" / "streamk5_test_helpers.py",
+        TL / "tensilelite" / "Tests" / "unit" / "characterization" / "_codegen" / "data" / "gfx908" / "BBS.yaml",
     ]
     broad, tests, sources, ignored = hook.classify_staged(staged)
     assert tests == set()
@@ -108,11 +108,11 @@ def test_classify_staged_test_support_triggers_full_suite():
 
 
 def test_select_tests_threshold_and_escalation():
-    index = {P(f"test_{i}.py"): {"Tensile.Big"} for i in range(5)}
-    index.update({P(f"test_s{i}.py"): {"Tensile.Small"} for i in range(3)})
-    index.update({P(f"test_o{i}.py"): {"Tensile.Other"} for i in range(2)})
+    index = {P(f"test_{i}.py"): {"tensilelite.Big"} for i in range(5)}
+    index.update({P(f"test_s{i}.py"): {"tensilelite.Small"} for i in range(3)})
+    index.update({P(f"test_o{i}.py"): {"tensilelite.Other"} for i in range(2)})
     # total = 10; threshold = 0.40 * 10 = 4.0
-    sources = [P("Tensile/Big.py"), P("Tensile/Small.py"), P("Tensile/Ghost.py")]
+    sources = [P("tensilelite/Big.py"), P("tensilelite/Small.py"), P("tensilelite/Ghost.py")]
     selected, escalations = hook.select_tests(sources, index)
     assert selected == {P(f"test_s{i}.py") for i in range(3)}  # 3 hits -> selected
     joined = " ".join(escalations)
@@ -121,7 +121,7 @@ def test_select_tests_threshold_and_escalation():
 
 
 def test_select_tests_unmappable_path():
-    selected, escalations = hook.select_tests([P("Tensile/weird")], index={P("t.py"): set()})
+    selected, escalations = hook.select_tests([P("tensilelite/weird")], index={P("t.py"): set()})
     assert selected == set()
     assert any("unmappable path" in e for e in escalations)
 

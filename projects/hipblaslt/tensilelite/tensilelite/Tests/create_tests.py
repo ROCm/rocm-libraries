@@ -29,7 +29,7 @@
 # Run from the Tensile/Tests directory, output script goes in the TEST_DIR/test_TEST_DIR.py
 
 # The directory containing the test script can be passed to pytest:
-# PYTHONPATH=. py.test-3 --durations=0 -v Tensile/Tests/TEST_DIR/
+# PYTHONPATH=. py.test-3 --durations=0 -v tensilelite/Tests/TEST_DIR/
 from __future__ import print_function
 import glob, sys, os
 
