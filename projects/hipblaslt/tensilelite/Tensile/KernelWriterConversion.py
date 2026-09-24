@@ -549,6 +549,17 @@ class KernelWriterConversion(KernelWriterBase):
 
     destTypeStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
 
+    # tensile_bfloat16 spells its fp32 conversion out in C++ so that it works on
+    # targets without a bf16 convert instruction. The compiler cannot recover the
+    # intent from those bit ops, so on gfx950+ it emits the software round-to-even
+    # sequence per element instead of one v_cvt_pk_bf16_f32 per pair. Holding the
+    # result in the builtin type states the intent and lets the compiler pick.
+    # Only the result buffer changes; it is reinterpreted for the store either
+    # way, and both types are two bytes with the same layout.
+    convTypeStr = destTypeStr
+    if self.state["ProblemType"]["DestDataType"].isBFloat16() and self.language == "HIP":
+      convTypeStr = "__bf16"
+
     indexChar = self.indexChars[0]
     kStr += "  %s strideW = 1 + (arg.size%s - 1) * strideW%s" % (self.uint64Str, indexChar, indexChar)
     for i in range(1, problemType["NumIndicesC"]):
@@ -558,7 +569,7 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += "  %s strideWLimit = strideW * arg.gsu * sizeof(%s);"%(self.uint64Str, self.wsDataType) + self.endLine
 
     kStr += "  " + intermediateDataType + " accum[NUM_ELEMENT_LOAD] = {0};" + self.endLine
-    kStr += "  " + destTypeStr + " result[NUM_ELEMENT_LOAD];" + self.endLine
+    kStr += "  " + convTypeStr + " result[NUM_ELEMENT_LOAD];" + self.endLine
 
     #Load scaleAB
     if self.state["ProblemType"]["UseScaleAB"] == "Scalar":
@@ -870,7 +881,7 @@ class KernelWriterConversion(KernelWriterBase):
 
     #covert to output
     for vIdx in range(self.num_dword_load):
-      kStr += "  %s[%d] = (%s)%s[%d];%s" % (resultStr, vIdx, destTypeStr, accumStr, vIdx, self.endLine)
+      kStr += "  %s[%d] = (%s)%s[%d];%s" % (resultStr, vIdx, convTypeStr, accumStr, vIdx, self.endLine)
 
     # kStr += "  *(%s *)(arg.D+idxD) = *(%s *)%s;%s" % (storeTypeStr, storeTypeStr, resultStr, self.endLine)
     kStr += "  %s byteOffsetD = idxD * sizeof(%s);%s" % (self.uint64Str, destTypeStr, self.endLine)
