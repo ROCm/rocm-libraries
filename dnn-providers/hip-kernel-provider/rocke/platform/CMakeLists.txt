@@ -378,6 +378,7 @@ if(ROCKE_INSTALL_TESTS)
     # component requirements are staged and installed by TheRock.
     set(_ROCKE_INSTALLED_PYTEST_EXCLUDE_RELPATHS
         "tests/library"
+        "tests/core/test_gfx1250_mxfp8_example.py"
         "tests/core/test_gfx1250_scaled_wmma_reference.py"
         "tests/test_numeric_references.py"
         "tests/instances/test_gfx1250_scaled_wmma_numeric.py")
