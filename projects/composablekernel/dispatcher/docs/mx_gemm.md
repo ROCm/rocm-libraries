@@ -119,9 +119,6 @@ PYCODE
 
 ## Regression tests
 
-The [gfx1250 validation report](mx_gemm_validation.md) records the full pipeline
-matrix, reference comparisons, architecture regression checks and their scope.
-
 CPU tests cover architecture selection and target suffixes, invalid configurations,
 LDS boundaries, scale/packing codecs, standalone Tile Engine entry points, the CI
 configuration, and exact generated-header parity with Tile Engine:
