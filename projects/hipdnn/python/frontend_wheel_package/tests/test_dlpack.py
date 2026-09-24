@@ -3,6 +3,7 @@
 
 """DLPack interoperability, matching cuDNN frontend's tensor_like and variant-pack rules."""
 
+import ctypes
 import os
 
 import numpy as np
@@ -32,6 +33,78 @@ class _NoneDlpack:
 class _DataPtr:
     def data_ptr(self):
         return 4096
+
+
+class _DLDevice(ctypes.Structure):
+    _fields_ = [("device_type", ctypes.c_int32), ("device_id", ctypes.c_int32)]
+
+
+class _DLDataType(ctypes.Structure):
+    _fields_ = [
+        ("code", ctypes.c_uint8),
+        ("bits", ctypes.c_uint8),
+        ("lanes", ctypes.c_uint16),
+    ]
+
+
+class _DLManagedTensor(ctypes.Structure):
+    _fields_ = [
+        ("data", ctypes.c_void_p),
+        ("device", _DLDevice),
+        ("ndim", ctypes.c_int32),
+        ("dtype", _DLDataType),
+        ("shape", ctypes.POINTER(ctypes.c_int64)),
+        ("strides", ctypes.POINTER(ctypes.c_int64)),
+        ("byte_offset", ctypes.c_uint64),
+        ("manager_ctx", ctypes.c_void_p),
+        ("deleter", ctypes.c_void_p),
+    ]
+
+
+_PyCapsule_New = ctypes.pythonapi.PyCapsule_New
+_PyCapsule_New.restype = ctypes.py_object
+_PyCapsule_New.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p]
+_DLTENSOR = b"dltensor"
+
+
+class _OffsetProducer:
+    """Exports one float32 element at ``base + byte_offset`` with a nonzero
+    DLPack byte_offset. Real producers (NumPy, torch) advance the data pointer
+    instead, so they never exercise the offset field."""
+
+    def __init__(self, base, byte_offset, device_type, device_id=0):
+        self._args = (base, byte_offset, device_type, device_id)
+        self._keep = []  # structs and shapes must outlive the consumer
+
+    def __dlpack__(self, **kwargs):
+        base, byte_offset, device_type, device_id = self._args
+        shape = (ctypes.c_int64 * 1)(1)
+        mt = _DLManagedTensor(
+            data=base,
+            device=_DLDevice(device_type, device_id),
+            ndim=1,
+            dtype=_DLDataType(2, 32, 1),  # kDLFloat, 32 bits
+            shape=shape,
+            byte_offset=byte_offset,
+        )
+        self._keep += [shape, mt]
+        return _PyCapsule_New(ctypes.addressof(mt), _DLTENSOR, None)
+
+    def __dlpack_device__(self):
+        return (self._args[2], self._args[3])
+
+
+class _DlpackOnly:
+    """Hides data_ptr() so the bindings must import the DLPack capsule."""
+
+    def __init__(self, tensor):
+        self._tensor = tensor
+
+    def __dlpack__(self, **kwargs):
+        return self._tensor.__dlpack__(**kwargs)
+
+    def __dlpack_device__(self):
+        return self._tensor.__dlpack_device__()
 
 
 class TestTensorLikeHost:
@@ -97,14 +170,29 @@ class TestTensorLikeHost:
         t = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
         assert t.set_is_pass_by_value(True).get_is_pass_by_value() is True
 
+    def test_read_only_producer(self):
+        host = np.zeros((2, 3), np.float32)
+        host.setflags(write=False)
+        t = hipdnn.Graph.tensor_like(host)
+        assert t.get_dim() == [2, 3]
+        assert _get_data_ptr(host) == host.ctypes.data
+
 
 class TestDataPointerConversion:
     """Variant-pack value conversion, checked through the private hook."""
 
     def test_host_dlpack_honors_byte_offset(self):
         host = np.zeros(4, np.float32)
-        assert _get_data_ptr(host) == host.ctypes.data
-        assert _get_data_ptr(host[1:]) == host.ctypes.data + 4
+        producer = _OffsetProducer(host.ctypes.data, 8, device_type=1)
+        assert _get_data_ptr(producer) == host.ctypes.data + 8
+
+    def test_integer_like_values(self):
+        assert _get_data_ptr(np.uint64(4096)) == 4096
+        assert _get_data_ptr(np.int64(4096)) == 4096
+        # A 0-d integer array implements __index__ too, but it is data, not a
+        # pointer: DLPack takes precedence.
+        scalar = np.array(7, np.int64)
+        assert _get_data_ptr(scalar) == scalar.ctypes.data
 
     def test_data_ptr_is_used_before_dlpack(self):
         assert _get_data_ptr(_DataPtr()) == 4096
@@ -138,6 +226,10 @@ class TestDlpackDevice:
         x = torch.empty(16, dtype=torch.float32, device="cuda")
         assert _get_data_ptr(x) == x.data_ptr()
         assert _get_data_ptr(x[3:]) == x.data_ptr() + 12
+        assert _get_data_ptr(_DlpackOnly(x[3:])) == x.data_ptr() + 12
+        device = torch.cuda.current_device()
+        producer = _OffsetProducer(x.data_ptr(), 12, device_type=10, device_id=device)
+        assert _get_data_ptr(producer) == x.data_ptr() + 12
 
     def test_torch_tensor_like(self):
         torch = _rocm_torch()
@@ -172,6 +264,33 @@ class TestDlpackDevice:
 
         with pytest.raises(ValueError, match="has no uid"):
             graph.execute(handle, {hipdnn.Tensor(): tensors[a]}, workspace)
+
+    def test_execute_with_dlpack_only_producers(self):
+        """Values and workspace that expose only __dlpack__, on the device."""
+        torch = _rocm_torch()
+        graph, a, b, out = build_pointwise_add_graph()
+        handle = build_all_plans(graph)
+        pack = {
+            t: _DlpackOnly(torch.empty(t.get_dim(), dtype=torch.float32, device="cuda"))
+            for t in (a, b, out)
+        }
+        workspace = _DlpackOnly(
+            torch.empty(
+                max(graph.get_workspace_size(), 1), dtype=torch.uint8, device="cuda"
+            )
+        )
+        assert graph.execute(handle, pack, workspace).is_good()
+        assert graph.execute_plan_at_index(handle, pack, workspace, 0).is_good()
+
+    def test_execute_with_numpy_integer_keys_and_pointers(self):
+        """Integer-pointer packs built with NumPy scalars keep working."""
+        graph, a, b, out = build_pointwise_add_graph()
+        handle = build_all_plans(graph)
+        buffers = {t: hipdnn.DeviceBuffer(4 * t.get_volume()) for t in (a, b, out)}
+        pack = {
+            np.int64(t.get_uid()): np.uint64(buf.ptr()) for t, buf in buffers.items()
+        }
+        assert graph.execute(handle, pack, np.uint64(0)).is_good()
 
     def test_host_runtime_scalar_reaches_the_engine(self):
         """cuDNN pattern: tensor_like(host) declares the scalar, execute passes it.

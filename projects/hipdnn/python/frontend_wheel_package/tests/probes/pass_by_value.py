@@ -32,7 +32,10 @@ y.set_output(True)
 handle = hipdnn.create_handle()
 
 # Same loader handle as the one the backend opened, so the recorder state is shared.
-plugin = ctypes.CDLL(os.environ["HIPDNN_TEST_PROBE_PLUGIN"], mode=os.RTLD_NOLOAD)
+# RTLD_NOLOAD is POSIX-only; on Windows, LoadLibrary returns the loaded module.
+plugin = ctypes.CDLL(
+    os.environ["HIPDNN_TEST_PROBE_PLUGIN"], mode=getattr(os, "RTLD_NOLOAD", 0)
+)
 plugin.hipdnnTestPbvPluginGetReceivedCount.restype = ctypes.c_uint32
 plugin.hipdnnTestPbvPluginGetReceivedUidAt.restype = ctypes.c_int64
 plugin.hipdnnTestPbvPluginGetReceivedUidAt.argtypes = [ctypes.c_uint32]

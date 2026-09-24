@@ -21,15 +21,32 @@ namespace
 {
 
 // Imports a __dlpack__ producer without conversion, so the data is never copied.
-nb::ndarray<> importDlpack(nb::handle obj, const std::string& what)
+// Read-only capsules are accepted: as in cuDNN, the writable flag is not checked.
+nb::ndarray<nb::ro> importDlpack(nb::handle obj, const std::string& what)
 {
-    nb::ndarray<> array;
+    nb::ndarray<nb::ro> array;
     if(!nb::try_cast(obj, array, /*convert=*/false))
     {
         throw nb::value_error(
             (what + ": __dlpack__ did not return a valid DLPack capsule").c_str());
     }
     return array;
+}
+
+// Python int or any other __index__ integer (for example np.int64), which the
+// earlier nanobind map conversion also accepted. bool is rejected.
+std::optional<nb::int_> asIndexInteger(nb::handle value)
+{
+    if(nb::isinstance<nb::bool_>(value) || PyIndex_Check(value.ptr()) == 0)
+    {
+        return std::nullopt;
+    }
+    PyObject* index = PyNumber_Index(value.ptr());
+    if(index == nullptr)
+    {
+        throw nb::python_error();
+    }
+    return nb::steal<nb::int_>(index);
 }
 
 std::string dtypeText(const nb::dlpack::dtype& dt)
@@ -189,17 +206,25 @@ void* toDataPointer(nb::handle value, const std::string& what)
     }
     if(nb::hasattr(value, "__dlpack__"))
     {
-        const nb::ndarray<> array = importDlpack(value, what);
+        const nb::ndarray<nb::ro> array = importDlpack(value, what);
         if(!isSupportedDevice(array.device_type()))
         {
             throw nb::value_error(
                 (what + ": " + unsupportedDeviceText(array.device_type())).c_str());
         }
-        return array.data();
+        return const_cast<void*>(array.data());
+    }
+    // Checked last: a single-element integer tensor also implements __index__,
+    // and its value is not a pointer.
+    if(const auto index = asIndexInteger(value))
+    {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        return reinterpret_cast<void*>(nb::cast<uintptr_t>(*index));
     }
     throw nb::type_error(
         (what
-         + ": expected int, DeviceBuffer, an object with data_ptr(), or an object implementing "
+         + ": expected an integer, DeviceBuffer, an object with data_ptr(), or an object "
+           "implementing "
            "__dlpack__, got "
          + nb::type_name(value.type()).c_str())
             .c_str());
@@ -222,9 +247,9 @@ std::unordered_map<int64_t, void*> toVariantPack(const nb::dict& variantPack)
             }
             uid = tensor.get_uid();
         }
-        else if(nb::isinstance<nb::int_>(key) && !nb::isinstance<nb::bool_>(key))
+        else if(const auto index = asIndexInteger(key))
         {
-            uid = nb::cast<int64_t>(key);
+            uid = nb::cast<int64_t>(*index);
         }
         else
         {
@@ -243,7 +268,7 @@ std::shared_ptr<TensorAttributes> tensorAttributesFromDlpack(nb::handle obj,
         throw nb::type_error(
             "tensor_like() expects a hipdnn Tensor or an object implementing __dlpack__");
     }
-    const nb::ndarray<> array = importDlpack(obj, "tensor_like()");
+    const nb::ndarray<nb::ro> array = importDlpack(obj, "tensor_like()");
 
     const int deviceType = array.device_type();
     if(!isSupportedDevice(deviceType))
