@@ -30,6 +30,7 @@ import copy
 import io
 import math
 import os
+import sys
 
 from rocisa.code import Module
 from .ScheduleTypes import (
@@ -784,6 +785,14 @@ class LogicalScheduler:
         numP = cfg.numPartitions
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
 
+        # Skipping a re-read is only sound for tensors whose registers still
+        # hold the data when the next partition wants it; the rest reload.
+        retained = self._lr_tensors_retained_across_partitions()
+        side_retained = {
+            side: all(t in retained for t, _ in self._lr_tensors()
+                      if TENSOR_SIDE[t] == side)
+            for side in ('A', 'B')}
+
         # Track which tile ranges are currently loaded in VGPR (for wrapping decisions).
         loaded_ranges = {'A': {part_ranges[0]['A']},
                          'B': {part_ranges[0]['B']}}
@@ -798,9 +807,11 @@ class LogicalScheduler:
 
             load = {}
             for side in ('A', 'B'):
-                load[side] = is_last or nxt[side] not in loaded_ranges[side]
+                load[side] = (is_last or not side_retained[side]
+                              or nxt[side] not in loaded_ranges[side])
 
-            slots = self._place_LRs_for_partition(cur, nxt, is_last, load, placed)
+            slots = self._place_LRs_for_partition(cur, nxt, is_last, load,
+                                                  placed, retained)
             for slot in slots:
                 for lr in slot.lrs:
                     lr.partition = pi
@@ -812,6 +823,110 @@ class LogicalScheduler:
 
         self._partitions = partitions
         return partitions
+
+    def _lr_tensors_retained_across_partitions(self) -> set:
+        """Tensors a later partition may read out of registers, not from LDS.
+
+        A partition re-reading what an earlier one already loaded is pure waste
+        -- it is the whole reason partitioning costs LDS bandwidth -- but the
+        read can only be skipped while the registers still hold the data.
+
+        The deterministic allocator gives each tile group two register sets and
+        puts k chunk c in set c % 2, so a tensor with more than two chunks per
+        unroll iteration overwrites its own earliest chunks before the
+        partition loop comes back around; one whose chunks fit in the two sets
+        has the entire iteration live at once. That is the difference between
+        MT128x128x512 (four chunks, must reload) and MT256x256x256 (two chunks,
+        need not), and it is why sharing the dedup unconditionally computed the
+        tail chunks twice and the first ones never.
+
+        The free-list allocator retains everything instead: it frees a tile at
+        its last read across the whole partition sequence, so carrying one from
+        partition 0 to partition 3 just gives it a longer live range rather
+        than letting something else land on it. PGR=0 retains nothing -- one
+        set, no prefetch, nothing to carry.
+        """
+        cfg = self.config
+        if cfg.pgr == 0:
+            return set()
+        grans = [(t, g) for t, g in self._lr_tensors() if g is not None]
+        if self._use_free_list_vgpr_allocation():
+            return {t for t, _ in grans}
+        return {t for t, g in grans
+                if (cfg.numSubIterK // g.k)
+                <= self._lr_tile_set_count(cfg.numSubIterK // g.k, t)}
+
+    def _span_ngll_merge_enabled(self) -> bool:
+        """Is the NGLL folded into the NLL per partition?
+
+        Asked at two very distant points -- register allocation and emission --
+        and they have to agree. Allocating for a merge that does not happen only
+        wastes registers, but emitting a merge that allocation did not plan for
+        aliases the two unroll iterations onto one set of tiles, which is the
+        silent clobber that has kept SPAN_NGLL off. So this deliberately ignores
+        the emission-side nll_ft condition: it is the conservative direction.
+
+        The flag takes "1" for every kernel, or an MFMA-tile filter like
+        "8x8" for one geometry. The filter exists because the merge costs a
+        few VGPRs and several library tiles already sit within single digits
+        of the 256 cap -- and an overflow here is a hard build failure, not a
+        silent drop. Until the merge pays for itself the filter keeps it on
+        the one geometry being measured.
+        """
+        if self.config.pgr < 2:
+            return False
+        flag = plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "0")
+        if flag == "0":
+            return False
+        if flag == "1":
+            return True
+        cfg = self.config
+        want = {s.strip() for s in flag.split(',')}
+        return f"{cfg.numMFMATilesM}x{cfg.numMFMATilesN}" in want
+
+    def _lr_tile_set_count(self, num_k_groups: int = 1,
+                           tensor: Optional[str] = None) -> int:
+        """Register sets per tile group for a tensor with num_k_groups chunks.
+
+        Two sets is one per k chunk of a single unroll iteration, which is all
+        the mainloop ever needs: chunk c lands in set c % 2 and an iteration
+        never collides with itself.
+
+        The merged tail breaks that assumption for a tensor every partition
+        reads. It runs the NGLL's unroll iteration and the NLL's back to back
+        into one accumulator block, so both iterations' chunks are live at once
+        and two sets alias the NLL's onto the NGLL's -- partition 0's NLL then
+        overwrites tiles partitions 1..3 have not read yet. Giving such a
+        tensor twice its chunk count separates them: iteration i takes sets
+        [0, nkg) and i+1 takes [nkg, 2*nkg).
+
+        Scaling with nkg rather than pinning 4 keeps the set index's period in
+        unroll_iter at exactly 2 for every tensor. A flat 4 would give the
+        nkg=1 scale tensors a period of 4 and force unroll_factor to 4, which
+        emits four mainloop copies to buy separation they already had at 2.
+
+        A tensor whose slice differs per partition is reloaded by each one, so
+        nobody reads its iteration-i tiles after that partition's iteration-i
+        MFMAs and the extra sets would only widen a live range that already
+        ended. It keeps two.
+        """
+        if self.config.pgr == 0:
+            return 1
+        if not self._span_ngll_merge_enabled():
+            return 2
+        if tensor is not None and self._varies_across_partitions(tensor):
+            return 2
+        return 2 * num_k_groups
+
+    def _varies_across_partitions(self, tensor: str) -> bool:
+        """Does this tensor's slice change from one partition to the next?
+
+        Only the side being split moves: under N-blocking every partition reads
+        the identical A and scale-A, and a different B and scale-B.
+        """
+        cfg = self.config
+        return (cfg.numPartitionsM > 1 if TENSOR_SIDE[tensor] == 'A'
+                else cfg.numPartitionsN > 1)
 
     def _create_partition_slots(self, cur: dict) -> List[SubIterKSlot]:
         """Create SubIterKSlots with MFMAs placed for one partition."""
@@ -868,11 +983,16 @@ class LogicalScheduler:
     def _place_LRs_for_partition(self, cur: tuple, nxt: tuple,
                                   is_last: bool,
                                   load: dict,
-                                  placed: set) -> List[SubIterKSlot]:
+                                  placed: set,
+                                  retained: set = frozenset()) -> List[SubIterKSlot]:
         """Place MFMAs and LRs for one partition."""
         cfg = self.config
         numK = cfg.numSubIterK
         multi_part = cfg.numPartitions > 1
+
+        # A tensor that does not survive the trip between partitions still
+        # dedups against itself, just not against what an earlier partition read.
+        placed_local = set()
 
         slots = self._create_partition_slots(cur)
         slot_mt = {}  # slot_k → lr_mt string, for MT-homogeneity enforcement
@@ -928,10 +1048,11 @@ class LogicalScheduler:
                             if not load[side_key]:
                                 continue
                         else:
+                            pool = placed if tensor in retained else placed_local
                             lr_key = (tensor, lr_k_start, lr_k_end, ts, te)
-                            if lr_key in placed:
+                            if lr_key in pool:
                                 continue
-                            placed.add(lr_key)
+                            pool.add(lr_key)
 
                         lr = LRPlacement(
                             tensor=tensor,
@@ -1137,39 +1258,76 @@ class LogicalScheduler:
 
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
 
+        # Positions are either global -- every partition's group gets its own,
+        # so a tensor holds all partitions at once -- or local, reused across
+        # partitions so it only ever holds one partition's worth.
+        #
+        # A tensor with a single k chunk takes its set index from unroll_iter
+        # alone, so within one iteration nothing else tells two partitions
+        # apart and it has to go global. The verdict is normally taken for the
+        # whole kernel the moment ANY tensor is in that position, which is why
+        # B costs one set of tiles per partition even though its own k chunks
+        # already separate it.
+        #
+        # The merge cannot afford that blanket: it doubles the sets, so a
+        # global B would double too (the +128 VGPRs that made this look
+        # unreachable). Under the merge each tensor answers for itself, which
+        # leaves B holding one partition -- FlyDSL's streamed operand, arrived
+        # at from the other side.
+        #
+        # Local positions alone are not enough for B, though. The partitions
+        # want different N slices, so sharing one set of registers lets the
+        # next partition's prefetched read land on the slice the current one
+        # is still multiplying. Alternating by partition parity below restores
+        # the separation global positions used to give, at two partitions'
+        # worth of registers instead of all four.
+        # Both questions below turn on the same fact: whether a tensor's slice
+        # actually changes from one partition to the next. Only the side being
+        # split does -- under N-blocking every partition reads the identical A
+        # and scale-A, so keeping a copy per partition buys nothing.
+        varies = {t: self._varies_across_partitions(t) for t in self.tensors}
+
         any_single_k_chunk = any(
             numK // lr_grans[t].k == 1 for t in self.tensors)
-        use_global_pos = (numP > 1) and any_single_k_chunk
+        if self._span_ngll_merge_enabled():
+            use_global_pos = {t: varies[t] and numK // lr_grans[t].k == 1
+                              for t in self.tensors}
+        else:
+            use_global_pos = {t: (numP > 1) and any_single_k_chunk
+                              for t in self.tensors}
+
+        # A tensor that varies but separates itself by k chunk takes the
+        # cheaper alternation instead of a full copy per partition.
+        parity_double_buffer = {
+            t: self._span_ngll_merge_enabled() and varies[t]
+               and not use_global_pos[t]
+            for t in self.tensors}
 
         group_to_pos = {t: {} for t in self.tensors}
         max_groups = {t: 0 for t in self.tensors}
 
-        if use_global_pos:
-            for pi in range(numP):
-                for tensor in self.tensors:
-                    side = TENSOR_SIDE[tensor]
-                    start, end = part_ranges[pi][side]
-                    gran = lr_grans[tensor]
-                    groups = sorted(set(
-                        (t // gran.mn) * gran.mn for t in range(start, end)))
+        for pi in range(numP):
+            for tensor in self.tensors:
+                side = TENSOR_SIDE[tensor]
+                start, end = part_ranges[pi][side]
+                gran = lr_grans[tensor]
+                groups = sorted(set(
+                    (t // gran.mn) * gran.mn for t in range(start, end)))
+                if use_global_pos[tensor]:
                     for g in groups:
                         if g not in group_to_pos[tensor]:
                             group_to_pos[tensor][g] = max_groups[tensor]
                             max_groups[tensor] += 1
-        else:
-            for pi in range(numP):
-                for tensor in self.tensors:
-                    side = TENSOR_SIDE[tensor]
-                    start, end = part_ranges[pi][side]
-                    gran = lr_grans[tensor]
-                    groups = sorted(set(
-                        (t // gran.mn) * gran.mn for t in range(start, end)))
+                else:
+                    phase = ((pi % 2) * len(groups)
+                             if parity_double_buffer[tensor] else 0)
                     local_pos = 0
                     for g in groups:
                         if g not in group_to_pos[tensor]:
-                            group_to_pos[tensor][g] = local_pos
+                            group_to_pos[tensor][g] = local_pos + phase
                         local_pos += 1
-                    max_groups[tensor] = max(max_groups[tensor], local_pos)
+                    max_groups[tensor] = max(max_groups[tensor],
+                                             local_pos + phase)
 
         num_k_groups = {}
         for tensor in self.tensors:
@@ -1180,6 +1338,12 @@ class LogicalScheduler:
             if num_k_groups[tensor] % 2 != 0:
                 unroll_factor = 2
                 break
+        if self._span_ngll_merge_enabled():
+            # A merging tensor holds sets [0, nkg) for one unroll iteration and
+            # [nkg, 2*nkg) for the next, so the assignment only closes after two
+            # iterations. Emitting one would leave the second half unwritten and
+            # hand the NLL the NGLL's tiles again.
+            unroll_factor = max(unroll_factor, 2)
         pgr0 = cfg.pgr == 0
         if pgr0:
             unroll_factor = 1
@@ -1190,13 +1354,16 @@ class LogicalScheduler:
             # prefetch has completed.
             unroll_factor = math.lcm(unroll_factor, cfg.pgr + 1)
 
+        num_sets = {t: self._lr_tile_set_count(num_k_groups[t], t)
+                    for t in self.tensors}
+
         def _tile_set_idx(tensor, unroll_iter, k_chunk, gran):
             if pgr0:
                 return 0
             if tensor == 'B' and cfg.directToVgprB:
                 return unroll_iter % (cfg.pgr + 1)
             nkg = num_k_groups[tensor]
-            return (unroll_iter * nkg + k_chunk // gran.k) % 2
+            return (unroll_iter * nkg + k_chunk // gran.k) % num_sets[tensor]
 
         def _tile_id(tensor, set_idx, pos, k_chunk=0):
             if tensor == 'B' and cfg.directToVgprB:
@@ -1259,8 +1426,8 @@ class LogicalScheduler:
                                 tensor, set_idx, pos, target_k)
                         gr.vgpr_tile_map.append(tile_map)
 
-        num_sets = 1 if pgr0 else 2
-        self.tile_peaks = {t: num_sets * max_groups[t] for t in self.tensors}
+        self.tile_peaks = {t: (1 if pgr0 else num_sets[t]) * max_groups[t]
+                           for t in self.tensors}
         if cfg.directToVgprB and not pgr0:
             self.tile_peaks['B'] = ((cfg.pgr + 1) * num_k_groups['B']
                                     * max_groups['B'])
@@ -1716,9 +1883,24 @@ class LogicalScheduler:
                 for t in self.tensors:
                     deps_for_t = []
                     for lr in lr_by_tensor.get(t, []):
-                        if _tiles_overlap(slot.mfma, t, lr.tiles):
-                            deps_for_t.append(Dep(
-                                ref=lr, mt_offset=_mt_offset(pi, k, 'MFMA', lr)))
+                        if not _tiles_overlap(slot.mfma, t, lr.tiles):
+                            continue
+                        # The instance of this LR that runs before the MFMA is
+                        # _slot_offset iterations back and carries data
+                        # mtIteration ahead; it only feeds the MFMA when those
+                        # cancel. Without the check, a later partition
+                        # re-reading the same tiles for the current MT scores as
+                        # the most recent producer and the MFMA ends up waiting
+                        # on an LR that has not run yet.
+                        #
+                        # PLR0 is exempt: it does not prefetch, so an LR sits in
+                        # its own consumer's slot and feeds it directly, against
+                        # the MFMA-before-LR order _slot_offset assumes.
+                        if cfg.plr != 0 and \
+                                _slot_offset(pi, k, 'MFMA', lr) + lr.mtIteration != 0:
+                            continue
+                        deps_for_t.append(Dep(
+                            ref=lr, mt_offset=_mt_offset(pi, k, 'MFMA', lr)))
                     slot.mfma.deps.extend(_dedup_deps(deps_for_t))
 
             # LR: depends on GR (data must be in LDS before reading)
@@ -3792,10 +3974,15 @@ class LogicalScheduler:
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
 
-    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):
+    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True,
+                  injectAfterPartition=None):
         """Emit a loop section from a 3D emitted structure.
 
         emitted_3d: [partition][subIterK][EmittedModule]
+
+        injectAfterPartition: {partition index: Module} spliced in once that
+        partition's K reduction is complete. The staged fused store uses this to
+        drain partition p's D tiles while partition p+1 is still accumulating.
 
         When schedule=True and a group has MFMAs, calls instructionSchedule
         for interleaving. When schedule=False, emits instructions sequentially.
@@ -3828,9 +4015,16 @@ class LogicalScheduler:
         pap_merge_label = Label("SubtilePAPPreloopFirstGRMerge", "") if use_pap_preloop_skip else None
         skipping_first_gr_group = False
         first_gr_group_done = False
+        # Partition p's drain rides inside partition p+1 rather than in front of it,
+        # so it is built into a per-partition module first and only appended once the
+        # scatter has had its chance. Carried across one partition, never further:
+        # holding it longer would keep the store's source registers live across more
+        # of the loop for no extra cover.
+        pendingDrain = None
         for pi, partition_emitted in enumerate(emitted_3d):
+            partModule = Module(f"{label}_part{pi}") if pendingDrain else module
             for k, em_list in enumerate(partition_emitted):
-                module.addComment0(f"partition={pi} subIterK={k}")
+                partModule.addComment0(f"partition={pi} subIterK={k}")
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
 
                 if schedule and em_list and has_mfma:
@@ -3838,24 +4032,60 @@ class LogicalScheduler:
                         em_list,
                         multiDU=self._is_multi_du(),
                         minGapDsReadToWait=minGapDsReadToWait)
-                    module.add(scheduled)
+                    partModule.add(scheduled)
                 else:
                     for em in em_list:
                         if use_pap_preloop_skip and not first_gr_group_done:
                             if em.opType == 'gr':
                                 if not skipping_first_gr_group:
-                                    module.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+                                    partModule.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
                                                          comment="Subtile PAP: first PRELOOP GR already issued?"))
-                                    module.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
+                                    partModule.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
                                                             comment="skip first PRELOOP GR group if primed"))
                                     skipping_first_gr_group = True
                             elif skipping_first_gr_group:
-                                module.add(pap_merge_label)
-                                module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+                                partModule.add(pap_merge_label)
+                                partModule.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                                    comment="Subtile PAP: clear after first PRELOOP GR merge"))
                                 first_gr_group_done = True
                         for inst in em.instructions:
-                            module.add(inst)
+                            partModule.add(inst)
+            # What partition pi's own drain can still weave into: pi's module with
+            # pi-1's drain already scattered through it. Held back from `module`
+            # until pi's drain has had its chance at those same MFMAs.
+            selfCover = None
+            if pendingDrain is not None:
+                selfCover = self._weaveStagedDrainIntoPartition(partModule, pendingDrain, f"{label}_p{pi}")
+                if selfCover is None:  # no MFMA to hide behind: keep the drain in order
+                    module.add(partModule)
+                    for unit in pendingDrain:
+                        for item in unit:
+                            module.add(item)
+                pendingDrain = None
+            if injectAfterPartition is not None:
+                staged = injectAfterPartition.get(pi)
+                if staged is not None:
+                    self._plsinStageAccCheck(pi, staged, emitted_3d)
+                    units = self._plsinStageDrainUnits(staged)
+                    if units and pi + 1 < len(emitted_3d):
+                        pendingDrain = units  # defer to the next partition's MFMAs
+                    else:
+                        # No next partition to defer to, so the partition's own
+                        # trailing MFMAs are the last cover available: they finalize
+                        # the later subtiles while the earlier ones are already
+                        # storable, so the drain can ride them subtile by subtile.
+                        lastWoven = (self._weaveLastPartitionDrain(selfCover, units,
+                                                                  f"{label}_p{pi}")
+                                     if units and selfCover is not None else None)
+                        if lastWoven is not None:
+                            selfCover = lastWoven
+                        else:
+                            if selfCover is not None:
+                                module.add(selfCover)
+                                selfCover = None
+                            module.add(staged)
+            if selfCover is not None:
+                module.add(selfCover)
         if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
             module.add(pap_merge_label)
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
@@ -4086,12 +4316,114 @@ class LogicalScheduler:
         if paramLend or envLend:
             return None, self._operandLendVgprs(None)
         if largeTile:
+            # Lending the K=0 tiles assumes the store runs after every MFMA has
+            # retired, which a per-partition staged store breaks: stage p issues
+            # while partition p+1 still needs its operands. Partitioning is itself
+            # a VGPR-pressure relief, so with enough partitions the store temps may
+            # fit without borrowing -- which makes the large tiles behave like the
+            # small ones (weave, no lend) and removes the hazard outright.
+            # TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_NO_LEND=1" (test-only).
+            if plsinDebugEnv("TENSILE_PLSIN_NO_LEND", "0") != "0":
+                return {}, []
             dead_ids = self._deadOperandTileIds(unroll_iter)
             has_ab_holes = bool(dead_ids.get("A") or dead_ids.get("B"))
             if self.config.numSubIterK >= 2 and has_ab_holes:
                 return {}, self._operandLendVgprs(dead_ids)
             return None, self._operandLendVgprs(None)
         return {}, []
+
+    def _plsinStagedStoreCount(self, weaveGroups, lendTiles):
+        """Number of per-partition store stages for the fused arm (0 = monolithic).
+
+        Staging only lines up with the store when the partitions split along N. The
+        store enumerates its elements N-group-outermost, so an N split makes each
+        partition's D tiles a contiguous run that can be cut on, while an M split
+        interleaves the partitions throughout the element list.
+
+        Tiles that lend operand registers to the store are excluded: a stage runs
+        while the next partition is still reading those registers. That is exactly
+        the MT>256x256 set, which cannot give the lending up either -- without it
+        those kernels need 284 VGPRs against a 256 cap.
+        """
+        if plsinDebugEnv("TENSILE_PLSIN_STAGED_STORE", "0") == "0":
+            return 0
+        # Test-only: keep the partition split but leave the store monolithic, to
+        # separate "partitioned compute" from "staged store" when bisecting. The
+        # partition count is chosen in Kernel.py off plsinStagingEligible, which
+        # reads TENSILE_PLSIN_STAGED_STORE and not this, so partitions survive.
+        if plsinDebugEnv("TENSILE_PLSIN_STORE_STAGES_OFF", "0") != "0":
+            return 0
+        if weaveGroups != {} or lendTiles:
+            return 0
+        cfg = self.config
+        if cfg.numPartitionsM != 1 or cfg.numPartitionsN < 2:
+            return 0
+        if len(set(cfg._partitionSizesN)) != 1:
+            return 0
+        return cfg.numPartitionsN
+
+    @staticmethod
+    def _hasStageMarker(mod):
+        from rocisa.code import Module
+        for item in mod.items():
+            if isinstance(item, Module) and (
+                    item.name.startswith("PlsinStageBoundary")
+                    or LogicalScheduler._hasStageMarker(item)):
+                return True
+        return False
+
+    @staticmethod
+    def _splitOnStageMarkers(mod, stages, cur):
+        """Sort mod's items into stages, cutting at each PlsinStageBoundary marker.
+
+        Sub-modules that contain a marker are flattened into the surrounding stages,
+        since a marker means the module spans a cut. Returns the stage index reached,
+        or None if a marker named a stage that does not exist.
+        """
+        from rocisa.code import Module
+        for item in mod.items():
+            if isinstance(item, Module):
+                if item.name.startswith("PlsinStageBoundary"):
+                    cur = int(item.name[len("PlsinStageBoundary"):])
+                    if not 0 <= cur < len(stages):
+                        return None
+                    continue
+                if LogicalScheduler._hasStageMarker(item):
+                    cur = LogicalScheduler._splitOnStageMarkers(item, stages, cur)
+                    if cur is None:
+                        return None
+                    continue
+            stages[cur].add(item)
+        return cur
+
+    def _buildStagedStoreStages(self, fusedStore, seam, nStages):
+        """Cut the fused store into {partition index: Module} for loop injection.
+
+        Items before the seam are the one-time prologue and ride with stage 0; items
+        after it are the one-time epilogue and ride with the last stage. Returns None
+        if the markers did not yield every stage, which leaves the caller on the
+        monolithic store.
+        """
+        from rocisa.code import Module
+        items = fusedStore.items()
+        stages = [Module(f"PlsinStage{p}") for p in range(nStages)]
+        if self._splitOnStageMarkers(items[seam], stages, 0) != nStages - 1:
+            return None
+        if any(stage.itemsSize() == 0 for stage in stages):
+            return None
+        head = Module("PlsinStage0")
+        head.addItems(items[:seam])
+        head.add(stages[0])
+        stages[0] = head
+        stages[-1].addItems(items[seam + 1:])
+        def nStores(mod):
+            return sum(1 for i in mod.flatitems()
+                       if type(i).__name__.startswith("BufferStore"))
+        self._plsinWeaveStat("staged", stages=nStages,
+                             sizes=[len(list(stage.flatitems())) for stage in stages],
+                             storesIn=nStores(fusedStore),
+                             storesOut=sum(nStores(s) for s in stages))
+        return dict(enumerate(stages))
 
     def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None,
                            unroll_iter=0):
@@ -4134,6 +4466,15 @@ class LogicalScheduler:
         #           tiles. TENSILE_PLSIN_SMALLTILE_LEND=1 forces this.
         # buildSubtileFusedStore still skips any lent tile that overlaps spilled D.
         weaveGroups, lendTiles = self._selectPlsinFusedStorePolicy(kernel, unroll_iter)
+        # Staged store: cut the store into one stage per compute partition and issue
+        # each stage as soon as its partition's K reduction is done, so partition p's
+        # stores are in flight across the whole of partition p+1's MFMAs. That makes
+        # the weave redundant -- its job was to find a few instructions of cover for
+        # the store inside 4-deep gaps -- so drop it and keep every MFMA in the loop.
+        stagedStores = self._plsinStagedStoreCount(weaveGroups, lendTiles)
+        if stagedStores:
+            weaveGroups, lendTiles = None, []
+        writer.states.subtileStoreStages = stagedStores
         writer.states.subtileFusedLendVgprs = lendTiles
         savedGroups = writer.states.subtileWeaveMfmaGroups
         savedMaster = writer.states.subtileWeaveMfmaGroupsMaster
@@ -4173,7 +4514,16 @@ class LogicalScheduler:
             writer.states.subtileWeaveLookahead = savedLookahead
             writer.states.subtileWeavePairCounter = savedPairCounter
             writer.states.subtileWeaveEmitted = savedEmitted
-        fusedLoopModule = self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted)
+        stagedInject = None
+        if stagedStores and writer.states.subtileStagedStoreSeam is not None:
+            stagedInject = self._buildStagedStoreStages(
+                storeModule, writer.states.subtileStagedStoreSeam, stagedStores)
+            if stagedInject is not None:
+                storeModule = None  # every piece now rides inside the loop
+        writer.states.subtileStagedStoreSeam = None
+        writer.states.subtileStoreStages = 0
+        fusedLoopModule = self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted,
+                                         injectAfterPartition=stagedInject)
         # Step 4 store-init hoist: buildSubtileFusedStore stashed the branch/memory-free
         # leading run of the fused store's SrdD address-math prep (when enabled and
         # eligible). Weave it into the FUSED loop's MFMA gaps so that exposed serial SALU
@@ -4185,8 +4535,10 @@ class LogicalScheduler:
             fusedLoopModule = self._weaveStoreInitIntoLoop(fusedLoopModule, hoistUnits,
                                                            f"{label}_FUSED")
             writer.states.subtileHoistedStoreInit = None
+        self._plsinStorePlacementStat(kernel, fusedLoopModule, storeModule)
         module.add(fusedLoopModule)
-        module.add(storeModule)
+        if storeModule is not None:
+            module.add(storeModule)
         # No "did-fuse" flag: the post-loop store dedups by re-evaluating the same
         # emitFusedStoreGuard (a WG that fused here will re-pass the guard there and
         # skip the redundant store). See kernelBodySubtile post-loop dedup.
@@ -4231,11 +4583,70 @@ class LogicalScheduler:
         return tuple((container.regType, container.regIdx + i)
                      for i in range(container.regNum))
 
+    def _plsinProducersWithClobberedSources(self, emitted_3d, allInsts):
+        """Pool members whose matrix inputs are rewritten later in the loop.
+
+        Moving a terminal MFMA into the store module moves it past everything the
+        loop emits after it. The planner keeps the accumulator chain ordered, but
+        an MFMA also reads A, B and the scale registers, and those are recycled:
+        each partition's LDS reads land in the same tiles the previous partition
+        used. A producer from an earlier partition, relocated past the next
+        partition's reads, then multiplies that partition's operands into its own
+        accumulator -- correct shape, wrong data, and only on the tiles whose
+        terminal MFMA happened to be captured. Such a producer has to stay put.
+
+        Scans in reverse so each instruction is asked once what it overwrites.
+        """
+        pool = {id(inst) for inst in allInsts}
+        order = []
+        for partition in emitted_3d:
+            for slot in partition or ():
+                for em in slot:
+                    order.extend(em.instructions or ())
+
+        def keysOf(inst, attrs):
+            """Register identities, or None if any operand is unreadable."""
+            out = set()
+            for container in self._plsinOperands(inst, attrs):
+                k = self._plsinRegisterKeys(container)
+                if k is None:
+                    return None
+                out.update(k)
+            return out
+
+        clobbered = set()
+        writtenAfter = set()
+        for inst in reversed(order):
+            if id(inst) in pool:
+                sources = keysOf(inst, self._PLSIN_MFMA_SOURCES)
+                if sources is None or (sources & writtenAfter):
+                    clobbered.add(id(inst))
+            for attrs in (self._PLSIN_UNIT_WRITES, self._PLSIN_MFMA_WRITES):
+                written = keysOf(inst, attrs)
+                if written is None:
+                    return pool     # an unreadable write could hit anything
+                writtenAfter |= written
+
+        self._plsinWeaveStat("srcguard", pool=len(pool), clobbered=len(clobbered))
+        return clobbered
+
     @staticmethod
     def _plsinTerminalMfmas(emitted_3d):
-        """Inventory terminal MFMAs without mutating the emitted loop."""
+        """Inventory terminal MFMAs without mutating the emitted loop.
+
+        Only the last subIterK slot is eligible. Under the stock [subIterK][tile]
+        order that is the whole movable set anyway: every K step accumulates into
+        the same registers, so an earlier slot's MFMA is consumed by the next
+        slot's MFMA rather than by the store.
+
+        A block-major schedule breaks that tie by finishing one tile block at a
+        time, which is why it puts every one of a block's K steps into this slot;
+        the planner tracks all of a register's writers so the resulting
+        multi-writer accumulators stay movable as an ordered chain.
+        """
         mfmaEms = []   # (EmittedModule, [all its mfma insts])
         allInsts = []
+        reservoir = 0  # mfmas in the slots the pool does NOT reach
         for partition in emitted_3d:
             if not partition:
                 continue
@@ -4243,7 +4654,52 @@ class LogicalScheduler:
                 if em.opType == 'mfma' and em.instructions:
                     mfmaEms.append((em, list(em.instructions)))
                     allInsts.extend(em.instructions)
+            for slot in partition[:-1]:
+                for em in slot:
+                    if em.opType == 'mfma' and em.instructions:
+                        reservoir += len(em.instructions)
+        LogicalScheduler._plsinWeaveStat(
+            "pool", slots=len(emitted_3d), pool=len(allInsts), reservoir=reservoir)
         return mfmaEms, allInsts
+
+    @staticmethod
+    def _plsinStorePlacementStat(kernel, *modules):
+        """Report how much matrix compute the fused arm's first store gets to hide behind.
+
+        The single number that matters for the epilogue: MFMAs issued after the
+        first store, out of the arm's total. The reference FlyDSL kernel reaches
+        232 of 256. Also reports how many distinct VGPR pairs feed the stores --
+        one pair serialises every store behind the previous store's register read,
+        so stores cannot overlap each other no matter how good the MFMA cover is.
+        """
+        if plsinDebugEnv("TENSILE_PLSIN_STORE_PLACEMENT", "0") == "0":
+            return
+        from rocisa.instruction import BufferStoreB64, BufferStoreB128
+        total = first = 0
+        srcs = set()
+        for mod in modules:
+            if mod is None:
+                continue
+            for inst in mod.flatitems():
+                if isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+                    total += 1
+                elif isinstance(inst, (BufferStoreB64, BufferStoreB128)):
+                    if not srcs:
+                        first = total
+                    srcs.add(str(inst.srcs[0]) if getattr(inst, "srcs", None) else "?")
+        if not srcs:
+            return
+        print(f"[plsin-place] MT{kernel['MacroTile0']}x{kernel['MacroTile1']}: "
+              f"mfma={total} beforeFirstStore={first} afterFirstStore={total - first} "
+              f"storeSrcPairs={len(srcs)}", file=sys.stderr)
+
+    @staticmethod
+    def _plsinWeaveStat(tag, **kw):
+        """Test-only weave telemetry: TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_WEAVE_STATS=1"."""
+        if plsinDebugEnv("TENSILE_PLSIN_WEAVE_STATS", "0") == "0":
+            return
+        fields = " ".join(f"{k}={v}" for k, v in kw.items())
+        print(f"[plsin-weave] {tag}: {fields}", file=sys.stderr)
 
     @staticmethod
     def _splitCvtValu(mod):
@@ -4338,7 +4794,14 @@ class LogicalScheduler:
         mfmaEms, allInsts = self._plsinTerminalMfmas(emitted_3d)
         if not allInsts or not captures or requiredCycles <= 0:
             return 0
-        producerByReg = {}
+        # All of a register's writers, in pool order. A block-major schedule puts
+        # every subIterK of a tile in the pool, so an accumulator has more than one
+        # writer; that is still safe to move, because what the store needs is only
+        # that the writes land before it reads that register, in their original
+        # order. Both get assigned the same gap below and are re-inserted in this
+        # order, so the chain is preserved. Single-writer pools (the stock
+        # [subIterK][tile] schedule) keep exactly their previous behaviour.
+        producersByReg = {}
         writesByProducer = {}
         for inst in allInsts:
             ids = self._plsinRegisterIds(getattr(inst, "acc", None))
@@ -4346,10 +4809,7 @@ class LogicalScheduler:
                 continue
             writesByProducer[id(inst)] = set(ids)
             for reg in ids:
-                if reg in producerByReg:
-                    producerByReg[reg] = None
-                    continue
-                producerByReg[reg] = inst
+                producersByReg.setdefault(reg, []).append(inst)
 
         flat = list(storeModule.flatitems())
         position = {id(item): idx for idx, item in enumerate(flat)}
@@ -4374,12 +4834,10 @@ class LogicalScheduler:
                         validCapture = False
                         break
                     seenReadIds.add(ids[0])
-                    producer = producerByReg.get(ids[0])
-                    if producer is not None:
+                    for producer in producersByReg.get(ids[0], ()):
                         consumedRegs.setdefault(id(producer), set()).add(ids[0])
-                        consumers.setdefault(id(producer), readPos)
                         consumers[id(producer)] = min(
-                            consumers[id(producer)], readPos)
+                            consumers.get(id(producer), readPos), readPos)
                 if not validCapture:
                     break
             if not validCapture:
@@ -4387,10 +4845,12 @@ class LogicalScheduler:
                 continue
 
             capturePlan = {}
+            noConsumer = noSlack = 0
             for producer in allInsts:
                 readPos = consumers.get(id(producer))
                 if (readPos is None or consumedRegs.get(id(producer)) !=
                         writesByProducer.get(id(producer))):
+                    noConsumer += 1
                     continue
                 safeGap = None
                 for anchorPos, gap in candidates:
@@ -4403,11 +4863,18 @@ class LogicalScheduler:
                         safeGap = gap
                 if safeGap is not None:
                     capturePlan[id(producer)] = safeGap
+                else:
+                    noSlack += 1
+            self._plsinWeaveStat("capture", gaps=len(candidates), placed=len(capturePlan),
+                                 rej_noconsumer=noConsumer, rej_noslack=noSlack)
             plans.append(capturePlan)
 
         moved = {id(inst) for inst in allInsts}
+        moved -= self._plsinProducersWithClobberedSources(emitted_3d, allInsts)
         for plan in plans:
             moved.intersection_update(plan.keys())
+        self._plsinWeaveStat("moved", pool=len(allInsts), paths=len(plans),
+                             moved=len(moved), reqCycles=requiredCycles)
         if not moved:
             return 0
 
@@ -4467,6 +4934,356 @@ class LogicalScheduler:
         while idx < numFillers:  # fewer targeted gaps than fillers: append the remainder
             idx = emitFiller(idx, woven)
         return idx
+
+    @staticmethod
+    def _plsinStageDrainUnits(stage):
+        """Split a staged drain into one unit per D store.
+
+        A unit is the whole accvgpr_read -> cvt_pk -> buffer_store chain for one
+        subtile, kept together so scattering never separates a store from the pack
+        that feeds it. Anything ahead of the first store (the stage's N-group label
+        and its deferred SrdD row increment) leads the first unit, and any trailing
+        remainder joins the last, so the drain's program order survives the scatter.
+        """
+        from rocisa.instruction import BufferStoreB64, BufferStoreB128
+        units, cur = [], []
+        for item in stage.flatitems():
+            cur.append(item)
+            if isinstance(item, (BufferStoreB64, BufferStoreB128)):
+                units.append(cur)
+                cur = []
+        if cur:
+            if units:
+                units[-1].extend(cur)
+            else:
+                units.append(cur)
+        return units
+
+    @staticmethod
+    def _plsinRelaxDrainStoreWaits(module):
+        """Keep the woven drain's D stores out of the partition's load waits.
+
+        gfx9-class targets share one vmcnt between VMEM loads and stores, so the
+        `s_waitcnt vmcnt(0)` a partition emits to cover the global loads feeding LDS
+        also blocks on every D store the weave just issued -- even though nothing in
+        the kernel reads D back. That hands back the whole point of the weave: the
+        stores get tucked into MFMA shadows and then the next barrier bills for them.
+
+        SWaitCnt models loads and stores as separate vlcnt/vscnt fields and folds them
+        (vmcnt = vlcnt + vscnt) only when the target has a single counter, so raising
+        vscnt relaxes exactly the store half and leaves the load wait intact.
+
+        Only stores issued after the last global load are excluded. vmcnt retires in
+        issue order, so those are the trailing entries a wait can skip while still
+        guaranteeing every load ahead of them has landed; a store issued before a load
+        is covered by that load's own wait and must keep counting. Waits with no vmcnt
+        component (lgkmcnt-only) are left alone, since giving them a vscnt would invent
+        a vmcnt wait rather than relax one.
+        """
+        from rocisa.instruction import SWaitCnt, GlobalReadInstruction, \
+            BufferStoreB64, BufferStoreB128
+        if plsinDebugEnv("TENSILE_PLSIN_DRAIN_WAIT_RELAX", "1") == "0":
+            return 0
+        pending, relaxed = 0, 0
+        for inst in module.flatitems():
+            if isinstance(inst, GlobalReadInstruction):
+                pending = 0
+            elif isinstance(inst, (BufferStoreB64, BufferStoreB128)):
+                pending += 1
+            elif isinstance(inst, SWaitCnt) and pending:
+                if inst.vlcnt == -1 and inst.vscnt == -1:
+                    continue
+                inst.vscnt = (inst.vscnt if inst.vscnt > 0 else 0) + pending
+                relaxed += 1
+        return relaxed
+
+    @staticmethod
+    def _plsinSpanNgllPartitions(ngll_3d, nll_3d):
+        """Run each partition's NGLL and NLL K-steps back to back.
+
+        A partition's drain cannot start until its accumulators are final, which is
+        after its LAST K-step. Emitting the NGLL and the NLL as separate regions means
+        every partition finishes its NGLL step before any partition begins its NLL
+        step, so nothing is final until well into the NLL and the NGLL's load-free
+        MFMAs ahead of it can never serve as cover -- measured as 79 of the 222
+        load-free MFMAs going unused. Concatenating the two K-step lists per partition
+        makes partition 0 final much earlier and hands the whole load-free window to
+        the weave instead of only its tail.
+
+        Both structures are [partition][subIterK], and _emitLoop walks the subIterK
+        list in order, so the concatenation is the entire reordering.
+        """
+        if not ngll_3d or not nll_3d or len(ngll_3d) != len(nll_3d):
+            return None
+        return [list(ngll_3d[p]) + list(nll_3d[p]) for p in range(len(nll_3d))]
+
+    @staticmethod
+    def _plsinRegisterKeys(container):
+        """Comparable identities for a register container, symbolic or resolved.
+
+        _plsinRegisterIds gives up whenever a container still carries a symbolic
+        name, which at weave time is every accumulator -- they stay ValuC-relative
+        until allocation. For a hazard bar that is not merely imprecise, it is
+        silently wrong in the unsafe direction: the conflict disappears and the
+        drain weaves straight through the MFMAs it collides with. Two containers
+        naming the same symbol at the same offset are the same register whether or
+        not the index is resolved yet, so compare on (type, symbol, offset).
+
+        Returns None for a container that is neither named nor placed, which the
+        caller must treat as "cannot prove safe".
+        """
+        from rocisa.container import RegisterContainer
+        if not isinstance(container, RegisterContainer):
+            return ()          # immediates and the like hold no register identity
+        regNum = container.regNum or 0
+        name = container.regName
+        if name is not None:
+            base = name.getTotalOffsets()
+            return tuple((container.regType, name.name, base + i) for i in range(regNum))
+        base = container.regIdx
+        if base is None or base < 0:
+            return None
+        return tuple((container.regType, None, base + i) for i in range(regNum))
+
+    @staticmethod
+    def _plsinOperands(inst, attrs):
+        """Containers reachable from ``inst`` under any of ``attrs``.
+
+        Operand attributes are per-instruction, not uniform: MFMAs expose a/b/acc
+        while the drain's reads and writes are srcs/dst. Probing a name the class
+        does not have yields nothing rather than raising, so a wrong guess here is a
+        silent no-op -- hence naming every spelling that carries operands.
+
+        Operand lists are rocisa vectors, not builtin sequences, so dispatch on "is
+        it a single container" rather than on list/tuple: guessing the latter treats
+        a whole srcs vector as one unreadable operand and drops every register in it.
+        """
+        from rocisa.container import RegisterContainer
+        for attr in attrs:
+            value = getattr(inst, attr, None)
+            if value is None:
+                continue
+            if isinstance(value, RegisterContainer):
+                yield value
+            else:
+                try:
+                    yield from value
+                except TypeError:
+                    yield value
+
+    # MFMAs accumulate, so acc is both written and read; a/b are read-only.
+    _PLSIN_MFMA_WRITES = ("acc", "acc2")
+    _PLSIN_MFMA_READS  = ("a", "b", "acc", "acc2")
+    # Matrix and scale inputs only. acc is left out on purpose: the capture
+    # planner already orders the accumulator chain, and it is the inputs that
+    # nothing was checking.
+    _PLSIN_MFMA_SOURCES = ("a", "b", "mxsa", "mxsb")
+    _PLSIN_UNIT_READS  = ("srcs", "src")
+    _PLSIN_UNIT_WRITES = ("dst", "dsts")
+
+    def _plsinStageAccCheck(self, pi, staged, emitted_3d):
+        """Test-only: does stage pi drain accumulators a later partition still writes?
+
+        The staged store's whole premise is that stage p only reads accumulators
+        partitions 0..p have finished. But stage membership comes from an element's
+        N group (_emitPlsinStageBoundary divides element[0] by tt1PerStage) while the
+        compute split is over MFMA N tiles, and nothing ties the two together. Where
+        they disagree, stage p drains registers partition p+1 is still accumulating
+        into and stores a partial sum.
+
+        TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_STAGE_MAP=1;TENSILE_PLSIN_WEAVE_STATS=1".
+        """
+        if plsinDebugEnv("TENSILE_PLSIN_STAGE_MAP", "0") == "0":
+            return
+        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+        read = set()
+        for item in staged.flatitems():
+            for container in self._plsinOperands(item, self._PLSIN_UNIT_READS):
+                read.update(self._plsinRegisterKeys(container) or ())
+        laterWrites = set()
+        for pj in range(pi + 1, len(emitted_3d)):
+            for em_list in emitted_3d[pj]:
+                for em in em_list:
+                    for inst in em.instructions:
+                        if not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+                            continue
+                        for container in self._plsinOperands(inst, self._PLSIN_MFMA_WRITES):
+                            laterWrites.update(self._plsinRegisterKeys(container) or ())
+        unsafe = read & laterWrites
+        self._plsinWeaveStat("stagemap", stage=pi, reads=len(read),
+                             laterWrites=len(laterWrites), unsafe=len(unsafe),
+                             sample=sorted(k[2] for k in unsafe)[:10])
+
+    def _plsinDrainReadyBars(self, flat, mfmaPos, units):
+        """For each drain unit, the last MFMA index it must be placed after.
+
+        Two hazards pin a unit, and only the first is about accumulators:
+          RAW  the drain's reads must follow every MFMA still accumulating into
+               the subtile they drain;
+          WAR  the drain's temps are borrowed operand VGPRs (the fused store lends
+               itself the K=0 A/B tiles), so a unit must also follow every MFMA
+               that still reads a register the unit overwrites. After the last
+               MFMA -- where this drain used to sit -- that is vacuous, which is
+               why the lend is safe today and why weaving it inward is not.
+        """
+        def keys(inst, attrs):
+            out = []
+            for container in self._plsinOperands(inst, attrs):
+                ids = self._plsinRegisterKeys(container)
+                if ids is None:
+                    return None
+                out.extend(ids)
+            return out
+
+        lastWriter, lastReader = {}, {}
+        for i in mfmaPos:
+            inst = flat[i]
+            written = keys(inst, self._PLSIN_MFMA_WRITES)
+            read = keys(inst, self._PLSIN_MFMA_READS)
+            if written is None or read is None:
+                return None
+            for reg in written:
+                lastWriter[reg] = i
+            for reg in read:
+                lastReader[reg] = i
+        readyAfter = []
+        for unit in units:
+            bar = -1
+            for item in unit:
+                read = keys(item, self._PLSIN_UNIT_READS)
+                written = keys(item, self._PLSIN_UNIT_WRITES)
+                if read is None or written is None:
+                    return None
+                for reg in read:
+                    bar = max(bar, lastWriter.get(reg, -1))
+                for reg in written:
+                    bar = max(bar, lastReader.get(reg, -1))
+            readyAfter.append(bar)
+        return readyAfter
+
+    def _weaveStagedDrainIntoPartition(self, partModule, units, label):
+        """Scatter partition p's drain through partition p+1's MFMAs.
+
+        Issuing the drain as one block after p (which is what the staged store did
+        on its own) leaves every accvgpr_read and cvt_pk exposed; spreading it one
+        store-unit per gap puts that VALU work in the MFMA issue shadows instead,
+        which is the interleave the reference kernel gets from its own block drain.
+
+        The partition boundary does NOT make this unconditionally safe. Partition p
+        owning a disjoint set of D tiles would put its accumulators out of reach of
+        p+1, but the drain handed over here is not clipped to p's tiles: on
+        MT128x128x512 (MIWaveTile 4x4) it reads a0-a63 while p+1 accumulates into
+        a32-a63, so a third of the drain reads registers p+1 is still writing. The
+        same RAW/WAR bars the last-partition weave computes therefore apply across
+        partitions too, and a unit that never clears its bar stays in order.
+        """
+        from rocisa.code import Module
+        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+        flat = list(partModule.flatitems())
+        mfmaPos = [i for i, inst in enumerate(flat)
+                   if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
+        if not units or not mfmaPos:
+            return None
+        readyAfter = self._plsinDrainReadyBars(flat, mfmaPos, units)
+        if readyAfter is None:
+            return None
+
+        # Pace against the MFMAs a unit may actually occupy: everything ahead of the
+        # first unit's bar is still finalizing that unit's accumulators, so pacing
+        # against the full count spends the budget on gaps no unit can take.
+        usable = sum(1 for i in mfmaPos if i > readyAfter[0])
+        stride = max(1, usable // len(units))
+        woven = Module(f"{label}_stagedrain")
+        idx = 0
+        sinceLast = 0
+        for i, inst in enumerate(flat):
+            woven.add(inst)
+            if not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+                continue
+            sinceLast += 1
+            if idx < len(units) and sinceLast >= stride and readyAfter[idx] < i:
+                for item in units[idx]:
+                    woven.add(item)
+                idx += 1
+                sinceLast = 0
+        for unit in units[idx:]:
+            for item in unit:
+                woven.add(item)
+        if not idx:
+            return None
+        relaxed = self._plsinRelaxDrainStoreWaits(woven)
+        self._plsinWeaveStat("stagedrain", units=len(units), mfma=len(mfmaPos),
+                             placed=idx, stride=stride, relaxed=relaxed)
+        return woven
+
+    def _weaveLastPartitionDrain(self, partModule, units, label):
+        """Scatter the LAST partition's drain through its own trailing MFMAs.
+
+        Partitions 0..n-2 hand their drain to the next partition. The last has no
+        successor, so its whole drain lands back-to-back after the final MFMA with
+        nothing to hide it -- on MT256x256 that is every store of the last stage
+        issuing fully exposed.
+
+        Cover does exist inside the partition: its stores are subtile ordered and so
+        are the MFMAs that finalize them, so store b's accumulators are already final
+        while blocks b+1.. are still accumulating into different registers. The MFMAs
+        that close a later block are in the very region being woven, so units are
+        pinned behind the same bars the cross-partition weave uses; units that never
+        clear their bar stay in order at the end.
+        """
+        from rocisa.code import Module
+        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+
+        # Opt-in: this currently miscompares on two swapAB-swizzleA shapes
+        # (4096x32768x4096 and 4096x4096x32768) for a hazard not yet identified --
+        # it is neither the accumulator RAW nor the borrowed-operand WAR modelled
+        # above, both of which are already enforced.
+        if plsinDebugEnv("TENSILE_PLSIN_LAST_DRAIN_WEAVE", "0") == "0":
+            return None
+        flat = list(partModule.flatitems())
+        mfmaPos = [i for i, inst in enumerate(flat)
+                   if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
+        if not units or not mfmaPos:
+            return None
+
+        readyAfter = self._plsinDrainReadyBars(flat, mfmaPos, units)
+        if readyAfter is None:
+            return None
+
+        woven = Module(f"{label}_lastdrain")
+        # Space the units over the MFMAs that can actually take one. Everything
+        # ahead of the first unit's bar is still finalizing that unit's own
+        # accumulators, so pacing against the full MFMA count spends most of the
+        # budget on gaps no unit is allowed to occupy and strands the rest of the
+        # drain past the last MFMA -- exactly the exposure this is undoing.
+        usable = sum(1 for i in mfmaPos if i > readyAfter[0])
+        stride = max(1, usable // len(units))
+        idx = 0
+        sinceLast = 0
+        for i, inst in enumerate(flat):
+            woven.add(inst)
+            if not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+                continue
+            sinceLast += 1
+            if idx < len(units) and sinceLast >= stride and readyAfter[idx] < i:
+                for item in units[idx]:
+                    woven.add(item)
+                idx += 1
+                sinceLast = 0
+        for unit in units[idx:]:
+            for item in unit:
+                woven.add(item)
+        if not idx:
+            return None
+        # No _plsinRelaxDrainStoreWaits here. It raises vscnt by the stores seen
+        # since the last global load, and this module has already been through it
+        # once for the previous partition's drain; a second pass adds that count on
+        # top of its own result and relaxes the partition's load waits past the
+        # loads they exist to cover. These stores therefore keep counting against
+        # the partition's vmcnt, which costs cover but cannot lose a load.
+        self._plsinWeaveStat("lastdrain", units=len(units), mfma=len(mfmaPos),
+                             placed=idx, stride=stride)
+        return woven
 
     def _weaveStoreInitIntoLoop(self, loopModule, units, label):
         """Step 4 store-init hoist: scatter the fused store's branch/memory-free SrdD
@@ -5046,7 +5863,20 @@ class LogicalScheduler:
 
         # Fall-through from last mainloop copy
         nll_ft = (last + pgr) % uf
-        if hasNGLL:
+        # Give the staged drain the NGLL's load-free MFMAs as cover by folding the
+        # NGLL into the NLL per partition. Restricted to the fall-through: when
+        # nll_ft == 0 a SkipToNLL label has to sit between the two regions for the
+        # preloop-skip path to jump at, and folding would swallow its target.
+        nll_ft_3d = self._nll_per_unroll[nll_ft]
+        spanNgll = (hasNGLL and nll_ft != 0
+                    and plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "0") != "0")
+        if spanNgll:
+            merged = self._plsinSpanNgllPartitions(
+                self._ngll_per_unroll[(last + 1) % uf], nll_ft_3d)
+            spanNgll = merged is not None
+            if spanNgll:
+                nll_ft_3d = merged
+        if hasNGLL and not spanNgll:
             module.addComment0(f"NGLL_C{last}")
             module.add(self._emitNgllMaybeFused(writer, kernel, f"NGLL_C{last}",
                                       self._ngll_per_unroll[(last + 1) % uf]))
@@ -5054,7 +5884,7 @@ class LogicalScheduler:
             module.add(Label("SkipToNLL", ""))
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
-                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft]),
+                                  inject_pap_after_nll_drain(nll_ft_3d),
                                   fusedExitLabel=(plsinFusedExitLabel if plsin else None),
                                   unroll_iter=nll_ft))
         module.add(self._emit_pgr2_tail_lw_align(kernel))

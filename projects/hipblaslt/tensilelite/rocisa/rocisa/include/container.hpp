@@ -534,19 +534,37 @@ namespace rocisa
         int              row_bcast;
         int              bound_ctrl;
         std::vector<int> quad_perm;
-        int              row_xmask;
+        int              row_xmask;  // GFX10+ only; gfx9/CDNA rejects it
+        // row_ror is the gfx9/CDNA in-row rotate, and is how a lane-XOR-8 exchange
+        // is expressed there since row_xmask does not exist (ror:8 == xor:8 for a
+        // 16-lane row). row_mask/bank_mask gate which rows and which banks of 4
+        // lanes are written, leaving the rest of the destination untouched.
+        int              row_ror;
+        int              row_mask;
+        int              bank_mask;
 
         DPPModifiers(int                      row_shr    = -1,
                      int                      row_bcast  = -1,
                      int                      bound_ctrl = -1,
                      const std::vector<int>&  quad_perm  = {},
-                     int                      row_xmask  = -1)
+                     int                      row_xmask  = -1,
+                     int                      row_ror    = -1,
+                     int                      row_mask   = -1,
+                     int                      bank_mask  = -1)
             : row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
             , quad_perm(quad_perm)
             , row_xmask(row_xmask)
+            , row_ror(row_ror)
+            , row_mask(row_mask)
+            , bank_mask(bank_mask)
         {
+            assert(((!quad_perm.empty() ? 1 : 0) + (row_shr != -1) + (row_ror != -1)
+                    + (row_bcast != -1) + (row_xmask != -1))
+                       <= 1
+                   && "DPPModifiers: quad_perm/row_shr/row_ror/row_bcast/row_xmask all "
+                      "encode dpp_ctrl, so at most one may be set");
         }
 
         std::shared_ptr<Container> clone() const override
@@ -557,16 +575,26 @@ namespace rocisa
         std::string toString() const override
         {
             std::string kStr;
-            if(row_shr != -1)
-                kStr += " row_shr:" + std::to_string(row_shr);
-            if(row_bcast != -1)
-                kStr += " row_bcast:" + std::to_string(row_bcast);
-            if(bound_ctrl != -1)
-                kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
+            // The dpp_ctrl selector must be emitted before every other modifier:
+            // the assembler rejects "bound_ctrl:0 quad_perm:[1,0,3,2]" outright.
+            // The selectors below all encode that one field, so at most one of
+            // them is ever set (enforced in the constructor).
             if(!quad_perm.empty())
                 kStr += " quad_perm:" + vectorToString(quad_perm);
+            if(row_shr != -1)
+                kStr += " row_shr:" + std::to_string(row_shr);
+            if(row_ror != -1)
+                kStr += " row_ror:" + std::to_string(row_ror);
+            if(row_bcast != -1)
+                kStr += " row_bcast:" + std::to_string(row_bcast);
             if(row_xmask != -1)
                 kStr += " row_xmask:" + std::to_string(row_xmask);
+            if(bound_ctrl != -1)
+                kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
+            if(row_mask != -1)
+                kStr += " row_mask:" + std::to_string(row_mask);
+            if(bank_mask != -1)
+                kStr += " bank_mask:" + std::to_string(bank_mask);
             return kStr;
         }
 

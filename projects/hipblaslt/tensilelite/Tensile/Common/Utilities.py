@@ -102,6 +102,33 @@ def plsinDebugEnv(name: str, default=None):
     """
     return _parsePlsinDebugEnv().get(name, default)
 
+
+def plsinEarlyStoreTile(kernel) -> bool:
+    """Whether this tile's fused arm may carry early-store work at all.
+
+    A property of the tile alone, so the knobs that reshape the fused epilogue
+    can all be scoped the same way and a tile that can never benefit keeps its
+    shipped schedule and its paired dwordx4 byte-for-byte.
+
+    Excludes MT>256x256, which lends its K=0 operand registers to the store (it
+    needs 284 VGPRs against a 256 cap without them); any store moved earlier
+    would run while those registers are still being read.
+    """
+    if not kernel.get("UseSubtileImpl"):
+        return False
+    if kernel.get("PLSINStoreMode", "Weave") == "Lend":
+        return False
+    if plsinDebugEnv("TENSILE_PLSIN_SMALLTILE_LEND", "0") != "0":
+        return False
+    return kernel["MacroTile0"] <= 256 and kernel["MacroTile1"] <= 256
+
+
+def plsinStagingEligible(kernel) -> bool:
+    """Whether the per-partition staged store may be built for this kernel."""
+    if plsinDebugEnv("TENSILE_PLSIN_STAGED_STORE", "0") == "0":
+        return False
+    return plsinEarlyStoreTile(kernel)
+
 # Global
 _global_ti = rocIsa.getInstance()
 

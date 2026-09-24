@@ -82,7 +82,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelSource
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKCluster
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKCluster, plsinStagingEligible
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinDebugEnv
@@ -14848,8 +14848,12 @@ class KernelWriterAssembly(KernelWriter):
       # (which never touch SCC) is register- and counter-safe; _splitHoistableStoreInit
       # fences off any branch/label/memory content.
       _largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+      # The staged store already runs inside the loop, so hoisting its address math
+      # into that same loop could land the SrdD setup in a gap after the stage that
+      # reads it; staging gives this SALU its compute overlap anyway.
       _hoistStoreInit = (plsinDebugEnv("TENSILE_NLL_HOIST_STOREINIT", "1") != "0") \
-                        and not _largeTile
+                        and not _largeTile \
+                        and not self.states.subtileStoreStages
       _hoistUnits = None
       if _hoistStoreInit:
         _hoistUnits, _remainder = self._splitHoistableStoreInit(list(srdInitMod.flatitems()))
@@ -14952,6 +14956,22 @@ class KernelWriterAssembly(KernelWriter):
     else:
       module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
+    # PLSIN staged store: turn the requested stage count into the element-space N-group
+    # stride that GlobalWriteBatch marks stage boundaries on. The N groups have to split
+    # evenly across stages and cover 0..n-1, otherwise a stage would not line up with a
+    # compute partition's D tiles; leaving the stride at 0 falls back to one monolithic
+    # store, so an awkward tile simply keeps today's behaviour.
+    self.states.subtileStoreTt1PerStage = 0
+    self.states.subtileStoreStageHighWater = 0
+    self.states.subtileScalarPackSlot = 0
+    self.states.subtileHoistedAddrArm = -1
+    self.states.subtileHoistedAddrDVgpr = -1
+    self.states.subtileHoistedAddrBlockN = -1
+    _nStages = self.states.subtileStoreStages
+    if _nStages > 1:
+      _tt1Vals = sorted({e[0] for e in elements[0]})
+      if len(_tt1Vals) % _nStages == 0 and _tt1Vals == list(range(len(_tt1Vals))):
+        self.states.subtileStoreTt1PerStage = len(_tt1Vals) // _nStages
     # 4d-3b weave: route accvgpr reads PER PAIR (into each pair's Phase1) instead of
     # the up-front batch block, so terminal MFMAs can later be interleaved between
     # Phase1/Phase2 to hide the ds_bpermute latency (see GlobalWriteBatch weave path).
@@ -14963,11 +14983,20 @@ class KernelWriterAssembly(KernelWriter):
     # UseScaleAB is likewise not folded into Alpha here (no multiply to apply).
     # beta==0 and full-tile are still guaranteed by the front guard, so no C-read or
     # edge path is added.
+    savedNoAct = self.states.subtileFusedStoreNoActivation
+    self.states.subtileFusedStoreNoActivation = bool(self.states.subtileStoreTt1PerStage) \
+        and self._plsinStagedArmNoActivation(kernel)
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
       noGSUBranch=True, applyAlpha=False, betas=[False], edge=False)
+    self.states.subtileFusedStoreNoActivation = savedNoAct
     self.states.subtileFusedWeave = savedWeave
+    # Remember where the store body sits so the scheduler can lift it out and split it
+    # into per-partition stages: everything before this index is one-time prologue,
+    # everything after is one-time epilogue.
+    self.states.subtileStagedStoreSeam = module.itemsSize() if self.states.subtileStoreTt1PerStage else None
+    self.states.subtileStoreTt1PerStage = 0
     module.add(storeModule)
     self.cleanupGlobalWrite(kernel)
     self.states.bpeCexternal = savedBpeCext
@@ -16145,6 +16174,24 @@ class KernelWriterAssembly(KernelWriter):
     """Whether this kernel uses the hoisted PostLoopFusedStore runtime flag."""
     return bool(self.states.postLoopStoreInNll) and kernel["ProblemType"]["ComputeDataType"].isSingle()
 
+  def _plsinStagedArmNoActivation(self, kernel):
+    """Whether the staged fused arm may carry only the no-activation store body.
+
+    Sound only if the arm is also guarded on ActivationType==none, and that guard
+    is hoisted to the pre-loop flag where ActivationType is not defined yet: it
+    arrives with the epilogue kernargs. So a kernel built for the runtime 'all'
+    activation set keeps every body unless the knob forces the single-body form,
+    which is then correct only for no-activation inputs.
+    """
+    if not (bool(self.states.postLoopStoreInNll) and plsinStagingEligible(kernel)):
+      return False
+    if "ActivationType" in self.sgprs:
+      # Activation arrives at runtime, so the arm cannot assume it is none and has
+      # to keep every body; only the opt-in knob drops them, and then the kernel is
+      # correct for no-activation inputs alone.
+      return plsinDebugEnv("TENSILE_PLSIN_STAGED_NOACT_UNSAFE", "0") != "0"
+    return True
+
   def _plsinFusedSkipEpilogueMul(self):
     """True while emitting the fused NLL store: skip scalar alpha and ScaleAlphaVec."""
     return bool(self.states.subtileFusedFullTileStore)
@@ -16195,6 +16242,87 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMulLOU32(dst=vgpr(vPermAddr), src0=vgpr(vPermAddr), src1=12*bpeDest,
                            comment="(lane_group&1)*12 rows = permlane16 row-byte delta"))
       self.states.subtileHoistedPermAddr = True
+    module.add(self.emitSubtileScalarStoreAddr(kernel, cvtVgprStruct))
+    return module
+
+  def emitSubtileScalarStoreAddr(self, kernel, cvtVgprStruct):
+    """Materialize the unpaired dwordx2 store's per-lane vaddr once per store.
+
+    Every term of that address -- the N-column offset, lane_group*8, the M
+    workgroup base and both wave offsets -- is a function of Serial and of SGPRs
+    that do not move across the store. The element only contributes the 12-bit
+    ``offset12`` immediate and the SrdD row increments, so one copy here serves
+    every store in the phase instead of ~18 ops (five of them v_mul_lo_u32) per
+    store. Only the fused arm routes elements through the unpaired store, so this
+    is emitted only there; the plain arm's orphan stores keep computing their own.
+    """
+    module = Module("SubtileScalarStoreAddr")
+    self.states.subtileHoistedScalarAddr = False
+    if not self.states.subtileFusedWeave:
+      return module
+    vAddr = getattr(cvtVgprStruct, "vgprScalarAddr", -1)
+    vLGDelta = getattr(cvtVgprStruct, "vgprLaneGroupDelta", -1)
+    if vAddr < 0 or vLGDelta < 0 or not self.states.subtileHoistedLaneGroupDelta:
+      return module
+    from .Components.GlobalWriteBatch import plsinScalarStoreActive
+    if not plsinScalarStoreActive(kernel):
+      return module
+
+    bpe       = self.states.bpeCexternalGSU1
+    packedC1  = kernel["PackedC1IndicesX"]
+    strideD1J = "StrideD%s" % self.states.indexChars[packedC1[0]]
+    ws        = kernel["WavefrontSize"]
+    miwg0     = kernel["MIWaveGroup"][0]
+    miwg1     = kernel["MIWaveGroup"][1]
+    if (miwg0 & (miwg0 - 1)) != 0:
+      return module
+    wsLog2 = int(log2(ws))
+    tmpV = cvtVgprStruct.vgprAddrScratch   # free until the first paired store, which this replaces
+    tmpS = self.sgprPool.checkOut(1, "plsinScalarStoreAddr")
+
+    module.addComment1("hoisted unpaired dwordx2 store vaddr (wave-invariant, once per store)")
+    module.add(VAndB32(dst=vgpr(vAddr), src0=15, src1=vgpr("Serial"),
+                       comment="col_in_wave = lane_id & 15  (N-column index)"))
+    module.add(VMulLOU32(dst=vgpr(tmpV), src0=vgpr(vAddr), src1=sgpr(strideD1J),
+                         comment="col_in_wave * StrideD1J"))
+    if bpe == 2:
+      module.add(VLShiftLeftB32(dst=vgpr(vAddr), shiftHex=1, src=vgpr(tmpV),
+                                comment="N_col_off = col_in_wave * StrideD1J * 2"))
+    else:
+      module.add(VMulLOU32(dst=vgpr(vAddr), src0=vgpr(tmpV), src1=bpe,
+                           comment="N_col_off = col_in_wave * StrideD1J * bpe"))
+    module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(vLGDelta),
+                       comment="vaddr += LG_M_off (= vgprLaneGroupDelta)"))
+    module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=kernel["MacroTile0"]*bpe,
+                       comment="wg0_M_off = WorkGroup0 * MT0 * bpe"))
+    module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=sgpr(tmpS),
+                       comment="vaddr += wg0_M_off"))
+    if miwg0 > 1:
+      module.add(VLShiftRightB32(dst=vgpr(tmpV), shiftHex=wsLog2, src=vgpr("Serial"),
+                                 comment=f"waveId = Serial >> {wsLog2}"))
+      module.add(VAndB32(dst=vgpr(tmpV), src0=miwg0-1, src1=vgpr(tmpV),
+                         comment=f"waveId0 = waveId & {miwg0-1}"))
+      module.add(SMovB32(dst=sgpr(tmpS), src=kernel["MIWaveTile"][0]*kernel["MatrixInstM"]*bpe,
+                         comment="waveM_stride_bpe"))
+      module.add(VMulLOU32(dst=vgpr(tmpV), src0=vgpr(tmpV), src1=sgpr(tmpS),
+                           comment="wave_M_off = waveId0 * waveM_stride_bpe"))
+      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(tmpV),
+                         comment="vaddr += wave_M_off"))
+    if miwg1 > 1:
+      module.add(VLShiftRightB32(dst=vgpr(tmpV), shiftHex=wsLog2, src=vgpr("Serial"),
+                                 comment=f"waveId = Serial >> {wsLog2}"))
+      module.add(VLShiftRightB32(dst=vgpr(tmpV), shiftHex=int(log2(miwg0)), src=vgpr(tmpV),
+                                 comment=f"waveId1 = waveId / {miwg0}"))
+      module.add(SMovB32(dst=sgpr(tmpS), src=kernel["MIWaveTile"][1]*kernel["MatrixInstN"]*bpe,
+                         comment="waveN_stride_bpe"))
+      module.add(VMulLOU32(dst=vgpr(tmpV), src0=vgpr(tmpV), src1=sgpr(tmpS),
+                           comment="waveId1 * waveN_stride_bpe"))
+      module.add(VMulLOU32(dst=vgpr(tmpV), src0=vgpr(tmpV), src1=sgpr(strideD1J),
+                           comment="wave_N_off = waveId1 * waveN_stride_bpe * StrideD1J"))
+      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(tmpV),
+                         comment="vaddr += wave_N_off"))
+    self.sgprPool.checkIn(tmpS)
+    self.states.subtileHoistedScalarAddr = True
     return module
 
   def _plsinFusedSkipBias(self, kernel):
@@ -16455,6 +16583,18 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
       module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0,
                              comment="alpha != 1 -> not fused"))
+
+      # ActivationType == none. The staged fused arm emits only the no-activation
+      # store body (see initActivationLoop), so every other activation has to reach
+      # the PLAIN NLL and its own post-loop store.
+      if self._plsinStagedArmNoActivation(kernel) and "ActivationType" in self.sgprs:
+        from .Activation import ActivationType
+        noneIdx = ActivationType.getEnumIndex("none")
+        module.addComment1("PLSIN guard-hoist: fold ActivationType==none into %s" % flag)
+        module.add(self.getSCMPKInstruction("EQU32", "ActivationType", noneIdx,
+                                            comment="activationType == none (%u) ?" % noneIdx))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0,
+                               comment="activation != none -> not fused"))
 
       # Degenerate short-K guard: require numIter >= minIter so the NLL pipeline has a
       # real iteration to drain.
@@ -17000,6 +17140,16 @@ class KernelWriterAssembly(KernelWriter):
     vgprPermAddr: int = -1        # per-lane ds_bpermute byte address (partner_lane*4); constant for the whole batch
     vgprLaneGroupDelta: int = -1  # per-lane lane_group*8: M-row byte offset added to addrDVgpr for the dwordx4 store
     vgprAddrScratch: int = -1     # per-store scratch: holds (addrDVgpr scaled + lane_group*8) without modifying addrDVgpr
+    vgprScalarAddr: int = -1      # hoisted per-lane vaddr for the unpaired dwordx2 store; wave-invariant, one copy per store
+    vgprScalarPackRing: int = -1  # base of the unpaired-store pack ring (numScalarPackPairs 2-vgpr pairs)
+    numScalarPackPairs: int = 1   # pairs in that ring; 1 serialises every store on one pair
+    # 128B-column merge (plsinStoreCol128Active): the offset-0 pair packs into the
+    # +0..+3 quad as usual and the offset-64 pair into this second quad, so both are
+    # live when _emitSubtileColumnMerge re-splits them by column.
+    vgprColPackB: int = -1        # 2-aligned second pack quad (+0..+3) for the offset-64 paired store
+    vgprColMergeTmp: int = -1     # holds P0 across the merge's first (overwriting) write
+    vgprColAddrQ: int = -1        # vaddr for the columns 0-7 store
+    vgprColAddrR: int = -1        # vaddr for the columns 8-15 store, one N-column past Q
 
   class FP8CVTVgprStruct(NamedTuple):
     vgprFp8NanInf: int = -1
@@ -17665,14 +17815,42 @@ class KernelWriterAssembly(KernelWriter):
         #   +4: vgprPermAddr       — ds_permute partner-lane byte address
         #   +5: vgprLaneGroupDelta — lane_group*8, pre-computed once per batch
         #   +6: vgprAddrScratch    — per-store adjusted D address; avoids modifying addrDVgpr
-        numCvtVgprs = 7 if kernel.get("UseSubtileImpl") else 4
+        #   +7: vgprScalarAddr     — hoisted vaddr for the unpaired dwordx2 store
+        #        (only allocated when that store is in use, so the paired path's
+        #         register footprint is unchanged)
+        #   +8..: vgprScalarPackRing — additional dwordx2 pack pairs. With a single
+        #        pair every store waits for the previous store to read it before its
+        #        pack may run, so the stores cannot overlap each other; rotating a
+        #        ring of pairs lets several be in flight (the reference FlyDSL kernel
+        #        rotates 8). TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_STORE_PAIRS=n".
+        #   +col..+col+3: vgprColPackB — second pack quad for the 128B-column merge,
+        #        2-aligned for its own buffer_store_dwordx4. +col+4 is the merge temp
+        #        and +col+5 the columns-8-15 vaddr. Costs 6 vgprs over the 64B-run
+        #        store, which is why it is gated rather than unconditional.
+        from .Components.GlobalWriteBatch import plsinScalarStoreActive, plsinStoreCol128Active
+        scalarStore = plsinScalarStoreActive(kernel)
+        packPairs   = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_PAIRS", "4"))) if scalarStore else 1
+        numCvtVgprs = (8 + 2 * packPairs if scalarStore else 7) \
+                      if kernel.get("UseSubtileImpl") else 4
+        col128Base  = -1
+        if kernel.get("UseSubtileImpl") and \
+           plsinStoreCol128Active(kernel, True if self.states.subtileFusedFullTileStore else None):
+          col128Base  = (numCvtVgprs + 1) & ~1   # 2-align the second pack quad
+          numCvtVgprs = col128Base + 7
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
         cvtVgpr = self.vgprPool.checkOutAligned(numCvtVgprs, cvtAlign, tag="globalWriteElements_cvtVgpr")
         cvtVgprStruct = self.BF16CVTVgprStruct(vgprBf16Temp=cvtVgpr, vgprBf16Mask=(cvtVgpr+1), \
                                                vgprFp32Nan=(cvtVgpr+2), vgprBf16Inc=(cvtVgpr+3), \
                                                vgprPermAddr=(cvtVgpr+4) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprLaneGroupDelta=(cvtVgpr+5) if kernel.get("UseSubtileImpl") else -1, \
-                                               vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1)
+                                               vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1, \
+                                               vgprScalarAddr=(cvtVgpr+7) if scalarStore else -1, \
+                                               vgprScalarPackRing=(cvtVgpr+8) if scalarStore else -1, \
+                                               numScalarPackPairs=packPairs, \
+                                               vgprColPackB=(cvtVgpr+col128Base) if col128Base >= 0 else -1, \
+                                               vgprColMergeTmp=(cvtVgpr+col128Base+4) if col128Base >= 0 else -1, \
+                                               vgprColAddrQ=(cvtVgpr+col128Base+5) if col128Base >= 0 else -1, \
+                                               vgprColAddrR=(cvtVgpr+col128Base+6) if col128Base >= 0 else -1)
         module.add(self.emitSubtileStoreLaneMath(kernel, cvtVgprStruct))
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr2")
@@ -18217,6 +18395,8 @@ class KernelWriterAssembly(KernelWriter):
     #print(gwvw, edge, beta, atomic, element, vectorDataTypes, factorDim)
     #exit(1)
     ss = StoreState(self, kernel, gwvw, edge, beta, atomic, element, vectorDataTypes, dim=factorDim)
+    # New store arm: any dwordx4 base hoisted in a previous arm is unreachable from here.
+    self.states.subtileStoreArmId += 1
 
 
     actPCMaxTempSgpr_ = None
@@ -20050,7 +20230,15 @@ class KernelWriterAssembly(KernelWriter):
     activationEndLabel = Label("Activation_End%s"%activationLabelSuffix, "")
     activationLabelModules = []
     activationEnumStrList = []
-    if kernel["ActivationFuncCall"]:
+    if self.states.subtileFusedStoreNoActivation:
+      # PLSIN staged store: the fused arm is guarded on ActivationType==none, so it
+      # only ever needs that one body. Emitting the full 'all' set here would put six
+      # copies of the store in the arm, each restarting its element N groups at 0 --
+      # the stage markers are forward-only, so the five unreachable copies would all
+      # collapse into the last stage and unbalance the per-partition drain.
+      activationLabelModules.append("")
+      activationEnumStrList.append("none")
+    elif kernel["ActivationFuncCall"]:
       activationLabelModules.append("")
       activationEnumStrList.append("none")
     elif (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' or kernel["StreamK"] > 0) and kernel["ActivationFused"]) and \

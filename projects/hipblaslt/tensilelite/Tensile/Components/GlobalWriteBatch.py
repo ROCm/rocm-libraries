@@ -22,7 +22,7 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
+  SDWAModifiers, DPPModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   GlobalLoadB32, SLoadB128, \
@@ -42,7 +42,8 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
 from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
-from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
+from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU, plsinDebugEnv, \
+    plsinEarlyStoreTile
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -94,6 +95,27 @@ PLSIN_STORE_HOIST_ADDR = _plsinStoreGate("PLSIN_STORE_HOIST_ADDR", default=True)
 PLSIN_STORE_PERMLANE16 = _plsinStoreGate("PLSIN_STORE_PERMLANE16", default=True)
 
 
+def plsinScalarStoreActive(kernel) -> bool:
+    """Whether the fused NLL arm stores each subtile on its own as a dwordx2.
+
+    The paired dwordx4 cannot start packing until BOTH subtiles of a pair have
+    their final accumulators, and needs two ``v_permlane16_swap`` to assemble the
+    two halves into one contiguous 16B per lane. Storing each subtile alone halves
+    that dependency and doubles the number of store/MFMA interleave points, at the
+    cost of twice as many store instructions. Same bytes either way.
+
+    Doubling the interleave points only pays off where something can be woven
+    into them, so this is scoped to the staging-eligible tiles. Elsewhere the
+    extra store instructions are pure cost and the paired dwordx4 is kept.
+
+    Opt-in while it is being measured:
+    ``TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_SCALAR_STORE=1"``.
+    """
+    if not plsinEarlyStoreTile(kernel):
+        return False
+    return plsinDebugEnv("TENSILE_PLSIN_SCALAR_STORE", "0") != "0"
+
+
 def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     """Whether this store emission uses the AITER ``v_permlane16_swap`` shuffle.
 
@@ -117,6 +139,38 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     if kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256:
         return weaveGroups is not None
     return True
+
+
+def plsinStoreCol128Active(kernel, weaveGroups) -> bool:
+    """Whether two M-adjacent paired stores are merged into 128B column runs.
+
+    One paired dwordx4 store covers 16 columns x 64B: lane m holds 8 bf16 rows of
+    column ``m & 15`` at byte ``lane_group*8 + (lane_group&1)*24`` within the
+    column (that is ``vgprLaneGroupDelta + vgprPermAddr``, both already hoisted).
+    64B is half of a 128B L2 line, so every line is touched twice and each touch
+    is a separate EA write request -- measured at 1.117x amplification with ``nt``.
+
+    Merging the pair at MUBUF offset 0 (column bytes 0-63) with the one at offset
+    64 (bytes 64-127) and re-splitting them by column instead of by row yields two
+    stores of 8 columns x 128B, which measured 1.002x amplification and 1.55x the
+    store bandwidth (2841 -> 4393 GB/s). The re-split is a lane-XOR-8 exchange
+    inside each 16-lane DPP row, so it costs 3 VALU per dword and no LDS traffic.
+
+    Requires the permlane16 shuffle: the merge is defined against the row order
+    that ``(lane_group&1)*12`` produces, not against the ds_bpermute path's.
+
+    Opt-in while it is being measured:
+    ``TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_COL128=1"``.
+    """
+    if plsinDebugEnv("TENSILE_PLSIN_COL128", "0") == "0":
+        return False
+    # An N group holds MIWaveTile[0]//2 paired stores. Requiring that to be even
+    # means every store has an M-adjacent partner to merge with, so there is no
+    # odd one left needing the 64B-run path as a fallback.
+    miwt0 = kernel.get("MIWaveTile", [0])[0]
+    if miwt0 % 4 != 0:
+        return False
+    return plsinStorePermlane16Active(kernel, weaveGroups)
 
 
 # Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
@@ -286,11 +340,10 @@ class GlobalWriteBatchWriter:
     # Component B (PLSIN_STORE_HOIST_ADDR): the lane-adjusted dwordx4 base
     # (addrDVgpr + lane_group*8) is identical for every paired store that shares
     # the same addrDVgpr and N-group (the M-subtile stride is carried by the MUBUF
-    # immediate offset 0/64/128/192, not by addrDVgpr).  Track the (addrDVgpr
-    # index, blockIdxN) that vgprAddrScratch currently holds so Phase1 recomputes
-    # it only when that key changes.  -1 = invalid / not yet computed.
-    self._subtileHoistedAddrDVgpr = -1
-    self._subtileHoistedAddrBlockN = -1
+    # immediate offset 0/64/128/192, not by addrDVgpr).  The key lives on the writer
+    # state (see subtileHoistedAddrDVgpr) because this object is rebuilt per write
+    # batch; an instance field invalidated the base at every batch boundary and cost
+    # one recompute per batch from provably unchanged inputs.
     self.numBatches = numBatches
 
     # Next batch's first-elt rowInc (look-ahead at the last emitting elt). 0 = none.
@@ -1886,6 +1939,18 @@ class GlobalWriteBatchWriter:
       # v_permlane16_swap. See plsinStorePermlane16Active.
       self._permlane16Active = plsinStorePermlane16Active(
         self.kernel, self._weaveMfmaGroups())
+      # Merging holds one pair's payload while the next is packed, so nothing may
+      # separate the two stores: a branch or an exec mask between them would leave
+      # the merge half-issued with no way to recover the held payload. The
+      # full-tile fused arm gives that -- it elides both the M guard and the
+      # align8 mask, since every block is full there (see useAlign8 below).
+      # Elsewhere the align8 mask is per (blockIdxM, blockIdxN), and a merged
+      # store draws its lanes from two different M blocks, so it cannot be
+      # expressed as one mask without re-deriving it in merged-lane coordinates.
+      self._col128Active = (plsinStoreCol128Active(self.kernel, self._weaveMfmaGroups())
+                            and self._fusedFullTileNoGuards()
+                            and self.cvtVgprStruct.vgprColPackB >= 0)
+      self._col128Pending = None
       vPermAddr = self.cvtVgprStruct.vgprPermAddr
       vTmp = self.cvtVgprStruct.vgprBf16Temp  # reuse scratch temp before it's used for mask init
       if self._permlane16Active and self.parentWriter.states.subtileHoistedPermAddr:
@@ -1972,6 +2037,7 @@ class GlobalWriteBatchWriter:
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
     for elementIdx in range(0, len(self.batchElements)):
       element = self.batchElements[elementIdx]
+      self._emitPlsinStageBoundary(module, element)
       addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
       addr = addrCalc.addrDVgpr
       dataE = self.ss.elementDataE[elementIdx]
@@ -2512,7 +2578,34 @@ class GlobalWriteBatchWriter:
           # Epilogue (bias/activation) is applied per-element in iteration order.
           # The paired store must be emitted AFTER both sba=0 and sba=1 elements have
           # had their epilogue applied, so we defer it to the sba=1 (odd tt0) iteration.
-          if tt0 % 2 == 1:
+          if self._plsinScalarStoreMode():
+            # No pairing: this element's epilogue is done, so store it now. Every
+            # element gets its own gap, doubling the store/MFMA interleave points.
+            if self.ss.optSrdIncForRow and addrCalc.rowInc:
+              self._subtilePendingSrdDInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
+            _weavePairIdx = None
+            if self._weaveMode:
+              _weavePairIdx = self.parentWriter.states.subtileWeavePairCounter
+              if not self._weaveReadBeforeEpilogue:
+                self._weaveEmitReady(storeCodeModule, _weavePairIdx)
+                storeCodeModule.add(self._popSubtileAccVgprReads(elementIdx))
+              self.parentWriter.states.subtileWeavePairCounter += 1
+            sumIdx0 = self.ss.elementSumIdx[elementIdx]
+            prefixOffset = self.parentWriter.states.c.startVgprValu
+            # Carries the N-group label and the deferred SrdD row increment even when
+            # the bounds branches themselves are elided, so D addressing still advances.
+            skipLabel = self._emitSubtileOobGuard(storeCodeModule, tt0, element[0],
+                                                  labelPrefix="subtile_skip_scalar")
+            if _weavePairIdx is not None and self._weaveMfmaGroups() is not None:
+              storeCodeModule.add(self._emit16bitSubtileScalarStoreWoven(
+                addrCalc, sumIdx0, prefixOffset, _weavePairIdx, tt0, forceSlc=fusedA2APushPass))
+            else:
+              storeCodeModule.add(self._emit16bitSubtileScalarStoreHoisted(
+                addrCalc, sumIdx0, prefixOffset, tt0, forceSlc=fusedA2APushPass))
+            if skipLabel is not None:
+              storeCodeModule.add(skipLabel)
+            self.storesIssued += 1
+          elif tt0 % 2 == 1:
             # sba=1 element (odd tt0): both sba=0 and sba=1 epilogues are done — emit paired store.
             # Find the sba=0 partner: the immediately preceding element with tt0-1.
             partnerElementIdx = elementIdx - 1
@@ -2571,6 +2664,31 @@ class GlobalWriteBatchWriter:
                 tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
                 storeCodeModule.add(tmpFallbackCode)
                 storeCodeModule.add(afterPairedLabel)
+              elif getattr(self, "_col128Active", False) and skipLabel is None and \
+                   (self._col128Pending is not None or
+                    self._col128PartnerInBatch(elementIdx, tt0, blockIdxN)):
+                # 128B-column merge: hold the first of each M-adjacent pair, then
+                # re-split both by column and issue two full-line stores. Deferring
+                # is only safe once the partner is known to be in this batch and in
+                # this N group -- a batch boundary can split an N group, so position
+                # alone does not imply a partner follows.
+                cvt = self.cvtVgprStruct
+                if self._col128Pending is None:
+                  storeCodeModule.add(self._emitCol128PairedPack(
+                    partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset,
+                    cvt.vgprBf16Temp, tt0 - 1, blockIdxM, blockIdxN))
+                  self._col128Pending = (partnerAddrCalc, tt0 - 1, blockIdxN)
+                else:
+                  p0AddrCalc, p0tt0, p0BlockN = self._col128Pending
+                  assert p0BlockN == blockIdxN and p0tt0 == tt0 - 3, \
+                    "128B-column merge paired non-adjacent stores"
+                  storeCodeModule.add(self._emitCol128PairedPack(
+                    partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset,
+                    cvt.vgprColPackB, tt0 - 1, blockIdxM, blockIdxN))
+                  self._emitCol128Addr(storeCodeModule)
+                  storeCodeModule.add(self._emitCol128MergedStores(
+                    p0AddrCalc, p0tt0, forceSlc=fusedA2APushPass))
+                  self._col128Pending = None
               else:
                 if _weavePairIdx is not None and self._weaveMfmaGroups() is not None:
                   tmpStoreCode = self._emit16bitSubtilePairedStoreWoven(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, _weavePairIdx, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
@@ -2874,6 +2992,59 @@ class GlobalWriteBatchWriter:
     module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
     module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
 
+    return module
+
+  # DPP row_ror:8 rotates within each 16-lane row, so it exchanges lanes m and
+  # m^8. bank_mask gates which banks of 4 lanes are written; the rest of the
+  # destination keeps its old value, which is what makes the merge in-place.
+  _COL128_ROR8     = 8
+  _COL128_ROW_ALL  = 0xf
+  _COL128_BANK_HI8 = 0xc   # banks 2,3 -> lanes 8-15 of each row
+  _COL128_BANK_LO8 = 0x3   # banks 0,1 -> lanes 0-7  of each row
+
+  def _emitSubtileColumnMerge(self, vPackA: int, vPackB: int, vTmp: int) -> Module:
+    """Re-split two M-adjacent paired-store payloads into 128B column runs.
+
+    On entry vPackA holds the store at MUBUF offset 0 and vPackB the one at
+    offset 64, so between them they hold 16 columns x 128B but each covers only
+    64B of any single column. On exit vPackA holds columns 0-7 and vPackB holds
+    columns 8-15, each with the full 128B run, so one store fills an L2 line
+    instead of half of one.
+
+    Writing P0 for the entry vPackA and P1 for the entry vPackB, the split is
+
+      vPackA[m] = P0[m]        if (m&15) < 8, else P1[m^8]     (columns 0-7)
+      vPackB[m] = P0[m^8]      if (m&15) < 8, else P1[m]       (columns 8-15)
+
+    Both halves are the same lane-XOR-8 exchange, and 8 == 16/2 makes that a
+    ``row_ror:8`` inside the DPP row. The two bank masks are complementary, so
+    each destination takes the rotated operand in exactly the lanes the other
+    one keeps. vTmp holds P0 across the first write, which overwrites it.
+
+    Verified against the emitted lane mapping and on gfx950 hardware; see
+    ~/data/0922/store-coalescing/{verify_merge.py,dpp_merge_test.cpp}.
+
+    Args:
+      vPackA: Base VGPR of the offset-0 quad (2-aligned); becomes columns 0-7.
+      vPackB: Base VGPR of the offset-64 quad (2-aligned); becomes columns 8-15.
+      vTmp:   One scratch VGPR, dead on return.
+
+    Returns:
+      Module of 12 VALU (3 per dword), no LDS traffic and no waitcnt.
+    """
+    module = Module("SubtileColumnMerge")
+    module.addComment1("column merge: 2 x (16 cols x 64B) -> 2 x (8 cols x 128B)")
+    hi8 = DPPModifiers(row_ror=self._COL128_ROR8, row_mask=self._COL128_ROW_ALL,
+                       bank_mask=self._COL128_BANK_HI8)
+    lo8 = DPPModifiers(row_ror=self._COL128_ROR8, row_mask=self._COL128_ROW_ALL,
+                       bank_mask=self._COL128_BANK_LO8)
+    for k in range(4):
+      module.add(VMovB32(dst=vgpr(vTmp), src=vgpr(vPackA+k),
+                         comment=f"save P0 dword {k} (vPackA is about to be overwritten)"))
+      module.add(VMovB32(dst=vgpr(vPackA+k), src=vgpr(vPackB+k), dpp=hi8,
+                         comment=f"cols 0-7 dword {k}: lanes 8-15 <- P1[m^8]"))
+      module.add(VMovB32(dst=vgpr(vPackB+k), src=vgpr(vTmp), dpp=lo8,
+                         comment=f"cols 8-15 dword {k}: lanes 0-7 <- P0[m^8]"))
     return module
 
   def _pairedStoreClobbersBf16Consts(self):
@@ -3829,6 +4000,8 @@ class GlobalWriteBatchWriter:
     if self._subtileAllStoresEndLabel is not None:
       targetModule.add(self._subtileAllStoresEndLabel)
       self._subtileAllStoresEndLabel = None
+    assert getattr(self, "_col128Pending", None) is None, \
+      "128B-column merge left a packed store unissued at the end of the batch"
 
   def _emitAlign8ExecMask(self, module, tmpS, tmpS2, blockIdxM, blockIdxN, mGuardOffset, rowScaleShift):
     """Emit exec mask for partial M/N blocks in the NonEdge store path.
@@ -4248,7 +4421,115 @@ class GlobalWriteBatchWriter:
     module.add(self._emit16bitSubtilePairedStorePhase2(addrCalc, tt0=tt0, forceSlc=forceSlc))
     return module
 
-  def _emit16bitSubtilePairedStorePhase1(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False) -> Module:
+  def _emitCol128PairedPack(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int,
+                            vPack: int, tt0: int, blockIdxM: int, blockIdxN: int) -> Module:
+    """Pack and shuffle one paired store into `vPack`, emitting no buffer_store.
+
+    This is Phase1 + Phase2's cross-lane assembly with the store suppressed, so the
+    payload sits in `vPack` until its M-adjacent partner arrives and the merge can
+    re-split the two by column. Phase1's vAddrScratch write is left in place: it is
+    the hoisted base that the merge path does not read, and suppressing it would
+    desync the hoist cache for any later non-merged store.
+    """
+    module = Module("Col128PairedPack")
+    module.add(self._emit16bitSubtilePairedStorePhase1(
+      addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0,
+      blockIdxM=blockIdxM, blockIdxN=blockIdxN, vPackOverride=vPack))
+    module.add(self._emit16bitSubtilePairedStorePhase2(
+      addrCalc, tt0=tt0, vPackOverride=vPack, shuffleOnly=True))
+    return module
+
+  def _col128PartnerInBatch(self, elementIdx: int, tt0: int, blockIdxN: int) -> bool:
+    """Whether the M-adjacent partner of the pair ending at ``elementIdx`` is here.
+
+    The pair (tt0-1, tt0) covers the low 64B of its columns; the high 64B is the
+    next pair, (tt0+1, tt0+2), at the two following elements of the same N group.
+    Batches are cut on element count, not on N-group boundaries, so a group can
+    end mid-batch or spill into the next one -- deferring without checking would
+    strand a packed payload with no partner to merge it into.
+    """
+    nxt = elementIdx + 2
+    if nxt >= len(self.batchElements):
+      return False
+    e1, e2 = self.batchElements[elementIdx + 1], self.batchElements[nxt]
+    return (e1[1] == tt0 + 1 and e2[1] == tt0 + 2
+            and e1[0] == blockIdxN and e2[0] == blockIdxN)
+
+  def _emitCol128Addr(self, module) -> None:
+    """Materialize the two 128B-column store addresses for one merged pair.
+
+    Recomputed per merged store rather than hoisted: the base it is derived from
+    is itself keyed on (store arm, addrDVgpr, N group) and may be rebuilt when the
+    N group changes, so caching Q/R would need to track the same key. Six
+    instructions per merged store is cheap enough to defer that.
+
+    Q and R live in their own registers. They deliberately do NOT reuse
+    vgprAddrScratch: only some paired stores merge, and the ones that do not still
+    read vgprAddrScratch as the hoisted 64B-run base (see Phase2), so overwriting
+    it here would corrupt every unmerged store in the batch.
+    """
+    cvt      = self.cvtVgprStruct
+    vQ, vR   = cvt.vgprColAddrQ, cvt.vgprColAddrR
+    vBase    = cvt.vgprAddrScratch    # addrDVgpr + vRowDelta, from Phase1
+    vTmp     = cvt.vgprColMergeTmp    # free until the merge itself
+    bpe      = self.parentWriter.states.bpeCexternalGSU1
+    packedC1 = self.kernel["PackedC1IndicesX"]
+    strideD1J = "StrideD%s" % self.parentWriter.states.indexChars[packedC1[0]]
+    sCols    = self._epilogScratchSgpr(2)
+
+    # Derive Q/R from the hoisted base instead of rebuilding the address: the base
+    # already carries the tile origin, this lane's N column and its row byte, none
+    # of which are recoverable from Serial alone. The merge only relocates lanes
+    # 8-15 of each row, so the correction is one conditional delta:
+    #
+    #   lane m of Q holds column m&7; lane m of R holds (m&7)+8.
+    #   halfSel = (m>>3)&1 picks which 64B half of the column the lane carries.
+    #     halfSel=0: base is already column m&7 in this pair's row  -> Q = base
+    #     halfSel=1: base is column (m&7)+8, and the lane now holds
+    #                the partner pair's row, 64B further down       -> Q = base - 8cols + 64
+    #   R is a uniform 8 columns past Q in both cases.
+    module.addComment1("128B-column store addresses (delta off the hoisted dwordx4 base)")
+    module.add(SMulI32(dst=sgpr(sCols), src0=sgpr(strideD1J), src1=8 * bpe,
+                       comment="8 columns in bytes"))
+    module.add(SSubI32(dst=sgpr(sCols+1), src0=64, src1=sgpr(sCols),
+                       comment="upper-half delta: +64 row bytes, -8 columns"))
+    module.add(VLShiftRightB32(dst=vgpr(vTmp), shiftHex=3, src=vgpr("Serial"),
+                               comment="lane >> 3"))
+    module.add(VAndB32(dst=vgpr(vTmp), src0=1, src1=vgpr(vTmp),
+                       comment="halfSel = (lane>>3) & 1"))
+    module.add(VMulLOU32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=sgpr(sCols+1),
+                         comment="halfSel * delta"))
+    module.add(VAddU32(dst=vgpr(vQ), src0=vgpr(vBase), src1=vgpr(vTmp),
+                       comment="Q vaddr: columns 0-7"))
+    module.add(VAddU32(dst=vgpr(vR), src0=vgpr(vQ), src1=sgpr(sCols),
+                       comment="R vaddr: columns 8-15"))
+
+  def _emitCol128MergedStores(self, addrCalc, tt0: int, forceSlc: bool = False) -> Module:
+    """Merge the two pending pack quads and issue both 128B-column stores."""
+    cvt = self.cvtVgprStruct
+    module = Module("Col128MergedStores")
+    module.add(self._emitSubtileColumnMerge(cvt.vgprBf16Temp, cvt.vgprColPackB,
+                                            cvt.vgprColMergeTmp))
+    ntd    = self._epilogueNtd()
+    isGlc  = bool(ntd & 0x1)
+    isSlc  = bool((ntd & 0x2) or forceSlc)
+    isNT   = bool(ntd & 0x4)
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpeDest = self.parentWriter.states.bpeCexternalGSU1
+    globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
+    for vPack, vAddr, cols in ((cvt.vgprBf16Temp, cvt.vgprColAddrQ,  "0-7"),
+                               (cvt.vgprColPackB, cvt.vgprColAddrR,    "8-15")):
+      module.add(BufferStoreB128(
+        src=vgpr(vPack, 4),
+        vaddr=vgpr(vAddr),
+        saddr=sgpr("SrdD", 4),
+        soffset=0,
+        mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
+        comment=f"128B-column store tt0={tt0}: columns {cols}, 8 lanes x 16B"))
+    module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
+    return module
+
+  def _emit16bitSubtilePairedStorePhase1(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False, vPackOverride=None) -> Module:
     """Phase 1 (issue) of the paired dwordx4 store — see _emit16bitSubtilePairedStore.
 
     Emits, with NO s_barrier and NO buffer_store:
@@ -4273,7 +4554,9 @@ class GlobalWriteBatchWriter:
     # vgprBf16Temp is at an even VGPR index, satisfying buffer_store_dwordx4's
     # alignment requirement.  The +0..+3 slots are safely overwritten here as pack/perm
     # staging for each pair.
-    vPack = self.cvtVgprStruct.vgprBf16Temp  # +0..3: packed 16bit dwords, 2-aligned
+    # The 128B-column merge needs both halves of a column live at once, so it packs
+    # the offset-64 store into a second quad and computes its own Q/R addresses.
+    vPack = self.cvtVgprStruct.vgprBf16Temp if vPackOverride is None else vPackOverride
 
     vPermAddr    = self.cvtVgprStruct.vgprPermAddr
     vLGDelta     = self.cvtVgprStruct.vgprLaneGroupDelta
@@ -4349,9 +4632,19 @@ class GlobalWriteBatchWriter:
     vRowDelta = vPermAddr if self._permlane16Active else vLGDelta
     deltaStr = "(lane_group&1)*12rows" if self._permlane16Active else "lane_group*8"
     hoistAddr = PLSIN_STORE_HOIST_ADDR and self._fusedFullTileNoGuards()
+    # optSingleColVgpr materializes addrDVgpr once for the whole store and
+    # optSrdIncForRow advances rows/N groups through SrdD, so the base is invariant
+    # across N groups too and blockIdxN drops out of the key.  Without both, an N
+    # group may rewrite addrDVgpr in place and the base has to be recomputed.
+    # singleColDAddrUpdated only exists on the optSingleColVgpr branch of StoreState.
+    nGroupInvariant = bool(self.ss.optSingleColVgpr and self.ss.optSrdIncForRow
+                           and getattr(self.ss, "singleColDAddrUpdated", False))
     addrAlreadyLive = (hoistAddr
-                       and self._subtileHoistedAddrDVgpr == addrDVgpr
-                       and self._subtileHoistedAddrBlockN == blockIdxN)
+                       and (self.parentWriter.states.subtileHoistedAddrArm
+                            == self.parentWriter.states.subtileStoreArmId)
+                       and self.parentWriter.states.subtileHoistedAddrDVgpr == addrDVgpr
+                       and (nGroupInvariant
+                            or self.parentWriter.states.subtileHoistedAddrBlockN == blockIdxN))
     if addrAlreadyLive:
       module.addComment1(f"reuse hoisted dwordx4 base in v{vAddrScratch} (addrDVgpr={addrDVgpr}, N={blockIdxN})")
     elif addrScaleShift:
@@ -4363,8 +4656,9 @@ class GlobalWriteBatchWriter:
       module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vRowDelta),
                          comment=f"adjusted D addr = addrDVgpr + {deltaStr}"))
     if hoistAddr:
-      self._subtileHoistedAddrDVgpr = addrDVgpr
-      self._subtileHoistedAddrBlockN = blockIdxN
+      self.parentWriter.states.subtileHoistedAddrArm = self.parentWriter.states.subtileStoreArmId
+      self.parentWriter.states.subtileHoistedAddrDVgpr = addrDVgpr
+      self.parentWriter.states.subtileHoistedAddrBlockN = blockIdxN
     if useAlign8:
       self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                mGuardOffset=2, rowScaleShift=1)
@@ -4373,7 +4667,16 @@ class GlobalWriteBatchWriter:
       "PostLoopStoreInNll Phase1 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
     return module
 
-  def _emit16bitSubtilePairedStorePhase2(self, addrCalc, tt0: int = 0, pending_lgkm=None, interior: bool = False, forceSlc: bool = False) -> Module:
+  def _epilogueNtd(self) -> int:
+    """NonTemporalD for the fused store's D writes, with a test-only override.
+
+    ``TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_NTD=<n>"`` replaces the solution's
+    NonTemporalD so the D-store cache hints can be A/B'd without retuning the
+    logic yaml. Unset reproduces the solution value exactly.
+    """
+    return int(plsinDebugEnv("TENSILE_PLSIN_NTD", self.kernel["NonTemporalD"]))
+
+  def _emit16bitSubtilePairedStorePhase2(self, addrCalc, tt0: int = 0, pending_lgkm=None, interior: bool = False, forceSlc: bool = False, vPackOverride=None, shuffleOnly: bool = False) -> Module:
     """Phase 2 (consume) of the paired dwordx4 store — see _emit16bitSubtilePairedStore.
 
     Emits, with NO s_barrier:
@@ -4392,12 +4695,12 @@ class GlobalWriteBatchWriter:
     """
     module = Module("16bitSubtilePairedStorePhase2")
 
-    ntd = self.kernel["NonTemporalD"]
+    ntd = self._epilogueNtd()
     isGlc = bool(ntd & 0x1)
     isSlc = bool((ntd & 0x2) or forceSlc)
     isNT  = bool(ntd & 0x4)
 
-    vPack        = self.cvtVgprStruct.vgprBf16Temp
+    vPack        = self.cvtVgprStruct.vgprBf16Temp if vPackOverride is None else vPackOverride
     vAddrScratch = self.cvtVgprStruct.vgprAddrScratch
 
     bpeCurr = self.parentWriter.states.bpeCexternal
@@ -4427,6 +4730,11 @@ class GlobalWriteBatchWriter:
       module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
       module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
       module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
+
+    if shuffleOnly:
+      # 128B-column merge: this pair's 8 rows are assembled but not stored -- the
+      # merge re-splits it against its M-adjacent partner and issues both stores.
+      return module
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
@@ -4508,7 +4816,7 @@ class GlobalWriteBatchWriter:
     dwordx4 store.  `dscnt` = number of ds_bpermute from LATER groups still in flight
     (4 per pipelined group; 0 at the pipeline drain)."""
     module = Module("pairedStoreCommit")
-    ntd = self.kernel["NonTemporalD"]
+    ntd = self._epilogueNtd()
     isGlc = bool(ntd & 0x1)
     isSlc = bool(ntd & 0x2)
     isNT  = bool(ntd & 0x4)
@@ -4527,6 +4835,129 @@ class GlobalWriteBatchWriter:
     ))
     # WAR: the store reads vPack; the next same-buffer pack (2 groups later) overwrites it.
     module.add(SNop(waitState=0, comment="1 wait state: WAR store src -> next same-buffer pack dst"))
+    return module
+
+  def _emitPlsinStageBoundary(self, module: Module, element):
+    """Mark where this element's N group crosses into the next compute partition.
+
+    The marker is an empty Module that emits nothing; the scheduler cuts the
+    finished store on it to build the per-partition stages.
+    """
+    tt1PerStage = getattr(self.parentWriter.states, "subtileStoreTt1PerStage", 0)
+    if not tt1PerStage:
+      return
+    # The stage index may only advance. A cut is a relocation, so the pieces have to
+    # stay in program order, and the element N groups are not globally monotone --
+    # they run 0,1,..,7 and then restart, both within the batch sequence and across
+    # later store paths. Reopening an earlier stage would hoist those stores above
+    # the address state they inherit (deferred SrdD row increments, the reused
+    # lane-adjusted base) AND above the MFMAs that still have to write their
+    # accumulators, so the high-water mark lives on the writer state to survive the
+    # per-batch rebuild of this object. Suppressed markers simply leave their stores
+    # in the latest stage, which is always late enough to be correct.
+    stage = element[0] // tt1PerStage
+    if stage <= self.parentWriter.states.subtileStoreStageHighWater:
+      return
+    self.parentWriter.states.subtileStoreStageHighWater = stage
+    module.add(Module(f"PlsinStageBoundary{stage}"))
+
+  def _plsinScalarStoreMode(self) -> bool:
+    """True when this emission routes every subtile through its own dwordx2 store.
+
+    Restricted to the fused NLL arm: it needs the hoisted vaddr (only emitted
+    there) and the branch-free full-tile guarantee, so the plain arm keeps the
+    paired dwordx4 exactly as before.
+    """
+    return (self._weaveMode and self._fusedFullTileNoGuards()
+            and self.parentWriter.states.subtileHoistedScalarAddr
+            and plsinScalarStoreActive(self.kernel))
+
+  def _scalarPackPair(self) -> int:
+    """Base vgpr of the pack pair this store uses, rotating through the ring.
+
+    The counter lives on the writer state so it keeps rotating across the
+    per-batch rebuild of this object; restarting it per batch would hand two
+    adjacent stores the same pair and reintroduce the serialisation.
+    """
+    ring  = self.cvtVgprStruct.vgprScalarPackRing
+    pairs = self.cvtVgprStruct.numScalarPackPairs
+    if ring < 0:
+      return self.cvtVgprStruct.vgprBf16Temp
+    return ring + 2 * (self.parentWriter.states.subtileScalarPackSlot % pairs)
+
+  def _advanceScalarPackPair(self):
+    self.parentWriter.states.subtileScalarPackSlot += 1
+
+  def _emit16bitSubtileScalarPacks(self, sumIdx0: int, prefixOffset: int, tt0: int) -> Module:
+    """Pack one subtile's 4 M-rows into vPack+0/+1, the dwordx2 store source."""
+    module = Module("16bitSubtileScalarPacks")
+    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+    typeStr = "fp16" if isFp16 else "bf16"
+    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
+    vPack = self._scalarPackPair()
+
+    def vc(vi):
+      return vgpr("ValuC+" + str(sumIdx0 + vi - prefixOffset))
+
+    module.addComment1(f"{typeStr} subtile tt0={tt0}: pack 4 M-rows (vc=0..3) at fixed N-col")
+    module.add(VCvtPkF32to16(dst=vgpr(vPack+0), src0=vc(0), src1=vc(1), comment=f"M-row+0/+1 -> {typeStr}"))
+    module.add(VCvtPkF32to16(dst=vgpr(vPack+1), src0=vc(2), src1=vc(3), comment=f"M-row+2/+3 -> {typeStr}"))
+    module.add(SNop(waitState=0, comment=f"delay after pk_{typeStr}"))
+    return module
+
+  def _emit16bitSubtileScalarIssue(self, addrCalc, tt0: int, forceSlc: bool = False) -> Module:
+    """Issue one dwordx2 against the hoisted wave-invariant vaddr."""
+    module = Module("16bitSubtileScalarIssue")
+    ntd = self._epilogueNtd()
+    vPack = self._scalarPackPair()
+    vAddr = self.cvtVgprStruct.vgprScalarAddr
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpe     = self.parentWriter.states.bpeCexternalGSU1
+    globalOffset = addrCalc.globalOffset * bpe // bpeCurr
+    module.add(BufferStoreB64(
+      src=vgpr(vPack+0, 2),
+      vaddr=vgpr(vAddr),
+      saddr=sgpr("SrdD", 4),
+      soffset=0,
+      mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=bool(ntd & 0x1),
+                           slc=bool((ntd & 0x2) or forceSlc), nt=bool(ntd & 0x4)),
+      comment=f"16bit unpaired dwordx2 store tt0={tt0}: 4 M-rows at fixed N-col"
+    ))
+    # WAR: the store reads vPack[0:1]; the next subtile's v_cvt_pk overwrites them.
+    # Only a hazard when the ring is a single pair -- with a rotating ring the next
+    # pack targets a different pair, which is the point of the ring.
+    if self.cvtVgprStruct.numScalarPackPairs <= 1:
+      module.add(SNop(waitState=0, comment="1 wait state: WAR between store src and next pack dst"))
+    self._advanceScalarPackPair()
+    return module
+
+  def _emit16bitSubtileScalarStoreHoisted(self, addrCalc, sumIdx0: int, prefixOffset: int,
+                                          tt0: int, forceSlc: bool = False) -> Module:
+    module = Module("16bitSubtileScalarStoreHoisted")
+    module.add(self._emit16bitSubtileScalarPacks(sumIdx0, prefixOffset, tt0))
+    module.add(self._emit16bitSubtileScalarIssue(addrCalc, tt0, forceSlc))
+    return module
+
+  def _emit16bitSubtileScalarStoreWoven(self, addrCalc, sumIdx0: int, prefixOffset: int,
+                                        pairIdx: int, tt0: int, forceSlc: bool = False) -> Module:
+    """Unpaired dwordx2 store with an MFMA gap between the packs and the store.
+
+    Mirrors _emit16bitSubtilePairedStoreWoven: the gap module is registered on this
+    pair's capture so the planner can move terminal MFMAs into it, and the anchor is
+    the last pack so cycle distance to the acc read is measured from the right place.
+    """
+    module = Module("16bitSubtileScalarStoreWoven")
+    packs = self._emit16bitSubtileScalarPacks(sumIdx0, prefixOffset, tt0)
+    module.add(packs)
+    gap = Module(f"PlsinGap_pair{pairIdx}")
+    self._weaveEmitGroup(gap, pairIdx + self._weaveLookahead())
+    module.add(gap)
+    pairCapture = self._weaveCapturePair(pairIdx)
+    if pairCapture is not None:
+      packItems = list(packs.flatitems())
+      pairCapture["gap"] = gap
+      pairCapture["gapAnchor"] = packItems[-1] if packItems else None
+    module.add(self._emit16bitSubtileScalarIssue(addrCalc, tt0, forceSlc))
     return module
 
   def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False, forceSlc: bool = False) -> Module:
@@ -4564,10 +4995,11 @@ class GlobalWriteBatchWriter:
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
     # Component B: an orphan/scalar store changes the addressing context; drop any
     # hoisted paired-store base so the next paired store recomputes vAddrScratch.
-    self._subtileHoistedAddrDVgpr = -1
-    self._subtileHoistedAddrBlockN = -1
+    self.parentWriter.states.subtileHoistedAddrArm = -1
+    self.parentWriter.states.subtileHoistedAddrDVgpr = -1
+    self.parentWriter.states.subtileHoistedAddrBlockN = -1
 
-    ntd = self.kernel["NonTemporalD"]
+    ntd = self._epilogueNtd()
     isGlc = bool(ntd & 0x1)
     isSlc = bool((ntd & 0x2) or forceSlc)
     isNT  = bool(ntd & 0x4)

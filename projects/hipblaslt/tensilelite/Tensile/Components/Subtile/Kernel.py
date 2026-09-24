@@ -13,7 +13,7 @@ from Tensile.Components.Subtile.LogicalScheduler import (
       ReadGranularity, GRPlacementStrategy)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion
+  INDEX_CHARS, IsaVersion, ceilDivide, plsinDebugEnv, plsinStagingEligible
 
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
@@ -1389,6 +1389,24 @@ def mainLoop(writer, kernel):
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  # Partitioning is normally a VGPR-pressure escape valve: the full-size candidate is
+  # first and wins whenever it fits, so every kernel schedules as one partition. A
+  # partition owns a disjoint set of D tiles and runs its whole K reduction before the
+  # next one starts, which is the staggered-completion structure the staged store needs,
+  # so allow asking for a floor on the partition count while that is being measured.
+  # TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_MIN_PARTITIONS=2" (test-only).
+  # Scoped to staging-eligible tiles: a kernel that cannot stage gains nothing
+  # from a finer split and pays the extra LDS re-reads, and MT>256x256 is also
+  # pushed off its full-size candidate onto an uneven N split, which breaks the
+  # lending weave. Only candidates staging can actually cut on are kept -- an
+  # N-only split (sizeM == M) into equal groups (N % sizeN == 0).
+  minParts = max(1, int(plsinDebugEnv("TENSILE_PLSIN_MIN_PARTITIONS", "1")))
+  if minParts > 1 and pgr != 0 and plsinStagingEligible(kernel):
+    def _stageable(sizeM, sizeN):
+      return sizeM == M and N % sizeN == 0 and ceilDivide(N, sizeN) >= minParts
+    wider = [c for c in candidates if _stageable(*c)]
+    if wider:
+      candidates = wider
   for partSizeM, partSizeN in candidates:
       hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
       grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
@@ -1419,6 +1437,12 @@ def mainLoop(writer, kernel):
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
+  if plsinDebugEnv("TENSILE_PLSIN_PART_STAT", "0") == "1":
+      import sys
+      print(f"PLSIN_PART_STAT MT{kernel['MacroTile0']}x{kernel['MacroTile1']} "
+            f"M={M} N={N} minParts={minParts} cands={candidates} "
+            f"chosen=({partSizeM},{partSizeN}) numVgpr={numVgpr} "
+            f"used={vgprUsed} budget={vgprBudget}", file=sys.stderr, flush=True)
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo

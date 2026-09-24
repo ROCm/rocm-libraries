@@ -1074,12 +1074,17 @@ class TestPlaceLRs:
     def test_2x2_k1_DU512(self):
         """MT=256x256, DU=512, FP4, k=1, 2x2 partition.
         numSubIterK=4. 4 partitions × 4 subIterKs = 16 slots.
+
+        A and B read at k=1, so their four k chunks do not fit the two register
+        sets and each partition has to read its own; SA and SB read at k=2, fit
+        in two, and are deduped across partitions.
         """
         cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         assert cfg.numPartitions == 4
         assert cfg.numSubIterK == 4
 
         sched = LogicalScheduler(cfg)
+        assert sched._lr_tensors_retained_across_partitions() == {'SA', 'SB'}
         partitions = sched.place_LRs()
         assert len(partitions) == 4
 
@@ -1093,14 +1098,15 @@ class TestPlaceLRs:
         _assert_slot_lrs(p0[0], ['A', 'B', 'SA'])
         _assert_slot_lrs(p0[1], ['A', 'B', 'SB'])
         _assert_slot_lrs(p0[2], ['A', 'B', 'SA'])
-        _assert_slot_lrs(p0[3], ['A'])
+        _assert_slot_lrs(p0[3], ['A', 'B', 'SB'])
 
-        # P3: last partition — last 2 slots load for MT n+1
+        # P3: last partition — A/B still reload, and the MT n+1 prefetch for
+        # every tensor lands in the final slot.
         p3 = partitions[3]
-        assert len(p3[0].lrs) == 0
-        assert len(p3[1].lrs) == 0
-        _assert_slot_lrs(p3[2], ['SA'])
-        _assert_slot_lrs(p3[3], ['A', 'B', 'SB'])
+        _assert_slot_lrs(p3[0], ['A', 'B'])
+        _assert_slot_lrs(p3[1], ['A', 'B'])
+        _assert_slot_lrs(p3[2], ['A', 'B'])
+        _assert_slot_lrs(p3[3], ['A', 'B', 'SA', 'SB'])
         _assert_lr(p3[3], 'A', 1,0, 1, 0, 4)
         _assert_lr(p3[3], 'B', 1,0, 1, 0, 4)
 
@@ -1849,10 +1855,12 @@ class TestAnnotateDeps:
         assert ('LR', 'A', 3, 3, -1) in mfma_p0_s0
         assert len(mfma_p0_s0) == 4
 
-        # P3 MFMA(k=0): deps on LRs that loaded subIterK=0 data for P3 tiles
+        # P3 MFMA(k=0): deps on LRs that loaded subIterK=0 data for P3 tiles.
+        # A comes from P2's wrap read, the last write before P3 runs; SA is
+        # retained across partitions so P2 is where its wrap lands too.
         mfma_p3_s0 = _dep_refs(parts[3][0].mfma)
-        assert ('LR', 'A', 0, 3, 0) in mfma_p3_s0
-        assert ('LR', 'SA', 0, 2, 0) in mfma_p3_s0
+        assert ('LR', 'A', 2, 3, 0) in mfma_p3_s0
+        assert ('LR', 'SA', 2, 2, 0) in mfma_p3_s0
 
     def test_1x1_multi_du_unroll2_AB(self):
         """Multi-DU: uid=0 and uid=1 GRs get correct collision deps.
@@ -2030,9 +2038,11 @@ class TestRemoveCrossDeps:
         lr_a_p3_s3 = _get_lr(parts[3][3], 'A')
         assert lr_a_p3_s3.preOps[0].wait_gr_counts.A == 20
 
-        # LR SA @P3:s2: wait_gr_sync with SA=1
-        lr_sa_p3_s2 = _get_lr(parts[3][2], 'SA')
-        assert lr_sa_p3_s2.preOps[0].wait_gr_counts.SA == 1
+        # LR SA @P3:s3: wait_gr_sync with SA=1.  SA reads at k=2, so its two
+        # chunks stay live across the whole partition loop and only the MT n+1
+        # prefetch is left, in the final slot.
+        lr_sa_p3_s3 = _get_lr(parts[3][3], 'SA')
+        assert lr_sa_p3_s3.preOps[0].wait_gr_counts.SA == 1
 
     def test_320x256_5part_reanchor_pi1(self):
         """Single-DU 5-partition: wait_gr counts match develop legacy inflight walk."""

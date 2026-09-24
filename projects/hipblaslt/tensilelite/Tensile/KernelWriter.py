@@ -445,6 +445,7 @@ class StateValues:
   # 16bit-subtile store lane offsets materialized once per store by
   # emitSubtileStoreLaneMath instead of in every write batch's preamble.
   subtileHoistedLaneGroupDelta: bool     = False   # vgprLaneGroupDelta is live from the hoist
+  subtileHoistedScalarAddr: bool         = False   # vgprScalarAddr holds the unpaired dwordx2 store vaddr
   subtileHoistedPermAddr: bool           = False   # vgprPermAddr holds the permlane16 row delta
   subtileWeaveMfmaGroups: Optional[dict] = None    # {pair: [terminal mfma insts]} being woven
   subtileWeaveMfmaGroupsMaster: Optional[dict] = None  # pristine master re-copied per store type
@@ -455,6 +456,25 @@ class StateValues:
   subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
   subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
   subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
+  subtileStoreStages: int                = 0       # PLSIN staged store: compute partitions to stage across
+  subtileStoreTt1PerStage: int           = 0       # element-space N groups per stage (0 = not staging)
+  subtileStagedStoreSeam: Optional[int]  = None    # index of the store body within the fused-store module
+  subtileStoreStageHighWater: int        = 0       # highest stage opened so far (survives per-batch writer rebuild)
+  subtileScalarPackSlot: int             = 0       # rotating index into the unpaired-store pack ring
+  # Paired-store dwordx4 base hoist: which addrDVgpr / N group vgprAddrScratch currently
+  # holds.  Lives on the writer state so it survives the per-batch rebuild of
+  # GlobalWriteBatch -- as an instance field it reset every batch and the base was
+  # recomputed once per batch from unchanged inputs.  subtileHoistedAddrArm pins the
+  # owning store arm: one StoreState is built per arm (edge/beta/activation) and arms
+  # are runtime-exclusive branches, so a base produced in one must never be reused in
+  # another -- only the emit order makes them look sequential.  It is the arm counter
+  # rather than the StoreState itself because that object reaches the writer (and its
+  # register pools) and must not be retained here.
+  subtileHoistedAddrDVgpr: int           = -1
+  subtileHoistedAddrBlockN: int          = -1
+  subtileHoistedAddrArm: int             = -1
+  subtileStoreArmId: int                 = 0       # bumped per StoreState (store arm)
+  subtileFusedStoreNoActivation: bool    = False   # fused arm emits only the no-activation store body
   subtileM32ValidBlocksSgpr: Optional[int] = None  # SubtileMGuard SGPR
   subtileN16ValidBlocksSgpr: Optional[int] = None  # SubtileNGuard SGPR
   # (subtileTotalMOffsetSgpr is declared with the other KWA SGPR fields above)
