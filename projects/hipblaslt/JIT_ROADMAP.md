@@ -46,7 +46,8 @@ without inventing a replacement recipe. Compilation does not benchmark recipes.
 | --- | --- | --- |
 | One-solution builder | Implemented | One YAML recipe and target produce a complete kernel/helper bundle through `Tensile.SingleSolution` and the existing validators/compiler |
 | Ranked recipe selector | Implemented | Supplied candidates and problem facts produce one validated recipe or rejection reasons; `Tensile.JitGemm` calls the builder without running a model |
-| Direct TensileLite API and sample | Implemented in the basic stack | Explicit YAML and GEMM descriptors produce a checked algorithm; sample `29_hipblaslt_jit_gemm` exercises C/C++ execution |
+| Direct TensileLite API | Implemented in the basic stack | Explicit YAML and GEMM descriptors produce a checked algorithm through `tensilelite::getGemmAlgo`, then C/C++ APIs execute it |
+| Direct sample and CI | Implemented in the basic stack | Sample `29_hipblaslt_jit_gemm` and the shared driver check direct C/C++ execution independently of the generic API |
 | Generic JIT interface and TensileLite provider | Implemented | Opaque `Request` and configured `Backend` produce an owned `Solution`; provider settings stay outside the common types |
 | GEMM request and execution adapters | Implemented | `makeGemmRequest` captures existing descriptors; `getGemmAlgo` connects a compiled GEMM solution to C/C++ execution |
 | Generic sample | Implemented in this layer | Sample `30_hipblaslt_generic_jit_gemm` uses the generic API with an explicit recipe and checked C/C++ execution; the direct sample remains available |
