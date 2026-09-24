@@ -3150,10 +3150,28 @@ class LogicalScheduler:
         self._ngll_emitted = ngll
         return ngll
 
-    def build_nll(self) -> EmittedSchedule:
+    def build_nll(self, dropRedundantSync: bool = False) -> EmittedSchedule:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
         WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n). WaitGR counts are
         zeroed only when no LR(n) remains in the last subIterK slot.
+
+        ``dropRedundantSync`` drops the barriers that survive on those zeroed
+        WaitGRs, keeping only the last one in the body. A WaitGR carries a
+        barrier because an LR reading LDS needs every *other* wave's loads to
+        have landed, which vmcnt cannot say. Strip the GRs and that hazard goes
+        with them: the counts are zeroed right below precisely because nothing
+        is in flight any more, and the body issues no load that could refill a
+        buffer. The barrier is then asserting a fact already established before
+        the body was entered.
+
+        The last one stays. It is not doing the WaitGR's job -- it is the only
+        thing standing between this body's final LDS read and the next macro
+        tile's global reads, which overwrite that buffer. The preloop cannot
+        cover that: its barrier sits after its GRs, not before them.
+
+        Off by default. The split NLL reaches its barriers with the NGLL's
+        loads still in flight behind it, so the same argument needs checking
+        there separately; only the four-deep tail asks for this today.
         """
         assert self._emitted is not None, "call build() first"
 
@@ -3161,10 +3179,11 @@ class LogicalScheduler:
             self._nll_emitted = [[[]]]
             return self._nll_emitted
 
-        nll = []
+        # (partition index, new_emitted, removed) in emission order, so the
+        # "keep the last barrier" decision below can see the whole body.
+        pending: List[Tuple[int, list, set]] = []
         numK = self.config.numSubIterK
-        for partition_emitted in self._emitted:
-            part_nll = []
+        for pi, partition_emitted in enumerate(self._emitted):
             for k, emitted in enumerate(partition_emitted):
                 new_emitted = copy.deepcopy(emitted)
                 removed = set()
@@ -3215,8 +3234,23 @@ class LogicalScheduler:
                                 and em.moduleId not in depended_on:
                             removed.add(em.moduleId)
 
-                part_nll.append(self._rewire_before(new_emitted, removed))
-            nll.append(part_nll)
+                pending.append((pi, new_emitted, removed))
+
+        if dropRedundantSync:
+            survivors = [
+                (idx, em)
+                for idx, (_, new_emitted, removed) in enumerate(pending)
+                for em in new_emitted
+                if em.opType == 'sync' and em.moduleId not in removed
+            ]
+            for idx, em in survivors[:-1]:
+                pending[idx][2].add(em.moduleId)
+
+        nll: EmittedSchedule = []
+        for pi, new_emitted, removed in pending:
+            while len(nll) <= pi:
+                nll.append([])
+            nll[pi].append(self._rewire_before(new_emitted, removed))
 
         self._nll_emitted = nll
         return nll
@@ -3260,7 +3294,7 @@ class LogicalScheduler:
 
         sub = LogicalScheduler(cfg)
         sub.build()
-        sub.build_nll()
+        sub.build_nll(dropRedundantSync=True)
 
         self._tail_merged_scheduler = sub
         self._tail_merged_emitted = sub._nll_emitted
