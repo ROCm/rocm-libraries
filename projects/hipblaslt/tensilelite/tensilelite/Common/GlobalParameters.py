@@ -196,6 +196,7 @@ globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2
 globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
+globalParameters["DeviceScalarAlpha"] = False
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
 # Where A/B data come from. None keeps the default: mxDataGenerator for MX inputs only.
@@ -483,6 +484,10 @@ defaultInternalSupportParams = {
     # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
     # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
+    # Kernel reserves internalArg0 bit 11 to distinguish a device scalar alpha
+    # from the existing device alpha vector. Older/custom kernels default to
+    # False so their 12-bit v3 GSU layout remains ABI-compatible.
+    "SupportDeviceScalarAlpha": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,

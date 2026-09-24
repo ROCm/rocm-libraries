@@ -41,6 +41,7 @@
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 
 #if defined(TENSILE_MSGPACK)
 #include <Tensile/msgpack/MessagePack.hpp>
@@ -140,6 +141,74 @@ TEST(PredictionLibraryTest, CopiesClusterDimIntoOrigamiConfig)
 
     expectClusterDim(lib.origami_config_list[0], solution->sizeMapping.clusterDim);
     EXPECT_EQ(lib.origami_config_list[0].cluster_dim, (origami::dim3_t{2, 4, 1}));
+}
+
+TEST(PredictionLibraryTest, DeviceScalarAlphaFiltersUnadvertisedSolutions)
+{
+    // Exercise ranking without querying a physical GPU.
+    hip::HipAMDGPU hardware;
+    hardware.processor = AMDGPU::Processor::gfx950;
+    hardware.computeUnitCount = 256;
+    hardware.deviceName = "device-alpha-selection-test";
+    hardware.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950,
+        256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
+        std::make_tuple(0.0, 0.008, 0.0));
+
+    auto legacy = makeMappedSolution(0);
+    auto scalar = makeMappedSolution(1);
+    legacy->problemType.useScaleAlphaVec = 1;
+    scalar->problemType.useScaleAlphaVec = 1;
+    scalar->internalArgsSupport.deviceScalarAlpha = true;
+    SolutionMap<ContractionSolution> solutions{{0, legacy}, {1, scalar}};
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({0, 1}, solutions, lib);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 256, 256, 64,
+                                               256, 64, 256, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+
+    problem.setParams().setDeviceScalarAlpha(true);
+    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), scalar);
+    scalar->problemType.useScaleAlphaVec = 0;
+    EXPECT_TRUE(lib.findTopSolutions(problem, hardware, 2).empty());
+}
+
+TEST(PredictionLibraryTest, MlpDeviceScalarAlphaFiltersUnadvertisedSolutions)
+{
+    const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
+    auto legacy = makeMappedSolution(0);
+    auto scalar = makeMappedSolution(1);
+    legacy->libraryLogicIndex = 0;
+    scalar->libraryLogicIndex = 1;
+    legacy->problemType.useScaleAlphaVec = 1;
+    scalar->problemType.useScaleAlphaVec = 1;
+    scalar->internalArgsSupport.deviceScalarAlpha = true;
+    MLPClassificationLibrary<ContractionProblemGemm> lib;
+    lib.solutionmap = {{0, legacy}, {1, scalar}};
+    lib.probFeatures = {std::make_shared<MLFeatures::FreeSizeA>(),
+                        std::make_shared<MLFeatures::FreeSizeB>(),
+                        std::make_shared<MLFeatures::BatchSize>(),
+                        std::make_shared<MLFeatures::BoundSize>()};
+    lib.model = std::make_shared<MLPClassification::MLPNet>();
+    lib.model->scaler.mean.assign(12, 0.0f);
+    lib.model->scaler.scale.assign(12, 1.0f);
+    // Rank the unsupported solution first, then fall through to the capable one.
+    lib.model->dense = MLPClassification::DenseLayer(std::vector<float>(24, 0.0f), {2.0f, 1.0f});
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+
+    problem.setParams().setDeviceScalarAlpha(true);
+    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), scalar);
+    scalar->problemType.useScaleAlphaVec = 0;
+    EXPECT_TRUE(lib.findTopSolutions(problem, hardware, 2).empty());
 }
 
 TEST(PredictionLibraryTest, DefaultClusterDimWhenUnset)

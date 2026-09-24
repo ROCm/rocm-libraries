@@ -174,7 +174,8 @@ namespace TensileLite
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
                 // With uniform summation order off, the filter stays
-                // hardwarePredicate && problemPredicate. The extra conjuncts in
+                // hardwarePredicate && problemPredicate, plus device-scalar capability.
+                // The extra conjuncts in
                 // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
                 // real filters, so they stay behind the check.
                 const bool swMatch = problem.getParams().uniformSummationOrder()
@@ -183,7 +184,8 @@ namespace TensileLite
                                                              hardware,
                                                              *solution,
                                                              problem)
-                                         : (*(solution->problemPredicate))(problem);
+                                         : (*(solution->problemPredicate))(problem)
+                                               && solution->deviceScalarAlphaSupported(problem);
                 const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
