@@ -457,18 +457,12 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         fields drop out of the cache key. This is what collapses the AOT
         batch x seqlen instance explosion.
 
-        On gfx942 this coincides with ``_has_shape_params``: unlike gfx950, the
-        sub-modes that take the params but still bake the shape somewhere else
-        (ragged / varlen / paged) are rejected outright by
-        :func:`supports_attention_dense`, so the only spec that reaches the builder
-        and is NOT runtime-shape is the persistent one -- and that one declares no
-        shape params at all, because its work-item space ``W = NQB*Hq*B`` is a
-        host-visible Python int feeding the grid-stride bound.
-
-        The predicate text is kept identical to the gfx950 twin on purpose even
-        though ``ragged``/``varlen``/``paged``/``sliding_window`` are inert here: if
-        one of those sub-modes is later admitted on gfx942, it lands already excluded
-        rather than silently claiming a cache identity its body does not have.
+        On gfx942 the live exclusions are sliding-window -- which takes the params
+        but bakes the non-runtime k-tile trip count (``n_ktiles``), so it keeps
+        per-shape identity -- and ``persistent``, a separate body that declares no
+        shape params at all. ``ragged``/``varlen``/``paged`` never reach the builder
+        (:func:`supports_attention_dense` rejects them) but stay in the predicate,
+        identical to the gfx950 twin, so a later admit lands already excluded.
 
         Every other knob that forks the body -- :func:`_use_exp2_fast` included --
         is a function of compile-time config only, never of the problem shape, so
