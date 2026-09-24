@@ -24,7 +24,9 @@ import argparse
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional
+import os 
 
+BASE_DIR = f'{os.path.dirname(os.path.abspath(__file__))}/..'
 
 class Parser:
     @staticmethod
