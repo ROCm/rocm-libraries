@@ -197,8 +197,10 @@ if(TENSILELITE_ENABLE_HOST)
     # needs this one ~6.5 MB .so; bundling it in hipblaslt's runtime package
     # would force every hipSPARSELt install to pull ~1.6 GB of Tensile kernel
     # binaries it does not use. See AIHPBLAS-4434.
-    # The static archive and headers stay in devel: they are build-time only,
-    # and hipsparselt-devel already depends on hipblaslt-devel.
+    # Interim: the static archive, headers and the roc::tensilelite-host
+    # imported target still ship through hipblaslt-devel and the
+    # hipblaslt-targets export set. A standalone tensilelite package moves
+    # them to its own export set, config file and devel package.
     install(TARGETS tensilelite-host
         EXPORT hipblaslt-targets
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tensilelite
