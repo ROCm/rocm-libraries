@@ -117,7 +117,7 @@ for line in listing.splitlines():
         value = int(match.group(2), 16)
         engines.append((match.group(1), value - (1 << 64) if value >= (1 << 63) else value))
 print(f"  engines: {len(engines)}")
-rows, graphs = [], sorted((corpus / "graphs").glob("*.json"))
+rows, graphs = [], sorted([*(corpus / "graphs").glob("*.json"), *(corpus / "graphs").glob("*.fb")])
 for graph in graphs:
     for name, engine_id in engines:
         command = [bench, "--graph", str(graph), *plugin_args,

@@ -3,14 +3,14 @@
 
 add_subdirectory(bench)
 
-# corpus_gen generates UHD training corpora, and three of its headers use the ingestor's
-# JsonLogic evaluator to read the constraint expressions in an .opmeta.json declaration. That
-# evaluator's header is empty unless HIPDNN_ENABLE_KERNEL_INGESTOR is set, and the option
-# defaults to OFF -- so building this tool unconditionally made the *default* configure fail to
-# compile. The tool is part of the feature, so it is gated with it rather than papered over with
-# a second gate inside the headers.
+# corpus_gen builds the UHD training corpora. It was once gated on HIPDNN_ENABLE_KERNEL_INGESTOR
+# because its JsonLogic evaluator lived under plugin_sdk's `ingestor/`, which preprocesses to
+# nothing when that option is OFF. The evaluator is now
+# `plugin_sdk/heuristics/uhd/DescriptorExpression.hpp` -- unconditional, like the rest of common
+# UHD prediction -- so the gate only kept corpus building out of a default build.
+add_subdirectory(corpus_gen)
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    add_subdirectory(corpus_gen)
     add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
     target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
     target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
@@ -69,20 +69,23 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
         set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
 
-        # corpus_build assembles the SDPA graph corpus a UHD is trained on, from the
-        # packed kernel geometries, the recorded model shapes and the declared space.
-        # Registered here because its failures are all silent ones: a graph that is
-        # rejected at from_binary looks fine on disk, a shape emitted twice doubles
-        # the weight of whichever regime it lands in, and a missing regime label
-        # leaves RFC 0019.13 §11.2's per-regime table reporting UNAVAILABLE. Offline
-        # and GPU-free -- every input is a file in this tree -- and it needs no ML
-        # dependencies.
+        # mine_shapes.py assembles the model pool -- the shapes anyone actually asks for --
+        # and hands it to hipdnn_corpus_gen as a q.* CSV. Registered here because its
+        # failures are all silent ones: a publisher's spelling that falls out of
+        # SHAPE_COLUMNS mines as zero rows, a guessed mask puts a differently-masked
+        # problem in the corpus under the row's name, and a narrowing on the way to the
+        # CSV shrinks the pool without shrinking what the corpus claims to be. This suite
+        # held none of that until the Python corpus assembler was retired and its coverage
+        # moved here; unregistered, it would have stopped being run at the same moment it
+        # became the only place that behaviour is pinned. Offline and GPU-free, and it
+        # needs no ML dependencies.
         add_test(
-            NAME corpus_build_tests
+            NAME ingestor_generator_tests
             COMMAND ${Python3_EXECUTABLE} -m pytest -q
-                    ${CMAKE_CURRENT_SOURCE_DIR}/corpus_build/tests
+                    ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-        set_tests_properties(corpus_build_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+        set_tests_properties(ingestor_generator_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+
     else()
         message(WARNING
                 "uhd_gen tests NOT registered: pytest is not importable by "

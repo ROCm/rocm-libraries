@@ -159,6 +159,35 @@ inline std::string enumName(const ArgumentResolution& resolved, const char* name
     return declared == nullptr ? std::string{} : *declared;
 }
 
+/// Reads the causal diagonal's anchor, by name. Absent is TOP_LEFT -- the schema's default, so
+/// a declaration that never heard of this argument writes the graph it always wrote.
+///
+/// A spelling nobody defined is nullopt rather than TOP_LEFT, for the reason dataTypeFor
+/// declines: the two anchors mask different triangles whenever seqlen_q < seqlen_k, so a typo
+/// silently read as TOP_LEFT would build, benchmark and record a corpus of the wrong problem --
+/// and the engines that serve only the other anchor would be absent from the comparison with no
+/// line anywhere saying so.
+inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>
+    diagonalAlignment(const ArgumentResolution& resolved, const char* name)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+    const auto declared = enumName(resolved, name);
+    if(declared.empty())
+    {
+        return DiagonalAlignment::TOP_LEFT;
+    }
+    if(declared == "top_left")
+    {
+        return DiagonalAlignment::TOP_LEFT;
+    }
+    if(declared == "bottom_right")
+    {
+        return DiagonalAlignment::BOTTOM_RIGHT;
+    }
+    return std::nullopt;
+}
+
 /// Builds a tensor spec from a resolved dims/strides pair.
 /// @brief Assembles one tensor role from `<role>Dims`, `<role>Strides` and an element type.
 ///
@@ -353,6 +382,11 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  return {{}, "sdpaForward needs qDims/qStrides, kDims/kStrides, vDims/vStrides, "
                              "oDims/oStrides, dataType"};
              }
+             const auto alignment = detail::diagonalAlignment(resolved, "diagonalAlignment");
+             if(!alignment.has_value())
+             {
+                 return {{}, "sdpaForward: diagonalAlignment must be top_left or bottom_right"};
+             }
              builders::SdpaOptions options;
              options.causalMask = detail::flag(resolved, "causalMask");
              options.paddingMask = detail::flag(resolved, "paddingMask");
@@ -363,6 +397,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  = static_cast<float>(detail::scalar(resolved, "dropoutProbability"));
              options.leftBound = detail::integer(resolved, "leftBound", -1);
              options.rightBound = detail::integer(resolved, "rightBound", -1);
+             options.diagonalAlignment = *alignment;
              return {builders::sdpaForward(detail::tensorFrom(1, "q", *q, *qs, *type),
                                            detail::tensorFrom(2, "k", *k, *ks, *type),
                                            detail::tensorFrom(3, "v", *v, *vs, *type),

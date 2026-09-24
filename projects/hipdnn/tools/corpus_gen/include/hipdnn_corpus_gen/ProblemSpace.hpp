@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <random>
 #include <set>
 #include <string>
@@ -80,6 +81,18 @@ struct ExplorationRequest
     /// Largest enumerated skeleton to try before sampling. The cross product of an
     /// operation's regime buckets grows quickly, and every point costs an oracle call.
     size_t maxSkeleton = 512;
+
+    /// Problems wanted from the whole operation; 0 asks for no more than the per-combination
+    /// pass finds. When the first pass falls short, every combination that found anything is
+    /// searched again for its share of the difference, with its budget and walk doubled until
+    /// it delivers or stops finding new points. A combination that found nothing is not grown:
+    /// it is what the engine declines, and growing it would spend the budget proving so again.
+    int64_t corpusTarget = 0;
+
+    /// How far a combination's oracle budget may grow, as a multiple of
+    /// @ref budgetPerCombination, while it is still finding new points. Reaching this is a
+    /// search limit, not a property of the engine, and is reported as one.
+    int64_t budgetGrowthLimit = 64;
 };
 
 /// One categorical assignment and what the numeric search found under it.
@@ -95,6 +108,14 @@ struct CombinationResult
     ProblemPoint categorical;
     std::vector<ProblemPoint> problems;
     FeasibleSetStats stats;
+
+    /// Grown toward @ref ExplorationRequest::corpusTarget and stopped because doubling the
+    /// search found no new point: the served region, as far as a walk can reach it, is spent.
+    bool saturated = false;
+
+    /// Grown and stopped at @ref ExplorationRequest::budgetGrowthLimit while still finding
+    /// new points. More exist; the search was not allowed to look for them.
+    bool searchCapped = false;
 };
 
 /// The problem corpus: a list of inputs, and an account of how it was arrived at.
@@ -117,6 +138,10 @@ struct ProblemCorpus
     /// an empty corpus reads as an engine that serves nothing.
     int64_t constraintRejections = 0;
     int64_t constraintAdmissions = 0;
+
+    /// Why the corpus holds fewer than @ref ExplorationRequest::corpusTarget problems, one line
+    /// per combination that could not supply more. Empty when the target was met or not set.
+    std::vector<std::string> shortfall;
 
     /// Every problem point found, flattened -- the list of inputs.
     std::vector<ProblemPoint> problems() const
@@ -361,9 +386,16 @@ inline std::string describe(const ProblemPoint& point)
 /// Every combination gets its own budget rather than sharing one. A shared budget is spent by
 /// whichever combination is searched first, and the corpus then covers one dtype thoroughly
 /// and the rest not at all -- while reporting a total that looks complete.
+///
+/// @p held names points the caller already has from elsewhere -- a kernel pack's geometries,
+/// recorded model shapes. They are feasible to the search, which must be free to walk through
+/// them, and they count as served when deciding whether a combination is worth growing; they are
+/// only left out of what the search returns. Rejecting them instead makes an engine that serves
+/// exactly its pack look as though it serves nothing, and cuts the walk off from the region.
 inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                                          const ExplorationRequest& request,
-                                         const ProblemOracle& admits)
+                                         const ProblemOracle& admits,
+                                         const ProblemOracle& held = {})
 {
     ProblemCorpus corpus;
     corpus.operation = metadata.operation;
@@ -402,6 +434,50 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             + " categorical combinations not explored (maxCombinations bound)");
     }
 
+    // Per combination, kept past the first pass so a combination can be searched again for
+    // more: the request it was searched with, how many of its problems came from anchored
+    // draws rather than the search, and every answer the oracle has given it. The memo is what
+    // makes growing affordable -- a longer walk from the same seed retraces the shorter one,
+    // and each retraced point is a lookup here rather than another engine query.
+    std::vector<FeasibleSetRequest> searches(combinations.size());
+    std::vector<size_t> anchoredCounts(combinations.size(), 0);
+    std::vector<std::map<Shape, bool>> answered(combinations.size());
+    /// Served points the search reached that the caller already holds, per combination.
+    std::vector<int64_t> heldFound(combinations.size(), 0);
+    const auto isHeld = [&held](const ProblemPoint& point) { return held && held(point); };
+
+    // The one place the two halves meet: the numeric search asks about whole problem points,
+    // with the categorical values of the combination held fixed.
+    const auto oracleFor = [&](size_t index) -> ShapeOracle {
+        return [&, index](const Shape& shape) {
+            auto& memo = answered[index];
+            const auto known = memo.find(shape);
+            if(known != memo.end())
+            {
+                return known->second;
+            }
+            auto point = combinations[index];
+            for(size_t i = 0; i < corpus.numericParameters.size(); ++i)
+            {
+                point[corpus.numericParameters[i]] = shape[i];
+            }
+            // Declared relations first: a candidate that is not a problem should not cost a
+            // graph build, and should not be counted against the engine.
+            bool verdict = false;
+            if(!detail::satisfiesConstraints(metadata, point))
+            {
+                ++corpus.constraintRejections;
+            }
+            else
+            {
+                ++corpus.constraintAdmissions;
+                verdict = admits(point);
+            }
+            memo.emplace(shape, verdict);
+            return verdict;
+        };
+    };
+
     for(size_t index = 0; index < combinations.size(); ++index)
     {
         const auto& categorical = combinations[index];
@@ -421,24 +497,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             continue;
         }
 
-        // The one place the two halves meet: the numeric search asks about whole problem
-        // points, with the categorical values of this combination held fixed.
-        const auto oracle = [&](const Shape& shape) {
-            auto point = categorical;
-            for(size_t i = 0; i < corpus.numericParameters.size(); ++i)
-            {
-                point[corpus.numericParameters[i]] = shape[i];
-            }
-            // Declared relations first: a candidate that is not a problem should not cost a
-            // graph build, and should not be counted against the engine.
-            if(!detail::satisfiesConstraints(metadata, point))
-            {
-                ++corpus.constraintRejections;
-                return false;
-            }
-            ++corpus.constraintAdmissions;
-            return admits(point);
-        };
+        const auto oracle = oracleFor(index);
 
         size_t skeletonTotal = 0;
         const auto skeleton = detail::regimeSkeleton(
@@ -481,7 +540,16 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 return false;
             }
             ++corpus.constraintAdmissions;
-            return admits(point);
+            if(!admits(point))
+            {
+                return false;
+            }
+            if(isHeld(point))
+            {
+                ++heldFound[index];
+                return false;
+            }
+            return true;
         };
 
         size_t archetypeQuota = 0;
@@ -560,6 +628,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             }
             search.seeds.push_back(std::move(shape));
         }
+        searches[index] = search;
+        anchoredCounts[index] = result.problems.size();
 
         if(search.targetCount > 0)
         {
@@ -572,6 +642,11 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 {
                     point[corpus.numericParameters[i]] = shape[i];
                 }
+                if(isHeld(point))
+                {
+                    ++heldFound[index];
+                    continue;
+                }
                 if(seen.insert(detail::describe(point)).second)
                 {
                     result.problems.push_back(std::move(point));
@@ -581,6 +656,174 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         }
 
         corpus.combinations.push_back(std::move(result));
+    }
+
+    // ------------------------------------------------------------------
+    // Growing toward the corpus size (corpusTarget). The pass above gives every combination the
+    // same modest target so that one the engine declines costs a fixed budget; here the ones
+    // that turned out to be served are searched again for the rest. An engine that serves a
+    // single combination -- AITER's bf16/d128/unmasked table -- otherwise delivers that one
+    // combination's first-pass target however large a corpus was asked for, while its search
+    // had already observed hundreds of points more.
+    // ------------------------------------------------------------------
+    const auto supplied = [&corpus]() {
+        int64_t total = 0;
+        for(const auto& combination : corpus.combinations)
+        {
+            total += static_cast<int64_t>(combination.problems.size());
+        }
+        return total;
+    };
+
+    std::vector<bool> spent(combinations.size(), false);
+    while(request.corpusTarget > 0 && !numericWindow.empty())
+    {
+        const auto before = supplied();
+        const auto need = request.corpusTarget - before;
+        if(need <= 0)
+        {
+            break;
+        }
+
+        std::vector<size_t> growable;
+        for(size_t index = 0; index < corpus.combinations.size(); ++index)
+        {
+            if(!spent[index]
+               && (!corpus.combinations[index].problems.empty() || heldFound[index] > 0))
+            {
+                growable.push_back(index);
+            }
+        }
+        if(growable.empty())
+        {
+            break;
+        }
+
+        const auto share = (need + static_cast<int64_t>(growable.size()) - 1)
+                           / static_cast<int64_t>(growable.size());
+        for(const auto index : growable)
+        {
+            auto& result = corpus.combinations[index];
+            auto& search = searches[index];
+            const auto oracle = oracleFor(index);
+            // Sized over everything the combination holds, anchored draws included: the search
+            // may return an anchored point again (they seed it), and a target that did not
+            // leave room for that could be met entirely by repeats and add nothing.
+            // Held points are among what the search returns and are then set aside, so they
+            // are budgeted for too.
+            search.targetCount
+                = static_cast<int64_t>(result.problems.size()) + heldFound[index] + share;
+
+            // First at the budget it already has: a larger target alone re-tessellates what the
+            // walk observed, which is often enough. Then, for a sparse region, a probe -- a
+            // quarter more budget -- and only if that finds new points, doubling. Saturation is therefore established for a
+            // quarter of the budget rather than a whole doubled round: an engine that serves
+            // isolated shapes (rocKE, whose kernels match exact geometries) otherwise pays the
+            // most to prove it has nothing more.
+            auto found = buildFeasibleShapeSet(oracle, search);
+            // A region still yielding a new point per hundred queries is nowhere near spent, and
+            // probing it first only adds a round; one yielding far less gets the cheap probe.
+            bool productive = found.stats.oracleCalls > 0
+                              && found.stats.distinct * 100 >= found.stats.oracleCalls;
+            while(static_cast<int64_t>(found.shapes.size()) < search.targetCount)
+            {
+                if(search.oracleBudget
+                   >= request.budgetPerCombination * request.budgetGrowthLimit)
+                {
+                    result.searchCapped = true;
+                    break;
+                }
+                const auto reached = found.stats.distinct;
+                const auto grow = [](int64_t value, bool twice) {
+                    return twice ? value * 2 : value + std::max<int64_t>(1, value / 4);
+                };
+                search.oracleBudget = grow(search.oracleBudget, productive);
+                search.stepsPerStart = grow(search.stepsPerStart, productive);
+                found = buildFeasibleShapeSet(oracle, search);
+                if(found.stats.distinct <= reached)
+                {
+                    result.saturated = true;
+                    break;
+                }
+                productive = true;
+            }
+            spent[index] = result.saturated || result.searchCapped;
+
+            // The new search supersedes the old one's contribution; anchored draws stay.
+            result.problems.resize(anchoredCounts[index]);
+            result.fromExploration = 0;
+            heldFound[index] = 0;
+            result.stats = found.stats;
+            std::set<std::string> seen;
+            for(const auto& point : result.problems)
+            {
+                seen.insert(detail::describe(point));
+            }
+            for(const auto& shape : found.shapes)
+            {
+                auto point = result.categorical;
+                for(size_t i = 0; i < corpus.numericParameters.size(); ++i)
+                {
+                    point[corpus.numericParameters[i]] = shape[i];
+                }
+                if(isHeld(point))
+                {
+                    ++heldFound[index];
+                    continue;
+                }
+                if(seen.insert(detail::describe(point)).second)
+                {
+                    result.problems.push_back(std::move(point));
+                    ++result.fromExploration;
+                }
+            }
+        }
+
+        if(supplied() <= before)
+        {
+            // Every growable combination was searched and none added a point. Not the same as
+            // saturation -- the new shapes may all have repeated anchored ones -- but another
+            // round would do exactly the same thing.
+            break;
+        }
+    }
+
+    if(request.corpusTarget > 0 && supplied() < request.corpusTarget)
+    {
+        const auto total = supplied();
+        corpus.shortfall.push_back(std::to_string(total) + " of "
+                                   + std::to_string(request.corpusTarget)
+                                   + " problems requested");
+        for(size_t index = 0; index < corpus.combinations.size(); ++index)
+        {
+            const auto& result = corpus.combinations[index];
+            if(result.problems.empty() && heldFound[index] == 0)
+            {
+                continue;
+            }
+            const auto who = detail::describe(result.categorical) + ": "
+                             + std::to_string(result.problems.size()) + " new problems ("
+                             + std::to_string(heldFound[index]) + " more already held), ";
+            if(result.searchCapped)
+            {
+                corpus.shortfall.push_back(
+                    who + "search stopped at its budget limit ("
+                    + std::to_string(searches[index].oracleBudget)
+                    + " oracle calls) while still finding new points -- more exist; raise "
+                      "--budget");
+            }
+            else if(result.saturated)
+            {
+                corpus.shortfall.push_back(
+                    who + "saturated: " + std::to_string(result.stats.distinct)
+                    + " distinct served points observed, and doubling the search found no more");
+            }
+            else
+            {
+                corpus.shortfall.push_back(who + "grown, but its new points repeated ones it "
+                                                 "already held");
+            }
+        }
     }
 
     return corpus;

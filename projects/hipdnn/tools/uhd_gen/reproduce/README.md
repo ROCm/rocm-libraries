@@ -10,7 +10,7 @@ rather than an omission:
 
 | on `users/jscampb/uhd-heuristics-e2e` (this branch) | on `users/jascampb/uhd-integration-test-branch` |
 |---|---|
-| the productized path: `rocKE/gfx942_attention_dense`, the `ASM_SDPA_ENGINE` descriptors, `corpus_build`, and every script in this directory except the two named opposite | the experiment path: the `rocKE/gfx950_attention_dense` descriptor pack (`gfx950_attention_dense.{ued,kmd,umd,kdp,udd,uhd}.json` and its `heuristics/` tree) and the flyDSL POC — `flydsl_catalog.sbatch`, `flydsl_enable.sbatch`, the Flydsl* packs, `flydsl_poc_scratch/` |
+| the productized path: `rocKE/gfx942_attention_dense`, the `ASM_SDPA_ENGINE` descriptors, `hipdnn_corpus_gen`, and every script in this directory except the two named opposite | the experiment path: the `rocKE/gfx950_attention_dense` descriptor pack (`gfx950_attention_dense.{ued,kmd,umd,kdp,udd,uhd}.json` and its `heuristics/` tree) and the flyDSL POC — `flydsl_catalog.sbatch`, `flydsl_enable.sbatch`, the Flydsl* packs, `flydsl_poc_scratch/` |
 
 A step below that names a gfx950 rocKE descriptor or a `flydsl_*.sbatch` needs the
 integration branch checked out; everything else runs here. The rocKE *kernels* for gfx950
@@ -47,26 +47,39 @@ Stage corpora and artifacts in `$HOME` on the login node; they appear under `/ex
 inside the job. `UHD_BUNDLE` (see the last section) is how a job builds the tree you pushed
 rather than whatever its site mirror happens to serve.
 
-## 1. Build the corpus (offline, no GPU)
+## 1. Build the corpus (per engine, on a GPU)
 
-Deterministic from the seed and the in-tree inputs — the same command reproduces the same
-graphs byte for byte, and `benchmark` ids are content-derived so results join across runs.
+A corpus is generated **for an engine**: every candidate problem is offered to it, so what
+comes out is what that engine serves. `--engine-name` is required and needs the provider
+built and staged, so this runs on a GPU node -- through `corpus5000.sbatch`, or by hand in
+a job as below. Deterministic from the seed and the in-tree inputs, and `benchmark` ids are
+content-derived so results join across runs.
 
 ```bash
 cd projects/hipdnn/tools
-# gfx942: the whole declared space, 5000 graphs
-python3 -m corpus_build --out /tmp/corpus-5000 --count 5000 --seed 0
-# gfx950: drawn from that arch's own packed geometries, both head dims its engines serve.
-# --kdp-root names the integration branch's pack; from this branch the path does not exist.
-python3 -m corpus_build --out /tmp/corpus-950 --count 1000 --seed 0 \
-    --kdp-root ../../../dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE/gfx950_attention_dense \
-    --min-candidates 2 --head-dim 64 --head-dim 128
+GEN=<build>/bin/hipdnn_corpus_gen
+PLUGINS=<build>/lib/hipdnn_plugins/engines
+PACKS=../../../dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE
+
+# rocKE, gfx950: its pack proposes, the engine admits. This is also the comparison corpus
+# of step 3. --kdp-root names the integration branch's pack; from this branch it does not exist.
+$GEN --operations corpus_gen/operations --operation sdpa_fwd --plugin-dir $PLUGINS \
+    --engine-name hipkernel:Gfx950AttentionDense --kdp-root $PACKS/gfx950_attention_dense \
+    --output /tmp/corpus-950 --count 1000 --seed 0
+
+# AITER, gfx950: what AITER serves, with the comparison graphs held out by construction.
+$GEN --operations corpus_gen/operations --operation sdpa_fwd --plugin-dir $PLUGINS \
+    --engine-name ASM_SDPA_ENGINE --exclude-corpus /tmp/corpus-950/manifest.json \
+    --output /tmp/corpus-950-aiter --count 2500 --seed 11
 ```
 
-`--dtype` and `--head-dim` exist because an engine that cannot serve a facet contributes
-only declines: AITER's gfx942 forward table is four kernels (bf16, hd128/hd192→128), its
-gfx950 table is two and carries no causal kernel at all. Check what any build actually
-ships before widening a corpus:
+Graphs land in `<output>/graphs/`, beside `manifest.json`. `--count` is met unless the
+engine physically serves fewer: rocKE's kernels match exact geometries, so its corpus is
+capped at the pack's shapes, and the tool says so and exits 0. Any other shortfall exits 3.
+
+No `--keep` is needed to narrow a corpus to an engine's facets: the engine decides. For
+reference, AITER's gfx942 forward table is four kernels (bf16, hd128/hd192->128, no mask
+and bottom-right causal) and its gfx950 table is two, with no causal kernel at all:
 
 ```bash
 python3 -c "import csv,sys; rows=list(csv.DictReader(open(sys.argv[1])));
@@ -85,7 +98,7 @@ $SUBMIT --constraint=GFX950 --time=08:00:00 \
     --export=ALL,UHD_GRAPHS=/exchange/corpus-950,UHD_ENGINE=hipkernel:Gfx950AttentionDense,UHD_ROLES=l2+l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-dense \
     generate.sbatch
 $SUBMIT --constraint=GFX950 --time=06:00:00 \
-    --export=ALL,UHD_GRAPHS=/exchange/corpus-950,UHD_ENGINE=ASM_SDPA_ENGINE,UHD_ROLES=l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-aiter \
+    --export=ALL,UHD_GRAPHS=/exchange/corpus-950-aiter,UHD_ENGINE=ASM_SDPA_ENGINE,UHD_ROLES=l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-aiter \
     generate.sbatch
 ```
 
@@ -231,6 +244,16 @@ flyDSL POC.
 | AITER gfx950 L1 | e2e | `--count 2500 --seed 11 --dtype bf16 --head-dim 128 --causal 0 --exclude-corpus <comparison manifest>` then `generate.sbatch UHD_ROLES=l1` |
 | the 94.2% number | integration | `bakeoff.sbatch` over the comparison corpus, then `score_predictions.py` |
 
+The corpus rows are recorded as they were run, under the retired Python `corpus_build`. To
+rebuild them with `hipdnn_corpus_gen`: `--out` is `--output`, and the engine the row was
+built for is named with `--engine-name`, which replaces the facet flags -- the engine now
+decides what it serves, where `--dtype/--head-dim/--causal` guessed it. `--min-candidates`
+is gone: pack density is an upper bound on what the matcher offers at runtime, never a count
+of it. A rebuilt corpus is not byte-identical to the recorded one: the sampler now holds
+declared shares per categorical combination rather than in expectation per draw, and causal
+graphs are expressed as bounds (`right_bound = 0`) rather than the deprecated `causal_mask`
+flag, which providers read as top-left whatever the alignment said.
+
 flyDSL additionally needs a FlyDSL checkout; `flydsl_catalog.sbatch` clones
 `https://github.com/ROCm/FlyDSL.git` itself, and the standalone builders take `FLYDSL_REPO`.
 
@@ -244,4 +267,4 @@ flyDSL additionally needs a FlyDSL checkout; `flydsl_catalog.sbatch` clones
 - **`hipkernel:Gfx950AttentionTiled`** requires page tables and correctly declines every
   dense SDPA graph, so a dense corpus cannot exercise it.
 - **Causal cross attention** (`seqlen_q > seqlen_kv` with a causal mask) is refused by
-  `corpus_build`: the declared FLOP count goes non-positive, so no label can be derived.
+  `hipdnn_corpus_gen`: the declared FLOP count goes non-positive, so no label can be derived.

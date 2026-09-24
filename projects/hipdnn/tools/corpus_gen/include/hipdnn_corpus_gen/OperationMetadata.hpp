@@ -6,6 +6,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/DescriptorExpression.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -147,6 +148,9 @@ struct BuilderArgument
     std::string source; ///< DIRECT, DTYPE_OF
     /// Compiled once at metadata admission; all dimensions share one expression DAG.
     hipdnn_plugin_sdk::uhd::expression::Program expressions{std::vector<nlohmann::json>{}};
+    /// EXPR whose `value` was one expression rather than an array: it resolves to a single
+    /// floating-point scalar, unfloored -- a softmax scale of rsqrt(head_dim) is not a dim.
+    bool scalarExpression = false;
     std::string of; ///< STRIDES_OF
     nlohmann::json constant; ///< CONSTANT
 };
@@ -166,6 +170,86 @@ struct Regime
     std::vector<nlohmann::json> buckets;
     std::string derived; ///< "alignment" when the buckets are labels rather than values
     std::string description;
+};
+
+/// One facet of the stratification label a corpus entry carries (see RegimeLabel.hpp).
+///
+/// A @ref Regime says which values of one parameter matter. This says which *populations* the
+/// operation has, which is a different question and not answerable from one parameter: an SDPA
+/// decode is `seqlen_q == 1`, a cross-attention is `seqlen_q > seqlen_kv`, and neither is a
+/// bucket of anything. So a facet is an ordered list of labelled conditions over the whole
+/// point, first match winning, and the label is the facets joined with `_`.
+///
+/// Declared rather than compiled in because the populations differ per operation -- a
+/// convolution's are not phase/context/grouping -- and an operation that names its own is the
+/// only mechanism by which the per-regime regret table (RFC 0019.13 §11.2) can exist for an
+/// operation nobody wrote C++ for.
+struct RegimeAxis
+{
+    std::string name;
+
+    /// The label each clause of @ref clauses assigns, in the same order.
+    std::vector<std::string> labels;
+
+    /// The clauses, as §6.2 boolean expressions -- the same language and the same evaluator as
+    /// @ref OperationMetadata::constraints, so there is no second expression dialect to learn
+    /// or to keep in step.
+    hipdnn_plugin_sdk::uhd::expression::Program clauses{std::vector<nlohmann::json>{}};
+
+    /// The label for a point no clause matched. Spelled out in the declaration rather than
+    /// defaulted to a silent "other", because an unlabelled population is one the regret table
+    /// reports as a bucket nobody can act on.
+    std::string otherwise;
+};
+
+/// How a kernel descriptor pack's metadata reads back as a problem point.
+///
+/// A descriptor engine's kernels bake their geometry in, so the pack is the authority on the
+/// one thing nothing else can answer: which problems the engine will have a candidate for at
+/// all. Reading it needs a vocabulary, because the pack names its fields whatever the kernel
+/// author named them (`num_query_heads`, `head_size`, `causal`) and the declaration names its
+/// parameters whatever the operation calls them (`heads`, `head_dim`, `is_causal`).
+///
+/// Declared rather than compiled in, for the same reason the regime facets are: hardcoding one
+/// operation's field names is what made the previous tool SDPA-only. An operation that ships no
+/// `kernel_catalog` block simply has no kernel pool -- which is how coverage stays "whatever has
+/// a declaration", with no operation list anywhere for someone to forget to extend.
+struct KernelCatalog
+{
+    /// Declared parameter name -> the pack metadata field carrying it. A descriptor missing
+    /// any of these fields carries no geometry, and contributes nothing rather than a point
+    /// with holes in it.
+    std::map<std::string, std::string> fields;
+
+    /// Declared parameter name -> pack spelling -> declared value, for the parameters whose
+    /// values are names rather than numbers. A pack value with no entry here is skipped and
+    /// counted, never guessed: a pack in fp8 read as bf16 would produce a corpus of graphs the
+    /// engine does not serve, labelled as ones it does.
+    std::map<std::string, std::map<std::string, std::string>> enums;
+
+    /// Declared parameter name -> the value every geometry from a pack takes, for parameters
+    /// the pack vocabulary has no field for at all.
+    ///
+    /// Not a default and not a guess -- a statement about the kernels. A pack records what its
+    /// kernels were compiled for, and a parameter it never mentions is one the kernel author
+    /// did not vary: rocKE's dense attention packs say `causal: 1` without saying which corner
+    /// the diagonal is anchored at, because every kernel in them anchors it top-left. Saying so
+    /// here is what lets the builder resolve an argument the pack cannot supply, and it is
+    /// checked against the parameter's declared values the same way an `enums` target is, so a
+    /// constant the operation cannot take is a load error rather than a corpus of graphs that
+    /// describe kernels nobody compiled.
+    ///
+    /// A parameter mapped under `metadata` is not eligible: the pack answers for it, and a
+    /// constant would silently override what the pack actually said.
+    ///
+    /// Typed at load, not at use, so a constant that does not fit its parameter is one error
+    /// naming the declaration rather than a pack that mysteriously contributes nothing.
+    std::map<std::string, ParameterValue> constants;
+
+    bool empty() const
+    {
+        return fields.empty();
+    }
 };
 
 /// How a sampled value may drift from an archetype's and still be a plausible problem.
@@ -244,6 +328,16 @@ struct OperationMetadata
     std::vector<Parameter> parameters;
     std::string stratificationAxis;
     std::map<std::string, Regime> regimes;
+
+    /// The facets composing each corpus entry's regime label, in the order they are joined.
+    /// Empty means the operation names no populations, and every entry's label is empty --
+    /// which the manifest records honestly rather than inventing a stratification.
+    std::vector<RegimeAxis> regimeLabel;
+
+    /// How a descriptor pack's metadata reads back as a point (see KernelCatalogSource.hpp).
+    /// Empty means the operation has no kernel pool, not that its packs are empty.
+    KernelCatalog kernelCatalog;
+
     GraphBuilderSpec graphBuilder;
 
     /// Declared tensor contents (proposed §4 addition). Absent means every tensor is zeros,
@@ -546,6 +640,186 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
         }
     }
 
+    if(root.contains("regime_label"))
+    {
+        // An array, not an object: the facets are joined in order and the label is what a
+        // reader greps for, so the order is part of the declaration rather than whatever a map
+        // happened to collate to.
+        for(const auto& entry : root.at("regime_label"))
+        {
+            RegimeAxis axis;
+            axis.name = entry.value("name", "");
+            axis.otherwise = entry.value("otherwise", "");
+            if(axis.otherwise.empty())
+            {
+                load.errors.push_back("regime_label axis '" + axis.name
+                                      + "' declares no 'otherwise' label");
+            }
+
+            std::vector<nlohmann::json> clauses;
+            for(const auto& clause : entry.value("labels", nlohmann::json::array()))
+            {
+                axis.labels.push_back(clause.value("label", ""));
+                clauses.push_back(clause.value("when", nlohmann::json()));
+            }
+
+            try
+            {
+                axis.clauses = hipdnn_plugin_sdk::uhd::expression::Program(clauses);
+                for(const auto& variable : axis.clauses.variables())
+                {
+                    const auto name = detail::queryReference(variable);
+                    if(!name.empty() && metadata.find(name) == nullptr)
+                    {
+                        load.errors.push_back("regime_label axis '" + axis.name
+                                              + "' references undeclared parameter '" + name
+                                              + "'");
+                    }
+                }
+            }
+            catch(const std::exception& error)
+            {
+                load.errors.push_back("regime_label axis '" + axis.name + "': "
+                                      + std::string(error.what()));
+            }
+            metadata.regimeLabel.push_back(std::move(axis));
+        }
+    }
+
+    if(root.contains("kernel_catalog"))
+    {
+        const auto& catalog = root.at("kernel_catalog");
+
+        // Each block is bound to a named object before `items()` is called on it: `value()`
+        // returns by value, and iterating the items of a temporary walks a destroyed object --
+        // which at -O0 throws and at -O3 quietly iterates nothing, so every check below would
+        // pass by never running. Same reason as the archetype values at the end of this file.
+        const auto fields    = catalog.value("metadata", nlohmann::json::object());
+        const auto enums     = catalog.value("enums", nlohmann::json::object());
+        const auto constants = catalog.value("constants", nlohmann::json::object());
+
+        for(const auto& field : fields.items())
+        {
+            // A mapping to a parameter that does not exist reads a pack into nothing, and the
+            // symptom is a pack that "carries no geometry" -- indistinguishable from a pack
+            // that really does not. Named here instead, where it is one line to fix.
+            if(metadata.find(field.key()) == nullptr)
+            {
+                load.errors.push_back("kernel_catalog maps undeclared parameter '" + field.key()
+                                      + "'");
+                continue;
+            }
+            metadata.kernelCatalog.fields[field.key()] = field.value().get<std::string>();
+        }
+
+        for(const auto& mapping : enums.items())
+        {
+            const auto* parameter = metadata.find(mapping.key());
+            if(parameter == nullptr)
+            {
+                load.errors.push_back("kernel_catalog declares values for undeclared parameter '"
+                                      + mapping.key() + "'");
+                continue;
+            }
+            if(metadata.kernelCatalog.fields.count(mapping.key()) == 0)
+            {
+                load.errors.push_back("kernel_catalog declares values for '" + mapping.key()
+                                      + "' but maps no pack field to it");
+            }
+
+            for(const auto& value : mapping.value().items())
+            {
+                const auto declared = value.value().get<std::string>();
+                // The target must be a value the parameter can actually take: a mapping onto a
+                // spelling the operation does not declare builds graphs the constraints and the
+                // builder disagree about, and neither says so.
+                if(parameter->type == ParameterType::ENUM
+                   && std::find(parameter->values.begin(), parameter->values.end(), declared)
+                          == parameter->values.end())
+                {
+                    load.errors.push_back("kernel_catalog maps '" + mapping.key() + "' onto '"
+                                          + declared + "', which it does not declare");
+                }
+                metadata.kernelCatalog.enums[mapping.key()][value.key()] = declared;
+            }
+        }
+
+        for(const auto& constant : constants.items())
+        {
+            const auto* parameter = metadata.find(constant.key());
+            if(parameter == nullptr)
+            {
+                load.errors.push_back("kernel_catalog declares a constant for undeclared "
+                                      "parameter '"
+                                      + constant.key() + "'");
+                continue;
+            }
+            if(metadata.kernelCatalog.fields.count(constant.key()) != 0)
+            {
+                load.errors.push_back("kernel_catalog declares a constant for '" + constant.key()
+                                      + "', which it also reads from the pack");
+                continue;
+            }
+            const auto& json = constant.value();
+            const auto printed = json.is_string() ? json.get<std::string>() : json.dump();
+            const auto wrongType = [&load, &constant, &printed](const char* expected) {
+                load.errors.push_back("kernel_catalog fixes '" + constant.key() + "' at '"
+                                      + printed + "', which is not " + expected);
+            };
+
+            switch(parameter->type)
+            {
+            // Unreachable while every ParameterType is handled below, and kept because the
+            // build treats a switch with no default as an error. A type added without an arm
+            // here refuses the constant rather than storing it untyped.
+            default:
+                wrongType("a value of a type this loader can check");
+                continue;
+
+            case ParameterType::INT64:
+                if(!json.is_number_integer() && !json.is_number_unsigned())
+                {
+                    wrongType("an integer");
+                    continue;
+                }
+                metadata.kernelCatalog.constants[constant.key()] = json.get<int64_t>();
+                break;
+
+            case ParameterType::FLOAT64:
+                if(!json.is_number())
+                {
+                    wrongType("a number");
+                    continue;
+                }
+                metadata.kernelCatalog.constants[constant.key()] = json.get<double>();
+                break;
+
+            case ParameterType::BOOL:
+                if(!json.is_boolean())
+                {
+                    wrongType("a boolean");
+                    continue;
+                }
+                metadata.kernelCatalog.constants[constant.key()] = json.get<bool>();
+                break;
+
+            case ParameterType::ENUM:
+                // The same check an `enums` target gets: fixing a parameter at a spelling the
+                // operation does not declare builds graphs its constraints and its builder
+                // disagree about, and neither of them says so.
+                if(!json.is_string()
+                   || std::find(parameter->values.begin(), parameter->values.end(), printed)
+                          == parameter->values.end())
+                {
+                    wrongType("one of its declared values");
+                    continue;
+                }
+                metadata.kernelCatalog.constants[constant.key()] = printed;
+                break;
+            }
+        }
+    }
+
     if(root.contains("graph_builder"))
     {
         const auto& builder = root.at("graph_builder");
@@ -584,8 +858,11 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
             {
                 try
                 {
+                    const auto& value = argument.at("value");
+                    resolved.scalarExpression = !value.is_array();
                     resolved.expressions = hipdnn_plugin_sdk::uhd::expression::Program(
-                        argument.at("value").get<std::vector<nlohmann::json>>());
+                        resolved.scalarExpression ? std::vector<nlohmann::json>{value}
+                                                  : value.get<std::vector<nlohmann::json>>());
                 }
                 catch(const std::exception& error)
                 {

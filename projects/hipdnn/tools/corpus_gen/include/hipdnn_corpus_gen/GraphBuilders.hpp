@@ -396,6 +396,14 @@ struct SdpaOptions
     /// full attention; a finite bound is a different kernel with different work per query.
     int64_t leftBound = -1;
     int64_t rightBound = -1;
+
+    /// Which corner the causal diagonal is anchored at. Only meaningful under a causal mask,
+    /// and then it is not a detail: at seqlen_q < seqlen_k the two anchors mask different
+    /// triangles, so they are different work -- and an engine that serves one anchor and
+    /// refuses the other is removed from a comparison by the corpus rather than by a
+    /// measurement. Defaults to the schema's default so an unset option writes what a graph
+    /// built before this field did.
+    fb::DiagonalAlignment diagonalAlignment = fb::DiagonalAlignment::TOP_LEFT;
 };
 
 /// @brief Scaled dot-product attention, forward.
@@ -420,7 +428,14 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     attributes.add_k_tensor_uid(k.uid);
     attributes.add_v_tensor_uid(v.uid);
     attributes.add_o_tensor_uid(o.uid);
-    attributes.add_causal_mask(options.causalMask);
+    // Causality is written as the bounds it means -- right_bound 0, left unbounded -- with the
+    // anchor in diagonal_alignment, and the deprecated causal_mask flag left false. The flag is
+    // not a synonym: providers give it precedence over the bounds and read it as TOP-LEFT
+    // whatever the alignment says (SdpaPlanUtils::getMaskType), so a "bottom-right causal"
+    // graph built with it is top-left, and an engine whose causal kernels are all bottom-right
+    // -- AITER on gfx942 -- declined every causal problem in the corpus.
+    const bool causal = options.causalMask && options.rightBound < 0;
+    attributes.add_causal_mask(false);
     attributes.add_padding_mask(options.paddingMask);
     attributes.add_alibi_mask(options.alibiMask);
     attributes.add_generate_stats(options.generateStats);
@@ -440,6 +455,11 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     {
         attributes.add_right_bound(options.rightBound);
     }
+    else if(causal)
+    {
+        attributes.add_right_bound(0);
+    }
+    attributes.add_diagonal_alignment(options.diagonalAlignment);
     const auto node = attributes.Finish();
 
     std::vector<flatbuffers::Offset<fb::Node>> nodes{fb::CreateNodeDirect(

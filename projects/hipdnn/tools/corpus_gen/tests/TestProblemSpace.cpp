@@ -17,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <map>
 #include <set>
 #include <string>
 
@@ -279,6 +280,176 @@ TEST(TestProblemSpace, AnUnevaluableConstraintRejectsRatherThanAdmits)
     })");
 
     EXPECT_FALSE(detail::satisfiesConstraints(metadata, ProblemPoint{{"H", int64_t{8}}}));
+}
+
+namespace
+{
+
+/// An engine that serves one dtype only -- the AITER shape of the problem: one combination
+/// carries the whole corpus, so its first-pass target is the corpus size unless it is grown.
+ProblemOracle servesOnlyFp16(int64_t mLimit, int64_t nLimit, std::map<std::string, int64_t>* asked)
+{
+    return [=](const ProblemPoint& point) {
+        const auto dtype = std::get<std::string>(point.at("dtype"));
+        if(asked != nullptr)
+        {
+            ++(*asked)[dtype];
+        }
+        return dtype == "fp16" && std::get<int64_t>(point.at("M")) <= mLimit
+               && std::get<int64_t>(point.at("N")) <= nLimit;
+    };
+}
+
+} // namespace
+
+TEST(TestProblemSpace, GrowsAServedCombinationToTheCorpusTarget)
+{
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.numericCeiling = 256;
+    request.corpusTarget = 80;
+    request.seed = 11;
+
+    const auto corpus
+        = exploreProblemSpace(twoDimsAndADtype(), request, servesOnlyFp16(256, 256, nullptr));
+
+    EXPECT_GE(corpus.problems().size(), 80U) << "stopped at the first-pass target";
+    EXPECT_TRUE(corpus.shortfall.empty());
+    for(const auto& point : corpus.problems())
+    {
+        EXPECT_EQ(std::get<std::string>(point.at("dtype")), "fp16");
+    }
+}
+
+TEST(TestProblemSpace, ReturnsFewerOnlyWhenTheServedRegionIsSpent)
+{
+    // Nine served points exist. Asking for fifty must return those nine and say that the
+    // search, not the request, was the limit -- saturated, and named as such.
+    ExplorationRequest request;
+    request.pointsPerCombination = 4;
+    request.numericCeiling = 64;
+    request.corpusTarget = 50;
+    request.seed = 12;
+
+    const auto corpus
+        = exploreProblemSpace(twoDimsAndADtype(), request, servesOnlyFp16(3, 3, nullptr));
+
+    EXPECT_LE(corpus.problems().size(), 9U);
+    ASSERT_FALSE(corpus.shortfall.empty());
+    bool sawSaturated = false;
+    for(const auto& combination : corpus.combinations)
+    {
+        if(!combination.problems.empty())
+        {
+            EXPECT_TRUE(combination.saturated) << detail::describe(combination.categorical);
+            EXPECT_FALSE(combination.searchCapped);
+            sawSaturated = true;
+        }
+    }
+    EXPECT_TRUE(sawSaturated);
+}
+
+TEST(TestProblemSpace, DoesNotGrowACombinationTheEngineDeclines)
+{
+    // A declined combination costs its first-pass budget and nothing more: growing it would
+    // spend budget proving again that it serves nothing.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.numericCeiling = 256;
+    request.seed = 13;
+
+    std::map<std::string, int64_t> firstPassOnly;
+    exploreProblemSpace(twoDimsAndADtype(), request, servesOnlyFp16(256, 256, &firstPassOnly));
+
+    request.corpusTarget = 80;
+    std::map<std::string, int64_t> grown;
+    exploreProblemSpace(twoDimsAndADtype(), request, servesOnlyFp16(256, 256, &grown));
+
+    EXPECT_EQ(grown["fp32"], firstPassOnly["fp32"]);
+    EXPECT_GT(grown["fp16"], firstPassOnly["fp16"]);
+}
+
+TEST(TestProblemSpace, ReportsABudgetLimitAsASearchLimitNotAnEngineLimit)
+{
+    // Stopped while still finding points: more exist, and saying "saturated" would tell the
+    // caller the engine serves no more when it was the search that was not allowed to look.
+    ExplorationRequest request;
+    request.pointsPerCombination = 5;
+    request.budgetPerCombination = 60;
+    request.budgetGrowthLimit = 1;
+    request.numericCeiling = 4096;
+    request.corpusTarget = 2000;
+    request.seed = 14;
+
+    const auto corpus
+        = exploreProblemSpace(twoDimsAndADtype(), request, servesOnlyFp16(4096, 4096, nullptr));
+
+    ASSERT_FALSE(corpus.shortfall.empty());
+    bool sawCapped = false;
+    for(const auto& combination : corpus.combinations)
+    {
+        if(!combination.problems.empty())
+        {
+            EXPECT_TRUE(combination.searchCapped);
+            EXPECT_FALSE(combination.saturated);
+            sawCapped = true;
+        }
+    }
+    EXPECT_TRUE(sawCapped);
+}
+
+TEST(TestProblemSpace, AnEngineThatServesOnlyHeldPointsIsSearchedNotDeclined)
+{
+    // rocKE's shape: every point it serves is a pack geometry the caller already holds. The
+    // search must still be grown for it and report that it found nothing new -- not skip it as
+    // though the engine served nothing.
+    ExplorationRequest request;
+    request.pointsPerCombination = 4;
+    request.numericCeiling = 64;
+    request.corpusTarget = 50;
+    request.seed = 15;
+
+    const ProblemOracle heldAll = [](const ProblemPoint& point) {
+        return std::get<int64_t>(point.at("M")) <= 3 && std::get<int64_t>(point.at("N")) <= 3;
+    };
+    const auto corpus = exploreProblemSpace(
+        twoDimsAndADtype(), request, servesOnlyFp16(3, 3, nullptr), heldAll);
+
+    EXPECT_TRUE(corpus.problems().empty()) << "returned a point the caller already held";
+    ASSERT_FALSE(corpus.shortfall.empty());
+    bool sawFp16 = false;
+    for(const auto& combination : corpus.combinations)
+    {
+        if(std::get<std::string>(combination.categorical.at("dtype")) == "fp16")
+        {
+            EXPECT_TRUE(combination.saturated) << "a served combination was never grown";
+            sawFp16 = true;
+        }
+    }
+    EXPECT_TRUE(sawFp16);
+}
+
+TEST(TestProblemSpace, HeldPointsDoNotWallTheSearchOffFromTheRestOfTheRegion)
+{
+    // The walk must be free to step through held points: treated as refused they fence it in.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.numericCeiling = 256;
+    request.corpusTarget = 60;
+    request.seed = 16;
+
+    const ProblemOracle heldHalf = [](const ProblemPoint& point) {
+        return std::get<int64_t>(point.at("M")) % 2 == 0;
+    };
+    const auto corpus = exploreProblemSpace(
+        twoDimsAndADtype(), request, servesOnlyFp16(256, 256, nullptr), heldHalf);
+
+    EXPECT_GE(corpus.problems().size(), 60U);
+    EXPECT_TRUE(corpus.shortfall.empty());
+    for(const auto& point : corpus.problems())
+    {
+        EXPECT_NE(std::get<int64_t>(point.at("M")) % 2, 0) << "returned a held point";
+    }
 }
 
 } // namespace hipdnn_corpus_gen

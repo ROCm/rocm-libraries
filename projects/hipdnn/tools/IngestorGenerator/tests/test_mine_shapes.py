@@ -580,3 +580,172 @@ class TestGradientSpellingsAreBothExcluded:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert len(json.loads(out.read_text())) == 1
+
+
+class TestShapeDirectory:
+    """`--shape-dir` reads whatever a publisher handed over.
+
+    This is the coverage the retired Python corpus assembler's own suite held: that
+    directory was the model pool's only source, and with the assembler deleted the
+    behaviour is pinned here, where the reader now lives.
+
+    A directory is a POINTER, not a format: the three tabular forms and hipDNN graph
+    JSON are all read from one flag, because a publisher who mixes them is the ordinary
+    case and a tree that mines as zero rows is indistinguishable from one nobody pointed
+    at.
+    """
+
+    def _mine(self, tmp_path: Path, *extra, arch="gfx942") -> tuple[int, str, list]:
+        out = tmp_path / "shapes.json"
+        result = subprocess.run(
+            [sys.executable, str(_MINE), "--shape-dir", str(tmp_path / "pub"),
+             "--arch", arch, "--out", str(out), *extra],
+            capture_output=True, text=True,
+        )
+        shapes = json.loads(out.read_text()) if out.exists() else []
+        return result.returncode, result.stdout + result.stderr, shapes
+
+    @pytest.fixture
+    def published(self, tmp_path) -> Path:
+        directory = tmp_path / "pub"
+        directory.mkdir()
+        return directory
+
+    def test_reads_csv_json_and_key_value_lines_from_one_flag(self, published, tmp_path):
+        (published / "a.csv").write_text(
+            "batch,num_query_heads,num_kv_heads,seqlen_q,seqlen_k,head_size,dtype\n"
+            "1,32,8,4096,4096,128,bf16\n"
+        )
+        (published / "b.json").write_text(json.dumps(
+            [{"b": 2, "hq": 16, "hkv": 16, "sq": 512, "skv": 512, "d": 64,
+              "data_type": "fp16"}]))
+        (published / "c.txt").write_text(
+            "# a hand-maintained list\n"
+            "batch=4 heads=8 seqlen_q=1 seqlen_kv=2048 head_dim=128 dtype=bf16\n"
+            "\n")
+        rc, log, shapes = self._mine(tmp_path)
+        assert rc == 0, log
+        assert sorted(s["batch"] for s in shapes) == [1, 2, 4]
+        assert all(s["_provenance"]["source"] == "shape_dir" for s in shapes)
+
+    def test_a_row_missing_a_required_field_is_not_a_shape_row(self, published, tmp_path):
+        """A publisher's tree holds README tables and index files too. Those are skipped,
+        not mined as shapes with invented dimensions."""
+        (published / "index.json").write_text(json.dumps(
+            [{"model": "Llama-3-8B", "notes": "see ticket"}]))
+        (published / "real.csv").write_text(
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
+        rc, log, shapes = self._mine(tmp_path)
+        assert rc == 0, log
+        assert len(shapes) == 1
+
+    def test_a_graph_document_is_left_to_the_graph_reader(self, published, tmp_path):
+        """`from_shape_dir` begins with `from_graph_corpus`, so a graph in the tree is
+        mined ONCE -- as a graph. Reading it a second time as a record would double the
+        weight of whichever regime it lands in."""
+        (published / "g.json").write_text(json.dumps({
+            "tensors": [{"name": "q", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
+                        {"name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"}],
+            "nodes": [{"type": "SdpaAttributes"}],
+        }))
+        rc, log, shapes = self._mine(tmp_path)
+        assert rc == 0, log
+        assert [s["_provenance"]["source"] for s in shapes] == ["graphs"]
+
+    def test_a_row_naming_another_arch_is_dropped_but_an_unnamed_one_is_kept(
+            self, published, tmp_path):
+        """Most publishers record a shape, not a target. Refusing the rows that name no
+        arch would mine nothing from the common case."""
+        (published / "a.csv").write_text(
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,arch\n"
+            "1,32,4096,4096,128,gfx942\n"
+            "2,32,512,512,128,gfx950\n"
+            "4,32,128,128,128,\n")
+        rc, log, shapes = self._mine(tmp_path)
+        assert rc == 0, log
+        assert sorted(s["batch"] for s in shapes) == [1, 4]
+        assert "named another arch" in log
+
+    def test_an_unknown_mask_spelling_is_refused_rather_than_guessed(
+            self, published, tmp_path):
+        """`bottom_right` is a genuinely different mask from top-left causal. Mapping it
+        here would put a differently-masked problem in the corpus under the row's name."""
+        (published / "a.csv").write_text(
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n"
+            "1,32,4096,4096,128,bottom_right\n")
+        rc, log, _ = self._mine(tmp_path)
+        assert rc != 0
+        assert "unknown mask spelling" in log
+
+    def test_a_boolean_causal_column_is_read_as_a_mask(self, published, tmp_path):
+        (published / "a.csv").write_text(
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,is_causal\n"
+            "1,32,4096,4096,128,true\n"
+            "2,32,4096,4096,128,false\n")
+        rc, log, shapes = self._mine(tmp_path)
+        assert rc == 0, log
+        assert sorted(s["mask_type"] for s in shapes) == [0, 1]
+
+
+class TestQueryCsv:
+    """`--out-query-csv` is the handoff to `hipdnn_corpus_gen --model-shapes`.
+
+    It is a NARROWING -- the mined record is the union of what four sources carry, and
+    the CSV is what one operation declaration can express -- so what it drops is counted
+    and named. A model pool that silently shrinks is indistinguishable from a miner
+    nobody pointed at anything.
+    """
+
+    def _mine(self, tmp_path: Path, rows: str) -> tuple[int, str, list[str]]:
+        published = tmp_path / "pub"
+        published.mkdir()
+        (published / "a.csv").write_text(rows)
+        query = tmp_path / "model-shapes.csv"
+        result = subprocess.run(
+            [sys.executable, str(_MINE), "--shape-dir", str(published),
+             "--arch", "gfx942", "--out-query-csv", str(query)],
+            capture_output=True, text=True,
+        )
+        lines = query.read_text().splitlines() if query.exists() else []
+        return result.returncode, result.stdout + result.stderr, lines
+
+    def test_writes_the_q_columns_the_corpus_tool_reads(self, tmp_path):
+        rc, log, lines = self._mine(
+            tmp_path,
+            "batch,heads_q,heads_kv,seqlen_q,seqlen_kv,head_dim,dtype,mask\n"
+            "1,32,8,4096,4096,128,bf16,causal\n")
+        assert rc == 0, log
+        assert lines[0] == ("name,op,q.batch,q.heads,q.heads_kv,q.seqlen_q,"
+                            "q.seqlen_k,q.head_dim,q.is_causal,q.alignment,q.dtype")
+        assert lines[1].split(",")[1:] == [
+            "sdpa_fwd", "1", "32", "8", "4096", "4096", "128", "true",
+            "top_left", "bf16"]
+
+    def test_alignment_is_always_top_left(self, tmp_path):
+        """No source here can say bottom-right -- `MASK_TYPE` deliberately carries no
+        spelling for it -- but the column is written anyway, because the declaration's
+        argument resolution is strict about a parameter it reads being present."""
+        rc, log, lines = self._mine(
+            tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
+        assert rc == 0, log
+        assert lines[1].split(",")[-2] == "top_left"
+
+    def test_a_windowed_shape_is_dropped_by_name_and_counted(self, tmp_path):
+        """`sdpa_fwd` declares no window parameter, so a swin shape cannot be written --
+        but it is reported, not discarded in silence."""
+        rc, log, lines = self._mine(
+            tmp_path,
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n"
+            "1,32,4096,4096,128,swin\n"
+            "2,32,4096,4096,128,causal\n")
+        assert rc == 0, log
+        assert len(lines) == 2
+        assert "dropped     1" in log and "windowed mask" in log
+
+    def test_dropping_every_shape_fails_rather_than_writing_an_empty_pool(self, tmp_path):
+        rc, log, lines = self._mine(
+            tmp_path,
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n1,32,4096,4096,128,swin\n")
+        assert rc != 0
+        assert len(lines) == 1
+        assert "the model pool would be empty" in log

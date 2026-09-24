@@ -331,4 +331,100 @@ TEST(TestOperationMetadata, ANestedExpressionsVariablesAreStillChecked)
     EXPECT_NE(load.errors.front().find("heigth"), std::string::npos);
 }
 
+namespace
+{
+
+/// An operation with a kernel pool, whose `kernel_catalog` block is the thing under test.
+/// `catalog` is spliced in as written so each case below reads as the declaration an author
+/// would have typed.
+nlohmann::json catalogMetadata(const nlohmann::json& catalog)
+{
+    auto declaration = nlohmann::json::parse(R"({
+      "schema_version": "1.0",
+      "operation": "sdpa_fwd",
+      "parameters": {
+        "batch":     { "type": "int64" },
+        "is_causal": { "type": "bool" },
+        "scale":     { "type": "float64" },
+        "alignment": { "type": "enum", "values": ["top_left", "bottom_right"] },
+        "dtype":     { "type": "enum", "values": ["bf16", "fp16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "b", "source": "x.hpp", "arguments": [] }
+    })");
+    declaration["kernel_catalog"] = catalog;
+    return declaration;
+}
+
+} // namespace
+
+TEST(TestOperationMetadata, AConstantAnswersForAParameterThePackVocabularyHasNoFieldFor)
+{
+    // The case this exists for: rocKE's dense packs record `causal` without recording which
+    // corner the diagonal is anchored at, because every kernel in them anchors it top-left.
+    // Without a way to say so, a declared argument reading `$q.alignment` would fail to resolve
+    // for every geometry in the pack and the kernel pool would silently be empty.
+    const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(R"({
+      "metadata": { "batch": "batch", "is_causal": "causal" },
+      "constants": { "alignment": "top_left", "batch_size_hint": 0 }
+    })")));
+
+    // `batch_size_hint` is undeclared, so the load fails -- and that is the first assertion,
+    // because a constant for a parameter nobody declared is a typo that would otherwise ride
+    // into every point the pack produces.
+    EXPECT_FALSE(load.ok());
+    EXPECT_NE(load.errors.front().find("batch_size_hint"), std::string::npos)
+        << load.errors.front();
+}
+
+TEST(TestOperationMetadata, AConstantIsTypedAgainstItsParameterAtLoad)
+{
+    // Typed here, not at use: point construction has no error channel, so a mistyped constant
+    // there is a pack that mysteriously contributes nothing.
+    const auto wrongType = [](const char* json) {
+        const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(json)));
+        EXPECT_FALSE(load.ok()) << json;
+        return load.ok() ? std::string{} : load.errors.front();
+    };
+
+    EXPECT_NE(wrongType(R"({"metadata": {"batch": "batch"}, "constants": {"is_causal": 1}})")
+                  .find("not a boolean"),
+              std::string::npos);
+    EXPECT_NE(wrongType(R"({"metadata": {"batch": "batch"}, "constants": {"scale": "half"}})")
+                  .find("not a number"),
+              std::string::npos);
+    EXPECT_NE(
+        wrongType(R"({"metadata": {"batch": "batch"}, "constants": {"alignment": "middle"}})")
+            .find("not one of its declared values"),
+        std::string::npos);
+
+    // And the well-typed ones survive with their declared types intact.
+    const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(R"({
+      "metadata": { "batch": "batch" },
+      "constants": { "is_causal": true, "scale": 0.125, "alignment": "bottom_right" }
+    })")));
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+
+    const auto& constants = load.metadata->kernelCatalog.constants;
+    EXPECT_TRUE(std::get<bool>(constants.at("is_causal")));
+    EXPECT_DOUBLE_EQ(std::get<double>(constants.at("scale")), 0.125);
+    EXPECT_EQ(std::get<std::string>(constants.at("alignment")), "bottom_right");
+}
+
+TEST(TestOperationMetadata, AConstantMayNotOverrideWhatAPackActuallySaid)
+{
+    // A parameter the pack answers for is not eligible. Allowing both would let a declaration
+    // quietly replace a descriptor's own geometry with a fixed value, which is the one thing a
+    // pool harvested from packs must never do.
+    const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(R"({
+      "metadata": { "batch": "batch", "is_causal": "causal" },
+      "constants": { "is_causal": true }
+    })")));
+
+    EXPECT_FALSE(load.ok());
+    EXPECT_NE(load.errors.front().find("which it also reads from the pack"), std::string::npos)
+        << load.errors.front();
+}
+
 } // namespace hipdnn_corpus_gen

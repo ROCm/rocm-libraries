@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--graphs", nargs="+", required=True,
                         help="Graph files -- JSON, or the binary FlatBuffers hipdnn_corpus_gen writes "
-                             "as problems/*.fb -- or corpus directories (recursive)")
+                             "as graphs/*.fb -- or corpus directories (recursive)")
     parser.add_argument("--descriptor-tree", required=True, help="Shipping descriptor tree; authored knobs are preserved")
     parser.add_argument("--engine", help="UED name/UUID or canonical immediate engine name")
     parser.add_argument("--engine-id", required=True, type=int, help="Public hipDNN engine ID used by hipdnn_bench")
@@ -320,7 +320,7 @@ def run_generate(args: argparse.Namespace) -> int:
         for supplied in args.graphs:
             path = Path(supplied).resolve()
             # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
-            # `problems/<operation>_<n>.fb`, so a generated corpus composes with
+            # `graphs/<operation>_<n>.fb`, so a generated corpus composes with
             # `generate` only if that form is collected alongside hand-written JSON.
             graphs.update([*path.rglob("*.json"), *path.rglob("*.fb")] if path.is_dir() else [path])
         if not graphs or any(not path.is_file() for path in graphs):
