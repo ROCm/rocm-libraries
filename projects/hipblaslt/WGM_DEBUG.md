@@ -17,6 +17,31 @@ When a solution has `EnableWGMDebug: 1`, the kernel writes a dedicated **16-byte
 
 Works for **all `DestDataType`s** (fp32, bf16, fp16, fp8, int8, …): the 16 bytes are written raw at the tile origin, so they survive regardless of element size.
 
+### StreamK record layout
+
+StreamK cannot use the tile-origin format: its tuned kernels are at the SGPR
+ceiling, and multiple workgroups/work items may target one output tile. With
+`EnableWGMDebug: 1`, a StreamK kernel parks the raw launch id in `AddressC`
+(GEMM-unused for this dump) and replays StreamK `graWorkGroup` plus
+`DefaultWGM` in a debug loop, writing one 16-byte **per-tile record** for every
+tile the persistent workgroup visits. Each record lands at
+`D + (wg0 + wg1 * NumWorkGroups0) * 16`, so the whole output tile grid is
+covered; the kernel exits once the workgroup runs out of StreamK iterations:
+
+| dword | contents |
+|------:|----------|
+| 0 | pre-`wgmXCC` launch id of the workgroup that mapped this tile |
+| 1 | packed post-`DefaultWGM` `(WorkGroup0 << 16) \| WorkGroup1` |
+| 2 | `0x534B0000 \| XCC id` (`SK` format marker) |
+| 3 | full packed StreamK WGM word (`WGM`, `WGMXCC`, `chunk`, `K`) |
+
+This path adds **no persistent SGPRs**. The raw id is parked in `WorkGroup0+2`
+across `wgmXCC`, then copied into `AddressC`; `AddressC+1` is packing scratch.
+The debug loop repeats on the same `StreamKIter >= StreamKIterEnd` test that
+`closePersistentLoop` uses (SK4 loops until its work queue drains into
+`KernelEnd`). Partial (SK) tiles are mapped by several workgroups, so dword0
+names the last writer; the XCD in dword2 is likewise that workgroup's chiplet.
+
 ## How to use
 
 ### 1. Enable per kernel (YAML)
@@ -57,6 +82,7 @@ python3 scripts/plot_wgm.py d.bin --mt0 <MacroTile0> --mt1 <MacroTile1> -o out.j
 ## Notes & caveats
 - Results are intentionally wrong — a validation flag (`--norm_check`/`--unit_check`/`--allclose_check`) will report failures; that's expected and only used to trigger the host copy + dump.
 - `WorkGroupMappingXCC <= 1` means the kernel does **no** XCC remap, so the XCC map you see is the hardware's default WG→XCD assignment (read live from `HW_REG_XCC_ID`).
+- StreamK debug kernels walk the full tile sequence of every persistent workgroup but never execute GEMM. The plot is tile ownership plus physical XCD for the whole output grid; for tiles split across workgroups it shows the last writer.
 - Very large workgroup grids (thousands of WGs) may stress some profilers/tools; the plot itself scales (per-cell text only for small grids).
 
 ## Files

@@ -370,6 +370,10 @@ class StateValues:
   numSgprAddressGSUSync: int             = 0
   numSgprStreamK: int                    = 0
   streamK: StreamKSettings               = field(default_factory=StreamKSettings)
+  # StreamK EnableWGMDebug parks the raw launch id in AddressC (GEMM-unused for
+  # a mapping-only dump) so graWorkGroup can write a record per visited tile
+  # with zero extra persistent SGPRs.
+  wgmDebugStreamKParked: bool            = False
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
@@ -10180,10 +10184,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # workgroup id from the prologue (before WGM/XCC remap) to the epilogue store,
     # where it is written into the output for visualization. See EnableWGMDebug
     # and KernelWriterAssembly.wgmDebugStoreValues().
-    # WGM-debug is instrumented only for non-StreamK kernels: StreamK subtile
-    # variants sit at the SGPR cap and cannot take the extra instrumentation
-    # SGPRs (and StreamK's multi-WG-per-tile store makes the tile-origin record
-    # ill-defined anyway).
+    # These persistent SGPRs are only for non-StreamK tile-origin records.
+    # StreamK variants sit at the SGPR cap and have multi-WG-per-tile stores;
+    # KernelWriterAssembly parks the raw launch id in WorkGroup0+2 / AddressC
+    # and loops the mapping code, writing a record per visited tile after
+    # DefaultWGM.
     if kernel.get("EnableWGMDebug", 0) and kernel["StreamK"] == 0:
       self.defineSgpr("WGMDebugOrigWG0", 1)
       # D store SRD (tile-N-base descriptor, 4 sgprs) snapshotted after

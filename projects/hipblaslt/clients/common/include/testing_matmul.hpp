@@ -87,13 +87,12 @@ extern "C" __global__ void flush_icache()
 
 // Debug-only WGM (workgroup-mapping) instrumentation support (guard removed to enable in Release).
 //
-// When hipBLASLt is built with the build-script option `--debug-wgm` (Debug
-// builds only), the generated GEMM kernels overwrite the top-left element of
-// each workgroup's output tile with workgroup-mapping diagnostics instead of
-// the real result (original 1D WG id, packed post-WGM (WG0<<16)|WG1, XCC id,
-// and the packed WGM sgpr value). This helper writes the raw D-output bytes to
-// a binary file (with a small header) so plot_wgm.py can decode and visualize
-// the mapping. It is triggered at runtime by setting the environment variable
+// Solutions with EnableWGMDebug=1 write workgroup-mapping diagnostics into D
+// instead of a valid GEMM result. Non-StreamK kernels use each macro-tile
+// origin; StreamK mapping-only kernels write a 16-byte record per visited tile,
+// indexed by flattened tile id at the start of D. This helper writes the raw
+// D-output bytes (with a small header) so plot_wgm.py can auto-detect and
+// visualize either format. It is triggered by
 // HIPBLASLT_DEBUG_WGM_DUMP=<output-file> (D output on host is in hD_1). The
 // buffer is column-major MxN with leading dimension ldd; only the first batch
 // of the first GEMM is dumped.

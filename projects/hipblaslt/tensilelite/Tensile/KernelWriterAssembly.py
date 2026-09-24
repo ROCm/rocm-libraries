@@ -60,7 +60,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
   VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
-  VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
+  VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXEqU32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
@@ -679,6 +679,104 @@ class KernelWriterAssembly(KernelWriter):
     for s in protected:
       self.setSgprToFreeState(s)
     return ret
+
+  def wgmDebugStreamKStore(self, kernel, loopLabel):
+    """Write a per-tile WGM record for every tile this StreamK WG visits.
+
+    StreamK kernels cannot afford the seven persistent SGPRs used by the
+    tile-origin debug path, and a persistent WG owns many tiles, so one record
+    per workgroup would leave most of the output matrix unmapped.
+
+    The raw pre-wgmXCC launch id is parked in WorkGroup0+2 across wgmXCC, then
+    copied into AddressC+0 (GEMM-unused here); AddressC+1 is packing scratch.
+    ``graWorkGroup`` (StreamK mapping + DefaultWGM) is wrapped in a debug loop,
+    so WorkGroup0/1/2 step through the same tile sequence the persistent loop
+    would run. Each pass writes a 16-byte record indexed by tile, then the loop
+    repeats on the same StreamKIter/StreamKIterEnd condition that
+    ``closePersistentLoop`` uses, and the kernel ends before any GEMM work.
+
+    Indexing by tile means every visited tile gets XCD coverage. Partial (SK)
+    tiles are touched by several workgroups; the last writer wins.
+
+    Layout (detected by scripts/plot_wgm.py):
+      dword0: raw pre-wgmXCC launch id of the writing WG (from AddressC)
+      dword1: packed post-DefaultWGM (WorkGroup0 << 16) | WorkGroup1
+      dword2: 0x534B0000 | HW_REG_XCC_ID ("SK" marker + physical XCD)
+      dword3: full packed WGM SGPR (WGM/WGMXCC/chunk/K)
+    """
+    module = Module("DebugWGM StreamK per-tile store")
+    module.addComment1("@DebugWGM: StreamK per-tile record; loops over this WG's tiles then exits")
+
+    scratch = "AddressC+1"
+    payload = self.vgprPool.checkOutAligned(4, 4, "wgmDebugStreamKPayload")
+    module.add(VMovB32(dst=vgpr(payload+0), src=sgpr("AddressC"),
+                       comment="DebugWGM StreamK: raw launch id parked in AddressC"))
+    module.add(SLShiftLeftB32(dst=sgpr(scratch), shiftHex=16, src=sgpr("WorkGroup0"),
+                              comment="DebugWGM StreamK: post-DefaultWGM M-tile << 16"))
+    module.add(SAddU32(dst=sgpr(scratch), src0=sgpr(scratch), src1=sgpr("WorkGroup1"),
+                       comment="DebugWGM StreamK: | post-DefaultWGM N-tile"))
+    module.add(VMovB32(dst=vgpr(payload+1), src=sgpr(scratch),
+                       comment="DebugWGM StreamK: packed (m<<16)|n"))
+    module.add(SGetRegB32(dst=sgpr(scratch), src="hwreg(HW_REG_XCC_ID)",
+                         comment="DebugWGM StreamK: physical XCD id"))
+    module.add(SOrB32(dst=sgpr(scratch), src0=sgpr(scratch), src1=hex(0x534B0000),
+                      comment="DebugWGM StreamK: add SK record marker"))
+    module.add(VMovB32(dst=vgpr(payload+2), src=sgpr(scratch),
+                       comment="DebugWGM StreamK: marker | XCD"))
+    module.add(VMovB32(dst=vgpr(payload+3), src=sgpr("WGM"),
+                       comment="DebugWGM StreamK: packed WGM word"))
+
+    # Record index = flattened tile id: (wg2 * nwg1 + wg1) * nwg0 + wg0.
+    module.add(SMulI32(dst=sgpr(scratch), src0=sgpr("WorkGroup2"), src1=sgpr("NumWorkGroups1"),
+                       comment="DebugWGM StreamK: batch * nwg1"))
+    module.add(SAddU32(dst=sgpr(scratch), src0=sgpr(scratch), src1=sgpr("WorkGroup1"),
+                       comment="DebugWGM StreamK: + N-tile"))
+    module.add(SMulI32(dst=sgpr(scratch), src0=sgpr(scratch), src1=sgpr("NumWorkGroups0"),
+                       comment="DebugWGM StreamK: * nwg0"))
+    module.add(SAddU32(dst=sgpr(scratch), src0=sgpr(scratch), src1=sgpr("WorkGroup0"),
+                       comment="DebugWGM StreamK: + M-tile = flat tile id"))
+
+    addr = self.vgprPool.checkOutAligned(2, 2, "wgmDebugStreamKAddress")
+    module.add(VMovB32(dst=vgpr(addr), src=sgpr(scratch),
+                       comment="DebugWGM StreamK: flat tile id"))
+    module.add(VLShiftLeftB32(dst=vgpr(addr), src=vgpr(addr), shiftHex=hex(4),
+                              comment="DebugWGM StreamK: byte offset = tile id * 16"))
+    module.add(VMovB32(dst=vgpr(addr+1), src=sgpr("AddressD+1"),
+                       comment="DebugWGM StreamK: D base high"))
+    module.add(VAddCOU32(dst=vgpr(addr), dst1=VCC(), src0=sgpr("AddressD+0"),
+                         src1=vgpr(addr), comment="DebugWGM StreamK: record address low"))
+    module.add(VAddCCOU32(dst=vgpr(addr+1), dst1=VCC(), src0=vgpr(addr+1),
+                          src1=0, src2=VCC(),
+                          comment="DebugWGM StreamK: record address high"))
+
+    # graWorkGroup has not yet narrowed EXEC. Serial==0 elects workitem 0 in
+    # wave 0. Restore the known-full mask without consuming save SGPRs.
+    module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr("Serial"), src1=0,
+                          comment="DebugWGM StreamK: workitem 0 only"))
+    # FlatStoreB128's generated Python keyword names are historically reversed;
+    # positional construction follows the C++ order: address, then data.
+    module.add(FlatStoreB128(vgpr(addr, 2), vgpr(payload, 4), None,
+                             "DebugWGM StreamK: store per-tile record"))
+    module.add(SWaitCnt(vscnt=0, comment="DebugWGM StreamK: wait for record store"))
+    execMovInst = SMovB32 if kernel["WavefrontSize"] == 32 else SMovB64
+    module.add(execMovInst(dst=EXEC(), src=-1, comment="DebugWGM StreamK: restore full exec"))
+
+    if kernel["StreamK"] == 4:
+      # Dynamic StreamK drains its work queue and leaves via KernelEnd from
+      # inside the mapping code, so there is no iteration bound to test here.
+      with self.allocTmpSgpr(3, tag="wgmDebugStreamKLoopBack") as tmpSgprInfo:
+        module.add(SLongBranchNegative(loopLabel, tmpSgprInfo,
+                                       comment="DebugWGM StreamK: next queued tile"))
+    else:
+      module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"),
+                           comment="DebugWGM StreamK: done all StreamK iterations?"))
+      module.add(self.longBranchScc0(loopLabel, posNeg=-1,
+                                     comment="DebugWGM StreamK: map next tile"))
+    module.add(SEndpgm(comment="DebugWGM StreamK: mapping-only kernel"))
+
+    self.vgprPool.checkIn(addr)
+    self.vgprPool.checkIn(payload)
+    return module
 
   def wgmDebugRawStore(self, kernel, addrCalc):
     """Debug-only WGM instrumentation (data-type-agnostic).
@@ -2737,6 +2835,7 @@ class KernelWriterAssembly(KernelWriter):
     tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
 
     sgprNumsOfGemm = None
+    wgmDebugStreamKPark = False
 
     if self.do["PreLoop"]:
       # Need to guard again since some defined sgprs are added into sgprPool
@@ -3160,13 +3259,22 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMovB32(dst=sgpr("StreamKTileIdx"), src=sgpr("WorkGroup0"),
                            comment="StreamK: snapshot raw pre-remap launch WG id -> dead-in-window StreamKTileIdx carrier (queue = rawWG %% numQueues)"))
 
-      # WGM instrumentation: snapshot the raw (pre-remap) 1D workgroup id
-      # before WGM/XCC remapping mutates WorkGroup0. Written into D at the
-      # epilogue store for workgroup-mapping visualization.
+      # Non-StreamK WGM instrumentation keeps the raw launch id in an SGPR
+      # until the epilogue tile-origin store.
       if "WGMDebugOrigWG0" in self.sgprs:
         module.addComment1("@DebugWGM: snapshot pre-WGM workgroup id")
         module.add(SMovB32(dst=sgpr("WGMDebugOrigWG0"), src=sgpr("WorkGroup0"),
                            comment="DebugWGM: original 1D workgroup id (pre-WGM)"))
+
+      # StreamK is at the persistent-SGPR ceiling and multiple WGs can target
+      # one tile. Park the raw launch id in WorkGroup0+2 (Z is unused for 1D
+      # StreamK launches) across wgmXCC, then copy it into AddressC once that
+      # kernarg is live so graWorkGroup can write its per-tile records.
+      if kernel.get("EnableWGMDebug", 0) and kernel["StreamK"] != 0:
+        wgmDebugStreamKPark = True
+        module.addComment1("@DebugWGM: snapshot StreamK raw launch rank in WorkGroup0+2")
+        module.add(SMovB32(dst=sgpr("WorkGroup0+2"), src=sgpr("WorkGroup0"),
+                           comment="DebugWGM StreamK: raw pre-wgmXCC launch id"))
 
       # Reorder WGIDs
       module.add(wgmXCC(self, kernel, tmpSgprNumWorkGroups))
@@ -3439,6 +3547,11 @@ class KernelWriterAssembly(KernelWriter):
       module.addSpaceLine()
       module.add(labelMultiGemmEnd)
 
+      if wgmDebugStreamKPark:
+        module.add(SMovB32(dst=sgpr("AddressC"), src=sgpr("WorkGroup0+2"),
+                           comment="DebugWGM StreamK: park raw launch id in AddressC"))
+        self.states.wgmDebugStreamKParked = True
+
       # Deferred check-in of the abs-prefetch base triple (reserved across the prolog in
       # _initKernel so the dynamic CFG-target ladder inserted after this label can use it). Free it
       # now, immediately before defineVariableSgprs reclaims the slots (net +0 SGPR; multi-agent +
@@ -3648,6 +3761,13 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment0("graWorkGroup mapping")
 
     skComponent = Component.StreamK.find(self)
+    # A persistent StreamK WG owns many tiles, so replay the mapping code once
+    # per tile to give every tile an XCD record before the kernel exits.
+    wgmDebugSKLoopLabel = None
+    if self.states.wgmDebugStreamKParked:
+      wgmDebugSKLoopLabel = Label(self.labels.getUniqueNamePrefix("WGMDebugSKTile"),
+                                  "DebugWGM StreamK: per-tile mapping loop")
+      module.add(wgmDebugSKLoopLabel)
     module.add(skComponent.graWorkGroup(self, kernel, tPA, tPB))
 
     gsuComponent = Component.GSU.find(self)
@@ -3661,6 +3781,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SpaceFillingCurveWalk(self, kernel, sgprWGM))
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
+
+    if wgmDebugSKLoopLabel is not None:
+      module.add(self.wgmDebugStreamKStore(kernel, wgmDebugSKLoopLabel))
 
     # Resolving &counter3 here makes the per-work-group tally in the epilogue a bare
     # atomic on a register pair rather than a kernarg load it has to wait on.
