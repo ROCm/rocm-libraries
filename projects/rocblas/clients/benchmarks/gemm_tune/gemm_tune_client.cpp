@@ -149,8 +149,16 @@ int main(int argc, char* argv[])
     std::unordered_set<std::string> processed{};
 
     // Benchmark each case
-    for(const Arguments& arg : RocBLAS_TestData())
+    for(Arguments arg : RocBLAS_TestData())
     {
+        // Defeat memory padding for tuning, the same way rocblas-bench does. The guard
+        // regions d_vector places either side of every device allocation are a test-harness
+        // facility that the tuner never checks, so it should not pay to allocate, fill and
+        // compare them. This has to be set on the Arguments rather than through
+        // d_vector_set_pad_length, because rocblas_local_handle's constructor resets the
+        // global from arg.pad, and every tuner constructs one before its device matrices.
+        arg.pad = 0;
+
         std::stringstream ss;
 
         // Build log entry, which doubles as set key for duplicate check

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,20 @@
 #pragma once
 
 #include <memory.h>
+#include <string>
 
 // global for device memory padding see d_vector.hpp
 
 extern size_t g_DVEC_PAD;
 void          d_vector_set_pad_length(size_t pad);
+
+// Reports a problem found while managing the device-memory guard regions in d_vector.hpp.
+// Records a Google Test failure where there is a running test, and prints otherwise.
+//
+// Deliberately out of line, and declared without reference to GOOGLE_TEST. d_vector<T>'s
+// members are templates, so they have the same mangled names however the translation unit
+// was compiled, and a binary that links objects built both with and without GOOGLE_TEST
+// keeps only one definition of each. Reporting through this function instead of a Google
+// Test macro is what lets d_vector.hpp compile to the same definition either way; only the
+// definition here, compiled once per binary, is allowed to care about the macro.
+void d_vector_report_failure(const std::string& message);

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,31 +82,35 @@ public:
 public:
     static T m_guard[MEM_MAX_GUARD_PAD];
 
-#ifdef GOOGLE_TEST
+    // One constructor for every configuration. Whether the guard regions exist is decided
+    // by g_DVEC_PAD, a single global defined in singletons.cpp, and not by GOOGLE_TEST.
+    //
+    // This is not a stylistic preference. Every member of this class template has the same
+    // mangled name however the translation unit was compiled, so a body that depends on
+    // GOOGLE_TEST gives one symbol two definitions, and the linker keeps whichever it sees
+    // first. rocblas-gemm-tune compiles its own sources without GOOGLE_TEST and links the
+    // common client libraries, which are built with it, so both definitions really do meet
+    // in one binary. A program that wants no guards asks for none at run time instead.
     d_vector(size_t s, bool HMM = false)
         : m_size(s)
         , m_pad(std::min(g_DVEC_PAD, size_t(MEM_MAX_GUARD_PAD)))
         , m_guard_len(m_pad * sizeof(T))
-        , m_bytes((s + m_pad * 2) * sizeof(T))
+        // At least one element: hipMalloc(0) is undefined.
+        , m_bytes(((s ? s : 1) + m_pad * 2) * sizeof(T))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
+        // Filled on first construction whatever the pad currently is. Keying this off
+        // m_pad would leave m_guard zero for a type whose first d_vector happened to be
+        // built while the pad was zero, and the pad is now a run-time setting, so a later
+        // guarded allocation of that same type would compare against zeros. The fill is
+        // bounded and happens once per type.
         if(!m_init_guard)
         {
+            // Initialize m_guard with random data
             rocblas_init_nan(m_guard, MEM_MAX_GUARD_PAD);
             m_init_guard = true;
         }
     }
-#else
-    d_vector(size_t s, bool HMM = false)
-        : m_size(s)
-        , m_pad(0) // save current pad length
-        , m_guard_len(0 * sizeof(T))
-        , m_bytes(s ? s * sizeof(T) : sizeof(T))
-        , use_HMM(HMM)
-    {
-    }
-#endif
 
     T* device_vector_setup()
     {
@@ -127,24 +131,19 @@ public:
 
             d = nullptr;
         }
-#ifdef GOOGLE_TEST
-        else
+        else if(m_guard_len > 0)
         {
-            if(m_guard_len > 0)
-            {
-                // Copy m_guard to device memory before allocated memory
-                if(hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                    rocblas_cerr << "Error: hipMemcpy pre-guard copy failure." << std::endl;
+            // Copy m_guard to device memory before allocated memory
+            if(hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault) != hipSuccess)
+                rocblas_cerr << "Error: hipMemcpy pre-guard copy failure." << std::endl;
 
-                // Point to allocated block
-                d += m_pad;
+            // Point to allocated block
+            d += m_pad;
 
-                // Copy m_guard to device memory after allocated memory
-                if(hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                    rocblas_cerr << "Error: hipMemcpy post-guard copy failure." << std::endl;
-            }
+            // Copy m_guard to device memory after allocated memory
+            if(hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault) != hipSuccess)
+                rocblas_cerr << "Error: hipMemcpy post-guard copy failure." << std::endl;
         }
-#endif
 
         if(use_HMM)
             alloc_ptr_use(d, m_bytes); // count the same as host memory
@@ -154,7 +153,6 @@ public:
 
     void device_vector_check(T* d)
     {
-#ifdef GOOGLE_TEST
         if(m_pad > 0)
         {
             std::vector<T> host(m_pad);
@@ -164,7 +162,8 @@ public:
                 rocblas_cerr << "Error: hipMemcpy post-guard copy failure." << std::endl;
 
             // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host.data(), m_guard, m_guard_len), 0);
+            if(memcmp(host.data(), m_guard, m_guard_len) != 0)
+                d_vector_report_failure("post-guard overwritten");
 
             // Point to m_guard before allocated memory
             d -= m_pad;
@@ -174,9 +173,9 @@ public:
                 rocblas_cerr << "Error: hipMemcpy pre-guard copy failure." << std::endl;
 
             // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host.data(), m_guard, m_guard_len), 0);
+            if(memcmp(host.data(), m_guard, m_guard_len) != 0)
+                d_vector_report_failure("pre-guard overwritten");
         }
-#endif
     }
 
     void device_vector_teardown(T* d)
@@ -191,8 +190,14 @@ public:
             if(use_HMM)
                 free_ptr_use(d); // release count
 
-            // Free device memory
-            CHECK_HIP_ERROR((hipFree)(d));
+            // Free device memory. Reported rather than asserted: CHECK_HIP_ERROR expands to
+            // a Google Test assertion only under GOOGLE_TEST, which would make this body
+            // another definition that depends on the macro. A destructor is also the wrong
+            // place for a fatal assertion.
+            hipError_t status = (hipFree)(d);
+            if(status != hipSuccess)
+                d_vector_report_failure(std::string("cannot free the device allocation: ")
+                                        + hipGetErrorName(status));
         }
     }
 };
