@@ -18,215 +18,27 @@ from typing import Any
 
 from . import block_diagram as _bd
 
-_BINARY = {
-    "arith.add": lambda a, b: a + b,
-    "arith.sub": lambda a, b: a - b,
-    "arith.mul": lambda a, b: a * b,
-    "arith.div": lambda a, b: a // b,   # emit uses integer division
-    "arith.mod": lambda a, b: a % b,
-}
-
-
-class OriginResolutionError(RuntimeError):
-    """Raised when an origin DAG hits an op/root the resolver was not told how to pin."""
-
-
-def resolve_value(value: Any, bindings: dict) -> int:
-    """Resolve an SSA ``Value`` (or a plain int) to a concrete int by walking ``Value.op`` to the
-    pinned roots.
-
-    ``bindings`` supplies the substitution roots:
-      - ``k``:        the ``scf.for`` induction value (e.g. the K-tile offset ``kb * tile_k``),
-      - ``tid``:      the thread id (the wave = ``tid // wave_size``, lane = ``tid % wave_size``),
-      - ``block_id``: optional ``{axis: int}`` for the macro-tile block (global origins).
-
-    The loop IV is a substitution ROOT, not a constant leaf -- any value produced by the ``scf.for``
-    op resolves to ``bindings['k']``.
-    """
-    if isinstance(value, int):
-        return value
-    op = getattr(value, "op", None)
-    if op is None:
-        raise OriginResolutionError(
-            f"value {getattr(value, 'name', value)!r} has no producing op and is not an int"
-        )
-    name = op.name
-    if name == "arith.constant":
-        return int(op.attrs["value"])
-    if name == "scf.for":
-        if "k" not in bindings:
-            raise OriginResolutionError("scf.for induction variable hit but no 'k' binding supplied")
-        return int(bindings["k"])
-    if name == "gpu.thread_id":
-        if "tid" not in bindings:
-            raise OriginResolutionError("gpu.thread_id hit but no 'tid' binding supplied")
-        return int(bindings["tid"])
-    if name == "gpu.block_id":
-        axis = op.attrs.get("axis")
-        block = bindings.get("block_id", {})
-        if axis not in block:
-            raise OriginResolutionError(f"gpu.block_id[{axis}] hit but no 'block_id' binding supplied")
-        return int(block[axis])
-    fn = _BINARY.get(name)
-    if fn is None:
-        raise OriginResolutionError(f"unhandled op in origin DAG: {name!r}")
-    return fn(resolve_value(op.operands[0], bindings), resolve_value(op.operands[1], bindings))
-
-
-def resolve_origin(origin: tuple, bindings: dict) -> tuple[int, ...]:
-    """Resolve every axis of a captured ``window.origin`` to a concrete int tuple."""
-    return tuple(resolve_value(o, bindings) for o in origin)
+# Geometry helpers + the two verification GATES moved to the analysis package (machinery: pure calc,
+# one home next to coalescing/vectorization). Imported here for the renderers' own use AND re-exported
+# so existing `auto_pipeline.X` callers keep resolving.
+from ..analysis.geometry import (  # noqa: F401
+    OriginResolutionError,
+    _arch_wave,
+    _elem_bytes,
+    _lane_span,
+    resolve_origin,
+    resolve_value,
+)
+from ..analysis.roundtrip import RoundTripError, verify_lds_roundtrip  # noqa: F401
+from ..analysis.soundness import MmaSoundnessError, verify_mma_soundness  # noqa: F401
 
 
 # --------------------------------------------------------------------------------------------------
-# Addressing round-trip (gate 1) -- per LDS buffer-half, keyed by smem identity + resolved half
-# --------------------------------------------------------------------------------------------------
-
-
-class RoundTripError(RuntimeError):
-    """Raised when a read touches an LDS address the cooperative store never wrote (per half)."""
-
-
-def _lane_span(encoding: Any) -> int:
-    """Total threads an encoding spans = product over ALL lane-partition levels (wave outer + lane
-    inner). `RegisterMapper.num_lanes` reads only the first level, so for a cooperative NDimP=2
-    encoding it undercounts -- this is the count `emit_tensor_coordinates` actually decomposes."""
-    span = 1
-    for majors, minors in zip(encoding.lane_to_rh_major, encoding.lane_to_rh_minor):
-        for major, minor in zip(majors, minors):
-            span *= encoding.bucket_length(major, minor)
-    return span
-
-
-def verify_lds_roundtrip(pipeline: Any, space_id: int, *, tile_k: int) -> list[int]:
-    """Addressing round-trip for one double-buffered LDS space, PER buffer-half.
-
-    Store and read descriptors are both ``_transpose_desc``'d into the same ``(K, free)`` frame, so the
-    element ADDRESS and the ``(K, free)`` label coincide -- the gate reduces to: every read address (over
-    all waves, at half ``h``) was written by the cooperative store to half ``h``, and the store is a
-    bijection with no leak across the half boundary. Origins are resolved via :func:`resolve_origin`;
-    the half is keyed on the RESOLVED free-origin, never the raw symbolic ``oth`` expression (the store
-    writes ``oth`` while the same-iteration read reads ``cur`` -- pairing those would be a silent bug).
-
-    ``tile_k`` pins the K-loop iteration for the resolver (from the render context). Returns the list of
-    verified halves; raises :class:`RoundTripError` naming the first offending read.
-    """
-    from ..lds_conflict import addr_map
-
-    _arch, wave_size = _arch_wave(pipeline)                    # DERIVED from the recording, not defaulted
-    txns = [t for t in pipeline.transactions if t.space_id == space_id]
-    stores = [t for t in txns if t.kind == "store"]
-    reads = [t for t in txns if t.kind == "load"]
-    if not stores or not reads:
-        return []
-
-    store_desc, read_desc = stores[0].tile_desc, reads[0].tile_desc
-    strides = tuple(stores[0].strides)
-    free_stride = strides[0]  # K-row stride = bufs*tile_m; the free axis (stride 1) spans both buffers
-    store_lanes = _lane_span(store_desc.layout)  # cooperative: all waves' threads (e.g. 256)
-    n_waves = store_lanes // wave_size
-    read_dag = reads[0].origin
-
-    # Halves = the distinct resolved store free-origins across the K-tiles (prologue writes half 0; the
-    # in-loop store writes `oth` -> the other half). tile_m = the per-half free extent.
-    store_frees = {resolve_origin(t.origin, {"k": kb * tile_k, "tid": 0})[1]
-                   for t in stores for kb in range(2)}
-    bufs = len(store_frees)
-    tile_m = free_stride // bufs
-
-    name = pipeline.spaces[space_id]
-
-    def elem_addrs(desc, origin, n_lanes, dtype, swizzle):
-        acc, _ = addr_map(desc, strides, origin=origin, n_lanes=n_lanes,
-                          dtype_name=dtype, lds_swizzle=swizzle)
-        for a in acc:
-            for i in range(a["vw"]):
-                yield a["base"] + i
-
-    verified: list[int] = []
-    for h in range(bufs):
-        lo, hi = h * tile_m, (h + 1) * tile_m
-        # (a) confinement -- the store's DATA (pre-swizzle) stays within half h; a swizzle then permutes
-        # WITHIN the buffer, so this leak check is a pre-swizzle property (post-swizzle freely crosses lo/hi).
-        for addr in elem_addrs(store_desc, (0, h * tile_m), store_lanes, stores[0].dtype_name, False):
-            free = addr % free_stride
-            if not (lo <= free < hi):
-                raise RoundTripError(f"{name}: store data leaks half {h} at free {free}")
-        # (b) coverage -- every read address (all waves, at the REAL swizzle) was written by the coop store.
-        written: set[int] = set()
-        for addr in elem_addrs(store_desc, (0, h * tile_m), store_lanes, stores[0].dtype_name,
-                               stores[0].swizzle):
-            if addr in written:
-                raise RoundTripError(f"{name}: store collision half {h} addr {addr}")
-            written.add(addr)
-        for w in range(n_waves):
-            r_origin = resolve_origin(read_dag, {"k": h * tile_k, "tid": w * wave_size})
-            if r_origin[1] // tile_m != h:
-                raise RoundTripError(
-                    f"{name}: read wave {w} resolves to half {r_origin[1] // tile_m}, expected {h}")
-            for addr in elem_addrs(read_desc, r_origin, wave_size, reads[0].dtype_name, reads[0].swizzle):
-                if addr not in written:
-                    raise RoundTripError(
-                        f"{name} half {h} wave {w}: read -> addr {addr} "
-                        f"(K={addr // free_stride}, free={addr % free_stride}) never written")
-        verified.append(h)
-    return verified
-
-
-# --------------------------------------------------------------------------------------------------
-# MMA soundness (gate 2) -- orthogonal to the addressing round-trip
-# --------------------------------------------------------------------------------------------------
-
-
-class MmaSoundnessError(RuntimeError):
-    """Raised when a recorded MMA's consumed operands are not a sound, K-aligned pair (the sound MAC)."""
-
-
-def verify_mma_soundness(pipeline: Any) -> int:
-    """Gate 2: every recorded MMA's CONSUMED operand encodings must be sound MMA operands against the
-    canonical machine (``operand_soundness``) AND share a K-distribution (``diagnose_k_match``) -- bundled
-    as ``mma_pair_compatible``. This is the operand-correctness the addressing round-trip is BLIND to: a
-    scrambled/duplicated operand K passes the address gate but is caught here. ``a_canon``/``b_canon`` are
-    the trusted canonical layouts from the MMA definition (``interleaved=False``); ``a_enc``/``b_enc`` are
-    the kernel's own (interleaved) operands. Returns the count verified; raises on the first unsound MMA.
-    Correctness SOT: ``docs/mma_is_machinery.md`` (the three-condition sound MAC).
-    """
-    from ..transforms import mma_pair_compatible
-
-    verified = 0
-    for op in pipeline.ops:
-        if op.kind != "mma":
-            continue
-        d = mma_pair_compatible(op.a_enc, op.b_enc, a_canon=op.a_canon, b_canon=op.b_canon)
-        if d.severity == "error":
-            raise MmaSoundnessError(f"MMA op seq {op.seq}: {d.message}")
-        verified += 1
-    return verified
-
-
-# --------------------------------------------------------------------------------------------------
-# Render driver (Phase C render half) -- map recorded transactions onto the existing FlowStage recipes
+# Render driver (Phase C render half) -- map recorded transactions onto the existing FlowStage recipes.
+# (Gates 1/2 + geometry now live in the analysis package, imported above.)
 # --------------------------------------------------------------------------------------------------
 
 _ARCH_NBANKS = {"gfx90a": 32, "gfx942": 32}
-
-
-def _elem_bytes(dtype_name: str) -> int:
-    from ..emit import _BYTE_WIDTH
-
-    return _BYTE_WIDTH[dtype_name]
-
-
-def _arch_wave(pipeline: Any) -> tuple[str, int]:
-    """The (arch, wave_size) the driver DERIVES from the recording -- either DECLARED by the caller via
-    ``record_build(arch=, wave_size=)`` or captured from a recorded ``TileMma``. Fails loud if neither is
-    present -- NO silent 'gfx90a'/64 fallback."""
-    if pipeline.arch is None or pipeline.wave_size is None:
-        raise ValueError(
-            "pipeline has no arch/wave_size: no TileMma was recorded and none was declared. A kernel with "
-            "no matrix instruction (reduction, scan, elementwise, LDS-combining epilogue) must pass the "
-            "target it already resolved: record_build(build_fn, ..., arch='gfxNNN', wave_size=N).")
-    return pipeline.arch, pipeline.wave_size
 
 
 def _lds_geometry(pipeline: Any, space_id: int, *, tile_k: int):
