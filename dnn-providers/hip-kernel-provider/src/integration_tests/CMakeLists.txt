@@ -173,7 +173,11 @@ endif()
 # feature flags say the engine could be built, the authored content says whether this
 # configuration ships it for gfx950. Pinned by ENGINE_NAME, so a build that does not
 # ship it registers a target whose engine never appears.
-hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+# The predicate lives in HkpPackaging.cmake, which only an ingestor build includes.
+set(_hkp_gfx950_attention_dense FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
    AND HIPKERNELPROVIDER_ENABLE_ROCKE
    AND _hkp_gfx950_attention_dense

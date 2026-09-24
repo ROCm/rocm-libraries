@@ -331,7 +331,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # gfx950. A build with every flag ON but `product` redirected to another bundle
     # would otherwise register an engine-pinned target for an engine that never
     # registers, which fails as a missing engine rather than reading as absent.
-    hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+    # The predicate lives in HkpPackaging.cmake, which only an ingestor build includes.
+    set(_hkp_gfx950_attention_dense FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+    endif()
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
        AND HIPKERNELPROVIDER_ENABLE_ROCKE
        AND _hkp_gfx950_attention_dense
@@ -393,12 +397,15 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # Called in both YAML modes. Under categorization the common file carries the
     # discovery stub; without it there is no common file to append to and only the
     # per-architecture shard files are written, which is what keeps the shards
-    # themselves independent of categorization.
-    hkp_finalize_census_install(
-        COMMON_TEST_FILE   "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-        BINDIR             "${CMAKE_INSTALL_BINDIR}"
-        PLUGIN_ENGINE_DIR  "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}"
-    )
+    # themselves independent of categorization. Only an ingestor build defines it (and
+    # registers any census to materialise).
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_finalize_census_install(
+            COMMON_TEST_FILE   "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            BINDIR             "${CMAKE_INSTALL_BINDIR}"
+            PLUGIN_ENGINE_DIR  "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}"
+        )
+    endif()
 
     # Install the ctest files. When YAML-based categorization is active, install the
     # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's
