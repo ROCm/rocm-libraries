@@ -87,6 +87,34 @@ def relative_path_guard() -> int:
     return 0
 
 
+def ctest_tests(
+    build_root: Path, config: str, pattern: str | None = None
+) -> list[dict]:
+    command = [
+        "ctest",
+        "--test-dir",
+        str(build_root),
+        "-C",
+        config,
+        "--show-only=json-v1",
+    ]
+    if pattern:
+        command += ["-R", pattern]
+    listing = subprocess.run(command, check=True, capture_output=True, text=True)
+    return json.loads(listing.stdout)["tests"]
+
+
+def ctest_ready(build_root: Path, config: str) -> bool:
+    if not (build_root / "CTestTestfile.cmake").is_file():
+        print("\n== ctest: SKIPPED (no configured test build) ==")
+        return False
+    commands = [test.get("command", []) for test in ctest_tests(build_root, config)]
+    if any(command and Path(command[0]).is_file() for command in commands):
+        return True
+    print(f"\n== ctest: SKIPPED (no built registered tests for {config}) ==")
+    return False
+
+
 def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     """Make the native storage comparisons available to both pytest passes."""
     env = dict(os.environ)
@@ -104,22 +132,7 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             ],
             check=True,
         )
-        listing = subprocess.run(
-            [
-                "ctest",
-                "--test-dir",
-                str(build_root),
-                "-C",
-                config,
-                "--show-only=json-v1",
-                "-R",
-                "^rocke_storage$",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        tests = json.loads(listing.stdout)["tests"]
+        tests = ctest_tests(build_root, config, "^rocke_storage$")
         commands = [
             test.get("command", []) for test in tests if test["name"] == "rocke_storage"
         ]
@@ -248,18 +261,14 @@ def main() -> int:
         status |= differential_pytest_pass(pytest_env)
 
     build_root = Path(args.build_root)
-    # Only ctest when the CTest-registered binaries were actually built (the
-    # byte-identity gate builds just `rocke_core`, so a gate-only build dir has the
-    # registration file but no test executables -> running ctest there would
-    # spuriously fail). Gate on the registered tests only; `rocke_smoke` is an
-    # optional build-only target (not an add_test target) so it is not a signal.
-    test_bins = [
-        build_root / "tests" / b
-        for b in ("rocke_ir_serialize_roundtrip", "rocke_tiled_attention_2d_reentrancy")
-    ]
-    if (build_root / "CTestTestfile.cmake").exists() and any(
-        b.exists() for b in test_bins
-    ):
+    # Run the entire registered suite once any executable is built; partial
+    # builds must expose their missing tests rather than silently lose coverage.
+    try:
+        ready = ctest_ready(build_root, args.config)
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        print(f"CTest discovery failed: {exc}", file=sys.stderr)
+        return 1
+    if ready:
         print("\n== ctest ==")
         status |= subprocess.run(
             ["ctest", "-C", args.config, "--output-on-failure", "--no-tests=ignore"],

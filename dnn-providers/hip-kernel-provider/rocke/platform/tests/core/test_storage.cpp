@@ -261,6 +261,61 @@ static int test_empty_storage_load()
     return 0;
 }
 
+static int test_fragment_offset_bounds()
+{
+    const struct
+    {
+        int count, groups;
+        uint64_t k0;
+        bool valid;
+    } cases[] = {{64, 100000000, 0, false},
+                 {64, 1 << 25, 0, true},
+                 {64, 1 << 25, 1, false},
+                 {64, 2, (uint64_t(1) << 31) - 128, true},
+                 {64, 2, (uint64_t(1) << 31) - 127, false},
+                 {16, 100000000, 1500000000, false},
+                 {64, INT32_MAX, 0, false}};
+    for(const char* dtype : {"e8m0", "fp6", "f16"})
+    {
+        const int slot_bits = strcmp(dtype, "f16") == 0 ? 16 : 8;
+        for(const auto& c : cases)
+        {
+            rocke_tensor_storage_t storage;
+            CHECK(rocke_tensor_storage_init(&storage,
+                                            dtype,
+                                            1,
+                                            c.k0 + uint64_t(c.count) * c.groups,
+                                            UINT64_MAX,
+                                            slot_bits,
+                                            0,
+                                            1));
+            rocke_fragment_packing_t fragment;
+            CHECK(rocke_fragment_packing_init(
+                &fragment, &storage.packing, c.count, 32, c.count * slot_bits / 32));
+            rocke_matrix_fragment_layout_t layout;
+            CHECK(rocke_matrix_fragment_layout_init(&layout, &fragment, 16, c.groups, 1));
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "offset_bounds") == ROCKE_OK);
+            auto* ptr = rocke_b_param(
+                &b, "A", rocke_ptr_type(&b, rocke_storage_ir_type(dtype), "global"), NULL);
+            auto* zero = rocke_b_const_i32(&b, 0);
+            const int before = b.kernel->body->num_ops;
+            auto* value = rocke_h_load_matrix_fragment(
+                &b, ptr, zero, zero, c.k0, &storage, &layout, rocke_i32());
+            if(c.valid)
+                CHECK(value && rocke_ir_builder_ok(&b));
+            else
+            {
+                CHECK(!value && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
+                CHECK(strstr(rocke_ir_builder_error(&b), "offset exceeds i32 range"));
+                CHECK(b.kernel->body->num_ops == before);
+            }
+            rocke_ir_builder_free(&b);
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--emit") == 0)
@@ -299,6 +354,7 @@ int main(int argc, char** argv)
     }
     CHECK(test_storage_validation() == 0);
     CHECK(test_empty_storage_load() == 0);
+    CHECK(test_fragment_offset_bounds() == 0);
     CHECK(rocke_dtype_info("e4m3") == rocke_dtype_info("fp8e4m3"));
     CHECK(rocke_dtype_to_ir_type("e4m3") == rocke_fp8e4m3());
     CHECK(rocke_storage_ir_type("e4m3") == rocke_fp8e4m3());

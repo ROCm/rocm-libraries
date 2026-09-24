@@ -28,6 +28,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
     runner, monkeypatch, tmp_path, filename
 ):
     (tmp_path / "CMakeCache.txt").touch()
+    (tmp_path / "CTestTestfile.cmake").touch()
     executable = tmp_path / "Debug" / filename
     executable.parent.mkdir()
     executable.touch()
@@ -69,6 +70,77 @@ def test_runner_passes_registered_fixture_to_both_backends(
         "--target",
         "rocke_storage",
     ]
+    assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
+
+
+@pytest.mark.parametrize("built", ["none", "partial", "all"])
+@pytest.mark.parametrize("ctest_rc", [0, 8])
+def test_ctest_readiness_and_failure_propagation(
+    runner, monkeypatch, tmp_path, capsys, built, ctest_rc
+):
+    (tmp_path / "CTestTestfile.cmake").touch()
+    executable = tmp_path / "Debug" / "renamed.exe"
+    executable.parent.mkdir()
+    if built != "none":
+        executable.touch()
+    commands = [[str(executable)], [] if built != "all" else [str(executable)]]
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        listing = {
+            "tests": [
+                {"name": str(i), "command": cmd} for i, cmd in enumerate(commands)
+            ]
+        }
+        return subprocess.CompletedProcess(
+            command,
+            0 if "--show-only=json-v1" in command else ctest_rc,
+            stdout=json.dumps(listing),
+        )
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+            "--config",
+            "Debug",
+        ],
+    )
+    assert runner.main() == (0 if built == "none" else ctest_rc)
+    executions = [cmd for cmd in calls if cmd[:3] == ["ctest", "-C", "Debug"]]
+    assert len(executions) == (0 if built == "none" else 1)
+    if built == "none":
+        assert "ctest: SKIPPED" in capsys.readouterr().out
+
+
+def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
+    (tmp_path / "CTestTestfile.cmake").touch()
+
+    def run(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+        ],
+    )
+    assert runner.main() == 1
 
 
 def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(

@@ -189,6 +189,47 @@ def test_fragment_load_requires_nonempty_storage(dtype, shape):
         assert "memref.global_load" in serialize(b.kernel)
 
 
+@pytest.mark.parametrize("dtype", ["e8m0", "fp6", "f16"])
+@pytest.mark.parametrize(
+    "count,groups,k0,valid",
+    [
+        (64, 100_000_000, 0, False),
+        (64, 1 << 25, 0, True),
+        (64, 1 << 25, 1, False),
+        (64, 2, (1 << 31) - 128, True),
+        (64, 2, (1 << 31) - 127, False),
+        (16, 100_000_000, 1_500_000_000, False),
+        (64, 0x7FFFFFFF, 0, False),
+    ],
+)
+def test_fragment_offset_bounds(dtype, count, groups, k0, valid):
+    # Padded FP6 and E8M0 use byte units; FP16 uses two-byte pointer units.
+    bits = 16 if dtype == "f16" else 6 if dtype == "fp6" else 8
+    packing = BitPacking(bits, 16 if dtype == "f16" else 8)
+    storage = TensorStorage(
+        dtype, (1, k0 + count * groups), slot_bits=packing.slot_bits
+    )
+    layout = MatrixFragmentLayout(
+        FragmentPacking(packing, count, 32, count * packing.slot_bits // 32),
+        16,
+        groups,
+        1,
+    )
+    b = IRBuilder("offset_bounds")
+    ptr = b.param("A", PtrType(storage_ir_type(dtype), "global"))
+    zero = b.const_i32(0)
+    before = serialize(b.kernel)
+    if valid:
+        assert (
+            load_matrix_fragment(b, ptr, zero, zero, k0, storage=storage, layout=layout)
+            is not None
+        )
+    else:
+        with pytest.raises(ValueError, match="offset exceeds i32 range"):
+            load_matrix_fragment(b, ptr, zero, zero, k0, storage=storage, layout=layout)
+        assert serialize(b.kernel) == before
+
+
 def test_hip_declares_only_encountered_missing_vector_widths():
     source = lower_kernel_to_hip(build_transport("fp6"), arch="gfx1250")
     for name in ("i8x24", "i8x40", "i32x12"):

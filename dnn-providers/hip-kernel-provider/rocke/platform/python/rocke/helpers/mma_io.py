@@ -76,9 +76,12 @@ def load_matrix_fragment(
         raise ValueError("matrix fragment payload must occupy whole carriers")
     chunk_units = layout.chunk_bytes // unit_bytes
     origin_bytes = origin_bits // 8
+    # Bound the last loaded unit across all chunks and lane groups, including k0.
     if (
         origin_bytes // unit_bytes > 0x7FFFFFFF
         or chunk_units * layout.lane_groups > 0x7FFFFFFF
+        or layout.chunks_per_lane
+        > (0x80000000 - origin_bytes // unit_bytes) // chunk_units // layout.lane_groups
     ):
         raise ValueError("matrix fragment offset exceeds i32 range")
     alignment = gcd(

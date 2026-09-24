@@ -91,7 +91,12 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                               "padded matrix fragments currently require i32 carriers");
         const uint64_t chunk_units = chunk_bytes / unit_bytes;
         const uint64_t origin_bytes = origin_bits / 8;
-        if(origin_bytes / unit_bytes > INT_MAX || chunk_units * layout->lane_groups > INT_MAX)
+        // Bound the last loaded unit without overflowing intermediate products.
+        if(origin_bytes / unit_bytes > INT_MAX
+           || chunk_units > uint64_t(INT_MAX) / layout->lane_groups
+           || packing.count / layout->chunk_elements
+                  > (uint64_t(INT_MAX) + 1 - origin_bytes / unit_bytes) / chunk_units
+                        / layout->lane_groups)
             ckc::raise_status(ROCKE_ERR_VALUE, "matrix fragment offset exceeds i32 range");
         int alignment = gcd(gcd(storage->alignment_bytes, storage->row_stride_bytes),
                             gcd(chunk_bytes, origin_bytes));
