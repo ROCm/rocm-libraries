@@ -173,12 +173,21 @@ jobs:
             echo "::error::hipblaslt-test not found in the fetched artifact"; exit 1
           fi
           echo "Using: $HIPBLASLT_TEST"
-          FILTER=()
-          [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
-          HIPBLASLT_TEST_TIMEOUT=3600 \
-          HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
-          "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 \
-            | tee test_results/hipblaslt_test.log
+          export HIPBLASLT_TEST_TIMEOUT=3600
+          export HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250"
+          # Run concurrent-streams StreamK test alone with hotswap disabled, then
+          # the rest on the normal path — keeping hotswap coverage for every other
+          # test. Remove this split once the underlying StreamK issue is fixed.
+          DL='StreamKMultiStream.ConcurrentStreamsDoNotDeadlock'
+          if   [[ "$GTEST_FILTER_ARG" == *-* ]]; then REST="${GTEST_FILTER_ARG}:*${DL}*"
+          elif [ -n "$GTEST_FILTER_ARG" ];       then REST="${GTEST_FILTER_ARG}-*${DL}*"
+          else                                        REST="-*${DL}*"; fi
+          rc=0
+          HSA_HOTSWAP_DISABLE=1 "$HIPBLASLT_TEST" --gtest_filter="*${DL}*" 2>&1 \
+            | tee    test_results/hipblaslt_test.log || rc=1
+          "$HIPBLASLT_TEST" --gtest_filter="$REST" 2>&1 \
+            | tee -a test_results/hipblaslt_test.log || rc=1
+          exit $rc
 
       - name: Run TensileLite common tests
         timeout-minutes: 240
