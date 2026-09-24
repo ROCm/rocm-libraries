@@ -91,11 +91,6 @@ namespace TensileLite
                             // than deferred.
                             lib.solution_list.emplace_back(index, solution);
 
-                            origami::dim3_t origami_cluster_dim = {
-                                static_cast<size_t>(solution->sizeMapping.clusterDim.x),
-                                static_cast<size_t>(solution->sizeMapping.clusterDim.y),
-                                static_cast<size_t>(solution->sizeMapping.clusterDim.z)};
-
                             origami::dim3_t origami_mi;
                             if(solution->sizeMapping.matrixInstruction[0] == 0
                                && solution->sizeMapping.matrixInstruction[1] == 0
@@ -139,7 +134,9 @@ namespace TensileLite
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
-                                .cluster_dim               = origami_cluster_dim,
+                                .cluster_dim               = {solution->sizeMapping.clusterDim.x,
+                                                              solution->sizeMapping.clusterDim.y,
+                                                              solution->sizeMapping.clusterDim.z},
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);

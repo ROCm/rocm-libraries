@@ -641,7 +641,7 @@ struct config_t {
   }
 
   bool is_valid() const {
-    return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0;
+    return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0 && cluster_dim.m > 0 && cluster_dim.n > 0 && cluster_dim.k > 0;
   }
 };
 
