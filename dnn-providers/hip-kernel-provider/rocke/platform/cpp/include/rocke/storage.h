@@ -104,6 +104,7 @@ bool rocke_tensor_storage_init(rocke_tensor_storage_t* out,
                                int slot_bits,
                                uint64_t base_bit_offset,
                                uint64_t alignment_bytes);
+/* Size and address queries validate public descriptors; invalid input returns false. */
 bool rocke_tensor_storage_bytes(const rocke_tensor_storage_t* p, uint64_t* bytes);
 bool rocke_tensor_storage_address(
     const rocke_tensor_storage_t* p, uint64_t row, uint64_t col, uint64_t* byte, int* shift);

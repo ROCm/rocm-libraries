@@ -71,15 +71,22 @@ For example, dense FP6 uses four elements in three bytes; `slot_bits=8` describe
 one six-bit pattern in each byte instead. Both have the same logical dtype.
 Address calculation includes the bit offset, and allocation bounds include the
 partial tail byte. Empty views require no accesses.
+Native size queries, address queries, and fragment loads revalidate the public
+storage descriptor, including dtype/packing consistency, stride, alignment, and
+allocation bounds, because C callers can construct or mutate these structs.
 
 [`storage_ir_type`](../../python/rocke/helpers/mma_io.py) chooses an addressable unit. FP4/FP6 use I8
 units while retaining their logical identities in the storage descriptor.
 This function is deliberately separate from `dtype_to_ir_type`.
+FP8/BF8 retain nominal FP8/BF8 pointer types despite occupying one byte per value.
 
 The fragment loader accepts complete, byte-aligned chunks. It derives load
 alignment from base alignment, row stride, chunk spacing, and origin. A 24-byte
 FP6 chunk becomes 16-byte and 8-byte loads without reading past the chunk.
 Partial fragments and nonzero bit origins are rejected by this initial loader.
+Row strides must also be divisible by the pointer storage unit: an odd-byte
+FP16/BF16 stride is valid generic storage but cannot be loaded through a typed
+two-byte pointer. `row_base` is an element index in those storage units.
 The host bit packer writes a fresh, exclusively owned output buffer; concurrent
 packed stores are not provided.
 

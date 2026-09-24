@@ -33,9 +33,11 @@ static int emit(const char* dtype, bool hip)
 {
     rocke_ir_builder_t b;
     CHECK(rocke_ir_builder_init(&b, "transport") == ROCKE_OK);
-    const bool padded = strcmp(dtype, "fp6_padded") == 0;
+    const bool padded = strstr(dtype, "_padded") != NULL;
     if(padded)
-        dtype = "fp6";
+        dtype = strcmp(dtype, "f16_padded") == 0    ? "f16"
+                : strcmp(dtype, "bf16_padded") == 0 ? "bf16"
+                                                    : "fp6";
     bool patterns = strncmp(dtype, "pack_", 5) == 0;
     const auto* unit = patterns ? rocke_i8() : rocke_storage_ir_type(dtype);
     CHECK(unit);
@@ -64,7 +66,7 @@ static int emit(const char* dtype, bool hip)
     {
         rocke_tensor_storage_t storage;
         CHECK(rocke_tensor_storage_init(
-            &storage, dtype, 16, 128, padded ? 97 : UINT64_MAX, 0, 0, 16));
+            &storage, dtype, 16, 128, padded ? (typed ? 258 : 97) : UINT64_MAX, 0, 0, 16));
         rocke_matrix_fragment_layout_t layout;
         if(typed)
         {
@@ -76,7 +78,7 @@ static int emit(const char* dtype, bool hip)
         }
         else
             layout = rocke_scaled_matrix_layout(dtype, 16);
-        auto* base = rocke_b_const_i32(&b, 0);
+        auto* base = rocke_b_const_i32(&b, padded ? (typed ? 129 : 97) : 0);
         auto* thread = rocke_b_thread_id_x(&b);
         auto* lane = rocke_b_mod(&b, thread, rocke_b_const_i32(&b, 32));
         auto* group = rocke_b_div(&b, lane, rocke_b_const_i32(&b, 16));
@@ -112,12 +114,127 @@ static int emit(const char* dtype, bool hip)
     return 0;
 }
 
+static int test_storage_validation()
+{
+    rocke_tensor_storage_t storage;
+    CHECK(rocke_tensor_storage_init(&storage, "fp6", 16, 128, 97, 0, 0, 16));
+    const auto layout = rocke_scaled_matrix_layout("fp6", 16);
+    for(int defect = 0; defect < 10; ++defect)
+    {
+        auto invalid = storage;
+        switch(defect)
+        {
+        case 0:
+            invalid.dtype = NULL;
+            break;
+        case 1:
+            invalid.dtype = rocke_dtype_info("fp8");
+            break;
+        case 2:
+            invalid.packing.element_bits = 0;
+            break;
+        case 3:
+            invalid.packing.slot_bits = 0;
+            break;
+        case 4:
+            invalid.packing.slot_bits = 4;
+            break;
+        case 5:
+            invalid.row_stride_bytes = 95;
+            break;
+        case 6:
+            invalid.alignment_bytes = 0;
+            break;
+        case 7:
+            invalid.alignment_bytes = 3;
+            break;
+        case 8:
+            invalid.rows = UINT64_MAX;
+            break;
+        case 9:
+            invalid.base_bit_offset = UINT64_MAX;
+            break;
+        }
+        uint64_t bytes;
+        int shift;
+        CHECK(!rocke_tensor_storage_bytes(&invalid, &bytes));
+        CHECK(!rocke_tensor_storage_address(&invalid, 0, 0, &bytes, &shift));
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "invalid_storage") == ROCKE_OK);
+        auto* ptr = rocke_b_param(&b, "A", rocke_ptr_type(&b, rocke_i8(), "global"), NULL);
+        auto* zero = rocke_b_const_i32(&b, 0);
+        CHECK(
+            !rocke_h_load_matrix_fragment(&b, ptr, zero, zero, 0, &invalid, &layout, rocke_i32()));
+        CHECK(!rocke_ir_builder_ok(&b));
+        rocke_ir_builder_free(&b);
+        if(defect < 8)
+        {
+            invalid.rows = 0;
+            CHECK(!rocke_tensor_storage_bytes(&invalid, &bytes));
+        }
+    }
+    for(const char* dtype : {"f16", "bf16", "fp8", "bf8"})
+    {
+        const auto* unit = rocke_storage_ir_type(dtype);
+        CHECK(unit && !rocke_type_eq(unit, rocke_i8()));
+        const bool typed = strcmp(dtype, "f16") == 0 || strcmp(dtype, "bf16") == 0;
+        rocke_tensor_storage_t direct = {rocke_dtype_info(dtype),
+                                         2,
+                                         128,
+                                         typed ? 257u : 129u,
+                                         0,
+                                         1,
+                                         {typed ? 16 : 8, typed ? 16 : 8}};
+        uint64_t bytes;
+        int shift;
+        CHECK(rocke_tensor_storage_bytes(&direct, &bytes));
+        CHECK(rocke_tensor_storage_address(&direct, 1, 0, &bytes, &shift));
+        CHECK(bytes == direct.row_stride_bytes && shift == 0);
+        rocke_matrix_fragment_layout_t fragment;
+        if(typed)
+        {
+            rocke_fragment_packing_t packing;
+            CHECK(rocke_fragment_packing_init(&packing, &direct.packing, 32, 16, 32));
+            CHECK(rocke_matrix_fragment_layout_init(&fragment, &packing, 16, 2, 16));
+        }
+        else
+            fragment = rocke_scaled_matrix_layout(dtype, 16);
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "invalid_pointer_units") == ROCKE_OK);
+        auto* ptr
+            = rocke_b_param(&b, "A", rocke_ptr_type(&b, typed ? unit : rocke_i8(), "global"), NULL);
+        auto* zero = rocke_b_const_i32(&b, 0);
+        CHECK(!rocke_h_load_matrix_fragment(
+            &b, ptr, zero, zero, 0, &direct, &fragment, typed ? unit : rocke_i32()));
+        CHECK(!rocke_ir_builder_ok(&b));
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--emit") == 0)
         return emit(argv[2], false);
     if(argc == 3 && strcmp(argv[1], "--hip") == 0)
         return emit(argv[2], true);
+    CHECK(test_storage_validation() == 0);
+    for(const char* elem_type : {"unknown", "fp4e2m1"})
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "invalid_element") == ROCKE_OK);
+        auto* ptr = rocke_b_param(&b, "A", rocke_ptr_type(&b, rocke_i8(), "global"), NULL);
+        auto* value = rocke_b_global_load_vN(&b, ptr, rocke_b_const_i32(&b, 0), rocke_i8(), 16, 16);
+        CHECK(value);
+        rocke_attr_set_str(&b, &value->op->attrs, "elem_type", elem_type);
+        rocke_strbuf_t text;
+        CHECK(rocke_strbuf_init(&text, 256) == 0);
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx1250";
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_ERR_KEY);
+        rocke_strbuf_free(&text);
+        rocke_ir_builder_free(&b);
+    }
     for(int alignment : {0, -1, -16, 3, 24})
     {
         rocke_ir_builder_t b;

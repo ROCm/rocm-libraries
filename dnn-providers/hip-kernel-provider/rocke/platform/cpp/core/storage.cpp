@@ -196,7 +196,7 @@ bool rocke_tensor_storage_init(rocke_tensor_storage_t* out,
     p.row_stride_bytes = row_stride_bytes == UINT64_MAX ? row_bytes : row_stride_bytes;
     p.base_bit_offset = base_bit_offset;
     p.alignment_bytes = alignment_bytes;
-    if(p.row_stride_bytes < row_bytes || !rocke_tensor_storage_bytes(&p, &bytes))
+    if(!rocke_tensor_storage_bytes(&p, &bytes))
         return false;
     *out = p;
     return true;
@@ -204,22 +204,28 @@ bool rocke_tensor_storage_init(rocke_tensor_storage_t* out,
 
 bool rocke_tensor_storage_bytes(const rocke_tensor_storage_t* p, uint64_t* bytes)
 {
-    if(!p || !bytes || !valid(&p->packing))
+    uint64_t row_bytes, prefix;
+    if(!p || !bytes || !p->dtype || !valid(&p->packing)
+       || rocke_dtype_info(p->dtype->name) != p->dtype
+       || p->packing.element_bits != p->dtype->encoded_bits || !p->alignment_bytes
+       || (p->alignment_bytes & (p->alignment_bytes - 1))
+       || !rocke_bit_packing_bytes(&p->packing, p->cols, p->base_bit_offset, &row_bytes)
+       || p->row_stride_bytes < row_bytes)
         return false;
     if(!p->rows || !p->cols)
     {
         *bytes = 0;
         return true;
     }
-    uint64_t row_bytes, prefix;
-    return rocke_bit_packing_bytes(&p->packing, p->cols, p->base_bit_offset, &row_bytes)
-           && mul(p->rows - 1, p->row_stride_bytes, &prefix) && add(prefix, row_bytes, bytes);
+    return mul(p->rows - 1, p->row_stride_bytes, &prefix) && add(prefix, row_bytes, bytes);
 }
 
 bool rocke_tensor_storage_address(
     const rocke_tensor_storage_t* p, uint64_t row, uint64_t col, uint64_t* byte, int* shift)
 {
-    if(!p || !byte || !shift || row >= p->rows || col >= p->cols)
+    uint64_t bytes;
+    if(!byte || !shift || !rocke_tensor_storage_bytes(p, &bytes) || row >= p->rows
+       || col >= p->cols)
         return false;
     uint64_t bits, prefix;
     if(!rocke_bit_packing_offset(&p->packing, col, &bits) || !add(bits, p->base_bit_offset, &bits)

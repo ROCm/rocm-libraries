@@ -43,7 +43,8 @@ def load_matrix_fragment(
 ) -> Value:
     """Load whole-byte chunks directly into the atom's carrier vector.
 
-    row_base counts pointer storage units. lane_group is derived from the atom's
+    row_base counts pointer storage units, which must divide the row stride.
+    lane_group is derived from the atom's
     lane mapping by the caller. Partial chunks and nonzero bit origins reject.
     """
     packing = layout.fragment
@@ -61,7 +62,11 @@ def load_matrix_fragment(
     if k0 < 0 or k0 + span > storage.shape[1]:
         raise ValueError("matrix fragment exceeds the packed row")
     origin_bits = storage.packing.bit_offset(k0)
-    if origin_bits % (8 * unit_bytes) or layout.chunk_bytes % unit_bytes:
+    if (
+        origin_bits % (8 * unit_bytes)
+        or layout.chunk_bytes % unit_bytes
+        or storage.row_stride_bytes % unit_bytes
+    ):
         raise ValueError("matrix fragment is not aligned to pointer storage units")
     if dtype_info(carrier_type.name).encoded_bits != packing.carrier_bits:
         raise ValueError("matrix carrier type width mismatch")

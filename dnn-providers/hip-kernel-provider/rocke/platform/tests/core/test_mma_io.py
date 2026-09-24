@@ -37,6 +37,8 @@ CASES = [
     "bf8",
     "f16",
     "bf16",
+    "f16_padded",
+    "bf16_padded",
     "pack_fp6_cross_word",
     "pack_scale_bytes_i32",
     "pack_scale_bytes_i64",
@@ -45,8 +47,8 @@ CASES = [
 
 def build_transport(dtype):
     b = IRBuilder("transport")
-    padded = dtype == "fp6_padded"
-    dtype = "fp6" if padded else dtype
+    padded = dtype.endswith("_padded")
+    dtype = dtype.removesuffix("_padded")
     patterns = dtype.startswith("pack_")
     unit = I8 if patterns else storage_ir_type(dtype)
     typed = dtype in ("f16", "bf16")
@@ -69,7 +71,7 @@ def build_transport(dtype):
         storage = TensorStorage(
             dtype,
             (16, 128),
-            row_stride_bytes=97 if padded else None,
+            row_stride_bytes=(258 if typed else 97) if padded else None,
             alignment_bytes=16,
         )
         layout = (
@@ -77,7 +79,7 @@ def build_transport(dtype):
             if typed
             else scaled_matrix_layout(dtype, 16)
         )
-        base = b.const_i32(0)
+        base = b.const_i32((129 if typed else 97) if padded else 0)
         lane = b.mod(b.thread_id_x(), b.const_i32(32))
         group = b.div(lane, b.const_i32(16))
         value = load_matrix_fragment(
@@ -155,6 +157,57 @@ def test_hip_declares_only_encountered_missing_vector_widths():
     source = lower_kernel_to_hip(build_transport("f16"), arch="gfx1250")
     assert source.count("using f16x32 =") == 1
     assert "using i8x24 =" not in source
+
+
+@pytest.mark.parametrize("dtype", ["f16", "bf16"])
+def test_reject_row_stride_not_in_pointer_units(dtype):
+    b = IRBuilder("odd_stride")
+    unit = storage_ir_type(dtype)
+    ptr = b.param("A", PtrType(unit, "global"))
+    zero = b.const_i32(0)
+    before = serialize(b.kernel)
+    with pytest.raises(ValueError, match="aligned to pointer storage units"):
+        load_matrix_fragment(
+            b,
+            ptr,
+            zero,
+            zero,
+            0,
+            storage=TensorStorage(dtype, (2, 64), row_stride_bytes=129),
+            layout=MatrixFragmentLayout(
+                FragmentPacking(BitPacking(16), 32, 16, 32), 16, 2, 16
+            ),
+            carrier_type=unit,
+        )
+    assert serialize(b.kernel) == before
+
+
+@pytest.mark.parametrize("dtype", ["fp8", "bf8"])
+def test_byte_width_does_not_erase_pointer_identity(dtype):
+    assert storage_ir_type(dtype) != I8
+    b = IRBuilder("nominal_pointer")
+    ptr = b.param("A", PtrType(I8, "global"))
+    zero = b.const_i32(0)
+    with pytest.raises(ValueError, match="pointer storage type mismatch"):
+        load_matrix_fragment(
+            b,
+            ptr,
+            zero,
+            zero,
+            0,
+            storage=TensorStorage(dtype, (16, 128)),
+            layout=scaled_matrix_layout(dtype, 16),
+        )
+
+
+@pytest.mark.parametrize("elem_type", ["unknown", "fp4e2m1"])
+def test_hip_rejects_unsupported_vector_element(elem_type):
+    b = IRBuilder("invalid_element")
+    ptr = b.param("A", PtrType(I8, "global"))
+    value = b.global_load_vN(ptr, b.const_i32(0), I8, 16)
+    value.op.attrs["elem_type"] = elem_type
+    with pytest.raises(NotImplementedError, match="unsupported element type"):
+        lower_kernel_to_hip(b.kernel, arch="gfx1250")
 
 
 @pytest.mark.parametrize(

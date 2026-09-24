@@ -45,6 +45,9 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
         if(!storage || !storage->dtype || !layout || !carrier_type || !ptr || !row_base
            || !lane_group)
             ckc::raise_status(ROCKE_ERR_VALUE, "null matrix fragment argument");
+        uint64_t storage_bytes;
+        if(!rocke_tensor_storage_bytes(storage, &storage_bytes))
+            ckc::raise_status(ROCKE_ERR_VALUE, "invalid tensor storage descriptor");
         const auto& packing = layout->fragment;
         rocke_matrix_fragment_layout_t checked;
         if(!rocke_matrix_fragment_layout_init(&checked,
@@ -69,7 +72,8 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
         uint64_t origin_bits, chunk_bytes;
         if(!rocke_bit_packing_offset(&storage->packing, k0, &origin_bits)
            || !rocke_bit_packing_bytes(&packing.packing, layout->chunk_elements, 0, &chunk_bytes)
-           || origin_bits % (8 * unit_bytes) || chunk_bytes % unit_bytes)
+           || origin_bits % (8 * unit_bytes) || chunk_bytes % unit_bytes
+           || storage->row_stride_bytes % unit_bytes)
             ckc::raise_status(ROCKE_ERR_VALUE,
                               "matrix fragment is not aligned to pointer storage units");
         const rocke_dtype_info_t* carrier_info = rocke_dtype_info(carrier_type->name);

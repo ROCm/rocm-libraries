@@ -80,6 +80,13 @@ def test_storage_rows_offsets_and_empty_views():
         TensorStorage("fp4", (1, 4), alignment_bytes=3)
 
 
+@pytest.mark.parametrize("dtype", ["f16", "bf16"])
+def test_storage_allows_byte_strides(dtype):
+    storage = TensorStorage(dtype, (2, 64), row_stride_bytes=129)
+    assert storage.address(1, 0) == (129, 0)
+    assert storage.byte_size == 257
+
+
 def test_invalid_packing_and_overflow():
     for bits, slots in [(0, None), (65, None), (6, 4)]:
         with pytest.raises(ValueError):
