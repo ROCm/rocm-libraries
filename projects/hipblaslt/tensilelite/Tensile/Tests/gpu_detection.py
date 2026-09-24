@@ -27,7 +27,9 @@ GPU architecture detection for TensileLite unit and common tests.
 """
 
 import os
+import re
 import subprocess
+from typing import Optional
 
 
 def get_available_archs() -> list[str]:
@@ -62,3 +64,35 @@ def get_available_archs() -> list[str]:
 def has_arch(target: str) -> bool:
     """Check if a specific GPU architecture is available."""
     return any(target in arch for arch in get_available_archs())
+
+
+def visible_device_count() -> int:
+    """Number of devices HIP will expose to this process.
+
+    detectAvailableGpus() counts every physical GPU in the machine and ignores
+    ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES. Runners that isolate one GPU
+    with those variables (rather than docker --device) would be over-counted.
+    """
+    counts = [
+        len([d for d in value.split(",") if d.strip()])
+        for value in (os.environ.get("ROCR_VISIBLE_DEVICES"),
+                      os.environ.get("HIP_VISIBLE_DEVICES"))
+        if value is not None
+    ]
+    if counts:
+        return min(counts)
+
+    from Tensile.ParallelExecution import detectAvailableGpus
+    return detectAvailableGpus()
+
+
+def worker_gpu_index(worker_id: str) -> Optional[int]:
+    """HIP device index for a pytest-xdist worker id such as 'gw3'.
+
+    Workers wrap around the visible devices, so on a one-GPU runner every
+    worker gets index 0. Returns None if worker_id has no numeric part.
+    """
+    match = re.search(r"\d+", worker_id)
+    if not match:
+        return None
+    return int(match.group()) % visible_device_count()
