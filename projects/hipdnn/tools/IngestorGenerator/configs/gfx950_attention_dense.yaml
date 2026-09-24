@@ -1,0 +1,123 @@
+# Worked example: a real rocKE kernel packaged for gfx950.
+#
+# The dense flash-attention prefill kernel from
+# rocke/library/kernels/gfx950/attention_dense.py in the PACKAGED dialect: hkp_pack
+# lowers the named builder through comgr at build time and rewrites the shipped
+# descriptor to `kind: kpack` before the runtime loader sees it, so nothing dispatches
+# `rocke` at runtime.
+#
+# gfx950 is not a requirement: both the gfx942 and gfx950 builders satisfy hkp_pack's
+# `_require_spec_arch_signature` `(spec, *, arch)` contract.
+#
+# Every `spec` value below is a field of AttentionDenseSpec. The six without defaults
+# (batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, head_size) are MANDATORY:
+# hkp_pack hydrates with Spec(**fields), so a missing one is a TypeError at pack time.
+#
+# Verify the builder before packing, from the IngestorGenerator root so
+# `codegen` is importable:
+#     .venv/bin/python -c "from codegen.sources import introspect; \
+#         print(introspect('kernels/gfx950/attention_dense.py', \
+#                          'build_attention_dense').signature_error or 'OK')"
+
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_dense
+
+engine:
+  name: hkp_example:gfx950_attention_dense
+  sdk_version: "1.0.0"
+  knobs: [block_n]
+  heuristic: native
+
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: head_size
+    type: int
+    default_value: 128
+  - name: num_query_heads
+    type: int
+    default_value: 8
+  - name: num_kv_heads
+    type: int
+    default_value: 8
+  - name: seqlen_q
+    type: int
+    default_value: 256
+  - name: seqlen_kv
+    type: int
+    default_value: 256
+  - name: causal
+    type: int
+    default_value: 1
+  - name: block_n
+    type: int
+    default_value: 64
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: rocke
+workspace_policy: none
+
+packs:
+  - name: attention_dense
+    # Required in the packaged dialect: hkp_pack uses it to pick the shard.
+    arch: [gfx950]
+    kernels:
+      - name: attention_dense.bf16_d128_hq8_kv8_sq256.gfx950
+        kernel_source:
+          kind: rocke
+          # A DOTTED PYTHON MODULE PATH resolved through the importable
+          # `kernels` package -- NOT a file under the descriptor root. The rocKE
+          # folder ships no sources for exactly this reason.
+          source: kernels/gfx950/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 256
+            seqlen_kv: 256
+            num_query_heads: 8
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 8
+          num_kv_heads: 8
+          seqlen_q: 256
+          seqlen_kv: 256
+          causal: 1
+          block_n: 64
+        priority: 0
+
+# What the COMPILER specialized on, carried once by each emitted KDP as
+# provenance.specialization_contract and inherited by the kernels under it.
+#
+# Every field below is a field of AttentionDenseSpec, hydrated by hkp_pack with
+# Spec(**fields) and handed to `build_attention_dense`, so each reached the compiler and
+# is bound to the spec attribute it was read from. Calling any of them matcher-only would
+# drop it from the agreement check while it kept deciding the binary.
+#
+# `dtype` needs a translation because the matcher compares the hipDNN spelling while the
+# spec carries the builder's. The map covers both spellings the layers use, not only the
+# one this pack ships: a vocabulary stopping at the shipped variants turns the first fp16
+# kernel added here into a phantom disagreement.
+specialization:
+  metadata_fields:
+    [dtype, head_size, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, causal, block_n]
+  matcher_only_fields: []
+  bindings:
+    dtype: {field: dtype}
+    head_size: {field: head_size}
+    num_query_heads: {field: num_query_heads}
+    num_kv_heads: {field: num_kv_heads}
+    seqlen_q: {field: seqlen_q}
+    seqlen_kv: {field: seqlen_kv}
+    causal: {field: causal}
+    block_n: {field: block_n}
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}

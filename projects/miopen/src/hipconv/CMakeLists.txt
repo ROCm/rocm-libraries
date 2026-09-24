@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
 
+# The GPU hipconv offloads to when a build names none that hipconv serves.
+#
+# gfx942 is cdna3's target, and cdna3 has no kernels of its own, so every other
+# architecture's entry guards discard their bodies on it. docs/architecture-guards.md says
+# why the stand-in must be a GPU hipconv declares.
+set(HIPCONV_BASELINE_GPU gfx942)
+
 # Take the GPU list from GPU_TARGETS, which is what a ROCm consumer sets.
 #
 # Enabling the HIP language is what fills CMAKE_HIP_ARCHITECTURES, from the build
@@ -20,13 +27,13 @@ if(NOT CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
     if(_hipconv_gpus)
         set(CMAKE_HIP_ARCHITECTURES "${_hipconv_gpus}")
     else()
-        # gfx942 is hipconv's cdna3 target, which declares no kernels of its own, so it
-        # is the cheapest stand-in. Detecting the build machine's devices instead would
-        # compile kernels for GPUs this build was never asked to serve.
+        # Detecting the build machine's devices instead would compile kernels for GPUs
+        # this build was never asked to serve.
         message(WARNING
-            "hipconv: no GPU_TARGETS entry is an offload target; building for gfx942. "
+            "hipconv: no GPU_TARGETS entry is an offload target; building for "
+            "${HIPCONV_BASELINE_GPU}. "
             "Set CMAKE_HIP_ARCHITECTURES to name the GPUs hipconv should serve.")
-        set(CMAKE_HIP_ARCHITECTURES gfx942)
+        set(CMAKE_HIP_ARCHITECTURES ${HIPCONV_BASELINE_GPU})
     endif()
 endif()
 
@@ -80,6 +87,21 @@ endif()
 option(HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ
     "Build the experimental cdna4 depthwise 2D patch-Toeplitz kernel (slower than 1D; not auto-selected)" OFF)
 
+# Device LTO costs up to 8x on these kernels.
+#
+# Some clang versions default the AMDGCN LTO mode to full, and the register allocator then
+# spills into the software-pipelined inner loops of the direct, direct_l1 and
+# direct_wgrad families. The code is correct, so it passes CI, but performance is destroyed.
+# ROCm/llvm-project#4434 has the report.
+#
+# Set with target_compile_options rather than appended to CMAKE_HIP_FLAGS: a consumer may
+# compile these sources as CXX, and MIOpen does, so HIP flags never reach them. Must
+# precede the arch subdirectories, since hipconv_add_arch_lib reads it.
+option(HIPCONV_OFFLOAD_LTO "Use the compiler's LTO default" OFF)
+if(NOT HIPCONV_OFFLOAD_LTO)
+    set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
+endif()
+
 # Every arch in the tree is built, whatever this build targets: the set of arch
 # directories is a property of the snapshot, the GPU list is not.
 file(GLOB _hipconv_arch_directories RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "src/arch/*")
@@ -101,6 +123,7 @@ endforeach()
 if(NOT _arch_targets)
     message(FATAL_ERROR "hipconv: no architectures found under src/arch")
 endif()
+hipconv_set_stand_in_offload("${_arch_targets}")
 
 # ---- hipconv static library ----
 set(_arch_registry "src/arch_registry.cpp")
@@ -136,7 +159,8 @@ target_include_directories(hipconv
 # Position-independent so the static lib can link into libMIOpen.so
 set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
-target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
+                                       ${HIPCONV_DEVICE_COMPILE_OPTIONS})
 if(HIPCONV_ENABLE_POINTWISE)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
     target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_POINTWISE)

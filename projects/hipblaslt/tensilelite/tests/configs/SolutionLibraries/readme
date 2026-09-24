@@ -9,4 +9,12 @@ SolutionLibraries:
 ../Tensile/bin/TensileCreateLibrary  --library-format=yaml --no-lazy-library-loading ${HIPBLASLT_DIR}/tensilelite/tests/configs/mixed_configs/ . HIP
 ../Tensile/bin/TensileCreateLibrary  --library-format=msgpack --no-lazy-library-loading ${HIPBLASLT_DIR}/tensilelite/tests/configs/mixed_configs/ . HIP
 
+KernelsLite.dat is a small (9-solution) master library used by
+IndexedLibraryLoad_test, which converts it to the indexed (format_version 2)
+layout in process and checks the two loads agree. Any small master library works
+here; the only requirement is that it carries every field the current
+serialization marks required, so it needs regenerating with the msgpack command
+above whenever a required field is added. A fixture that has fallen behind makes
+those tests skip with a message rather than fail.
+
 All libraries are checked in as .gz to reduce checkout size

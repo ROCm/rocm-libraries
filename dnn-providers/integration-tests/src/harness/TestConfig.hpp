@@ -139,6 +139,7 @@ struct TestConfigOptions
     std::optional<VerificationMode> verificationMode;
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
+    bool writeSupportClaims = false;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -205,6 +206,9 @@ public:
             instance._testSettings.emplace(*opts.configPath);
         }
 
+        instance._enforceSupportClaims = opts.enforceSupportClaims;
+        instance._writeSupportClaims = opts.writeSupportClaims;
+
         // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
         auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
@@ -217,10 +221,19 @@ public:
             instance._allowBundles = true;
         }
 
+        // Bundles are the only thing that carries a support claim, so a write run
+        // with bundle registration off would walk zero graphs, write zero files and
+        // still exit 0 — a silent no-op that reads as success. This sits after the
+        // env override so that neither an omitted --allow-bundles nor a stray
+        // HIPDNN_TEST_ALLOW_BUNDLES=0 in the environment can reintroduce it.
+        if(instance._writeSupportClaims)
+        {
+            instance._allowBundles = true;
+        }
+
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._captureDir = std::move(opts.captureDir);
-        instance._enforceSupportClaims = opts.enforceSupportClaims;
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -326,6 +339,20 @@ public:
         return _testSettings->findToleranceOverride(testName);
     }
 
+    // Find a validator override for one output tensor of the given test.
+    // Returns std::nullopt if no config loaded or nothing matches, which means the
+    // default allclose comparison.
+    std::optional<ValidatorOverride> findValidatorOverride(std::string_view testName,
+                                                           std::string_view tensorLabel) const
+    {
+        throwIfNotInitialized();
+        if(!_testSettings.has_value())
+        {
+            return std::nullopt;
+        }
+        return _testSettings->findValidatorOverride(testName, tensorLabel);
+    }
+
     // Raw gcnArchName for device 0 detected at init time (e.g.
     // "gfx942:sramecc+:xnack-"). Empty if detection failed.
     const std::string& getCurrentArch() const
@@ -407,6 +434,12 @@ public:
         return _enforceSupportClaims;
     }
 
+    bool writeSupportClaims() const
+    {
+        throwIfNotInitialized();
+        return _writeSupportClaims;
+    }
+
     bool hasCaptureDir() const
     {
         throwIfNotInitialized();
@@ -449,6 +482,7 @@ private:
     bool _skipGraphValidation = false;
     bool _allowBundles = false;
     bool _enforceSupportClaims = false;
+    bool _writeSupportClaims = false;
     bool _initialized = false;
 };
 

@@ -23,15 +23,25 @@ class IntegrationHipdnnDynamicBackendWrapper : public testing::Test
 protected:
     void SetUp() override
     {
+        // If this build supplies the backend, loading failures must fail rather than skip.
+#ifdef HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+        ASSERT_NE(hipdnn_frontend::detail::backendLibraryHandle(), nullptr)
+            << "the hipDNN backend library was built, but could not be loaded";
+#else
         if(hipdnn_frontend::detail::backendLibraryHandle() == nullptr)
         {
             GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
         }
+#endif
 
         _backend = hipdnn_frontend::detail::hipdnnBackend();
         if(_backend->versionString()[0] == '\0')
         {
+#ifdef HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+            FAIL() << "hipDNN backend library was found, but runtime symbol loading failed";
+#else
             GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
+#endif
         }
     }
 

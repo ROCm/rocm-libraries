@@ -151,9 +151,10 @@ namespace TensileLite
             int numToSort = std::min(numSolutions, int(solution_ranking.size()));
             rv.reserve(numToSort);
             auto it = solution_ranking.begin(), it_end = solution_ranking.end();
-            // Snapshot the batch end. `it != it + numToSort` is always true while
-            // numToSort > 0 and walks off the vector once softwarePredicate (USO)
-            // starts skipping ranked kernels.
+            // Snapshot the batch end in `batch_end`: `it != it + numToSort`
+            // re-evaluates the bound against the advancing `it`, so it degenerates
+            // to `numToSort != 0` and the loop runs off the vector whenever fewer
+            // than numToSort of the ranked kernels are accepted.
             while(it != it_end && numToSort > 0)
             {
                 const int remaining = static_cast<int>(it_end - it);
@@ -164,12 +165,26 @@ namespace TensileLite
                 {
                     auto const& solution = *it->second;
                     Task        task(hardware, problem, *solution);
-                    if((*solution->hardwarePredicate)(hardware)
-                       && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                            task,
-                                            hardware,
-                                            *solution,
-                                            problem))
+                    // The uniform-summation-order arm adds hardwarePredicate plus
+                    // softwarePredicate(DEFAULT), which subsumes problemPredicate and adds
+                    // taskPredicate and the StreamK dynamic-queue check -- both reject
+                    // kernels accepted before the per-tile split mapping was added. With
+                    // that mode off, restore the narrower filter: problemPredicate alone.
+                    bool accept;
+                    if(problem.getParams().uniformSummationOrder())
+                    {
+                        accept = (*solution->hardwarePredicate)(hardware)
+                                 && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                      task,
+                                                      hardware,
+                                                      *solution,
+                                                      problem);
+                    }
+                    else
+                    {
+                        accept = (*solution->problemPredicate)(problem);
+                    }
+                    if(accept)
                     {
                         rv.emplace_back(solution);
                         --numToSort;

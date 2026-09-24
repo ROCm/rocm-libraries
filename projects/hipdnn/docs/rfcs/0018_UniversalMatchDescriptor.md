@@ -319,10 +319,11 @@ then N, which is NHWC.
   `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[3, 0, 2, 1]`
   (A.5). The array remains the single canonical form. The four convolution aliases are exactly the
   layouts `validateSupportedLayout` accepts today: NCHW/NHWC at rank 4, NCDHW/NDHWC at rank 5
-  (`ApplicabilityChecks.cpp:76`). The `bhsd` and `bshd` aliases are additions for the attention
-  families, which that oracle never covered. An alias is a whole-array comparison, so it inherits
-  the tie caveat below; a family that must separate BSHD from BHSD at a unit head count does not
-  use one.
+  (`ApplicabilityChecks.cpp:76`). The `bhsd` / `bshd` and the matmul `mk` / `km` / `bmk` / `bkm`
+  aliases are additions for the attention and GEMM families, which that oracle never covered. An
+  alias is a whole-array comparison, so it inherits the tie caveat below; a family that must
+  separate BSHD from BHSD at a unit head count does not use one. A packing that is a different
+  array at each rank has no alias and is written as an array (A.4).
 - **The encoding is lossy under stride ties.** `extractStrideOrder` sorts axes by descending
   stride and breaks equal strides by original position, so a tensor with a **unit extent** encodes
   identically under two layouts that disagree on that axis's stride. Over `dims [4,1,256,64]`,
@@ -1238,14 +1239,27 @@ matching
 |---|---|---|---|---|
 | `nchw` | `[3,2,1,0]` | | `bhsd` | `[3,2,1,0]` |
 | `nhwc` | `[3,0,2,1]` | | `bshd` | `[3,1,2,0]` |
-| `ncdhw` | `[4,3,2,1,0]` | | `ndhwc` | `[4,0,3,2,1]` |
+| `ncdhw` | `[4,3,2,1,0]` | | `mk` | `[1,0]` |
+| `ndhwc` | `[4,0,3,2,1]` | | `km` | `[0,1]` |
+| | | | `bmk` | `[2,1,0]` |
+| | | | `bkm` | `[2,0,1]` |
 
-Every alias is fixed-rank. An alias compared against a tensor the criteria pin to a different rank
-is refused at compile, rather than declining silently at match time.
+A name lists the tensor's logical axes slowest-varying first, which is how
+`nchw` reads. The matmul names follow: `mk` is a row-major operand `(M, K)`, `km` its
+column-major spelling, and `bmk` / `bkm` the rank-3 batched forms.
 
-`bhsd` and `nchw` expand to the same permutation. That is not a duplicate entry: the arrays are
-stride ranks over a logical axis order, and the two names give the same packing over differently
-named axes, so an author writes whichever names the axes their family thinks in. The pair also
+Every name in that table is one fixed array, which is what lets the compile pass expand it before
+any tensor is in hand. An alias compared against a tensor the criteria pin to a different rank is
+refused at compile, rather than declining silently at match time.
+
+A packing that is a different array at each rank therefore has no name. `mk` / `km` cover a rank-2
+operand and `bmk` / `bkm` a rank-3 one; a matmul operand with more than one leading batch
+dimension writes its stride order as an array, `[3,2,0,1]` for a column-major rank-4 operand.
+
+`bhsd` and `nchw` expand to the same permutation, as do `bmk` and a rank-3 channel-first
+convolution. That is not a duplicate entry: the arrays are stride ranks over a logical axis order,
+and the names give the same packing over differently named axes, so an author writes whichever
+names the axes their family thinks in. The `bhsd` / `nchw` pair also
 shows what an alias cannot do. Because an alias is a whole-array comparison, it inherits
 [§5](#5-layout-and-stride-order-criteria)'s tie caveat: at a unit head extent a BSHD tensor also
 encodes as `[3,2,1,0]`, so `{"==": ["$k.stride_order", "bshd"]}` declines a correct BSHD tensor

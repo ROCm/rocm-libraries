@@ -194,6 +194,7 @@ from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
+    check_dense_spec_preflight,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
@@ -363,8 +364,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     # use_exp2_fast: force the P2 single-instruction exp2 on/off.
     #   None (default) -> :func:`_use_exp2_fast`, which owns the measured verdict
-    #   (on for all configs except short-sequence bf16 head_dim=128, which reverts
-    #   to plain exp2 -- see _use_exp2_fast for the seqlen gate).
+    #   (on for all configs except bf16 head_dim=128 on the default grid, which
+    #   reverts to plain exp2 -- see _use_exp2_fast for the grid gate).
     #   Numerically safe in both directions here -- both softmax arguments are
     #   always <= 0 -- so correctness never depends on it; the gate is pure perf.
     use_exp2_fast: bool | None = None
@@ -435,7 +436,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     def resolved_use_exp2_fast(self) -> bool:
         """Resolved exp2_fast decision (``None`` -> :func:`_use_exp2_fast`)."""
         if self.use_exp2_fast is None:
-            return _use_exp2_fast(self.head_size, self.dtype, self.seqlen_q)
+            return _use_exp2_fast(self.head_size, self.dtype, self.persistent)
         return bool(self.use_exp2_fast)
 
     def resolved_waves_per_eu(self) -> int:
@@ -448,6 +449,54 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         :func:`_tuned_waves_per_eu`, so the shipped value tracks the measured policy
         without this class restating it."""
         return int(self.waves_per_eu)
+
+    @property
+    def runtime_shape(self) -> bool:
+        """Whether the body reads the problem shape *only* from its kernel params,
+        baking it nowhere -- so ONE compiled kernel serves every shape and the three
+        fields drop out of the cache key. This is what collapses the AOT
+        batch x seqlen instance explosion.
+
+        On gfx942 this coincides with ``_has_shape_params``: unlike gfx950, the
+        sub-modes that take the params but still bake the shape somewhere else
+        (ragged / varlen / paged) are rejected outright by
+        :func:`supports_attention_dense`, so the only spec that reaches the builder
+        and is NOT runtime-shape is the persistent one -- and that one declares no
+        shape params at all, because its work-item space ``W = NQB*Hq*B`` is a
+        host-visible Python int feeding the grid-stride bound.
+
+        The predicate text is kept identical to the gfx950 twin on purpose even
+        though ``ragged``/``varlen``/``paged``/``sliding_window`` are inert here: if
+        one of those sub-modes is later admitted on gfx942, it lands already excluded
+        rather than silently claiming a cache identity its body does not have.
+
+        Every other knob that forks the body -- :func:`_use_exp2_fast` included --
+        is a function of compile-time config only, never of the problem shape, so
+        none of them can leak a per-shape body past this predicate. Keep it that
+        way: a policy that reads a shape field would make two shapes share a cache
+        key AND a kernel name while lowering to different IR, which neither the
+        name assert nor this predicate can catch."""
+        return not (
+            self.persistent
+            or self.ragged
+            or self.varlen
+            or self.paged
+            or self.sliding_window > 0
+        )
+
+    @property
+    def runtime_param_fields(self) -> tuple[str, ...]:
+        """The shape fields this body reads *only* from its kernel params, and so
+        the fields ``attention_dense_cache_key`` may drop.
+
+        Kept in sync with the body by hand, and with :meth:`kernel_name` -- which
+        drops ``sq``/``sk`` (via :meth:`_shape_name_parts`) and ``b{batch}`` for
+        exactly this tuple. A field declared here but still baked anywhere would be a
+        cache collision serving one shape's binary to another."""
+        return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
+
+    def _shape_name_parts(self) -> tuple[str, ...]:
+        return () if self.runtime_shape else super()._shape_name_parts()
 
     def kernel_name(self) -> str:
         """The gfx942 kernel symbol: the shared name plus everything THIS body bakes.
@@ -476,9 +525,17 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         do_qk addressing, but it lives in the shared ``lds_k_group_pad`` field and the
         base ``kernel_name()`` already emits a ``kpad{N}`` token for it on the packed
         path. A second gfx942 tag would restate the same fact under another name.
+
+        Under ``runtime_shape`` the ``b{batch}`` token drops, for the same reason the
+        base drops ``sq``/``sk``: batch is a kernel param there, it sizes nothing
+        baked, and keeping it would give two specs that share ONE cache key two
+        DIFFERENT symbol names -- which the ``assert art.kernel_name ==
+        spec.kernel_name()`` in :func:`run_attention_dense_torch` would then trip on
+        the second shape served from the cache.
         """
+        batch_part = "" if self.runtime_shape else f"_b{self.batch}"
         return (
-            f"{super().kernel_name()}_gfx942_b{self.batch}"
+            f"{super().kernel_name()}_gfx942{batch_part}"
             f"_wpe{self.resolved_waves_per_eu()}{_tuning_name_tags(self)}"
         )
 
@@ -556,7 +613,7 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     if swz != (spec.resolved_use_cfvst() and _use_cfvst(spec.head_size, spec.dtype)):
         parts.append("vswz1" if swz else "vswz0")
     e2f = spec.resolved_use_exp2_fast()
-    if e2f != _use_exp2_fast(spec.head_size, spec.dtype, spec.seqlen_q):
+    if e2f != _use_exp2_fast(spec.head_size, spec.dtype, spec.persistent):
         parts.append("e2f1" if e2f else "e2f0")
     if spec.iglp != _DEFAULT_IGLP:
         parts.append("iglp1" if spec.iglp else "iglp0")
@@ -583,11 +640,6 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
 _SUPPORTED_DTYPES = ("bf16", "fp16")
 _SUPPORTED_HEAD_SIZES = (64, 128)
 
-# 32-bit addressing ceiling. The dense ABI bakes every extent at build time, so the
-# limits below are static properties of the spec, not runtime conditions.
-_INT32_LIMIT = 2**31
-
-
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
 # / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel emits
 # (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
@@ -605,36 +657,43 @@ def _rows_per_instr(head_size: int) -> int:
     return _DMA_ELEMS_PER_INSTR // head_size
 
 
-def _use_exp2_fast(head_size: int, dtype: str, seqlen: int) -> bool:
+def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
-    Enabled for all configs EXCEPT short-sequence bf16 head_dim=128 (see the guard
-    below). exp2_fast is a strict VALU reduction and the dominant P2 lever on the
-    (post-P1) VALU-bound path, and is always numerically safe here -- both softmax
+    Enabled for all configs EXCEPT bf16 head_dim=128 on the DEFAULT grid (see the
+    guard below). exp2_fast is a strict VALU reduction and the dominant P2 lever on
+    the (post-P1) VALU-bound path, and is always numerically safe here -- both softmax
     args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly exp2_fast's
     precondition, independent of head_size and dtype. So this is a pure perf gate,
     never a correctness one.
 
-    Short-sequence bf16 D128 guard. exp2_fast is a net win only where the kernel is
-    VALU-bound. For bf16 head_dim=128 prefill that clearly holds at seqlen >= 4096; at
-    seqlen <= 1024 the kernel is occupancy/latency-bound and exp2_fast's register/
-    schedule shift clearly regresses it. seqlen == 2048 sits in the same-node run-to-run
-    noise band (the exp2_fast-vs-plain delta there is smaller than same-node measurement
-    variance), so its sign is not reliably resolvable. fp16 D128 -- byte-identical across the
-    exp2_fast boundary -- is flat at every seqlen, which pins the regression to this
-    kernel. The guard uses the conservative cut seqlen < 4096: it reverts every clear
-    regressor (and the noisy 2048 case) to plain exp2 -- its original perf -- so no shape
-    regresses, at the cost of forgoing at most a noise-level 2048 win. head_dim != 128
-    and fp16 are unaffected.
+    Default-grid bf16 D128 guard. exp2_fast is a net win only where the kernel is
+    VALU-bound, and on this config the grid is what decides that. The P4 persistent
+    grid keeps one CTA resident over many work items, so the softmax VALU stays the
+    critical path and exp2_fast wins there uniformly. On the default grid (one CTA per
+    work item) bf16 D128 is occupancy/latency-bound instead, and exp2_fast's register/
+    schedule shift pays for itself nowhere on that path -- so it reverts to plain
+    exp2, its original perf. fp16 D128 -- byte-identical across the exp2_fast boundary
+    -- is unaffected on either grid, which pins the regression to this kernel.
+    head_dim != 128 and fp16 are unaffected.
+
+    This predicate reads only compile-time config, never the problem shape: an earlier
+    revision cut on ``seqlen < 4096`` instead, which made the emitted body a function
+    of ``seqlen_q`` and so collided with the runtime-shape cache identity. Re-measuring
+    across both grids showed the seqlen term was a proxy for which grid the dispatch
+    layer picked at that shape, not an effect of the sequence length: there is no
+    seqlen at which exp2_fast wins on the default grid, nor one at which it loses on
+    the persistent grid. Keep any future term compile-time for the same reason.
 
     Scope: measured on gfx942 against the current develop dense builder (causal, square
-    Sq==Skv). Full-mask square short-seq shapes take the same cut on the same mechanism
-    (identical kernel/softmax), not separately measured. The gfx950 dense kernel makes an
-    independent exp2_fast decision (its own builder) and is not covered here. 4096 is a
-    gfx942 / ROCm-7.2.2 sweep snapshot -- re-measure via the dense sweep harness on a
-    toolchain or kernel change rather than treating it as a fixed constant.
+    Sq==Skv), both grids forced, with fp16-D128 / bf16-D64 / fp16-D64 controls. Full-mask
+    square shapes take the same cut on the same mechanism (identical kernel/softmax), not
+    separately measured. The gfx950 dense kernel makes an independent exp2_fast decision
+    (its own builder) and is not covered here. This is a gfx942 / ROCm-7.2.2 sweep
+    snapshot -- re-measure via the dense sweep harness on a toolchain or kernel change
+    rather than treating it as fixed.
     """
-    if dtype == "bf16" and head_size == 128 and seqlen < 4096:
+    if dtype == "bf16" and head_size == 128 and not persistent:
         return False
     return True
 
@@ -884,36 +943,15 @@ def supports_attention_dense(
             f"gfx942 attention_dense scope is D{list(_SUPPORTED_HEAD_SIZES)} "
             f"(D256 is served by its own wide-atom candidates), got D{spec.head_size}"
         )
-    # Re-run the dataclass validators (shape multiples, GQA divisibility, knob
-    # ranges) so a hand-built spec is rejected with a structured reason. Iterate the
-    # BASE class fields deliberately: this re-validates only what the shared
-    # __post_init__ owns, and passing the gfx942-private extras would be a TypeError.
-    # Those extras are validated by the explicit checks further down instead. Catch
-    # ZeroDivisionError too: __post_init__ evaluates `seqlen_kv % block_n` BEFORE it
-    # validates block_n > 0, so block_n=0 raises ZeroDivisionError, not ValueError,
-    # and would escape this (bool, str) API.
-    fields = AttentionDenseSpec.__dataclass_fields__  # type: ignore[attr-defined]
-    try:
-        AttentionDenseSpec(**{f: getattr(spec, f) for f in fields})
-    except (ValueError, ZeroDivisionError) as e:
-        return False, f"invalid AttentionDenseSpec: {e}"
-
-    # --- Positive extents. Every dataclass validator is a divisibility test, and
-    # Python's `%` is sign-following: -256 % 256 == 0 and 8 % -1 == 0, so zero and
-    # negative shapes pass all of them. num_query_heads == 0 is the worst -- gqa =
-    # Hq // Hkv == 0 emits `sdiv i32 %hq, 0` into the kernel -- and negative extents
-    # make the 32-bit checks below vacuously true.
-    for _field in (
-        "batch",
-        "seqlen_q",
-        "seqlen_kv",
-        "num_query_heads",
-        "num_kv_heads",
-        "head_size",
-    ):
-        _value = getattr(spec, _field)
-        if _value <= 0:
-            return False, f"{_field} must be positive, got {_value}"
+    # --- Shared preflight: dataclass re-validation, positive extents, block_n
+    # dividing the query tile, and the 32-bit extent bounds. All four are properties
+    # of the base spec with the same verdict for every dense body, so they live in
+    # kernels.common next to the spec rather than being replicated per arch. The
+    # gfx942-private knobs and the LDS budget are NOT in there -- they need this
+    # body's tile math, and are checked below.
+    ok, why = check_dense_spec_preflight(spec)
+    if not ok:
+        return False, why
 
     # --- Mode scope. The body implements the default-grid AND the P4 persistent
     # grid-stride variant, both uniform dense self-attention. Checked HERE and not
@@ -1018,19 +1056,6 @@ def supports_attention_dense(
                 f"v_row_pad=None (derived) or set use_v_swizzle=False to sweep the pad"
             )
 
-    # --- Tile geometry. The causal KV-loop clamp uses n_per = block_m //
-    # block_n, a FLOOR: a block_n that does not divide the query tile silently drops
-    # every key past the last whole sub-tile, and block_n > block_m makes n_per 0
-    # -> zero-trip loop -> l == 0 -> rcp(0) -> NaN. Neither fails loudly, so reject.
-    if spec.block_m % spec.block_n != 0:
-        return False, (
-            f"block_n must divide the {spec.block_m}-row query tile (got "
-            f"block_n={spec.block_n}; the spec also requires block_n % 32 == 0, so "
-            f"use 32, 64, 128 or 256). Load-bearing for causal=True, where "
-            f"n_per = {spec.block_m} // block_n floors and drops keys; enforced "
-            f"unconditionally so the two grids cannot diverge by a knob"
-        )
-
     # --- Wave/tile divisibility, mirrored from the builder so support() and build()
     # agree on exactly one set of specs (the module contract at the top of this file).
     # The condition below is ALSO enforced in _build_attention_dense_single_buffer;
@@ -1070,24 +1095,6 @@ def supports_attention_dense(
             f"D={spec.head_size}, which exceeds the {arch} LDS capacity ({capacity} B)"
         )
 
-    # --- 32-bit addressing. Every offset below is built from IRBuilder add/mul, which
-    # lower to `add nsw` / `mul nsw` i32 -- signed overflow is UB, not a wrap, so LLVM
-    # may poison the whole address chain rather than merely read the wrong place. The
-    # buffer-resource num_records field is unsigned in hardware, but it is emitted via
-    # const_i32 (no range check) and the voffset feeding it is signed i32 arithmetic,
-    # so the signed bound is the binding one on both paths.
-    kv_bytes = spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
-    if kv_bytes >= _INT32_LIMIT:
-        return False, (
-            f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "
-            f"limit ({_INT32_LIMIT} B)"
-        )
-    qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if qo_elems >= _INT32_LIMIT:
-        return False, (
-            f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
-            f"limit ({_INT32_LIMIT})"
-        )
     return True, ""
 
 
@@ -1183,6 +1190,25 @@ def _build_attention_dense_single_buffer(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    # Problem shape as kernel params, so ONE compiled binary serves every
+    # (batch, seqlen_q, seqlen_kv). Declared right after scale to fix their ABI
+    # position -- mirrored by hand in attention_dense_signature, which is the only
+    # place a silent kernarg skew can enter (and is what the signature test guards).
+    #
+    # Gated on ``spec.runtime_shape``, which on gfx942 is exactly "not persistent":
+    # the persistent body's work-item space W = NQB*Hq*B is a host-visible Python int
+    # feeding the grid-stride bound and the b.mod/b.div work decode, so the shape
+    # cannot become a param there without that bound following it (out of scope --
+    # runtime operands would turn those strength-reduced divides into real integer
+    # division inside the grid-stride loop, a perf question needing a benchmark).
+    # Keeping the persistent path's declaration empty is also what holds its IR --
+    # and the 5 persist golden cases -- byte-identical.
+    if spec.runtime_shape:
+        batch_p = b.param("batch", I32)
+        seqlen_q_p = b.param("seqlen_q", I32)
+        seqlen_kv_p = b.param("seqlen_kv", I32)
+    else:
+        batch_p = seqlen_q_p = seqlen_kv_p = None
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     tid = b.thread_id_x()
@@ -1268,8 +1294,25 @@ def _build_attention_dense_single_buffer(
     # cfvst feeds V via buffer_load + perm_b32 + smem_store (no async-DMA handle); the
     # naive D64 path still lands V through async_buffer_load_lds, which needs the base.
     V_lds_addr = None if USE_CFVST else b.smem_addr_of(V_lds)
-    k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
-    v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
+    # num_records must track THIS launch's real extent: under runtime_shape one
+    # kernel serves every seqlen, and a baked bound would silently drop valid reads
+    # for a larger one (buffer loads past num_records return 0 with no fault).
+    #
+    # Emit a SEPARATE product per buffer_rsrc rather than one shared node: develop
+    # emits two num_records nodes here, so sharing one breaks byte-identity against
+    # the golden. The baked branch keeps const_i32(B*Skv*...) verbatim -- the
+    # persistent path's IR must not move.
+    _kv_elem_bytes = Hkv * D * 2
+    if spec.runtime_shape:
+        k_rsrc = b.buffer_rsrc(
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+        )
+        v_rsrc = b.buffer_rsrc(
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+        )
+    else:
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
 
     # ---- conflict-free V (P1): perm_b32 store-path transpose into V_lds[dim, token] ----
     # Load V naturally [token, dim] (coalesced VMEM over the contiguous dim axis),
@@ -1398,12 +1441,24 @@ def _build_attention_dense_single_buffer(
         CTA-invariant and closed over."""
         hkv = b.div(hq, b.const_i32(gqa))
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+        # NOT hoisted into a local shared with o_base below: the IR builder is
+        # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
+        # written. Hoisting moves that node earlier and lets the second use CSE
+        # away -- semantically identical, but it renumbers every SSA value after it
+        # and moves all 5 persist golden hashes for a path this change is supposed
+        # to leave byte-identical. Emit in place on the baked branch.
         q_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(
+                b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
+                b.const_i32(stride_q_tok),
+            ),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Skv)), b.const_i32(stride_k_tok)),
+            b.mul(
+                b.mul(bt, seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv)),
+                b.const_i32(stride_k_tok),
+            ),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -1561,7 +1616,14 @@ def _build_attention_dense_single_buffer(
                     )
 
         # n_up: causal clamps the KV loop to the diagonal tile of this query block.
-        n_ktiles_c = b.const_i32(n_ktiles)
+        # BN is a power of two, so the runtime divide lowers to a shift. The causal
+        # clamp below needs no further edit -- it consumes n_ktiles_c, so converting
+        # the trip count carries it.
+        n_ktiles_c = (
+            b.div(seqlen_kv_p, b.const_i32(BN))
+            if spec.runtime_shape
+            else b.const_i32(n_ktiles)
+        )
         if causal:
             n_up = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
             n_up = b.select(b.cmp_lt(n_up, n_ktiles_c), n_up, n_ktiles_c)
@@ -1646,8 +1708,8 @@ def _build_attention_dense_single_buffer(
             # s) -- exactly exp2_fast's precondition (no overflow; v_exp_f32 flushes
             # large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
             # MFMA-starving residual once conflict-free V (P1) lands. Enabled by
-            # _use_exp2_fast for every config except short-sequence bf16 D128, which
-            # reverts to plain exp2; rationale + seqlen gate in that docstring.
+            # _use_exp2_fast for every config except bf16 D128 on the default grid,
+            # which reverts to plain exp2; rationale + grid gate in that docstring.
             exp2 = b.exp2_fast if spec.resolved_use_exp2_fast() else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 
@@ -1713,7 +1775,10 @@ def _build_attention_dense_single_buffer(
         # Epilogue: O[query,dim] = (P@V)/l, from the transposed C[dim,query] accum.
         rcp_l = b.rcp(l_i)
         o_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(
+                b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
+                b.const_i32(stride_q_tok),
+            ),
             b.mul(hq, b.const_i32(D)),
         )
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
@@ -1829,7 +1894,8 @@ def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:
 
 
 def attention_dense_signature(spec: AttentionDenseSpec):
-    """ABI signature: q/k/v/o pointers + f32 scale.
+    """ABI signature: q/k/v/o pointers + f32 scale, plus batch/seqlen_q/seqlen_kv as
+    i32 when the body takes the shape at runtime (``spec.runtime_shape``).
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -1840,15 +1906,25 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     """
     from rocke.helpers.spec import SignatureBuilder
 
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
         .ptr("k_ptr", spec.dtype)
         .ptr("v_ptr", spec.dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
-        .build()
     )
+    if _as_gfx942_spec(spec).runtime_shape:
+        # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
+        # build_attention_dense. Still mirrored BY HAND, but cross-checked against
+        # KernelDef.params by test_signature_matches_the_built_kernels_params in
+        # library/tests/test_attention_builds.py, so a skew fails on CPU.
+        sig = (
+            sig.scalar("batch", "i32")
+            .scalar("seqlen_q", "i32")
+            .scalar("seqlen_kv", "i32")
+        )
+    return sig.build()
 
 
 _DENSE_LAUNCHER_CACHE: dict = {}
@@ -1875,8 +1951,11 @@ def run_attention_dense_torch(
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
-    the launcher cache by ``(arch, concrete frozen spec)``. Every current and future
-    IR-live field therefore participates without relying on manual name tokens.
+    the launcher cache by ``attention_dense_cache_key``. On the runtime-shape path
+    (``spec.runtime_shape``, i.e. everything but persistent) batch/seqlen_q/seqlen_kv
+    are kernel params and drop out of that key, so one compiled binary serves every
+    shape; every other IR-live field still participates without relying on manual
+    name tokens. The persistent path keeps its fully-baked per-shape identity.
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
     ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a
@@ -1912,8 +1991,13 @@ def run_attention_dense_torch(
             signature=attention_dense_signature(spec),
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
+    vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if spec.runtime_shape:
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
     launcher(
-        {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)},
+        vals,
         config=LaunchConfig(
             grid=attention_dense_grid(spec),
             block=attention_dense_block(spec),

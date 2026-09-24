@@ -53,8 +53,10 @@
  * wide store. Mirrors _KOUTER_PAD in conv_implicit_gemm_wgrad.py. */
 #define ROCKE_WGRAD_KOUTER_PAD 8
 
-/* The K-outer LDS tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
- * Emitting it for an older target produces IR the assembler will reject.
+/* The wave64 regime's arch. The K-outer tile is fed by an LDS transpose read
+ * that exists in two regimes: ds_read_tr16_b64 on gfx950 (wave64) and
+ * ds_load_tr16_b128 on gfx1250 (wave32); the validator accepts both and pins
+ * each arch to its wave size. Retained for the wave64 half.
  * Mirrors _LDS_K_OUTER_ARCH in conv_implicit_gemm_wgrad.py. */
 #define ROCKE_WGRAD_LDS_K_OUTER_ARCH "gfx950"
 #include <stddef.h>

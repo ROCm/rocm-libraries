@@ -29,6 +29,7 @@ from rocke.dispatch.core import (
     KernelId,
     OperatorRequest,
     Ranker,
+    make_kernel_id,
     stable_json_hash,
 )
 
@@ -88,19 +89,7 @@ def dense_spec_for_request(req: AttentionRequest):
 def _kernel_id(
     req: AttentionRequest, candidate: KernelCandidate, spec: AttentionSpec
 ) -> KernelId:
-    request_hash = stable_json_hash(req.normalized(), n=16)
-    spec_hash = stable_json_hash(asdict(spec), n=16)
-    return KernelId(
-        op="attention",
-        family=_FAMILY,
-        candidate=candidate.name,
-        algorithm=candidate.algorithm,
-        spec_id=candidate.spec_id,
-        arch=req.arch,
-        abi_version=candidate.abi_version,
-        request_hash=request_hash,
-        spec_hash=spec_hash,
-    )
+    return make_kernel_id(req, candidate, spec, op="attention")
 
 
 def attention_sweep_space(req: OperatorRequest) -> Sequence[AttentionSpec]:
