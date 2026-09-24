@@ -31,7 +31,7 @@ from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
 from Tensile.Common import SemanticVersion, print2
-from Tensile.Common.Architectures import toolchainTargetOf
+from Tensile.Common.Architectures import bundleTargetsOf, toolchainTargetOf
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -330,24 +330,27 @@ class Bundler(Component):
         Args:
             srcPath: The source path of the code object file to be compressed.
             destPath: The destination path for the compressed code object file.
-            target: The compiler target to tag the bundle entry with. The runtime
-                unbundles by matching the agent's target, and a stepping is built
-                for the architecture it steps, so this is the stepped name; see
-                toolchainTargetOf.
+            target: The architecture the code object was requested for. The
+                runtime unbundles by matching the agent's reported target, so a
+                stepping is offered under both its own name and the one it steps;
+                see bundleTargetsOf.
 
         Raises:
             RuntimeError: If compressing the code object file fails.
         """
         devnull = "/dev/null" if os_name != "nt" else "NUL"
+        # One --input per target: the bundler pairs them positionally after the
+        # host entry, so a stepping hands it the same file twice on purpose.
+        entries = bundleTargetsOf(target)
         args = [
             self._component_path,
             "--compress",
             "--type=o",
             "--bundle-align=4096",
-            f"--targets=host-x86_64-unknown-linux-gnu,"
-            f"hipv4-amdgcn-amd-amdhsa-unknown-{toolchainTargetOf(target)}",
+            "--targets=host-x86_64-unknown-linux-gnu,"
+            + ",".join(f"hipv4-amdgcn-amd-amdhsa-unknown-{e}" for e in entries),
             f"--input={devnull}",
-            f"--input={srcPath}",
+            *(f"--input={srcPath}" for _ in entries),
             f"--output={destPath}",
         ]
 

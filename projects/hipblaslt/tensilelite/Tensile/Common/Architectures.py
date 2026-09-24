@@ -298,12 +298,13 @@ def steppingArchOf(spec: str) -> Optional[str]:
 def toolchainTargetOf(spec: str) -> str:
     """The target the toolchain is handed for ``spec``.
 
-    Transitional. A stepping is built for the architecture it steps, because HIP
-    picks a bundle entry by matching the agent's reported target and ROCr still
-    reports gfx1250 for an A0 by default -- an entry tagged gfx1250-strict is
-    rejected there. Only the compiler target moves; the stepping keeps naming its
-    directory, its files and its capability overrides. Remove once ROCr reports
-    the stepping by default, and the stepping becomes its own target again.
+    A stepping is built for the architecture it steps: its capability overrides
+    only remove features, so the result is a valid object for the base
+    architecture. Only the compiler target moves; the stepping keeps naming its
+    directory, its files and its capability overrides.
+
+    Which names the object is then offered under is a separate question; see
+    bundleTargetsOf.
 
     Args:
         spec: A requested architecture spec, qualified or not.
@@ -313,6 +314,32 @@ def toolchainTargetOf(spec: str) -> str:
             ``spec`` unchanged when it is not a stepping.
     """
     return steppingArchOf(spec) or spec
+
+
+def bundleTargetsOf(spec: str) -> List[str]:
+    """The bundle entry names a code object built for ``spec`` should carry.
+
+    HIP picks a bundle entry by string-matching the agent's reported target, and
+    an A0 reports gfx1250 or gfx1250-strict depending on
+    HSA_DISABLE_GFX12_STRICT, whose default rocm-systems#11575 proposes to flip.
+    Offering a stepping's object under both names makes it loadable either way,
+    so one build spans that change with no flag day.
+
+    Both entries share one payload: the object is built for the architecture the
+    stepping steps (see toolchainTargetOf), so the base entry is honest, and the
+    stepping entry gets code already within its capabilities. Compressed, the
+    duplicate costs around a tenth of a percent.
+
+    Args:
+        spec: A requested architecture spec, qualified or not.
+
+    Returns:
+        The entry names, stepped architecture first. A non-stepping spec yields
+            only itself, so a gfx1250 object stays single-entry and an agent
+            reporting gfx1250-strict still cannot load it.
+    """
+    stepped = steppingArchOf(spec)
+    return [spec] if stepped is None else [stepped, baseArchName(spec)]
 
 
 def archNamesByIsa(specs: List[str]) -> Dict[IsaVersion, str]:
