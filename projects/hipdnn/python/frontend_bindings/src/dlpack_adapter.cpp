@@ -20,12 +20,45 @@ namespace hipdnn_python
 namespace
 {
 
-// Imports a __dlpack__ producer without conversion, so the data is never copied.
-// Read-only capsules are accepted: as in cuDNN, the writable flag is not checked.
-nb::ndarray<nb::ro> importDlpack(nb::handle obj, const std::string& what)
+// Calls __dlpack__ directly instead of handing the object to nanobind. nanobind
+// discards the producer's exception and then tries the buffer protocol and
+// framework to_dlpack() imports (which can import torch). A direct call lets the
+// producer's own error reach the caller.
+//
+// noCopy passes copy=False: the pointer path returns data() after this import is
+// released, so the memory must belong to the producer object, not to a copy that
+// only the capsule owns. A producer that cannot export without a copy raises.
+nb::object callDlpack(nb::handle obj, bool noCopy)
 {
+    const nb::object method = obj.attr("__dlpack__");
+    try
+    {
+        if(noCopy)
+        {
+            return method(nb::arg("max_version") = nb::make_tuple(1, 1), nb::arg("copy") = false);
+        }
+        return method(nb::arg("max_version") = nb::make_tuple(1, 1));
+    }
+    catch(nb::python_error& e)
+    {
+        // Producers older than the 2023.12 array API reject these keywords.
+        if(!e.matches(PyExc_TypeError))
+        {
+            throw;
+        }
+    }
+    return method();
+}
+
+// Imports a __dlpack__ producer without conversion, so the data is never copied.
+// The writable flag is not checked: inputs and outputs share this path, and the
+// caller decides which memory hipDNN writes.
+nb::ndarray<nb::ro> importDlpack(nb::handle obj, const std::string& what, bool noCopy)
+{
+    const nb::object capsule = callDlpack(obj, noCopy);
     nb::ndarray<nb::ro> array;
-    if(!nb::try_cast(obj, array, /*convert=*/false))
+    // A capsule skips every nanobind fallback; anything else is malformed.
+    if(PyCapsule_CheckExact(capsule.ptr()) == 0 || !nb::try_cast(capsule, array, false))
     {
         throw nb::value_error(
             (what + ": __dlpack__ did not return a valid DLPack capsule").c_str());
@@ -162,7 +195,7 @@ std::optional<DataType> toDataType(const nb::dlpack::dtype& dt)
     return std::nullopt;
 }
 
-// Same device set cuDNN accepts (kDLCPU, kDLCUDAHost, kDLCUDA), mapped to ROCm.
+// Host, device, and pinned host memory. DLPack has no ROCm managed-memory type.
 bool isSupportedDevice(int deviceType)
 {
     return deviceType == nb::device::cpu::value || deviceType == nb::device::rocm::value
@@ -193,8 +226,8 @@ void* toDataPointer(nb::handle value, const std::string& what)
     {
         return nb::cast<DeviceBuffer&>(value).ptr();
     }
-    // cuDNN order: data_ptr() before the DLPack fallback. For torch it is the
-    // same address as DLPack (storage offset included) without a capsule round trip.
+    // data_ptr() before the DLPack fallback: for torch it is the same address as
+    // DLPack (storage offset included) without a capsule round trip.
     if(nb::hasattr(value, "data_ptr"))
     {
         const nb::object dataPtr = value.attr("data_ptr");
@@ -206,7 +239,7 @@ void* toDataPointer(nb::handle value, const std::string& what)
     }
     if(nb::hasattr(value, "__dlpack__"))
     {
-        const nb::ndarray<nb::ro> array = importDlpack(value, what);
+        const nb::ndarray<nb::ro> array = importDlpack(value, what, /*noCopy=*/true);
         if(!isSupportedDevice(array.device_type()))
         {
             throw nb::value_error(
@@ -268,7 +301,7 @@ std::shared_ptr<TensorAttributes> tensorAttributesFromDlpack(nb::handle obj,
         throw nb::type_error(
             "tensor_like() expects a hipdnn Tensor or an object implementing __dlpack__");
     }
-    const nb::ndarray<nb::ro> array = importDlpack(obj, "tensor_like()");
+    const nb::ndarray<nb::ro> array = importDlpack(obj, "tensor_like()", /*noCopy=*/false);
 
     const int deviceType = array.device_type();
     if(!isSupportedDevice(deviceType))
@@ -278,6 +311,8 @@ std::shared_ptr<TensorAttributes> tensorAttributesFromDlpack(nb::handle obj,
     const auto dt = array.dtype();
     if(dt.lanes != 1)
     {
+        // DLPack defines sub-byte types with lanes=1. Packed exports such as
+        // torch.float4_e2m1fn_x2 (bits=4, lanes=2) are not accepted.
         throw nb::value_error("tensor_like(): vector DLPack dtypes (lanes != 1) are unsupported");
     }
     const auto dataType = toDataType(dt);
@@ -311,8 +346,8 @@ std::shared_ptr<TensorAttributes> tensorAttributesFromDlpack(nb::handle obj,
         }
     }
 
-    // As in cuDNN, host memory marks a runtime pass-by-value tensor: execute()
-    // takes its host pointer in the variant pack.
+    // Host memory marks a runtime pass-by-value tensor: execute() takes its host
+    // pointer in the variant pack.
     auto tensor = std::make_shared<TensorAttributes>();
     tensor->set_dim(dims)
         .set_stride(strides)

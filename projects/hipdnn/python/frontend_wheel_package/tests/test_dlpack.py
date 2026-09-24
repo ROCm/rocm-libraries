@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""DLPack interoperability, matching cuDNN frontend's tensor_like and variant-pack rules."""
+"""DLPack interoperability: tensor_like metadata and variant-pack values."""
 
 import ctypes
 import os
@@ -33,6 +33,33 @@ class _NoneDlpack:
 class _DataPtr:
     def data_ptr(self):
         return 4096
+
+
+class _RaisingDlpack:
+    def __dlpack__(self, *args, **kwargs):
+        raise RuntimeError("producer refused export")
+
+
+class _CopyOnlyProducer:
+    """Can export only a copy, so it must refuse copy=False."""
+
+    def __init__(self, array):
+        self._array = array
+
+    def __dlpack__(self, *, copy=None, **kwargs):
+        if copy is False:
+            raise BufferError("export requires a copy")
+        return self._array.__dlpack__(**kwargs)
+
+
+class _LegacyProducer:
+    """Pre-2023.12 signature: rejects max_version and copy."""
+
+    def __init__(self, array):
+        self._array = array
+
+    def __dlpack__(self, stream=None):
+        return self._array.__dlpack__()
 
 
 class _DLDevice(ctypes.Structure):
@@ -117,7 +144,7 @@ class TestTensorLikeHost:
         assert t.get_data_type() == hipdnn.DataType.FLOAT
         assert t.get_name() == "x"
         assert t.has_uid() is False
-        # cuDNN: every host tensor is a runtime pass-by-value tensor.
+        # Every host tensor is a runtime pass-by-value tensor.
         assert t.get_is_pass_by_value() is True
 
     def test_non_contiguous_strides(self):
@@ -177,6 +204,46 @@ class TestTensorLikeHost:
         assert t.get_dim() == [2, 3]
         assert _get_data_ptr(host) == host.ctypes.data
 
+    def test_producer_exception_propagates(self):
+        with pytest.raises(RuntimeError, match="producer refused export"):
+            hipdnn.Graph.tensor_like(_RaisingDlpack())
+
+    def test_legacy_producer_signature(self):
+        host = np.zeros((2, 3), np.float32)
+        assert hipdnn.Graph.tensor_like(_LegacyProducer(host)).get_dim() == [2, 3]
+        assert _get_data_ptr(_LegacyProducer(host)) == host.ctypes.data
+
+
+class TestTensorLikeTorchDtypes:
+    """dtype rows NumPy cannot produce, from CPU torch tensors."""
+
+    @pytest.mark.parametrize(
+        "torch_dtype, data_type",
+        [
+            ("bfloat16", hipdnn.DataType.BFLOAT16),
+            ("float8_e4m3fn", hipdnn.DataType.FP8_E4M3),
+            ("float8_e4m3fnuz", hipdnn.DataType.FP8_E4M3_FNUZ),
+            ("float8_e5m2", hipdnn.DataType.FP8_E5M2),
+            ("float8_e5m2fnuz", hipdnn.DataType.FP8_E5M2_FNUZ),
+            ("float8_e8m0fnu", hipdnn.DataType.FP8_E8M0),
+        ],
+    )
+    def test_dtype_mapping(self, torch_dtype, data_type):
+        torch = pytest.importorskip("torch")
+        dtype = getattr(torch, torch_dtype, None)
+        if dtype is None:
+            pytest.skip(f"torch has no {torch_dtype}")
+        t = hipdnn.Graph.tensor_like(torch.empty(2, 4, dtype=dtype))
+        assert t.get_data_type() == data_type
+
+    def test_packed_fp4_rejected(self):
+        """torch exports float4_e2m1fn_x2 as bits=4, lanes=2; DLPack FP4 is lanes=1."""
+        torch = pytest.importorskip("torch")
+        if not hasattr(torch, "float4_e2m1fn_x2"):
+            pytest.skip("torch has no float4_e2m1fn_x2")
+        with pytest.raises(ValueError, match="lanes"):
+            hipdnn.Graph.tensor_like(torch.empty(2, 4, dtype=torch.float4_e2m1fn_x2))
+
 
 class TestDataPointerConversion:
     """Variant-pack value conversion, checked through the private hook."""
@@ -211,6 +278,18 @@ class TestDataPointerConversion:
     def test_malformed_capsule(self):
         with pytest.raises(ValueError, match="valid DLPack capsule"):
             _get_data_ptr(_NoneDlpack())
+
+    def test_producer_exception_propagates(self):
+        with pytest.raises(RuntimeError, match="producer refused export"):
+            _get_data_ptr(_RaisingDlpack())
+
+    def test_pointer_path_refuses_copies(self):
+        """A copy would be freed with the import, leaving a dangling pointer."""
+        host = np.zeros(4, np.float32)
+        with pytest.raises(BufferError, match="requires a copy"):
+            _get_data_ptr(_CopyOnlyProducer(host))
+        # Metadata needs no ownership, so tensor_like still accepts it.
+        assert hipdnn.Graph.tensor_like(_CopyOnlyProducer(host)).get_dim() == [4]
 
 
 @pytest.mark.gpu
@@ -293,7 +372,7 @@ class TestDlpackDevice:
         assert graph.execute(handle, pack, np.uint64(0)).is_good()
 
     def test_host_runtime_scalar_reaches_the_engine(self):
-        """cuDNN pattern: tensor_like(host) declares the scalar, execute passes it.
+        """tensor_like(host) declares the scalar, and execute passes its value.
 
         Two values go through one compiled plan, so the engine must read the
         host tensor at execute time rather than a value baked in at build time.

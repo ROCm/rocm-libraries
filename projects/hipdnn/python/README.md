@@ -137,8 +137,6 @@ The wheel package uses a `src/` layout, so running pytest from
 
 ## DLPack Interoperability
 
-The bindings follow the cuDNN frontend Python rules for DLPack.
-
 `Graph.execute()`, `Graph.execute_plan_at_index()`, `Graph.autotune()`, and
 `Graph.autotune_exhaustive_sweep()` take a `variant_pack` keyed by tensor UID
 or by `Tensor`. Each value, and `workspace`, may be one of these kinds, checked
@@ -152,14 +150,18 @@ in this order:
    plus its byte offset.
 
 No data is copied. The caller must keep each object alive until the HIP work
-completes.
+completes. The bindings call `__dlpack__(copy=False)`, so a producer that can
+export only a copy raises its own error instead of returning memory that nothing
+keeps alive. Errors raised by `__dlpack__` reach the caller unchanged.
 
 `Graph.tensor_like(obj, name="")` also accepts a `__dlpack__` producer. It
 copies the dims and the element strides (row-major when the producer reports
-none) and maps the data type. As in cuDNN, a host (`cpu`) producer becomes a
+none) and maps the data type. A host (`cpu`) producer becomes a
 runtime pass-by-value tensor: pass a host tensor for it in the variant pack of
 each execute call. Runtime pass-by-value tensors need an engine plugin that
-reports plugin API 1.2.0 or later.
+reports plugin API 1.2.0 or later. Sub-byte types follow the DLPack
+definition (`lanes=1`); packed exports such as `torch.float4_e2m1fn_x2`
+(`lanes=2`) raise `ValueError`.
 
 ```python
 x = torch.randn(8, 16, device="cuda")
@@ -170,8 +172,8 @@ scale_t = graph.tensor_like(scale, "scale")  # runtime pass-by-value
 graph.execute(handle, {x_t: x, scale_t: scale, y_t: y}, workspace)
 ```
 
-The value rules match cuDNN, but the method signatures follow the hipDNN C++
-API, not `cudnn.pygraph`:
+Code ported from `cudnn.pygraph` needs these changes, because the method
+signatures follow the hipDNN C++ API:
 
 - `execute` and `execute_plan_at_index` take the handle first:
   `execute(handle, variant_pack, workspace)`, not

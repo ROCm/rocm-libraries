@@ -734,7 +734,7 @@ void graphBindings(nb::module_& m)
             nb::arg("tensor"),
             nb::arg("name") = "",
             "Create a tensor with the metadata of a hipdnn Tensor or a __dlpack__ producer. "
-            "As in cuDNN, a host (cpu) producer becomes a runtime pass-by-value tensor "
+            "A host (cpu) producer becomes a runtime pass-by-value tensor "
             "whose value is passed to execute() as a host tensor.")
         .def(
             "to_json",
@@ -803,8 +803,7 @@ void graphBindings(nb::module_& m)
             "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
             "Call build_operation_graph(handle) after to finalize for execution.");
 
-    // Private test hook, named as in cuDNN: resolves a variant-pack value exactly as
-    // execute() does.
+    // Private test hook: resolves a variant-pack value exactly as execute() does.
     m.def(
         "_get_data_ptr",
         [](nb::handle value) {
