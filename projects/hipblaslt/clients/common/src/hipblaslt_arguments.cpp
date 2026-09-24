@@ -142,6 +142,7 @@ void Arguments::init()
     scaleD            = false;
     scaleE            = false;
     scaleAlpha_vector = false;
+    device_scalar_alpha = false;
     grouped_gemm      = 0;
     c_equal_d         = false;
     HMM               = false;

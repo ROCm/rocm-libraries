@@ -672,6 +672,7 @@ Arguments:
   - scaleD: c_bool
   - scaleE: c_bool
   - scaleAlpha_vector: c_bool
+  - device_scalar_alpha: c_bool
   - amaxScaleA: c_bool
   - amaxScaleB: c_bool
   - amaxD: c_bool
@@ -813,6 +814,7 @@ Defaults:
   scaleD: false
   scaleE: false
   scaleAlpha_vector: false
+  device_scalar_alpha: false
   amaxScaleA: false
   amaxScaleB: false
   amaxD: false

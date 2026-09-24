@@ -817,6 +817,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
 
+    problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
+
     if(scaleAlphaVec)
     {
         // Fill owned storage with "1" for the compute type, and repoint alpha into it.
