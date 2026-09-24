@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from rocke.core.arch.wmma_scale import scaled_matrix_layout
-from rocke.core.ir import I8, I32, I64, IRBuilder, PtrType
-from rocke.core.ir_serialize import serialize
+from rocke.core.ir import FP8E4M3, I8, I32, I64, IRBuilder, PtrType, VectorType
+from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.storage import (
@@ -34,6 +34,7 @@ CASES = [
     "fp6_padded",
     "bf6",
     "fp8",
+    "e4m3",
     "bf8",
     "f16",
     "bf16",
@@ -244,3 +245,20 @@ def test_hip_rejects_invalid_vector_load_alignment(alignment):
     value.op.attrs["align"] = alignment
     with pytest.raises(ValueError, match="alignment must be a positive power of two"):
         lower_kernel_to_hip(b.kernel, arch="gfx1250")
+
+
+def test_e4m3_alias_serialization_matches_native():
+    executable = os.environ.get("ROCKE_STORAGE_TEST")
+    if not executable:
+        pytest.skip("set ROCKE_STORAGE_TEST to the built native storage test")
+    b = IRBuilder("canonical_e4m3")
+    b.param("scalar", FP8E4M3)
+    b.param("pointer", PtrType(FP8E4M3, "global"))
+    b.param("vector", VectorType(FP8E4M3, 4))
+    canonical = serialize(b.kernel)
+    alias = canonical.replace("fp8e4m3", "e4m3")
+    assert serialize(parse(alias)) == canonical
+    result = subprocess.run(
+        [executable, "--parse", alias], check=True, capture_output=True, text=True
+    )
+    assert result.stdout == canonical

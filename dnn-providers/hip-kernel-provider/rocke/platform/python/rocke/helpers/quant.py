@@ -90,6 +90,7 @@ _QDTYPE_ALIAS = {
     "fp8e4m3": "fp8e4m3",
     "fp8": "fp8e4m3",
     "fp8_e4m3": "fp8e4m3",
+    "e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
     "bf8": "bf8e5m2",
     "fp8_e5m2": "bf8e5m2",

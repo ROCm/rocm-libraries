@@ -57,7 +57,6 @@ FP4E2M1 = Type("fp4e2m1")
 FP6E2M3 = Type("fp6e2m3")
 FP6E3M2 = Type("fp6e3m2")
 E8M0 = Type("e8m0")
-E4M3 = Type("e4m3")
 E5M3 = Type("e5m3")
 
 
@@ -82,7 +81,6 @@ def dtype_to_ir_type(dtype: str) -> Type:
         "fp6e2m3": FP6E2M3,
         "fp6e3m2": FP6E3M2,
         "e8m0": E8M0,
-        "e4m3": E4M3,
         "e5m3": E5M3,
     }
     if info.name not in types:

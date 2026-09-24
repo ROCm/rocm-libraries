@@ -6,7 +6,10 @@ import pytest
 
 from rocke.core.dtypes import normalize_dtype
 from rocke.core.dtypes import dtype_info
-from rocke.core.ir import I8, IRBuilder, dtype_to_ir_type
+from rocke.core.arch.target import MmaScaleDType
+from rocke.core.ir import FP8E4M3, I8, IRBuilder, dtype_to_ir_type
+from rocke.core.storage import TensorStorage
+from rocke.helpers.mma_io import storage_ir_type
 from rocke.core.ir_serialize import parse, serialize
 from rocke.helpers.quant import quant_ir_type, ir_to_qdtype, dequantize_scalar_to_f32
 
@@ -63,6 +66,7 @@ def test_unknown_dtype_and_unrepresented_integer_family():
         ("bfloat16", "bf16"),
         (" Float\t", "fp32"),
         ("FP8", "fp8e4m3"),
+        (" E4M3 ", "fp8e4m3"),
         ("BF8", "bf8e5m2"),
         ("FP6", "fp6e2m3"),
         ("BF6", "fp6e3m2"),
@@ -84,3 +88,25 @@ def test_architecture_entry_points_reexport_core_normalization():
 
     assert normalize_dtype.__module__ == "rocke.core.dtypes"
     assert core_normalize is arch_normalize is target_normalize is normalize_dtype
+
+
+@pytest.mark.parametrize("spelling", ["e4m3", "fp8e4m3", "fp8", MmaScaleDType.E4M3])
+def test_e4m3_shares_encoding_type_and_storage(spelling):
+    assert dtype_info(spelling) is dtype_info("fp8e4m3")
+    assert dtype_to_ir_type(spelling) is FP8E4M3
+    assert storage_ir_type(spelling) is FP8E4M3
+    assert TensorStorage(spelling, (2, 128)) == TensorStorage("fp8e4m3", (2, 128))
+    assert quant_ir_type(spelling) is FP8E4M3
+    b = IRBuilder("e4m3_conversion")
+    value = b.param("value", dtype_to_ir_type(spelling))
+    b.cvt_fp8_to_f32(value)
+    assert serialize(b.kernel) == serialize(parse(serialize(b.kernel)))
+
+
+def test_scale_role_remains_independent_of_encoding_aliases():
+    assert MmaScaleDType("fp8e4m3") is MmaScaleDType.E4M3
+    assert str(MmaScaleDType.E4M3) == "e4m3"
+    assert dtype_info("e5m3") is not dtype_info("bf8e5m2")
+    assert dtype_to_ir_type("e5m3") != dtype_to_ir_type("bf8e5m2")
+    with pytest.raises(ValueError):
+        MmaScaleDType("bf8e5m2")

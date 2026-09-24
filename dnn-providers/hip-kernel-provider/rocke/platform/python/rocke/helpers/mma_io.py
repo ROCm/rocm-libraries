@@ -25,7 +25,7 @@ from ..core.storage import FragmentPacking, MatrixFragmentLayout, TensorStorage
 def storage_ir_type(dtype: str) -> Type:
     """Addressable storage unit, distinct from the logical dtype resolver."""
     info = dtype_info(dtype)
-    if info.encoded_bits % 8 or info.name in ("e8m0", "e4m3", "e5m3"):
+    if info.encoded_bits % 8 or info.name in ("e8m0", "e5m3"):
         return I8
     return dtype_to_ir_type(info.name)
 

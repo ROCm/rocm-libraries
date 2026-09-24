@@ -22,9 +22,9 @@ const rocke_type_t* rocke_quant_ir_type(const char* qdtype)
     {
         return rocke_dtype_to_ir_type("i8");
     }
-    /* `_canon` -> "fp8e4m3" : keys "fp8e4m3", "fp8", "fp8_e4m3". */
+    /* `_canon` -> "fp8e4m3" : keys "fp8e4m3", "fp8", "fp8_e4m3", "e4m3". */
     if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0
-       || strcmp(qdtype, "fp8_e4m3") == 0)
+       || strcmp(qdtype, "fp8_e4m3") == 0 || strcmp(qdtype, "e4m3") == 0)
     {
         return rocke_dtype_to_ir_type("fp8e4m3");
     }
@@ -63,7 +63,7 @@ const rocke_type_t* rocke_b_quant_ir_type(rocke_ir_builder_t* b, const char* qdt
             b,
             ROCKE_ERR_VALUE,
             "unsupported quant dtype %s%s%s; expected one of "
-            "['bf8', 'bf8e5m2', 'fp8', 'fp8_e4m3', 'fp8_e5m2', 'fp8e4m3', "
+            "['bf8', 'bf8e5m2', 'e4m3', 'fp8', 'fp8_e4m3', 'fp8_e5m2', 'fp8e4m3', "
             "'i8', 'int8']",
             qdtype ? "'" : "",
             qdtype ? qdtype : "None",

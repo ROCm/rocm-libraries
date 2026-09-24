@@ -22,14 +22,20 @@ selectors. An integer carrier does not identify the numerical format.
 [`dtype_info`](../../python/rocke/core/dtypes.py) and
 [`rocke_dtype_info`](../../cpp/include/rocke/dtypes.h) return target-independent
 encoding descriptors. `dtype_to_ir_type` and `rocke_dtype_to_ir_type` resolve
-logical types, including distinct FP4 E2M1, FP6 E2M3, FP6 E3M2, and scale types.
+logical types, including distinct FP4 E2M1, FP6 E2M3, FP6 E3M2, E8M0, and E5M3.
 `quant_ir_type` delegates type resolution to this common resolver.
 
 Recognition and serialization do not enable scalar conversion, arithmetic, or
-an instruction on a target. In this implementation, FP4/FP6 and the nominal scale
-types are used in authoring metadata; storage helpers expand their transport into
+an instruction on a target. In this implementation, FP4/FP6, E8M0, and E5M3
+are used in authoring metadata; storage helpers expand their transport into
 existing integer operations before serialization. Raw scalar lowering of these
 types remains unsupported. Existing FP16/BF16 and FP8/BF8 lowering is unchanged.
+
+`e4m3` is an alias for the canonical `fp8e4m3` encoding, logical IR type, and
+nominal FP8 storage pointer. Both spellings serialize as `fp8e4m3`. The
+architecture scale selector `MmaScaleDType.E4M3` describes its operand role; it
+does not introduce a second scalar type. Scale words can still be assembled
+from raw byte patterns with the common bit packer.
 
 Scale-format validation remains separate from matrix alias normalization:
 E5M3 is not BF8 E5M2. Registering a scale dtype does not enable a backend selector.

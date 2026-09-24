@@ -173,7 +173,7 @@ static int test_storage_validation()
             CHECK(!rocke_tensor_storage_bytes(&invalid, &bytes));
         }
     }
-    for(const char* dtype : {"f16", "bf16", "fp8", "bf8"})
+    for(const char* dtype : {"f16", "bf16", "fp8", "e4m3", "bf8"})
     {
         const auto* unit = rocke_storage_ir_type(dtype);
         CHECK(unit && !rocke_type_eq(unit, rocke_i8()));
@@ -218,7 +218,26 @@ int main(int argc, char** argv)
         return emit(argv[2], false);
     if(argc == 3 && strcmp(argv[1], "--hip") == 0)
         return emit(argv[2], true);
+    if(argc == 3 && strcmp(argv[1], "--parse") == 0)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "parse") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = NULL;
+        CHECK(rocke_ir_parse(argv[2], &b, &kernel) == ROCKE_OK);
+        char* text = NULL;
+        CHECK(rocke_ir_serialize(kernel, &text) == ROCKE_OK);
+        fputs(text, stdout);
+        free(text);
+        rocke_ir_builder_free(&b);
+        return 0;
+    }
     CHECK(test_storage_validation() == 0);
+    CHECK(rocke_dtype_info("e4m3") == rocke_dtype_info("fp8e4m3"));
+    CHECK(rocke_dtype_to_ir_type("e4m3") == rocke_fp8e4m3());
+    CHECK(rocke_storage_ir_type("e4m3") == rocke_fp8e4m3());
+    CHECK(rocke_quant_ir_type("e4m3") == rocke_fp8e4m3());
+    CHECK(rocke_scalar_by_name("e4m3") == rocke_fp8e4m3());
+    CHECK(rocke_dtype_info("e5m3") != rocke_dtype_info("bf8e5m2"));
     for(const char* elem_type : {"unknown", "fp4e2m1"})
     {
         rocke_ir_builder_t b;

@@ -13,8 +13,7 @@ const rocke_type_t* rocke_storage_ir_type(const char* dtype)
     const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
     if(!info)
         return NULL;
-    if(info->encoded_bits % 8 || strcmp(info->name, "e8m0") == 0 || strcmp(info->name, "e4m3") == 0
-       || strcmp(info->name, "e5m3") == 0)
+    if(info->encoded_bits % 8 || strcmp(info->name, "e8m0") == 0 || strcmp(info->name, "e5m3") == 0)
         return rocke_i8();
     return rocke_dtype_to_ir_type(info->name);
 }
