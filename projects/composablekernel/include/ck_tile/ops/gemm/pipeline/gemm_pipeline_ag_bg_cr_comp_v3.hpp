@@ -21,12 +21,19 @@ struct BaseGemmPipelineAgBgCrCompV3
     static constexpr index_t GlobalBufferNum  = 1;
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
 
-    // The special eight-warp schedule is for wave64 MFMA blocks. Wave32 WMMA
-    // blocks use the standard schedule. Use the build's MFMA/WMMA selection,
-    // which is the same in the HIP host and device passes: host launchers also
-    // call these helpers and instantiate TailHandler's kernel specializations.
-    // Device-only architecture macros give the host a different hot-loop/tail
-    // choice and can make it request a kernel absent from the device image.
+    // The NumWarps==8 special-cased hot-loop/tail schedule below was written for
+    // wave64 512-thread blocks (gfx9xx / MFMA). On a wave32 WMMA target (gfx11,
+    // gfx12) an 8-warp block is only 256 threads -- the same thread count as a
+    // 4-warp wave64 block -- so it must follow the STANDARD (<=4-warp) schedule.
+    // Using the wave64 8-warp schedule there miscomputes has_hot_loop /
+    // tail_number and makes the intrawave RUN path execute an extra block_gemm
+    // on a non-existent K-tile, producing wrong results (ROCm/rocm-libraries#11161).
+    // Key the choice on the build's MFMA/WMMA selection (CK_TILE_USE_WMMA, set for
+    // gfx11/gfx12 targets), which is the same in the HIP host and device passes.
+    // Host launchers also call BlockHasHotloop/GetBlockLoopTailNum and TailHandler
+    // to pick the kernel specialization, so a device-only macro such as
+    // __gfx11__/__gfx12__ gives the host a different hot-loop/tail choice and can
+    // make it launch a kernel absent from the device image.
 #if CK_TILE_USE_WMMA
     static constexpr bool Use8WarpSchedule = false;
 #else
