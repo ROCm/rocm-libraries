@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from rocke.core.arch import ArchTarget
+from rocke.core.backend import resolve_backend
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
@@ -182,7 +183,8 @@ def test_fp4_catalog_signature_and_lowering(path, scale_type):
     hip = lower_kernel_to_hip(kernel, arch="gfx1250")
     assert f"__builtin_amdgcn_{path}_f32_16x16x128_f8f6f4(4," in hip
     for flavor in ("llvm20", "llvm22"):
-        with pytest.raises(NotImplementedError, match="requires llvm23"):
+        error_type = RuntimeError if resolve_backend() == "cpp" else NotImplementedError
+        with pytest.raises(error_type, match="requires llvm23"):
             lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor=flavor)
     with pytest.raises(NotImplementedError):
         lower_kernel_to_hip(kernel, arch="gfx950")
