@@ -209,8 +209,12 @@ _NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale"})
 # when one base rejects one of them (e.g. use_cfvst=True is legal only at fp16 D128).
 _SPEC_PERTURBATIONS = {
     "batch": (2, 4),
-    "seqlen_q": (4096,),
-    "seqlen_kv": (4096,),
+    # Two values each, and the persistent base is the one that exercises them: on the
+    # default grid the shape is read from kernel params (``runtime_shape``), so no
+    # seqlen perturbation moves the body there. 4096 is a no-op against the persistent
+    # base, which pins 4096 to get a legal P4 grid -- hence 2048 as the live candidate.
+    "seqlen_q": (4096, 2048),
+    "seqlen_kv": (4096, 2048),
     "num_query_heads": (32, 8),
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
@@ -269,6 +273,18 @@ _INJECTIVITY_BASES = {
         num_query_heads=32,
     ),
 }
+
+
+def _baked_spec(**kw) -> Gfx942AttentionDenseSpec:
+    """A spec whose emitted body still BAKES the problem shape.
+
+    The default grid is ``runtime_shape``: batch and both seqlens are read from
+    kernel params, so one binary serves every shape and those fields are absent
+    from the symbol by design. The persistent grid is the remaining sub-mode that
+    bakes them -- it is therefore where the "shape is in the name" properties are
+    still meaningful, and where a name collision would be a real stale-binary bug.
+    """
+    return _spec(**{**_INJECTIVITY_BASES["persistent_d128_fp16"], **kw})
 
 
 def _injectivity_field_ids():
@@ -398,15 +414,37 @@ def test_kernel_name_covers_every_baked_parameter(field):
     )
 
 
-def test_kernel_name_is_batch_unique():
-    names = {gfx942_kernel_name(_spec(batch=b)) for b in (1, 2, 4, 8)}
+def test_kernel_name_is_batch_unique_where_batch_is_baked():
+    """On the baked (persistent) grid, batch must reach the symbol.
+
+    This is the collision that once shipped: the body indexed with a baked batch
+    while the name omitted it, so the second launch was served the first config's
+    HSACO out of ``_DENSE_LAUNCHER_CACHE`` and read out of bounds. Asserted only
+    where batch is genuinely baked -- on the default grid it is a kernel param and
+    its absence from the name is correct, not a collision (see
+    :func:`test_kernel_name_drops_batch_on_the_runtime_shape_grid`).
+    """
+    names = {gfx942_kernel_name(_baked_spec(batch=b)) for b in (1, 2, 4, 8)}
     assert len(names) == 4, f"batch must disambiguate the kernel name, got {names}"
-    assert "_b4_" in gfx942_kernel_name(_spec(batch=4))
+    assert "_b4_" in gfx942_kernel_name(_baked_spec(batch=4))
+
+
+def test_kernel_name_drops_batch_on_the_runtime_shape_grid():
+    """The other direction: one binary per shape means no batch token at all.
+
+    A batch token here would be a silent duplicate compile per batch size -- safe,
+    but it would mean the runtime-shape path is not actually delivering the single
+    binary it claims. Byte-level, so it fails if the body starts baking batch again.
+    """
+    lo, hi = _spec(batch=1), _spec(batch=4)
+    assert lo.runtime_shape
+    assert gfx942_kernel_name(lo) == gfx942_kernel_name(hi)
+    assert _ir_body_sha(lo) == _ir_body_sha(hi)
 
 
 def test_build_bakes_batch_into_the_emitted_symbol():
-    assert build_attention_dense(_spec(batch=4), arch="gfx942").name != (
-        build_attention_dense(_spec(batch=1), arch="gfx942").name
+    assert build_attention_dense(_baked_spec(batch=4), arch="gfx942").name != (
+        build_attention_dense(_baked_spec(batch=1), arch="gfx942").name
     )
 
 
@@ -916,37 +954,38 @@ def _walk_op_names(op):
 
 
 @pytest.mark.parametrize(
-    "head_size, dtype, seqlen, expected",
+    "head_size, dtype, persistent, expected",
     [
-        # fp16 D128 is byte-identical across the exp2_fast boundary and flat at every
-        # seqlen in the sweeps -> stays enabled everywhere (no short-seq regression).
-        (128, "fp16", 512, True),
-        (128, "fp16", 2048, True),
-        (128, "fp16", 8192, True),
-        (64, "fp16", 512, True),
-        # bf16 D64: enabled (fused rescale gave the P2 headroom; no D128 short-seq cost).
-        (64, "bf16", 512, True),
-        (64, "bf16", 8192, True),
-        # bf16 D128 SHORT-SEQ GUARD: plain exp2 below 4096 (short-seq regressor);
-        # exp2_fast at/above 4096.
-        (128, "bf16", 512, False),
-        (128, "bf16", 1024, False),
-        (128, "bf16", 2048, False),
-        (128, "bf16", 4096, True),
-        (128, "bf16", 8192, True),
+        # fp16 D128 is byte-identical across the exp2_fast boundary and unaffected on
+        # either grid in the sweeps -> stays enabled everywhere.
+        (128, "fp16", False, True),
+        (128, "fp16", True, True),
+        (64, "fp16", False, True),
+        (64, "fp16", True, True),
+        # bf16 D64: enabled (fused rescale gave the P2 headroom; no D128 grid cost).
+        (64, "bf16", False, True),
+        (64, "bf16", True, True),
+        # bf16 D128 DEFAULT-GRID GUARD: plain exp2 on the default grid, exp2_fast on
+        # the persistent grid. The predicate reads no shape -- see _use_exp2_fast.
+        (128, "bf16", False, False),
+        (128, "bf16", True, True),
     ],
 )
-def test_exp2_fast_policy_bf16_d128_short_seq_guard(head_size, dtype, seqlen, expected):
-    """exp2_fast is enabled for every config EXCEPT short-sequence bf16 head_dim=128,
-    which reverts to plain exp2 below seqlen 4096. It is numerically safe everywhere
-    (both softmax args -- alpha's m_i - m_new and p's s - m_new -- are <= 0, exactly
-    exp2_fast's precondition), so this is a pure perf gate. bf16 D128 short sequences
-    are occupancy/latency-bound, where exp2_fast's register/schedule shift regresses
-    them (gfx942, ROCm 7.2.2); fp16 D128 -- byte-identical across the boundary
-    -- is flat and stays enabled. Pins the guard so a future edit that changes the
-    enabled set has to update this matrix on purpose.
+def test_exp2_fast_policy_bf16_d128_default_grid_guard(
+    head_size, dtype, persistent, expected
+):
+    """exp2_fast is enabled for every config EXCEPT bf16 head_dim=128 on the default
+    grid, which reverts to plain exp2. It is numerically safe everywhere (both softmax
+    args -- alpha's m_i - m_new and p's s - m_new -- are <= 0, exactly exp2_fast's
+    precondition), so this is a pure perf gate. bf16 D128 on the default grid is
+    occupancy/latency-bound, where exp2_fast's register/schedule shift never pays;
+    the persistent grid keeps the softmax VALU on the critical path, so it wins there
+    uniformly. fp16 D128 -- byte-identical across the boundary -- is unaffected on
+    either grid. The predicate reads only compile-time config, never the problem shape,
+    which is what lets bf16 D128 share one runtime-shape binary. Pins the guard so a
+    future edit that changes the enabled set has to update this matrix on purpose.
     """
-    assert _use_exp2_fast(head_size, dtype, seqlen) is expected
+    assert _use_exp2_fast(head_size, dtype, persistent) is expected
 
 
 @pytest.mark.parametrize(
@@ -1151,9 +1190,19 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
     spec = _spec(head_size=64, dtype="bf16", waves_per_eu=4)
     kernel = build_attention_dense(spec, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
-    # anchored on the full baked suffix, not a bare "_wpe4" (which "_wpe14" would
-    # also match): batch + arch + wpe are all part of the identity.
-    assert gfx942_kernel_name(spec).endswith("_gfx942_b1_wpe4")
+    # Anchored on the full suffix, not a bare "_wpe4" (which "_wpe14" would also
+    # match). The batch token is present only OFF the runtime-shape path: there
+    # batch is a kernel param, sizes nothing baked, and keeping it in the symbol
+    # would give two specs sharing ONE cache key two different names. Asserted
+    # both ways so this stays a name-identity check rather than drifting into an
+    # unintended assertion about which path the spec is on.
+    assert spec.runtime_shape
+    assert gfx942_kernel_name(spec).endswith("_gfx942_wpe4")
+    assert "_b1" not in gfx942_kernel_name(spec)
+
+    baked = dataclasses.replace(spec, persistent=True, num_persistent=64)
+    assert not baked.runtime_shape
+    assert gfx942_kernel_name(baked).endswith("_gfx942_b1_wpe4")
 
 
 def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():

@@ -22,6 +22,8 @@ hipDNN is a graph-based deep learning library for AMD GPUs that leverages a flex
 - [Project Structure](#project-structure)
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
 
 ---
 
@@ -118,3 +120,15 @@ The documentation covers the frontend API including:
 ## Contributing
 
 For information about contributing to the hipDNN project, please see the [Contributing Guide](./CONTRIBUTING.md).
+
+---
+
+## Security
+
+Please follow [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
+
+---
+
+## License
+
+This project is licensed under the terms described in [LICENSE](./LICENSE).
