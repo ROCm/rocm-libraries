@@ -19,7 +19,7 @@ Record at least:
     "Tensile/Common/Utilities.py"
   ],
   "test_selection": [
-    "Tensile/Tests/unit/characterization/CommonUtilities"
+    "tensilelite/Tests/unit/characterization/CommonUtilities"
   ],
   "container": "tl-mut",
   "source_root": "projects/hipblaslt/tensilelite",

@@ -33,7 +33,7 @@ cover numeric output across cluster shapes and prefetch modes.
 initialization, and uneven batched boundaries. Run them with:
 
 ```bash
-tox -e py3 -- Tensile/Tests -m common -k 'cluster_multicast'
+tox -e py3 -- tensilelite/Tests -m common -k 'cluster_multicast'
 ```
 
 ## Signature

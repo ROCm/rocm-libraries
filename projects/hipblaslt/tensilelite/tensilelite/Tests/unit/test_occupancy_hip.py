@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-# The coverage tox env runs `pytest -m unit Tensile/Tests/unit`; without this
+# The coverage tox env runs `pytest -m unit tensilelite/Tests/unit`; without this
 # explicit declaration the file is silently deselected and reports 0% coverage.
 # GPU-requiring tests within this file are individually skip-gated via
 # @pytest.mark.skipif, so the unit marker is safe here.

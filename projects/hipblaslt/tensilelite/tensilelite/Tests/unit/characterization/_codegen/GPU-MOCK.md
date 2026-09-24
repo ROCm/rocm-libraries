@@ -58,7 +58,7 @@ documented `--global-parameters` surface.
 When the switch is **off**, behavior is byte-identical to today — every spoof is
 gated on `globalParameters["CpuOnly"]`.
 
-The unit tests for the switch live in `Tensile/Tests/unit/test_cpu_only_switch.py`
+The unit tests for the switch live in `tensilelite/Tests/unit/test_cpu_only_switch.py`
 (the T1–T12 rigor-gate suite referenced from this doc).
 
 ## Caveat — synthetic perf is not real perf

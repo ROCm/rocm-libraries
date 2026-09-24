@@ -239,11 +239,11 @@ def findAvailableArchs(gpu_targets=None):
 
 def findConfigs(rootDir=None, availableArchs=None):
     """
-    Walks rootDir (defaults to trying to find Tensile/Tests) and returns a
+    Walks rootDir (defaults to trying to find tensilelite/Tests) and returns a
     list of test parameters, one for each YAML file.
 
     Args:
-        rootDir: Directory to walk for YAML configs. Defaults to Tensile/Tests.
+        rootDir: Directory to walk for YAML configs. Defaults to tensilelite/Tests.
         availableArchs: Pre-resolved list of GPU architectures.
             When None, calls findAvailableArchs() to auto-detect.
     """

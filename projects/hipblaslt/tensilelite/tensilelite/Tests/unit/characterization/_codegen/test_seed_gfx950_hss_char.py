@@ -19,7 +19,7 @@ from config_harness import emit_kernels_from_config
 pytestmark = pytest.mark.unit
 
 _ARCH = "gfx950"
-_SEED = "Tensile/Tests/common/gemm/fp16fp32mix.yaml"
+_SEED = "tensilelite/Tests/common/gemm/fp16fp32mix.yaml"
 
 
 def test_seed_gfx950_hss_emits_assembly():

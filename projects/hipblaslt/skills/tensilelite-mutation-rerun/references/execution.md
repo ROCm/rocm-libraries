@@ -146,7 +146,7 @@ bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/pyproject-mutm
   set \
   --src projects/hipblaslt/tensilelite \
   --only-mutate Tensile/Common/Utilities.py \
-  --test-selection Tensile/Tests/unit/characterization/CommonUtilities
+  --test-selection tensilelite/Tests/unit/characterization/CommonUtilities
 ```
 
 Expected output:
@@ -270,7 +270,7 @@ Create a tab-separated manifest. The header and column order are required:
 
 ```text
 mutant_id	file	apply_method	test_node	expect_clean_rc	expect_mutant_rc_nonzero
-Tensile.Common.Utilities.x__mutmut_1	Tensile/Common/Utilities.py	mutmut_apply	Tensile/Tests/unit/characterization/CommonUtilities/test_example.py::test_example	0	true
+Tensile.Common.Utilities.x__mutmut_1	Tensile/Common/Utilities.py	mutmut_apply	tensilelite/Tests/unit/characterization/CommonUtilities/test_example.py::test_example	0	true
 ```
 
 For kill-proof rows, `expect_clean_rc` must be `0`: a test that already fails on

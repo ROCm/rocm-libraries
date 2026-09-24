@@ -51,7 +51,7 @@ C++ unit → Tensile pytest → client/API → integration → perf. Pick the lo
 the regression. Map the base test-level table onto these lanes when advising or reviewing.
 
 ### Adds — characterization snapshot (`.ambr` golden) discipline
-Scope: `projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/` — characterization tests
+Scope: `projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/` — characterization tests
 that pin TensileLite's *current* Python behavior as syrupy `.ambr` goldens, run in the `-m unit`
 lane. Green means "behavior unchanged," not "correct"; a red is information about the PR's own
 change. When a PR's diff touches any `.ambr` file, gate on all of the below.
@@ -105,8 +105,8 @@ while another adds *data the validator checks*. Treat these as a coupled pair ev
 different paths. The concrete hipBLASLt instance:
 - Validator / allow-list: `projects/hipblaslt/tensilelite/Tensile/Common/GlobalParameters.py` (the
   global-parameter registry and the `_assertGlobalParametersAreValid` ignored-key allow-list), plus
-  the enforcing test `projects/hipblaslt/tensilelite/Tensile/Tests/unit/test_input_yaml_corpus_clean.py`.
-- Validated data: YAML fixtures under `projects/hipblaslt/tensilelite/Tensile/Tests/**` (e.g.
+  the enforcing test `projects/hipblaslt/tensilelite/tensilelite/Tests/unit/test_input_yaml_corpus_clean.py`.
+- Validated data: YAML fixtures under `projects/hipblaslt/tensilelite/tensilelite/Tests/**` (e.g.
   `common/gemm/**`).
 
 If, since the PR diverged, the base branch changed the validator/allow-list **and** this PR adds or

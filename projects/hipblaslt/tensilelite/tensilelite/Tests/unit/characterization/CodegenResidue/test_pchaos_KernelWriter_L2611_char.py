@@ -131,7 +131,7 @@ def test_solution_usesubtileimpl_derivation_ast():
     """
     import ast
 
-    target_file = resolve_tensile_path("Tensile/SolutionStructs/Solution.py")
+    target_file = resolve_tensile_path("tensilelite/SolutionStructs/Solution.py")
     with open(target_file) as fh:
         source = fh.read()
 

@@ -22,7 +22,7 @@ from config_helpers import configMarks, findAvailableArchs
 pytestmark = pytest.mark.gfx1250
 
 # configMarks takes rootDir only to compute the config's relpath (for the
-# directory-name marks); the four gfx1250 configs live under Tensile/Tests.
+# directory-name marks); the four gfx1250 configs live under tensilelite/Tests.
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
 _TESTS_ROOT = os.path.dirname(_COMMON_DIR)
 

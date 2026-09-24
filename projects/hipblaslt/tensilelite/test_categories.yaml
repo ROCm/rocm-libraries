@@ -82,7 +82,7 @@ test_categories:
       - "all"
 
   # Common-GEMM tests on real hardware, matching Math CI's `preliminary` stage
-  # (`tox -e py3 -- Tensile/Tests -m common`). Selected by TheRock's
+  # (`tox -e py3 -- tensilelite/Tests -m common`). Selected by TheRock's
   # tensilelite-common job, which pins this category via TEST_CATEGORY.
   #
   # Unlike the emulation categories below, arch selection here is opt-out:
@@ -97,7 +97,7 @@ test_categories:
   hw-common:
     description: "Common GEMM tests on real hardware"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "common"
     # On a 1-GPU runner every worker is pinned to the same GPU and
@@ -145,7 +145,7 @@ test_categories:
   emu-fast:
     description: "Common GEMM tests for emulation pre-submits"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS} and emu_fast"
     parallel_workers: 16
@@ -160,7 +160,7 @@ test_categories:
   emu-full:
     description: "All common GEMM tests for emulation nightly"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS}"
     parallel_workers: 16
