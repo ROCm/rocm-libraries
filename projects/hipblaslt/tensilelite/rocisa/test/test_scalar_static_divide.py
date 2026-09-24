@@ -24,10 +24,17 @@ U32 = 0xFFFFFFFF
 Q_REG, R_REG, D_REG, TMP_REG = 0, 1, 2, 4
 TMP_RES = ContinuousRegister(TMP_REG, 2)
 
-# Non-power-of-2 divisors take the magic-number path. Powers of 2 take the
-# shift/AND fast path and are included to prove it is untouched.
-NON_POW2_DIVISORS = [96, 160, 192, 272, 320]
-POW2_DIVISORS = [16, 32, 64, 128, 256]
+# Non-power-of-2 divisors take the magic-number path: small odd and prime
+# divisors (3 has a magic constant above INT32_MAX), macrotile-like sizes,
+# larger odd/prime sizes, and divisors above 16 bits. Powers of 2 (including 1)
+# take the shift/AND fast path.
+NON_POW2_DIVISORS = [
+    3, 5, 7, 11, 13,
+    96, 160, 192, 272, 320,
+    97, 1009, 1023,
+    65537, 100003,
+]
+POW2_DIVISORS = [1, 2, 16, 32, 64, 128, 256]
 
 
 def _magic(divisor):
@@ -46,12 +53,15 @@ def _low_half_overflow_threshold(divisor):
 def _exactness_limit(divisor):
     """Largest dividend for which magic division is guaranteed exact."""
     magic, shift = _magic(divisor)
-    return (1 << shift) // (magic * divisor - (1 << shift))
+    return ((1 << shift) - 1) // (magic * divisor - (1 << shift))
 
 
 def _dividends(divisor):
-    """Dividends bracketing the low-half overflow threshold, plus small values."""
+    """Dividends bracketing the low-half overflow threshold, plus small values
+    and the largest dividend the magic constant is guaranteed exact for."""
     threshold = _low_half_overflow_threshold(divisor)
+    limit = min(_exactness_limit(divisor), U32)
+    assert threshold + 1 <= limit, f"overflow threshold not testable for {divisor}"
     values = [
         0,
         1,
@@ -70,10 +80,11 @@ def _dividends(divisor):
         (threshold // divisor + 1) * divisor + 1,
         4 * threshold,
         4 * threshold + divisor - 1,
+        limit - divisor,
+        limit - 1,
+        limit,
     ]
-    limit = _exactness_limit(divisor)
-    assert max(values) <= limit, f"test dividend exceeds exactness limit for {divisor}"
-    return values
+    return sorted({v for v in values if 0 <= v <= limit})
 
 
 # ---------------------------------------------------------------------------
@@ -161,13 +172,18 @@ class _Sim:
             raise AssertionError(f"unhandled opcode in emitted sequence: {opcode}")
 
 
-def _run_divide(divisor, dividend, do_remainder=1):
+def _run_divide_regs(divisor, dividend, q_reg, r_reg, d_reg, do_remainder):
     module = scalarStaticDivideAndRemainder(
-        Q_REG, R_REG, D_REG, divisor, TMP_RES, do_remainder
+        q_reg, r_reg, d_reg, divisor, TMP_RES, do_remainder
     )
     sim = _Sim()
-    sim.regs[D_REG] = dividend
+    sim.regs[d_reg] = dividend
     sim.run(module)
+    return sim
+
+
+def _run_divide(divisor, dividend, do_remainder=1):
+    sim = _run_divide_regs(divisor, dividend, Q_REG, R_REG, D_REG, do_remainder)
     return sim.regs.get(Q_REG), sim.regs.get(R_REG)
 
 
@@ -197,6 +213,43 @@ def test_divide_quotient_only_non_power_of_2(divisor):
     for dividend in _dividends(divisor):
         quotient, _ = _run_divide(divisor, dividend, do_remainder=0)
         assert quotient == dividend // divisor, (divisor, dividend)
+
+
+@pytest.mark.parametrize("divisor", NON_POW2_DIVISORS)
+def test_divide_remainder_only_non_power_of_2(divisor):
+    for dividend in _dividends(divisor):
+        _, remainder = _run_divide(divisor, dividend, do_remainder=2)
+        assert remainder == dividend % divisor, (divisor, dividend)
+
+
+def test_magic_constant_above_int32_max():
+    """Divisor 3 has magic 0xAAAAAAAB, which does not fit in a signed 32-bit int."""
+    assert _magic(3)[0] > 0x7FFFFFFF
+    for dividend in [1, 2, 3, 4, 5, 100, 12345, 1 << 31, U32 - 1, U32]:
+        quotient, remainder = _run_divide(3, dividend)
+        assert (quotient, remainder) == divmod(dividend, 3), dividend
+        assert _run_ceil(3, dividend) == -(-dividend // 3), dividend
+
+
+# Register aliasing used by kernel-writer call sites: (qReg, rReg, dReg,
+# doRemainder, outputs checked).
+ALIAS_CASES = {
+    "quotient_and_remainder_share_reg": (Q_REG, Q_REG, D_REG, 1, "r"),
+    "quotient_in_tmp_lo": (TMP_REG, R_REG, D_REG, 2, "r"),
+    "quotient_overwrites_dividend": (D_REG, R_REG, D_REG, 0, "q"),
+}
+
+
+@pytest.mark.parametrize("case", list(ALIAS_CASES))
+@pytest.mark.parametrize("divisor", [3, 7, 192, 320])
+def test_divide_register_aliasing(case, divisor):
+    q_reg, r_reg, d_reg, do_remainder, outputs = ALIAS_CASES[case]
+    for dividend in _dividends(divisor):
+        sim = _run_divide_regs(divisor, dividend, q_reg, r_reg, d_reg, do_remainder)
+        if "q" in outputs:
+            assert sim.regs[q_reg] == dividend // divisor, (divisor, dividend)
+        if "r" in outputs:
+            assert sim.regs[r_reg] == dividend % divisor, (divisor, dividend)
 
 
 @pytest.mark.parametrize("divisor", POW2_DIVISORS)
