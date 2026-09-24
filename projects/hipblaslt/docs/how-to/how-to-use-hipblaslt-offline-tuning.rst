@@ -103,9 +103,17 @@ if it still names the same kernel. If it does not, that entry is rejected and th
 to normal heuristic selection.
 
 Validation is per entry, so upgrading hipBLASLt thins a tuning file rather than discarding it, and
-only the shapes that failed need re-tuning. Files written by an older hipBLASLt may carry a
-``solution_name`` instead, which is validated the same way, and files older still carry no name at
-all; those last are used only when the file was produced by the running build.
+only the shapes that failed need re-tuning. A row that carries a ``solution_name`` instead is
+validated the same way. Files written by an older hipBLASLt carry no name at all, and those are used
+only when the file was produced by the running build.
+
+``kernel_name`` names the compiled kernel, not the whole solution. The index still selects the
+solution, including its GSU, WGM and StaggerU defaults, and several solutions can share one compiled
+kernel, which is why the name is paired with the index rather than used on its own. What validation
+guarantees is that the index resolves to the same compiled kernel as when the row was written. It
+does not detect a rebuild that changes only that solution's defaults, whose row is used with the new
+defaults, and it cannot find a kernel that moved to a different index: that row is rejected and the
+shape falls back to heuristic selection.
 
 Runtime tuning
 ==============
@@ -133,20 +141,42 @@ is still off until you ask for it, with two environment variables:
 matmul, and appends the winner to the cache file. ``cache`` only replays what the file already
 contains, validating each entry as described above. ``off`` is the default and changes nothing.
 
+Which kernel a matmul launches depends on whether it passes an algorithm. A call to
+``hipblasLtMatmul`` with an explicit ``algo`` always launches that algorithm: the cache serves such a
+caller through ``hipblasLtMatmulAlgoGetHeuristic``, which returns the cached winner as its first
+result. A call with ``algo=nullptr`` leaves the choice to the library and launches the cached entry
+when there is a usable one. In ``tune`` mode the call that benchmarks a shape records the winner
+either way, but only a call with ``algo=nullptr`` launches it straight away. A caller that queried the
+heuristic before the shape was tuned, and reuses that algorithm, keeps launching it until it queries
+the heuristic again.
+
 The cache file uses the same header/value-row format as an offline tuning file, so a file produced by
 one can be read by the other. Runtime-tuned rows include a schema version and use the complete problem
-key. Rows produced by the current ``hipblaslt-bench`` writer have no schema version and retain the
-historical matching behavior: they distinguish transpose, shape and the principal datatypes, but not
-leading dimensions, batch strides, epilogue details or device identity. Do not put offline-tuned
-problems that differ only in one of those omitted fields in the same file.
+key, and every column of such a row is required: a row with a missing or malformed value, including
+one a crash cut short, is ignored. Strides a problem does not use, such as the batch strides of a
+single batch or the E strides of an epilogue without an E tensor, are recorded as zero, so a problem
+matches its own entry whether it arrives through the C API or the C++ extension. Rows produced by the
+current ``hipblaslt-bench`` writer have no schema version and retain the historical matching behavior:
+they distinguish transpose, shape and the principal datatypes, but not leading dimensions, batch
+strides, epilogue details or device identity. Do not put offline-tuned problems that differ only in
+one of those omitted fields in the same file.
 
 ``HIPBLASLT_TUNING_CACHE_PATH`` and ``HIPBLASLT_TUNING_OVERRIDE_FILE`` are mutually exclusive; set
 only one.
 
-Only one process at a time may write a given cache file. Tuning is serialised within a process, but
-nothing coordinates separate processes, so the ranks of a multi-process job such as MPI would each
-benchmark the same shapes and append to the same file unsynchronised. Tune once in a single-rank
-warm-up run, then start the job with ``HIPBLASLT_TUNING_MODE=cache``, which only reads:
+Tuning is serialised within a process. A thread that meets an untuned shape while another thread is
+tuning waits for it, so every shape ``tune`` mode meets is tuned, whatever the thread timing. Work
+that other threads or processes run on the same GPU during a search still shares the device with it
+and can shift the timings, so tune in a run whose GPU is otherwise quiet.
+
+A process running in a secure execution context (set-user-ID, set-group-ID, or another
+credential-changing exec such as file capabilities) ignores every ``HIPBLASLT_TUNING_*`` variable,
+so tuning stays off in it.
+
+Only one process at a time may write a given cache file. Nothing coordinates separate processes, so
+the ranks of a multi-process job such as MPI would each benchmark the same shapes and append to the
+same file unsynchronised. Tune once in a single-rank warm-up run, then start the job with
+``HIPBLASLT_TUNING_MODE=cache``, which only reads:
 
 .. code-block:: bash
 
@@ -216,10 +246,11 @@ cannot block a live application indefinitely, and 0 removes the ceiling entirely
 
 A search the ceiling cuts short still records its best candidate, marked incomplete. Candidates are
 not measured in order of expected performance, so the best of a truncated prefix is usually not the
-shape's best kernel. It is never worse than not tuning at all, though: default selection's own choice
-is put at the front of the candidate list and is therefore always measured first, so the best of any
-prefix is at least as fast as what the shape would have run untuned. Recording it means a shape too
-large to finish gets some of the benefit immediately rather than none.
+shape's best kernel. It is never worse than not tuning at all, though: the kernel the call would
+otherwise launch is put at the front of the candidate list and measured first, and a truncated search
+is recorded only when that kernel was measured, so the recorded winner is at least as fast as what
+the call would have run untuned. Recording it means a shape too large to finish gets some of the
+benefit immediately rather than none.
 
 An incomplete entry is replayed like any other. What the marking buys is that tune mode revisits the
 shape when a run comes along that can finish the search, and replaces the row, so a partial answer
@@ -227,11 +258,17 @@ never becomes permanent. To finish such a shape, raise or clear
 ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` and run it in tune mode again; as a rough guide a
 2048x1024x2048 FP16 shape takes about 146 seconds on MI300X, and the cost grows with the problem.
 
-Each row records the ceiling it was written under, and a shape is only benchmarked again when the
-current ceiling beats it, with 0 beating every finite one. Re-running the same workload at the same
-ceiling therefore costs nothing: the search would measure the same candidates and stop in the same
-place, so it is not repeated and no second row is appended. Within a single process a shape is
-benchmarked at most once in any case.
+Each row records the ceiling it was written under and the search that produced it: whether every
+kernel or a ranked prefix was searched and how long that prefix was, the workspace limit, the
+iteration counts, and whether the flush and rotation were on. A finished row is final only for a run
+that would search no more than it did, so widening the search, for example from a ranked prefix to
+every kernel, to a larger workspace, or to more iterations, tunes the shape again, while narrowing it
+does not. An incomplete row is benchmarked again when the current ceiling beats the one it was
+written under, with 0 beating every finite one, or when the search differs from the one that produced
+it. Re-running the same workload with the same settings therefore costs nothing: the search would
+measure the same candidates and stop in the same place, so it is not repeated and no second row is
+appended. Within a single process a shape is benchmarked at most once in any case, including when an
+attempt fails after ``tuning-start``.
 
 Use the ceiling to bound how long tuning may run, not as a way to tune faster; to tune faster, reduce
 the candidate list or the iteration counts.
@@ -291,7 +328,8 @@ on a later one, and that tune is reported:
    tuning-cache: tuning-skipped in-place C==D with nonzero beta cannot be measured without mutating its input; using default selection
 
 ``tuning-skipped`` means the tuner understood the problem and declined it, which is expected for
-some shapes forever. ``tuning-fallback`` means an attempt failed and is worth investigating.
+some shapes forever. ``tuning-fallback`` means an attempt failed and is worth investigating; an
+attempt that failed after ``tuning-start`` is not retried in the same process.
 
 Setting ``HIPBLASLT_LOG_LEVEL=4`` keeps all of the above, timestamps it like the rest of the library
 log, and adds per-problem cache hit, miss and invalidation lines, the scratch and candidate setup,
@@ -308,6 +346,6 @@ Limitations
 * One process should write a given cache file at a time. Multi-process jobs should tune in a
   single-rank warm-up and then run in ``cache`` mode; see above.
 * ``alpha``, ``beta`` and whether ``C`` and ``D`` alias are not part of the lookup key, so an entry tuned at one value of ``beta`` can serve a caller using another.
-* Passing ``algo=nullptr`` to ``hipblasLtMatmul`` does not replay cached winners, and such a call is
-  left out of the summary rather than counted as a shape the cache served. In ``tune`` mode the shape
-  is still benchmarked, and that winner does run.
+* An explicit ``algo`` passed to ``hipblasLtMatmul`` always launches as given. A caller that reuses an
+  algorithm it queried before its shape was tuned does not pick up the winner until it queries the
+  heuristic again.

@@ -97,7 +97,10 @@ feature, and these variables are ignored.
 Runtime tuning is opt-in. ``HIPBLASLT_TUNING_MODE`` and
 ``HIPBLASLT_TUNING_CACHE_PATH`` are read when tuning is first used in a process;
 set them before the first hipBLASLt call. The scratch cap is read on the first
-scratch allocation. For more information, see
+scratch allocation. A process running in a secure execution context
+(set-user-ID, set-group-ID, or another credential-changing exec such as file
+capabilities) ignores every variable in this section, so tuning stays off. For
+more information, see
 :doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
 
 Setting ``cache`` or ``tune`` mode emits a few concise lifecycle notices without
