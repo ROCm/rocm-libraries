@@ -26,6 +26,12 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
+# The benchmarks use primbench device monitoring, which links against amd-smi.
+# amd-smi is not available on Windows; it is required everywhere else.
+if(NOT WIN32)
+  find_package(amd_smi REQUIRED)
+endif()
+
 function(add_thrust_benchmark BENCHMARK_SOURCE)
     file(RELATIVE_PATH rel_path ${CMAKE_CURRENT_LIST_DIR}/bench ${CMAKE_CURRENT_LIST_DIR}/${BENCHMARK_SOURCE})
     string(REPLACE ".cu" "" bench_name ${rel_path})
