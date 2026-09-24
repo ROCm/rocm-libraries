@@ -489,7 +489,9 @@ class CkVariantBench:
         key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
         if key not in self._launchers:
             kernel = build_unified_attention_2d_tiled(spec)
-            backend = self.compile_backend or _select_2d_compile_backend(problem)
+            backend = self.compile_backend or _select_2d_compile_backend(
+                problem, "gfx950"
+            )
             if backend == "hipcc":
                 from rocke.helpers.compile import compile_kernel_via_hipcc
 
@@ -1155,7 +1157,7 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     elif run_backend == "3d":
         from kernels import supports_native_unified_attention_3d_tiled
 
-        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem, "gfx950")
         instance_name = "3d" if ok_3d else "scalar"
     else:
         instance_name = "scalar"

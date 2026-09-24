@@ -1404,8 +1404,8 @@ def _run_rocke(
         # run_unified_attention_torch dispatcher overhead). --no-interleave
         # (applied in main via a scoped patch of _tiled_spec_from_problem) makes
         # this lane measure both the interleave fast path and the "32x32 base".
-        if _d256_gfx950_fast(problem):
-            spec = _tiled_spec_from_problem(problem)
+        if _d256_gfx950_fast(problem, "gfx950"):
+            spec = _tiled_spec_from_problem(problem, "gfx950")
             if kq_swizzle:
                 spec = _with_kq_xor_swizzle(spec)
                 print(
@@ -1421,7 +1421,7 @@ def _run_rocke(
                     "correct: numerics preserved)"
                 )
             kernel = build_unified_attention_2d_tiled(spec)
-            if _select_2d_compile_backend(problem) == "hipcc":
+            if _select_2d_compile_backend(problem, "gfx950") == "hipcc":
                 from rocke.helpers.compile import compile_kernel_via_hipcc
 
                 artifact = compile_kernel_via_hipcc(kernel)
@@ -1491,9 +1491,9 @@ def _run_rocke(
         if not ok:
             raise NotImplementedError(reason)
 
-        spec = _tiled_spec_from_problem(problem)
+        spec = _tiled_spec_from_problem(problem, "gfx950")
         kernel = build_unified_attention_2d_tiled(spec)
-        if _select_2d_compile_backend(problem) == "hipcc":
+        if _select_2d_compile_backend(problem, "gfx950") == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
 
             artifact = compile_kernel_via_hipcc(kernel)

@@ -201,13 +201,13 @@ def main() -> int:
         use_sinks=use_sinks,
         use_fp8=kv_is_fp8,
     )
-    ok, why = au.supports_native_unified_attention_3d_tiled(problem)
+    ok, why = au.supports_native_unified_attention_3d_tiled(problem, arch)
     if not ok:
         print(f"[{arch}] decode3d UNSUPPORTED: {why}")
         return 2
     Spec3D, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(arch)
     seg_updates = {"num_segments": NUM_SEG}
-    base_seg_spec = au._tiled_3d_spec_from_problem(problem)
+    base_seg_spec = au._tiled_3d_spec_from_problem(problem, arch)
     if hasattr(base_seg_spec, "use_register_p"):
         if args.register_p:
             seg_updates["use_register_p"] = True

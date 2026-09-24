@@ -4344,6 +4344,14 @@ def run_unified_attention_torch(
         if int(k.shape[0]) * _blk_stride > 0x8000_0000:
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
 
+    # The launch arch. This is the one place the *launch* path is allowed to
+    # ask the running box: compile-then-run must target the local device, and
+    # every gate below is a launch decision, not a selection decision. Bound
+    # once here (above the 3D branch) so both branches share a single answer --
+    # the selection-side arch is the explicit ``arch`` parameter threaded
+    # through ``supports_native_unified_attention*``.
+    _launch_arch = _resolve_attention_arch()
+
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton
     # 2-6× on decode-shape workloads (small total Q, few sequences).
@@ -4369,7 +4377,9 @@ def run_unified_attention_torch(
     # is fine" branch of ``use_2d_kernel``).
     prefer_2d = backend == "auto" and problem.select_path() == "2d"
     if backend == "3d" or (backend == "auto" and not prefer_2d):
-        ok_3d, reason_3d = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, reason_3d = supports_native_unified_attention_3d_tiled(
+            problem, _launch_arch
+        )
         if ok_3d:
             return _run_3d_tiled(
                 problem=problem,
@@ -4403,7 +4413,6 @@ def run_unified_attention_torch(
         # a replay skips supports + cache_key + the kernarg pack -- the host
         # overhead that otherwise dominates tiny-shape latency. Skipped when the
         # caller is already capturing the forward (they take precedence).
-        _launch_arch = _resolve_attention_arch()
         if (
             _enable_2d_graph_replay(problem, _launch_arch)
             and not _torch_stream_capturing()
