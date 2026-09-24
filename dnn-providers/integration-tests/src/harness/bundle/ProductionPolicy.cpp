@@ -18,6 +18,7 @@ HarnessPolicy productionPolicy(TensorPlacement placement)
 {
     HarnessPolicy policy;
     policy.mode = TestConfig::get().getVerificationMode();
+    policy.validator = TestConfig::get().getValidatorDevice();
     policy.claims = claimMode();
     policy.placement = placement;
     policy.arch = TestConfig::get().getCurrentArch();

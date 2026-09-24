@@ -114,6 +114,8 @@ inline ClaimModeResolution resolveClaimMode(const ClaimModeRequest& request)
 struct HarnessPolicy
 {
     VerificationMode mode = VerificationMode::AUTO;
+    /// Where comparisons run; AUTO follows the reference that produced the expectation.
+    ValidatorDevice validator = ValidatorDevice::AUTO;
     ClaimMode claims = ClaimMode::WARN;
     TensorPlacement placement = TensorPlacement::DEVICE;
 

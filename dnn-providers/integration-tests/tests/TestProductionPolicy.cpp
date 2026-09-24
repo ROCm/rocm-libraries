@@ -44,6 +44,7 @@ TEST_F(TestProductionPolicy, EveryFieldMirrorsItsOwnConfigGetter)
     const HarnessPolicy policy = productionPolicy(TensorPlacement::DEVICE);
 
     EXPECT_EQ(policy.mode, TestConfig::get().getVerificationMode());
+    EXPECT_EQ(policy.validator, TestConfig::get().getValidatorDevice());
     // The one field fed by a helper rather than a getter, and the assertion is
     // wiring only: this fixture initializes the singleton with the flag false, so
     // both sides can only ever answer OFF. What it does catch is productionPolicy()
