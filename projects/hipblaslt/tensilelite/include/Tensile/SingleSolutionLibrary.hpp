@@ -154,6 +154,12 @@ namespace TensileLite
                                                              double*                       fitness
                                                              = nullptr) const override
         {
+            // Grouped device-scalar argument packing is not implemented. Reject
+            // before workspace sizing, which also packs grouped arguments.
+            for(auto const& problem : problems)
+                if(problem.getParams().deviceScalarAlpha())
+                    return {};
+
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution = resolved();
@@ -281,6 +287,11 @@ namespace TensileLite
                                         SolutionLibrarySearchType     searchType
                                         = SolutionLibrarySearchType::DEFAULT) const override
         {
+            if(searchType == SolutionLibrarySearchType::DEFAULT)
+                for(auto const& problem : problems)
+                    if(problem.getParams().deviceScalarAlpha())
+                        return {};
+
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution    = resolved();

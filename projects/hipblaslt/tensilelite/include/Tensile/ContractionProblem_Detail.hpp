@@ -189,7 +189,9 @@ namespace TensileLite
                                         lhs.getParams().gsu(),
                                         rhs.getParams().gsu(),
                                         lhs.getParams().fallbackStatus(),
-                                        rhs.getParams().fallbackStatus());
+                                        rhs.getParams().fallbackStatus(),
+                                        lhs.getParams().deviceScalarAlpha(),
+                                        rhs.getParams().deviceScalarAlpha());
         }
     };
 } // namespace TensileLite
@@ -248,7 +250,8 @@ namespace std
                                           problem.amaxd().dataType(),
                                           problem.beta() == 0.0,
                                           problem.getParams().gsu(),
-                                          problem.getParams().fallbackStatus()));
+                                          problem.getParams().fallbackStatus(),
+                                          problem.getParams().deviceScalarAlpha()));
         }
     };
 
