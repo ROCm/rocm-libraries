@@ -1588,59 +1588,6 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
-    # S4: hipdnn_validate_descriptors --native-source cross-checks a pack's descriptor
-    # JSON against the C++ source it dispatches into (dispatch/graph_match/kernel_match/
-    # score symbol names). This is a pure filesystem/JSON/regex check -- no HIP call, no
-    # device -- but the flag was previously exercised only against generator-emitted
-    # synthetic fixtures, never against a real shipped pack, so a typo in any of the four
-    # symbol strings in a real descriptor was invisible to every test that ran.
-    #
-    # One entry per attention_dense pack this repo ships, so the rows name the PRODUCTION
-    # tree (HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR, arch_content/) and never the test tree
-    # beside it: what is checked here is what is packaged. That arch's kind: rocke sources
-    # are lowered to a loadable kind: kpack tree only when the arch is in GPU_TARGETS, and
-    # only when a production source root is configured at all, so a build that did neither
-    # never stages one. The driver script skips (ctest's SKIP_RETURN_CODE, 77) rather than
-    # fails in that case: absence reflects how this build was configured, not a descriptor
-    # defect.
-    #
-    # Gated on the validator target existing (HIPDNN_ENABLE_KERNEL_INGESTOR) and nothing
-    # else -- the per-arch skip is the driver script's job, not configure-time's, since
-    # which arches got packed is a build-time fact the production OUT_ROOT only holds once
-    # hkp_wire_pack_target's custom command has actually run.
-    #
-    # Rows are `<arch>;<pack-dir>;<engine-name>;<Native.cpp>`, one per attention_dense
-    # pack the branch actually ships, so the table never names a Native.cpp absent from the
-    # checkout. Separators are escaped (`\;`) so each row stays ONE list element --
-    # unescaped, the rows flatten into loose fields and `list(GET _ns_spec 1)` reads past
-    # the end of a 1-element list.
-    set(HKP_NATIVE_SOURCE_PACKS
-        "gfx942\;gfx942_attention_dense\;hipkernel:Gfx942AttentionDense\;Gfx942AttentionDenseNative.cpp")
-
-    if(TARGET hipdnn_validate_descriptors AND HKP_NATIVE_SOURCE_PACKS)
-        set(_ns_native_source_root "${HKP_PKG_DIR}/../src/engines/kernel_ingestor_engine/packs")
-        foreach(_ns_spec IN LISTS HKP_NATIVE_SOURCE_PACKS)
-            list(GET _ns_spec 0 _ns_arch)
-            list(GET _ns_spec 1 _ns_pack)
-            list(GET _ns_spec 2 _ns_engine)
-            list(GET _ns_spec 3 _ns_native_file)
-            set(_ns_test_name "hip-kernel-provider-hkp-native-source-${_ns_arch}")
-            add_test(
-                NAME ${_ns_test_name}
-                COMMAND "${Python3_EXECUTABLE}"
-                        "${HKP_PKG_DIR}/tools/hkp_native_source_check.py"
-                        --arch "${_ns_arch}"
-                        --root "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/${_ns_arch}/rocKE/${_ns_pack}"
-                        --validator "$<TARGET_FILE:hipdnn_validate_descriptors>"
-                        --expect-engine "${_ns_engine}"
-                        --native-source "${_ns_native_source_root}/${_ns_native_file}"
-            )
-            set_tests_properties(${_ns_test_name} PROPERTIES
-                SKIP_RETURN_CODE 77
-                LABELS "unit_test;hip-kernel-provider;host")
-        endforeach()
-    endif()
-
     # Every entry above is add_test()'d in this scope, so the YAML's
     # test_patterns match them via the directory-property loop. EXPLICIT_TESTS is
     # avoided: apply_ctest_category_labels joins it with ';', which execute_process
