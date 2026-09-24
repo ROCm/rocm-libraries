@@ -116,7 +116,7 @@ TEST(TestResolveVerificationMode, NulloptCliWithoutEnvReturnsNullopt)
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(TestParseValidatorDevice, AcceptsAutoCpuGpuCaseInsensitiveAndNothingElse)
+TEST(TestParseValidatorDevice, AcceptsTheThreeSpellingsCaseInsensitiveAndNothingElse)
 {
     using hipdnn_integration_tests::parseValidatorDevice;
     using hipdnn_integration_tests::ValidatorDevice;
@@ -142,7 +142,7 @@ TEST(TestResolveValidatorDevice, ExplicitAutoOnTheCliBeatsTheEnv)
     EXPECT_EQ(resolveValidatorDevice(std::nullopt), ValidatorDevice::GPU);
 }
 
-TEST(TestResolveValidationSite, AutoFollowsTheReferenceAndCpuGpuOverrideIt)
+TEST(TestResolveValidationSite, AutoFollowsTheReferenceAndAnExplicitDeviceOverridesIt)
 {
     using hipdnn_integration_tests::resolveValidationSite;
     using hipdnn_integration_tests::ValidationSite;
