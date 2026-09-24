@@ -253,10 +253,12 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   // Batch case
   if (batch > 1) {
     auto numMTs_total = numMTs * batch;
-    if (numMTs == 1 || numMTs_total <= NUM_XCD || numMTs % NUM_XCD == 0)
+    if (numMTs == 1 || numMTs_total <= NUM_XCD)
       return {0, 0, 0, 1};
     else
-      return {0, 0, NUM_XCD, 1};
+      return {0, (cus_per_xcd / numMTs) * numMTs, NUM_XCD,
+        grid_m > 1 ?
+        std::min(static_cast<int32_t>(std::ceil(std::sqrt(cus_per_xcd))), static_cast<int32_t>(grid_n)) : 1};
   }
 
   // Non-temporal
@@ -1856,7 +1858,9 @@ double compute_parallel_reduction_latency(const problem_t& problem,
 
 double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
-                             const config_t& config) {
+                             const config_t& config,
+                             bool non_temporal_a_available,
+                             bool non_temporal_b_available) {
   assert(config.is_valid());
 
   // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
@@ -1917,11 +1921,15 @@ double compute_total_latency(const problem_t& problem,
     if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
       // avoid division by 0 if K == 0
       if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
-        // Use nontemporal B
-        if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
+        // Use nontemporal B, if the library has one to use
+        if (non_temporal_b_available && !(config.cache_hints_b == 4)) {
+          return std::numeric_limits<double>::max();
+        }
       } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
-        // Use Non Temporal A
-        if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
+        // Use Non Temporal A, if the library has one to use
+        if (non_temporal_a_available && !(config.cache_hints_a == 4)) {
+          return std::numeric_limits<double>::max();
+        }
       } else {
         // Never use Non Temporal
         if (config.cache_hints_a || config.cache_hints_b) {

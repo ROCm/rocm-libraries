@@ -5,10 +5,8 @@
 #define GUARD_MIOPEN_CONV_DRIVER_HPP
 
 #include "InputFlags.hpp"
-#include "conv_verify.hpp"
 #include "conv_common.hpp"
 #include "driver.hpp"
-#include "mloConvHost.hpp"
 #include "random.hpp"
 #include "rocrand_wrapper.hpp"
 #include "tensor_driver.hpp"

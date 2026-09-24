@@ -520,10 +520,10 @@ namespace TensileLite
         CustomArgType_Count,
     };
 
-    std::string toString(CustomArgType arg);
-    CustomArgType fromStringCustomArgType(std::string& str);
-    std::ostream& operator<<(std::ostream& stream, const CustomArgType& t);
-    std::istream& operator>>(std::istream& stream, CustomArgType& t);
+    TENSILELITEHOST_EXPORT std::string toString(CustomArgType arg);
+    TENSILELITEHOST_EXPORT CustomArgType fromStringCustomArgType(std::string& str);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomArgType& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomArgType& t);
 
     /**
  * @}

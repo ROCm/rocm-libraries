@@ -100,6 +100,30 @@ hipsolver<type>getrf()
    :outline:
 .. doxygenfunction:: hipsolverSgetrf
 
+.. _getrfBatched_bufferSize:
+
+hipsolver<type>getrfBatched_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgetrfBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverCgetrfBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverDgetrfBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverSgetrfBatched_bufferSize
+
+.. _getrfBatched:
+
+hipsolver<type>getrfBatched()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgetrfBatched
+   :outline:
+.. doxygenfunction:: hipsolverCgetrfBatched
+   :outline:
+.. doxygenfunction:: hipsolverDgetrfBatched
+   :outline:
+.. doxygenfunction:: hipsolverSgetrfBatched
+
 .. _sytrf_bufferSize:
 
 hipsolver<type>sytrf_bufferSize()

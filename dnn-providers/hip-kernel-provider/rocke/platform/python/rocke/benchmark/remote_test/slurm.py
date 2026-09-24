@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import shlex
+from pathlib import Path
 
 from . import config, transport
 
@@ -29,6 +30,25 @@ _PKG_EXCLUDES = (
     "--exclude=.venv",
 )
 
+_LIB_EXCLUDES = (
+    "--exclude=__pycache__",
+    "--exclude=*.pyc",
+    "--exclude=tests",
+    "--exclude=.venv",
+)
+
+
+def library_root() -> Path:
+    """``rocke/library`` (sibling of ``platform``), exposing ``builders``/``kernels``."""
+    return config.CK_PY_ROOT.parent.parent / "library"
+
+
+def pythonpath(remote_pkg: str, remote_lib: str) -> str:
+    """Remote PYTHONPATH: platform package first, then library adapters."""
+    if remote_lib:
+        return f"{remote_pkg}:{remote_lib}"
+    return remote_pkg
+
 
 def push_rocke_tree() -> str:
     """Rsync rocke/ to <stage_root>/ck_pkg/rocke/ on the login node."""
@@ -43,6 +63,19 @@ def push_rocke_tree() -> str:
     return remote_pkg
 
 
+def push_library_tree() -> str:
+    """Rsync library/ so a manifest ``runner_module`` under builders can import."""
+    remote_lib = f"{config.remote_stage_root()}/ck_lib"
+    transport.ssh_run(["mkdir", "-p", remote_lib])
+    transport.rsync_push(
+        library_root(),
+        remote_lib,
+        delete=True,
+        extra=_LIB_EXCLUDES,
+    )
+    return remote_lib
+
+
 def push_artifacts(arch: str) -> str:
     local = config.stage_dir(arch)
     remote = config.remote_stage_dir(arch)
@@ -51,7 +84,12 @@ def push_artifacts(arch: str) -> str:
 
 
 def _build_srun_argv(
-    arch: str, remote_pkg: str, remote_art: str, run_spec: dict
+    arch: str,
+    remote_pkg: str,
+    remote_art: str,
+    run_spec: dict,
+    *,
+    remote_lib: str,
 ) -> str:
     profile = config.ARCHES[arch]
     shape = run_spec.get("shape", {})
@@ -73,9 +111,10 @@ def _build_srun_argv(
         "echo '[remote] lspci -k for the AMD Display controller, and the host driver version).' >&2; "
         "exit 42; fi; "
     )
+    py_path = pythonpath(remote_pkg, remote_lib)
     work = (
         f"set -e; cd {shlex.quote(remote_pkg)}; "
-        f"export PYTHONPATH={shlex.quote(remote_pkg)}:$PYTHONPATH; "
+        f"export PYTHONPATH={shlex.quote(py_path)}:$PYTHONPATH; "
         f"echo '[remote] host='$(hostname)' arch={arch}'; "
         + preflight
         + f"python3 -m rocke.run_manifest {shlex.quote(hsaco)} "
@@ -152,8 +191,11 @@ def run_arch(arch: str) -> int:
     run_spec = json.loads(spec_path.read_text())
 
     remote_pkg = push_rocke_tree()
+    remote_lib = push_library_tree()
     remote_art = push_artifacts(arch)
-    srun_cmd = _build_srun_argv(arch, remote_pkg, remote_art, run_spec)
+    srun_cmd = _build_srun_argv(
+        arch, remote_pkg, remote_art, run_spec, remote_lib=remote_lib
+    )
     print(f"[slurm:{arch}] $ {srun_cmd}")
     r = transport.ssh_run(srun_cmd, check=False, stream=True)
     # Always pull the per-job logs back for inspection.

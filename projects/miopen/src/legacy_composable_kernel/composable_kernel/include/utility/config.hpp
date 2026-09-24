@@ -67,9 +67,6 @@
 #define CK_USE_AMD_V_DOT4_I32_I8
 #endif
 
-// multi index
-#define CK_USE_DYNAMICALLY_INDEXED_MULTI_INDEX 0
-
 // AMD inline asm
 #ifndef CK_USE_AMD_INLINE_ASM
 #define CK_USE_AMD_INLINE_ASM 1

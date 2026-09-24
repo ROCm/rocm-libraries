@@ -453,6 +453,75 @@ TEST(TestCudnnShimGraphNodes, BlockScaleDequantizeValidGraphValidates)
     EXPECT_TRUE(graph.validate().is_good());
 }
 
+// Mirrors native TestGraphMoeGroupedMatmul shapes. The routing tensors are
+// INT32, so they are built directly rather than through the FLOAT makeTensor
+// helper.
+TEST(TestCudnnShimGraphNodes, MoeGroupedMatmulValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto token = hipdnn_shim_test::makeTensor(graph, {1, 8, 16}, {128, 16, 1}, 1);
+    auto weight = hipdnn_shim_test::makeTensor(graph, {2, 16, 32}, {512, 32, 1}, 2);
+    auto firstTokenOffset = graph.tensor(fe::graph::Tensor_attributes{}
+                                             .set_dim({2, 1, 1})
+                                             .set_stride({1, 1, 1})
+                                             .set_data_type(fe::DataType_t::INT32)
+                                             .set_uid(3));
+    auto tokenIndex = graph.tensor(fe::graph::Tensor_attributes{}
+                                       .set_dim({1, 8, 1})
+                                       .set_stride({8, 1, 1})
+                                       .set_data_type(fe::DataType_t::INT32)
+                                       .set_uid(4));
+    auto tokenKs = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_dim({1, 8, 1})
+                                    .set_stride({8, 1, 1})
+                                    .set_data_type(fe::DataType_t::INT32)
+                                    .set_uid(5));
+
+    auto output = graph.moe_grouped_matmul(token,
+                                           weight,
+                                           firstTokenOffset,
+                                           tokenIndex,
+                                           tokenKs,
+                                           fe::graph::Moe_grouped_matmul_attributes{}
+                                               .set_name("MoeGroupedMatmulNode")
+                                               .set_mode(fe::MoeGroupedMatmulMode_t::SCATTER)
+                                               .set_top_k(2));
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(output->get_name(), "MoeGroupedMatmulNode::OUTPUT");
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraphMoeGroupedMatmulBwd shapes. dweight's dims are left
+// unset so validate() infers them, which only happens on the real node.
+TEST(TestCudnnShimGraphNodes, MoeGroupedMatmulBwdValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto dOutput = hipdnn_shim_test::makeTensor(graph, {1, 8, 32}, {256, 32, 1}, 1);
+    auto token = hipdnn_shim_test::makeTensor(graph, {1, 8, 16}, {128, 16, 1}, 2);
+    auto firstTokenOffset = graph.tensor(fe::graph::Tensor_attributes{}
+                                             .set_dim({2, 1, 1})
+                                             .set_stride({1, 1, 1})
+                                             .set_data_type(fe::DataType_t::INT32)
+                                             .set_uid(3));
+
+    auto dweight = graph.moe_grouped_matmul_bwd(
+        dOutput,
+        token,
+        firstTokenOffset,
+        fe::graph::Moe_grouped_matmul_bwd_attributes{}.set_name("MoeGroupedMatmulBwdNode"));
+    ASSERT_NE(dweight, nullptr);
+
+    EXPECT_TRUE(graph.validate().is_good());
+
+    const std::vector<int64_t> expectedDweightDims{2, 16, 32};
+    EXPECT_EQ(dweight->get_dim(), expectedDweightDims);
+}
+
 // --- (a2) Unhappy path: Tier-1 nodes still enforce constraints --------------
 //
 // The wrapper forwards to the real hipDNN engines, so a malformed Tier-1 graph
@@ -802,6 +871,8 @@ TEST(TestCudnnShimGraphNodes, AllAttributeClassesExposeUniversalSurface)
     expectConstructsAndExposesUniversalSurface<fe::graph::Layernorm_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Layernorm_backward_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Matmul_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_attributes>();
+    expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_bwd_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Pointwise_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Reduction_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Resample_attributes>();
@@ -832,8 +903,6 @@ TEST(TestCudnnShimGraphNodes, AllAttributeClassesExposeUniversalSurface)
     expectConstructsAndExposesUniversalSurface<fe::graph::DiagonalBandMask_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Slice_attributes>();
     expectConstructsAndExposesUniversalSurface<fe::graph::Concatenate_attributes>();
-    expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_attributes>();
-    expectConstructsAndExposesUniversalSurface<fe::graph::Moe_grouped_matmul_bwd_attributes>();
 
     // Attribute-only stubs (no Graph method): must still exist and chain.
     expectConstructsAndExposesUniversalSurface<fe::graph::Matmul_fp8_attributes>();

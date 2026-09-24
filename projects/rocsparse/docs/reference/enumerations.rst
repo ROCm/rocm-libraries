@@ -64,6 +64,20 @@ rocsparse_diag_type
 
 .. doxygenenum:: rocsparse_diag_type
 
+.. _rocsparse_solve_mode_:
+
+rocsparse_solve_mode
+--------------------
+
+.. doxygenenum:: rocsparse_solve_mode
+
+.. _rocsparse_diagonal_modifier_:
+
+rocsparse_diagonal_modifier
+---------------------------
+
+.. doxygenenum:: rocsparse_diagonal_modifier
+
 .. _rocsparse_operation_:
 
 rocsparse_operation

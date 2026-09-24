@@ -8,18 +8,21 @@
 //
 // SCOPE — facts, not policy. A value belongs here only if it describes what the
 // silicon does: a queue depth, a fixed latency, a scoreboard size. Scheduling
-// heuristics and tunable knobs do NOT belong here; they live in PassFeatureConfig
-// (user-overridable, plumbed to both the Python bindings and stinkytofu-opt) or
-// stay local to the pass that owns the policy. Two concrete examples of things
-// deliberately kept out: InsertClusterBarrierPass's kRule3SignalLeadCycles ("set
-// to 0 to co-locate the signal with the wait" — a placement policy) and the
-// dsReadPerWmma / globalReadPerWmma scheduling ratios in CDNA5Config.
+// heuristics and tunable knobs do NOT belong here; they live in
+// PassFeatureConfig (user-overridable, plumbed to both the Python bindings and
+// stinkytofu-opt) or stay local to the pass that owns the policy. Examples
+// deliberately kept out include InsertClusterBarrierPass's configurable Rule 3
+// signal lead and the dsReadPerWmma / globalReadPerWmma scheduling ratios in
+// CDNA5Config.
 //
-// This header is deliberately include-light: it is reachable from core headers,
-// so it must not drag in the asm IR. HazardRule is therefore forward-declared and
+// Per-opcode LDS drain caps / throughputs live on HwInstDesc (filled from each
+// arch's *.Instructions.def via .dsMaxDrain / .dsThroughput). This header only
+// keeps arch-level LDS queue facts and fallbacks for opcodes that omit those
+// fields. It is deliberately include-light: HazardRule is forward-declared and
 // referenced by pointer; only HWModel.cpp includes the rule table itself.
 
 #include <array>
+#include <span>
 
 #include "stinkytofu/Export.hpp"
 
@@ -39,11 +42,18 @@ struct HWModel {
         int readQueueDepth;
         int readDrainLatency;
         int readThrottleLatency;
+        /// Fallback overflow issue throughput (per WGP) when an opcode's
+        /// HwInstDesc::dsThroughput is 0.
+        int dsLoadDefaultThroughput;
+        /// Fallback experimental max drain latency when an opcode's
+        /// HwInstDesc::dsMaxDrain is 0.
+        int dsLoadDefaultMaxDrain;
     };
 
     /// s_barrier_signal / s_barrier_wait timing, and branch overhead.
     struct Barrier {
-        /// Cycles from an s_barrier_signal until a paired s_barrier_wait can retire.
+        /// Cycles from an s_barrier_signal until a paired s_barrier_wait can
+        /// retire.
         int signalToWaitLatency;
         /// Fixed cycle cost charged to a taken branch.
         int jumpOverheadCycles;
@@ -64,7 +74,8 @@ struct HWModel {
     };
 
     /// Producer->consumer hazard gap rules. Points at the arch's static rule
-    /// table (see HazardRules.hpp); this is a reference to that table, not a copy.
+    /// table (see HazardRules.hpp); this is a reference to that table, not a
+    /// copy.
     struct Hazards {
         const HazardRule* rules;
         int numRules;
@@ -77,25 +88,37 @@ struct HWModel {
         unsigned saluCycleMax;
     };
 
+    /// VMEM completion-counter shape.
+    struct Counters {
+        /// The legacy vmcnt is split into separate loadcnt/storecnt. When true a
+        /// buffer_store bumps STOREcnt only, so it may legally sink across an
+        /// s_wait_loadcnt (which tests LOADcnt) without perturbing that wait.
+        bool hasSplitLoadStoreCnt;
+        /// storecnt and asynccnt are independent.
+        bool hasSplitStoreCntAsyncCnt;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
     Hazards hazards;
     DelayAlu delayAlu;
+    Counters counters;
 };
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.
 ///
-/// Keyed on the triple rather than GfxArchID because the triple covers archs that
-/// are tuned separately but not registered in Config/Archs.def (gfx1250v0);
-/// getGfxArchID() cannot round-trip those.
+/// Keyed on the triple rather than GfxArchID because the triple covers archs
+/// that are tuned separately but not registered in Config/Archs.def
+/// (gfx1250v0); getGfxArchID() cannot round-trip those.
 ///
-/// This helper and the kArchKey* constants below are the single definition of the
-/// encoding. CDNA5.hpp's cdna5ConfigForArch() selects per-arch scheduling *policy*
-/// off the same keys that hwModelForArch() selects hardware *facts* off, and the
-/// two must stay paired: both fall back to gfx1250 for an unlisted arch, so a
-/// mismatch would silently combine one arch's policy with another's facts rather
-/// than failing. Adding or restepping an arch is therefore a one-line change here.
+/// This helper and the kArchKey* constants below are the single definition of
+/// the encoding. CDNA5.hpp's cdna5ConfigForArch() selects per-arch scheduling
+/// *policy* off the same keys that hwModelForArch() selects hardware *facts*
+/// off, and the two must stay paired: both fall back to gfx1250 for an unlisted
+/// arch, so a mismatch would silently combine one arch's policy with another's
+/// facts rather than failing. Adding or restepping an arch is therefore a
+/// one-line change here.
 constexpr int archKey(const std::array<int, 3>& arch) {
     return arch[0] * 10000 + arch[1] * 100 + arch[2];
 }
@@ -103,13 +126,45 @@ constexpr int archKey(const std::array<int, 3>& arch) {
 constexpr int kArchKeyGfx1250 = archKey({12, 5, 0});
 // TODO: stepping 1 is a placeholder pending
 // https://github.com/ROCm/rocm-libraries/pull/10273 landing the real gfx1250v0
-// ArchInfo. Changing it here retargets both the HWModel and the CDNA5 policy table.
+// ArchInfo. Changing it here retargets both the HWModel and the CDNA5 policy
+// table.
 constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
 
-// Internal helper used by stinkytofu passes to model dynamic LDS drain latency
-// from per-arch HWModel facts. Not part of the exported API surface.
+/// One LDS read in an ordered burst for mixed-type drain estimation.
+/// Callers resolve per-opcode throughput / max-drain from HwInstDesc (with
+/// HWModel.lds defaults when the desc fields are 0) before pushing an entry.
+struct DsLoadDrainEntry {
+    int latency = 0;
+    int throughput = 0;
+    int maxDrain = 0;
+};
+
+/// Resolve a drain-model entry from an instruction's latency and optional
+/// HwInstDesc overrides. \p dsThroughput / \p dsMaxDrain of 0 select the
+/// arch defaults on \p hw.
+inline DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, int latency, int dsThroughput,
+                                             int dsMaxDrain) {
+    return {
+        .latency = latency > 0 ? latency : hw.lds.readDrainLatency,
+        .throughput = dsThroughput > 0 ? dsThroughput : hw.lds.dsLoadDefaultThroughput,
+        .maxDrain = dsMaxDrain > 0 ? dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
+    };
+}
+
+/// Homogeneous-burst drain estimate. Throughput and max-drain are already
+/// resolved (typically via makeDsLoadDrainEntry / HwInstDesc).
 int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
-                               int numWaves);
+                               int dsLoadThroughput, int maxDrainLatency, int numWaves);
+
+/// Mixed-type burst drain estimate.
+///
+/// Order of non-final loads does not matter. Uses:
+/// - latency from the last load
+/// - max-drain cap = max over every entry's maxDrain
+/// - total load count
+/// - issue throughput as the count-weighted average of per-load throughputs
+int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
+                                       int numWaves);
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.

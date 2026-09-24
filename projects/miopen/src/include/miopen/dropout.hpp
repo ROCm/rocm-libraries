@@ -37,21 +37,6 @@
 #define MAX_PRNG_STATE (256 * 64)
 #define MAX_WORKITEM_NUM (256 * 4096)
 
-struct xorwowStates
-{
-    // Xorshift values (160 bits)
-    unsigned int x;
-    unsigned int y;
-    unsigned int z;
-    unsigned int w;
-    unsigned int v;
-
-    // Weyl sequence value
-    unsigned int d;
-};
-
-using prngStates = xorwowStates;
-
 namespace miopen {
 
 struct DropoutDescriptor : miopenDropoutDescriptor

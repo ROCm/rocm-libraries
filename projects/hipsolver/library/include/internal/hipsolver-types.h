@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 /*! \file
@@ -131,6 +131,22 @@ typedef enum
     HIPSOLVER_DETERMINISTIC_RESULTS           = 241,
     HIPSOLVER_ALLOW_NON_DETERMINISTIC_RESULTS = 242,
 } hipsolverDeterministicMode_t;
+
+typedef enum
+{
+    HIPBLAS_DIRECT_FORWARD  = 251,
+    HIPBLAS_DIRECT_BACKWARD = 252,
+    HIPSOLVER_DIRECT_FORWARD  = HIPBLAS_DIRECT_FORWARD,
+    HIPSOLVER_DIRECT_BACKWARD = HIPBLAS_DIRECT_BACKWARD,
+} hipsolverDirectMode_t;
+
+typedef enum
+{
+    HIPBLAS_STOREV_COLUMNWISE = 261,
+    HIPBLAS_STOREV_ROWWISE    = 262,
+    HIPSOLVER_STOREV_COLUMNWISE = HIPBLAS_STOREV_COLUMNWISE,
+    HIPSOLVER_STOREV_ROWWISE    = HIPBLAS_STOREV_ROWWISE,
+} hipsolverStorevMode_t;
 
 // Aliases for hipBLAS enums
 

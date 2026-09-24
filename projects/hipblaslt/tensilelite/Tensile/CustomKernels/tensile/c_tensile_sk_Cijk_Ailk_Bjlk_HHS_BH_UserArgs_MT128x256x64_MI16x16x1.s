@@ -95,7 +95,7 @@ custom.config:
             { type: uint32, semantic: SKTilesAndSplit } ]
     macrotile: [128, 256, 64]
     threads: [256, 1, 1]
-    grid: [TilesXYBatch, One, One]
+    grid: [StreamKWithBatch, One, One]
     workspaceType: StreamK
     workspaceSizePerElemC: 4
     workspaceSizePerElemBias: 4

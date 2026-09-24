@@ -3,25 +3,22 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""PublicInputSurface characterization: ``if args.platform:`` in
-``Tensile/Tensile.py`` at line 239, inside ``argUpdatedGlobalParameters``.
+"""PublicInputSurface characterization: OpenCL platform selection in
+``Tensile/Tensile.py``'s ``argUpdatedGlobalParameters``.
 
-Branch 765305e2fbcf1ee08927bffdac198278bded30ee.
+This file used to pin the ``if args.platform:`` branch, which stored
+``rv["Platform"] = args.platform`` from the ``-p / --platform`` CLI flag.  That
+flag and that branch are gone: OpenCL is no longer a supported runtime, so the
+option was dropped from ``addCommonArguments`` and the assignment was replaced
+by an explicit refusal.
 
-The predicate is a bare Python truthiness test on the CLI integer flag
-``-p / --platform`` (type=int, no default => None when omitted):
+What is pinned now:
 
-  * TRUE branch  -> ``args.platform`` is a nonzero int (e.g. 1); the block
-                    prints a Command-line override message and stores
-                    ``rv["Platform"] = args.platform``.
-  * FALSE branch -> ``args.platform`` is 0 (explicit) or None (omitted);
-                    the block is skipped and ``rv`` does NOT get a
-                    ``"Platform"`` key.
-
-Witnesses confirmed via z3 (sat on both sides) and in-container argparse replay:
-  TRUE:  platform=1  -> rv contains "Platform"
-  FALSE: platform=0  -> rv does NOT contain "Platform"
-  FALSE: platform=None (omitted) -> rv does NOT contain "Platform"
+  * ``-p / --platform`` is not a recognised option any more.
+  * ``args.platform`` is never read, so a namespace still carrying it produces
+    no ``"Platform"`` key rather than an error.
+  * ``Platform`` can still reach ``rv`` through ``--global-parameters``, and
+    that path exits via ``printExit`` instead of silently configuring OpenCL.
 
 These tests pin ACTUAL observed behavior; they do not assert anything
 aspirational.
@@ -41,13 +38,14 @@ pytestmark = pytest.mark.unit
 def _make_args(**overrides):
     """Return a Namespace matching the fields consumed by argUpdatedGlobalParameters."""
     defaults = dict(
+        # Retained deliberately: the point of the first test below is that this
+        # field is now inert, so the namespace still offers it.
         platform=None,
         RuntimeLanguage=None,
         CodeObjectVersion=None,
         debug=False,
         # --validate-metadata: action="store_true", so a real argparse Namespace
-        # always carries this (default False), unrelated to the `platform`
-        # predicate under test here -- see
+        # always carries this (default False) -- see
         # TensileMain/test_tensile_helpers_char.py for dedicated ValidateMetadata
         # coverage.
         ValidateMetadata=False,
@@ -61,55 +59,48 @@ def _make_args(**overrides):
 
 
 # ---------------------------------------------------------------------------
-# Unit: pure predicate truthiness (no Tensile import; no side-effects)
+# The flag is gone from the public CLI surface
 # ---------------------------------------------------------------------------
 
-def test_platform_predicate_true_nonzero_int():
-    """bool(1) is True -> the TRUE branch is taken."""
-    assert bool(1) is True
+def test_platform_flag_is_no_longer_a_recognised_option():
+    """``--platform`` is left over as an unknown argument rather than parsed."""
+    from Tensile.Tensile import addCommonArguments
 
+    parser = argparse.ArgumentParser()
+    addCommonArguments(parser)
 
-def test_platform_predicate_false_zero():
-    """bool(0) is False -> the FALSE branch is taken."""
-    assert bool(0) is False
+    _, unknown = parser.parse_known_args(["--platform", "1"])
+    assert "--platform" in unknown
 
-
-def test_platform_predicate_false_none():
-    """bool(None) is False -> the FALSE branch is taken when -p is omitted."""
-    assert bool(None) is False
+    assert "platform" not in {action.dest for action in parser._actions}
 
 
 # ---------------------------------------------------------------------------
-# Integration: call argUpdatedGlobalParameters directly, pin rv["Platform"]
+# argUpdatedGlobalParameters no longer reads args.platform at all
 # ---------------------------------------------------------------------------
 
-def test_platform_true_branch_sets_rv_key(capsys):
-    """TRUE branch (platform=1): rv contains 'Platform' == 1."""
+@pytest.mark.parametrize("platform", [1, 0, None], ids=["nonzero", "zero", "omitted"])
+def test_args_platform_is_ignored(platform):
+    """Whatever the namespace carries, no 'Platform' key is produced."""
     from Tensile.Tensile import argUpdatedGlobalParameters
 
-    args = _make_args(platform=1)
-    rv = argUpdatedGlobalParameters(args)
-    assert "Platform" in rv, "Expected 'Platform' key in rv for truthy platform"
-    assert rv["Platform"] == 1
-
-
-def test_platform_false_branch_zero_no_rv_key():
-    """FALSE branch (platform=0): rv does NOT contain 'Platform'."""
-    from Tensile.Tensile import argUpdatedGlobalParameters
-
-    args = _make_args(platform=0)
-    rv = argUpdatedGlobalParameters(args)
+    rv = argUpdatedGlobalParameters(_make_args(platform=platform))
     assert "Platform" not in rv, (
-        "Expected no 'Platform' key in rv for falsy platform=0; got rv={}".format(rv)
+        "args.platform is no longer consulted; got rv={}".format(rv)
     )
 
 
-def test_platform_false_branch_none_no_rv_key():
-    """FALSE branch (platform=None, omitted): rv does NOT contain 'Platform'."""
+# ---------------------------------------------------------------------------
+# The one surviving route to a Platform key is refused outright
+# ---------------------------------------------------------------------------
+
+def test_platform_via_global_parameters_exits(capsys):
+    """--global-parameters Platform=1 reaches rv, and is rejected there."""
     from Tensile.Tensile import argUpdatedGlobalParameters
 
-    args = _make_args(platform=None)
-    rv = argUpdatedGlobalParameters(args)
-    assert "Platform" not in rv, (
-        "Expected no 'Platform' key in rv for falsy platform=None; got rv={}".format(rv)
-    )
+    args = _make_args(global_parameters=[("Platform", 1)])
+    with pytest.raises(SystemExit) as excinfo:
+        argUpdatedGlobalParameters(args)
+
+    assert excinfo.value.code == -1
+    assert "OpenCL platform selection is no longer supported" in capsys.readouterr().out

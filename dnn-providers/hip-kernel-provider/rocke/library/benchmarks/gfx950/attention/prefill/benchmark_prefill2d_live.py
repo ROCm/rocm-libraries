@@ -50,6 +50,13 @@ from typing import Any, Optional
 
 from rocke.assets import shape_utils_dir
 
+from benchmarks.common.attention_sweep import (
+    all_variant_keys,
+    expand_variant_keys,
+    record_sweep_entries,
+    run_sweep,
+)
+
 DEFAULT_SHAPE_UTILS = shape_utils_dir()
 
 
@@ -713,7 +720,9 @@ def main() -> int:
         "--variants",
         nargs="+",
         default=["prod", "combo", "fallback"],
-        help="rocke variants to sweep: prod combo fallback r4_t32 combo_sw",
+        help="rocke variants to sweep: prod combo fallback r4_t32 combo_sw sweep. "
+        "'sweep' times every engine the dispatcher registry offers for each "
+        "problem (one entry per launched path).",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
@@ -858,6 +867,38 @@ def main() -> int:
         best = None
         for v in args.variants:
             try:
+                if v == "sweep":
+                    # Multi-engine lane: time every engine the registry offers for
+                    # this problem (one entry per launched path). Emitted as
+                    # "sweep:<path>" sub-records so each is comparable to the
+                    # single-kernel variants above.
+                    from kernels.common.attention_unified import (
+                        _resolve_attention_arch,
+                    )
+
+                    sweep_entries = run_sweep(
+                        shape,
+                        data,
+                        sw,
+                        is_fp8,
+                        bench,
+                        arch=_resolve_attention_arch(),
+                        stream_handle=_bench_stream_handle(),
+                        warmup=args.warmup,
+                        iters=args.iterations,
+                    )
+                    if not sweep_entries:
+                        print(f"  [sweep] no eligible engines for {tag} sw={sw}")
+                    best = record_sweep_entries(
+                        rec,
+                        sweep_entries,
+                        tri_out=tri_out,
+                        tri_ms=tri_ms,
+                        tol=args.tol,
+                        compare=_compare,
+                        best=best,
+                    )
+                    continue
                 if v in ("prod", "ck3d"):
                     # production dispatch via run_unified_attention_torch
                     ck_out, ck_ms, kname = _run_prod(
@@ -925,8 +966,8 @@ def main() -> int:
         vs = "  ".join(
             f"{v}={rec['variants'][v]['ms'] * 1000:.1f}us"
             f"{'' if rec['variants'][v].get('ok') else '!'}"
-            for v in args.variants
-            if "ms" in rec["variants"][v]
+            for v in expand_variant_keys(args.variants, rec["variants"])
+            if "ms" in rec["variants"].get(v, {})
         )
         best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
         tf_str = f" {rec['best_tflops']:.1f}TF" if rec.get("best_tflops") else ""
@@ -991,7 +1032,7 @@ def main() -> int:
             f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}"
         )
     print("\n=== per-variant geomean (correct shapes only) ===")
-    for v in args.variants:
+    for v in all_variant_keys(args.variants, results):
         sp = [
             r["variants"][v]["speedup"]
             for r in results

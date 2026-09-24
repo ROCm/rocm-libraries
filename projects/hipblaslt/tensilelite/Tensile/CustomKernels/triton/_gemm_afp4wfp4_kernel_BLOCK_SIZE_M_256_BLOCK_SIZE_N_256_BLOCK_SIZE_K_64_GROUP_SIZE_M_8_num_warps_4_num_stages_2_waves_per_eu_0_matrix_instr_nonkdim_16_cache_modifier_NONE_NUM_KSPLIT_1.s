@@ -1,3 +1,4 @@
+	.amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 	.text
 	.globl	_gemm_afp4wfp4_kernel_BLOCK_SIZE_M_256_BLOCK_SIZE_N_256_BLOCK_SIZE_K_64_GROUP_SIZE_M_8_num_warps_4_num_stages_2_waves_per_eu_0_matrix_instr_nonkdim_16_cache_modifier_NONE_NUM_KSPLIT_1 ; -- Begin function _gemm_afp4wfp4_kernel_BLOCK_SIZE_M_256_BLOCK_SIZE_N_256_BLOCK_SIZE_K_64_GROUP_SIZE_M_8_num_warps_4_num_stages_2_waves_per_eu_0_matrix_instr_nonkdim_16_cache_modifier_NONE_NUM_KSPLIT_1
 	.p2align	8
@@ -8901,6 +8902,7 @@ custom.config:
     threads: [256, 1, 1]
     grid: [TilesXY, One, One]
   MatrixInstruction: [16, 16, 128, 1]
+  StaggerU: 0
   EnableMatrixInstruction: True
   MIWaveTile: [8, 8]
   AssertSummationElementMultiple: 32

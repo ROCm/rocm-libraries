@@ -217,10 +217,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
-  # Only name LDSSegmentInterleave when applied (==1), so the applied kernel is distinct from its
-  # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
-  if state.get("LDSSegmentInterleave") == 1:
-    requiredParametersTemp.add("LDSSegmentInterleave")
+  # TDMFuse=0 is the arrangement every shipped kernel already has, so naming it
+  # would rename all of them.
+  if state.get("TDMFuse", 0):
+    requiredParametersTemp.add("TDMFuse")
+  else:
+    requiredParametersTemp.discard("TDMFuse")
 
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernel":

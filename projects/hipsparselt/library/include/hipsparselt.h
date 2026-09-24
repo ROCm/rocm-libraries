@@ -90,6 +90,14 @@
 /* Opaque structures holding information */
 // clang-format off
 
+// Zero-initialize opaque struct data in C++ (= {} is a C++11 feature, invalid in C).
+// Guarantees is_init=0 on every declaration, eliminating uninitialized-struct false positives.
+#ifdef __cplusplus
+#  define HIPSPARSELT_STRUCT_ZERO_INIT = {}
+#else
+#  define HIPSPARSELT_STRUCT_ZERO_INIT
+#endif
+
 #if defined(__HIP_PLATFORM_AMD__)
 /*!
  *  \brief Handle to the hipSPARSELt library context queue.
@@ -100,7 +108,7 @@
  *  passed to all subsequent library function calls. It should be destroyed at the end
  *  using \ref hipsparseLtDestroy.
  */
-typedef struct hipsparseLtHandle_t {uint8_t data[11024];} hipsparseLtHandle_t;
+typedef struct hipsparseLtHandle_t           { alignas(16) uint8_t data[512] HIPSPARSELT_STRUCT_ZERO_INIT; } hipsparseLtHandle_t;
 
 /*!
  *  \brief Descriptor of the matrix.
@@ -111,7 +119,7 @@ typedef struct hipsparseLtHandle_t {uint8_t data[11024];} hipsparseLtHandle_t;
  *  descriptor must be passed to all subsequent library calls that involve the matrix.
  *  It should be destroyed at the end using \ref hipsparseLtMatDescriptorDestroy.
  */
-typedef struct hipsparseLtMatDescriptor_t {uint8_t data[11024];} hipsparseLtMatDescriptor_t;
+typedef struct hipsparseLtMatDescriptor_t    { alignas(16) uint8_t data[512] HIPSPARSELT_STRUCT_ZERO_INIT; } hipsparseLtMatDescriptor_t;
 
 /*!
  *  \brief Descriptor of the matrix multiplication operation.
@@ -121,7 +129,7 @@ typedef struct hipsparseLtMatDescriptor_t {uint8_t data[11024];} hipsparseLtMatD
  *  the description of the matrix multiplication operation.
  *  It is initialized with the \ref hipsparseLtMatmulDescriptorInit function.
  */
-typedef struct hipsparseLtMatmulDescriptor_t {uint8_t data[11024];} hipsparseLtMatmulDescriptor_t;
+typedef struct hipsparseLtMatmulDescriptor_t { alignas(16) uint8_t data[512] HIPSPARSELT_STRUCT_ZERO_INIT; } hipsparseLtMatmulDescriptor_t;
 
 /*!
  *  \brief Descriptor of the matrix multiplication algorithm.
@@ -129,7 +137,7 @@ typedef struct hipsparseLtMatmulDescriptor_t {uint8_t data[11024];} hipsparseLtM
  *  \details
  *  It is initialized with the \ref hipsparseLtMatmulAlgSelectionInit function.
  */
-typedef struct hipsparseLtMatmulAlgSelection_t {uint8_t data[11024];} hipsparseLtMatmulAlgSelection_t;
+typedef struct hipsparseLtMatmulAlgSelection_t { alignas(16) uint8_t data[512] HIPSPARSELT_STRUCT_ZERO_INIT; } hipsparseLtMatmulAlgSelection_t;
 
 /*!
  *  \brief Descriptor of the matrix multiplication execution plan
@@ -140,14 +148,14 @@ typedef struct hipsparseLtMatmulAlgSelection_t {uint8_t data[11024];} hipsparseL
  *  It is initialized and destroyed using the \ref hipsparseLtMatmulPlanInit
  *  and \ref hipsparseLtMatmulPlanDestroy functions, respectively.
  */
-typedef struct hipsparseLtMatmulPlan_t {uint8_t data[11024];} hipsparseLtMatmulPlan_t;
+typedef struct hipsparseLtMatmulPlan_t       { alignas(16) uint8_t data[512] HIPSPARSELT_STRUCT_ZERO_INIT; } hipsparseLtMatmulPlan_t;
 #elif defined(__HIP_PLATFORM_NVIDIA__)
 typedef __nv_bfloat16 hip_bfloat16;
-typedef struct {uint8_t data[11024];} hipsparseLtHandle_t;
-typedef struct {uint8_t data[11024];} hipsparseLtMatDescriptor_t;
-typedef struct {uint8_t data[11024];} hipsparseLtMatmulDescriptor_t;
-typedef struct {uint8_t data[11024];} hipsparseLtMatmulAlgSelection_t;
-typedef struct {uint8_t data[11024];} hipsparseLtMatmulPlan_t;
+typedef struct { alignas(16) uint8_t data[512]; } hipsparseLtHandle_t;
+typedef struct { alignas(16) uint8_t data[512]; } hipsparseLtMatDescriptor_t;
+typedef struct { alignas(16) uint8_t data[512]; } hipsparseLtMatmulDescriptor_t;
+typedef struct { alignas(16) uint8_t data[512]; } hipsparseLtMatmulAlgSelection_t;
+typedef struct { alignas(16) uint8_t data[512]; } hipsparseLtMatmulPlan_t;
 #endif
 
 /*!
@@ -654,7 +662,8 @@ hipsparseStatus_t
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p algSelection is invalid.
  */
 HIPSPARSELT_EXPORT
-hipsparseStatus_t hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algSelection);
+hipsparseStatus_t
+    hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algSelection);
 
 /*!
  *  \brief Specify the algorithm attribute of a algorithm selection descriptor.

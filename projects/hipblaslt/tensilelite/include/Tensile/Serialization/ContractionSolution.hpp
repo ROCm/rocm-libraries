@@ -166,6 +166,9 @@ namespace TensileLite
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
+                iot::mapOptional(io, "temporalHintA", s.temporalHintA);
+                iot::mapOptional(io, "temporalHintB", s.temporalHintB);
+                iot::mapOptional(io, "hasTemporalHint", s.hasTemporalHint);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
@@ -200,6 +203,9 @@ namespace TensileLite
                 iot::mapRequired(io, "gsu", s.gsu);
                 iot::mapRequired(io, "wgm", s.wgm);
                 iot::mapRequired(io, "staggerU", s.staggerU);
+                // Optional so older logic files that omit the field deserialize
+                // as false (no per-tile extra-iters capability).
+                iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }
@@ -255,6 +261,7 @@ namespace TensileLite
                 iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
+                iot::mapOptional(io, "fusedGemmA2A", s.fusedGemmA2A);
                 iot::mapOptional(io, "metadataLayout", s.metadataLayout);
                 // mxScaleFormat is mapped as optional so logic files that omit it
                 // (e.g. non-MX problems) deserialize cleanly with the default 0 = NoSwizzle.

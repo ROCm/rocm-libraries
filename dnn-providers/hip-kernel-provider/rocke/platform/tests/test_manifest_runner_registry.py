@@ -145,6 +145,52 @@ class TestRunnerRegistry(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("no_such_kind", message)
         self.assertIn("gemm_fp16", message)
+        self.assertIn("runner_module", message)
+
+    def test_runner_module_is_imported_before_kind_lookup(self):
+        import json
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        from rocke.run_manifest import resolve_manifest_runner
+        from rocke import run_manifest as rm
+
+        kind = "kda_test_only_kind"
+        self.assertNotIn(kind, rm.registered_manifest_kinds())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "ck_test_kda_runner.py").write_text(
+                "from rocke.run_manifest import register_manifest_runner\n"
+                "def _builder(manifest, shape, verify):\n"
+                "    raise AssertionError('not called')\n"
+                "register_manifest_runner('kda_test_only_kind', _builder)\n"
+            )
+            sys.path.insert(0, tmp)
+            try:
+                builder = resolve_manifest_runner(
+                    {
+                        "kind": kind,
+                        "runner_module": "ck_test_kda_runner",
+                    }
+                )
+                self.assertEqual(builder.__name__, "_builder")
+                self.assertIn(kind, rm.registered_manifest_kinds())
+            finally:
+                sys.path.remove(tmp)
+                rm._RUNNERS.pop(kind, None)
+                sys.modules.pop("ck_test_kda_runner", None)
+
+    def test_missing_runner_module_is_an_import_error(self):
+        from rocke.run_manifest import resolve_manifest_runner
+
+        with self.assertRaises(ImportError):
+            resolve_manifest_runner(
+                {
+                    "kind": "no_such_kind",
+                    "runner_module": "ck_test_no_such_runner_module",
+                }
+            )
 
 
 if __name__ == "__main__":

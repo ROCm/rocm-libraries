@@ -110,10 +110,16 @@ struct GraphAndTensorMap
             auto validatorFunc = hipdnn_data_sdk::utilities::Visitor{
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
-
-                    auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<DataType>{
-                        absTolerance, relTolerance};
-                    return validator.allClose(*referenceTensorPtr, *tensorMap.at(uid));
+                    if constexpr(std::is_same_v<DataType, bool>)
+                    {
+                        return CpuIntReferenceValidation<bool>{}.allClose(*referenceTensorPtr,
+                                                                          *tensorMap.at(uid));
+                    }
+                    else
+                    {
+                        return CpuFpReferenceValidation<DataType>{absTolerance, relTolerance}
+                            .allClose(*referenceTensorPtr, *tensorMap.at(uid));
+                    }
                 },
                 [&](int) {
                     throw std::runtime_error("validateTensors: Cannot validate integer tensors");

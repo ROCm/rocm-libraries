@@ -30,6 +30,8 @@
 #ifndef HIPCUB_WARP_WARP_LOAD_HPP_
 #define HIPCUB_WARP_WARP_LOAD_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/warp/warp_load.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

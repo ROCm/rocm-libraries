@@ -10,12 +10,13 @@
 namespace stinkytofu {
 namespace {
 
-// The models are defined here, out of line, rather than as inline objects in the
-// header. STINKYTOFU_EXPORT is empty for consumers on Linux (see Export.hpp), so a
-// header-inline object would get a distinct address in libstinkytofu.so and in each
-// consumer (stinkytofu-opt, the Python module). PassContext caches a *pointer* to
-// the model, which makes address identity load-bearing. One definition in one TU,
-// reached through an exported function, keeps that sound.
+// The models are defined here, out of line, rather than as inline objects in
+// the header. STINKYTOFU_EXPORT is empty for consumers on Linux (see
+// Export.hpp), so a header-inline object would get a distinct address in
+// libstinkytofu.so and in each consumer (stinkytofu-opt, the Python module).
+// PassContext caches a *pointer* to the model, which makes address identity
+// load-bearing. One definition in one TU, reached through an exported function,
+// keeps that sound.
 
 constexpr HWModel kGfx1250Model = {
     .lds =
@@ -25,6 +26,9 @@ constexpr HWModel kGfx1250Model = {
             // matching ds_read count and the latest ds_read's own latency.
             .readDrainLatency = 0,
             .readThrottleLatency = 72,
+            // Fallback when HwInstDesc::dsThroughput / dsMaxDrain are 0.
+            .dsLoadDefaultThroughput = 4,
+            .dsLoadDefaultMaxDrain = 120,
         },
     .barrier =
         {
@@ -47,6 +51,11 @@ constexpr HWModel kGfx1250Model = {
             .transDepth = 4,
             .saluCycleMax = 4,
         },
+    .counters =
+        {
+            .hasSplitLoadStoreCnt = true,
+            .hasSplitStoreCntAsyncCnt = true,  // only async stores on this arch
+        },
 };
 
 // gfx1250v0: starts from the gfx1250 values. Kept as its own object so those
@@ -55,28 +64,69 @@ constexpr HWModel kGfx1250Model = {
 // hazards at a gfx1250v0 rule table if its cycles or rule set diverge.
 constexpr HWModel kGfx1250v0Model = kGfx1250Model;
 
+constexpr int kMinModeledWaves = 1;
+constexpr int kMaxModeledWaves = 4;
+
+int capDrainLatency(int latency, int maxDrainLatency) {
+    return maxDrainLatency > 0 ? std::min(latency, maxDrainLatency) : latency;
+}
+
 }  // namespace
 
 int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
-                               int rawNumWaves) {
-    // Keep these local: they only define this function's modeled input range.
-    constexpr int kMinModeledWaves = 1;
-    constexpr int kMaxModeledWaves = 4;
+                               int dsLoadThroughput, int maxDrainLatency, int rawNumWaves) {
     const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
     const int queueDepth = hw.lds.readQueueDepth;
-    // A zero queue depth means the arch has no modeled LDS return queue (the other
-    // consumers of lds.* already treat it as inert), and a lone load has nothing
-    // queued behind it. Either way only the load's own latency applies.
-    if (queueDepth <= 0 || matchingDsLoadCount <= 1) return targetDSLoadLatency;
+    const int throughput = std::max(1, dsLoadThroughput);
 
-    // Up to the queue depth every load is in flight at once, so the burst costs one
-    // load's latency plus the per-wave issue spacing of the loads ahead of it.
+    // A zero queue depth means the arch has no modeled LDS return queue (the
+    // other consumers of lds.* already treat it as inert), and a lone load has
+    // nothing queued behind it. Either way only the load's own latency applies.
+    if (queueDepth <= 0 || matchingDsLoadCount <= 1)
+        return capDrainLatency(targetDSLoadLatency, maxDrainLatency);
+
+    // Up to the queue depth every load is in flight at once, so the burst costs
+    // one load's latency plus the per-wave issue spacing of the loads ahead of
+    // it.
     if (matchingDsLoadCount <= queueDepth)
-        return targetDSLoadLatency + (matchingDsLoadCount - 1) * numWaves;
+        return capDrainLatency(targetDSLoadLatency + (matchingDsLoadCount - 1) * numWaves,
+                               maxDrainLatency);
 
-    // Past the depth the queue is full, so the overflow issues at half rate.
-    return targetDSLoadLatency + (queueDepth - 1) * numWaves +
-           (matchingDsLoadCount - queueDepth) * numWaves / 2;
+    // Past the depth the queue is full. Divide by throughput so half-rate DS
+    // loads (smaller throughput) pay a larger overflow term.
+    return capDrainLatency(targetDSLoadLatency + (queueDepth - 1) * numWaves +
+                               (matchingDsLoadCount - queueDepth) * numWaves / throughput,
+                           maxDrainLatency);
+}
+
+int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
+                                       int rawNumWaves) {
+    if (loads.empty()) return 0;
+
+    const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
+    const int queueDepth = hw.lds.readQueueDepth;
+    const int count = static_cast<int>(loads.size());
+    const int targetLatency = loads.back().latency;
+
+    // Cap with the largest maxDrain among the whole burst, not just the last
+    // load.
+    int maxDrainLatency = 0;
+    long long throughputSum = 0;
+    for (const DsLoadDrainEntry& load : loads) {
+        maxDrainLatency = std::max(maxDrainLatency, load.maxDrain);
+        throughputSum += std::max(1, load.throughput);
+    }
+
+    if (queueDepth <= 0 || count <= 1) return capDrainLatency(targetLatency, maxDrainLatency);
+
+    if (count <= queueDepth)
+        return capDrainLatency(targetLatency + (count - 1) * numWaves, maxDrainLatency);
+
+    const int dsLoadThroughput =
+        static_cast<int>(std::max<long long>(1, throughputSum / std::max(1, count)));
+    return capDrainLatency(targetLatency + (queueDepth - 1) * numWaves +
+                               (count - queueDepth) * numWaves / dsLoadThroughput,
+                           maxDrainLatency);
 }
 
 const HWModel& hwModelForArch(const std::array<int, 3>& arch) {

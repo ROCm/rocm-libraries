@@ -51,6 +51,10 @@ set (CpuTestSources
 
 add_hiptensor_unit_test(elementwise_cpu_test ${CpuTestSources})
 
+add_hiptensor_unit_test(elementwise_output_strides_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_output_strides_test.cpp)
+
 # Rank 2 tests
 set (PermutationRank2TestSources ${PermutationCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank2_elementwise_permute_test.cpp)

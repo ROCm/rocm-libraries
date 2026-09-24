@@ -161,32 +161,47 @@ DEF_BATCH(.format = FLAT_ATOMIC,
 // LDS Operations
 DEF_BATCH(.format = DS_READ,
     DsLoadU8Inst, "ds_load_u8", .logical = "DSLoadU8",
+        .dsMaxDrain = 120, .dsThroughput = 4,
     DsLoadI8Inst, "ds_load_i8", .logical = "DSLoadI8",
+        .dsMaxDrain = 120, .dsThroughput = 4,
     DsLoadU16Inst, "ds_load_u16", .logical = "DSLoadU16",
+        .dsMaxDrain = 120, .dsThroughput = 4,
     DsLoadI16Inst, "ds_load_i16", .logical = "DSLoadI16",
+        .dsMaxDrain = 120, .dsThroughput = 4,
     DsLoadB32Inst, "ds_load_b32", .logical = "DSLoadB32",
+        .dsMaxDrain = 120, .dsThroughput = 4,
     DsRead2B32Inst, "ds_load_2addr_b32", .logical = "DSLoad2B32",
         .operand_fields = { {D0, .size=64} },
+        .dsMaxDrain = 120, .dsThroughput = 4,
     DsLoadB64Inst, "ds_load_b64", .logical = "DSLoadB64",
         .operand_fields = { {D0, .size=64} },
+        .dsMaxDrain = 131, .dsThroughput = 4,
     DsRead2B64Inst, "ds_load_2addr_b64", .logical = "DSLoad2B64",
         .operand_fields = { {D0, .size=128} },
+        .dsMaxDrain = 255, .dsThroughput = 2,
     DsLoadB96Inst, "ds_load_b96", .logical = "DSLoadB96",
         .operand_fields = { {D0, .size=96} },
+        .dsMaxDrain = 255, .dsThroughput = 2,
     DsLoadB128Inst, "ds_load_b128", .cost = {1, 56}, .logical = "DSLoadB128",
         .operand_fields = { {D0, .size=128} },
+        .dsMaxDrain = 255, .dsThroughput = 2,
     // FIXME: gfx1250 doesn't have b192, think a way to represent this.
     //        currently stinkytofu will legalize this in LegalizationUtils.cpp.
     DsLoadB192Inst, "ds_load_b192", .logical = "DSLoadB192",
         .operand_fields = { {D0, .size=192} },
+        .dsMaxDrain = 255, .dsThroughput = 2,
     DsLoadTr4B64Inst, "ds_load_tr4_b64", .logical = "DSLoadB64TrB4",
         .operand_fields = { {D0, .size=64} },
+        .dsMaxDrain = 131, .dsThroughput = 4,
     DsLoadTr6B96Inst, "ds_load_tr6_b96", .logical = "DSLoadB96TrB6",
         .operand_fields = { {D0, .size=96} },
+        .dsMaxDrain = 255, .dsThroughput = 2,
     DsLoadTr8B64Inst, "ds_load_tr8_b64", .logical = "DSLoadB64TrB8",
         .operand_fields = { {D0, .size=64} },
+        .dsMaxDrain = 135, .dsThroughput = 4,
     DsLoadTr16B128Inst, "ds_load_tr16_b128", .logical = "DSLoadB128TrB16",
         .operand_fields = { {D0, .size=128} },
+        .dsMaxDrain = 255, .dsThroughput = 2,
 )
 DEF_BATCH(.format = DS_STORE,
     DsBpermuteB32Inst, "ds_bpermute_b32", .logical = "DSBPermuteB32",
@@ -463,13 +478,15 @@ DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {G
 // Global load with transpose-read (TR) — gfx1250 only.
 // global_load_tr_b64: 64-bit TR load; D0 = 64-bit vgpr dest,
 // S0 = 32-bit vaddr (offset), S1 = 64-bit saddr (base).
-DEF_T(GlobalLoadTrB64Inst, "global_load_tr_b64", .format = VGLOBAL, .logical = "GlobalLoadTR8B64",
+DEF_T(GlobalLoadTrB64Inst, "global_load_tr_b64", .format = VGLOBAL, .flags = {GLOBALLoad},
+    .logical = "GlobalLoadTR8B64",
     .cost = {12, 116},
     .operand_fields = { {D0, vdst, vgpr, 64}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
 
 // global_load_tr_b128: 128-bit TR load; D0 = 128-bit vgpr dest,
 // S0 = 32-bit vaddr (offset), S1 = 64-bit saddr (base).
-DEF_T(GlobalLoadTrB128Inst, "global_load_tr_b128", .format = VGLOBAL, .logical = "GlobalLoadTR16B128",
+DEF_T(GlobalLoadTrB128Inst, "global_load_tr_b128", .format = VGLOBAL, .flags = {GLOBALLoad},
+    .logical = "GlobalLoadTR16B128",
     .cost = {12, 116},
     .operand_fields = { {D0, vdst, vgpr, 128}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
 
@@ -760,6 +777,15 @@ DEF_T(VCndmaskB32Inst, "v_cndmask_b32", .format = VOP2, .logical = "VCndMaskB32"
         {S2, src2, sreg, M64},
     },
 )
+// true16 16-bit select (VOP3-only); half-word (.l/.h) rides on the operands.
+DEF_T(VCndmaskB16Inst, "v_cndmask_b16", .format = VOP3, .logical = "VCndMaskB16",
+    .operand_fields = {
+        {D0, vdst, vgpr, 16},
+        {S0, src0, src, 16},
+        {S1, src1, src, 16},
+        {S2, src2, sreg, M64},
+    },
+)
 DEF_T(VFmacF32Inst, "v_fmac_f32", .format = VOP2, .logical = "VMacF32",
     .operand_fields = {
         {D0, vdst, vgpr, 32, RW},
@@ -833,6 +859,20 @@ DEF_T(VReadfirstlaneB32Inst, "v_readfirstlane_b32", .format = VOP1, .logical = "
     .operand_fields = {
         {D0, vdst, sreg, 32},
         {S0, src0, vgpr, 32},
+    },
+)
+DEF_T(VReadlaneB32Inst, "v_readlane_b32", .format = VOP3_2SRC, .logical = "VReadlaneB32",
+    .operand_fields = {
+        {D0, vdst, sreg, 32},
+        {S0, src0, vgpr, 32},
+        {S1, src1, ssrc, 32},
+    },
+)
+DEF_T(VWritelaneB32Inst, "v_writelane_b32", .format = VOP3_2SRC, .logical = "VWritelaneB32",
+    .operand_fields = {
+        {D0, vdst, vgpr, 32, RW},
+        {S0, src0, ssrc, 32},
+        {S1, src1, ssrc, 32},
     },
 )
 

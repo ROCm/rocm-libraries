@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -80,6 +80,25 @@ foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
 endforeach()
 
 include(FetchContent)
+
+# Stores the content of '_variable' in 'OLD_${_variable}' and
+# sets '_variable' to '_value'.
+macro(override_cache_variable _variable _value _type)
+  if(DEFINED ${_variable})
+    set(OLD_${_variable} ${${_variable}})
+  endif()
+  set(${_variable} ${value} CACHE ${_type} "" FORCE)
+endmacro(override_cache_variable)
+
+# Restores the content of '_variable'. If original was unset,
+# then unsets '_variable'.
+macro(restore_cache_variable _variable _type)
+  if(DEFINED OLD_${_variable})
+    set(${_variable} ${OLD_${_variable}} CACHE ${_type} "" FORCE)
+  else()
+    unset(${_variable} CACHE)
+  endif()
+endmacro(restore_cache_variable)
 
 # This function checks to see if the download branch given by "branch" exists in the repository.
 # It does so using the git ls-remote command.
@@ -423,6 +442,7 @@ else()
       LOG_BUILD TRUE
       LOG_INSTALL TRUE
     )
+    override_cache_variable(BUILD_CODE_COVERAGE OFF BOOL)
     FetchContent_MakeAvailable(prim)
 
     if(NOT TARGET roc::rocprim)
@@ -432,6 +452,7 @@ else()
     if(NOT TARGET roc::rocprim_hip)
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
     endif()
+    restore_cache_variable(BUILD_CODE_COVERAGE BOOL)
   endif()
 endif()
 

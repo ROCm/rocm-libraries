@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "d1f4a2b6-0c73-4e58-9a21-6b8f3c05d7e4",
+  "name": "hipkernel:pointwise_packed",
+  "graph_match": { "native": "hipkernel.pointwise.graph_match" },
+  "heuristic": "2b6e9c31-58a4-4f07-b3d9-1e07c4a86f52",
+  "metadata": "9c05e7a4-3b18-4d62-8e5f-71a2d6039c8b",
+  "knobs": [
+    "block_size"
+  ]
+}

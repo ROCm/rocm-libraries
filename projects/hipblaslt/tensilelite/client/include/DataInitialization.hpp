@@ -37,6 +37,7 @@
 #include <mxDataGen.hpp>
 
 #include <cstddef>
+#include <map>
 #include <random>
 
 #include "RunListener.hpp"
@@ -769,8 +770,8 @@ namespace TensileLite
             template <typename T, InitMode Mode>
             void initArray(T* array, size_t elements)
             {
-                size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for
+                const size_t numPacks = elements / TypeInfo<T>::Packing;
+#pragma omp parallel for shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = getValue<T, Mode>();
@@ -780,8 +781,8 @@ namespace TensileLite
             template <typename T>
             void initArrayConvert(T* array, size_t elements)
             {
-                size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for
+                const size_t numPacks = elements / TypeInfo<T>::Packing;
+#pragma omp parallel for shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = ConvertTo<T>(i);
@@ -798,9 +799,9 @@ namespace TensileLite
             template <typename T>
             void initArraySerialIdx(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -813,9 +814,9 @@ namespace TensileLite
             template <typename T>
             void initArraySerialDim(T* array, int dim, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -828,17 +829,16 @@ namespace TensileLite
             template <>
             void initArraySerialDim<Half>(Half* array, int dim, TensorDescriptor const& tensor)
             {
-                union
-                {
-                    uint16_t bits;
-                    Half     value;
-                } x;
-
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx++)
                 {
+                    union
+                    {
+                        uint16_t bits;
+                        Half     value;
+                    } x;
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
                     x.bits                     = static_cast<uint16_t>(coord[dim]);
@@ -849,9 +849,9 @@ namespace TensileLite
             template <typename T>
             void initArrayIdentity(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -864,9 +864,9 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -879,7 +879,7 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             void initArrayTrig(T* array, size_t elements)
             {
-#pragma omp parallel for
+#pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
                 {
                     array[i / TypeInfo<T>::Packing] = getTrigValue<T>(i, useCos, useAbs);
@@ -1192,6 +1192,10 @@ namespace TensileLite
             // hand back gpuInput.valid as-is rather than re-swizzling).
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
+
+            // Scale descriptor most recently swizzled into gpuInput.valid, per
+            // tensor index. The MX equivalent of g_swizzleCache.
+            std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
         };
 
         template <>

@@ -34,6 +34,13 @@ PER_ARCH_REQUIRED = {
     "gfx950": ("rr_custom_kernels_gfx950.co",),
 }
 
+# Silicon-revision subtree -> the arch it is a revision of. gfx1250's revisions
+# share one compiler target, so only the GEMM library splits into
+# library/gfx1250/ and library/gfx1250v0/; every other artifact stays on gfx1250.
+REVISION_SUBTREES = {
+    "gfx1250v0": "gfx1250",
+}
+
 FORBIDDEN_FLAT_ROOT_BASENAMES = (
     "TensileLibrary.dat",
     "TensileLibrary.dat.zlib",
@@ -130,7 +137,12 @@ def validate(install_root: Path) -> List[str]:
             )
 
     for arch_dir in base_arch_dirs:
-        base = arch_dir.name
+        # A revision subtree is validated against the architecture it is a
+        # revision of, because that is the name every file inside it carries:
+        # the runtime selects the directory by ASIC revision and then forms the
+        # filename from the compiler target, which is the same for both.
+        revision_of = REVISION_SUBTREES.get(arch_dir.name)
+        base = revision_of or arch_dir.name
         if not _arch_dir_name_is_base(base):
             continue
 
@@ -144,9 +156,14 @@ def validate(install_root: Path) -> List[str]:
                     f"the producer must remove the uncompressed sibling)"
                 )
 
-        for template in REQUIRED_PER_BASE_FILES:
-            if not _has_required_file(entries, template, base):
-                violations.append(f"missing required file in {arch_dir}: {template.format(arch=base)}")
+        # ExtOp and Transform are resolved at runtime from gcnArchName, which is
+        # the architecture name on either revision, so they live in the base
+        # subtree only and a revision subtree that carried copies would be
+        # dead files nothing opens.
+        if not revision_of:
+            for template in REQUIRED_PER_BASE_FILES:
+                if not _has_required_file(entries, template, base):
+                    violations.append(f"missing required file in {arch_dir}: {template.format(arch=base)}")
 
         master_present = any(
             t.format(arch=base) in entries for t in TENSILE_MASTER_CANDIDATES
@@ -171,9 +188,17 @@ def validate(install_root: Path) -> List[str]:
             if fname == "metadata.yaml":
                 continue
             if not _filename_arch_matches_dir(fname, base):
-                violations.append(
-                    f"filename arch suffix does not match dir {base}: {arch_dir / fname}"
-                )
+                if revision_of:
+                    violations.append(
+                        f"filename in the {arch_dir.name} subtree is not named for the "
+                        f"compiler target {base}: {arch_dir / fname} (the revision "
+                        f"belongs in the directory only; the runtime forms filenames "
+                        f"from the target, so this one is never opened)"
+                    )
+                else:
+                    violations.append(
+                        f"filename arch suffix does not match dir {base}: {arch_dir / fname}"
+                    )
 
     for arch, extras in PER_ARCH_REQUIRED.items():
         for fname in extras:

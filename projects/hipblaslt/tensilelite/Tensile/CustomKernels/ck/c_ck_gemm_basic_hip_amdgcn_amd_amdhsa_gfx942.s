@@ -177418,6 +177418,7 @@ custom.config:
     threads: [256, 1, 1]
     grid: [TilesXYBatch, One, One]
   MatrixInstruction: [32, 32, 8, 1]
+  StaggerU: 0
   EnableMatrixInstruction: True
   MIWaveTile: [4, 4]
   WavefrontSize: 64

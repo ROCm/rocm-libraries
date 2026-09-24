@@ -30,6 +30,8 @@
 #ifndef HIPCUB_BLOCK_BLOCK_STORE_HPP_
 #define HIPCUB_BLOCK_BLOCK_STORE_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/block/block_store.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

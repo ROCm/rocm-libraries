@@ -4,6 +4,9 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
 #include <variant>
 
 using namespace hipdnn_frontend;
@@ -32,6 +35,22 @@ TEST(TestTensorAttributes, SetAndGetUid)
     tensor.clear_uid();
     EXPECT_EQ(tensor.get_uid(), 0);
     EXPECT_FALSE(tensor.has_uid());
+}
+
+// cuDNN-parity nested alias: consumer source spells variant-pack map keys as
+// TensorAttributes::uid_t, and it must be the same type get_uid() returns.
+TEST(TestTensorAttributes, UidTypeAliasMatchesUidAccessors)
+{
+    static_assert(std::is_same_v<TensorAttributes::uid_t, int64_t>);
+    static_assert(std::is_same_v<TensorAttributes::uid_t,
+                                 decltype(std::declval<TensorAttributes>().get_uid())>);
+
+    std::unordered_map<TensorAttributes::uid_t, void*> variantPack;
+    TensorAttributes tensor;
+    tensor.set_uid(7);
+    variantPack.emplace(tensor.get_uid(), nullptr);
+
+    EXPECT_EQ(variantPack.count(7), 1U);
 }
 
 TEST(TestTensorAttributes, SetAndGetName)
@@ -264,6 +283,66 @@ TEST(TestTensorAttributes, RaggedOffsetMethodChainingReturnsThis)
 
     const TensorAttributes& ref2 = tensor.set_alignment(32);
     EXPECT_EQ(&ref2, &tensor);
+}
+
+TEST(TestTensorAttributes, SetAndGetRaggedOffsetMultiplier)
+{
+    TensorAttributes tensor;
+    EXPECT_EQ(tensor.get_ragged_offset_multiplier(), 1);
+    EXPECT_FALSE(tensor.has_ragged_offset_multiplier());
+
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.get_ragged_offset_multiplier(), 512);
+    EXPECT_TRUE(tensor.has_ragged_offset_multiplier());
+
+    tensor.set_ragged_offset_multiplier(1);
+    EXPECT_FALSE(tensor.has_ragged_offset_multiplier());
+
+    const TensorAttributes& ref = tensor.set_ragged_offset_multiplier(64);
+    EXPECT_EQ(&ref, &tensor);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnRaggedOffsetMultiplierBelowOne)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    auto aux = std::make_shared<TensorAttributes>();
+    tensor.set_ragged_offset(aux);
+    tensor.set_ragged_offset_multiplier(0);
+    EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnMultiplierWithoutRaggedOffset)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithMultiplierAndRaggedOffset)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    auto aux = std::make_shared<TensorAttributes>();
+    tensor.set_ragged_offset(aux);
+    tensor.set_ragged_offset_multiplier(512);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithDefaultRaggedOffsetMultiplier)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
 }
 TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeWithDefaultTensor)
 {

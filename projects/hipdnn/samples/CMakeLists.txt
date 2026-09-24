@@ -68,8 +68,22 @@ function(disable_container_size_empty_check TARGET)
     foreach(_prop CXX_CLANG_TIDY C_CLANG_TIDY HIP_CLANG_TIDY)
         get_target_property(_cmd ${TARGET} ${_prop})
         if(_cmd)
-            list(APPEND _cmd "--checks=-readability-container-size-empty")
-            set_target_properties(${TARGET} PROPERTIES ${_prop} "${_cmd}")
+            # clang-tidy honours only the last --checks= on the command line, so
+            # fold this into an existing one (Windows builds add their own)
+            # rather than appending a second that would shadow it.
+            set(_merged "")
+            set(_folded FALSE)
+            foreach(_arg IN LISTS _cmd)
+                if(_arg MATCHES "^--checks=")
+                    string(APPEND _arg ",-readability-container-size-empty")
+                    set(_folded TRUE)
+                endif()
+                list(APPEND _merged "${_arg}")
+            endforeach()
+            if(NOT _folded)
+                list(APPEND _merged "--checks=-readability-container-size-empty")
+            endif()
+            set_target_properties(${TARGET} PROPERTIES ${_prop} "${_merged}")
         endif()
     endforeach()
 endfunction()
@@ -235,6 +249,54 @@ add_hipdnn_sample_test(hipdnn_sample_conv_fprop)
 add_hipdnn_sample_test(hipdnn_sample_conv_dgrad)
 add_hipdnn_sample_test(hipdnn_sample_conv_wgrad)
 
+# The only coverage of warnOnUnknownEngineName() in Helpers.hpp: a --engine-name that
+# resolves to no loaded engine must say so on stderr instead of silently falling back to
+# the heuristic's pick. One dtype/layout pair keeps the run short. PASS_REGULAR_EXPRESSION
+# replaces the exit-status check rather than adding to it, so this test asserts the warning
+# only; hipdnn_sample_conv_fprop above covers the same binary exiting cleanly.
+set(HIPDNN_UNKNOWN_ENGINE_NAME_TEST hipdnn_sample_conv_fprop_unknown_engine_name)
+set(HIPDNN_UNKNOWN_ENGINE_NAME_ARGS --verify-cpu --dtype fp32 --layout nchw --engine-name
+                                    NOT_A_LOADED_ENGINE_NAME
+)
+add_test(NAME ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
+         COMMAND hipdnn_sample_conv_fprop ${HIPDNN_UNKNOWN_ENGINE_NAME_ARGS}
+)
+set_property(GLOBAL APPEND PROPERTY HIPDNN_SAMPLE_TEST_TARGETS
+                                    ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
+)
+# The sample returns 0 from RETURN_SUCCESS_IF_NO_DEVICE() before it reads --engine-name, so on a
+# GPU-less runner the warning never prints. SKIP_REGULAR_EXPRESSION outranks an unmatched
+# PASS_REGULAR_EXPRESSION, so that run reports Skipped rather than a missing-regex failure.
+set_tests_properties(
+    ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
+    PROPERTIES PASS_REGULAR_EXPRESSION "no loaded engine carries" SKIP_REGULAR_EXPRESSION
+               "SKIPPED: No GPU devices available"
+)
+if(TEST_ENVIRONMENT)
+    set_tests_properties(${HIPDNN_UNKNOWN_ENGINE_NAME_TEST} PROPERTIES ENVIRONMENT
+                                                                       "${TEST_ENVIRONMENT}"
+    )
+endif()
+if(TEST_ENVIRONMENT_MODIFICATION)
+    set_tests_properties(
+        ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
+        PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}"
+    )
+endif()
+if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
+    set_tests_properties(${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
+                         PROPERTIES FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache
+    )
+endif()
+string(JOIN "\" \"" HIPDNN_UNKNOWN_ENGINE_NAME_INSTALLED_ARGS ${HIPDNN_UNKNOWN_ENGINE_NAME_ARGS})
+file(APPEND "${INSTALLED_CTEST_FILE}"
+     "add_test(${HIPDNN_UNKNOWN_ENGINE_NAME_TEST} \"../hipdnn_sample_conv_fprop\""
+     " \"${HIPDNN_UNKNOWN_ENGINE_NAME_INSTALLED_ARGS}\")\n"
+     "set_tests_properties(${HIPDNN_UNKNOWN_ENGINE_NAME_TEST} PROPERTIES"
+     " PASS_REGULAR_EXPRESSION \"no loaded engine carries\""
+     " SKIP_REGULAR_EXPRESSION \"SKIPPED: No GPU devices available\")\n"
+)
+
 if(NOT WIN32)
     # Some fused conv samples are not supported on windows due to lack of CK support
     add_hipdnn_sample_test(hipdnn_sample_fused_conv_fprop_activ)
@@ -296,6 +358,7 @@ add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS $
 if(BUILD_ADDRESS_SANITIZER)
     set_tests_properties(
         hipdnn_sample_conv_fprop
+        ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
         hipdnn_sample_conv_dgrad
         hipdnn_sample_conv_wgrad
         hipdnn_sample_serialization_roundtrip

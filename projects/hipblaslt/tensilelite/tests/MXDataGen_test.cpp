@@ -59,6 +59,12 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
 {
     auto [rows, cols, mxBlock, isTranspose] = GetParam();
 
+    if(rows == 2048u && cols == 514u && mxBlock == 32 && !isTranspose)
+        GTEST_SKIP() << "AIHPBLAS-3506: known segfault for this (rows, cols, mxBlock, isTranspose) "
+                        "combination, first observed on gfx950/MI350. generateMXInput has no "
+                        "architecture parameter, so this skip is unconditional (all hosts hit the "
+                        "same data-shape bug); remove it once the underlying issue is fixed.";
+
     const uint64_t numElements  = rows * cols;
     const uint64_t numPacked    = (numElements + 1) / 2;
     const size_t   numScales    = ((rows + mxBlock - 1) / mxBlock) * cols;

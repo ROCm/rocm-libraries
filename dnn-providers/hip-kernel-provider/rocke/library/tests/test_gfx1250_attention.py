@@ -420,6 +420,22 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
 
 
 class TestGfx1250ScalarFp8Attention(unittest.TestCase):
+    # ``supports_native_unified_attention`` takes no arch argument -- it resolves
+    # the arch off the host device. Without a pin these gfx1250 gates inherit
+    # whatever the runner is, and on an fnuz-native arch (gfx942) the fp8 gate
+    # correctly rejects the OCP-declared problem built below. Pin the arch so the
+    # test asserts gfx1250 behaviour on any runner.
+    def setUp(self):
+        from kernels.common import attention_unified as au
+
+        self._old_arch = au._RESOLVED_ATTENTION_ARCH
+        au._RESOLVED_ATTENTION_ARCH = "gfx1250"
+
+    def tearDown(self):
+        from kernels.common import attention_unified as au
+
+        au._RESOLVED_ATTENTION_ARCH = self._old_arch
+
     @staticmethod
     def _small_fp8_problem(**overrides):
         from kernels.common.attention_unified import UnifiedAttentionProblem

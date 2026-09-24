@@ -29,6 +29,18 @@ currently land on the same pool sizes (93/97/101/105 of 106); FP4 is covered bec
 it reaches them through a different allocation path -- different global-read widths,
 LDS layout and scale-block bookkeeping -- that could drift away from FP8.
 
+NOTE on the tight corner: PGL1/SKFDPO0/PGR1/SIA0 sits at 105 of 106, i.e. one
+spare SGPR. The uniform-summation-order selector (bit 29 of
+``MagicShiftItersPerTile``, which chooses between the historical global "first-E"
+Stream-K K-split mapping and the per-tile extra-iters mapping) deliberately does
+NOT consume one: it is tested in place with ``s_bitcmp1_b32`` at each of the three
+divergence sites in ``Components/StreamK.py`` rather than held in a persistent
+register. On this VGPR-cache path the ``v_readfirstlane_b32`` target is a transient
+released before ``skTiles``/``skGrid`` are acquired, so it does not raise the peak
+either. The assertions below deliberately pin only ``<= MaxSgpr`` and
+``overflowedResources == 0``, never the exact sizes, but headroom here is one
+register: anything that adds two persistent SGPRs on this path will overflow.
+
 CPU-only: no GPU required.
 """
 
@@ -99,6 +111,17 @@ _CONFIGS = {
 
 _UNDEF_RE = re.compile(r"^\s*\.set\s+sgprWaveIdx\s*,\s*UNDEF\s*$", re.MULTILINE)
 _WAVEIDX_READ_RE = re.compile(r"s\[sgprWaveIdx\]")
+_LOOP_BEGIN_RE = re.compile(r"^label_LoopBeginL:", re.MULTILINE)
+_LOOP_END_RE = re.compile(r"^label_LoopEndL:", re.MULTILINE)
+_SERIAL_RFL_RE = re.compile(
+    r"v_readfirstlane_b32\s+\S+,\s*v\[(?:vgprSerial(?:-256)?|vgprSerial)\]"
+)
+_NAMED_ARGTYPE_CMP_RE = re.compile(
+    r"""SCmpEQU32\s*\(\s*src0\s*=\s*sgpr\(\s*['"]ArgType['"]\s*\)"""
+)
+_TENSILE_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+)
 
 
 def _emit_with_reg_state(config_path, arch, limit):
@@ -216,8 +239,41 @@ def test_streamk_tdm_prefetchgl2_emits_real_kernel_bodies(emitted):
         )
 
 
+def test_streamk_tdm_general_batch_dereferences_inputs_before_first_load(emitted):
+    """Wave-separated TDM loads A[batch]/B[batch] before the first tensor load."""
+    for r in emitted:
+        src, variant = r["src"], r["variant"]
+        first_load = src.index("tensor_load_to_lds")
+        prologue = src[:first_load]
+        for tc in ("A", "B"):
+            pointer_load = f"load {tc} matrix address from pointer array"
+            assert pointer_load in prologue, (
+                f"{variant}: TDM {tc} loads the selected matrix from the pointer array"
+            )
+            batch_offset_load = f"load batchOffset{tc} from kernel args"
+            batch_offset_apply = f"apply batchOffset{tc} (low)"
+            assert batch_offset_load in prologue
+            assert batch_offset_apply in prologue
+            assert prologue.index(pointer_load) < prologue.index(batch_offset_load)
+            assert prologue.index(batch_offset_load) < prologue.index(batch_offset_apply)
+        pointer_loads = sum(
+            prologue.count(f"load {tc} matrix address from pointer array")
+            for tc in ("A", "B")
+        )
+        suppressed_strides = prologue.count(
+            "general batch uses an already-dereferenced matrix base"
+        )
+        assert suppressed_strides == pointer_loads, (
+            f"{variant}: {suppressed_strides} suppressed batch strides for "
+            f"{pointer_loads} dereferenced A/B pointers; MXSA/MXSB must retain "
+            "their direct-pointer batch strides"
+        )
+        for tc in ("MXSA", "MXSB"):
+            assert f"load {tc} matrix address from pointer array" not in prologue
+
+
 def test_streamk_tdm_no_waveidx_read_after_undefine(emitted):
-    """Every wave-parity consumer past the release must recompute from vgpr("Serial")."""
+    """No s[sgprWaveIdx] after UNDEF. Later parity uses ArgType bit 8 (or Serial remat)."""
     for r in emitted:
         src, variant = r["src"], r["variant"]
         undef = _UNDEF_RE.search(src)
@@ -229,8 +285,8 @@ def test_streamk_tdm_no_waveidx_read_after_undefine(emitted):
         leaked = _WAVEIDX_READ_RE.findall(trailing)
         assert not leaked, (
             f"{variant}: {len(leaked)} s[sgprWaveIdx] reference(s) emitted after "
-            ".set sgprWaveIdx, UNDEF -- a parity consumer is missing its "
-            "isTdmWaveIdxLive fallback"
+            ".set sgprWaveIdx, UNDEF -- a parity consumer missed ArgType bit 8 "
+            "or the Serial remat fallback"
         )
 
 
@@ -249,3 +305,94 @@ def test_streamk_tdm_stagger_prologue_keeps_cheap_parity_read(emitted):
             f"{variant}: no direct s[sgprWaveIdx] parity read before the release; "
             "the stagger prologue lost its fast path"
         )
+
+
+def test_streamk_tdm_wrapua_hoisted_before_kloop(emitted):
+    """A/B WrapU is selected once before the unroll loop, while WaveIdx is live.
+
+    MX scale WrapUMXSA/WrapUMXSB stay in-loop (hoistedWrapUSel=False): those
+    offsets use scale strides, so an A/B-selected WrapU would wrap the scale
+    descriptor to the wrong address. Peak SGPR must stay at the 106 cap.
+    """
+    for r in emitted:
+        src, variant = r["src"], r["variant"]
+        begin = _LOOP_BEGIN_RE.search(src)
+        assert begin is not None, f"{variant}: missing label_LoopBeginL"
+        prologue = src[: begin.start()]
+        assert "hoist: WrapUA = parity ? WrapUB" in prologue, (
+            f"{variant}: WrapUA wave-parity select was not hoisted before the K-loop"
+        )
+        if variant == _TIGHT_VARIANT:
+            assert r["poolSize"] <= 106, (
+                f"{variant}: poolSize={r['poolSize']} exceeds MaxSgpr 106"
+            )
+            assert r["overflowed"] == 0, (
+                f"{variant}: overflowedResources={r['overflowed']}"
+            )
+
+
+def _unroll_loop_body(src):
+    begin = _LOOP_BEGIN_RE.search(src)
+    end = _LOOP_END_RE.search(src)
+    assert begin is not None and end is not None and end.start() > begin.end()
+    return src[begin.end() : end.start()]
+
+
+def test_streamk_tdm_kloop_has_no_serial_readfirstlane(emitted):
+    """WrapUA hoist + ArgType bit-8 pack: zero Serial v_readfirstlane in the K-loop.
+
+    A/B wrap is preselected into WrapUA; MX (and remaining parity sites) use
+    s_bitcmp1 ArgType, 8. Peak must stay <= 106 on the tight variant.
+    """
+    for r in emitted:
+        src, variant = r["src"], r["variant"]
+        body = _unroll_loop_body(src)
+        serial_rfl = _SERIAL_RFL_RE.findall(body)
+        get_tid = [
+            ln for ln in body.splitlines()
+            if "v_readfirstlane" in ln and "get tId" in ln
+        ]
+        assert not serial_rfl and not get_tid, (
+            f"{variant}: in-loop Serial v_readfirstlane "
+            f"(serial={serial_rfl}, get tId={get_tid})"
+        )
+        assert "hoist: WrapUA = parity ? WrapUB" in src, (
+            f"{variant}: missing WrapUA hoist comment"
+        )
+        assert re.search(r"s_bitcmp1_b32 s\[sgprArgType\],\s*(?:8|0x8)\b", body), (
+            f"{variant}: MX/loop parity did not use s_bitcmp1 ArgType bit 8"
+        )
+        if variant == _TIGHT_VARIANT:
+            assert r["poolSize"] <= 106, (
+                f"{variant}: poolSize={r['poolSize']} exceeds MaxSgpr 106"
+            )
+            assert r["overflowed"] == 0, (
+                f"{variant}: overflowedResources={r['overflowed']}"
+            )
+
+
+def test_named_argtype_compares_go_through_mask_helper():
+    """Every named SCmpEQU32 of sgpr ArgType must use cmpNamedArgTypeEq (mask 0xFF).
+
+    Pre-pack compares of the temporary sgprArgType (kernarg decode) are excluded:
+    they run before the named copy and before pack.
+    """
+    hits = []
+    for rel in (
+        os.path.join("KernelWriterAssembly.py"),
+        os.path.join("Components", "StreamK.py"),
+        os.path.join("Components", "GSU.py"),
+        os.path.join("KernelWriter.py"),
+    ):
+        path = os.path.join(_TENSILE_ROOT, rel)
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        for i, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if _NAMED_ARGTYPE_CMP_RE.search(line):
+                hits.append(f"{rel}:{i}:{line.strip()}")
+    assert not hits, (
+        "named SCmpEQU32(sgpr(\"ArgType\"), ...) must go through cmpNamedArgTypeEq "
+        "(mask 0xFF). Hits: %s" % hits
+    )

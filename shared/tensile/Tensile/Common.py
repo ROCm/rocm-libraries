@@ -2389,11 +2389,17 @@ def populateCapabilities(
 
 ################################################################################
 ################################################################################
-def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
+def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *, warnOnMissingIsa: bool = True ):
   """
   Assign Global Parameters
   Each global parameter has a default parameter, and the user
   can override them, overriding happens here
+
+  Args:
+    warnOnMissingIsa: When True, warn if no physical GPU ISA is detected. Set
+      False for library-generation builds (e.g. TensileCreateLibrary), where a
+      GPU-less host is expected and the detected ISA is only used for assembly
+      kernel benchmarking, not code generation.
   """
 
   global globalParameters
@@ -2470,7 +2476,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
 
   # read current gfx version
   returncode = detectGlobalCurrentISA()
-  if globalParameters["CurrentISA"] == (0,0,0):
+  if warnOnMissingIsa and globalParameters["CurrentISA"] == (0,0,0):
     printWarning(f"Did not detect SupportedISA: {globalParameters['SupportedISA']}; cannot benchmark assembly kernels."\
       "This warning can be safely ignored for TensileCreateLibrary builds.")
   if returncode:

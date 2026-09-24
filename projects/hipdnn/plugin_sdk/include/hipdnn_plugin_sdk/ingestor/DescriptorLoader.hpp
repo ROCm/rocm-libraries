@@ -126,6 +126,10 @@ struct CatalogEntry
     /// ignores key order/whitespace, unlike adding operator== to all seven struct types.
     nlohmann::json source;
     std::filesystem::path path; ///< first file that defined this id
+    /// The root this file was found under. Stamped by settleCatalog when the root's pass
+    /// finishes, since that is the one place that already knows both the root and which
+    /// entries it contributed -- the seven FileType insert rows do not see the root.
+    std::filesystem::path treeRoot;
     bool conflicted = false; ///< two files disagreed; treat as absent
     /// Set once the root this came from is fully read. A later root may add descriptors
     /// beside a settled one but never redefine it: the drop-all rule below exists because
@@ -309,6 +313,23 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
     version.major = std::stoi(text.substr(0, dot));
     version.minor = std::stoi(text.substr(dot + 1));
     return version;
+}
+
+/// Checks that a `sha256` value has the shape `hashlib.sha256(...).hexdigest()` produces:
+/// exactly 64 characters of `[0-9a-f]`. Lowercase only -- the packer emits nothing else.
+///
+/// A maintainability guard, not a security control: descriptor and archive travel together,
+/// so anyone able to substitute one can rewrite the other. What it catches is a truncated,
+/// misspelled, or wrong-algorithm digest, at parse time and with a locator.
+inline void requireSha256Shape(const std::string& text, const std::string& where)
+{
+    const auto isLowerHex
+        = [](unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); };
+    if(text.size() != 64 || !std::all_of(text.begin(), text.end(), isLowerHex))
+    {
+        fail("key 'sha256' in " + where
+             + " must be 64 lowercase hex characters, as sha256 hexdigest, not '" + text + "'");
+    }
 }
 
 /// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed and
@@ -797,26 +818,92 @@ inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
     return dispatch;
 }
 
+/// Reads `signature`: the packager-derived list of arguments the host is expected to
+/// marshal, one object per argument in declaration order.
+///
+/// Shape-checked rather than merely type-checked, for the reason requireSha256Shape is: a
+/// field nothing validates is a field that can drift into nonsense and still load. `name`
+/// is the one optional key, because clang emits argument names for some producers and not
+/// others -- requiring it would make every HIP-compiled kernel unloadable. An empty array
+/// is accepted and means a kernel taking no arguments; that is why the key itself is
+/// required, since absence would otherwise be indistinguishable from it.
+inline std::vector<KernelArgument> requireKernelSignature(const nlohmann::json& object,
+                                                          const std::string& where)
+{
+    const auto& value = requireKey(object, "signature", where);
+    if(!value.is_array())
+    {
+        fail("key 'signature' in " + where + " must be an array of argument objects");
+    }
+
+    // Sizes and offsets are kernarg-segment quantities: unsigned, and small. A negative or
+    // out-of-range value is a broken producer, not a large kernel.
+    const auto requireUint32
+        = [](const nlohmann::json& entry, std::string_view key, const std::string& entryWhere) {
+              const auto& field = requireKey(entry, key, entryWhere);
+              if(!field.is_number_unsigned())
+              {
+                  fail("key '" + std::string(key) + "' in " + entryWhere
+                       + " must be a non-negative integer");
+              }
+              const auto raw = field.get<uint64_t>();
+              if(raw > std::numeric_limits<uint32_t>::max())
+              {
+                  fail("key '" + std::string(key) + "' in " + entryWhere
+                       + " is too large for a kernel argument");
+              }
+              return static_cast<uint32_t>(raw);
+          };
+
+    std::vector<KernelArgument> signature;
+    signature.reserve(value.size());
+    for(std::size_t index = 0; index < value.size(); ++index)
+    {
+        // Positional, because argument lists are compared positionally and an index is the
+        // only locator an unnamed argument has.
+        const std::string entryWhere = where + " signature[" + std::to_string(index) + "]";
+        const auto& entry = value[index];
+        requireObject(entry, entryWhere);
+        requireKnownKeys(entry, {"kind", "size", "offset", "name"}, entryWhere);
+
+        KernelArgument argument;
+        argument.kind = requireString(entry, "kind", entryWhere);
+        argument.size = requireUint32(entry, "size", entryWhere);
+        argument.offset = requireUint32(entry, "offset", entryWhere);
+        if(entry.contains("name"))
+        {
+            // requireString rejects the empty string, which is what keeps "omitted" and
+            // "named nothing" from collapsing into the same parsed value.
+            argument.name = requireString(entry, "name", entryWhere);
+        }
+        signature.push_back(std::move(argument));
+    }
+    return signature;
+}
+
 inline KernelSource parseKernelSource(const nlohmann::json& root, const std::string& where)
 {
     requireObject(root, where);
-    // `library`/`toc_key`/`symbol`/`sha256` belong to the `kpack` kind and are named here
-    // before any adapter reads them: this check runs ahead of the kind switch, so leaving
-    // them out would fail a packaged descriptor with "unknown key 'library'" instead of
-    // the honest "no implementation yet" below. They are not modelled on KernelSource
-    // until something can dispatch them.
-    requireKnownKeys(
-        root,
-        {"kind", "source_file", "entry_point", "library", "toc_key", "symbol", "sha256"},
-        where);
+    // The union of every kind's keys, checked ahead of the kind switch so that a key
+    // belonging to a kind this build cannot dispatch fails with the honest "no
+    // implementation yet" below rather than a misleading "unknown key".
+    requireKnownKeys(root,
+                     {"kind",
+                      "source_file",
+                      "entry_point",
+                      "library",
+                      "toc_key",
+                      "symbol",
+                      "sha256",
+                      "signature"},
+                     where);
 
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
     source.kind = kernelSourceKindFromString(kindText, where);
-    // Only EMBEDDED_SOURCE has an implementation the dispatch handler can call, and that
-    // handler never inspects source.kind -- so accepting another kind here would let
-    // applicability advertise a kernel that throws inside getKernelSrc("") at
-    // plan-build time instead of failing cleanly at load.
+    // Kinds are accepted only where an adapter can call them: the dispatch handler never
+    // inspects source.kind, so accepting one it cannot serve would let applicability
+    // advertise a kernel that throws at plan-build time instead of failing cleanly at load.
     if(source.kind == KernelSourceKind::EMBEDDED_SOURCE)
     {
         // Not cross-checked against the provider's embedded kernel map: that map is
@@ -828,10 +915,23 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
         source.sourceFile = requireString(root, "source_file", where);
         source.entryPoint = requireString(root, "entry_point", where);
     }
+    else if(source.kind == KernelSourceKind::KPACK)
+    {
+        // All five are mandatory: the packager emits them together, and an adapter needs
+        // every one of them to name a code object and vouch for it. Only sha256 and
+        // signature are checked past non-empty, and only for shape -- see
+        // requireSha256Shape and requireKernelSignature.
+        source.library = requireString(root, "library", where);
+        source.tocKey = requireString(root, "toc_key", where);
+        source.symbol = requireString(root, "symbol", where);
+        source.sha256 = requireString(root, "sha256", where);
+        requireSha256Shape(source.sha256, where);
+        source.signature = requireKernelSignature(root, where);
+    }
     else
     {
         fail("kernel source kind '" + kindText + "' in " + where
-             + " has no implementation yet; only 'embedded_source' can be dispatched");
+             + " has no implementation yet; only 'embedded_source' and 'kpack' can be dispatched");
     }
     return source;
 }
@@ -1042,7 +1142,7 @@ inline void insertCatalogEntry(Map& map,
     const std::string name = descriptor.name;
 
     auto [it, inserted] = map.try_emplace(
-        std::move(key), CatalogEntry<T>{std::move(descriptor), source, path, false});
+        std::move(key), CatalogEntry<T>{std::move(descriptor), source, path, {}, false, false});
     if(inserted)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: loaded " << path << " " << description
@@ -1103,6 +1203,15 @@ struct KernelMatch
 {
     const KernelDescriptor* kernel = nullptr;
     std::string reason; ///< empty iff @c kernel is set; the pack's drop diagnostic otherwise
+    /// The file that defined @c kernel, whose directory a referenced kernel resolves its own
+    /// relative paths against -- a per-arch shard layout puts it elsewhere than the pack's.
+    /// Set iff @c kernel is.
+    std::filesystem::path path;
+    /// The root @c path was found under, which is the containment boundary for anything
+    /// the kernel names. A referenced kernel can come from a different root than its pack,
+    /// so this travels with @c path rather than being taken from the pack. Set iff
+    /// @c kernel is.
+    std::filesystem::path treeRoot;
 };
 
 /// The kernel @p id names, as seen by a pack targeting @p packArch.
@@ -1149,24 +1258,30 @@ inline KernelMatch findKernelForPack(const KernelMap& kernels,
         // catalog order. Nothing in the format ranks them, and an arch-specific spelling
         // silently shadowing an arch-independent one is the shadowing the drop-in rule
         // refuses elsewhere.
-        return {nullptr, names + ", which several descriptors define within the pack's arch"};
+        return {
+            nullptr, names + ", which several descriptors define within the pack's arch", {}, {}};
     }
     if(covered != nullptr)
     {
         // A conflicted definition is unusable, and falling through to another would hide
         // the collision the conflict recorded.
-        return covered->conflicted ? KernelMatch{nullptr, names + ", which no descriptor defines"}
-                                   : KernelMatch{&covered->descriptor, {}};
+        return covered->conflicted
+                   ? KernelMatch{nullptr, names + ", which no descriptor defines", {}, {}}
+                   : KernelMatch{&covered->descriptor, {}, covered->path, covered->treeRoot};
     }
     if(!reaching.empty())
     {
         return {nullptr,
                 names + ", which declares arch " + reaching + " reaching past the pack's "
-                    + describeArch(packArch)};
+                    + describeArch(packArch),
+                {},
+                {}};
     }
     return {nullptr,
             exists ? names + ", which is defined only for another arch"
-                   : names + ", which no descriptor defines"};
+                   : names + ", which no descriptor defines",
+            {},
+            {}};
 }
 
 /// Checks and completes one kernel's metadata against its engine's KMD, mirroring the
@@ -1460,11 +1575,22 @@ inline void
 
 /// Marks everything read so far as belonging to an earlier root, which is what makes a
 /// later root additive: insertCatalogEntry refuses a redefinition of a settled entry.
-inline void settleCatalog(DescriptorCatalog& catalog)
+///
+/// Also stamps @p root onto everything that root contributed. An entry is this root's iff
+/// it is not yet settled -- every earlier root's entries were settled by its own call --
+/// so the same pass that closes a root identifies its entries for free. The seven
+/// FileType insert rows never see the root, which is why the stamp lands here rather than
+/// at insertion.
+inline void settleCatalog(DescriptorCatalog& catalog, const std::filesystem::path& root)
 {
-    const auto settle = [](auto& map) {
+    const auto settle = [&root](auto& map) {
         for(auto& entry : map)
         {
+            if(entry.second.settled)
+            {
+                continue;
+            }
+            entry.second.treeRoot = root;
             entry.second.settled = true;
         }
     };
@@ -1557,7 +1683,7 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::vector<std::filesystem
         std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
         detail::collectDescriptorFiles(root, files);
         detail::loadDescriptorFiles(files, catalog);
-        detail::settleCatalog(catalog);
+        detail::settleCatalog(catalog, root);
     }
 
     return catalog;
@@ -1678,12 +1804,14 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             continue;
         }
 
-        std::vector<const KernelDescriptorPack*> packEntries;
+        // The whole entry, not just its descriptor: the file a pack came from is what its
+        // inline kernels resolve their relative paths against.
+        std::vector<const CatalogEntry<KernelDescriptorPack>*> packEntries;
         for(const auto& [key, entry] : catalog.packs)
         {
             if(!entry.conflicted && entry.descriptor.engineId == engine.id)
             {
-                packEntries.push_back(&entry.descriptor);
+                packEntries.push_back(&entry);
             }
         }
 
@@ -1710,7 +1838,15 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             // wants only the colliding kernel dropped; the upgrade is making that
             // constructor log and drop rather than throw, in one place, so hand-built packs
             // get the same behavior.
-            KernelDescriptorPack pack = *packEntry;
+            KernelDescriptorPack pack = packEntry->descriptor;
+            // An inline kernel is defined by the pack's own file. Referenced kernels are
+            // stamped with their own file below. treeRoot comes from the catalog entry
+            // rather than the path, since only the loader knows which root it walked.
+            for(auto& kernel : pack.kernels)
+            {
+                kernel.originDirectory = packEntry->path.parent_path();
+                kernel.treeRoot = packEntry->treeRoot;
+            }
             std::vector<const MatchDescriptor*> packMatchers;
             std::string reason;
 
@@ -1757,6 +1893,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                         break;
                     }
                     pack.kernels.push_back(*match.kernel);
+                    pack.kernels.back().originDirectory = match.path.parent_path();
+                    pack.kernels.back().treeRoot = match.treeRoot;
                 }
             }
 

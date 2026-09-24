@@ -921,6 +921,7 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       // Default values
       size_t default_wgmxccchunk = 0;
       size_t default_wgmxcc      = hardware.NUM_XCD;
+      int32_t default_wgm        = static_cast<int32_t>(std::ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
       size_t chunk_size          = std::min((numMT_M * numMT_N + hardware.NUM_XCD - 1) / hardware.NUM_XCD, 
                                             (hardware.N_CU + hardware.NUM_XCD - 1) / hardware.NUM_XCD);
 
@@ -959,8 +960,8 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       auto out_wgm_batch =
           origami::select_workgroup_mapping(problem_batch, hardware, config, skGrid);
       REQUIRE(out_wgm_batch.wgmxccchunk == default_wgmxccchunk);
-      REQUIRE(out_wgm_batch.wgmxcc == 0);
-      REQUIRE(out_wgm_batch.wgm == 1);
+      REQUIRE(out_wgm_batch.wgmxcc == default_wgmxcc);
+      REQUIRE(out_wgm_batch.wgm == default_wgm);
 
       // Test 3: Test small GEMMs
       auto problem_small = make_problem(1024, 1024, 1024);

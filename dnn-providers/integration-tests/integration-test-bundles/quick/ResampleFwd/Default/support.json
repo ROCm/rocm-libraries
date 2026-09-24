@@ -1,0 +1,40 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "1_2_3_2_2_bfp16_ncdhw_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_3_2_2_bfp16_ndhwc_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_3_2_2_fp16_ncdhw_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_3_2_2_fp16_ndhwc_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_3_2_2_fp32_ncdhw_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_3_2_2_fp32_ndhwc_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_4_3_bfp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "1_2_4_3_bfp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "1_2_4_3_fp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "1_2_4_3_fp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "1_2_4_3_fp32_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "1_2_4_3_fp32_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_3_2_bfp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "2_3_3_2_bfp16_nhwc_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "2_3_3_2_fp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "2_3_3_2_fp16_nhwc_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "2_3_3_2_fp32_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "2_3_3_2_fp32_nhwc_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+          "2_3_4_3_bfp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_4_3_bfp16_nhwc_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_4_3_fp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_4_3_fp16_nhwc_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_4_3_fp32_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_4_3_fp32_nhwc_padding_modezero_pad_postpad1x1_prepad1x1"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

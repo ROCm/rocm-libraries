@@ -47,6 +47,7 @@
 #endif
 #include "unit.hpp"
 #include "utility.hpp"
+#include <limits>
 
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
@@ -1292,6 +1293,140 @@ void testing_aux_matmul_streamk_tile_scheduling_ext(const Arguments& arg)
     ASSERT_TRUE(value_r == 0);
 
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+}
+
+void testing_aux_matmul_uniform_summation_order_ext(const Arguments& arg)
+{
+    size_t                sizeWritten = 0;
+    hipblasLtMatmulDesc_t matmul      = nullptr;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
+
+    // Default is OFF (0).
+    int32_t value_r = -1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(matmul,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &value_r,
+                                        sizeof(value_r),
+                                        &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 0);
+    ASSERT_TRUE(sizeWritten == sizeof(int32_t));
+
+    // ON / OFF / ON round-trip.
+    for(int32_t value_set : {1, 0, 1})
+    {
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                            &value_set,
+                                            sizeof(value_set)),
+            HIPBLAS_STATUS_SUCCESS);
+        value_r = -1;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                            &value_r,
+                                            sizeof(value_r),
+                                            &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(value_r == value_set);
+    }
+
+    // Anything outside {0,1} is rejected and must leave the stored value (1) intact.
+    for(int32_t bad : {int32_t{2}, int32_t{-1}, std::numeric_limits<int32_t>::min()})
+    {
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(
+                matmul, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &bad, sizeof(bad)),
+            HIPBLAS_STATUS_INVALID_VALUE);
+        value_r = -1;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                            &value_r,
+                                            sizeof(value_r),
+                                            &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(value_r == 1);
+    }
+
+    // An undersized get fails, but *sizeWritten is assigned before the size
+    // check, so the caller still learns how large the buffer has to be.
+    sizeWritten = 0;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(matmul,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &value_r,
+                                        sizeof(int32_t) / 2,
+                                        &sizeWritten),
+        HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_TRUE(sizeWritten == sizeof(int32_t));
+
+    // A null sizeWritten is legal.
+    value_r = -1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(matmul,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &value_r,
+                                        sizeof(value_r),
+                                        nullptr),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 1);
+
+    // An undersized set is rejected.
+    int32_t enable = 1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(matmul,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &enable,
+                                        sizeof(int32_t) / 2),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+
+    // _rocblaslt_matmul_desc::copy() is a hand-written field-by-field copy, so a
+    // new attribute is silently dropped on the copyMatmul and grouped-GEMM paths
+    // unless it is added there too.
+    hipblasLtMatmulDesc_t matmul_src = nullptr;
+    hipblasLtMatmulDesc_t matmul_dst = nullptr;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul_src, arg.compute_type, arg.scale_type));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul_dst, arg.compute_type, arg.scale_type));
+
+    int32_t sm_count_set = 77;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(
+            matmul_src, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &enable, sizeof(enable)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(
+            matmul_src, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &sm_count_set, sizeof(sm_count_set)),
+        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblaslt_ext::copyMatmul(matmul_src, matmul_dst),
+                          HIPBLAS_STATUS_SUCCESS);
+
+    value_r = -1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(matmul_dst,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &value_r,
+                                        sizeof(value_r),
+                                        &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 1);
+
+    value_r = -1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul_dst,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == sm_count_set);
+
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_src));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_dst));
 }
 
 void testing_aux_matmul_pref_sm_count_target(const Arguments& arg)
