@@ -66,6 +66,14 @@ typedef halfhpp Rpp16f;
 /*! \brief RPP maximum channels in audio tensor \ingroup group_rppdefs \page subpage_rppt */
 #define RPPT_MAX_AUDIO_CHANNELS (16)
 
+/*! \brief If a nested RPP call fails, return its \ref RppStatus from the enclosing function. Use
+ * when forwarding the result of a *_host_tensor or hip_exec_* helper. \ingroup group_rppdefs */
+#define RPP_RETURN_IF_ERROR(expr)                           \
+    do {                                                    \
+        RppStatus _rpp_status = (expr);                     \
+        if (_rpp_status != RPP_SUCCESS) return _rpp_status; \
+    } while (0)
+
 #if RPP_BACKEND_HIP
 #include <hip/hip_runtime.h>
 #define RPP_HOST_DEVICE __host__ __device__
