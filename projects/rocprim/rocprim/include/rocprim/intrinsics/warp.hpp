@@ -83,8 +83,27 @@ int warp_all(int predicate)
     return ::__all(predicate);
 }
 
+} // namespace detail
+
+/// \overload
+/// \brief Group active lanes having the same bits of \p label
+///
+/// Threads that have the same least significant \p label_bits bits are grouped into the same group.
+/// Every lane in the warp receives a mask of all active lanes participating in its group.
+///
+/// This overload does not accept a template parameter for label bits. It is passed as a function parameter instead.
+///
+/// \param [in] label the label for the calling lane
+/// \param [in] label_bits number of bits to compare between labels
+/// \param [in] valid lanes passing <tt>false</tt> will be ignored for comparisons,
+/// such lanes will not be part of any group, and will always return an empty mask (0)
+///
+/// \return A bit mask of lanes sharing the same bits for \p label. The bit at index
+/// lane <tt>i</tt>'s result includes bit <tt>j</tt> in the lane mask if lane <tt>j</tt> is part
+/// of the same group as lane <tt>i</tt>, i.e. lane <tt>i</tt> and <tt>j</tt> called with the
+/// same value for label.
 ROCPRIM_DEVICE ROCPRIM_INLINE
-lane_mask_type match_any_small(unsigned int label, unsigned int label_bits, bool valid)
+lane_mask_type match_any(unsigned int label, unsigned int label_bits, bool valid = true)
 {
     // Obtain a mask with the threads which are currently active.
     lane_mask_type       peer_mask  = ballot(valid);
@@ -115,54 +134,6 @@ lane_mask_type match_any_small(unsigned int label, unsigned int label_bits, bool
     return -lane_mask_type{valid} & peer_mask;
 }
 
-ROCPRIM_DEVICE ROCPRIM_INLINE
-lane_mask_type match_any_large(unsigned int label, unsigned int label_bits, bool valid)
-{
-    // Obtain a mask with the threads which are currently active.
-    lane_mask_type peer_mask = ballot(valid);
-
-    const unsigned int bit_mask   = (label_bits >= 32) ? ~0u : ((1u << label_bits) - 1);
-    const unsigned int masked_lbl = label & bit_mask;
-
-    // Query the hardware for all lanes with the same masked label,
-    // then intersect with the active lanes to exclude any that opted out.
-    peer_mask &= static_cast<lane_mask_type>(__match_any(masked_lbl));
-
-    return -lane_mask_type{valid} & peer_mask;
-}
-
-} // namespace detail
-
-/// \overload
-/// \brief Group active lanes having the same bits of \p label
-///
-/// Threads that have the same least significant \p label_bits bits are grouped into the same group.
-/// Every lane in the warp receives a mask of all active lanes participating in its group.
-///
-/// This overload does not accept a template parameter for label bits. It is passed as a function parameter instead.
-///
-/// \param [in] label the label for the calling lane
-/// \param [in] label_bits number of bits to compare between labels
-/// \param [in] valid lanes passing <tt>false</tt> will be ignored for comparisons,
-/// such lanes will not be part of any group, and will always return an empty mask (0)
-///
-/// \return A bit mask of lanes sharing the same bits for \p label. The bit at index
-/// lane <tt>i</tt>'s result includes bit <tt>j</tt> in the lane mask if lane <tt>j</tt> is part
-/// of the same group as lane <tt>i</tt>, i.e. lane <tt>i</tt> and <tt>j</tt> called with the
-/// same value for label.
-ROCPRIM_DEVICE ROCPRIM_INLINE
-lane_mask_type match_any(unsigned int label, unsigned int label_bits, bool valid = true)
-{
-    if (label_bits < 16)
-    {
-        return detail::match_any_small(label, label_bits, valid);
-    }
-    else
-    {
-        return detail::match_any_large(label, label_bits, valid);
-    }
-}
-
 /// \brief Group active lanes having the same bits of \p label
 ///
 /// Threads that have the same least significant \p LabelBits bits are grouped into the same group.
@@ -183,14 +154,7 @@ template<unsigned int LabelBits>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 lane_mask_type match_any(unsigned int label, bool valid = true)
 {
-    if constexpr(LabelBits < 16)
-    {
-        return detail::match_any_small(label, LabelBits, valid);
-    }
-    else
-    {
-        return detail::match_any_large(label, LabelBits, valid);
-    }
+    return match_any(label, LabelBits, valid);
 }
 
 /// \brief Elect a single lane for each group in \p mask
