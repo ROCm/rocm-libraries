@@ -3410,8 +3410,8 @@ class TestIntegration:
 # Tool to visualize the scheduling steps on a real kernel configuration. Run with --interactive to step through each phase.
 # Also calls the instruction scheduler to verify the emitted modules are valid input and to show the final instruction counts.
 # Example usage:
-#   PYTHONPATH=. python Tensile/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 320 --mt1 320 --du 64 --pgr 1 --wg 2x2 --partition-size 10x2
-#   PYTHONPATH=. python Tensile/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 256 --mt1 256 --du 256 --dtype fp4 --pgr 2 --wg 2x2 --partition-size 8x4
+#   PYTHONPATH=. python tensilelite/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 320 --mt1 320 --du 64 --pgr 1 --wg 2x2 --partition-size 10x2
+#   PYTHONPATH=. python tensilelite/Tests/unit/test_SubtileBasedLogicalScheduler.py --mt0 256 --mt1 256 --du 256 --dtype fp4 --pgr 2 --wg 2x2 --partition-size 8x4
 if __name__ == "__main__":
     import sys
     import io

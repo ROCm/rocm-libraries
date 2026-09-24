@@ -30,14 +30,14 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# FALSE branch: import path -- __name__ == "Tensile.Tensile" -> guard skipped
+# FALSE branch: import path -- __name__ == "tensilelite.Tensile" -> guard skipped
 # ---------------------------------------------------------------------------
 
 def test_module_guard_false_import_succeeds():
     """Importing Tensile.Tensile bypasses the guard; module load succeeds."""
     M = importlib.import_module("Tensile.Tensile")
     # The module's __name__ attribute is the dotted import name, not "__main__".
-    assert M.__name__ == "Tensile.Tensile"
+    assert M.__name__ == "tensilelite.Tensile"
 
 
 def test_module_guard_false_name_is_not_main():
@@ -77,6 +77,6 @@ def test_module_guard_true_direct_exec_prints_deprecation():
         capture_output=True,
         text=True,
     )
-    assert "Tensile/bin/Tensile" in result.stdout, (
+    assert "tensilelite/bin/Tensile" in result.stdout, (
         "Expected redirect notice in stdout; got: {!r}".format(result.stdout)
     )
