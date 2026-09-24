@@ -227,23 +227,55 @@ jobs:
           # target is almost entirely parallel per-file analysis.
           ninja -C build -k 0 -j$(nproc) analyze
 
-      # The wrapper is off in every configuration here, and off has to mean
-      # invisible: a harness that leaked into the default build would otherwise be
-      # noticed only once it started failing somewhere else. Configure-time and
-      # GPU-free, so it rides the cheapest build in the matrix.
+      # Off has to mean invisible: a harness that leaked into the default build
+      # would otherwise be noticed only once it started failing somewhere else.
+      #
+      # The build above cannot show this. This runner has no GPU, so the configure
+      # probe drops the harness whatever the wrapper flag says, and a zero count
+      # there proves nothing. Two configure-only trees that differ in the wrapper
+      # flag alone can: with the test target pinned, the harness is registered
+      # unless the flag is off, and the wrapper-on tree checks the count is read
+      # correctly.
       - name: Forwarding parity harness is absent with the wrapper off
         if: matrix.job_id == 'no-ck-build'
         run: |
-          # Capture before parsing: piping into sed would make sed's exit status
-          # the step's, so a ctest that failed outright would be read as the zero
-          # count this step is asserting. An assignment from a command
-          # substitution carries that command's status, so -e stops here instead.
-          listing=$(ctest --test-dir build -N -L forwarding_parity)
-          count=$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p')
-          echo "forwarding_parity tests registered: ${count:-<unparsed>}"
-          test "$count" = "0" || {
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          parity_count() {
+            cmake -S projects/miopen -B "$1" \
+              -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+              ${{ matrix.cmake_extra_flags }} \
+              -DMIOPEN_TEST_GFX94X=ON \
+              -DMIOPEN_TEST_DISCRETE=OFF \
+              -DMIOPEN_ENABLE_HIPDNN_WRAPPER="$2" > "$1.configure.log" \
+              || { cat "$1.configure.log" >&2; return 1; }
+            # Capture before parsing: piping ctest into sed would make sed's exit
+            # status the function's, so a ctest that failed outright would be read
+            # as a zero count.
+            local listing
+            listing=$(ctest --test-dir "$1" -N -L forwarding_parity) || return 1
+            printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p'
+          }
+          off=$(parity_count parity-off OFF)
+          on=$(parity_count parity-on ON)
+          echo "forwarding_parity tests registered: wrapper off ${off:-<unparsed>}, wrapper on ${on:-<unparsed>}"
+          test -n "$on" && test "$on" -gt 0 || {
+            echo "the wrapper-on tree registered no forwarding_parity tests, so the wrapper-off count proves nothing"
+            exit 1
+          }
+          test "$off" = "0" || {
             echo "expected no forwarding_parity tests without MIOPEN_ENABLE_HIPDNN_WRAPPER"
-            printf '%s\n' "$listing"
+            exit 1
+          }
+          # The packaged test list is written separately from the build tree's and
+          # is what ships, so it gets the same pair of checks.
+          packaged=test/gtest/install_CTestTestfile.cmake
+          if grep -q forwarding_parity "parity-off/$packaged"; then
+            echo "the packaged test list registers the harness without MIOPEN_ENABLE_HIPDNN_WRAPPER"
+            exit 1
+          fi
+          grep -q forwarding_parity "parity-on/$packaged" || {
+            echo "the packaged test list is missing the harness with MIOPEN_ENABLE_HIPDNN_WRAPPER on"
             exit 1
           }
 

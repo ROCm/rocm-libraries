@@ -559,7 +559,11 @@ endif()
 # libraries are, not against a build tree. A default artifact is built with the wrapper off and
 # carries none of them. Only the single-binary build packages a test executable and so only it
 # registers the harness mirrored here.
-if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_GPU)
+#
+# No MIOPEN_NO_GPU condition, unlike the build-tree entries: that probe describes the machine
+# that built the package, and packages are routinely built on GPU-less machines and tested
+# elsewhere. Whether the test machine has a GPU is decided when the harness runs.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
   # The same set of entries the build tree registers, under the same rule: a bare entry for the
   # architecture filter's exclude form and one per declared architecture for its require form.
   # Labels are read back out of the YAML rather than repeated here, so adding an exclusion set
@@ -602,16 +606,17 @@ if( NOT ENABLE_ASAN_PACKAGING )
       RENAME "CTestTestfile.cmake"
   )
 
-  # wrapper_abi_check's dependencies, under a gate that does not require a GPU: the check
-  # itself never loads or runs either library. check_public_abi.py holds the ABI logic;
-  # miopen_wrapper_libs.py is the shared helper both this script and the parity harness
-  # below import from, so it is installed here rather than duplicated in both blocks.
+  # Dependencies of the wrapper_abi_check and forwarding-parity mirrors above.
+  # check_public_abi.py holds the ABI logic; miopen_wrapper_libs.py is the helper both
+  # check_wrapper_abi.py and run_forwarding_parity.py import.
   if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
     install(
         PROGRAMS
           "${PROJECT_SOURCE_DIR}/script/check_wrapper_abi.py"
           "${PROJECT_SOURCE_DIR}/script/check_public_abi.py"
           "${PROJECT_SOURCE_DIR}/script/miopen_wrapper_libs.py"
+          "${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py"
+          "${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )
@@ -622,17 +627,5 @@ if( NOT ENABLE_ASAN_PACKAGING )
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )
-
-    # The parity mirror's own dependencies, under its own narrower gate: it is the only
-    # caller of either, so a wider gate would ship files nothing invokes on that build.
-    if(NOT MIOPEN_NO_GPU)
-      install(
-          PROGRAMS
-            "${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py"
-            "${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py"
-          DESTINATION ${CMAKE_INSTALL_BINDIR}
-          COMPONENT tests
-      )
-    endif()
   endif()
 endif()
