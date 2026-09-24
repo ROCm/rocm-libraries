@@ -6033,7 +6033,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
     hipblasStatus_t Bundle::support(const jit::detail::OperationRequest& operation,
                                     size_t                               limit,
                                     size_t&                              workspace,
-                                    Diagnostics&                         diagnostics) const
+                                    jit::Diagnostics&                         diagnostics) const
     {
         workspace           = 0;
         diagnostics.backend = "TensileLite";
@@ -6084,7 +6084,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
     hipblasStatus_t Bundle::prepare(const jit::detail::OperationRequest&                operation,
                                     const jit::detail::ExecutionContext&                execution,
                                     std::shared_ptr<const jit::detail::PreparedLaunch>& prepared,
-                                    Diagnostics& diagnostics) const
+                                    jit::Diagnostics& diagnostics) const
     {
         prepared.reset();
         size_t workspace = 0;

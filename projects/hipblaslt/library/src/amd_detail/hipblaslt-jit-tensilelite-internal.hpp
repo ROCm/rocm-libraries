@@ -33,10 +33,10 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
         hipblasStatus_t support(const jit::detail::OperationRequest&,
                                 size_t,
                                 size_t&,
-                                Diagnostics&) const override;
+                                jit::Diagnostics&) const override;
         hipblasStatus_t prepare(const jit::detail::OperationRequest&,
                                 const jit::detail::ExecutionContext&,
                                 std::shared_ptr<const jit::detail::PreparedLaunch>&,
-                                Diagnostics&) const override;
+                                jit::Diagnostics&) const override;
     };
 }

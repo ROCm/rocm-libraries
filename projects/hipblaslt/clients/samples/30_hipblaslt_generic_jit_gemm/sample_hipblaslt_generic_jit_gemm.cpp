@@ -7,6 +7,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt-jit-tensilelite.hpp>
+#include <hipblaslt/hipblaslt-jit.hpp>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -155,26 +156,34 @@ namespace
     };
     void runPublicGemm(Problem& p, const TensileLiteOptions& options)
     {
-        namespace tensilelite = hipblaslt_ext::experimental::jit::tensilelite;
-        tensilelite::Diagnostics         diagnostics;
+        namespace jit = hipblaslt_ext::experimental::jit;
+        jit::Diagnostics diagnostics;
+        auto checked = [&](hipblasStatus_t status) { check(status, diagnostics.message.c_str()); };
+        // Provider settings are needed only to construct the selected backend.
+        jit::Backend backend;
+        checked(jit::tensilelite::createBackend(options, backend, diagnostics));
+        jit::Request request;
+        checked(jit::makeGemmRequest(p.handle,
+                                     p.desc,
+                                     &p.alpha,
+                                     p.a,
+                                     p.aLayout,
+                                     p.b,
+                                     p.bLayout,
+                                     &p.beta,
+                                     p.c,
+                                     p.cLayout,
+                                     p.d,
+                                     p.dLayout,
+                                     request,
+                                     diagnostics));
+        int device;
+        check(hipGetDevice(&device), "Get current device");
+        jit::Solution solution;
+        checked(jit::getJitAlgo(
+            device, request, backend, std::numeric_limits<size_t>::max(), solution, diagnostics));
         hipblasLtMatmulHeuristicResult_t selected{};
-        const auto                       status = tensilelite::getGemmAlgo(p.handle,
-                                                     p.desc,
-                                                     &p.alpha,
-                                                     p.a,
-                                                     p.aLayout,
-                                                     p.b,
-                                                     p.bLayout,
-                                                     &p.beta,
-                                                     p.c,
-                                                     p.cLayout,
-                                                     p.d,
-                                                     p.dLayout,
-                                                     options,
-                                                     std::numeric_limits<size_t>::max(),
-                                                     selected,
-                                                     diagnostics);
-        check(status, diagnostics.message.c_str());
+        checked(jit::getGemmAlgo(solution, selected, diagnostics));
         if(selected.workspaceSize)
             check(hipMalloc(&p.workspace, selected.workspaceSize), "Allocate workspace");
         p.reset();
