@@ -19,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
+#include "RaggedGraphTestUtils.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
@@ -686,6 +687,22 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseIsApplicable)
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+// No GPU plan builder reads ragged offsets, so a ragged graph must be rejected at
+// dispatch rather than executed against misread dims. This covers GpuPointwisePlan,
+// which has no dedicated test file, and mirrors what TestCpuReferenceRaggedRejection
+// pins for the CPU reference.
+TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRaggedGraph)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    GpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+
+    auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
+    EXPECT_FALSE(executor.isApplicable(ragged.data(), ragged.size()));
 }
 
 TEST(TestGpuReferenceGraphExecutorFp32, ConvFwdBasicExecutes)

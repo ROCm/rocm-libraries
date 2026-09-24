@@ -3,10 +3,10 @@
 
 #include "harness/bundle/ReferenceOpCoverage.hpp"
 
-#include <algorithm>
 #include <stdexcept>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -47,6 +47,22 @@ const std::set<NodeAttributes>& gpuSupportedOps()
     return s_ops;
 }
 
+bool isFp8(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    switch(dataType)
+    {
+    case DataType::FP8_E4M3:
+    case DataType::FP8_E5M2:
+    case DataType::FP8_E8M0:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
+        return true;
+    default:
+        return false;
+    }
+}
+
 } // namespace
 
 const std::set<NodeAttributes>& referenceSupportedOps(ReferenceExecutorType type)
@@ -84,55 +100,107 @@ std::optional<std::set<NodeAttributes>> graphNodeTypes(const void* graphBuffer, 
     return types;
 }
 
-bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, size_t size)
+std::optional<bool> graphUsesRaggedTensors(const void* graphBuffer, size_t size)
 {
-    const auto types = graphNodeTypes(graphBuffer, size);
-    if(!types.has_value() || types->empty())
+    try
     {
-        return false;
+        // Keep getTensorMap() inside the try: GraphWrapper's constructor does not
+        // throw on a bad buffer, throwIfNotValid() inside this accessor does.
+        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+            graphBuffer, size);
+        return !hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(graph.getTensorMap());
     }
+    catch(const std::exception&)
+    {
+        return std::nullopt;
+    }
+}
 
-    const auto& supported = referenceSupportedOps(type);
-    return std::all_of(types->begin(), types->end(), [&supported](const auto nodeType) {
-        return supported.count(nodeType) != 0;
-    });
+std::optional<bool> graphUsesFp8Tensors(const void* graphBuffer, size_t size)
+{
+    try
+    {
+        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+            graphBuffer, size);
+        for(const auto& entry : graph.getTensorMap())
+        {
+            if(entry.second != nullptr && isFp8(entry.second->data_type()))
+            {
+                return true;
+            }
+        }
+    }
+    catch(const std::exception&)
+    {
+        return std::nullopt;
+    }
+    return false;
 }
 
 std::vector<std::string>
-    uncoveredNodeTypes(ReferenceExecutorType type, const void* graphBuffer, size_t size)
+    exclusionReasons(ReferenceExecutorType type, const void* graphBuffer, size_t size)
 {
+    // Three walks of the same buffer, at registration time only.  Folding them into
+    // one pass would mean hand-rolling the node and tensor traversals here instead of
+    // reusing the queries the tests pin individually.
     const auto types = graphNodeTypes(graphBuffer, size);
-    if(!types.has_value())
+    const auto ragged = graphUsesRaggedTensors(graphBuffer, size);
+    const auto fp8 = graphUsesFp8Tensors(graphBuffer, size);
+    if(!types.has_value() || !ragged.has_value() || !fp8.has_value())
     {
         return {std::string(K_UNREADABLE_GRAPH)};
     }
 
-    std::vector<std::string> uncovered;
+    std::vector<std::string> reasons;
+    if(types->empty())
+    {
+        reasons.emplace_back(K_NO_NODES);
+    }
+
     const auto& supported = referenceSupportedOps(type);
     for(const auto nodeType : *types)
     {
         if(supported.count(nodeType) == 0)
         {
-            uncovered.emplace_back(
+            reasons.emplace_back(
                 hipdnn_flatbuffers_sdk::data_objects::EnumNameNodeAttributes(nodeType));
         }
     }
-    return uncovered;
+
+    if(*ragged)
+    {
+        reasons.emplace_back(K_RAGGED_TENSORS);
+    }
+    // FP8 is GPU-only: no GPU plan builder registers an FP8 signature, and
+    // GpuFpReferenceSdpa::fprop() takes no descale parameters at all, so FP8 is a
+    // missing feature in the reference kernel rather than a missing registry line.
+    // The CPU reference has BlockScaleDequantizePlan and may legitimately handle FP8
+    // for ops in its own set, so excluding it there would over-reject.
+    if(*fp8 && type == ReferenceExecutorType::GPU)
+    {
+        reasons.emplace_back(K_FP8_TENSORS);
+    }
+    return reasons;
 }
 
-std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps)
+bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, size_t size)
 {
-    if(uncoveredOps.empty())
+    return exclusionReasons(type, graphBuffer, size).empty();
+}
+
+std::string formatExclusionReasons(const std::set<std::string>& reasons)
+{
+    if(reasons.empty())
     {
         return {};
     }
 
     std::string formatted = " (";
     const char* separator = "";
-    for(const auto& op : uncoveredOps)
+    for(const auto& reason : reasons)
     {
         formatted += separator;
-        formatted += op;
+        formatted += reason;
         separator = ", ";
     }
     formatted += ")";
