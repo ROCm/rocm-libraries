@@ -127,19 +127,22 @@ def buildTargetGfx(isaInfoMap, archNames=None) -> str:
 def clientLibraryFiles(clientLibraryPath, archs):
   """Return the code objects and master library files built for `archs`.
 
-  Kernels fan out into one per-base subdir per arch, so the globs are unioned
-  across them. The master library is matched by name and by the extension of
-  the configured LibraryFormat: msgpack writes `.dat`, and always-msgpack side
-  files such as `TensileLiteLibrary_lazy_<arch>_Mapping.dat` must not be
-  mistaken for it.
+  Kernels fan out into one per-base subdir per arch, so the lists are unioned
+  across them. The master is matched by its exact name because lazy-loading
+  shards share the `TensileLibrary_` prefix. Msgpack is written to disk as
+  `<name>.dat.zlib`, but the client must be given the logical `.dat` name; it
+  probes for the `.zlib` variant itself.
   """
   libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+  masterPrefix = "TensileLibrary_lazy_" if globalParameters["LazyLibraryLoading"] else "TensileLibrary_"
   coList = []
   libraryList = []
   for arch in archs:
     archDir = libraryDir(clientLibraryPath, arch)
     coList.extend(glob(os.path.join(archDir, "*.co")))
-    libraryList.extend(glob(os.path.join(archDir, "TensileLibrary*" + libraryExt)))
+    master = os.path.join(archDir, masterPrefix + arch + libraryExt)
+    if os.path.exists(master) or os.path.exists(master + ".zlib"):
+      libraryList.append(master)
   return coList, libraryList
 
 
