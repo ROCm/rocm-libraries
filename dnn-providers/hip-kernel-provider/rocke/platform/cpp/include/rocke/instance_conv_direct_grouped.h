@@ -76,11 +76,12 @@ struct rocke_arena; /* fwd (rocke/arena.h)                      */
  *  class DirectConvProblem:
  *      N, H, W, groups, cpg, kpg          # required
  *      KH=3, KW=3, PAD=1, stride=1
+ *      dtype="fp16"                        # "fp16" or "bf16"
  *
  *  Layouts:
- *    A: NHWC fp16, [N, H, W, groups*cpg]
- *    B: KRSC fp16, [groups*kpg, KH, KW, cpg]
- *    D: NHWK fp16, [N, H, W, groups*kpg]
+ *    A: NHWC, [N, H, W, groups*cpg]
+ *    B: KRSC, [groups*kpg, KH, KW, cpg]
+ *    D: NHWK, [N, H, W, groups*kpg]
  * ===================================================================== */
 typedef struct rocke_direct_conv_problem
 {
@@ -94,10 +95,17 @@ typedef struct rocke_direct_conv_problem
     int KW; /* default 3 */
     int PAD; /* default 1 */
     int stride; /* default 1 */
+    const char* dtype; /* "fp16" or "bf16"; NULL is treated as "fp16" by all
+                        * build functions.  Always set this field explicitly or
+                        * use rocke_direct_conv_problem_default() which sets it
+                        * to "fp16".  Zero-initialising the struct leaves dtype
+                        * NULL, which silently selects fp16 and will silently
+                        * drop a bf16 request. */
 } rocke_direct_conv_problem_t;
 
 /* DirectConvProblem with dataclass defaults (KH=KW=3, PAD=1, stride=1) and the
- * six required dims zeroed. Caller fills N,H,W,groups,cpg,kpg. */
+ * six required dims zeroed.  dtype is initialised to "fp16".
+ * Caller fills N,H,W,groups,cpg,kpg; override dtype for bf16. */
 rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void);
 
 /* @property total_c -> groups * cpg. */
@@ -148,25 +156,27 @@ int rocke_direct_conv_16c_n_acc_slots(const rocke_direct_conv_16c_spec_t* spec);
 
 /* kernel_name():
  *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}",
- *                    "db" if double_buffer else "sb", flags={"k32": fold_k32})
+ *                    "db" if double_buffer else "sb",
+ *                    flags={"k32": fold_k32, "bf16": problem.dtype=="bf16"})
  * Writes NUL-terminated into out (capacity out_cap). */
 rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spec_t* spec,
                                                  char* out,
                                                  size_t out_cap);
 
 /* validate(): the hard assertions of DirectConv16cSpec.validate (cpg==kpg==16,
- * groups % block_groups == 0). On a violated invariant returns ROCKE_ERR_VALUE and
- * (if reason non-NULL, cap reason_cap) writes the message; else ROCKE_OK. */
+ * groups % block_groups == 0, dtype in {"fp16","bf16"}). On a violated invariant
+ * returns ROCKE_ERR_VALUE and (if reason non-NULL, cap reason_cap) writes the
+ * message; else ROCKE_OK. */
 rocke_status_t rocke_direct_conv_16c_validate(const rocke_direct_conv_16c_spec_t* spec,
                                               char* reason,
                                               size_t reason_cap);
 
 /* is_valid_spec_16c(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
- * Checks: ArchTarget.from_gfx(arch) resolves; cpg==kpg==16; groups % block_groups
- * == 0; the 16x16x16 f16 MFMA atom present on arch; and when fold_k32 the
- * 16x16x32 f16 atom present on arch (absent on gfx942 -> clean reject). On reject
- * writes the reason (if non-NULL) and returns false; on accept writes "ok",
- * returns true. */
+ * Checks: ArchTarget.from_gfx(arch) resolves; dtype in {"fp16","bf16"};
+ * cpg==kpg==16; groups % block_groups == 0; the 16x16x16 {f16,bf16} MFMA atom
+ * present on arch; and when fold_k32 the 16x16x32 {f16,bf16} atom present on arch
+ * (absent on gfx942 -> clean reject). On reject writes the reason (if non-NULL)
+ * and returns false; on accept writes "ok", returns true. */
 bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spec,
                                          const char* arch,
                                          char* reason,
@@ -356,6 +366,8 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
                                                   const char* arch,
                                                   char* reason,
                                                   size_t reason_cap);
+rocke_status_t rocke_direct_depthwise_spatial_validate(
+    const rocke_direct_depthwise_spatial_spec_t* spec, char* reason, size_t reason_cap);
 
 /* ===================================================================== *
  *  DirectConvDgradSpec  (grouped dgrad: scalar FMA, any cpg/kpg, stride>=1)
@@ -510,18 +522,26 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_new(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_spec_t* spec, const char* arch);
 
 /* ===================================================================== *
- *  SIGNATURE (manifest)  --  both kernels share the 6-entry ABI:
- *    ptr A:f16, ptr B:f16, ptr D:f16, scalar A_bytes:i32, B_bytes:i32,
- *    D_bytes:i32.
+ *  SIGNATURE (manifest)  --  all kernels share the 6-entry ABI:
+ *    ptr A:{dtype}, ptr B:{dtype}, ptr D:{dtype}, scalar A_bytes:i32,
+ *    B_bytes:i32, D_bytes:i32.
  * ===================================================================== */
 
 /* Writes the 6 manifest entries into out[] (capacity out_cap) and sets
  * *out_count = 6. Strings live in `arena`. Returns ROCKE_OK or ROCKE_ERR_VALUE
- * (NULL args / out_cap < 6). One signature serves both 16c and 4c. */
+ * (NULL args / out_cap < 6). One signature serves both 16c and 4c (fp16 only). */
 rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
                                            struct rocke_sig_entry* out,
                                            size_t out_cap,
                                            size_t* out_count);
+
+/* Dtype-aware variant. `dtype` is "f16" (alias "fp16") or "bf16".
+ * NULL `dtype` defaults to "f16". */
+rocke_status_t rocke_direct_conv_signature_for_dtype(struct rocke_arena* arena,
+                                                     const char* dtype,
+                                                     struct rocke_sig_entry* out,
+                                                     size_t out_cap,
+                                                     size_t* out_count);
 
 /* ===================================================================== *
  *  CONVENIENCE: build -> lower to LLVM .ll text.
