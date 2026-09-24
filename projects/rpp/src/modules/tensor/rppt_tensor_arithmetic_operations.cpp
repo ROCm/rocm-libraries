@@ -478,6 +478,18 @@ RppStatus rppt_tensor_add_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                                           dstGenericDescPtr->offsetInBytes),
                 dstGenericDescPtr, RPP_TENSOR_OP_ADD, broadcastMode, roiTensorSrc1, roiTensorSrc2,
                 rpp::deref(rppHandle));
+        } else if ((srcPtr1GenericDescPtr->dataType == RpptDataType::F16) &&
+                   (dstGenericDescPtr->dataType == RpptDataType::F16)) {
+            return tensor_binary_op_dispatch_f16_f16_host_tensor(
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr1) +
+                                          srcPtr1GenericDescPtr->offsetInBytes),
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr2) +
+                                          srcPtr2GenericDescPtr->offsetInBytes),
+                srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) +
+                                          dstGenericDescPtr->offsetInBytes),
+                dstGenericDescPtr, RPP_TENSOR_OP_ADD, broadcastMode, roiTensorSrc1, roiTensorSrc2,
+                rpp::deref(rppHandle));
         } else if ((srcPtr1GenericDescPtr->dataType == RpptDataType::U8) &&
                    (dstGenericDescPtr->dataType == RpptDataType::U8)) {
             return tensor_binary_bitwise_op_dispatch_int_host_tensor(
@@ -660,6 +672,18 @@ RppStatus rppt_tensor_subtract_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                                           srcPtr2GenericDescPtr->offsetInBytes),
                 srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
+                                          dstGenericDescPtr->offsetInBytes),
+                dstGenericDescPtr, RPP_TENSOR_OP_SUBTRACT, broadcastMode, roiTensorSrc1,
+                roiTensorSrc2, rpp::deref(rppHandle));
+        } else if ((srcPtr1GenericDescPtr->dataType == RpptDataType::F16) &&
+                   (dstGenericDescPtr->dataType == RpptDataType::F16)) {
+            return tensor_binary_op_dispatch_f16_f16_host_tensor(
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr1) +
+                                          srcPtr1GenericDescPtr->offsetInBytes),
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr2) +
+                                          srcPtr2GenericDescPtr->offsetInBytes),
+                srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) +
                                           dstGenericDescPtr->offsetInBytes),
                 dstGenericDescPtr, RPP_TENSOR_OP_SUBTRACT, broadcastMode, roiTensorSrc1,
                 roiTensorSrc2, rpp::deref(rppHandle));
@@ -848,6 +872,18 @@ RppStatus rppt_tensor_multiply_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                                           dstGenericDescPtr->offsetInBytes),
                 dstGenericDescPtr, RPP_TENSOR_OP_MULTIPLY, broadcastMode, roiTensorSrc1,
                 roiTensorSrc2, rpp::deref(rppHandle));
+        } else if ((srcPtr1GenericDescPtr->dataType == RpptDataType::F16) &&
+                   (dstGenericDescPtr->dataType == RpptDataType::F16)) {
+            return tensor_binary_op_dispatch_f16_f16_host_tensor(
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr1) +
+                                          srcPtr1GenericDescPtr->offsetInBytes),
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr2) +
+                                          srcPtr2GenericDescPtr->offsetInBytes),
+                srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) +
+                                          dstGenericDescPtr->offsetInBytes),
+                dstGenericDescPtr, RPP_TENSOR_OP_MULTIPLY, broadcastMode, roiTensorSrc1,
+                roiTensorSrc2, rpp::deref(rppHandle));
         } else if ((srcPtr1GenericDescPtr->dataType == RpptDataType::U8) &&
                    (dstGenericDescPtr->dataType == RpptDataType::U8)) {
             return tensor_binary_bitwise_op_dispatch_int_host_tensor(
@@ -1028,6 +1064,18 @@ RppStatus rppt_tensor_divide_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                                           srcPtr2GenericDescPtr->offsetInBytes),
                 srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
+                                          dstGenericDescPtr->offsetInBytes),
+                dstGenericDescPtr, RPP_TENSOR_OP_DIVIDE, broadcastMode, roiTensorSrc1,
+                roiTensorSrc2, rpp::deref(rppHandle));
+        } else if ((srcPtr1GenericDescPtr->dataType == RpptDataType::F16) &&
+                   (dstGenericDescPtr->dataType == RpptDataType::F16)) {
+            return tensor_binary_op_dispatch_f16_f16_host_tensor(
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr1) +
+                                          srcPtr1GenericDescPtr->offsetInBytes),
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr2) +
+                                          srcPtr2GenericDescPtr->offsetInBytes),
+                srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) +
                                           dstGenericDescPtr->offsetInBytes),
                 dstGenericDescPtr, RPP_TENSOR_OP_DIVIDE, broadcastMode, roiTensorSrc1,
                 roiTensorSrc2, rpp::deref(rppHandle));
