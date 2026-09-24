@@ -495,6 +495,36 @@ namespace TensileLite
 
     TENSILELITEHOST_EXPORT size_t multiplyElementSize(size_t element, float elementSize);
 
+    enum CustomArgType
+    {
+        int8,
+        uint8,
+        int16,
+        uint16,
+        int32,
+        uint32,
+        int64,
+        uint64,
+        float4,
+        float6,
+        float8,
+        bfloat8,
+        float16,
+        bfloat16,
+        float32,
+        tfloat32,
+        float64,
+        // Complex types?
+        boolean,
+        address,
+        CustomArgType_Count,
+    };
+
+    TENSILELITEHOST_EXPORT std::string toString(CustomArgType arg);
+    TENSILELITEHOST_EXPORT CustomArgType fromStringCustomArgType(std::string& str);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomArgType& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomArgType& t);
+
     /**
  * @}
  */

@@ -608,13 +608,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
         "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
     ),
-    "wmma.scale.gfx1250.f32.16x16x128.fp8.fp8": (
+    "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
         "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4."
         "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
         "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i32, "
         "i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"
     ),
-    "wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8": (
+    "wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
         "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4."
         "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
         "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i64, "
@@ -1083,11 +1083,16 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+): empirically identical to LLVM 22 for the declares rocke
-# emits today. Split entries here if an LLVM 23 host proves drift.
-_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = dict(
-    _INTRINSIC_DECLS_LLVM22_OVERRIDES
-)
+# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
+# intrinsic's ABI changed again.
+_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
+    **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    "mfma.scale.f32.16x16x128.f8f6f4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+        "i32 immarg, i32, i32 immarg, i32)"
+    ),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -1127,6 +1132,78 @@ def _llvm_type(t: Type) -> str:
     if t.name == "f32":
         return "float"
     raise NotImplementedError(f"no LLVM mapping for type {t!r}")
+
+
+def _llvm_loop_carried_type(t: Type) -> str:
+    """Render an admitted ``scf.for`` carry with the canonical type renderer."""
+    if isinstance(t, VectorType):
+        if t.count <= 0:
+            raise ValueError(
+                f"scf.for loop-carried vector type {t.name!r} must have a positive width"
+            )
+        if isinstance(t.elem, (PtrType, SmemType, VectorType)):
+            raise NotImplementedError(
+                f"scf.for loop-carried type {t.name!r} is unsupported; "
+                "expected a scalar or vector of scalar values"
+            )
+    elif isinstance(t, (PtrType, SmemType)):
+        raise NotImplementedError(
+            f"scf.for loop-carried type {t.name!r} is unsupported; "
+            "expected a scalar or vector of scalar values"
+        )
+    try:
+        return _llvm_type(t)
+    except NotImplementedError as exc:
+        raise NotImplementedError(
+            f"scf.for loop-carried type {t.name!r} has no LLVM mapping"
+        ) from exc
+
+
+def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
+    """Validate serialized loop metadata and render the real carry types."""
+    iter_inits = op.operands[3:]
+    iter_meta = op.attrs.get("iter_args", [])
+    if not isinstance(iter_meta, list):
+        raise ValueError("scf.for iter_args metadata must be a list")
+    if len(iter_inits) != num_iter:
+        raise ValueError(
+            f"scf.for declares {num_iter} iter_args but has "
+            f"{len(iter_inits)} init operands"
+        )
+    if len(iter_meta) != num_iter:
+        raise ValueError(
+            f"scf.for declares {num_iter} iter_args but has "
+            f"{len(iter_meta)} metadata entries"
+        )
+    if len(op.results) != num_iter:
+        raise ValueError(
+            f"scf.for declares {num_iter} iter_args but has {len(op.results)} results"
+        )
+
+    llvm_types: List[str] = []
+    for index, (meta, init, result) in enumerate(
+        zip(iter_meta, iter_inits, op.results)
+    ):
+        if not isinstance(meta, dict):
+            raise ValueError(f"scf.for iter_arg {index} metadata must be a map")
+        name = meta.get("name")
+        type_name = meta.get("type")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"scf.for iter_arg {index} metadata has no name")
+        if not isinstance(type_name, str):
+            raise ValueError(f"scf.for iter_arg {name} metadata has no type")
+        if type_name != init.type.name:
+            raise ValueError(
+                f"scf.for iter_arg {name} metadata type {type_name!r} "
+                f"does not match init type {init.type.name!r}"
+            )
+        if result.type != init.type:
+            raise ValueError(
+                f"scf.for result type {result.type.name!r} does not match "
+                f"iter_arg {name} type {init.type.name!r}"
+            )
+        llvm_types.append(_llvm_loop_carried_type(init.type))
+    return llvm_types
 
 
 def _param_llvm_type(p: Param) -> str:
@@ -3324,14 +3401,24 @@ class _Lowerer:
             )
         else:
             b_packed = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-            f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
-            f"<4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
-            f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
-        )
+        if self._flavor == LLVM_FLAVOR_LLVM23:
+            self._current().emit(
+                f"  {op.result.name} = call <4 x float> "
+                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+                f"<4 x float> {self._operand(c)}, "
+                f"i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+                f"i32 0, i32 {self._operand(b_scale)})"
+            )
+        else:
+            self._current().emit(
+                f"  {op.result.name} = call <4 x float> "
+                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+                f"<4 x float> {self._operand(c)}, "
+                f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+                f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
+            )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
         a, b, c = op.operands
@@ -3398,9 +3485,8 @@ class _Lowerer:
         value 0 (exponent 0 => 2^0 == 1.0), making it numerically a plain
         unscaled fp8 MFMA. ``cbsz=0`` / ``blgp=0`` select fp8e4m3 for A and
         B; ``op_sel`` scale-byte selectors are 0. This is ADDITIVE — it
-        reuses the existing scaled intrinsic decl and emits the same call
-        shape as :meth:`_op_tile_mfma_scale_f32_16x16x128_f8f6f4`, but with
-        constant zero scales (so no scale registers are loaded).
+        uses a dedicated declaration key for the nine-argument form and pins
+        both scale operands to zero (so no scale registers are loaded).
 
         A / B arrive as ``<32 x fp8e4m3>`` (== ``<32 x i8>``, 32 f8 bytes
         per lane) and are bitcast to the intrinsic's ``<8 x i32>``.
@@ -3408,9 +3494,8 @@ class _Lowerer:
         """
         a, b, c = op.operands
         # ADDITIVE: a dedicated decl key for the unscaled hero atom (the
-        # 9-arg LLVM22 f8f6f4 scale-MFMA signature). We do NOT touch the
-        # existing ``mfma.scale.f32.16x16x128.f8f6f4`` decl (different,
-        # frozen, 11-arg form used by the MX-scaled lowering).
+        # 9-arg f8f6f4 scale-MFMA signature). The separate key preserves the
+        # LLVM20/22 MX-scaled declaration, which remains the 11-arg form.
         self._need("mfma.f32.16x16x128.fp8.hero")
         a_packed = self._fresh("a_fp8_128")
         b_packed = self._fresh("b_fp8_128")
@@ -5636,6 +5721,7 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
+        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
         iv_name = op.attrs["iv"]
         iv_ty = _llvm_type(lower.type)
 
@@ -5654,9 +5740,7 @@ class _Lowerer:
             f"[ %iv.next.{header.label}, %FOR_LATCH ]"
         )
         iter_phi_lines: List[int] = []
-        for meta, init in zip(iter_meta, iter_inits):
-            ty = meta["type"]
-            ll_ty = _llvm_type_from_name(ty)
+        for meta, init, ll_ty in zip(iter_meta, iter_inits, iter_llvm_types):
             header.emit(
                 f"  {meta['name']} = phi {ll_ty} "
                 f"[ {self._operand(init)}, %{pred_block} ], "
@@ -5693,8 +5777,7 @@ class _Lowerer:
 
         iv_next = f"%iv.next.{header.label}"
         latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {self._operand(step)}")
-        for meta, yld in zip(iter_meta, yielded):
-            ll_ty = _llvm_type_from_name(meta["type"])
+        for meta, yld, ll_ty in zip(iter_meta, yielded, iter_llvm_types):
             latch.emit(
                 f"  {meta['name']}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}"
             )
@@ -5710,8 +5793,7 @@ class _Lowerer:
         # Bind the for op's results: in LLVM IR, the header phi values
         # (which include the yielded values from the last latch iteration)
         # are the loop results. We add aliases via bitcast in the exit.
-        for meta, result in zip(iter_meta, op.results):
-            ll_ty = _llvm_type_from_name(meta["type"])
+        for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
             exit_blk.emit(
                 f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}"
             )
@@ -5731,6 +5813,7 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
+        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
         iv_name = op.attrs["iv"]
 
         # Evaluate constant bounds
@@ -5849,8 +5932,7 @@ class _Lowerer:
                 current_iter_values[meta["name"]] = yld
 
         # After all iterations, bind results to final iter var values
-        for meta, result in zip(iter_meta, op.results):
-            ll_ty = _llvm_type_from_name(meta["type"])
+        for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
             final_val = current_iter_values[meta["name"]]
             self._current().emit(
                 f"  {result.name} = bitcast {ll_ty} {final_val} to {ll_ty}"
@@ -6076,32 +6158,6 @@ def _format_agpr_alloc(value: object) -> str:
     if lo > hi:
         raise ValueError("agpr_alloc min must be <= max")
     return f"{lo},{hi}"
-
-
-def _llvm_type_from_name(name: str) -> str:
-    """Map our IR type-name string (from op.attrs) back to LLVM IR text."""
-    if name == "i32":
-        return "i32"
-    if name == "i64":
-        return "i64"
-    if name == "i8":
-        return "i8"
-    if name == "f16":
-        return "half"
-    if name == "bf16":
-        return "bfloat"
-    if name == "f32":
-        return "float"
-    if name == "fp8e4m3":
-        return "i8"
-    if name.startswith("vec<"):
-        # vec<f32x4> / vec<f16x4>
-        inner = name[4:-1]
-        elem, _, count = inner.partition("x")
-        count = int(count)
-        elem_map = {"f32": "float", "f16": "half", "bf16": "bfloat", "i32": "i32"}
-        return f"<{count} x {elem_map[elem]}>"
-    raise NotImplementedError(f"no LLVM type for {name!r}")
 
 
 def _param_attrs(attrs: Dict[str, object], t: Type) -> str:

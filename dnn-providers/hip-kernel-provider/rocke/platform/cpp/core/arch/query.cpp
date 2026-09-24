@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "mma_family_index.h"
+
 #include "rocke/arch_target.h"
 #include "rocke/arch_target_internal.h"
 #include "rocke/error.hpp"
@@ -46,6 +48,50 @@
 static const char* rocke_ati_family_or_default(const char* family)
 {
     return family ? family : "mma";
+}
+
+static const char* rocke_ati_scale_dtype(const char* dtype)
+{
+    return dtype && strcmp(dtype, "fp8e4m3") == 0 ? "e4m3" : dtype;
+}
+
+static void rocke_ati_validate_scales(const rocke_mma_scale_filter_t* scales)
+{
+    if(!scales)
+        return;
+    if(!scales->a_scale_dtype && !scales->b_scale_dtype && scales->scale_block_k == 0)
+        return;
+    const char* dtypes[2] = {scales->a_scale_dtype, scales->b_scale_dtype};
+    for(int i = 0; i < 2; ++i)
+    {
+        const char* dtype = rocke_ati_scale_dtype(dtypes[i]);
+        if(!dtype
+           || (strcmp(dtype, "e8m0") != 0 && strcmp(dtype, "e4m3") != 0
+               && strcmp(dtype, "e5m3") != 0))
+            ckc::raise_status(ROCKE_ERR_VALUE, "MMA scale dtype must be e8m0, e4m3, or e5m3");
+    }
+    if(scales->scale_block_k != 16 && scales->scale_block_k != 32)
+        ckc::raise_status(ROCKE_ERR_VALUE,
+                          "MMA scale_block_k must be an integer equal to 16 or 32");
+}
+
+static bool rocke_ati_scales_match(const rocke_mma_op_t* op, const rocke_mma_scale_filter_t* scales)
+{
+    if(!scales)
+        return true;
+    if(scales->scale_block_k != op->srcs[0].scale_block_size
+       || scales->scale_block_k != op->srcs[1].scale_block_size)
+        return false;
+    const char* actual[2] = {op->srcs[0].scale_dtype, op->srcs[1].scale_dtype};
+    const char* queried[2] = {scales->a_scale_dtype, scales->b_scale_dtype};
+    for(int i = 0; i < 2; ++i)
+    {
+        const char* expected = rocke_ati_scale_dtype(queried[i]);
+        const char* dtype = rocke_ati_scale_dtype(actual[i]);
+        if(bool(expected) != bool(dtype) || (dtype && strcmp(expected, dtype) != 0))
+            return false;
+    }
+    return true;
 }
 
 /* ============================== MMA atom getters ====================== */
@@ -126,6 +172,30 @@ const rocke_layout_map_t* rocke_mma_op_dst_layout(const rocke_mma_op_t* op, rock
     return rocke_ati_require_layout(op, op ? op->dst.layout : NULL, "dst", b);
 }
 
+const rocke_layout_map_t*
+    rocke_mma_op_src_scale_layout(const rocke_mma_op_t* op, int index, rocke_ir_builder_t* b)
+{
+    if(index < 0 || index >= 3)
+        rocke_ati_q_set_err(b, ROCKE_ERR_VALUE, "MMA src index %d is outside [0, 3)", index);
+    char role[16];
+    snprintf(role, sizeof(role), "src%d_scale", index);
+    return rocke_ati_require_layout(op, op ? op->srcs[index].scale_layout : NULL, role, b);
+}
+const rocke_layout_map_t* rocke_mma_op_a_scale_layout(const rocke_mma_op_t* op,
+                                                      rocke_ir_builder_t* b)
+{
+    return rocke_mma_op_src_scale_layout(op, 0, b);
+}
+const rocke_layout_map_t* rocke_mma_op_b_scale_layout(const rocke_mma_op_t* op,
+                                                      rocke_ir_builder_t* b)
+{
+    return rocke_mma_op_src_scale_layout(op, 1, b);
+}
+const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b)
+{
+    return rocke_mma_op_dst_layout(op, b);
+}
+
 /* ============================== MMA catalog =========================== */
 
 const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int* num_out)
@@ -151,7 +221,8 @@ static bool rocke_ati_op_matches(const rocke_mma_op_t* op,
                                  const char* c,
                                  const char* d,
                                  int m,
-                                 int n)
+                                 int n,
+                                 const rocke_mma_scale_filter_t* scales)
 {
     if(strcmp(op->family, family) != 0)
         return false;
@@ -167,7 +238,7 @@ static bool rocke_ati_op_matches(const rocke_mma_op_t* op,
         return false;
     if(n >= 0 && op->n != n)
         return false;
-    return true;
+    return rocke_ati_scales_match(op, scales);
 }
 
 int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
@@ -177,7 +248,8 @@ int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
                                         int m,
                                         int n,
                                         const rocke_mma_op_t** out,
-                                        int cap)
+                                        int cap,
+                                        const rocke_mma_scale_filter_t* scales)
 {
     char abuf[64], bbuf[64], cbuf[64], dbuf[64];
     const char *a, *bd, *c, *d, *fam;
@@ -185,16 +257,17 @@ int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
 
     if(!cat || !src_dtypes)
         return 0;
+    rocke_ati_validate_scales(scales);
     fam = rocke_ati_family_or_default(family);
-    a = rocke_ati_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
-    bd = rocke_ati_normalize_dtype(src_dtypes[1], bbuf, sizeof bbuf);
-    c = rocke_ati_normalize_dtype(src_dtypes[2], cbuf, sizeof cbuf);
-    d = rocke_ati_normalize_dtype(dst_dtype, dbuf, sizeof dbuf);
+    a = rocke_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
+    bd = rocke_normalize_dtype(src_dtypes[1], bbuf, sizeof bbuf);
+    c = rocke_normalize_dtype(src_dtypes[2], cbuf, sizeof cbuf);
+    d = rocke_normalize_dtype(dst_dtype, dbuf, sizeof dbuf);
 
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, d, m, n))
+        if(!rocke_ati_op_matches(op, fam, a, bd, c, d, m, n, scales))
             continue;
         if(out && total < cap)
             out[total] = op;
@@ -211,10 +284,12 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 int m,
                                 int n,
                                 const rocke_mma_op_t** out,
-                                int cap)
+                                int cap,
+                                const rocke_mma_scale_filter_t* scales)
 {
     const char* src_dtypes[3] = {a_dtype, b_dtype, c_dtype};
-    return rocke_mma_catalog_enumerate_indexed(cat, family, src_dtypes, c_dtype, m, n, out, cap);
+    return rocke_mma_catalog_enumerate_indexed(
+        cat, family, src_dtypes, c_dtype, m, n, out, cap, scales);
 }
 
 bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
@@ -223,7 +298,8 @@ bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
                                          const char* dst_dtype,
                                          int m,
                                          int n,
-                                         int k)
+                                         int k,
+                                         const rocke_mma_scale_filter_t* scales)
 {
     char abuf[64], bbuf[64], cbuf[64], dbuf[64];
     const char *a, *bd, *c, *d, *fam;
@@ -231,17 +307,18 @@ bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
 
     if(!cat || !src_dtypes)
         return false;
+    rocke_ati_validate_scales(scales);
     fam = rocke_ati_family_or_default(family);
-    a = rocke_ati_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
-    bd = rocke_ati_normalize_dtype(src_dtypes[1], bbuf, sizeof bbuf);
-    c = rocke_ati_normalize_dtype(src_dtypes[2], cbuf, sizeof cbuf);
-    d = rocke_ati_normalize_dtype(dst_dtype, dbuf, sizeof dbuf);
+    a = rocke_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
+    bd = rocke_normalize_dtype(src_dtypes[1], bbuf, sizeof bbuf);
+    c = rocke_normalize_dtype(src_dtypes[2], cbuf, sizeof cbuf);
+    d = rocke_normalize_dtype(dst_dtype, dbuf, sizeof dbuf);
 
     /* Python enumerates with m=m, n=n then checks op.shape == (m, n, k). */
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, d, m, n))
+        if(!rocke_ati_op_matches(op, fam, a, bd, c, d, m, n, scales))
             continue;
         if(op->m == m && op->n == n && op->k == k)
             return true;
@@ -256,45 +333,56 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  const char* c_dtype,
                                  int m,
                                  int n,
-                                 int k)
+                                 int k,
+                                 const rocke_mma_scale_filter_t* scales)
 {
     const char* src_dtypes[3] = {a_dtype, b_dtype, c_dtype};
-    return rocke_mma_catalog_has_shape_indexed(cat, family, src_dtypes, c_dtype, m, n, k);
+    return rocke_mma_catalog_has_shape_indexed(cat, family, src_dtypes, c_dtype, m, n, k, scales);
 }
 
-const rocke_mma_op_t* rocke_mma_catalog_select_largest_k_indexed(const rocke_mma_catalog_t* cat,
-                                                                 const char* family,
-                                                                 const char* const src_dtypes[3],
-                                                                 const char* dst_dtype,
-                                                                 int m,
-                                                                 int n,
-                                                                 int k_max)
+const rocke_mma_op_t*
+    rocke_mma_catalog_select_largest_k_indexed(const rocke_mma_catalog_t* cat,
+                                               const char* family,
+                                               const char* const src_dtypes[3],
+                                               const char* dst_dtype,
+                                               int m,
+                                               int n,
+                                               int k_max,
+                                               const rocke_mma_scale_filter_t* scales)
 {
     char abuf[64], bbuf[64], cbuf[64], dbuf[64];
     const char *a, *bd, *c, *d, *fam;
     const rocke_mma_op_t* best = NULL;
     int i;
+    bool ambiguous = false;
 
     if(!cat || !src_dtypes)
         return NULL;
+    rocke_ati_validate_scales(scales);
     fam = rocke_ati_family_or_default(family);
-    a = rocke_ati_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
-    bd = rocke_ati_normalize_dtype(src_dtypes[1], bbuf, sizeof bbuf);
-    c = rocke_ati_normalize_dtype(src_dtypes[2], cbuf, sizeof cbuf);
-    d = rocke_ati_normalize_dtype(dst_dtype, dbuf, sizeof dbuf);
+    a = rocke_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
+    bd = rocke_normalize_dtype(src_dtypes[1], bbuf, sizeof bbuf);
+    c = rocke_normalize_dtype(src_dtypes[2], cbuf, sizeof cbuf);
+    d = rocke_normalize_dtype(dst_dtype, dbuf, sizeof dbuf);
 
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, d, m, n))
+        if(!rocke_ati_op_matches(op, fam, a, bd, c, d, m, n, scales))
             continue;
         if(k_max >= 0 && op->k > k_max)
             continue; /* Python: k_max is None || op.k <= k_max */
-        /* max(cands, key=op.k): first op wins ties (Python max keeps the first
-         * maximal element when iterating in catalog order). */
         if(best == NULL || op->k > best->k)
+        {
             best = op;
+            ambiguous = false;
+        }
+        else if(op->k == best->k)
+            ambiguous = true;
     }
+    if(ambiguous)
+        ckc::raise_status(ROCKE_ERR_VALUE,
+                          "ambiguous MMA query; specify the full operand contract");
     return best;
 }
 
@@ -305,11 +393,12 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
                                                          const char* c_dtype,
                                                          int m,
                                                          int n,
-                                                         int k_max)
+                                                         int k_max,
+                                                         const rocke_mma_scale_filter_t* scales)
 {
     const char* src_dtypes[3] = {a_dtype, b_dtype, c_dtype};
     return rocke_mma_catalog_select_largest_k_indexed(
-        cat, family, src_dtypes, c_dtype, m, n, k_max);
+        cat, family, src_dtypes, c_dtype, m, n, k_max, scales);
 }
 
 const rocke_mma_op_t* rocke_mma_catalog_by_op_id(const rocke_mma_catalog_t* cat, const char* op_id)
@@ -332,30 +421,38 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape_indexed(const rocke_mma_cat
                                                              const char* dst_dtype,
                                                              int m,
                                                              int n,
-                                                             int k)
+                                                             int k,
+                                                             const rocke_mma_scale_filter_t* scales)
 {
     char abuf[64], bbuf[64], cbuf[64], dbuf[64];
     const char *a, *bd, *c, *d, *fam;
     int i;
+    const rocke_mma_op_t* match = NULL;
 
     if(!cat || !src_dtypes)
         return NULL;
+    rocke_ati_validate_scales(scales);
     fam = rocke_ati_family_or_default(family);
-    a = rocke_ati_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
-    bd = rocke_ati_normalize_dtype(src_dtypes[1], bbuf, sizeof bbuf);
-    c = rocke_ati_normalize_dtype(src_dtypes[2], cbuf, sizeof cbuf);
-    d = rocke_ati_normalize_dtype(dst_dtype, dbuf, sizeof dbuf);
+    a = rocke_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
+    bd = rocke_normalize_dtype(src_dtypes[1], bbuf, sizeof bbuf);
+    c = rocke_normalize_dtype(src_dtypes[2], cbuf, sizeof cbuf);
+    d = rocke_normalize_dtype(dst_dtype, dbuf, sizeof dbuf);
 
-    /* Python enumerates with m=m, n=n, then returns the first op whose k == k. */
+    /* Exact selection requires a unique operand contract. */
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, d, m, n))
+        if(!rocke_ati_op_matches(op, fam, a, bd, c, d, m, n, scales))
             continue;
         if(op->k == k)
-            return op;
+        {
+            if(match)
+                ckc::raise_status(ROCKE_ERR_VALUE,
+                                  "ambiguous MMA query; specify the full operand contract");
+            match = op;
+        }
     }
-    return NULL;
+    return match;
 }
 
 const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* cat,
@@ -365,13 +462,26 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
                                                      const char* c_dtype,
                                                      int m,
                                                      int n,
-                                                     int k)
+                                                     int k,
+                                                     const rocke_mma_scale_filter_t* scales)
 {
     const char* src_dtypes[3] = {a_dtype, b_dtype, c_dtype};
-    return rocke_mma_catalog_op_for_shape_indexed(cat, family, src_dtypes, c_dtype, m, n, k);
+    return rocke_mma_catalog_op_for_shape_indexed(
+        cat, family, src_dtypes, c_dtype, m, n, k, scales);
 }
 
 /* ===================== bare-op_id SSOT lookups ======================== */
+
+const char* rocke_arch_mma_op_id_family(const char* op_id)
+{
+    if(!op_id)
+        return NULL;
+    // Function-local static initialization publishes the immutable index once,
+    // including when independent builders first query it concurrently.
+    static const rocke_ati_mma_family_index index(rocke_ati_arch_registry,
+                                                  rocke_ati_arch_registry_len);
+    return index.lookup(op_id);
+}
 
 const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id)
 {
@@ -479,25 +589,97 @@ const char* const* rocke_known_arches(int* count)
     return rocke_ati_known_arches;
 }
 
-const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap)
+/* Return the final gfx component without discarding profile or feature suffixes. */
+static const char* rocke_target_id_start(const char* isa)
 {
-    const char* dash;
-    const char* tok;
-    size_t len;
-
-    if(!isa || !out || out_cap == 0)
-        return NULL;
-    /* Python: isa.rsplit("-", 1)[-1] if "-" in isa else isa.
-     * rsplit on the last '-' yields everything after the final '-'. */
-    dash = strrchr(isa, '-');
-    tok = dash ? dash + 1 : isa;
-    len = strlen(tok);
-    if(len + 1 > out_cap)
+    const char* target = isa;
+    const char* next = isa;
+    while((next = strstr(next, "gfx")) != NULL)
     {
-        /* Truncate to fit (NUL-terminated); mirrors a best-effort copy. */
-        len = out_cap - 1;
+        target = next;
+        next += 3;
     }
-    memcpy(out, tok, len);
+    return target;
+}
+
+/* Length of the base architecture in target_id; consult the shared catalog so
+ * names such as gfx11-generic are preserved before removing profile suffixes. */
+static size_t rocke_base_arch_length(const char* target_id)
+{
+    size_t name_len = strcspn(target_id, ":");
+    size_t best = 0;
+    int i;
+    for(i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const char* arch = rocke_ati_known_arches[i];
+        size_t len = strlen(arch);
+        if(len <= name_len && strncmp(target_id, arch, len) == 0)
+        {
+            if(len == name_len)
+                return len;
+            if(target_id[len] == '-' && len > best)
+                best = len;
+        }
+    }
+    if(best != 0)
+        return best;
+    /* Python's fallback is ^(gfx[0-9a-z]+), with ASCII character semantics. */
+    if(name_len > 3 && strncmp(target_id, "gfx", 3) == 0)
+    {
+        size_t len = 3;
+        while(len < name_len
+              && ((target_id[len] >= '0' && target_id[len] <= '9')
+                  || (target_id[len] >= 'a' && target_id[len] <= 'z')))
+            ++len;
+        if(len > 3)
+            return len;
+    }
+    return name_len;
+}
+
+static const char* rocke_copy_target(const char* target, size_t len, char* out, size_t out_cap)
+{
+    if(len >= out_cap)
+        len = out_cap - 1;
+    memcpy(out, target, len);
     out[len] = '\0';
     return out;
+}
+
+const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap)
+{
+    if(!isa || !out || out_cap == 0)
+        return NULL;
+    const char* target = rocke_target_id_start(isa);
+    return rocke_copy_target(target, strlen(target), out, out_cap);
+}
+
+const char* rocke_base_arch_from_target_id(const char* target_id, char* out, size_t out_cap)
+{
+    if(!target_id || !out || out_cap == 0)
+        return NULL;
+    return rocke_copy_target(target_id, rocke_base_arch_length(target_id), out, out_cap);
+}
+
+const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap)
+{
+    if(!target_id || !out || out_cap == 0)
+        return NULL;
+    size_t name_len = strcspn(target_id, ":");
+    const char* features = target_id + name_len;
+    size_t base_len = rocke_base_arch_length(target_id);
+    if(base_len < name_len && target_id[base_len] == '-')
+        name_len = base_len;
+    if(name_len >= out_cap)
+        return rocke_copy_target(target_id, name_len, out, out_cap);
+    memcpy(out, target_id, name_len);
+    rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
+    return out;
+}
+
+const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap)
+{
+    if(!isa || !out || out_cap == 0)
+        return NULL;
+    return rocke_base_arch_from_target_id(rocke_target_id_start(isa), out, out_cap);
 }

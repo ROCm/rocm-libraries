@@ -2,7 +2,7 @@
 # name: test_gfx90a_db_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_D_B_UserArgs_MT4x16x16_MI4x4x4_SNOlBtEX6TrFxo2F9kpFise6dmRZlW3Ygrq1X9opA7F0E=',
+      'basename': 'Cijk_Ailk_Bjlk_D_B_UserArgs_MT4x16x16_MI4x4x4_SN74tw1I9tJBptXYkNruko_moQ-EbyheiAlDnN1lRUV8k=',
       'err': 0,
     }),
   ])

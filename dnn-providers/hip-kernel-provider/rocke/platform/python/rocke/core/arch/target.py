@@ -18,47 +18,17 @@ See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
+from enum import Enum, IntEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Re-export for callers using the original architecture entry point.
+from ..dtypes import normalize_dtype
+
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
-
-# Canonical dtype spellings used as catalog keys. Instance/spec dtype strings
-# are normalised through this map so "f16"/"half" and "fp16" all resolve.
-_DTYPE_ALIASES = {
-    "f16": "fp16",
-    "half": "fp16",
-    "fp16": "fp16",
-    "bf16": "bf16",
-    "bfloat16": "bf16",
-    "f32": "fp32",
-    "float": "fp32",
-    "fp32": "fp32",
-    "fp8": "fp8e4m3",
-    "fp8e4m3": "fp8e4m3",
-    "bf8": "bf8e5m2",
-    "bf8e5m2": "bf8e5m2",
-    # Integer WMMA: "iu8"/"iu4" are the RDNA WMMA integer operand families
-    # (signedness is an instruction operand, not the dtype); "i32" is the
-    # integer accumulator. Scalar int spellings pass through for completeness.
-    "iu8": "iu8",
-    "iu4": "iu4",
-    "i8": "i8",
-    "int8": "i8",
-    "i4": "i4",
-    "int4": "i4",
-    "i32": "i32",
-    "int32": "i32",
-}
-
-
-def normalize_dtype(name: str) -> str:
-    """Map a dtype spelling to its canonical catalog key."""
-    key = name.strip().lower()
-    return _DTYPE_ALIASES.get(key, key)
-
 
 # A callable that, given an :class:`~rocke.core.ir.IRBuilder`, a runtime lane
 # ``Value`` (0..wave_size-1) and a compile-time fragment slot index, emits the
@@ -93,7 +63,8 @@ class LayoutMap:
     role
         ``"src0"``, ``"src1"``, ``"src2"``, or ``"dst"``. ``src0`` uses
         ``(row, k)``, ``src1`` uses ``(k, col)``, and ``src2``/``dst`` use
-        ``(row, col)`` coordinates.
+        ``(row, col)`` coordinates. ``src0_scale`` and ``src1_scale`` use
+        ``(row, K-group)`` and ``(K-group, col)`` for logical scale elements.
     frag_len
         Number of fragment slots per lane for this role (the per-lane vector
         length: e.g. 4 for an MFMA 16x16x16 accumulator, 8 for the WMMA
@@ -129,6 +100,49 @@ class LayoutMap:
         return self.fn(builder, lane, slot)
 
 
+class MmaScaleDType(str, Enum):
+    """Scale value formats, independent of matrix dtypes and target support.
+
+    E5M3 is an unsigned scale format, distinct from the signed E5M2 matrix
+    format. Only E4M3 shares the accepted matrix spelling ``fp8e4m3``.
+    """
+
+    E8M0 = "e8m0"
+    E4M3 = "e4m3"
+    E5M3 = "e5m3"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> MmaScaleDType | None:
+        if value == "fp8e4m3":
+            return cls.E4M3
+        return None
+
+
+class MmaScaleBlockK(IntEnum):
+    """Number of K elements sharing one scale."""
+
+    K16 = 16
+    K32 = 32
+
+
+def _normalize_mma_scales(
+    a_dtype: str | None, b_dtype: str | None, block_k: int | None
+) -> tuple[MmaScaleDType | None, MmaScaleDType | None, MmaScaleBlockK | None]:
+    """Validate the complete scale contract, independently of backend support."""
+    if a_dtype is None and b_dtype is None and block_k is None:
+        return None, None, None
+    try:
+        a, b = MmaScaleDType(a_dtype), MmaScaleDType(b_dtype)
+    except ValueError:
+        raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3") from None
+    if type(block_k) not in (int, MmaScaleBlockK) or block_k not in (16, 32):
+        raise ValueError("MMA scale_block_k must be an integer equal to 16 or 32")
+    return a, b, MmaScaleBlockK(block_k)
+
+
 @dataclass(frozen=True)
 class MmaScaleOperand:
     """Scale value format and granularity for one matrix source.
@@ -140,18 +154,31 @@ class MmaScaleOperand:
     16 and 32 are valid: SCALE and SCALE16 use 32 and 16, respectively.
     """
 
-    dtype: str
-    block_size: int
+    dtype: MmaScaleDType | str
+    block_size: MmaScaleBlockK | int
+    frag_len: int = 0
+    layout: LayoutMap | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self.dtype == "fp8e4m3":
-            object.__setattr__(self, "dtype", "e4m3")
-        if self.dtype not in ("e8m0", "e4m3", "e5m3"):
-            raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3")
-        if type(self.block_size) is not int or self.block_size not in (16, 32):
+        try:
+            dtype = MmaScaleDType(self.dtype)
+        except ValueError:
+            raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3") from None
+        if type(self.block_size) not in (
+            int,
+            MmaScaleBlockK,
+        ) or self.block_size not in (16, 32):
             raise ValueError(
                 "MMA scale block_size must be an integer equal to 16 or 32"
             )
+        object.__setattr__(self, "dtype", dtype)
+        object.__setattr__(self, "block_size", MmaScaleBlockK(self.block_size))
+        if type(self.frag_len) is not int or self.frag_len < 0:
+            raise ValueError(f"invalid scale fragment length: {self.frag_len!r}")
+        if self.layout is not None and (
+            not self.frag_len or self.layout.frag_len != self.frag_len
+        ):
+            raise ValueError("scale layout does not match its fragment metadata")
 
 
 @dataclass(frozen=True)
@@ -195,9 +222,8 @@ class MmaSrc:
 class MmaOp:
     """A single supported matrix-multiply-accumulate atom on a target.
 
-    ``op_id`` is the opaque handle the backend consumes; today it matches the
-    ISA-named ``IRBuilder`` method (e.g. ``mfma_f32_16x16x16_f16``). It is **not**
-    LLVM intrinsic text — the backend maps ``op_id`` to an intrinsic.
+    ``op_id`` identifies a concrete operand contract. The backend reads
+    metadata, not the ID spelling; LLVM intrinsic text belongs to the ISA layer.
 
     ``srcs`` contains ``src0``, ``src1``, and ``src2`` in machine order. The
     first two are multiplicands, ``src2`` is the accumulator input, and ``dst``
@@ -206,7 +232,7 @@ class MmaOp:
     matrix fragments in ``srcs``.
     """
 
-    family: str  # "mma" | "wmma" | "wmma_scale" | "wmma_scale16"
+    family: str  # "mma" | "wmma" | "wmma_scaled"
     srcs: Tuple[MmaSrc, MmaSrc, MmaSrc]
     dst: MmaDst
     m: int
@@ -218,6 +244,15 @@ class MmaOp:
     def __post_init__(self) -> None:
         if len(self.srcs) != 3:
             raise ValueError(f"MMA op {self.op_id!r} requires exactly 3 matrix sources")
+        for i, src in enumerate(self.srcs):
+            if src.scale is not None and src.scale.layout is not None:
+                layout = src.scale.layout
+                if layout.role != f"src{i}_scale" or layout.wave_size != self.wave_size:
+                    raise ValueError("scale layout does not match its source metadata")
+        if self.family == "wmma_scaled":
+            _normalize_mma_scales(
+                self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
+            )
 
     @property
     def shape(self) -> Tuple[int, int, int]:
@@ -272,6 +307,51 @@ class MmaOp:
 
     def c_layout(self) -> LayoutMap:
         """Legacy result ``(row, col)`` lane/slot -> coordinate map."""
+        return self.dst_layout()
+
+    @property
+    def a_scale_dtype(self) -> MmaScaleDType | None:
+        return self.srcs[0].scale.dtype if self.srcs[0].scale else None
+
+    @property
+    def b_scale_dtype(self) -> MmaScaleDType | None:
+        return self.srcs[1].scale.dtype if self.srcs[1].scale else None
+
+    @property
+    def scale_block_k(self) -> MmaScaleBlockK | None:
+        """Shared block size for consumers requiring a complete A/B contract."""
+        a, b = self.srcs[0].scale, self.srcs[1].scale
+        if a is None and b is None:
+            return None
+        if a is None or b is None or a.block_size != b.block_size:
+            raise ValueError("MMA sources do not have a shared scale block size")
+        return a.block_size
+
+    @property
+    def a_scale_frag_len(self) -> int:
+        return self.srcs[0].scale.frag_len if self.srcs[0].scale else 0
+
+    @property
+    def b_scale_frag_len(self) -> int:
+        return self.srcs[1].scale.frag_len if self.srcs[1].scale else 0
+
+    def src_scale_layout(self, index: int) -> LayoutMap:
+        scale = self.src(index).scale
+        if scale is None or scale.layout is None:
+            raise NotImplementedError(
+                f"no verified 'src{index}_scale' layout map for MMA op_id {self.op_id!r} "
+                f"({self.m}x{self.n}x{self.k}); add one to "
+                f"_MMA_FRAGMENT_INFO before consuming it"
+            )
+        return scale.layout
+
+    def a_scale_layout(self) -> LayoutMap:
+        return self.src_scale_layout(0)
+
+    def b_scale_layout(self) -> LayoutMap:
+        return self.src_scale_layout(1)
+
+    def acc_layout(self) -> LayoutMap:
         return self.dst_layout()
 
 
@@ -646,6 +726,16 @@ def _wmma_gfx1250_b_16x16x32(builder, lane, slot):
     return k, col
 
 
+def _wmma_gfx1250_a_scale(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(16))
+    return row, builder.const_i32(slot)
+
+
+def _wmma_gfx1250_b_scale(builder, lane, slot):
+    col = builder.mod(lane, builder.const_i32(16))
+    return builder.const_i32(slot), col
+
+
 @dataclass(frozen=True)
 class _FragOperand:
     """Physical fragment metadata for one machine operand position."""
@@ -661,6 +751,10 @@ class _FragInfo:
     srcs: Tuple[_FragOperand, _FragOperand, _FragOperand]
     dst: _FragOperand
     wave_size: int
+    a_scale_frag_len: int = 0
+    b_scale_frag_len: int = 0
+    a_scale_fn: _LaneCoordFn = None
+    b_scale_fn: _LaneCoordFn = None
 
     def __post_init__(self) -> None:
         if len(self.srcs) != 3:
@@ -675,6 +769,10 @@ def _shared_src2_dst_frag_info(
     src0_fn: _LaneCoordFn = None,
     src1_fn: _LaneCoordFn = None,
     row_col_fn: _LaneCoordFn = None,
+    a_scale_frag_len: int = 0,
+    b_scale_frag_len: int = 0,
+    a_scale_fn: _LaneCoordFn = None,
+    b_scale_fn: _LaneCoordFn = None,
 ) -> _FragInfo:
     """Build metadata whose ``src2`` and ``dst`` layouts currently match.
 
@@ -692,6 +790,10 @@ def _shared_src2_dst_frag_info(
         ),
         dst=_FragOperand(row_col_frag_len, row_col_fn),
         wave_size=wave_size,
+        a_scale_frag_len=a_scale_frag_len,
+        b_scale_frag_len=b_scale_frag_len,
+        a_scale_fn=a_scale_fn,
+        b_scale_fn=b_scale_fn,
     )
 
 
@@ -862,10 +964,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_row_col_16x16,
     ),
-    # Native gfx1250 MX FP8 WMMA. A/B each carry 64 bytes as <16 x i32>;
+    # Native gfx1250 scaled WMMA. FP8/BF8 use 64 bytes per lane as <16 x i32>.
     # SCALE packs four K=32 E8M0 bytes in i32 and SCALE16 packs eight K=16
     # bytes in i64. Both share the gfx12 column-distributed accumulator.
-    "wmma_scale_f32_16x16x128_fp8_fp8": _shared_src2_dst_frag_info(
+    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32": _shared_src2_dst_frag_info(
         16,
         16,
         8,
@@ -873,8 +975,12 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         None,
         _wmma_gfx12_row_col_16x16,
+        a_scale_frag_len=4,
+        b_scale_frag_len=4,
+        a_scale_fn=_wmma_gfx1250_a_scale,
+        b_scale_fn=_wmma_gfx1250_b_scale,
     ),
-    "wmma_scale16_f32_16x16x128_fp8_fp8": _shared_src2_dst_frag_info(
+    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32": _shared_src2_dst_frag_info(
         16,
         16,
         8,
@@ -882,6 +988,36 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         None,
         _wmma_gfx12_row_col_16x16,
+        a_scale_frag_len=4,
+        b_scale_frag_len=4,
+        a_scale_fn=_wmma_gfx1250_a_scale,
+        b_scale_fn=_wmma_gfx1250_b_scale,
+    ),
+    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16": _shared_src2_dst_frag_info(
+        16,
+        16,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_row_col_16x16,
+        a_scale_frag_len=8,
+        b_scale_frag_len=8,
+        a_scale_fn=_wmma_gfx1250_a_scale,
+        b_scale_fn=_wmma_gfx1250_b_scale,
+    ),
+    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16": _shared_src2_dst_frag_info(
+        16,
+        16,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_row_col_16x16,
+        a_scale_frag_len=8,
+        b_scale_frag_len=8,
+        a_scale_fn=_wmma_gfx1250_a_scale,
+        b_scale_fn=_wmma_gfx1250_b_scale,
     ),
     "wmma_gfx1250_f32_16x16x32_bf16": _shared_src2_dst_frag_info(
         16,
@@ -922,7 +1058,12 @@ class ResourceLimits:
 
 
 class MmaCatalog:
-    """The arch-selected set of MMA atoms, with enumeration + best-K selection."""
+    """Query indexed matrix operands and an optional complete A/B scale contract.
+
+    ``scales=None`` leaves scaling unconstrained; ``(None, None, None)``
+    selects unscaled sources. Exact selection and largest-K ties must be unique.
+    Legacy A/B/C queries default the destination dtype to the src2 dtype.
+    """
 
     def __init__(self, ops: List[MmaOp]) -> None:
         self._ops = tuple(ops)
@@ -937,6 +1078,7 @@ class MmaCatalog:
         family: str = "mma",
         src_dtypes: Optional[Tuple[str, str, str]] = None,
         dst_dtype: Optional[str] = None,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         a_dtype: Optional[str] = None,
         b_dtype: Optional[str] = None,
         c_dtype: Optional[str] = None,
@@ -947,6 +1089,10 @@ class MmaCatalog:
             if a_dtype is None or b_dtype is None or c_dtype is None:
                 raise TypeError("enumerate requires src_dtypes or a/b/c_dtype")
             src_dtypes = (a_dtype, b_dtype, c_dtype)
+        if scales is not None:
+            if len(scales) != 3:
+                raise ValueError("scales must contain exactly 3 entries")
+            scales = _normalize_mma_scales(*scales)
         if len(src_dtypes) != 3:
             raise ValueError("src_dtypes must contain exactly 3 entries")
         src_keys = tuple(normalize_dtype(dtype) for dtype in src_dtypes)
@@ -962,6 +1108,19 @@ class MmaCatalog:
                 or op.dst.dtype != dst_key
             ):
                 continue
+            if scales is not None:
+                a, b, block_k = scales
+                expected = ((a, block_k), (b, block_k))
+                actual = tuple(
+                    (
+                        (src.scale.dtype, src.scale.block_size)
+                        if src.scale
+                        else (None, None)
+                    )
+                    for src in op.srcs[:2]
+                )
+                if actual != expected:
+                    continue
             if m is not None and op.m != m:
                 continue
             if n is not None and op.n != n:
@@ -973,10 +1132,12 @@ class MmaCatalog:
         self,
         *,
         family: str = "mma",
-        a_dtype: str,
-        b_dtype: str,
-        c_dtype: str,
+        src_dtypes: tuple[str, str, str] | None = None,
+        a_dtype: str | None = None,
+        b_dtype: str | None = None,
+        c_dtype: str | None = None,
         dst_dtype: Optional[str] = None,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k: int,
@@ -985,10 +1146,12 @@ class MmaCatalog:
             op.shape == (m, n, k)
             for op in self.enumerate(
                 family=family,
+                src_dtypes=src_dtypes,
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
                 dst_dtype=dst_dtype,
+                scales=scales,
                 m=m,
                 n=n,
             )
@@ -998,10 +1161,12 @@ class MmaCatalog:
         self,
         *,
         family: str = "mma",
-        a_dtype: str,
-        b_dtype: str,
-        c_dtype: str,
+        src_dtypes: tuple[str, str, str] | None = None,
+        a_dtype: str | None = None,
+        b_dtype: str | None = None,
+        c_dtype: str | None = None,
         dst_dtype: Optional[str] = None,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k_max: Optional[int] = None,
@@ -1010,10 +1175,12 @@ class MmaCatalog:
             op
             for op in self.enumerate(
                 family=family,
+                src_dtypes=src_dtypes,
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
                 dst_dtype=dst_dtype,
+                scales=scales,
                 m=m,
                 n=n,
             )
@@ -1021,7 +1188,14 @@ class MmaCatalog:
         ]
         if not cands:
             return None
-        return max(cands, key=lambda op: op.k)
+        largest_k = max(op.k for op in cands)
+        return self._unique([op for op in cands if op.k == largest_k])
+
+    @staticmethod
+    def _unique(ops: list[MmaOp]) -> MmaOp | None:
+        if len(ops) > 1:
+            raise ValueError("ambiguous MMA query; specify the full operand contract")
+        return ops[0] if ops else None
 
     def by_op_id(self, op_id: str) -> Optional[MmaOp]:
         """Look up an atom by its ``op_id`` handle (the backend's MMA key)."""
@@ -1034,26 +1208,28 @@ class MmaCatalog:
         self,
         *,
         family: str = "mma",
-        a_dtype: str,
-        b_dtype: str,
-        c_dtype: str,
+        src_dtypes: tuple[str, str, str] | None = None,
+        a_dtype: str | None = None,
+        b_dtype: str | None = None,
+        c_dtype: str | None = None,
         dst_dtype: Optional[str] = None,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k: int,
     ) -> Optional[MmaOp]:
-        for op in self.enumerate(
+        candidates = self.enumerate(
             family=family,
+            src_dtypes=src_dtypes,
             a_dtype=a_dtype,
             b_dtype=b_dtype,
             c_dtype=c_dtype,
             dst_dtype=dst_dtype,
+            scales=scales,
             m=m,
             n=n,
-        ):
-            if op.k == k:
-                return op
-        return None
+        )
+        return self._unique([op for op in candidates if op.k == k])
 
 
 @dataclass(frozen=True)
@@ -1175,6 +1351,22 @@ def _op_id_dst_dtype() -> Dict[str, str]:
 _op_id_c_dtype = _op_id_dst_dtype
 
 
+@lru_cache(maxsize=1)
+def _op_id_family() -> Dict[str, str]:
+    """Resolve operation families without selecting a target or parsing IDs."""
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for op in row["mma"]:
+            op_id, family = op["op_id"], op["family"]
+            previous = out.setdefault(op_id, family)
+            if previous != family:
+                raise ValueError(
+                    f"arch SSOT drift: op_id {op_id!r} has inconsistent family "
+                    f"across arches ({previous!r} vs {family!r})"
+                )
+    return out
+
+
 def _build_mma_op(o: dict) -> MmaOp:
     """Construct an :class:`MmaOp` from one catalog JSON row, attaching the
     physical fragment lengths and layout maps registered for its op_id."""
@@ -1189,17 +1381,39 @@ def _build_mma_op(o: dict) -> MmaOp:
     src_rows = o.get("srcs")
     if src_rows is None:
         src_rows = ({"dtype": o["a"]}, {"dtype": o["b"]}, {"dtype": o["c"]})
+    if "a_scale_dtype" in o or "b_scale_dtype" in o or "scale_block_k" in o:
+        a, b, block_k = _normalize_mma_scales(
+            o.get("a_scale_dtype"), o.get("b_scale_dtype"), o.get("scale_block_k")
+        )
+        src_rows = [dict(row) for row in src_rows]
+        for i, dtype in enumerate((a, b)):
+            if dtype is not None:
+                legacy_scale = {"dtype": dtype, "block_size": block_k}
+                if "scale" in src_rows[i] and MmaScaleOperand(
+                    **src_rows[i]["scale"]
+                ) != MmaScaleOperand(**legacy_scale):
+                    raise ValueError("conflicting indexed and legacy scale metadata")
+                src_rows[i]["scale"] = legacy_scale
     if len(src_rows) != 3:
         raise ValueError(
             f"MMA catalog op {op_id!r} must define exactly 3 matrix sources"
         )
 
-    def _source(row: dict, role: str, frag_len: int, fn: _LaneCoordFn) -> MmaSrc:
+    def _source(
+        row: dict,
+        role: str,
+        frag_len: int,
+        fn: _LaneCoordFn,
+        scale_len: int = 0,
+        scale_fn: _LaneCoordFn = None,
+    ) -> MmaSrc:
         scale_row = row.get("scale")
         scale = (
             MmaScaleOperand(
-                dtype=normalize_dtype(scale_row["dtype"]),
+                dtype=scale_row["dtype"],
                 block_size=scale_row["block_size"],
+                frag_len=scale_len,
+                layout=_mk(f"{role}_scale", scale_len, scale_fn),
             )
             if scale_row is not None
             else None
@@ -1215,8 +1429,22 @@ def _build_mma_op(o: dict) -> MmaOp:
     return MmaOp(
         family=o["family"],
         srcs=(
-            _source(src_rows[0], "src0", info.srcs[0].frag_len, info.srcs[0].fn),
-            _source(src_rows[1], "src1", info.srcs[1].frag_len, info.srcs[1].fn),
+            _source(
+                src_rows[0],
+                "src0",
+                info.srcs[0].frag_len,
+                info.srcs[0].fn,
+                info.a_scale_frag_len,
+                info.a_scale_fn,
+            ),
+            _source(
+                src_rows[1],
+                "src1",
+                info.srcs[1].frag_len,
+                info.srcs[1].fn,
+                info.b_scale_frag_len,
+                info.b_scale_fn,
+            ),
             _source(src_rows[2], "src2", info.srcs[2].frag_len, info.srcs[2].fn),
         ),
         dst=MmaDst(
@@ -1286,9 +1514,79 @@ def known_arches() -> Tuple[str, ...]:
     return tuple(sorted(_load_specs()))
 
 
+def target_id_from_isa(isa: str) -> str:
+    """Extract the target ID from a COMGR ISA name.
+
+    ``compile_kernel(..., isa=...)`` passes its ``isa`` argument here. That
+    value may come from an example's ``--isa`` option, a fixed string in a
+    script, or the compile helper's ``gfx950`` default. See the input paths
+    documented in :mod:`rocke.helpers.compile`.
+
+    For ``amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-``, this returns
+    ``gfx942:sramecc+:xnack-``, keeping any profile or feature suffix.
+    It also accepts a target ID without the ISA prefix.
+
+    The result starts at the last ``gfx`` in the input. If there is no
+    ``gfx``, the input is returned unchanged. This does not validate the name.
+    """
+
+    start = isa.rfind("gfx")
+    return isa[start:] if start >= 0 else isa
+
+
+def base_arch_from_target_id(target_id: str) -> str:
+    """Derive the architecture name used for rocKE catalog lookup and lowering.
+
+    Removes features after ``:`` and profile suffixes such as ``-strict``:
+    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
+    ``gfx942``. Names already in :func:`known_arches`, including
+    ``gfx11-generic``, are preserved.
+
+    An unknown name is reduced to its leading ``gfx`` token when possible.
+    This does not check support; :meth:`ArchTarget.from_gfx` requires a
+    matching catalog entry.
+    """
+
+    target_without_features = target_id.split(":", 1)[0]
+    arches = known_arches()
+    if target_without_features in arches:
+        return target_without_features
+    for arch in sorted(arches, key=len, reverse=True):
+        if target_without_features.startswith(f"{arch}-"):
+            return arch
+    match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
+    return match.group(1) if match else target_without_features
+
+
+def compiler_target_from_target_id(target_id: str) -> str:
+    """Derive the target name that the compile helpers pass to COMGR or hipcc.
+
+    Removes profile suffixes such as ``-strict`` using
+    :func:`base_arch_from_target_id`, but keeps features after ``:``.
+    For example, ``gfx1250-strict`` becomes ``gfx1250``, while
+    ``gfx942:sramecc+:xnack-`` stays unchanged.
+
+    This only converts the string. COMGR or hipcc checks whether the target
+    and its features are supported when compilation runs.
+    """
+
+    target_without_features, separator, features = target_id.partition(":")
+    base_arch = base_arch_from_target_id(target_id)
+    if target_without_features.startswith(f"{base_arch}-"):
+        target_without_features = base_arch
+    if separator:
+        return f"{target_without_features}:{features}"
+    return target_without_features
+
+
 def arch_from_isa(isa: str) -> str:
-    """Extract the gfx token from an isa triple like ``amdgcn-amd-amdhsa--gfx942``."""
-    return isa.rsplit("-", 1)[-1] if "-" in isa else isa
+    """Extract a target ID from a COMGR ISA name, then derive its base architecture.
+
+    Combines :func:`target_id_from_isa` and :func:`base_arch_from_target_id`.
+    For example, ``amdgcn-amd-amdhsa--gfx942:xnack-`` becomes ``gfx942``.
+    """
+
+    return base_arch_from_target_id(target_id_from_isa(isa))
 
 
 def validate_arch(arch: Optional[str]) -> None:

@@ -112,7 +112,7 @@ def _gate_for(label: str, builder: Callable[..., Any], field: str) -> _guard.Gat
                 )
                 return bool(is_valid_spec(spec, ARCH)[0])
             if label == "conv_implicit_gemm":
-                from rocke.instances.common.conv_implicit_gemm import (
+                from kernels.common.conv_implicit_gemm import (
                     ConvProblem,
                     ImplicitGemmConvSpec,
                     is_valid_spec,

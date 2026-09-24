@@ -190,6 +190,8 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             -DBUILD_LAPACK_DEPRECATED=OFF
             -DBUILD_TESTING=OFF
             -DBUILD_BENCHMARKS=OFF
+            # Use OpenBLAS's suppression of unused/uninitialized C warnings.
+            -DQUIET_MAKE=ON
             -DUSE_OPENMP=OFF
             -DUSE_THREAD=OFF
             -DCMAKE_C_VISIBILITY_PRESET=hidden

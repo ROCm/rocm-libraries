@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .arch import target as _arch
+
 # ----------------------------- Types --------------------------------------
 
 
@@ -71,9 +73,8 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # Both are read from the arch SSOT (``core/arch/target``): fragment lengths from
 # ``_MMA_FRAGMENT_INFO`` and the accumulator dtype from the JSON catalog. ir.py
 # keeps *no* private copy of that data — an ``MmaOp`` object supplies both fields
-# directly, and a bare op_id string is resolved through the lazy helpers below.
-# The arch package is imported lazily (inside the helpers) so ir.py stays
-# importable without eagerly loading the arch tree.
+# directly, and a bare op_id string is resolved through the helpers below.
+# The arch module loads its JSON catalog lazily when a lookup needs it.
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. This is
 # purely ir-side SSA naming (not arch data), kept here so the emitted value
@@ -85,8 +86,6 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
-    "wmma_scale_f32_16x16x128_fp8_fp8": "mxacc",
-    "wmma_scale16_f32_16x16x128_fp8_fp8": "mxacc",
 }
 
 
@@ -135,12 +134,10 @@ def _check_cachepolicy(op: str, value: int) -> int:
 def _mma_dst_frag_len(op_id: str) -> int:
     """``dst`` fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
+    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
     the strictness callers relied on.
     """
-    from rocke.core.arch import target as _arch
-
     frag_len = _arch._frag_info(op_id).dst.frag_len
     if frag_len <= 0:
         raise ValueError(
@@ -157,8 +154,6 @@ def _mma_dst_is_int(op_id: str) -> bool:
     (``core/arch/data/arch_specs.json`` via ``target._op_id_dst_dtype``), imported
     lazily. Op_ids absent from the catalog default to an f32 ``dst``.
     """
-    from rocke.core.arch import target as _arch
-
     return _arch._op_id_dst_dtype().get(op_id) == "i32"
 
 
@@ -1866,7 +1861,11 @@ class IRBuilder:
             dst_dtype == "i32" if dst_dtype is not None else _mma_dst_is_int(op_id)
         )
         dst_elem = I32 if is_int_acc else F32
-        hint = _MMA_RESULT_HINT.get(op_id, "acc")
+        hint = (
+            "mxacc"
+            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            else _MMA_RESULT_HINT.get(op_id, "acc")
+        )
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
@@ -1969,38 +1968,6 @@ class IRBuilder:
     def wmma_gfx1250_f32_16x16x64_bf8_bf8(self, a: Value, b: Value, c: Value) -> Value:
         """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
         return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
-
-    def wmma_scale_f32_16x16x128_fp8_fp8(
-        self,
-        a: Value,
-        b: Value,
-        c: Value,
-        a_scale: Value,
-        b_scale: Value,
-    ) -> Value:
-        """gfx1250 native SCALE FP8 WMMA with packed E8M0 scale operands.
-
-        A and B are ``<16 x i32>`` fragments (64 FP8 bytes per lane), C is
-        ``<8 x f32>``, and each scale operand is one i32 packing four E8M0
-        bytes for the instruction's four K=32 scale blocks.
-        """
-        return self.mma("wmma_scale_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
-
-    def wmma_scale16_f32_16x16x128_fp8_fp8(
-        self,
-        a: Value,
-        b: Value,
-        c: Value,
-        a_scale: Value,
-        b_scale: Value,
-    ) -> Value:
-        """gfx1250 native SCALE16 FP8 WMMA with eight packed E8M0 scales.
-
-        The matrix and accumulator fragments match
-        :meth:`wmma_scale_f32_16x16x128_fp8_fp8`; each scale operand is i64
-        because SCALE16 carries eight K=16 E8M0 scale bytes.
-        """
-        return self.mma("wmma_scale16_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
 
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)

@@ -22,10 +22,12 @@
  *   class ResourceLimits              rocke_resource_limits_t
  *   class MmaCatalog                  rocke_mma_catalog_t + rocke_mma_catalog_* ()
  *   class ArchTarget (frozen)         rocke_arch_target_t + rocke_arch_* () getters
- *   normalize_dtype()                 rocke_normalize_dtype()
  *   ArchTarget.from_gfx(gfx)          rocke_arch_target_from_gfx()
  *   known_arches()                    rocke_known_arches()
  *   arch_from_isa(isa)                rocke_arch_from_isa()
+ *   target_id_from_isa(isa)           rocke_target_id_from_isa()
+ *   base_arch_from_target_id(id)      rocke_base_arch_from_target_id()
+ *   compiler_target_from_target_id(id) rocke_compiler_target_from_target_id()
  *
  * The Python loader reads core/arch/data/arch_specs.json at import time. The C99
  * port embeds that frozen SSOT as static tables (libc-only: no JSON parser), so
@@ -36,10 +38,9 @@
  * by the layout-map coordinate emitters, which create IR Values in the builder
  * passed at call time.
  *
- * Error model: the lookup entry points that can fail (unknown gfx) return NULL
- * and, when a builder is supplied to the layout-coord emitter, set the builder's
- * sticky error -- matching the rest of the C99 port. The data getters never
- * fail.
+ * Error model: unknown target lookups return NULL. Layout and ambiguous
+ * catalog queries raise ckc::Error; public builder/lowering boundaries translate
+ * it to status + message. Layout coordinate validation sets builder status.
  */
 #ifndef ROCKE_ARCH_TARGET_H
 #define ROCKE_ARCH_TARGET_H
@@ -47,23 +48,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "rocke/dtypes.h"
 #include "rocke/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* ============================== dtype keys ============================== */
-
-/* Map a dtype spelling ("f16"/"half"/"fp16" -> "fp16", ...) to its canonical
- * catalog key. Returns a pointer to a static, interned canonical string when the
- * spelling is recognised; otherwise returns the *lowercased* spelling stored in
- * `scratch` (caller-provided buffer of >= scratch_cap bytes), so unknown
- * spellings pass through Python-identically. `scratch` may be NULL only if the
- * caller guarantees a known spelling; pass a buffer to be safe.
- *
- * Mirrors target.py::normalize_dtype (strip + lower + _DTYPE_ALIASES.get). */
-const char* rocke_normalize_dtype(const char* name, char* scratch, size_t scratch_cap);
 
 /* ============================== layout map ============================== */
 
@@ -74,7 +64,9 @@ typedef enum rocke_mma_role
     ROCKE_MMA_ROLE_SRC0 = 0, /* src0: coords (row, k) */
     ROCKE_MMA_ROLE_SRC1, /* src1: coords (k, col) */
     ROCKE_MMA_ROLE_SRC2, /* src2: coords (row, col) */
-    ROCKE_MMA_ROLE_DST /* dst: coords (row, col) */
+    ROCKE_MMA_ROLE_DST, /* dst: coords (row, col) */
+    ROCKE_MMA_ROLE_SRC0_SCALE,
+    ROCKE_MMA_ROLE_SRC1_SCALE
 } rocke_mma_role_t;
 
 /* The lane/slot -> tile-coordinate emitter. Given the builder, a runtime i32
@@ -112,6 +104,23 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
 
 /* ============================== MMA atom =============================== */
 
+/* Shared K-group size. NONE is only the unscaled sentinel. */
+typedef enum rocke_mma_scale_block_k
+{
+    ROCKE_MMA_SCALE_NONE = 0,
+    ROCKE_MMA_SCALE_K16 = 16,
+    ROCKE_MMA_SCALE_K32 = 32
+} rocke_mma_scale_block_k_t;
+
+/* Complete scale query: independent A/B types, shared K-group size.
+ * {NULL, NULL, 0} selects unscaled atoms. */
+typedef struct rocke_mma_scale_filter
+{
+    const char* a_scale_dtype;
+    const char* b_scale_dtype;
+    rocke_mma_scale_block_k_t scale_block_k;
+} rocke_mma_scale_filter_t;
+
 /* Metadata shared by one matrix src or dst. */
 typedef struct rocke_mma_dst
 {
@@ -129,7 +138,10 @@ typedef struct rocke_mma_src
     int frag_len;
     const rocke_layout_map_t* layout; /* may be NULL */
     const char* scale_dtype; /* scale value format: e8m0/e4m3/e5m3; NULL if unscaled */
-    int scale_block_size; /* source elements along K per scale: 16 or 32; 0 if unscaled */
+    rocke_mma_scale_block_k_t
+        scale_block_size; /* source elements along K per scale: 16 or 32; 0 if unscaled */
+    int scale_frag_len; /* logical scale elements per lane */
+    const rocke_layout_map_t* scale_layout; /* may be NULL */
 } rocke_mma_src_t;
 
 typedef struct rocke_mma_op
@@ -154,17 +166,22 @@ const rocke_layout_map_t*
     rocke_mma_op_src_layout(const rocke_mma_op_t* op, int index, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_dst_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 
-/* Historical mathematical-role compatibility accessors. A and B project src0
- * and src1; C projects the result/dst, matching the original operator-level
- * surface. src2 is available only through the indexed
- * accessor above. Each returns the verified map, or NULL when none is
- * registered. Unlike Python (which raises NotImplementedError), the C getters
- * return NULL and -- when `b` is non-NULL -- set the builder's sticky error
- * (ROCKE_ERR_NOTIMPL) with the same message text, so callers can either check
- * NULL or rely on the sticky-fail builder. Pass b=NULL for a pure lookup. */
+/* Historical mathematical-role compatibility accessors. A/B project src0/src1;
+ * C projects dst. Missing maps raise ckc::Error with ROCKE_ERR_NOTIMPL, matching
+ * Python's NotImplementedError. An enclosing public builder/lowering boundary
+ * translates the exception to status + message; direct C++ callers must catch
+ * it, even with b=NULL. A NULL op returns NULL. */
 const rocke_layout_map_t* rocke_mma_op_a_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_b_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_c_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
+
+const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
+const rocke_layout_map_t*
+    rocke_mma_op_src_scale_layout(const rocke_mma_op_t* op, int index, rocke_ir_builder_t* b);
+const rocke_layout_map_t* rocke_mma_op_a_scale_layout(const rocke_mma_op_t* op,
+                                                      rocke_ir_builder_t* b);
+const rocke_layout_map_t* rocke_mma_op_b_scale_layout(const rocke_mma_op_t* op,
+                                                      rocke_ir_builder_t* b);
 
 /* ====================== memory caps / resource limits ================== */
 
@@ -196,6 +213,16 @@ typedef struct rocke_mma_catalog
 /* MmaCatalog.ops accessor (count + pointer). */
 const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int* num_out);
 
+/* Optional scale filter: NULL leaves scales unconstrained; {NULL, NULL, 0}
+ * selects unscaled atoms. C callers supply the filter pointer explicitly.
+ * Exact selection and largest-K ties raise a query error on ambiguity.
+ * As with layout queries, C++ callers catch ckc::Error at their entry boundary. */
+#ifdef __cplusplus
+#define ROCKE_MMA_DEFAULT_SCALES = nullptr
+#else
+#define ROCKE_MMA_DEFAULT_SCALES
+#endif
+
 /* Indexed MmaCatalog.enumerate: filter atoms by family + the exact three src
  * dtypes and dst dtype. `src_dtypes` must contain three entries.
  * optional m/n. Writes up to `cap` matching op pointers into `out` and returns
@@ -207,7 +234,9 @@ int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
                                         int m,
                                         int n,
                                         const rocke_mma_op_t** out,
-                                        int cap);
+                                        int cap,
+                                        const rocke_mma_scale_filter_t* scales
+                                            ROCKE_MMA_DEFAULT_SCALES);
 
 /* Compatibility MmaCatalog.enumerate: filter atoms by family + A/B/C dtypes and
  * optional m/n. Writes up to `cap` matching op pointers into `out` and returns
@@ -222,7 +251,8 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 int m,
                                 int n,
                                 const rocke_mma_op_t** out,
-                                int cap);
+                                int cap,
+                                const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
 
 /* Indexed and compatibility MmaCatalog.has_shape variants. */
 bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
@@ -231,7 +261,9 @@ bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
                                          const char* dst_dtype,
                                          int m,
                                          int n,
-                                         int k);
+                                         int k,
+                                         const rocke_mma_scale_filter_t* scales
+                                             ROCKE_MMA_DEFAULT_SCALES);
 bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  const char* family,
                                  const char* a_dtype,
@@ -239,16 +271,19 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  const char* c_dtype,
                                  int m,
                                  int n,
-                                 int k);
+                                 int k,
+                                 const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
 
 /* Indexed and compatibility MmaCatalog.select_largest_k variants. */
-const rocke_mma_op_t* rocke_mma_catalog_select_largest_k_indexed(const rocke_mma_catalog_t* cat,
-                                                                 const char* family,
-                                                                 const char* const src_dtypes[3],
-                                                                 const char* dst_dtype,
-                                                                 int m,
-                                                                 int n,
-                                                                 int k_max);
+const rocke_mma_op_t* rocke_mma_catalog_select_largest_k_indexed(
+    const rocke_mma_catalog_t* cat,
+    const char* family,
+    const char* const src_dtypes[3],
+    const char* dst_dtype,
+    int m,
+    int n,
+    int k_max,
+    const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
 const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog_t* cat,
                                                          const char* family,
                                                          const char* a_dtype,
@@ -256,7 +291,9 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
                                                          const char* c_dtype,
                                                          int m,
                                                          int n,
-                                                         int k_max);
+                                                         int k_max,
+                                                         const rocke_mma_scale_filter_t* scales
+                                                             ROCKE_MMA_DEFAULT_SCALES);
 
 /* MmaCatalog.by_op_id. Returns NULL if absent. */
 const rocke_mma_op_t* rocke_mma_catalog_by_op_id(const rocke_mma_catalog_t* cat, const char* op_id);
@@ -268,15 +305,21 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape_indexed(const rocke_mma_cat
                                                              const char* dst_dtype,
                                                              int m,
                                                              int n,
-                                                             int k);
-const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* cat,
-                                                     const char* family,
-                                                     const char* a_dtype,
-                                                     const char* b_dtype,
-                                                     const char* c_dtype,
-                                                     int m,
-                                                     int n,
-                                                     int k);
+                                                             int k,
+                                                             const rocke_mma_scale_filter_t* scales
+                                                                 ROCKE_MMA_DEFAULT_SCALES);
+const rocke_mma_op_t*
+    rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* cat,
+                                   const char* family,
+                                   const char* a_dtype,
+                                   const char* b_dtype,
+                                   const char* c_dtype,
+                                   int m,
+                                   int n,
+                                   int k,
+                                   const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
+
+#undef ROCKE_MMA_DEFAULT_SCALES
 
 /* ===================== bare-op_id SSOT lookups ======================== */
 /* These resolve a bare op_id string (no MmaOp / ArchTarget in hand) against the
@@ -302,6 +345,10 @@ int rocke_arch_mma_dst_frag_len(const char* op_id);
  * NULL for an op_id absent from every catalog. The returned string is an
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
 const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id);
+
+/* Target-independent family projection. Unknown/NULL IDs return NULL;
+ * conflicting families for one ID raise ROCKE_ERR_VALUE. */
+const char* rocke_arch_mma_op_id_family(const char* op_id);
 
 /* ============================== arch target =========================== */
 
@@ -356,10 +403,25 @@ int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
  * (excluding the terminating NULL). */
 const char* const* rocke_known_arches(int* count);
 
-/* arch_from_isa: extract the gfx token from an isa triple
- * ("amdgcn-amd-amdhsa--gfx942" -> "gfx942"). Writes into `out` (>= out_cap) and
- * returns `out`. If `isa` has no '-', it is copied verbatim (Python identity
- * fallthrough). */
+/* Target identity helpers mirror rocke.core.arch.target. They do not validate
+ * compiler support or query a GPU. Inputs and output buffers must not overlap.
+ * Each writes at most out_cap - 1 bytes plus a NUL and returns out; a small
+ * buffer receives a truncated result (the existing arch_from_isa convention).
+ * NULL input/output or zero capacity returns NULL without writing. */
+
+/* Extract from the last "gfx", preserving profile and feature suffixes.
+ * If there is no "gfx", copy the input unchanged. */
+const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap);
+
+/* Remove features and profiles for catalog lookup, preserving catalog names
+ * such as gfx11-generic. gfx1250-strict and gfx942:xnack- become gfx1250/gfx942. */
+const char* rocke_base_arch_from_target_id(const char* target_id, char* out, size_t out_cap);
+
+/* Remove profiles but preserve compiler features: gfx1250-strict:xnack-
+ * becomes gfx1250:xnack-. */
+const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap);
+
+/* Extract the target ID from an ISA name, then derive its base architecture. */
 const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap);
 
 #ifdef __cplusplus

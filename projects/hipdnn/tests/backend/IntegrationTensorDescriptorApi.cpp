@@ -697,6 +697,60 @@ TEST_F(IntegrationTensorDescriptorApi, RuntimePassByValueFlagRoundTrips)
     hipdnnBackendDestroyDescriptor(desc);
 }
 
+// Contract: the ragged offset multiplier round-trips through the C API set/get path.
+TEST_F(IntegrationTensorDescriptorApi, RaggedOffsetMultiplierRoundTrips)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+
+    int64_t multiplier = 512;
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            desc, HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER, HIPDNN_TYPE_INT64, 1, &multiplier),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t elementCount = 0;
+    int64_t gotMultiplier = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &elementCount,
+                                        &gotMultiplier),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(gotMultiplier, 512);
+    EXPECT_EQ(elementCount, 1);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Contract: the ragged offset multiplier defaults to 1 when never set.
+TEST_F(IntegrationTensorDescriptorApi, RaggedOffsetMultiplierDefaultsToOne)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t elementCount = 0;
+    int64_t gotMultiplier = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &elementCount,
+                                        &gotMultiplier),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(gotMultiplier, 1);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
 // Contract: the runtime flag defaults to false when never set.
 TEST_F(IntegrationTensorDescriptorApi, RuntimePassByValueFlagDefaultsFalse)
 {

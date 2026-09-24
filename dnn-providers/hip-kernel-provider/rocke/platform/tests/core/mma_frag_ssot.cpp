@@ -102,8 +102,16 @@ int main(void)
         {
             const rocke_mma_op_t* op = &target->mma.ops[i];
             const char* src_dtypes[3] = {op->srcs[0].dtype, op->srcs[1].dtype, op->srcs[2].dtype};
-            CHECK(rocke_mma_catalog_op_for_shape_indexed(
-                      &target->mma, op->family, src_dtypes, op->dst.dtype, op->m, op->n, op->k)
+            const rocke_mma_scale_filter_t scales
+                = {op->srcs[0].scale_dtype, op->srcs[1].scale_dtype, op->srcs[0].scale_block_size};
+            CHECK(rocke_mma_catalog_op_for_shape_indexed(&target->mma,
+                                                         op->family,
+                                                         src_dtypes,
+                                                         op->dst.dtype,
+                                                         op->m,
+                                                         op->n,
+                                                         op->k,
+                                                         &scales)
                       != NULL,
                   "indexed query resolves CPU catalog key");
         }
@@ -117,9 +125,9 @@ int main(void)
         distinct.srcs[0].dtype = "xf32";
         distinct.srcs[1].dtype = "xf32";
         distinct.srcs[0].scale_dtype = "e8m0";
-        distinct.srcs[0].scale_block_size = 32;
+        distinct.srcs[0].scale_block_size = ROCKE_MMA_SCALE_K32;
         distinct.srcs[1].scale_dtype = "e4m3";
-        distinct.srcs[1].scale_block_size = 16;
+        distinct.srcs[1].scale_block_size = ROCKE_MMA_SCALE_K16;
         distinct.srcs[2].dtype = "fp32";
         distinct.srcs[2].frag_len = 3;
         distinct.srcs[2].layout = &src2_layout;
@@ -184,8 +192,10 @@ int main(void)
     CHECK(gfx1250 != NULL, "gfx1250 target");
     if(gfx1250)
     {
-        check_catalog_fragments(&gfx1250->mma, "wmma_scale_f32_16x16x128_fp8_fp8", 32);
-        check_catalog_fragments(&gfx1250->mma, "wmma_scale16_f32_16x16x128_fp8_fp8", 16);
+        check_catalog_fragments(
+            &gfx1250->mma, "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32", 32);
+        check_catalog_fragments(
+            &gfx1250->mma, "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16", 16);
     }
 
     /* Unknown op_id must be rejected. The engine's error path either returns

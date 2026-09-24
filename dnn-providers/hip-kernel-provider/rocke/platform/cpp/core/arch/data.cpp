@@ -3,11 +3,10 @@
 /*
  * arch_target_arch_target_data.c -- bucket 0 of the C99 port of
  * rocke.core.arch.target: the frozen SSOT data, the lane-coord IR emitters,
- * the dtype-normalisation core, and the shared lookup tables/helpers declared in
+ * and the shared lookup tables/helpers declared in
  * rocke/arch_target_internal.h.
  *
  * This file is a faithful, byte-identical translation of:
- *   - normalize_dtype() / _DTYPE_ALIASES                  -> rocke_normalize_dtype
  *   - the _mfma / _wmma lane-coord closures                -> static rocke_lane_coord_fn
  *   - LayoutMap.coord                                      -> rocke_layout_map_coord
  *   - _MMA_FRAGMENT_INFO + _build_mma_op (precomputed)     -> per-op_id static
@@ -28,135 +27,6 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-
-/* =========================================================================
- * dtype normalisation core (shared by both buckets)
- * =========================================================================
- *
- * Mirrors target.py::normalize_dtype: strip + lower(name), then
- * _DTYPE_ALIASES.get(key, key). The canonical RHS values are interned static
- * strings; unknown spellings pass through as the lowercased text in `lowered`.
- */
-
-typedef struct rocke_ati_dtype_alias
-{
-    const char* alias; /* lowercased key */
-    const char* canonical; /* interned canonical value */
-} rocke_ati_dtype_alias_t;
-
-/* Byte-for-byte the _DTYPE_ALIASES map (insertion order is irrelevant: lookup is
- * by exact lowercased key). */
-static const rocke_ati_dtype_alias_t k_dtype_aliases[] = {
-    {"f16", "fp16"},
-    {"half", "fp16"},
-    {"fp16", "fp16"},
-    {"bf16", "bf16"},
-    {"bfloat16", "bf16"},
-    {"f32", "fp32"},
-    {"float", "fp32"},
-    {"fp32", "fp32"},
-    {"fp8", "fp8e4m3"},
-    {"fp8e4m3", "fp8e4m3"},
-    {"bf8", "bf8e5m2"},
-    {"bf8e5m2", "bf8e5m2"},
-    {"iu8", "iu8"},
-    {"iu4", "iu4"},
-    {"i8", "i8"},
-    {"int8", "i8"},
-    {"i4", "i4"},
-    {"int4", "i4"},
-    {"i32", ROCKE_DTYPE_I32},
-    {"int32", ROCKE_DTYPE_I32},
-};
-#define K_NUM_DTYPE_ALIASES ((int)(sizeof(k_dtype_aliases) / sizeof(k_dtype_aliases[0])))
-
-/* str.strip(): Python strips ASCII whitespace from both ends. */
-static int rocke_ati_is_ws(char c)
-{
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
-const char* rocke_ati_normalize_dtype(const char* name, char* lowered, size_t cap)
-{
-    int i;
-    size_t n;
-    const char* start;
-    const char* end;
-
-    if(name == NULL)
-    {
-        /* Python would raise on None.strip(); the C contract requires a result.
-         * Treat as empty string (no alias match, passes through as ""). */
-        if(lowered != NULL && cap > 0)
-        {
-            lowered[0] = '\0';
-        }
-        return (lowered != NULL && cap > 0) ? lowered : "";
-    }
-
-    /* strip(): advance over leading/trailing whitespace */
-    start = name;
-    while(*start != '\0' && rocke_ati_is_ws(*start))
-    {
-        start++;
-    }
-    end = start + strlen(start);
-    while(end > start && rocke_ati_is_ws(end[-1]))
-    {
-        end--;
-    }
-
-    /* lower() into the caller buffer (the pass-through result) */
-    n = (size_t)(end - start);
-    if(lowered == NULL || cap == 0)
-    {
-        /* No scratch: caller guarantees a known spelling. Build a small inline
-         * copy on a fixed buffer to look up; if unknown we have nowhere to
-         * return it, so fall back to "". */
-        static char tmp[64];
-        size_t m = n < sizeof(tmp) - 1 ? n : sizeof(tmp) - 1;
-        for(i = 0; (size_t)i < m; i++)
-        {
-            char c = start[i];
-            tmp[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-        }
-        tmp[m] = '\0';
-        for(i = 0; i < K_NUM_DTYPE_ALIASES; i++)
-        {
-            if(strcmp(tmp, k_dtype_aliases[i].alias) == 0)
-            {
-                return k_dtype_aliases[i].canonical;
-            }
-        }
-        return "";
-    }
-
-    if(n > cap - 1)
-    {
-        n = cap - 1;
-    }
-    for(i = 0; (size_t)i < n; i++)
-    {
-        char c = start[i];
-        lowered[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-    }
-    lowered[n] = '\0';
-
-    /* _DTYPE_ALIASES.get(key, key) */
-    for(i = 0; i < K_NUM_DTYPE_ALIASES; i++)
-    {
-        if(strcmp(lowered, k_dtype_aliases[i].alias) == 0)
-        {
-            return k_dtype_aliases[i].canonical;
-        }
-    }
-    return lowered;
-}
-
-const char* rocke_normalize_dtype(const char* name, char* scratch, size_t scratch_cap)
-{
-    return rocke_ati_normalize_dtype(name, scratch, scratch_cap);
-}
 
 /* =========================================================================
  * lane-coord emitters (static rocke_lane_coord_fn)
@@ -736,10 +606,12 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
     {
         if(b != NULL)
         {
-            const char* role_txt = (m->role == ROCKE_MMA_ROLE_SRC0)   ? "src0"
-                                   : (m->role == ROCKE_MMA_ROLE_SRC1) ? "src1"
-                                   : (m->role == ROCKE_MMA_ROLE_SRC2) ? "src2"
-                                                                      : "dst";
+            const char* role_txt = (m->role == ROCKE_MMA_ROLE_SRC0)         ? "src0"
+                                   : (m->role == ROCKE_MMA_ROLE_SRC1)       ? "src1"
+                                   : (m->role == ROCKE_MMA_ROLE_SRC2)       ? "src2"
+                                   : (m->role == ROCKE_MMA_ROLE_SRC0_SCALE) ? "src0_scale"
+                                   : (m->role == ROCKE_MMA_ROLE_SRC1_SCALE) ? "src1_scale"
+                                                                            : "dst";
             b->status = ROCKE_ERR_VALUE;
             snprintf(b->err,
                      ROCKE_ERR_MSG_CAP,
@@ -758,6 +630,39 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
     return true;
 }
 
+/* Scale slots describe logical K groups; both half-waves duplicate them. */
+static void _wmma_gfx1250_a_scale(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  int slot,
+                                  rocke_value_t** out0,
+                                  rocke_value_t** out1)
+{
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+    rocke_value_t* row = rocke_b_mod(b, lane, c16);
+    rocke_value_t* group = rocke_b_const_i32(b, slot);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = group;
+}
+
+static void _wmma_gfx1250_b_scale(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  int slot,
+                                  rocke_value_t** out0,
+                                  rocke_value_t** out1)
+{
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+    rocke_value_t* col = rocke_b_mod(b, lane, c16);
+    rocke_value_t* group = rocke_b_const_i32(b, slot);
+    if(out0)
+        *out0 = group;
+    if(out1)
+        *out1 = col;
+}
+
 /* =========================================================================
  * Per-op_id LayoutMap statics (the precomputed _build_mma_op output)
  * =========================================================================
@@ -774,6 +679,15 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
  * least one verified map need descriptors; the rest carry NULL layout pointers
  * in the catalog directly.
  */
+
+static const rocke_layout_map_t lm_wmma_scale_k32_a
+    = {ROCKE_MMA_ROLE_SRC0_SCALE, 4, 32, _wmma_gfx1250_a_scale};
+static const rocke_layout_map_t lm_wmma_scale_k32_b
+    = {ROCKE_MMA_ROLE_SRC1_SCALE, 4, 32, _wmma_gfx1250_b_scale};
+static const rocke_layout_map_t lm_wmma_scale_k16_a
+    = {ROCKE_MMA_ROLE_SRC0_SCALE, 8, 32, _wmma_gfx1250_a_scale};
+static const rocke_layout_map_t lm_wmma_scale_k16_b
+    = {ROCKE_MMA_ROLE_SRC1_SCALE, 8, 32, _wmma_gfx1250_b_scale};
 
 /* --- mfma_f32_16x16x16_f16 / _bf16: src0/src1/src2/dst (frag 4/4/4/4, wave64) --- */
 static const rocke_layout_map_t lm_mfma_16x16x16_src0 = {ROCKE_MMA_ROLE_SRC0, 4, 64, _mfma_a_16x16};
@@ -1055,8 +969,10 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x64_fp8_bf8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
-    {"wmma_scale_f32_16x16x128_fp8_fp8", 8},
-    {"wmma_scale16_f32_16x16x128_fp8_fp8", 8},
+    {"wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32", 8},
+    {"wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32", 8},
+    {"wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16", 8},
+    {"wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16", 8},
 };
 
 int rocke_arch_mma_dst_frag_len(const char* op_id)
@@ -1092,8 +1008,7 @@ int rocke_arch_mma_dst_frag_len(const char* op_id)
  * scale block size along K (zero when unscaled); dst stores dtype, frag_len,
  * and layout. Scale value dtype is independent of the packed register carrier.
  *
- * NOTE: fp4/fp6 dtypes are not in _DTYPE_ALIASES, so normalize_dtype passes them
- * through as the lowercased spelling "fp4"/"fp6" (Python identity fallthrough).
+ * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
  */
 
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */
@@ -1102,9 +1017,9 @@ int rocke_arch_mma_dst_frag_len(const char* op_id)
  * bf16 arrived in CDNA2 with the same layout maps as fp16 for those shapes). */
 static const rocke_mma_op_t k_mma_gfx90a[] = {
     {"mma",
-     {{"fp16", 4, &lm_mfma_16x16x16_src0},
-      {"fp16", 4, &lm_mfma_16x16x16_src1},
-      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {{"fp16", 4, &lm_mfma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 4, &lm_mfma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
@@ -1112,9 +1027,9 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      "mfma_f32_16x16x16_f16",
      64},
     {"mma",
-     {{"fp16", 4, &lm_mfma_32x32x8_src0},
-      {"fp16", 4, &lm_mfma_32x32x8_src1},
-      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {{"fp16", 4, &lm_mfma_32x32x8_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 4, &lm_mfma_32x32x8_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x8_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
@@ -1122,9 +1037,9 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      "mfma_f32_32x32x8_f16",
      64},
     {"mma",
-     {{"bf16", 4, &lm_mfma_16x16x16_src0},
-      {"bf16", 4, &lm_mfma_16x16x16_src1},
-      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {{"bf16", 4, &lm_mfma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 4, &lm_mfma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
@@ -1132,9 +1047,9 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      "mfma_f32_16x16x16_bf16",
      64},
     {"mma",
-     {{"bf16", 4, &lm_mfma_32x32x8_src0},
-      {"bf16", 4, &lm_mfma_32x32x8_src1},
-      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {{"bf16", 4, &lm_mfma_32x32x8_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 4, &lm_mfma_32x32x8_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x8_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
@@ -1146,9 +1061,9 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
 /* ----------------------------- gfx942 (CDNA) ----------------------------- */
 static const rocke_mma_op_t k_mma_gfx942[] = {
     {"mma",
-     {{"fp32", 1, &lm_mfma_16x16x4_f32_src0},
-      {"fp32", 1, &lm_mfma_16x16x4_f32_src1},
-      {"fp32", 4, &lm_mfma_16x16x4_f32_src2}},
+     {{"fp32", 1, &lm_mfma_16x16x4_f32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 1, &lm_mfma_16x16x4_f32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x4_f32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x4_f32_dst},
      16,
      16,
@@ -1156,9 +1071,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_16x16x4_f32",
      64},
     {"mma",
-     {{"fp32", 1, &lm_mfma_32x32x2_f32_src0},
-      {"fp32", 1, &lm_mfma_32x32x2_f32_src1},
-      {"fp32", 16, &lm_mfma_32x32x2_f32_src2}},
+     {{"fp32", 1, &lm_mfma_32x32x2_f32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 1, &lm_mfma_32x32x2_f32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x2_f32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x2_f32_dst},
      32,
      32,
@@ -1166,9 +1081,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_32x32x2_f32",
      64},
     {"mma",
-     {{"fp16", 4, &lm_mfma_16x16x16_src0},
-      {"fp16", 4, &lm_mfma_16x16x16_src1},
-      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {{"fp16", 4, &lm_mfma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 4, &lm_mfma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
@@ -1176,9 +1091,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_16x16x16_f16",
      64},
     {"mma",
-     {{"fp16", 4, &lm_mfma_32x32x8_src0},
-      {"fp16", 4, &lm_mfma_32x32x8_src1},
-      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {{"fp16", 4, &lm_mfma_32x32x8_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 4, &lm_mfma_32x32x8_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x8_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
@@ -1186,9 +1101,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_32x32x8_f16",
      64},
     {"mma",
-     {{"bf16", 4, &lm_mfma_16x16x16_src0},
-      {"bf16", 4, &lm_mfma_16x16x16_src1},
-      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {{"bf16", 4, &lm_mfma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 4, &lm_mfma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
@@ -1196,9 +1111,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_16x16x16_bf16",
      64},
     {"mma",
-     {{"bf16", 4, &lm_mfma_32x32x8_src0},
-      {"bf16", 4, &lm_mfma_32x32x8_src1},
-      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {{"bf16", 4, &lm_mfma_32x32x8_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 4, &lm_mfma_32x32x8_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x8_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
@@ -1206,9 +1121,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_32x32x8_bf16",
      64},
     {"mma",
-     {{"fp8e4m3", 8, &lm_mfma_16x16x32_src0},
-      {"fp8e4m3", 8, &lm_mfma_16x16x32_src1},
-      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {{"fp8e4m3", 8, &lm_mfma_16x16x32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp8e4m3", 8, &lm_mfma_16x16x32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
@@ -1216,9 +1131,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_16x16x32_fp8",
      64},
     {"mma",
-     {{"fp8e4m3", 8, &lm_mfma_32x32x16_src0},
-      {"fp8e4m3", 8, &lm_mfma_32x32x16_src1},
-      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {{"fp8e4m3", 8, &lm_mfma_32x32x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp8e4m3", 8, &lm_mfma_32x32x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
@@ -1226,9 +1141,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_32x32x16_fp8",
      64},
     {"mma",
-     {{"bf8e5m2", 8, &lm_mfma_16x16x32_src0},
-      {"bf8e5m2", 8, &lm_mfma_16x16x32_src1},
-      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {{"bf8e5m2", 8, &lm_mfma_16x16x32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf8e5m2", 8, &lm_mfma_16x16x32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
@@ -1236,9 +1151,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      "mfma_f32_16x16x32_bf8",
      64},
     {"mma",
-     {{"bf8e5m2", 8, &lm_mfma_32x32x16_src0},
-      {"bf8e5m2", 8, &lm_mfma_32x32x16_src1},
-      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {{"bf8e5m2", 8, &lm_mfma_32x32x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf8e5m2", 8, &lm_mfma_32x32x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
@@ -1250,9 +1165,9 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
 /* ----------------------------- gfx950 (CDNA) ----------------------------- */
 static const rocke_mma_op_t k_mma_gfx950[] = {
     {"mma",
-     {{"fp32", 1, &lm_mfma_16x16x4_f32_src0},
-      {"fp32", 1, &lm_mfma_16x16x4_f32_src1},
-      {"fp32", 4, &lm_mfma_16x16x4_f32_src2}},
+     {{"fp32", 1, &lm_mfma_16x16x4_f32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 1, &lm_mfma_16x16x4_f32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x4_f32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x4_f32_dst},
      16,
      16,
@@ -1260,9 +1175,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_16x16x4_f32",
      64},
     {"mma",
-     {{"fp32", 1, &lm_mfma_32x32x2_f32_src0},
-      {"fp32", 1, &lm_mfma_32x32x2_f32_src1},
-      {"fp32", 16, &lm_mfma_32x32x2_f32_src2}},
+     {{"fp32", 1, &lm_mfma_32x32x2_f32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 1, &lm_mfma_32x32x2_f32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x2_f32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x2_f32_dst},
      32,
      32,
@@ -1270,9 +1185,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_32x32x2_f32",
      64},
     {"mma",
-     {{"fp16", 4, &lm_mfma_16x16x16_src0},
-      {"fp16", 4, &lm_mfma_16x16x16_src1},
-      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {{"fp16", 4, &lm_mfma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 4, &lm_mfma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
@@ -1280,9 +1195,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_16x16x16_f16",
      64},
     {"mma",
-     {{"fp16", 8, &lm_mfma_16x16x32_src0},
-      {"fp16", 8, &lm_mfma_16x16x32_src1},
-      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {{"fp16", 8, &lm_mfma_16x16x32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 8, &lm_mfma_16x16x32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
@@ -1290,9 +1205,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_16x16x32_f16",
      64},
     {"mma",
-     {{"fp16", 4, &lm_mfma_32x32x8_src0},
-      {"fp16", 4, &lm_mfma_32x32x8_src1},
-      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {{"fp16", 4, &lm_mfma_32x32x8_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 4, &lm_mfma_32x32x8_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x8_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
@@ -1300,9 +1215,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_32x32x8_f16",
      64},
     {"mma",
-     {{"fp16", 8, &lm_mfma_32x32x16_src0},
-      {"fp16", 8, &lm_mfma_32x32x16_src1},
-      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {{"fp16", 8, &lm_mfma_32x32x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 8, &lm_mfma_32x32x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
@@ -1310,9 +1225,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_32x32x16_f16",
      64},
     {"mma",
-     {{"bf16", 4, &lm_mfma_16x16x16_src0},
-      {"bf16", 4, &lm_mfma_16x16x16_src1},
-      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {{"bf16", 4, &lm_mfma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 4, &lm_mfma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
@@ -1320,9 +1235,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_16x16x16_bf16",
      64},
     {"mma",
-     {{"bf16", 8, &lm_mfma_16x16x32_src0},
-      {"bf16", 8, &lm_mfma_16x16x32_src1},
-      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {{"bf16", 8, &lm_mfma_16x16x32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 8, &lm_mfma_16x16x32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
@@ -1330,9 +1245,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_16x16x32_bf16",
      64},
     {"mma",
-     {{"bf16", 4, &lm_mfma_32x32x8_src0},
-      {"bf16", 4, &lm_mfma_32x32x8_src1},
-      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {{"bf16", 4, &lm_mfma_32x32x8_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 4, &lm_mfma_32x32x8_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x8_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
@@ -1340,9 +1255,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_32x32x8_bf16",
      64},
     {"mma",
-     {{"bf16", 8, &lm_mfma_32x32x16_src0},
-      {"bf16", 8, &lm_mfma_32x32x16_src1},
-      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {{"bf16", 8, &lm_mfma_32x32x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 8, &lm_mfma_32x32x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
@@ -1350,9 +1265,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_32x32x16_bf16",
      64},
     {"mma",
-     {{"fp8e4m3", 8, &lm_mfma_16x16x32_src0},
-      {"fp8e4m3", 8, &lm_mfma_16x16x32_src1},
-      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {{"fp8e4m3", 8, &lm_mfma_16x16x32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp8e4m3", 8, &lm_mfma_16x16x32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
@@ -1360,9 +1275,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_16x16x32_fp8",
      64},
     {"mma",
-     {{"fp8e4m3", 8, &lm_mfma_32x32x16_src0},
-      {"fp8e4m3", 8, &lm_mfma_32x32x16_src1},
-      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {{"fp8e4m3", 8, &lm_mfma_32x32x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp8e4m3", 8, &lm_mfma_32x32x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
@@ -1370,9 +1285,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_32x32x16_fp8",
      64},
     {"mma",
-     {{"bf8e5m2", 8, &lm_mfma_16x16x32_src0},
-      {"bf8e5m2", 8, &lm_mfma_16x16x32_src1},
-      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {{"bf8e5m2", 8, &lm_mfma_16x16x32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf8e5m2", 8, &lm_mfma_16x16x32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x32_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
@@ -1380,19 +1295,21 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_16x16x32_bf8",
      64},
     {"mma",
-     {{"bf8e5m2", 8, &lm_mfma_32x32x16_src0},
-      {"bf8e5m2", 8, &lm_mfma_32x32x16_src1},
-      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {{"bf8e5m2", 8, &lm_mfma_32x32x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf8e5m2", 8, &lm_mfma_32x32x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
      16,
      "mfma_f32_32x32x16_bf8",
      64},
-    /* fp4/fp6 pass through normalize_dtype unchanged; op_ids carry frag lengths
+    /* Low-bit catalog keys use exponent/mantissa names; op_ids carry frag lengths
      * only (no verified maps), per _MMA_FRAGMENT_INFO. */
     {"mma",
-     {{"fp4", 16, NULL}, {"fp4", 16, NULL}, {"fp32", 4, NULL}},
+     {{"fp4e2m1", 16, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp4e2m1", 16, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, NULL},
      16,
      16,
@@ -1400,7 +1317,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_16x16x128_fp4",
      64},
     {"mma",
-     {{"fp6", 12, NULL}, {"fp6", 12, NULL}, {"fp32", 4, NULL}},
+     {{"fp6e2m3", 12, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp6e2m3", 12, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 4, NULL},
      16,
      16,
@@ -1412,9 +1331,9 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
 /* ----------------------------- gfx1151 (RDNA3.5) ------------------------- */
 static const rocke_mma_op_t k_mma_gfx1151[] = {
     {"wmma",
-     {{"fp16", 16, &lm_wmma_16x16x16_src0},
-      {"fp16", 16, &lm_wmma_16x16x16_src1},
-      {"fp32", 8, &lm_wmma_16x16x16_src2}},
+     {{"fp16", 16, &lm_wmma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 16, &lm_wmma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_16x16x16_dst},
      16,
      16,
@@ -1422,9 +1341,9 @@ static const rocke_mma_op_t k_mma_gfx1151[] = {
      "wmma_f32_16x16x16_f16",
      32},
     {"wmma",
-     {{"bf16", 16, &lm_wmma_16x16x16_src0},
-      {"bf16", 16, &lm_wmma_16x16x16_src1},
-      {"fp32", 8, &lm_wmma_16x16x16_src2}},
+     {{"bf16", 16, &lm_wmma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 16, &lm_wmma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_16x16x16_dst},
      16,
      16,
@@ -1432,7 +1351,9 @@ static const rocke_mma_op_t k_mma_gfx1151[] = {
      "wmma_f32_16x16x16_bf16",
      32},
     {"wmma",
-     {{"iu8", 4, &lm_wmma_iu8_src0}, {"iu8", 4, &lm_wmma_iu8_src1}, {"i32", 8, &lm_wmma_iu8_src2}},
+     {{"iu8", 4, &lm_wmma_iu8_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"iu8", 4, &lm_wmma_iu8_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"i32", 8, &lm_wmma_iu8_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"i32", 8, &lm_wmma_iu8_dst},
      16,
      16,
@@ -1440,7 +1361,9 @@ static const rocke_mma_op_t k_mma_gfx1151[] = {
      "wmma_i32_16x16x16_iu8",
      32},
     {"wmma",
-     {{"iu4", 2, &lm_wmma_iu4_src0}, {"iu4", 2, &lm_wmma_iu4_src1}, {"i32", 8, &lm_wmma_iu4_src2}},
+     {{"iu4", 2, &lm_wmma_iu4_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"iu4", 2, &lm_wmma_iu4_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"i32", 8, &lm_wmma_iu4_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"i32", 8, &lm_wmma_iu4_dst},
      16,
      16,
@@ -1452,9 +1375,9 @@ static const rocke_mma_op_t k_mma_gfx1151[] = {
 /* ----------------------------- gfx1201 (RDNA4) -------------------------- */
 static const rocke_mma_op_t k_mma_gfx1201[] = {
     {"wmma",
-     {{"fp16", 8, &lm_wmma_gfx12_src0},
-      {"fp16", 8, &lm_wmma_gfx12_src1},
-      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"fp16", 8, &lm_wmma_gfx12_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 8, &lm_wmma_gfx12_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
@@ -1462,9 +1385,9 @@ static const rocke_mma_op_t k_mma_gfx1201[] = {
      "wmma_gfx12_f32_16x16x16_f16",
      32},
     {"wmma",
-     {{"bf16", 8, &lm_wmma_gfx12_src0},
-      {"bf16", 8, &lm_wmma_gfx12_src1},
-      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"bf16", 8, &lm_wmma_gfx12_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 8, &lm_wmma_gfx12_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
@@ -1476,9 +1399,9 @@ static const rocke_mma_op_t k_mma_gfx1201[] = {
 /* --------------------------- gfx11-generic (RDNA3) ---------------------- */
 static const rocke_mma_op_t k_mma_gfx11_generic[] = {
     {"wmma",
-     {{"fp16", 16, &lm_wmma_16x16x16_src0},
-      {"fp16", 16, &lm_wmma_16x16x16_src1},
-      {"fp32", 8, &lm_wmma_16x16x16_src2}},
+     {{"fp16", 16, &lm_wmma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 16, &lm_wmma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_16x16x16_dst},
      16,
      16,
@@ -1486,9 +1409,9 @@ static const rocke_mma_op_t k_mma_gfx11_generic[] = {
      "wmma_f32_16x16x16_f16",
      32},
     {"wmma",
-     {{"bf16", 16, &lm_wmma_16x16x16_src0},
-      {"bf16", 16, &lm_wmma_16x16x16_src1},
-      {"fp32", 8, &lm_wmma_16x16x16_src2}},
+     {{"bf16", 16, &lm_wmma_16x16x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 16, &lm_wmma_16x16x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_16x16x16_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_16x16x16_dst},
      16,
      16,
@@ -1496,7 +1419,9 @@ static const rocke_mma_op_t k_mma_gfx11_generic[] = {
      "wmma_f32_16x16x16_bf16",
      32},
     {"wmma",
-     {{"iu8", 4, &lm_wmma_iu8_src0}, {"iu8", 4, &lm_wmma_iu8_src1}, {"i32", 8, &lm_wmma_iu8_src2}},
+     {{"iu8", 4, &lm_wmma_iu8_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"iu8", 4, &lm_wmma_iu8_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"i32", 8, &lm_wmma_iu8_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"i32", 8, &lm_wmma_iu8_dst},
      16,
      16,
@@ -1504,7 +1429,9 @@ static const rocke_mma_op_t k_mma_gfx11_generic[] = {
      "wmma_i32_16x16x16_iu8",
      32},
     {"wmma",
-     {{"iu4", 2, &lm_wmma_iu4_src0}, {"iu4", 2, &lm_wmma_iu4_src1}, {"i32", 8, &lm_wmma_iu4_src2}},
+     {{"iu4", 2, &lm_wmma_iu4_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"iu4", 2, &lm_wmma_iu4_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"i32", 8, &lm_wmma_iu4_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"i32", 8, &lm_wmma_iu4_dst},
      16,
      16,
@@ -1524,9 +1451,9 @@ static const rocke_mma_op_t k_mma_gfx11_generic[] = {
  * (rocke_ll_backend_for). */
 static const rocke_mma_op_t k_mma_gfx1250[] = {
     {"wmma",
-     {{"fp32", 2, &lm_wmma_gfx1250_f32_src0},
-      {"fp32", 2, &lm_wmma_gfx1250_f32_src1},
-      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"fp32", 2, &lm_wmma_gfx1250_f32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 2, &lm_wmma_gfx1250_f32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
@@ -1534,9 +1461,9 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      "wmma_gfx1250_f32_16x16x4_f32",
      32},
     {"wmma",
-     {{"fp16", 16, &lm_wmma_gfx1250_32_src0},
-      {"fp16", 16, &lm_wmma_gfx1250_32_src1},
-      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"fp16", 16, &lm_wmma_gfx1250_32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp16", 16, &lm_wmma_gfx1250_32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
@@ -1544,9 +1471,9 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      "wmma_gfx1250_f32_16x16x32_f16",
      32},
     {"wmma",
-     {{"bf16", 16, &lm_wmma_gfx1250_32_src0},
-      {"bf16", 16, &lm_wmma_gfx1250_32_src1},
-      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"bf16", 16, &lm_wmma_gfx1250_32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf16", 16, &lm_wmma_gfx1250_32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
@@ -1554,7 +1481,9 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      "wmma_gfx1250_f32_16x16x32_bf16",
      32},
     {"wmma",
-     {{"fp8e4m3", 32, NULL}, {"fp8e4m3", 32, NULL}, {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"fp8e4m3", 8, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp8e4m3", 8, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
@@ -1562,7 +1491,9 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      "wmma_gfx1250_f32_16x16x64_fp8_fp8",
      32},
     {"wmma",
-     {{"fp8e4m3", 32, NULL}, {"bf8e5m2", 32, NULL}, {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"fp8e4m3", 8, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf8e5m2", 8, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
@@ -1570,7 +1501,9 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      "wmma_gfx1250_f32_16x16x64_fp8_bf8",
      32},
     {"wmma",
-     {{"bf8e5m2", 32, NULL}, {"fp8e4m3", 32, NULL}, {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"bf8e5m2", 8, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp8e4m3", 8, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
@@ -1578,32 +1511,54 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      "wmma_gfx1250_f32_16x16x64_bf8_fp8",
      32},
     {"wmma",
-     {{"bf8e5m2", 32, NULL}, {"bf8e5m2", 32, NULL}, {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {{"bf8e5m2", 8, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"bf8e5m2", 8, NULL, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_bf8_bf8",
      32},
-    {"wmma_scale",
-     {{"fp8e4m3", 16, NULL, "e8m0", 32},
-      {"fp8e4m3", 16, NULL, "e8m0", 32},
-      {"fp32", 8, &lm_wmma_gfx12_src2}},
+    {"wmma_scaled",
+     {{"fp8e4m3", 16, NULL, "e8m0", ROCKE_MMA_SCALE_K32, 4, &lm_wmma_scale_k32_a},
+      {"fp8e4m3", 16, NULL, "e8m0", ROCKE_MMA_SCALE_K32, 4, &lm_wmma_scale_k32_b},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      128,
-     "wmma_scale_f32_16x16x128_fp8_fp8",
+     "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32",
      32},
-    {"wmma_scale16",
-     {{"fp8e4m3", 16, NULL, "e8m0", 16},
-      {"fp8e4m3", 16, NULL, "e8m0", 16},
-      {"fp32", 8, &lm_wmma_gfx12_src2}},
+    {"wmma_scaled",
+     {{"bf8e5m2", 16, NULL, "e8m0", ROCKE_MMA_SCALE_K32, 4, &lm_wmma_scale_k32_a},
+      {"bf8e5m2", 16, NULL, "e8m0", ROCKE_MMA_SCALE_K32, 4, &lm_wmma_scale_k32_b},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
      {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      128,
-     "wmma_scale16_f32_16x16x128_fp8_fp8",
+     "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32",
+     32},
+    {"wmma_scaled",
+     {{"fp8e4m3", 16, NULL, "e8m0", ROCKE_MMA_SCALE_K16, 8, &lm_wmma_scale_k16_a},
+      {"fp8e4m3", 16, NULL, "e8m0", ROCKE_MMA_SCALE_K16, 8, &lm_wmma_scale_k16_b},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16",
+     32},
+    {"wmma_scaled",
+     {{"bf8e5m2", 16, NULL, "e8m0", ROCKE_MMA_SCALE_K16, 8, &lm_wmma_scale_k16_a},
+      {"bf8e5m2", 16, NULL, "e8m0", ROCKE_MMA_SCALE_K16, 8, &lm_wmma_scale_k16_b},
+      {"fp32", 8, &lm_wmma_gfx12_src2, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16",
      32},
 };
 
