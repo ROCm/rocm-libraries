@@ -254,7 +254,7 @@ Command-line example
    HIPBLASLT_EMULATE_DOUBLE_PRECISION=1 ./hipblaslt-bench \
        --function matmul \
        --a_type f64_r --b_type f64_r --c_type f64_r --d_type f64_r \
-       --compute_type c_f64_r --scale_type f64_r \
+       --compute_type f64_r --scale_type f64_r \
        --transA T --transB N \
        --alpha 1 --beta 0 \
        --initialization trig_float \
@@ -269,11 +269,7 @@ Create a YAML problem file (e.g. ``problems.yaml``):
 
 .. code-block:: yaml
 
-   - {function: matmul, a_type: f64_r, b_type: f64_r, c_type: f64_r, d_type: f64_r,
-      compute_type: c_f64_r, scale_type: f64_r, transA: T, transB: N,
-      alpha: 1, beta: 0, initialization: trig_float,
-      M: 8192, N: 8192, K: 8192, batch_count: 1,
-      user_allocated_workspace: 34359738368}
+   - {function: matmul, a_type: f64_r, b_type: f64_r, c_type: f64_r, d_type: f64_r, compute_type: c_f64_r, scale_type: f64_r, transA: T, transB: N, alpha: 1, beta: 0, initialization: trig_float, M: 8192, N: 8192, K: 8192, batch_count: 1, user_allocated_workspace: 34359738368}
 
 Then run:
 
