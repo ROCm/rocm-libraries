@@ -240,7 +240,7 @@ def test_scaled_catalog_identity_and_backend_contract():
             (0, 0) if row.a_dtype == "fp8e4m3" else (1, 1)
         )
         assert packing.scales.count * packing.scales.block_k == row.k
-        assert packing.matrix_llvm_types == ("<16 x i32>", "<16 x i32>")
+        assert (row.a_frag_len, row.b_frag_len) == (16, 16)
     for family in ("wmma_scale", "wmma_scale16"):
         old_id = f"{family}_f32_16x16x128_fp8_fp8"
         assert catalog.by_op_id(old_id) is None
