@@ -37,7 +37,7 @@ is used only for the realistic accept case).
 
 import pytest
 
-import Tensile.Common.ValidParameters as VP
+import tensilelite.Common.ValidParameters as VP
 
 pytestmark = pytest.mark.unit
 
