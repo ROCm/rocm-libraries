@@ -46,15 +46,14 @@ namespace
 
 /* A = [[1, 0.5, 0], [0.5, 1, 0], [0, 0, K]], padded to n with unit diagonal.
    Exact singular values: K, 1.5, (n-3) ones, 0.5. */
-template <typename T>
-vector<T> dominant_axis_matrix(rocblas_int n, double K)
+vector<float> dominant_axis_matrix(rocblas_int n, double K)
 {
-    vector<T> A(size_t(n) * n, T(0));
+    vector<float> A(size_t(n) * n, 0.0f);
     for(rocblas_int i = 0; i < n; i++)
-        A[i + i * n] = T(1);
-    A[0 + 1 * n] = T(0.5);
-    A[1 + 0 * n] = T(0.5);
-    A[(n - 1) + (n - 1) * n] = T(K);
+        A[i + i * n] = 1.0f;
+    A[0 + 1 * n] = 0.5f;
+    A[1 + 0 * n] = 0.5f;
+    A[(n - 1) + (n - 1) * n] = float(K);
     return A;
 }
 
@@ -150,38 +149,28 @@ void run_syevj(rocblas_int n, const vector<T>& hA, vector<T>& hW, rocblas_int& n
    values of the unrotated matrix, sqrt(1.25) and 0.75/sqrt(1.25). */
 TEST(checkin_lapack, SYEVJ_dominant_axis_does_not_mask_block)
 {
-    for(rocblas_int n : {3, 4, 8, 32, 59})
+    for(rocblas_int n : {3, 4, 8, 32, 59, 200})
     {
-        auto hA = dominant_axis_matrix<float>(n, 4096.0);
+        auto hA = dominant_axis_matrix(n, 4096.0);
         auto exact = exact_sigma(n, 4096.0);
 
         vector<float> hS;
         rocblas_int n_sweeps = -1, info = -1;
         run_gesvdj<float>(n, hA, hS, n_sweeps, info);
 
-        vector<double> got(hS.begin(), hS.end());
-        sort(got.begin(), got.end(), greater<double>());
-
         EXPECT_EQ(info, 0) << "n = " << n;
         EXPECT_GT(n_sweeps, 0) << "n = " << n << ": the Jacobi loop never ran";
+
+        // GESVDJ documents decreasing order; an unrotated matrix breaks that too,
+        // because SYEVJ orders by the diagonal it was handed
+        for(rocblas_int i = 1; i < n; i++)
+            EXPECT_LE(hS[i], hS[i - 1]) << "n = " << n << ": not in decreasing order at " << i;
+
+        vector<double> got(hS.begin(), hS.end());
+        sort(got.begin(), got.end(), greater<double>());
         for(rocblas_int i = 0; i < n; i++)
             EXPECT_NEAR(got[i], exact[i], exact[i] * 1e-5) << "n = " << n << ", sigma " << i;
     }
-}
-
-/* GESVDJ documents decreasing order; an unrotated matrix also breaks the sort,
-   because SYEVJ orders by the diagonal it was handed. */
-TEST(checkin_lapack, SYEVJ_dominant_axis_singular_values_are_sorted)
-{
-    const rocblas_int n = 5;
-    auto hA = dominant_axis_matrix<float>(n, 4096.0);
-
-    vector<float> hS;
-    rocblas_int n_sweeps = -1, info = -1;
-    run_gesvdj<float>(n, hA, hS, n_sweeps, info);
-
-    for(rocblas_int i = 1; i < n; i++)
-        EXPECT_LE(hS[i], hS[i - 1]) << "singular values not in decreasing order at " << i;
 }
 
 /* The small-size kernel used to test the sweep counter with a condition that

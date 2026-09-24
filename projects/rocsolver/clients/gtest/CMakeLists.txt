@@ -70,6 +70,7 @@ set(roclapack_test_source
   lapack/sygv_hegv_gtest.cpp
   lapack/sygvd_hegvd_gtest.cpp
   lapack/syevj_heevj_gtest.cpp
+  lapack/syevj_convergence_gtest.cpp
   lapack/syevdj_heevdj_gtest.cpp
   lapack/sygvj_hegvj_gtest.cpp
   lapack/sygvdj_hegvdj_gtest.cpp
@@ -144,7 +145,6 @@ set(rocrefact_test_source
 set(rocunit_test_source
   # gemm
   unit/gemm_gtest.cpp
-  unit/syevj_convergence_gtest.cpp
   # generate helpers
   unit/gerand_gtest.cpp
   unit/herand_gtest.cpp

@@ -13,20 +13,20 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Changed
 
-* `abstol` in SYEVJ/HEEVJ, GESVDJ, and SYGVJ/HEGVJ is now a relative tolerance: convergence requires every off-diagonal element to satisfy `|a_ij| <= abstol * sqrt(|a_ii| * |a_jj|)`, rather than the off-diagonal norm to fall below a multiple of the norm of the whole matrix. Callers that tuned `abstol` may see a different number of sweeps.
-* SYEVJ/HEEVJ for `n <= 58` can now return `info = 1`. It previously returned 0 unconditionally, so callers that treated a nonzero `info` as unreachable for these sizes should be rechecked. SYEVDJ/HEEVDJ and SYGVDJ/HEGVDJ inherit this through their Jacobi sub-solver.
+* `abstol` in SYEVJ/HEEVJ, GESVDJ, and SYGVJ/HEGVJ is now a relative tolerance, requiring every off-diagonal element to satisfy `|a_ij| <= abstol * sqrt(|a_ii| * |a_jj|)`. Callers that tuned `abstol` may see a different number of sweeps.
+* SYEVJ/HEEVJ can now report non-convergence for small matrices, where `info` was previously always 0. SYEVDJ/HEEVDJ and SYGVDJ/HEGVDJ inherit this through their Jacobi sub-solver.
 
 ### Removed
 ### Optimized
 ### Resolved issues
 
-* Fixed SYEVJ/HEEVJ and GESVDJ silently returning an undiagonalized matrix when one entry dominates the norm. The convergence test compared the global off-diagonal norm against a multiple of the norm of the whole matrix, so a single large entry could mask a block that had not been rotated at all, and the routine returned after zero sweeps with `info = 0`. In fp32, `GESVDJ` broke at a largest singular value of 3.4e3, `SYEVJ` at 5.9e6.
-* Fixed SYEVJ/HEEVJ never reporting non-convergence for matrices with `n <= 58`. The small-size kernel tested the sweep counter with a condition that was always true, so `info` was unconditionally 0.
-* Fixed SYEVJ/HEEVJ declaring convergence for well-scaled matrices near the limits of the floating-point range, where the squared convergence comparison saturated. In fp32 this affected entry magnitudes at or above roughly 1e19.
+* Fixed SYEVJ/HEEVJ and GESVDJ returning an undiagonalized matrix, with `info = 0`, when one entry dominates the norm of the whole matrix.
+* Fixed SYEVJ/HEEVJ never reporting non-convergence for small matrices.
+* Fixed SYEVJ/HEEVJ declaring convergence for well-scaled matrices near the limits of the floating-point range.
 
 ### Known issues
 
-* GESVDJ computes the SVD from the eigendecomposition of `A^H A`, which squares the condition number. Its accuracy on ill-conditioned matrices is correspondingly lower than GESVD's, independently of the convergence fix above.
+* GESVDJ computes the SVD from the eigendecomposition of `A^H A`, which squares the condition number, so its accuracy on ill-conditioned matrices is lower than GESVD's.
 
 ### Upcoming changes
 
