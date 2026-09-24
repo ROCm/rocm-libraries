@@ -3930,9 +3930,7 @@ def attention_3d_workspace_nbytes(
     explicitly.
     """
     return WorkspacePool.required_nbytes(
-        _attention_3d_workspace_specs(
-            problem, _num_segments(problem, arch), device
-        )
+        _attention_3d_workspace_specs(problem, _num_segments(problem, arch), device)
     )
 
 

@@ -220,9 +220,7 @@ def test_canonical_arch_does_not_change_selection():
     """
     p_suffixed = A._problem(_req(num_cus=256, arch="gfx950:sramecc+"))
     p_plain = A._problem(_req(num_cus=256, arch="gfx950"))
-    assert au._num_segments(p_suffixed, "gfx950") == au._num_segments(
-        p_plain, "gfx950"
-    )
+    assert au._num_segments(p_suffixed, "gfx950") == au._num_segments(p_plain, "gfx950")
 
 
 def test_request_layer_accepts_canonicalizable_arch():
@@ -344,14 +342,8 @@ def test_target_ctas_bypasses_the_gfx950_clamp():
         ceiling = au._pre_bump_segments(_prob(120, **shape))
 
         # Default callers: clamped to the pre-bump ceiling regardless of the bump.
-        assert (
-            au._num_segments(_prob(120, **shape), "gfx950")
-            == ceiling
-        )
-        assert (
-            au._num_segments(_prob(256, **shape), "gfx950")
-            == ceiling
-        )
+        assert au._num_segments(_prob(120, **shape), "gfx950") == ceiling
+        assert au._num_segments(_prob(256, **shape), "gfx950") == ceiling
 
         # Explicit target_ctas: clamp steps aside, caller gets the raw split.
         pinned = _prob(120, tctas=1024, **shape)
