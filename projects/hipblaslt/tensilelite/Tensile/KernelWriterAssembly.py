@@ -774,9 +774,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMovB32(dst=vgpr(payload+0), src=sgpr("WGMDebugOrigWG0"),
                          comment="DebugWGM: original 1D workgroup id"))
       module.add(SLShiftLeftB32(dst=sgpr(tmp), shiftHex=16, src=sgpr("WGMDebugPostWG+0"),
-                                comment="DebugWGM: post-WGM WorkGroup0 << 16"))
+                                comment="DebugWGM: post-WGM WorkGroup0 (M-tile) << 16"))
       module.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WGMDebugPostWG+1"),
-                         comment="DebugWGM: | post-WGM WorkGroup1"))
+                         comment="DebugWGM: | post-WGM WorkGroup1 (N-tile)"))
       module.add(VMovB32(dst=vgpr(payload+1), src=sgpr(tmp), comment="DebugWGM: packed (newWG0<<16)|newWG1"))
       module.add(SGetRegB32(dst=sgpr(tmp), src="hwreg(HW_REG_XCC_ID)", comment="DebugWGM: read XCC id"))
       module.add(VMovB32(dst=vgpr(payload+2), src=sgpr(tmp), comment="DebugWGM: XCC id"))
@@ -14277,8 +14277,6 @@ class KernelWriterAssembly(KernelWriter):
         module.addComment1("@DebugWGM: snapshot D store SRD (tile N-base) + final tile coords before store loop")
         module.add(SMovB64(dst=sgpr("WGMDebugSrdD", 2), src=sgpr("SrdD", 2), comment="DebugWGM: save SrdD base"))
         module.add(SMovB64(dst=sgpr("WGMDebugSrdD+2", 2), src=sgpr("SrdD+2", 2), comment="DebugWGM: save SrdD size/flags"))
-        # Capture the SAME WorkGroup0/1 the SRD was just computed from, so the
-        # M vaddr offset (WG0) is consistent with the SRD's N base (WG1).
         module.add(SMovB32(dst=sgpr("WGMDebugPostWG+0"), src=sgpr("WorkGroup0"), comment="DebugWGM: final M-tile index"))
         module.add(SMovB32(dst=sgpr("WGMDebugPostWG+1"), src=sgpr("WorkGroup1"), comment="DebugWGM: final N-tile index"))
       if not skipUndefine:

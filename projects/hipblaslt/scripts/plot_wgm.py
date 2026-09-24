@@ -127,10 +127,10 @@ def build_lattice(raw, m, n, ldd, bpe, mt0, mt1):
     for iy, ix in np.ndindex(lattice.shape):
         orig_wg, (new_wg1, new_wg0), _ = lattice[iy][ix]
         if 0 <= orig_wg < grid_size:
-            # Store as (x=new_wg0, y=new_wg1) to match the cell-text placement
-            # ax.text(new_wg0, new_wg1, ...); otherwise arrows are transposed and
-            # only cover part of the grid.
-            order[orig_wg] = (new_wg0, new_wg1)
+            # Plot uses matrix convention: M-tile (new_wg0) on the vertical axis,
+            # N-tile (new_wg1) on the horizontal axis. Store arrow points as
+            # (x=new_wg1, y=new_wg0) to match the cell-text placement.
+            order[orig_wg] = (new_wg1, new_wg0)
 
     return lattice, lattice_str, xcc_grid, wgm_value, order, (n_wg_m, n_wg_n)
 
@@ -140,37 +140,54 @@ def to_plot(lattice, xcc_grid, order, wgm_value, out_path, meta=None):
     from matplotlib import pyplot as plt
 
     meta = meta or {}
+    invalid = bool(meta.get("invalid"))
 
     def to_text(orig_wg, new_wg0, new_wg1, xcc):
         return f"{orig_wg}->({new_wg1},{new_wg0})\n(XCC:{xcc})"
 
-    n_wg_n, n_wg_m = lattice.shape
+    n_wg_n, n_wg_m = lattice.shape  # (N-tiles, M-tiles)
 
-    fig, ax = plt.subplots(figsize=(max(8, n_wg_m * 2), max(8, n_wg_n * 2)), dpi=80)
+    # Matrix convention: M-tiles on the vertical axis (rows), N-tiles on the
+    # horizontal axis (columns). xcc_grid is [wg_n][wg_m]; transpose it so rows
+    # index M and columns index N.
+    if invalid:
+        # No per-cell detail to render; keep it compact/readable.
+        figsize = (min(24, max(10, n_wg_n)), min(14, max(6, n_wg_m)))
+    else:
+        figsize = (max(8, n_wg_n * 2), max(8, n_wg_m * 2))
+    fig, ax = plt.subplots(figsize=figsize, dpi=80)
     plt.tight_layout()
     plt.xticks([], [])
     plt.yticks([], [])
+    ax.set_xlabel("N-tiles (columns)")
+    ax.set_ylabel("M-tiles (rows)")
 
-    ax.imshow(xcc_grid)
+    if invalid:
+        # No valid WGM dump (e.g. uninstrumented StreamK kernel): draw only the
+        # correctly-sized/oriented empty grid. No XCD colors, cell text, or arrows.
+        ax.imshow(np.zeros((n_wg_m, n_wg_n)), cmap="Greys", vmin=0, vmax=1)
+    else:
+        ax.imshow(np.asarray(xcc_grid).T)
 
-    for (i, j), z in np.ndenumerate(lattice):
-        orig_wg, (new_wg1, new_wg0), xcc = z
-        ax.text(new_wg0, new_wg1, to_text(orig_wg, new_wg0, new_wg1, xcc),
-                ha="center", va="center", size=12)
+        for (i, j), z in np.ndenumerate(lattice):
+            orig_wg, (new_wg1, new_wg0), xcc = z
+            # x = N-tile (new_wg1), y = M-tile (new_wg0)
+            ax.text(new_wg1, new_wg0, to_text(orig_wg, new_wg0, new_wg1, xcc),
+                    ha="center", va="center", size=12)
 
-    # Draw the space-filling walk order (arrows between consecutive WG ids).
-    style = "Simple, tail_width=0.5, head_width=8, head_length=8"
-    for i in range(1, len(order)):
-        if order[i] is None or order[i - 1] is None:
-            continue
-        p = patches.FancyArrowPatch(
-            (order[i - 1][0], order[i - 1][1]),
-            (order[i][0], order[i][1]),
-            connectionstyle="arc3,rad=.1",
-            arrowstyle=style,
-            color="k",
-        )
-        ax.add_patch(p)
+        # Draw the space-filling walk order (arrows between consecutive WG ids).
+        style = "Simple, tail_width=0.5, head_width=8, head_length=8"
+        for i in range(1, len(order)):
+            if order[i] is None or order[i - 1] is None:
+                continue
+            p = patches.FancyArrowPatch(
+                (order[i - 1][0], order[i - 1][1]),
+                (order[i][0], order[i][1]),
+                connectionstyle="arc3,rad=.1",
+                arrowstyle=style,
+                color="k",
+            )
+            ax.add_patch(p)
 
     # --- Title: WGM value + macro-tile / grid / StreamK / GSU / LSU ---
     total_wgs = n_wg_m * n_wg_n
@@ -196,13 +213,53 @@ def to_plot(lattice, xcc_grid, order, wgm_value, out_path, meta=None):
             parts.append(f"{label}={meta[key]}")
     line2 = "  |  ".join(parts)
 
-    ax.set_title(line1 + "\n" + line2, fontsize=14)
+    # --- Per-XCD operand-load reuse stats ---
+    # Each output tile lives at (M-tile = wg_m along x, N-tile = wg_n along y) and
+    # loads one A row-block (its M-tile) and one B column-block (its N-tile). For
+    # each XCD (XCC id), count the tiles it owns and how many DISTINCT M-tiles
+    # (rows) and N-tiles (cols) it touches. Share% = redundant (reused) fraction
+    # of that operand's block loads = (total - unique) * 100 / total; higher =
+    # more L2 reuse of that operand within the XCD.
+    if invalid:
+        stats_table = ("Per-XCD operand-load reuse: N/A -- StreamK kernel is NOT "
+                       "instrumented (no valid WGM dump).")
+    else:
+        from collections import defaultdict
+        rows_by_xcd = defaultdict(list)  # M-tile indices (rows)
+        cols_by_xcd = defaultdict(list)  # N-tile indices (cols)
+        for (i, j), x in np.ndenumerate(xcc_grid):
+            rows_by_xcd[int(x)].append(j)   # wg_m -> M-tile (row)
+            cols_by_xcd[int(x)].append(i)   # wg_n -> N-tile (col)
+        stat_lines = ["Per-XCD operand-load reuse (Rows=M-tiles, Cols=N-tiles):",
+                      "XCD  tiles  uRows  uCols  RowShare%  ColShare%"]
+        for x in sorted(rows_by_xcd):
+            tot = len(rows_by_xcd[x])
+            ur = len(set(rows_by_xcd[x]))
+            uc = len(set(cols_by_xcd[x]))
+            rs = (tot - ur) * 100.0 / tot if tot else 0.0
+            cs = (tot - uc) * 100.0 / tot if tot else 0.0
+            stat_lines.append(f"{x:3d}  {tot:5d}  {ur:5d}  {uc:5d}  {rs:8.1f}  {cs:8.1f}")
+        stats_table = "\n".join(stat_lines)
 
-    # Full kernel/solution name as a small caption under the figure.
+    # --- Full names at the top of the chart (solution + kernel) ---
+    import textwrap
+    solname = meta.get("solname")
     name = meta.get("name")
+    header_lines = []
+    if solname:
+        header_lines.append("Solution: " + textwrap.fill(solname, 150, subsequent_indent="          "))
     if name:
-        fig.text(0.5, 0.005, name, ha="center", va="bottom", fontsize=6,
-                 family="monospace", wrap=True)
+        header_lines.append("Kernel:   " + textwrap.fill(name, 150, subsequent_indent="          "))
+    header = ("\n".join(header_lines) + "\n\n") if header_lines else ""
+
+    if invalid:
+        line1 = ("*** WGM DATA INVALID -- StreamK kernel (uninstrumented): the grid "
+                 "size/name/config below are real, but XCD colors, tile mapping, walk "
+                 "order and per-XCD stats are NOT captured. ***\n") + line1
+
+    title = header + line1 + "\n" + line2 + "\n\n" + stats_table
+    ax.set_title(title, fontsize=8, family="monospace", loc="left",
+                 color=("red" if invalid else "black"))
 
     plt.savefig(out_path, bbox_inches="tight")
     print(f"wrote {out_path}")
@@ -223,7 +280,10 @@ def main():
     parser.add_argument("--lsu", default=None, help="LocalSplitU (LSU) value")
     parser.add_argument("--wgm", default=None, help="WorkGroupMapping (WGM) value")
     parser.add_argument("--wgmxcc", default=None, help="WorkGroupMappingXCC value")
-    parser.add_argument("--name", default=None, help="kernel/solution name to caption on the plot")
+    parser.add_argument("--name", default=None, help="kernel name to show at the top of the plot")
+    parser.add_argument("--solname", default=None, help="full solution name to show at the top of the plot")
+    parser.add_argument("--invalid", action="store_true",
+                        help="mark the dump as invalid (e.g. uninstrumented StreamK): show names/config/grid only")
     args = parser.parse_args()
 
     raw, m, n, ldd, bpe = read_dump(args.dump)
@@ -240,6 +300,7 @@ def main():
         "mt0": args.mt0, "mt1": args.mt1, "depthu": args.depthu,
         "streamk": args.streamk, "gsu": args.gsu, "lsu": args.lsu,
         "wgm": args.wgm, "wgmxcc": args.wgmxcc, "name": args.name,
+        "solname": args.solname, "invalid": args.invalid,
     }
     out_path = args.output or (args.dump + "_wgm.jpg")
     to_plot(lattice, xcc_grid, order, wgm_value, out_path, meta=meta)
