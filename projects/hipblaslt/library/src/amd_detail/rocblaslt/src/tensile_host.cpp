@@ -4361,10 +4361,11 @@ namespace
 
     enum class TuningFailureStage : int
     {
-        None        = 0,
-        Setup       = 1,
-        Enumeration = 2,
-        MidSearch   = 3,
+        None               = 0,
+        Setup              = 1,
+        Enumeration        = 2,
+        MidSearch          = 3,
+        TruncateAfterFirst = 4,
     };
 
     bool tuningFailureInjected(TuningFailureStage stage)
@@ -4864,7 +4865,8 @@ namespace
 
         for(const auto& solution : candidates)
         {
-            if(outOfBudget())
+            if(outOfBudget()
+               || (measured > 0 && tuningFailureInjected(TuningFailureStage::TruncateAfterFirst)))
             {
                 truncated = true;
                 break;

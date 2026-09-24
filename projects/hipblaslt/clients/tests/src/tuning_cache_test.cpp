@@ -2230,6 +2230,56 @@ namespace
         EXPECT_EQ(fellback, 1u);
     }
 
+    // A search the budget stops keeps its best candidate only once the kernel
+    // the call would otherwise run has been measured, and that kernel goes
+    // first. The caller here passes a non-default algo and the search stops
+    // after one candidate, so the partial row must name the caller's kernel,
+    // not the one default selection would have picked.
+    TEST_F(TuningCache, PartialSearchMeasuresTheCallersAlgoFirst)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+        const int given = identities[1].first;
+
+        enterMode("tune", m_path);
+        hipblaslt_tuning_inject_failure_for_test(4);
+
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given, &launched));
+        EXPECT_EQ(launched, given);
+
+        const auto indexes = columnValues(m_path, "solution_index");
+        ASSERT_EQ(indexes.size(), 1u) << "the truncated search recorded nothing";
+        EXPECT_EQ(columnValues(m_path, "complete").at(0), "0");
+        EXPECT_EQ(std::stoi(indexes[0]), given)
+            << "the partial search did not start with the caller's algo";
+    }
+
+    // The same for an algo outside the ranked prefix the tuner searches, such as
+    // one the heuristic's all-solutions fallback hands a caller. It is not among
+    // the candidates at all, so it has to be added to them, at the front.
+    TEST_F(TuningCache, PartialSearchMeasuresAnAlgoOutsideTheRankedCandidates)
+    {
+        // The fixture searches the top sixteen, so take one well past them.
+        const auto identities = candidateIdentities(1024, 512, 1024, 64);
+        if(identities.size() <= 16)
+            GTEST_SKIP() << "this device offers no solution past the searched prefix";
+        const int given = identities.back().first;
+
+        enterMode("tune", m_path);
+        hipblaslt_tuning_inject_failure_for_test(4);
+
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given, &launched));
+        EXPECT_EQ(launched, given);
+
+        const auto indexes = columnValues(m_path, "solution_index");
+        ASSERT_EQ(indexes.size(), 1u) << "the truncated search recorded nothing";
+        EXPECT_EQ(std::stoi(indexes[0]), given)
+            << "an algo outside the ranked candidates was not measured first";
+    }
+
     // Two threads that meet two untuned shapes at the same time both get them
     // tuned. Tune mode was asked for, so what it records must not depend on
     // which thread reached the tuning lock first.
