@@ -42,7 +42,7 @@ def _cases() -> dict[str, Callable]:
     at D_I=128 (the real index_head_dim). seqlen only sizes the grid, so it is
     kept small to keep the golden cheap.
     """
-    from kernels.gfx942.lightning_indexer import (
+    from kernels.common.lightning_indexer import (
         IndexerSpec,
         IndexerTileSpec,
         build_lightning_indexer,

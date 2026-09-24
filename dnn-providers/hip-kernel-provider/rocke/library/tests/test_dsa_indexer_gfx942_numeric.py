@@ -38,9 +38,7 @@ def _gpu_arch() -> str:
 
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.skipif(
-        "gfx942" not in _gpu_arch(), reason="needs a gfx942 GPU"
-    ),
+    pytest.mark.skipif("gfx942" not in _gpu_arch(), reason="needs a gfx942 GPU"),
 ]
 
 _ARCH = "gfx942"
@@ -52,12 +50,12 @@ _TOL = 3e-2
 @pytest.mark.parametrize(
     "Q,Sk,HI,D,block,q_pos_base,body",
     [
-        (8, 64, 4, 16, 64, 0, "scalar"),      # small, decode-like base
+        (8, 64, 4, 16, 64, 0, "scalar"),  # small, decode-like base
         (8, 128, 32, 128, 256, 0, "scalar"),  # GLM-shaped H_I=32, D_I=128
-        (4, 96, 8, 128, 128, 50, "scalar"),   # nonzero causal offset
-        (16, 64, 32, 128, 64, 0, "mfma"),     # MFMA, GLM-shaped, 16-aligned
-        (32, 128, 64, 128, 64, 0, "mfma"),    # MFMA, DeepSeek-shaped, multi-tile
-        (16, 96, 8, 128, 64, 48, "mfma"),     # MFMA, nonzero causal offset
+        (4, 96, 8, 128, 128, 50, "scalar"),  # nonzero causal offset
+        (16, 64, 32, 128, 64, 0, "mfma"),  # MFMA, GLM-shaped, 16-aligned
+        (32, 128, 64, 128, 64, 0, "mfma"),  # MFMA, DeepSeek-shaped, multi-tile
+        (16, 96, 8, 128, 64, 48, "mfma"),  # MFMA, nonzero causal offset
     ],
 )
 def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
@@ -65,7 +63,7 @@ def test_indexer_scores_match_oracle(Q, Sk, HI, D, block, q_pos_base, body):
     from rocke.run_manifest import run_manifest
 
     from builders.gfx942.dsa.manifest import make_lightning_indexer_manifest
-    from kernels.gfx942.lightning_indexer import (
+    from kernels.common.lightning_indexer import (
         IndexerSpec,
         IndexerTileSpec,
         build_lightning_indexer,
