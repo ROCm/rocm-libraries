@@ -168,7 +168,7 @@ class TestValidationRules(unittest.TestCase):
                         ok(p, "tdm", "intrawave", False, prefix, "rcr", *pads),
                         (prefix, p, pads),
                     )
-        # Padding is still allowed for comp_async and the legacy pipelines.
+        # Full padding is allowed for comp_async and the legacy pipelines.
         for p in ("comp_async", "compv3", "compv4", "mem"):
             self.assertTrue(
                 ok(
@@ -194,6 +194,103 @@ class TestValidationRules(unittest.TestCase):
         self.assertEqual(r("comp_async", "cshuffle", True, True, True), "")
         self.assertEqual(r("compv3", "cshuffle", True, True, True), "")
         self.assertIn("pad_m=pad_n=pad_k=False", vu.TDM_PAD_REJECT_REASON)
+
+    def test_comp_async_pad_reject_reason(self):
+        r = vu.gfx1250_comp_async_pad_reject_reason
+        self.assertEqual(r("comp_async", True, True, True), "")
+        self.assertEqual(r("comp_async", "true", "True", True), "")
+        for pads in (
+            (False, False, False),
+            (False, True, True),
+            (True, False, True),
+            (True, True, False),
+        ):
+            self.assertEqual(
+                r("comp_async", *pads), vu.GFX1250_COMP_ASYNC_PAD_REJECT_REASON, pads
+            )
+        for p in ("compv3", "compv4", "mem", "comp_tdm", "comp_tdm_v2"):
+            self.assertEqual(r(p, False, False, False), "", p)
+        self.assertIn("pad_m=pad_n=pad_k=True", vu.GFX1250_COMP_ASYNC_PAD_REJECT_REASON)
+
+    def test_comp_async_8bit_warp_tile_k_reject_reason(self):
+        r = vu.gfx1250_comp_async_8bit_warp_tile_k_reject_reason
+        reason = vu.GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
+        for dt in ("fp8", "bf8"):
+            self.assertEqual(r("comp_async", dt, dt, 64), reason, dt)
+            self.assertEqual(r("comp_async", dt, dt, 32), reason, dt)
+            self.assertEqual(r("comp_async", dt, dt, 128), "", dt)
+            for p in ("compv3", "compv4", "mem", "comp_tdm", "comp_tdm_v2"):
+                self.assertEqual(r(p, dt, dt, 64), "", (p, dt))
+        self.assertEqual(r("comp_async", "fp16", "fp16", 32), "")
+        self.assertIn("warp_tile_k", reason)
+
+    def test_comp_async_8bit_warp_tile_k_tile_config(self):
+        tile = dict(_TILE, tile_k=128)
+
+        def valid(pipe, dt, wtk, arch="gfx1250"):
+            t = dict(tile, warp_tile_k=wtk)
+            args = [t[k] for k in _TILE] + [dt, dt, "fp16"]
+            return vu.is_tile_config_valid(*args, pipe, "rcr", arch, "gemm_universal")
+
+        for dt in ("fp8", "bf8"):
+            self.assertFalse(valid("comp_async", dt, 64), dt)
+            self.assertTrue(valid("comp_async", dt, 128), dt)
+            self.assertTrue(valid("compv3", dt, 64), dt)
+
+    def test_comp_async_pad_trait_gate(self):
+        ok = vu.is_trait_combination_valid
+        for prefix in ("gemm_universal", "batched_gemm"):
+            self.assertTrue(
+                ok(
+                    "comp_async",
+                    "cshuffle",
+                    "intrawave",
+                    False,
+                    prefix,
+                    "rcr",
+                    True,
+                    True,
+                    True,
+                )
+            )
+            for pads in (
+                (False, False, False),
+                (True, True, False),
+                (False, True, True),
+            ):
+                self.assertFalse(
+                    ok(
+                        "comp_async",
+                        "cshuffle",
+                        "intrawave",
+                        False,
+                        prefix,
+                        "rcr",
+                        *pads,
+                    ),
+                    (prefix, pads),
+                )
+        # No padding given: the pad rule is not checked (legacy callers).
+        for prefix in ("", "gemm_universal", "batched_gemm"):
+            self.assertTrue(
+                ok("comp_async", "cshuffle", "intrawave", False, prefix), prefix
+            )
+        # Legacy pipelines keep accepting any padding.
+        for p in ("compv3", "compv4", "mem"):
+            self.assertTrue(
+                ok(
+                    p,
+                    "cshuffle",
+                    "intrawave",
+                    False,
+                    "gemm_universal",
+                    "rcr",
+                    False,
+                    False,
+                    False,
+                ),
+                p,
+            )
 
     def test_comp_async_layout_gate(self):
         v = vu.validate_gemm_gfx1250_pipeline
@@ -239,9 +336,10 @@ class TestValidationRules(unittest.TestCase):
         def boom(*_a, **_k):
             raise AssertionError("gfx1250 gate consulted on the MX path")
 
-        with mock.patch.object(
-            vu, "gfx1250_comp_async_layout_reject_reason", boom
-        ), mock.patch.object(vu, "tdm_pad_reject_reason", boom):
+        with (
+            mock.patch.object(vu, "gfx1250_comp_async_layout_reject_reason", boom),
+            mock.patch.object(vu, "tdm_pad_reject_reason", boom),
+        ):
             for dtype in ("fp8", "fp4"):
                 for layout, expected in want.items():
                     got = vu.is_tile_config_valid(
@@ -373,7 +471,7 @@ class TestBuilderGolden(_BuilderCase):
 
     def test_comp_async_instance(self):
         for prefix in ("gemm_universal", "batched_gemm"):
-            code = self._gen(prefix, "comp_async", "cshuffle")
+            code = self._gen(prefix, "comp_async", "cshuffle", pads=(True,) * 3)
             self.assertIn("GemmPipelineAgBgCrCompAsync", code, prefix)
             self.assertIn("DoubleSmemBuffer = true", code, prefix)
             self.assertNotIn("TdmEpilogue", code, prefix)
@@ -396,7 +494,7 @@ class TestBuilderGolden(_BuilderCase):
             with self.assertRaises(ValueError, msg=prefix):
                 self._gen(prefix, "comp_tdm", "tdm")
             with self.assertRaises(ValueError, msg=prefix):
-                self._gen(prefix, "comp_async", "cshuffle")
+                self._gen(prefix, "comp_async", "cshuffle", pads=(True,) * 3)
         with self.assertRaises(ValueError):
             self._gen("gemm_universal", "compv3", "tdm")
         with self.assertRaises(ValueError):
@@ -412,15 +510,37 @@ class TestBuilderGolden(_BuilderCase):
                 ):
                     with self.assertRaisesRegex(ValueError, "TDM bounds-clips"):
                         self._gen(prefix, pipeline, "tdm", pads=pads)
-            # comp_async keeps padding.
+            # comp_async requires full padding.
             code = self._gen(prefix, "comp_async", "cshuffle", pads=(True,) * 3)
             self.assertIn("GemmPipelineAgBgCrCompAsync", code)
+
+    def test_builder_rejects_unpadded_comp_async(self):
+        for prefix in ("gemm_universal", "batched_gemm"):
+            for pads in (
+                (False, False, False),
+                (False, True, True),
+                (True, False, True),
+                (True, True, False),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "requires pad_m=pad_n=pad_k=True"
+                ):
+                    self._gen(prefix, "comp_async", "cshuffle", pads=pads)
+        # Off gfx1250 the builder does not consult the gate.
+        code = self._gen("gemm_universal", "compv3", "cshuffle", arch="gfx942")
+        self.assertIn("DoubleSmemBuffer = false", code)
 
     def test_builder_comp_async_rc_layout_only(self):
         for prefix in ("gemm_universal", "batched_gemm"):
             for layout in ("rrr", "crr", "ccr"):
                 with self.assertRaisesRegex(ValueError, "A row-major and B col-major"):
-                    self._gen(prefix, "comp_async", "cshuffle", layout=layout)
+                    self._gen(
+                        prefix,
+                        "comp_async",
+                        "cshuffle",
+                        pads=(True,) * 3,
+                        layout=layout,
+                    )
                 code = self._gen(prefix, "comp_tdm", "tdm", layout=layout)
                 self.assertIn("TdmEpilogue", code, (prefix, layout))
 
@@ -439,7 +559,7 @@ class TestBuilderGolden(_BuilderCase):
         }
         self.assertEqual(tdm_pads, {(False, False, False)})
         async_pads = {tuple(c[3:6]) for c in combos if c[0] == "comp_async"}
-        self.assertEqual(len(async_pads), 8)
+        self.assertEqual(async_pads, {(True, True, True)})
 
     def test_lookup_pipeline_strict(self):
         self.assertEqual(lookup_pipeline({"a": "x"}, "a"), "x")
@@ -453,6 +573,7 @@ class TestBuilderGolden(_BuilderCase):
                 ["compv3", "comp_async", "comp_tdm", "comp_tdm_v2"],
                 ["cshuffle", "tdm"],
                 persistent=(False, True),
+                pads=(False, True),
             ),
         )
         combos = {(c[0], c[1], c[6]) for c in b._generate_trait_combinations()}

@@ -58,6 +58,17 @@ GFX1250_COMP_ASYNC_PAD_REJECT_REASON = (
     "extent and the TailNumber::Two path lacks an LDS fence, so comp_async "
     "requires pad_m=pad_n=pad_k=True"
 )
+# Non-MX comp_async on gfx1250 with 8-bit A/B (fp8/bf8, the XOR-swizzled async
+# load path) gives wrong results with warp_tile_k 32 or 64 at any tile_k
+# (on-device verified); warp_tile_k=128 is correct. Same rule and text as the
+# dispatcher codegen_common.
+GFX1250_COMP_ASYNC_8BIT_DTYPES = ("fp8", "bf8")
+GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K = 128
+GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON = (
+    "comp_async on gfx1250 with fp8/bf8 A/B gives wrong results below "
+    "warp_tile_k=128 (XOR-swizzled 8-bit async load), so it requires "
+    "warp_tile_k >= 128"
+)
 
 
 def _is_true(value) -> bool:
@@ -95,6 +106,22 @@ def gfx1250_comp_async_layout_reject_reason(pipeline, layout):
         return ""
     if layout[:2] != "rc":
         return GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON
+    return ""
+
+
+def gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
+    pipeline, a_datatype, b_datatype, warp_tile_k
+):
+    """Reason string if non-MX comp_async has fp8/bf8 A or B and
+    warp_tile_k < 128, else ""."""
+    if pipeline not in GEMM_ASYNC_PIPELINES:
+        return ""
+    is_8bit = (
+        a_datatype in GFX1250_COMP_ASYNC_8BIT_DTYPES
+        or b_datatype in GFX1250_COMP_ASYNC_8BIT_DTYPES
+    )
+    if is_8bit and warp_tile_k < GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K:
+        return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
     return ""
 
 
@@ -365,11 +392,15 @@ def is_trait_combination_valid(
     persistent_or_preshuffle_quant=None,
     kernel_name_prefix: str = "",
     layout: str = "",
-    pad_m=False,
-    pad_n=False,
-    pad_k=False,
+    pad_m=None,
+    pad_n=None,
+    pad_k=None,
 ) -> bool:
-    """Check if a trait combination is valid."""
+    """Check if a trait combination is valid.
+
+    pad_m/pad_n/pad_k are optional: None means the caller did not provide the
+    padding, so the padding rules are not checked for it.
+    """
     if kernel_name_prefix == "gemm_aquant":
         if (pipeline, epilogue, scheduler) in AQUANT_TRAIT_UNSUPPORTED_COMBINATIONS:
             return False
@@ -427,8 +458,12 @@ def is_trait_combination_valid(
             if epilogue == "tdm":
                 return False
             # Non-MX comp_async (gfx1250-only) must be fully padded (see
-            # GFX1250_COMP_ASYNC_PAD_REJECT_REASON).
-            if gfx1250_comp_async_pad_reject_reason(pipeline, pad_m, pad_n, pad_k):
+            # GFX1250_COMP_ASYNC_PAD_REJECT_REASON). Skipped when the caller
+            # passed no padding at all.
+            pads_given = not (pad_m is None and pad_n is None and pad_k is None)
+            if pads_given and gfx1250_comp_async_pad_reject_reason(
+                pipeline, pad_m, pad_n, pad_k
+            ):
                 logging.debug(f"{pipeline}: {GFX1250_COMP_ASYNC_PAD_REJECT_REASON}")
                 return False
         return (pipeline, epilogue, scheduler) not in TRAIT_UNSUPPORTED_COMBINATIONS
@@ -847,6 +882,12 @@ def is_tile_config_valid(
         )
         if not gfx1250_valid:
             logging.debug(f"gfx1250 pipeline validation failed: {gfx1250_error}")
+            return False
+        warp_tile_k_reason = gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
+            pipeline, a_datatype, b_datatype, warp_tile_k
+        )
+        if warp_tile_k_reason:
+            logging.debug(f"gfx1250 pipeline validation failed: {warp_tile_k_reason}")
             return False
 
         gemm_valid, gemm_valid_error = validate_gemm(

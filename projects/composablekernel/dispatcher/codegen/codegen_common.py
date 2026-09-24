@@ -742,6 +742,38 @@ def tile_config_from_dict(tile_dict: Mapping[str, int]) -> TileConfig:
     )
 
 
+# Non-MX comp_async on gfx1250 must be fully padded. Shared by
+# unified_gemm_codegen, arch_filter and the Tile Engine gemm_validation_utils
+# (identical text there).
+GFX1250_COMP_ASYNC_PAD_REJECT_REASON = (
+    "comp_async on gfx1250 unpadded: the async K-prefetch reads past the A/B "
+    "extent and the TailNumber::Two path lacks an LDS fence, so comp_async "
+    "requires pad_m=pad_n=pad_k=True"
+)
+
+# Non-MX comp_async on gfx1250 with 8-bit A/B (fp8/bf8, the XOR-swizzled async
+# load path) gives wrong results with warp_tile_k 32 or 64 at any tile_k
+# (on-device verified); warp_tile_k=128 is correct. Shared like
+# GFX1250_COMP_ASYNC_PAD_REJECT_REASON above.
+GFX1250_COMP_ASYNC_8BIT_DTYPES = ("fp8", "bf8")
+GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K = 128
+GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON = (
+    "comp_async on gfx1250 with fp8/bf8 A/B gives wrong results below "
+    "warp_tile_k=128 (XOR-swizzled 8-bit async load), so it requires "
+    "warp_tile_k >= 128"
+)
+
+
+def gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype_a, dtype_b, warp_tile_k) -> bool:
+    """True if a gfx1250 non-MX comp_async config has fp8/bf8 A or B and a
+    warp_tile_k below GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K."""
+    is_8bit = (
+        dtype_a in GFX1250_COMP_ASYNC_8BIT_DTYPES
+        or dtype_b in GFX1250_COMP_ASYNC_8BIT_DTYPES
+    )
+    return is_8bit and warp_tile_k < GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K
+
+
 def rcr_only_layout_guard(layout: str) -> Optional[str]:
     """Layout guard for operators that only support ``rcr``.
 

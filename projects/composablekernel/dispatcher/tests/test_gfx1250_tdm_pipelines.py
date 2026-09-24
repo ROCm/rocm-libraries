@@ -28,7 +28,11 @@ sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
 from arch_filter import ArchFilter  # noqa: E402
 from arch_specs_generated import get_lds_limit  # noqa: E402
-from codegen_common import CommonTypeMappings  # noqa: E402
+from codegen_common import (  # noqa: E402
+    CommonTypeMappings,
+    GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
+    gfx1250_comp_async_8bit_warp_tile_k_rejected,
+)
 
 TDM_TILE = dict(
     tile_m=128,
@@ -93,6 +97,61 @@ class TestArchFilter(unittest.TestCase):
                 warp_tile_n=32,
                 warp_tile_k=16,
             )
+        )
+
+    def test_comp_async_pad_rule_gfx1250(self):
+        # Opt-in: the rule only runs when all three pad traits are passed.
+        self.assertTrue(self._valid("gfx1250", pipeline="comp_async"))
+        self.assertTrue(
+            self._valid(
+                "gfx1250", pipeline="comp_async", pad_m=True, pad_n=True, pad_k=True
+            )
+        )
+        for pads in ((False, False, False), (False, True, True), (True, True, False)):
+            kw = dict(zip(("pad_m", "pad_n", "pad_k"), pads))
+            self.assertFalse(self._valid("gfx1250", pipeline="comp_async", **kw), pads)
+            self.assertTrue(self._valid("gfx1250", pipeline="compv3", **kw), pads)
+        # gfx950 comp_async (grouped_conv, MX) is not pad-gated.
+        self.assertTrue(
+            self._valid(
+                "gfx950",
+                pipeline="comp_async",
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pad_m=False,
+                pad_n=False,
+                pad_k=False,
+            )
+        )
+
+    def test_comp_async_8bit_warp_tile_k_rule_gfx1250(self):
+        pads = dict(pad_m=True, pad_n=True, pad_k=True)
+        for dt in ("fp8", "bf8"):
+            kw = dict(datatype_a=dt, datatype_b=dt, datatype_c="fp16", tile_k=128)
+            self.assertFalse(
+                self._valid(
+                    "gfx1250", pipeline="comp_async", warp_tile_k=64, **kw, **pads
+                ),
+                dt,
+            )
+            self.assertTrue(
+                self._valid(
+                    "gfx1250", pipeline="comp_async", warp_tile_k=128, **kw, **pads
+                ),
+                dt,
+            )
+            # Only comp_async is affected.
+            self.assertTrue(
+                self._valid("gfx1250", pipeline="compv3", warp_tile_k=64, **kw), dt
+            )
+        self.assertTrue(gfx1250_comp_async_8bit_warp_tile_k_rejected("fp8", "fp8", 64))
+        self.assertTrue(gfx1250_comp_async_8bit_warp_tile_k_rejected("fp16", "bf8", 32))
+        self.assertFalse(
+            gfx1250_comp_async_8bit_warp_tile_k_rejected("bf8", "bf8", 128)
+        )
+        self.assertFalse(
+            gfx1250_comp_async_8bit_warp_tile_k_rejected("fp16", "fp16", 32)
         )
 
     def test_existing_pipelines_unchanged(self):
@@ -183,10 +242,10 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
             "pipeline": ["comp_tdm", "comp_tdm_v2", "comp_async", "compv3"],
             "epilogue": ["tdm", "cshuffle"],
             "scheduler": ["intrawave"],
-            # TDM only accepts pads False; pad_k True keeps comp_async and
-            # compv3 padded coverage and proves TDM drops the padded combos.
-            "pad_m": [False],
-            "pad_n": [False],
+            # TDM only accepts pads False and comp_async only pads True, so
+            # every pad combo proves each gate drops the others.
+            "pad_m": [False, True],
+            "pad_n": [False, True],
             "pad_k": [False, True],
             "persistent": [False, True],
         },
@@ -216,11 +275,11 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         # comp_tdm_v2: 4 waves only.
         self.assertEqual(len(tdm_v2), 1)
         self.assertIn("2x2x1", tdm_v2[0])
-        # comp_async: 2 wave layouts x persistent on/off x pad_k, cshuffle only.
-        self.assertEqual(len(async_), 8)
-        self.assertTrue(
-            any("_comp_async_cshuffle_intrawave_False_False_True_" in n for n in names)
-        )
+        # comp_async: 2 wave layouts x persistent on/off, fully padded,
+        # cshuffle only.
+        self.assertEqual(len(async_), 4)
+        for n in async_:
+            self.assertIn("_comp_async_cshuffle_intrawave_True_True_True_", n)
         for n in tdm + tdm_v2:
             self.assertIn("_tdm_intrawave_False_False_False_False_", n)
         self.assertFalse(
@@ -300,7 +359,9 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
                     self.tmp / f"tdm_{pad}_{variant}", "gfx1250", variant, path
                 )
                 self.assertFalse(any("_comp_tdm" in n for n in names), (pad, names))
-                self.assertTrue(any("_comp_async_" in n for n in names), pad)
+                # A single pad is not enough for comp_async either.
+                self.assertFalse(any("_comp_async_" in n for n in names), pad)
+                self.assertTrue(any("_compv3_" in n for n in names), pad)
 
     def test_comp_async_rc_layout_only(self):
         for layout in ("rrr", "crr", "ccr"):
@@ -317,6 +378,16 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         self.assertIn(
             "A row-major and B col-major", ugc.GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON
         )
+        self.assertIn("pad_m=pad_n=pad_k=True", GFX1250_COMP_ASYNC_PAD_REJECT_REASON)
+        self.assertIs(
+            ugc.GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
+            GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
+        )
+        # Same text as the Tile Engine gate.
+        te_gemm = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
+        te_src = (te_gemm / "gemm_validation_utils.py").read_text()
+        te_text = "".join(GFX1250_COMP_ASYNC_PAD_REJECT_REASON.split())
+        self.assertIn(te_text, "".join(te_src.replace('"', "").split()))
 
     def test_multi_d_no_gfx1250_pipelines(self):
         _, names = self._gen("gfx1250", "multi_d")
@@ -374,17 +445,20 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         self.assertFalse(self._ok("comp_tdm_v2", "tdm", waves=(4, 2, 1)))
         self.assertFalse(self._ok("compv3", "tdm"))
 
+    def _async(self, *args, **kw):
+        return self._ok("comp_async", *args, pad_m=True, pad_n=True, pad_k=True, **kw)
+
     def test_comp_async_rules(self):
-        self.assertTrue(self._ok("comp_async"))
-        self.assertTrue(self._ok("comp_async", persist=True))
-        self.assertTrue(self._ok("comp_async", variant="batched"))
-        self.assertFalse(self._ok("comp_async", arch="gfx942"))
+        self.assertTrue(self._async())
+        self.assertTrue(self._async(persist=True))
+        self.assertTrue(self._async(variant="batched"))
+        self.assertFalse(self._async(arch="gfx942"))
         for variant in ("multi_d", "grouped", "multi_abd", "stream_k"):
-            self.assertFalse(self._ok("comp_async", variant=variant), variant)
-        self.assertFalse(self._ok("comp_async", sched="interwave"))
-        self.assertFalse(self._ok("comp_async", "tdm"))
-        self.assertFalse(self._ok("comp_async", "default"))
-        self.assertFalse(self._ok("comp_async", "cshuffle", sched="interwave"))
+            self.assertFalse(self._async(variant=variant), variant)
+        self.assertFalse(self._async(sched="interwave"))
+        self.assertFalse(self._async("tdm"))
+        self.assertFalse(self._async("default"))
+        self.assertFalse(self._async("cshuffle", sched="interwave"))
 
     def test_tdm_pad_rule(self):
         for pipe in ("comp_tdm", "comp_tdm_v2"):
@@ -393,17 +467,30 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
             )
             for pad in ("pad_m", "pad_n", "pad_k"):
                 self.assertFalse(self._ok(pipe, "tdm", **{pad: True}), (pipe, pad))
-        # Padding does not affect comp_async or legacy pipelines.
-        self.assertTrue(self._ok("comp_async", pad_m=True, pad_n=True, pad_k=True))
+        # comp_async requires full padding; legacy pipelines are unaffected.
+        self.assertTrue(self._async())
+        self.assertFalse(self._ok("comp_async"))
+        for pad in ("pad_m", "pad_n", "pad_k"):
+            kw = {"pad_m": True, "pad_n": True, "pad_k": True, pad: False}
+            self.assertFalse(self._ok("comp_async", **kw), pad)
+            self.assertTrue(self._ok("compv3", **kw), pad)
         self.assertTrue(self._ok("compv3", pad_m=True, pad_n=True, pad_k=True))
 
     def test_comp_async_layout_rule(self):
-        self.assertTrue(self._ok("comp_async", layout="rcr"))
-        self.assertTrue(self._ok("comp_async", layout=""))
+        self.assertTrue(self._async(layout="rcr"))
+        self.assertTrue(self._async(layout=""))
         for layout in ("rrr", "crr", "ccr"):
-            self.assertFalse(self._ok("comp_async", layout=layout), layout)
+            self.assertFalse(self._async(layout=layout), layout)
             self.assertTrue(self._ok("comp_tdm", "tdm", layout=layout), layout)
             self.assertTrue(self._ok("compv3", layout=layout), layout)
+
+    def test_comp_async_8bit_warp_tile_k_rule(self):
+        for dt in ("fp8", "bf8"):
+            self.assertFalse(self._async(dtype=dt, warp_tile_k=64), dt)
+            self.assertTrue(self._async(dtype=dt, warp_tile_k=128), dt)
+            self.assertTrue(self._ok("compv3", dtype=dt, warp_tile_k=64), dt)
+        self.assertTrue(self._async(dtype="fp16", warp_tile_k=32))
+        self.assertTrue(self._async(dtype="", warp_tile_k=0))
 
     def test_expand_sweep_tdm_unpadded(self):
         import gemm_utils
@@ -427,7 +514,7 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         for c in tdm:
             self.assertEqual((c.pad_m, c.pad_n, c.pad_k), (False, False, False))
         pads = {(c.pad_m, c.pad_n, c.pad_k) for c in rcr if c.pipeline == "comp_async"}
-        self.assertEqual(len(pads), 8)
+        self.assertEqual(pads, {(True, True, True)})
         self.assertFalse(any(c.pipeline == "comp_async" for c in rrr))
         self.assertTrue(any(c.pipeline == "comp_tdm" for c in rrr))
 

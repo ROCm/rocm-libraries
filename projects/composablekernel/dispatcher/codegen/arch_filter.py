@@ -41,6 +41,12 @@ from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import logging
 
+from codegen_common import (
+    GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
+    GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON,
+    gfx1250_comp_async_8bit_warp_tile_k_rejected,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -413,6 +419,11 @@ class KernelConfig:
     # Operator type (affects validation rules)
     operator: OperatorType = OperatorType.GEMM
 
+    # Padding traits. None means unknown and skips the pad rules.
+    pad_m: Optional[bool] = None
+    pad_n: Optional[bool] = None
+    pad_k: Optional[bool] = None
+
     @property
     def dtype_key(self) -> str:
         """Generate data type combination key for warp tile lookup.
@@ -588,6 +599,9 @@ class ArchFilter:
         layout: str = "rcr",
         operator: Optional[OperatorType] = None,
         double_smem_buffer: bool = False,
+        pad_m: Optional[bool] = None,
+        pad_n: Optional[bool] = None,
+        pad_k: Optional[bool] = None,
     ) -> bool:
         """
         Quick validation check for a kernel configuration.
@@ -604,6 +618,7 @@ class ArchFilter:
             operator: Operator type (GEMM, CONV_FWD, CONV_BWD_DATA, etc.)
                      Affects validation rules for tile constraints.
                      Defaults to GEMM if not specified.
+            pad_m, pad_n, pad_k: Padding traits; None skips the pad rules.
 
         Returns:
             True if configuration is valid for this architecture
@@ -627,6 +642,9 @@ class ArchFilter:
             layout=layout.lower(),
             double_smem_buffer=double_smem_buffer,
             operator=operator if operator is not None else OperatorType.GEMM,
+            pad_m=pad_m,
+            pad_n=pad_n,
+            pad_k=pad_k,
         )
         return self.validate_kernel(config).valid
 
@@ -775,8 +793,28 @@ class ArchFilter:
         (and the TDM epilogue with a TDM pipeline), are intrawave-only, and
         comp_tdm_v2 requires exactly four waves. Only the plain GEMM operator is
         supported (no stream-K, multi-D, grouped or preshuffle).
+
+        Non-MX comp_async GEMM on gfx1250 must be fully padded; the rule only
+        runs when the caller passes all three pad traits.
         """
         is_tdm_pipeline = config.pipeline in TDM_PIPELINES
+        if (
+            config.pipeline == "comp_async"
+            and self.gpu_arch.split(":")[0] == TDM_ARCH
+            and config.operator == OperatorType.GEMM
+            and None not in (config.pad_m, config.pad_n, config.pad_k)
+            and not (config.pad_m and config.pad_n and config.pad_k)
+        ):
+            result.add_error(GFX1250_COMP_ASYNC_PAD_REJECT_REASON)
+        if (
+            config.pipeline == "comp_async"
+            and self.gpu_arch.split(":")[0] == TDM_ARCH
+            and config.operator == OperatorType.GEMM
+            and gfx1250_comp_async_8bit_warp_tile_k_rejected(
+                config.datatype_a, config.datatype_b, config.warp_tile_k
+            )
+        ):
+            result.add_error(GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON)
         if not is_tdm_pipeline:
             if config.epilogue == "tdm":
                 result.add_error(

@@ -2377,6 +2377,9 @@ _GFX1250_ONLY_PIPELINES = ("comp_async",) + _TDM_PIPELINES
 # transforms inflate them, so TDM requires pad_m=pad_n=pad_k=False.
 # comp_async on gfx1250 requires A row-major and B col-major: the LDS
 # transpose-load path is incompatible with the WMMA 16x16x32 K distribution.
+# comp_async on gfx1250 unpadded: the async K-prefetch reads past the A/B
+# extent and the TailNumber::Two path lacks an LDS fence, so comp_async
+# requires pad_m=pad_n=pad_k=True.
 
 
 def _gfx1250_pipeline_supported(
@@ -2393,12 +2396,15 @@ def _gfx1250_pipeline_supported(
     pad_n: bool = False,
     pad_k: bool = False,
     layout: str = "",
+    dtype: str = "",
+    warp_tile_k: int = 0,
 ) -> bool:
     """False iff the (pipeline, epilogue) pair is a gfx1250-only combination
     that the codegen would reject for this arch/variant/trait.
 
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
-    comp_async layout rule."""
+    comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
+    8-bit warp_tile_k rule; an empty dtype skips it."""
     if pipeline not in _GFX1250_ONLY_PIPELINES and epilogue != "tdm":
         return True
     if pipeline not in _GFX1250_ONLY_PIPELINES:
@@ -2419,6 +2425,20 @@ def _gfx1250_pipeline_supported(
     # comp_async
     if layout and layout[:2] != "rc":
         return False
+    if not (pad_m and pad_n and pad_k):
+        return False
+    if dtype:
+        try:
+            from codegen_common import (  # noqa: WPS433 (lazy, see output_dtype_for)
+                gfx1250_comp_async_8bit_warp_tile_k_rejected as _rejected,
+            )
+        except ImportError:  # codegen dir not on sys.path: same rule inline
+
+            def _rejected(dtype_a, dtype_b, wtk):
+                return (dtype_a in ("fp8", "bf8") or dtype_b in ("fp8", "bf8")) and wtk < 128
+
+        if _rejected(dtype, dtype, warp_tile_k):
+            return False
     return epilogue == "cshuffle"
 
 
@@ -2682,6 +2702,8 @@ def expand_sweep(
             pad_n=bool(pn),
             pad_k=bool(pk),
             layout=layout,
+            dtype=dtype,
+            warp_tile_k=wtk,
         ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(

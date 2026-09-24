@@ -107,7 +107,9 @@ class TestPreshuffleRejection(unittest.TestCase):
             for pipe in BATCHED_GEMM_UNSUPPORTED_PIPELINES:
                 with self.assertRaises(ValueError):
                     b._check_pipeline_allowed_for_op(pipe, "cshuffle")
-            b._check_pipeline_allowed_for_op("comp_async", "cshuffle")
+            with self.assertRaisesRegex(ValueError, "pad_m=pad_n=pad_k=True"):
+                b._check_pipeline_allowed_for_op("comp_async", "cshuffle")
+            b._check_pipeline_allowed_for_op("comp_async", "cshuffle", True, True, True)
             b._check_pipeline_allowed_for_op("comp_tdm", "tdm")
             b._check_pipeline_allowed_for_op("comp_tdm_v2", "tdm")
 
@@ -137,17 +139,27 @@ class TestGfx1250Configs(unittest.TestCase):
 
     def test_traits_valid(self):
         for k in self._all():
-            pipe, epi, sched, _, _, _, persistent = k["trait_combo"]
+            pipe, epi, sched, pad_m, pad_n, pad_k, persistent = k["trait_combo"]
             self.assertTrue(
                 vu.is_trait_combination_valid(
-                    pipe, epi, sched, persistent, "batched_gemm"
+                    pipe,
+                    epi,
+                    sched,
+                    persistent,
+                    "batched_gemm",
+                    "rcr",
+                    pad_m=pad_m,
+                    pad_n=pad_n,
+                    pad_k=pad_k,
                 ),
                 k["name"],
             )
             if pipe in _TDM_PIPELINES:
                 self.assertEqual((epi, sched), ("tdm", "intrawave"), k["name"])
+                self.assertEqual((pad_m, pad_n, pad_k), (False,) * 3, k["name"])
             if pipe == "comp_async":
                 self.assertEqual((epi, sched), ("cshuffle", "intrawave"), k["name"])
+                self.assertEqual((pad_m, pad_n, pad_k), (True,) * 3, k["name"])
             if epi == "tdm":
                 self.assertIn(pipe, _TDM_PIPELINES, k["name"])
 
@@ -204,7 +216,7 @@ class TestGfx1250Configs(unittest.TestCase):
 
 
 class TestGeneratedHeaders(unittest.TestCase):
-    def _gen(self, pipe, epi, warp=(2, 2, 1)):
+    def _gen(self, pipe, epi, warp=(2, 2, 1), pad=False):
         with tempfile.TemporaryDirectory() as tmp:
             b = _builder(tmp, _CI_CONFIG)
             tile = {
@@ -219,7 +231,7 @@ class TestGeneratedHeaders(unittest.TestCase):
                 "warp_tile_k": 32,
             }
             _, code = b._generate_kernel_instance(
-                tile, (pipe, epi, "intrawave", False, False, False, False)
+                tile, (pipe, epi, "intrawave", pad, pad, pad, False)
             )
             return code
 
@@ -236,7 +248,7 @@ class TestGeneratedHeaders(unittest.TestCase):
             self.assertIn("BatchedGemmKernel", code)
 
     def test_comp_async_header(self):
-        code = self._gen("comp_async", "cshuffle")
+        code = self._gen("comp_async", "cshuffle", pad=True)
         self.assertIn("GemmPipelineAgBgCrCompAsync", code)
         self.assertIn("DoubleSmemBuffer = true", code)
         self.assertNotIn("TdmEpilogue", code)

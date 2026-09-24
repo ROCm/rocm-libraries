@@ -55,16 +55,19 @@ GFX1250_LDS = 320 * 1024
 
 # Kernel counts per (dtype, layout) for the full gfx1250 config: total and per
 # new pipeline. Pins the sweep so any config or validator drift is noticed.
-# comp_async is rcr-only on gfx1250, so the rrr rows have no comp_async.
+# comp_async is rcr-only on gfx1250, so the rrr rows have no comp_async. The
+# pads sweep [false, true]: comp_async keeps only all-True, TDM only all-False,
+# and the legacy pipelines keep all 8 combos.
 FULL_COUNTS = {
-    ("fp16", "rcr"): (4005, 384, 174, 87),
-    ("fp16", "rrr"): (3621, 0, 174, 87),
-    ("bf16", "rcr"): (4005, 384, 174, 87),
-    ("bf16", "rrr"): (3621, 0, 174, 87),
-    ("fp8", "rcr"): (7020, 720, 360, 180),
-    ("fp8", "rrr"): (6300, 0, 360, 180),
-    ("bf8", "rcr"): (7020, 720, 360, 180),
-    ("bf8", "rrr"): (6300, 0, 360, 180),
+    ("fp16", "rcr"): (27525, 384, 174, 87),
+    ("fp16", "rrr"): (27141, 0, 174, 87),
+    ("bf16", "rcr"): (27525, 384, 174, 87),
+    ("bf16", "rrr"): (27141, 0, 174, 87),
+    # fp8/bf8 comp_async keeps only warp_tile_k=128 (the 16x16x64 set is gated).
+    ("fp8", "rcr"): (46908, 288, 360, 180),
+    ("fp8", "rrr"): (46620, 0, 360, 180),
+    ("bf8", "rcr"): (46908, 288, 360, 180),
+    ("bf8", "rrr"): (46620, 0, 360, 180),
 }
 
 
@@ -200,6 +203,9 @@ class _ConfigLintMixin:
             self.assertNotEqual(epilogue, "tdm", name)
         if pipeline == "comp_async":
             self.assertEqual(layout[:2], "rc", name)
+            self.assertEqual((pad_m, pad_n, pad_k), (True, True, True), name)
+            if dtype in ("fp8", "bf8"):
+                self.assertEqual(t["warp_tile_k"], 128, name)
         if pipeline == "comp_tdm_v2":
             self.assertEqual(t["warp_m"] * t["warp_n"] * t["warp_k"], 4, name)
         if pipeline in NEW_PIPELINES + ["compv4"]:
@@ -235,11 +241,12 @@ class TestCiConfig(_ConfigLintMixin, unittest.TestCase):
             for layout in LAYOUTS:
                 kernels = self._lint(dtype, layout)
                 counts = collections.Counter(k["trait_combo"][0] for k in kernels)
-                # comp_async keeps all 8 pad combos; TDM keeps only pads False;
-                # comp_async is rcr-only on gfx1250.
+                # comp_async keeps only pads True; TDM keeps only pads False;
+                # comp_async is rcr-only on gfx1250, and fp8/bf8 comp_async
+                # needs warp_tile_k=128, which the CI config (tile_k=64) lacks.
                 expected = {"comp_tdm": 1, "comp_tdm_v2": 1}
-                if layout[:2] == "rc":
-                    expected["comp_async"] = 8
+                if layout[:2] == "rc" and dtype not in ("fp8", "bf8"):
+                    expected["comp_async"] = 1
                 self.assertEqual(counts, expected, (dtype, layout))
 
 
@@ -309,10 +316,14 @@ class TestTileEngineGolden(unittest.TestCase):
     def test_comp_async_non_rc_layout_raises(self):
         for layout in ["rrr", "crr", "ccr"]:
             with self.assertRaisesRegex(ValueError, "A row-major and B col-major"):
-                self._instance("comp_async", "cshuffle", layout=layout)
+                self._instance("comp_async", "cshuffle", pad=True, layout=layout)
         # TDM is not layout-gated.
         name, _code = self._instance("comp_tdm", "tdm", layout="rrr")
         self.assertIn("_comp_tdm_tdm_intrawave_", name)
+
+    def test_comp_async_without_pad_raises(self):
+        with self.assertRaisesRegex(ValueError, "requires pad_m=pad_n=pad_k=True"):
+            self._instance("comp_async", "cshuffle")
 
     def test_comp_async_with_pad_accepted(self):
         name, _code = self._instance("comp_async", "cshuffle", pad=True)
@@ -338,7 +349,7 @@ class TestTileEngineGolden(unittest.TestCase):
         self.assertIn("args.k_batch != 1", code)
 
     def test_comp_async(self):
-        name, code = self._instance("comp_async", "cshuffle")
+        name, code = self._instance("comp_async", "cshuffle", pad=True)
         self.assertIn("_comp_async_cshuffle_intrawave_", name)
         self.assertIn("ck_tile::GemmPipelineAgBgCrCompAsync<", code)
         self.assertIn("CShuffleEpilogue<", code)
@@ -432,12 +443,10 @@ class TestDispatcherGolden(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
-    def _header(self, marker):
-        # comp_async keeps every pad combo; pick the unpadded one.
+    def _header(self, marker, pads="False_False_False"):
+        # comp_async keeps only pads True; TDM keeps only pads False.
         matches = [
-            n
-            for n in self.names
-            if marker in n and "_intrawave_False_False_False_False_" in n
+            n for n in self.names if marker in n and f"_intrawave_{pads}_False_" in n
         ]
         self.assertEqual(len(matches), 1, (marker, self.names))
         name = matches[0]
@@ -445,8 +454,8 @@ class TestDispatcherGolden(unittest.TestCase):
         return (self.out / name).read_text(), wrapper.read_text()
 
     def test_kernel_set(self):
-        # comp_async: 8 pad combos; comp_tdm / comp_tdm_v2: pads False only.
-        self.assertEqual(len(self.names), 10, self.names)
+        # comp_async: pads True only; comp_tdm / comp_tdm_v2: pads False only.
+        self.assertEqual(len(self.names), 3, self.names)
         counts = collections.Counter(
             p
             for n in self.names
@@ -454,7 +463,7 @@ class TestDispatcherGolden(unittest.TestCase):
             if p in n
         )
         self.assertEqual(
-            counts, {"_comp_async_": 8, "_comp_tdm_tdm_": 1, "_comp_tdm_v2_tdm_": 1}
+            counts, {"_comp_async_": 1, "_comp_tdm_tdm_": 1, "_comp_tdm_v2_tdm_": 1}
         )
         for n in self.names:
             if "_tdm_intrawave_" in n:
@@ -478,7 +487,7 @@ class TestDispatcherGolden(unittest.TestCase):
         self.assertIn("Epilogue::Tdm", wrapper)
 
     def test_comp_async(self):
-        code, _wrapper = self._header("_comp_async_")
+        code, _wrapper = self._header("_comp_async_", pads="True_True_True")
         self.assertIn("GemmPipelineAgBgCrCompAsync<", code)
         self.assertNotIn("TdmEpilogue", code)
         self.assertIn("static constexpr bool DoubleSmemBuffer = true;", code)

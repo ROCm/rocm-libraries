@@ -29,6 +29,9 @@ from codegen_common import (
     TileConfig,
     TraitConfigBase,
     CommonTypeMappings as TypeMappings,
+    GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
+    GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON,
+    gfx1250_comp_async_8bit_warp_tile_k_rejected,
 )
 
 # Import architecture filter for GPU-specific validation
@@ -2108,6 +2111,12 @@ class UnifiedGemmCodegen:
             return f"pipeline={pipeline} requires epilogue=cshuffle"
         if self.layout[:2] != "rc":
             return GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON
+        if not (trait.pad_m and trait.pad_n and trait.pad_k):
+            return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
+        if gfx1250_comp_async_8bit_warp_tile_k_rejected(
+            self.datatype, self.datatype, tile.warp_tile_k
+        ):
+            return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
         return ""
 
     def _is_tile_arch_valid(

@@ -72,17 +72,20 @@
         },
         "pad_m": {
             "values": [
-                false
+                false,
+                true
             ]
         },
         "pad_n": {
             "values": [
-                false
+                false,
+                true
             ]
         },
         "pad_k": {
             "values": [
-                false
+                false,
+                true
             ]
         },
         "persistent": {
