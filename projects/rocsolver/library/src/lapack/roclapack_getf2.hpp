@@ -203,6 +203,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(IAMAX_THDS) getf2_iamax(const I m,
         // (after the reduction, the maximum of the elements is in sval[0] and sidx[0])
         if(tid == 0)
             pivotidx[bid] = sidx[0];
+
+        // ----------------------------------------------------
+        // synchronize to make sure sval[], sidx[] are available
+        // for next batch entry
+        // ----------------------------------------------------
+        __syncthreads();
     }
 }
 
