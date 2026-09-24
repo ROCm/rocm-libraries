@@ -660,6 +660,185 @@ void rocke_dconv32c_prologue_prefetch(rocke_dconv_32c_ctx_t* ctx);
 rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx);
 
 /* ===================================================================== *
+ *  rocke_dconv_wgrad_ctx_t  --  shared state for build_direct_conv_wgrad.
+ *
+ *  The Python body is one long function with six closures (_tr_read, _read_dy,
+ *  _read_strip, _lds_run, _issue_delta / _commit_delta, _issue_s_strip /
+ *  _commit_s_strip, _row_coords) over a wide block of prologue locals. Every
+ *  local those closures share is a field here; field order follows the Python
+ *  prologue top-to-bottom so the populate routine reads against the source.
+ *
+ *  Unlike the forward variants there is NO LDS ping-pong and no chunk-decode
+ *  table: the row loop stages one dY tile + one S-row strip per input row into
+ *  wave-private LDS partitions, and the epilogue atomically adds the KH*KW
+ *  accumulators into an fp32 dW.
+ * ===================================================================== */
+#define ROCKE_DCONV_WGRAD_MAX_KH 8
+#define ROCKE_DCONV_WGRAD_MAX_KW 8
+/* STRIP_PASSES = ceil((WO_BLOCK + KW - 1) / WO_BLOCK) is 2 for every legal
+ * (WO_BLOCK >= 16, KW <= 8) combination, and STRIP_PASSES_PER_WAVE <=
+ * STRIP_PASSES; 8 is generous headroom. */
+#define ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES 8
+
+typedef struct rocke_dconv_wgrad_ctx
+{
+    /* ---- inputs / resolved environment -- */
+    rocke_ir_builder_t* b;
+    const rocke_direct_conv_wgrad_spec_t* spec;
+    const char* arch; /* NULL-normalised "gfx950" */
+    rocke_direct_conv_problem_t p;
+
+    /* ---- geometry scalars (Python all-caps locals) -- */
+    int Ho; /* p.Ho                                       */
+    int Wo; /* p.Wo                                       */
+    int KH;
+    int KW;
+    int WAVE_K; /* spec.wave_tile_k (16)                      */
+    int WAVE_C; /* spec.wave_tile_c (16)                      */
+    int WAVES_K;
+    int WAVES_C;
+    int WAVES_Q;
+    int WAVE; /* spec.wave_size                             */
+    int THREADS; /* spec.threads_per_block                     */
+    int HPB; /* spec.ho_per_block                          */
+    int WO_BLOCK; /* spec.mfma_k                                */
+    int VEC_CH; /* spec.mfma_k / 4                            */
+    int n_wo_tiles;
+    int STRIP_COLS; /* WO_BLOCK + KW - 1                          */
+    int TR_N; /* WAVE_K (LDS row width)                     */
+    int TR_K_L; /* WO_BLOCK / 4                               */
+    int N_TR_READS; /* VEC_CH / 4                                 */
+    int LDS_SIZE_DY; /* WO_BLOCK * TR_N                            */
+    int STRIP_PASSES;
+    int STRIP_GROUPS;
+    int STRIP_PASSES_PER_WAVE;
+    int STRIP_COLS_PAD;
+    int STRIP_PER_Q; /* STRIP_COLS_PAD * TR_N                      */
+    int n_k_tiles;
+    int n_c_tiles;
+    int n_q_blocks;
+
+    /* ---- kernel params (Values) -- */
+    rocke_value_t* A; /* dY  ptr<f16, global> */
+    rocke_value_t* Bp; /* X   ptr<f16, global> */
+    rocke_value_t* D; /* dW  ptr<f32, global> */
+    rocke_value_t* A_bytes;
+    rocke_value_t* B_bytes;
+    /* D_bytes is declared to keep the shared 6-arg launch signature but the
+     * Python discards the Value (dW is reached by plain global_atomic_add, not
+     * a buffer resource), so it is not carried here either. */
+
+    /* ---- common SSA constants -- */
+    rocke_value_t* c0;
+    rocke_value_t* c_wave;
+    rocke_value_t* c_cpg;
+    rocke_value_t* c_kpg;
+    rocke_value_t* c_half_bytes;
+    rocke_value_t* oob_sentinel;
+    rocke_value_t* c_H; /* INPUT height            */
+    rocke_value_t* c_Ho; /* output height           */
+    rocke_value_t* c_Wo;
+    rocke_value_t* zero_acc; /* zero_vec_f32(4)         */
+
+    /* ---- thread / wave / lane decode -- */
+    rocke_value_t* tid;
+    rocke_value_t* wave_id;
+    rocke_value_t* lane;
+    rocke_value_t* c4; /* lane / 16 */
+    rocke_value_t* q_in_lane; /* lane % 16 */
+
+    /* ---- grid decode -- */
+    rocke_value_t* bx;
+    rocke_value_t* by;
+    rocke_value_t* bz;
+    rocke_value_t* c_n_k_tiles;
+    rocke_value_t* c_n_c_tiles;
+    rocke_value_t* c_n_q_blocks;
+    rocke_value_t* c_tile_idx;
+    rocke_value_t* gk_flat;
+    rocke_value_t* k_tile_in_group;
+    rocke_value_t* group;
+    rocke_value_t* n_i;
+    rocke_value_t* q_block;
+    rocke_value_t* hi_block_start;
+
+    /* ---- wave decomposition (KCQ layout) -- */
+    rocke_value_t* wave_q_id;
+    rocke_value_t* wave_kc_id;
+    rocke_value_t* wave_k_id;
+    rocke_value_t* wave_c_id;
+    rocke_value_t* wave_k_origin;
+    rocke_value_t* wave_c_origin;
+    rocke_value_t* wo_tile;
+    rocke_value_t* wo_tile_start;
+    rocke_value_t* wo_tile_valid;
+    rocke_value_t* k_tile_origin;
+    rocke_value_t* c_tile_origin;
+    rocke_value_t* k_wave_base;
+
+    /* ---- buffer rsrcs (dW has none: plain atomics) -- */
+    rocke_value_t* a_rsrc;
+    rocke_value_t* b_rsrc;
+
+    /* ---- descriptors -- */
+    const rocke_tensor_descriptor_t* dy_desc; /* A[N,Ho,Wo,total_k] naive      */
+    const rocke_tensor_descriptor_t* x_strip_desc; /* B[N,H,W,total_c] + w embed    */
+    const rocke_tensor_descriptor_t* dw_desc; /* D[total_k,KH,KW,cpg] naive    */
+
+    /* ---- LDS tiles -- */
+    rocke_value_t* dy_lds;
+    rocke_value_t* s_strip_lds;
+
+    /* ---- per-thread loader decomposition -- */
+    rocke_value_t* c_lanes_per_sp;
+    rocke_value_t* c_ld_sp;
+    rocke_value_t* c_ld_ch;
+    rocke_value_t* dy_part_idx;
+    rocke_value_t* dy_wave_off_f16;
+    rocke_value_t* s_strip_part_idx;
+    rocke_value_t* s_strip_off_f16;
+    rocke_value_t* c_TR_N;
+    rocke_value_t* c_WO_BLOCK;
+    rocke_value_t* c_STRIP_COLS;
+    rocke_value_t* tr_row;
+    rocke_value_t* tr_flat;
+
+    /* ---- S-strip pass decomposition -- */
+    rocke_value_t* strip_pass_base;
+    rocke_value_t* strip_cols[ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES];
+    rocke_value_t* strip_col_ok[ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES];
+
+    /* ---- iter-state carried across the unrolled row loop -- */
+    rocke_value_t* acc[ROCKE_DCONV_WGRAD_MAX_KH][ROCKE_DCONV_WGRAD_MAX_KW];
+    rocke_value_t* delta_ring[ROCKE_DCONV_WGRAD_MAX_KH];
+    rocke_value_t* pending_dy;
+    rocke_value_t* pending_x[ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES];
+} rocke_dconv_wgrad_ctx_t;
+
+/* ===================================================================== *
+ *  wgrad PHASE FUNCTIONS
+ * ===================================================================== */
+
+/* Prologue: validate() + is_valid_wgrad_spec gate, every geometry scalar, the
+ * params, the SSA constants, thread/wave/grid decode, the three descriptors,
+ * the two LDS tiles, the loader decomposition and the S-strip pass columns.
+ * Returns false (builder error set) on a rejected spec. */
+bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx);
+
+/* Ring prologue: pre-load the KH-1 past dY rows into ctx->delta_ring, and seed
+ * ctx->acc / the remaining ring slot. */
+void rocke_dconv_wgrad_ring_prologue(rocke_dconv_wgrad_ctx_t* ctx);
+
+/* The Python-unrolled loop over the HPB input rows of this block: commit the
+ * fragments issued last row, issue the next row's, sync, refresh the ring +
+ * read the KW S fragments, then the KH*KW MFMAs. */
+void rocke_dconv_wgrad_row_loop(rocke_dconv_wgrad_ctx_t* ctx);
+
+/* Epilogue: KH*KW*4 guarded global_atomic_add into the fp32 dW. Returns the
+ * kernel (ctx->b->kernel) on success, NULL on error. */
+rocke_kernel_def_t* rocke_dconv_wgrad_epilogue(rocke_dconv_wgrad_ctx_t* ctx);
+
+/* ===================================================================== *
  *  Depthwise PHASE FUNCTIONS
  * ===================================================================== */
 bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx);

@@ -1774,7 +1774,7 @@ def is_valid_spec_32c(
     from rocke.core.arch import ArchTarget
 
     try:
-        target = ArchTarget.from_gfx(arch)
+        ArchTarget.from_gfx(arch)  # rejects an arch the catalog does not know
     except KeyError as e:
         return False, str(e)
     p = spec.problem
@@ -3171,6 +3171,716 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         # Yield cell_idx (changes each round) to prevent loop elimination.
         b.scf_yield(cell_idx)
         cell_loop.__exit__(None, None, None)
+
+    return b.kernel
+
+
+# ---------------------------------------------------------------------------
+# Direct grouped convolution — backward weights (wgrad)
+#
+# Algorithm for direct wgrad convolution:
+#   - All KH*KW filter taps computed IN ONE BLOCK → dY loaded once, reused 9×
+#   - Grid encodes (group, k_tile, ho_block) in bx; c_tile in by; batch n in bz
+#   - Inner loops iterate (ho_in_block, wo_chunk) directly — zero div/mod in hot loop
+#   - 9 separate MFMA accumulators (one per filter tap) per wave
+#   - LDS staging: one dy_lds + KH*KW x_lds buffers; single sync per (ho, wo_chunk)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DirectConvWgradSpec:
+    """Direct grouped wgrad kernel: computes the weight gradient dW.
+
+    Computes::
+
+        dW[k, r, s, c] = sum_{n, ho, wo} dY[n, ho, wo, k] * X[n, hi, wi, c]
+
+    where hi = ho * stride + r - PAD  and  wi = wo * stride + s - PAD.
+
+    Algorithm:
+      One block handles ALL KH*KW filter taps simultaneously. dY is loaded ONCE
+      per (ho, wo_chunk) and reused for all KH*KW MFMAs. This eliminates the
+      KH*KW × redundant dY loads of the per-tap grid approach.
+
+      Grid:
+        bx = ho_block * (groups * n_k_tiles) + group * n_k_tiles + k_tile_in_group
+        by = c_tile
+        bz = n  (batch index)
+
+      Per block:
+        - Python-unrolled loop over ho_in_block (ho_per_block iterations).
+        - Runtime scf.for over wo_chunk (n_wo_chunks = ceil(Wo / 16) iterations).
+        - Per (ho_in_block, wo_chunk):
+            1. Load dY[n, ho, wo_chunk, k_tile] into dy_lds.
+            2. For each r in 0..KH-1: load X[n, hi=ho*stride+r-PAD, wi_chunk, c_tile]
+               into x_lds[r][s] for each s in 0..KW-1.  (KH*KW separate LDS bufs)
+            3. Single sync barrier.
+            4. KH*KW mfma_f32_16x16x16_f16 calls, one per filter tap.
+            5. Single sync before overwriting LDS in next iteration.
+        - Epilogue: atomic_add KH*KW accumulator tiles to dW[k, r, s, c].
+
+    Benefits vs per-tap grid:
+      - dY loaded once per (ho, wo_chunk): KH*KW × bandwidth savings on dY.
+      - No div/mod in the hot loop (ho and wo iterated directly).
+      - KH*KW = 9 parallel MFMA accumulators per wave → high compute density.
+
+    dW output is fp32. The caller must zero-initialise dW before launch.
+    """
+
+    problem: DirectConvProblem
+    name: str = "direct_conv_wgrad"
+    wave_tile_k: int = 16  # K output channels per wave (MFMA M-dim)
+    wave_tile_c: int = 16  # C input channels per wave (MFMA N-dim)
+    waves_k: int = 1  # waves along K
+    waves_c: int = 1  # waves along C
+    waves_q: int = 1  # waves along Q (spatial/wo); each handles one wo_tile
+    wave_size: int = 64
+    ho_per_block: int = 4  # output rows per block; tunes grid occupancy
+    mfma_k: int = 32  # MFMA K-inner: 32 (gfx950, default) or 16
+
+    @property
+    def block_k(self) -> int:
+        return self.waves_k * self.wave_tile_k
+
+    @property
+    def block_c(self) -> int:
+        return self.waves_c * self.wave_tile_c
+
+    @property
+    def threads_per_block(self) -> int:
+        return self.waves_k * self.waves_c * self.waves_q * self.wave_size
+
+    @property
+    def wo_block(self) -> int:
+        """Output columns per MFMA chunk (= MFMA K-inner dimension)."""
+        return self.mfma_k
+
+    def n_ho_blocks(self) -> int:
+        p = self.problem
+        Ho = (p.H + 2 * p.PAD - p.KH) // p.stride + 1
+        return (Ho + self.ho_per_block - 1) // self.ho_per_block
+
+    def n_wo_tiles(self) -> int:
+        p = self.problem
+        Wo = (p.W + 2 * p.PAD - p.KW) // p.stride + 1
+        return (Wo + self.wo_block - 1) // self.wo_block
+
+    def n_q_blocks(self) -> int:
+        """Grid blocks in the wo dimension (ceil(n_wo_tiles / waves_q))."""
+        return (self.n_wo_tiles() + self.waves_q - 1) // self.waves_q
+
+    def kernel_name(self) -> str:
+        from rocke.helpers.spec import kernel_name_join
+
+        p = self.problem
+        return kernel_name_join(
+            self.name,
+            p.short(),
+            f"bk{self.block_k}",
+            f"bc{self.block_c}",
+            f"hpb{self.ho_per_block}",
+            f"mk{self.mfma_k}",
+            flags={"wq": self.waves_q} if self.waves_q > 1 else {},
+        )
+
+    def validate(self) -> None:
+        p = self.problem
+        if p.kpg < self.wave_tile_k:
+            raise ValueError(f"kpg {p.kpg} must be >= wave_tile_k {self.wave_tile_k}")
+        if p.cpg < self.wave_tile_c:
+            raise ValueError(f"cpg {p.cpg} must be >= wave_tile_c {self.wave_tile_c}")
+        if self.wave_tile_k != 16:
+            raise ValueError("wave_tile_k must be 16")
+        if self.wave_tile_c != 16:
+            raise ValueError("wave_tile_c must be 16")
+        if self.waves_k * self.waves_c > 16:
+            raise ValueError("waves_k * waves_c must be <= 16")
+        if self.waves_q < 1:
+            raise ValueError("waves_q must be >= 1")
+        if self.ho_per_block <= 0:
+            raise ValueError("ho_per_block must be > 0")
+        if self.mfma_k not in (16, 32):
+            raise ValueError(f"mfma_k must be 16 or 32 (got {self.mfma_k})")
+        if self.problem.stride != 1:
+            raise ValueError(_WGRAD_STRIDE_WHY.format(stride=self.problem.stride))
+
+
+# The row loop walks INPUT rows and pairs row hi with output row hi + PAD - r,
+# and one LDS strip row serves all KW s-taps by being read at a one-column
+# shift. Both identities hold only at stride 1; at stride 2 the taps would have
+# to step the strip by `stride` columns and the row pairing would skip rows.
+_WGRAD_STRIDE_WHY = (
+    "direct wgrad is a stride-1 algorithm (input-row iteration + shifted S-row "
+    "strip); got stride={stride}"
+)
+
+
+def is_valid_wgrad_spec(
+    spec: DirectConvWgradSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for a wgrad spec on ``arch``."""
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
+    p = spec.problem
+    if p.kpg < spec.wave_tile_k:
+        return False, f"kpg {p.kpg} must be >= wave_tile_k {spec.wave_tile_k}"
+    if p.cpg < spec.wave_tile_c:
+        return False, f"cpg {p.cpg} must be >= wave_tile_c {spec.wave_tile_c}"
+    if spec.wave_tile_k != 16 or spec.wave_tile_c != 16:
+        return False, "wave_tile_k and wave_tile_c must be 16"
+    if spec.waves_k * spec.waves_c > 16:
+        return False, "waves_k * waves_c must be <= 16"
+    if spec.ho_per_block <= 0:
+        return False, "ho_per_block must be > 0"
+    if spec.mfma_k not in (16, 32):
+        return False, f"mfma_k must be 16 or 32 (got {spec.mfma_k})"
+    if p.stride != 1:
+        return False, _WGRAD_STRIDE_WHY.format(stride=p.stride)
+    if not target.mma.has_shape(
+        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=16
+    ):
+        return False, f"missing mfma_f32_16x16x16_f16 on {arch}"
+    if spec.mfma_k == 32 and not target.mma.has_shape(
+        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=32
+    ):
+        return False, f"mfma_k=32 needs mfma_f32_16x16x32_f16, absent on {arch}"
+    if not target.memory.has_ds_read_tr:
+        return False, (
+            f"wgrad LDS staging requires ds_read_tr16_b64 (gfx950+), absent on {arch}"
+        )
+    return True, "ok"
+
+
+def build_direct_conv_wgrad(
+    spec: DirectConvWgradSpec, arch: str = "gfx950"
+) -> KernelDef:
+    """Build the IR for the direct grouped convolution wgrad kernel.
+
+    Computes dW[k, r, s, c] = sum_{n,ho,wo} dY[n,ho,wo,k] * X[n,hi,wi,c]
+    where hi = ho*stride + r - PAD and wi = wo*stride + s - PAD.
+
+    All KH*KW filter taps are handled in ONE block. dY is loaded once per
+      (ho, wo_chunk) and reused for all KH*KW MFMA calls. This eliminates
+      the KH*KW × redundant dY reads of the per-tap-grid approach.
+
+    LDS (1 + KH*KW buffers, each 256 f16):
+      dy_lds[k=16, sp=16] — loaded once per (ho, wo_chunk).
+      x_lds[r][s][c=16, sp=16] — one per filter tap (r, s).
+    All tiles loaded then ONE sync; KH*KW MFMAs; ONE sync before next load.
+
+    Grid:
+      bx = ho_block * (groups * n_k_tiles) + group * n_k_tiles + k_tile_in_group
+      by = c_tile
+      bz = n  (batch index)
+
+    The caller must zero-initialise dW before launch.
+    """
+    spec.validate()
+    ok, why = is_valid_wgrad_spec(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid DirectConvWgradSpec for {arch}: {why}")
+
+    p = spec.problem
+    Ho = p.Ho
+    Wo = p.Wo
+    KH, KW = p.KH, p.KW
+
+    WAVE_K = spec.wave_tile_k  # 16
+    WAVE_C = spec.wave_tile_c  # 16
+    WAVES_K = spec.waves_k
+    WAVES_C = spec.waves_c
+    WAVE = spec.wave_size
+    THREADS = spec.threads_per_block
+    HPB = spec.ho_per_block  # output rows per block
+
+    # MFMA variants controlled by spec.mfma_k:
+    #   mfma_k=16: mfma_f32_16x16x16_f16, WO_BLOCK=16, vec4 loads (4 f16 per thread)
+    #   mfma_k=32: mfma_f32_16x16x32_f16, WO_BLOCK=32, vec8 loads (8 f16 per thread)
+    #     → 2× spatial positions per MFMA atom → 2× fewer loop iterations
+    #     → vec8 DRAM loads → 2× better cache-line utilisation
+    # ---- Algorithm: delta register ring + S-row strip ----
+    #
+    # direct_wgrad main_loop:
+    #   - Iterate over output rows ho (= input rows hi for stride=1)
+    #   - Keep KH delta (dY) rows in REGISTER RING: each loaded once, reused KH×
+    #   - Load one S-row strip per (hi, r) → covers KW=3 s-taps with one load
+    #   - Zero inner wo_chunk loop: block owns one wo_tile, MFMA K=32 covers all
+    #
+    # Memory ops per ho_in_blk iteration (vs old approach):
+    #   delta loads: 1 async DRAM→LDS → 1 ds_read_tr16_b64 (+ reuse KH× in ring)
+    #   S-strip loads: KH=3 × 1 async load (covers KW=3 taps)
+    #   MFMAs: KH×KW = 9 (same)
+    # vs old: 1 dY + 9 X = 10 per (ho, wo_chunk) × n_wo_chunks = 50 loads per ho
+    # new:    1 dY + 3 S-strips = 4 per ho (1× wo tile per block, no wo loop!)
+    # → ~12× fewer loads per block
+
+    # ---- INPUT-row iteration + delta register ring ----
+    #
+    # Outer loop: INPUT rows hi = 0..H-1 (not output rows ho).
+    # For each hi:
+    #   dY: load one row dY(ho=hi+PAD) into ring[hi%KH] via async DRAM→LDS → ds_read_tr16_b64
+    #       Each dY row is reused KH=3 times across consecutive hi iterations → 3× saving.
+    #   S-strip: one strip X[n, hi, wo_tile_start..+STRIP_COLS-1, c] in LDS,
+    #            covers all KW s-offsets (s=0,1,2) at this input row. ONE load per hi.
+    #   MFMAs: for (r,s): acc[r][s] += ring[(hi+KH-r)%KH] × S_strip[s]
+    #
+    # Loads per hi: 1 dY async + 2 S-strip async passes = ~3 total (vs old 4-10 per ho).
+    # KH=3 dY reuse → effective 1 load per 3 hi for dY component.
+
+    WAVES_Q = spec.waves_q
+    WO_BLOCK = spec.mfma_k  # 32 for mk=32, 16 for mk=16
+    VEC_CH = spec.mfma_k // 4  # 8 for mk=32, 4 for mk=16
+    n_wo_tiles = spec.n_wo_tiles()
+    STRIP_COLS = WO_BLOCK + KW - 1  # 34 for mk=32; 18 for mk=16
+
+    # ---- LDS staging: spatial-major tiles + transpose reads ----
+    #
+    # Both LDS tiles are stored EXACTLY as NHWC delivers them — channel is the
+    # fast axis, spatial the slow one:
+    #
+    #   dy_lds[sp = WO_BLOCK rows][k_ch = 16 cols]
+    #   s_strip_lds[col = STRIP_COLS rows][c_ch = 16 cols]
+    #
+    # so the VEC_CH channels a lane pulls out of DRAM land in ONE contiguous
+    # LDS run and go back with a single ds_write_b{64,128}. The transposed
+    # per-lane operand the MFMA wants is recovered on the read side by
+    # ``ds_read_b64_tr_b16``, which is free: it is the same LDS traffic the
+    # untransposed read would do.
+    #
+    # The alternative — storing channel-major so a plain ds_read serves the
+    # MFMA — costs VEC_CH scalar ds_write_b16 per lane per tile, and that
+    # scatter is what makes this kernel LDS-instruction bound: at 16x16 wave
+    # tiles the write side alone is 24 LDS instructions per row against 9
+    # MFMAs, and LDS is one unit per CU while MFMA is one per SIMD.
+    #
+    # Transpose-read lane formulas for a [K][N=16] tile (CK's
+    # TransposeLDSLayout; see rocke.helpers.layouts.TransposeLdsReader):
+    #   row(lane, read) = (lane / 16) * K_L + read * 4 + (lane / 4) % 4
+    #   col(lane)       = (lane % 4) * 4        with K_L = K / 4
+    # After N_READS of these, lane ``l`` holds tile[(l / 16) * VEC_CH + 0 ..
+    # VEC_CH - 1][l % 16] — the mfma_f32_16x16x{16,32}_f16 operand fragment.
+    TR_N = WAVE_K  # LDS row width, = WAVE_C = 16 (both validated)
+    TR_K_L = WO_BLOCK // 4  # tile rows one lane's k-chunk spans
+    N_TR_READS = VEC_CH // 4  # ds_read_b64_tr_b16 per operand fragment
+
+    # dy_lds: WAVES_K × WAVES_Q partitions, each WO_BLOCK × 16 f16.
+    # Partition index = wave_k_id * WAVES_Q + wave_q_id.
+    LDS_SIZE_DY = WO_BLOCK * TR_N  # 512 f16/wave for mk=32, 256 for mk=16
+
+    # s_strip_lds: STRIP_COLS × 16 f16 per partition — the KW s-taps are row
+    # shifts into the same strip. One wave-pass covers WO_BLOCK rows, so the
+    # strip takes STRIP_PASSES of them and the WAVES_K waves sharing a partition
+    # split those: wave_k ``w`` runs the passes congruent to ``w`` mod
+    # STRIP_GROUPS, which is branch-free and covers every pass for any WAVES_K.
+    #
+    # The partition is then padded to the full grid of (pass-per-wave × group)
+    # slots each wave can address, so no pass needs an ``scf_if``: a dead lane
+    # loads zero through the OOB sentinel and writes it into the pad, and no
+    # wave can step past its own partition. Gating instead is what lets LLVM
+    # sink the tail load into the conditional region, which strands it in the
+    # same iteration as its ``s_waitcnt`` and costs a full exposed DRAM latency
+    # per row.
+    STRIP_PASSES = (STRIP_COLS + WO_BLOCK - 1) // WO_BLOCK
+    STRIP_GROUPS = min(WAVES_K, STRIP_PASSES)
+    STRIP_PASSES_PER_WAVE = (STRIP_PASSES + STRIP_GROUPS - 1) // STRIP_GROUPS
+    STRIP_COLS_PAD = STRIP_PASSES_PER_WAVE * STRIP_GROUPS * WO_BLOCK
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+
+    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(F32, "global"), noalias=True, align=4)
+    A_bytes = b.param("A_bytes", I32)
+    B_bytes = b.param("B_bytes", I32)
+    # dW is reached by plain global_atomic_add, not a buffer resource, so the
+    # size is unused here — but the parameter still has to be declared to match
+    # the launch signature every conv kernel shares.
+    b.param("D_bytes", I32)
+
+    c0 = b.const_i32(0)
+    c_wave = b.const_i32(WAVE)
+    c_cpg = b.const_i32(p.cpg)
+    c_kpg = b.const_i32(p.kpg)
+    c_half_bytes = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    c_H = b.const_i32(p.H)  # INPUT height
+    c_Ho = b.const_i32(Ho)  # output height (for dY bounds)
+    c_Wo = b.const_i32(Wo)
+
+    zero_acc = b.zero_vec_f32(4)
+
+    tid = b.thread_id_x()
+    wave_id = b.div(tid, c_wave)
+    lane = b.mod(tid, c_wave)
+    c4 = b.div(lane, b.const_i32(16))
+    q_in_lane = b.mod(lane, b.const_i32(16))
+
+    # ---- Grid decode ----
+    # bx = (group * n_k_tiles + k_tile) * n_c_tiles + c_tile
+    # by = hi_block  (input row block, 0..n_hi_blocks-1 where n_hi_blocks=ceil(H/HPB))
+    # bz = n * n_q_blocks + q_block
+    #
+    # waves_q spatial decomposition:
+    #   wave_kc_id = wave_id // WAVES_Q  (K/C wave group index)
+    #   wave_q_id  = wave_id  % WAVES_Q  (which wo_tile within block: 0..WAVES_Q-1)
+    #   wave_k_id  = wave_kc_id % WAVES_K
+    #   wave_c_id  = wave_kc_id // WAVES_K
+    #   wo_tile    = q_block * WAVES_Q + wave_q_id
+    # If wo_tile >= n_wo_tiles: wave is out-of-range, suppress epilogue atomic.
+    n_k_tiles = (p.kpg + spec.block_k - 1) // spec.block_k
+    n_c_tiles = (p.cpg + spec.block_c - 1) // spec.block_c
+    n_q_blocks = spec.n_q_blocks()  # ceil(n_wo_tiles / WAVES_Q)
+
+    bx = b.block_id_x()
+    by = b.block_id_y()  # hi_block
+    bz = b.block_id_z()  # n * n_q_blocks + q_block
+
+    c_n_k_tiles = b.const_i32(n_k_tiles)
+    c_n_c_tiles = b.const_i32(n_c_tiles)
+    c_n_q_blocks = b.const_i32(n_q_blocks)
+
+    c_tile_idx = b.mod(bx, c_n_c_tiles)
+    gk_flat = b.div(bx, c_n_c_tiles)
+    k_tile_in_group = b.mod(gk_flat, c_n_k_tiles)
+    group = b.div(gk_flat, c_n_k_tiles)
+
+    n_i = b.div(bz, c_n_q_blocks)
+    q_block = b.mod(bz, c_n_q_blocks)
+
+    hi_block = by
+    hi_block_start = b.mul(hi_block, b.const_i32(HPB))
+
+    # Wave decomposition: KCQ layout (q is fastest-varying)
+    # wave_id = wave_kc_id * WAVES_Q + wave_q_id
+    wave_q_id = b.mod(wave_id, b.const_i32(WAVES_Q))
+    wave_kc_id = b.div(wave_id, b.const_i32(WAVES_Q))
+    wave_k_id = b.mod(wave_kc_id, b.const_i32(WAVES_K))
+    wave_c_id = b.div(wave_kc_id, b.const_i32(WAVES_K))
+
+    wave_k_origin = b.mul(wave_k_id, b.const_i32(WAVE_K))
+    wave_c_origin = b.mul(wave_c_id, b.const_i32(WAVE_C))
+
+    # wo_tile and wo_tile_start for THIS wave's spatial item
+    wo_tile = b.add(b.mul(q_block, b.const_i32(WAVES_Q)), wave_q_id)
+    wo_tile_start = b.mul(wo_tile, b.const_i32(WO_BLOCK))
+    # Guard: last block may have fewer than WAVES_Q valid tiles
+    wo_tile_valid = b.cmp_lt(wo_tile, b.const_i32(n_wo_tiles))
+
+    k_tile_origin = b.mul(k_tile_in_group, b.const_i32(spec.block_k))
+    c_tile_origin = b.mul(c_tile_idx, b.const_i32(spec.block_c))
+
+    k_wave_base = b.add(b.add(b.mul(group, c_kpg), k_tile_origin), wave_k_origin)
+
+    a_rsrc = b.buffer_rsrc(A, A_bytes)
+    b_rsrc = b.buffer_rsrc(Bp, B_bytes)
+
+    # ---- Descriptors ----
+    # dY: A[N, Ho, Wo, total_k] — loaded at output row ho = hi + PAD - r
+    dy_desc = TensorDescriptor.naive(
+        "A",
+        lengths=[p.N, Ho, Wo, p.total_k],
+        coord_names=("n", "h", "w", "k"),
+    )
+    # X for S-strip: B[N, H, W, total_c] — loaded at INPUT row hi directly
+    # w embed: wo_tile_start + col - PAD (col is runtime strip column index)
+    x_strip_desc = TensorDescriptor.naive(
+        "B",
+        lengths=[p.N, p.H, p.W, p.total_c],
+        coord_names=("n", "h", "w", "c"),
+    ).transform(
+        embed(
+            upper=("wo", "s_off"),
+            into="w",
+            strides=(p.stride, 1),
+            offset=-p.PAD,
+            lo=0,
+            hi=p.W,
+        ),
+    )
+    dw_desc = TensorDescriptor.naive(
+        "D",
+        lengths=[p.total_k, p.KH, p.KW, p.cpg],
+        coord_names=("k", "r", "s", "c"),
+    )
+
+    # ---- LDS allocation ----
+    #
+    # Partitioning rule: a tile is keyed on exactly the wave axes its contents
+    # depend on, and every wave writes precisely the bytes it later reads. That
+    # is what lets the row loop run on ONE barrier per iteration — a wave never
+    # consumes another wave's write, so the only ordering it needs is "nobody is
+    # still reading last row's tile before I overwrite it".
+    #
+    #   dy_lds[sp][k_ch]        depends on (wave_k, wave_q)  -> keyed on both
+    #   s_strip_lds[col][c_ch]  depends on (wave_c, wave_q)  -> keyed on both
+    #
+    # The waves that share a tile write it redundantly; that costs a duplicate
+    # DRAM read (L1/L2 resident) and a duplicate ds_write, and buys away the
+    # second barrier plus the cross-wave dependency it would impose.
+    dy_lds = b.smem_alloc(F16, [1, WAVES_K * WAVES_Q * LDS_SIZE_DY], name_hint="dy_lds")
+
+    # Column-major [col=STRIP_COLS rows, c_ch=TR_N cols]; s-tap = row shift.
+    STRIP_PER_Q = STRIP_COLS_PAD * TR_N
+    s_strip_lds = b.smem_alloc(
+        F16, [1, WAVES_C * WAVES_Q * STRIP_PER_Q], name_hint="s_strip"
+    )
+
+    # ---- Per-thread loader decomposition ----
+    # VEC_CH f16 (one contiguous channel run) per lane via buffer_load_vN.
+    #   c_ld_sp = lane // (TR_N // VEC_CH), c_ld_ch = (lane % ...) * VEC_CH.
+    #   For mk=32: VEC_CH=8, c_lanes_per_sp=2, c_ld_sp∈0..31, c_ld_ch∈{0,8}.
+    #   For mk=16: VEC_CH=4, c_lanes_per_sp=4, c_ld_sp∈0..15, c_ld_ch∈{0,4,8,12}.
+    # Either way the 64 lanes tile WO_BLOCK spatial positions × TR_N channels
+    # exactly, and lane l's LDS run starts at byte 2 * VEC_CH * l — a perfectly
+    # linear, conflict-free ds_write_b{64,128}.
+    c_lanes_per_sp = b.const_i32(TR_N // VEC_CH)
+    c_ld_sp = b.div(lane, c_lanes_per_sp)
+    c_ld_ch = b.mul(b.mod(lane, c_lanes_per_sp), b.const_i32(VEC_CH))
+
+    # dy partition index = wave_k_id * WAVES_Q + wave_q_id
+    dy_part_idx = b.add(b.mul(wave_k_id, b.const_i32(WAVES_Q)), wave_q_id)
+    dy_wave_off_f16 = b.mul(dy_part_idx, b.const_i32(LDS_SIZE_DY))
+    # s_strip partition index = wave_c_id * WAVES_Q + wave_q_id
+    s_strip_part_idx = b.add(b.mul(wave_c_id, b.const_i32(WAVES_Q)), wave_q_id)
+    s_strip_off_f16 = b.mul(s_strip_part_idx, b.const_i32(STRIP_PER_Q))
+    c_TR_N = b.const_i32(TR_N)
+    c_WO_BLOCK = b.const_i32(WO_BLOCK)
+    c_STRIP_COLS = b.const_i32(STRIP_COLS)
+
+    # Transpose-read lane address, shared by both operands (same tile width).
+    tr_row = b.add(
+        b.mul(c4, b.const_i32(TR_K_L)),
+        b.mod(b.div(lane, b.const_i32(4)), b.const_i32(4)),
+    )
+    tr_flat = b.add(
+        b.mul(tr_row, c_TR_N), b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
+    )
+
+    # ---- Readers ----
+    # Both operands live in LDS spatial-major and come back transposed, so one
+    # address formula serves them: ``mfma(dy_vec, x_vec, acc)`` puts dY in the
+    # A position (M = k channels) and X in the B position (N = c channels), and
+    # for a 16x16 atom the A and B per-lane fragments have the same shape —
+    # element (lane % 16, (lane / 16) * VEC_CH + j) of the [channel][spatial]
+    # operand. That is exactly what ds_read_b64_tr_b16 delivers out of a
+    # [spatial][channel] tile.
+    def _tr_read(smem: "Value", part_off: "Value", row_shift: int) -> "Value":
+        base = b.add(part_off, b.add(tr_flat, b.const_i32(row_shift * TR_N)))
+        frag = b.ds_read_tr16_b64(smem, c0, base, dtype=F16)
+        for rd in range(1, N_TR_READS):
+            frag = b.vec_concat(
+                frag,
+                b.ds_read_tr16_b64(
+                    smem, c0, b.add(base, b.const_i32(4 * rd * TR_N)), dtype=F16
+                ),
+            )
+        return frag
+
+    def _read_dy() -> "Value":
+        """dY fragment: transpose-read of dy_lds[sp][k_ch]."""
+        return _tr_read(dy_lds, dy_wave_off_f16, 0)
+
+    def _read_strip(s_const: int) -> "Value":
+        """X fragment for filter column ``s``: the strip shifted ``s`` rows."""
+        return _tr_read(s_strip_lds, s_strip_off_f16, s_const)
+
+    # ---- Loaders ----
+    #
+    # Split into ISSUE (DRAM -> VGPR) and COMMIT (VGPR -> LDS) so the row loop
+    # can run the issue a whole iteration ahead of the commit that consumes it.
+    # Fused, the ``s_waitcnt vmcnt(0)`` in front of the LDS write exposes the
+    # full DRAM latency on every row; split, that wait sits one compute phase
+    # downstream of its load and the latency lands under the MFMAs.
+    #
+    # No OOB masking of the loaded value is needed: an out-of-range lane gets
+    # ``oob_sentinel`` as its buffer offset, and a buffer load past num_records
+    # returns zero. The extra ``select`` per vector cost VEC_CH/2 v_cndmask per
+    # load for nothing.
+    def _lds_run(part_off: "Value", row: "Value") -> "Value":
+        """Flat f16 index of this lane's VEC_CH-wide run in ``row`` of a tile."""
+        return b.add(part_off, b.add(b.mul(row, c_TR_N), c_ld_ch))
+
+    def _issue_delta(ho_val: "Value", ho_ok: "Value") -> "Value":
+        """Start the DRAM read of one dY row; returns the in-flight fragment."""
+        wo_sp = b.add(wo_tile_start, c_ld_sp)
+        both_ok = b.land(ho_ok, b.cmp_lt(wo_sp, c_Wo))
+        k_ld = b.add(k_wave_base, c_ld_ch)
+        off, _ = dy_desc.offset(b, n=n_i, h=ho_val, w=wo_sp, k=k_ld)
+        safe_off = b.select(both_ok, b.mul(off, c_half_bytes), oob_sentinel)
+        return b.buffer_load_vN_f16(a_rsrc, safe_off, c0, VEC_CH // 2)
+
+    def _commit_delta(vec: "Value") -> None:
+        """Land a dY fragment in dy_lds[sp][k_ch] — one ds_write per lane."""
+        b.smem_store_vN_f16(
+            dy_lds, [c0, _lds_run(dy_wave_off_f16, c_ld_sp)], vec, n=VEC_CH
+        )
+
+    # The strip columns this wave loads: pass ``base + j * STRIP_GROUPS`` of the
+    # partition it shares with the other k-waves (see the LDS staging note).
+    #
+    # This is the one place a wave reads LDS another wave wrote. It is safe
+    # because ``sync_lds_only`` below is a real barrier, not just a waitcnt.
+    _strip_pass_base = b.mod(wave_k_id, b.const_i32(STRIP_GROUPS))
+    _strip_cols = [
+        b.add(
+            c_ld_sp,
+            b.mul(b.add(_strip_pass_base, b.const_i32(j * STRIP_GROUPS)), c_WO_BLOCK),
+        )
+        for j in range(STRIP_PASSES_PER_WAVE)
+    ]
+    _strip_col_ok = [b.cmp_lt(col, c_STRIP_COLS) for col in _strip_cols]
+
+    def _issue_s_strip(hi_val: "Value", hi_ok: "Value") -> List["Value"]:
+        """Start the DRAM reads of one X strip; returns the in-flight fragments."""
+        c_ld_base = b.add(
+            b.add(b.mul(group, c_cpg), c_tile_origin),
+            b.add(wave_c_origin, c_ld_ch),
+        )
+        out: List["Value"] = []
+        for pass_idx, col in enumerate(_strip_cols):
+            off, x_ok = x_strip_desc.offset(
+                b,
+                n=n_i,
+                h=hi_val,
+                wo=wo_tile_start,
+                s_off=col,
+                c=c_ld_base,
+            )
+            both_ok = b.land(b.land(hi_ok, _strip_col_ok[pass_idx]), x_ok)
+            safe = b.select(both_ok, b.mul(off, c_half_bytes), oob_sentinel)
+            out.append(b.buffer_load_vN_f16(b_rsrc, safe, c0, VEC_CH // 2))
+        return out
+
+    def _commit_s_strip(vecs: List["Value"]) -> None:
+        """Land the X strip fragments in s_strip_lds[col][c_ch].
+
+        Unconditional in both passes: the tail pass's dead lanes carry zeros
+        and land them in the partition's pad rows, which nothing reads.
+        """
+        for pass_idx, col in enumerate(_strip_cols):
+            b.smem_store_vN_f16(
+                s_strip_lds,
+                [c0, _lds_run(s_strip_off_f16, col)],
+                vecs[pass_idx],
+                n=VEC_CH,
+            )
+
+    # ---- Accumulators and delta register ring ----
+    acc: List[List["Value"]] = [[zero_acc] * KW for _ in range(KH)]
+    # KH-slot register ring: ring[i] = <VEC_CH x f16> for dY row i
+    delta_ring: List["Value"] = [b.zero_vec_f16(VEC_CH)] * KH
+
+    # ---- Prologue: pre-load KH-1 past delta rows into the ring ----
+    # For hi_block B (hi_block_start = B*HPB), the ring needs delta rows from
+    # "virtual" input rows hi = hi_block_start - 1 and hi_block_start - 2.
+    # The corresponding output rows are: ho = hi_virtual + PAD - r_0 = hi_virtual + PAD.
+    # (We prefetch for r=0, i.e., ho = hi + PAD.)
+    #
+    # k=1: virtual_hi = hi_block_start - 1,  ho_past = (hi_block_start - 1) + PAD
+    #      slot = (KH-1)%KH = KH-1 = 2
+    # k=2: virtual_hi = hi_block_start - 2,  ho_past = (hi_block_start - 2) + PAD
+    #      slot = (KH-2)%KH = 1
+    #
+    # For hi_block=0: ho_past = PAD-1=0 (valid) and PAD-2=-1 (OOB→zero). ✓
+    # For hi_block=B>0: ho_past = B*HPB-k+PAD (valid for small PAD and reasonable B). ✓
+    for k in range(KH - 1, 0, -1):
+        slot_pre = (KH - k) % KH  # ring slot for virtual hi = hi_block_start - k
+        # ho to load: virtual_hi + PAD = (hi_block_start - k) + PAD (runtime value)
+        ho_past = b.add(hi_block_start, b.const_i32(p.PAD - k))  # runtime!
+        ho_past_ok = b.land(b.cmp_ge(ho_past, c0), b.cmp_lt(ho_past, c_Ho))
+        _commit_delta(_issue_delta(ho_past, ho_past_ok))
+        b.sync_lds_only()
+        delta_ring[slot_pre] = _read_dy()
+        b.s_barrier_bare()
+
+    # ---- Python-unrolled loop over hi_in_block (HPB input rows) ----
+    #
+    # Software-pipelined by one row: iteration i commits the fragments issued at
+    # i - 1 and issues row i + 1's, so every ``s_waitcnt vmcnt`` for a DRAM read
+    # is separated from its load by a whole compute phase.
+    def _row_coords(hi_in_blk: int):
+        """(hi, hi_ok, ho, ho_ok) for one input row of this block."""
+        hi_val = b.add(hi_block_start, b.const_i32(hi_in_blk))
+        hi_ok = b.cmp_lt(hi_val, c_H)
+        # dY row this input row feeds through r = 0.
+        ho_val = b.add(hi_val, b.const_i32(p.PAD))
+        return hi_val, hi_ok, ho_val, b.land(hi_ok, b.cmp_lt(ho_val, c_Ho))
+
+    _hi0, _hi0_ok, _ho0, _ho0_ok = _row_coords(0)
+    pending_dy = _issue_delta(_ho0, _ho0_ok)
+    pending_x = _issue_s_strip(_hi0, _hi0_ok)
+
+    for hi_in_blk in range(HPB):
+        slot_fill = hi_in_blk % KH  # compile-time ring slot
+
+        # 1. Land the fragments issued last iteration.
+        b.s_setprio(0)
+        _commit_delta(pending_dy)
+        _commit_s_strip(pending_x)
+
+        # 2. Issue the next row's DRAM reads before waiting on this one's LDS
+        #    writes, so their latency runs under the compute phase below.
+        if hi_in_blk + 1 < HPB:
+            nxt_hi, nxt_hi_ok, nxt_ho, nxt_ho_ok = _row_coords(hi_in_blk + 1)
+            pending_dy = _issue_delta(nxt_ho, nxt_ho_ok)
+            pending_x = _issue_s_strip(nxt_hi, nxt_hi_ok)
+
+        # 3. Wait for LDS loads to complete.
+        b.sync_lds_only()  # wait for smem_store (lgkmcnt=0) for both dY and X
+
+        # 4. Update delta ring → VGPR, and read the KW S fragments once each.
+        #    Hoisted out of the r loop: the same KW fragments feed all KH rows,
+        #    so re-reading them per r would triple the LDS read traffic.
+        delta_ring[slot_fill] = _read_dy()
+        x_vecs = [_read_strip(s) for s in range(KW)]
+
+        # 5. Compute phase: s_setprio(1) + KH*KW MFMAs.
+        b.s_setprio(1)
+        for r in range(KH):
+            ring_slot = (hi_in_blk + KH - r) % KH  # compile-time!
+            dy_vec = delta_ring[ring_slot]
+            for s in range(KW):
+                if spec.mfma_k == 32:
+                    acc[r][s] = b.mfma_f32_16x16x32_f16(dy_vec, x_vecs[s], acc[r][s])
+                else:
+                    acc[r][s] = b.mfma_f32_16x16x16_f16(dy_vec, x_vecs[s], acc[r][s])
+
+        b.s_setprio(0)
+        b.s_barrier_bare()
+
+    # ---- Epilogue: atomic-add to dW ----
+    # Guard with wo_tile_valid: last q_block may have fewer than WAVES_Q valid tiles.
+    #
+    # dW is [total_k, KH, KW, cpg]: the k axis is global but the c axis is
+    # per-group, so the channel index here is the IN-GROUP one. Feeding the
+    # global channel (which is what X is addressed by) walks off the end of the
+    # filter's c extent and lands in the next (r, s) slot for every group > 0.
+    c_in_group_lane = b.add(b.add(c_tile_origin, wave_c_origin), q_in_lane)
+    c_valid_guard = b.cmp_lt(c_in_group_lane, c_cpg)
+    k_in_group_base = b.sub(k_wave_base, b.mul(group, c_kpg))
+
+    for r in range(KH):
+        for s in range(KW):
+            for slot in range(4):
+                k_abs = b.add(
+                    k_wave_base, b.add(b.mul(c4, b.const_i32(4)), b.const_i32(slot))
+                )
+                k_in_group = b.add(
+                    k_in_group_base, b.add(b.mul(c4, b.const_i32(4)), b.const_i32(slot))
+                )
+                k_valid = b.cmp_lt(k_in_group, c_kpg)
+                both_valid = b.land(b.land(k_valid, c_valid_guard), wo_tile_valid)
+                acc_val = b.vec_extract(acc[r][s], slot)
+                dw_off, _ = dw_desc.offset(
+                    b, k=k_abs, r=b.const_i32(r), s=b.const_i32(s), c=c_in_group_lane
+                )
+                with b.scf_if(both_valid):
+                    b.global_atomic_add(D, dw_off, acc_val)
 
     return b.kernel
 
@@ -5085,7 +5795,6 @@ def build_direct_depthwise_spatial(
 
     p = spec.problem
     WAVE = spec.wave_size
-    BLOCK_WAVES = spec.block_waves
     THREADS = spec.threads_per_block
     n_w = spec.n_w_per_wave
     BLOCK_W = spec.block_w

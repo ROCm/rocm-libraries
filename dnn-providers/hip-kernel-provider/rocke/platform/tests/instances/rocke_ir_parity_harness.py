@@ -756,7 +756,9 @@ def build_deep(kind, arch, **kw):
 # C++ engine parity: direct-conv parity is gated via tools/check_byte_identity.py
 # (see tests/instances/parity/conv_direct_grouped_emit.* and the
 # conv_direct_grouped family in tests/instances/differential/golden/llvm_gfx_all.json).
-# All five variants (16c, 4c, 8c, 32c, depthwise) are covered as configs 0-8.
+# The five forward variants (16c, 4c, 8c, 32c, depthwise) are configs 0-8; the
+# wgrad variant is configs 9-13 (9 mfma_k=32, 10 mfma_k=16, 11 multi-wave K/C/Q,
+# 12-13 the two gfx942 rejection paths).
 # If you add new direct-conv variants, add matching configs to both emitters and
 # re-bless the golden.
 # ---------------------------------------------------------------------------
