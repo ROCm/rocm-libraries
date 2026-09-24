@@ -76,6 +76,7 @@ BenchmarkProblems:
             - Exact: [640, 640, 1, 640]
             - Exact: [768, 640, 1, 512]
             - Exact: [521, 521, 1, 521]
+            - Exact: [532, 64, 1, 64]
 
 LibraryLogic:
   ScheduleName: "bench_fused_bf16_partialrms_residualadd"
