@@ -2663,7 +2663,7 @@ class GlobalWriteBatchWriter:
           # the top-left element of the tile (first element of the first batch).
           # addrCalc.addrDVgpr / globalOffset are valid here (just used by addStore).
           # Works for any DestDataType; produces INCORRECT results (visualization only).
-          if self.kernel.get("EnableWGMDebug", 0) and self.batchIdx == 0 and elementIdx == 0:
+          if "WGMDebugOrigWG0" in self.parentWriter.sgprs and self.batchIdx == 0 and elementIdx == 0:
             storeCodeModule.add(self.parentWriter.wgmDebugRawStore(self.kernel, addrCalc))
           if useAlign8:
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))

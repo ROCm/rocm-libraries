@@ -10180,7 +10180,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # workgroup id from the prologue (before WGM/XCC remap) to the epilogue store,
     # where it is written into the output for visualization. See EnableWGMDebug
     # and KernelWriterAssembly.wgmDebugStoreValues().
-    if kernel.get("EnableWGMDebug", 0):
+    if kernel.get("EnableWGMDebug", 0) and kernel["StreamK"] == 0:
       self.defineSgpr("WGMDebugOrigWG0", 1)
       # Snapshot of the workgroup's D store SRD (tile-base descriptor, 4 sgprs)
       # taken right after it is computed and BEFORE the store loop increments it

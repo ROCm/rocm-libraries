@@ -3163,7 +3163,7 @@ class KernelWriterAssembly(KernelWriter):
       # WGM instrumentation: snapshot the raw (pre-remap) 1D workgroup id
       # before WGM/XCC remapping mutates WorkGroup0. Written into D at the
       # epilogue store for workgroup-mapping visualization.
-      if kernel.get("EnableWGMDebug", 0):
+      if "WGMDebugOrigWG0" in self.sgprs:
         module.addComment1("@DebugWGM: snapshot pre-WGM workgroup id")
         module.add(SMovB32(dst=sgpr("WGMDebugOrigWG0"), src=sgpr("WorkGroup0"),
                            comment="DebugWGM: original 1D workgroup id (pre-WGM)"))
@@ -14273,7 +14273,7 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprBpeList = [sgprLog2BpeC, sgprLog2BpeD]
 
       module.add(self.computeStoreSrdStart(kernel, ["C", "D"], sgprBpeList=self.sgprBpeList))
-      if kernel.get("EnableWGMDebug", 0):
+      if "WGMDebugSrdD" in self.sgprs:
         module.addComment1("@DebugWGM: snapshot D store SRD (tile N-base) + final tile coords before store loop")
         module.add(SMovB64(dst=sgpr("WGMDebugSrdD", 2), src=sgpr("SrdD", 2), comment="DebugWGM: save SrdD base"))
         module.add(SMovB64(dst=sgpr("WGMDebugSrdD+2", 2), src=sgpr("SrdD+2", 2), comment="DebugWGM: save SrdD size/flags"))
@@ -18049,7 +18049,7 @@ class KernelWriterAssembly(KernelWriter):
       # workgroup's macro-tile origin with the WG-mapping record (store-path
       # independent). Uses the tile-N-base SRD snapshotted before the store loop
       # plus a per-WI M-tile vaddr offset (mirrors the real store's addressing).
-      if kernel.get("EnableWGMDebug", 0):
+      if "WGMDebugSrdD" in self.sgprs:
         module.add(self.wgmDebugRawStoreOrigin(kernel))
 
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["StreamK"] > 0 and \
