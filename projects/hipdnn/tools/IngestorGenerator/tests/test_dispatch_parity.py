@@ -379,3 +379,64 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
             "the non-persistent arm"
         )
         assert value == "off", value
+
+    @staticmethod
+    def _resolve_with_the_real_dispatcher(monkeypatch, **overrides):
+        """B1, Sq=Skv=8192, Hq=Hkv=8, D=128, bf16, causal through the dispatcher and
+        request class the shipped profile binds, on its own ``request.defaults``.
+
+        At that shape ``work = 32 * 8 * 1 = 256 = dense_num_persistent``, so the
+        unpinned ``auto`` arm resolves persistent and, at D=128 causal bf16, wide DMA
+        with it: the one shape where the pin is the whole difference.
+        """
+        import importlib
+
+        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        dispatch_parity._bind_provider(profile["provider_root"])
+        dispatch, request = profile["dispatch"], profile["request"]
+        try:
+            factory_module = importlib.import_module(dispatch["module"])
+            request_module = importlib.import_module(request["module"])
+        except ImportError as exc:
+            pytest.skip(
+                f"the rocKE library cannot be imported here ({exc}) -- run with an "
+                "interpreter that has its dependencies, e.g. <build-dir>/dnn-providers/"
+                "hip-kernel-provider/descriptor-packaging/hkp-rocke-venv/bin/python"
+            )
+        factory = getattr(factory_module, dispatch["function"])
+        request_cls = getattr(request_module, request["class"])
+        fields = {
+            **request["defaults"],
+            "batch": 1,
+            "seqlen_q": 8192,
+            "seqlen_k": 8192,
+            "nhead_q": 8,
+            "nhead_k": 8,
+            "hdim_q": 128,
+            "hdim_v": 128,
+            "dtype": "bf16",
+            "mask_type": 1,
+            **overrides,
+        }
+        return factory(request_cls(**fields))
+
+    def test_the_real_dispatcher_resolves_the_arm_the_catalog_ships(self, monkeypatch):
+        """The YAML value is only half of F6: this is what the dispatcher DOES with it,
+        so a profile that parses correctly but no longer reaches the non-persistent
+        eight-argument kernel still fails."""
+        spec = self._resolve_with_the_real_dispatcher(monkeypatch)
+        assert spec.persistent is False, (
+            "the shipped profile resolves the persistent arm at B1/Sq8192/H8/D128 -- "
+            "a kernel with a different argument contract that this catalog does not "
+            "ship"
+        )
+        assert spec.wide_lds_dma is False, spec
+
+    def test_the_unpinned_control_does_resolve_the_persistent_arm(self, monkeypatch):
+        """A control: without the pin this shape IS persistent, so the case above
+        exercises the pin rather than a shape that is never persistent."""
+        spec = self._resolve_with_the_real_dispatcher(
+            monkeypatch, dense_persistent="auto"
+        )
+        assert spec.persistent is True, spec
