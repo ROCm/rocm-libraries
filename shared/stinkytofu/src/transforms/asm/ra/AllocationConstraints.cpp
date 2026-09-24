@@ -197,6 +197,53 @@ void collectReadWriteTies(const StinkyInstruction& instruction, const OperandGro
     }
 }
 
+/// One lifted DWORD, which is what "the whole register" means to the allocator:
+/// a field declaring fewer bits than this writes part of one and leaves the rest.
+constexpr uint16_t kLiftedUnitBits = 32;
+
+/// Record each value written through a narrow (sub-32-bit) destination that
+/// nothing reads.
+///
+/// A narrow write changes part of a register and keeps the rest, so the value
+/// already in the register is one of its inputs. The table says so by marking
+/// the field RW, and collectReadWriteTies then keeps the old and new values in
+/// one register. When RW is missing, that input is invisible: the earlier value
+/// has no reader, looks dead as soon as it is written, and the allocator gives
+/// its register away, so the part the next write was meant to keep is lost. The
+/// FP8 pack converts had this bug before they were marked RW.
+///
+/// This is a warning, not an error: a narrow write that really is dead is legal.
+/// A missing RW, though, is silent wrong code that no later pass can catch,
+/// because op_sel is not a register, so it is worth reporting.
+void collectUnreadPartialWrites(const StinkyInstruction& instruction, const RegClassSet& classes,
+                                std::vector<SSAValueID>& unread) {
+    const HwInstDesc* desc = instruction.getHwInstDesc();
+    if (desc == nullptr || desc->operandFields.empty()) return;
+
+    const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
+    size_t destIdx = 0;
+    size_t cursor = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t destSlot = destIdx++;
+        if (destSlot >= destRegs.size()) break;
+
+        const size_t units = liftedSSAUnits(destRegs[destSlot], classes);
+        const size_t first = cursor;
+        cursor += units;
+        // RW already says the rest of the register survives, so the read is
+        // there and this says nothing.
+        if (field.isReadWrite || units == 0) continue;
+        if (field.fieldSizeBits == 0 || field.fieldSizeBits >= kLiftedUnitBits) continue;
+
+        for (size_t unit = 0; unit < units && first + unit < instruction.getNumSSAResults();
+             ++unit) {
+            const StinkySSAValue* value = instruction.getSSAResult(first + unit);
+            if (value != nullptr && value->useEmpty()) unread.push_back(value->valueId());
+        }
+    }
+}
+
 /// Cap the values used where the instruction cannot select a VGPR bank.
 ///
 /// `s_set_vgpr_msb` carries four 2-bit slots, so a format with more register
@@ -372,6 +419,8 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
             const OperandGroups groups = operandGroupsOf(*instruction, liftedClasses);
             collectReadWriteTies(*instruction, groups, execMasked.count(instruction) != 0,
                                  constraints.affinitySets_);
+            collectUnreadPartialWrites(*instruction, liftedClasses,
+                                       constraints.unreadPartialWrites_);
             collectBankReachableCeilings(*instruction, groups, constraints.maxIndexByValue_);
 
             // Soft pairings and producer pins, per instruction because that is

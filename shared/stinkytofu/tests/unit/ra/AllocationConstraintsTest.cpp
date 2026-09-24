@@ -12,6 +12,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
+#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -154,6 +155,75 @@ TEST_F(AllocationConstraintsTest, MergeIsAnAffinitySet) {
         << setup.constraints().toString();
     EXPECT_FALSE(setup.constraints().affinitySets().empty());
     EXPECT_GE(setup.constraints().affinitySets().front().members.size(), 2u);
+}
+
+TEST_F(AllocationConstraintsTest, HalfWritingPackIsTiedToTheHalfItKeeps) {
+    // The producer's FP8 pack: the first convert fills v10's low half, the second
+    // its high half while keeping the low. Both write v10, so the second reads
+    // what the first left there -- a read-write tie, not two unrelated defs.
+    BasicBlock* entry = block("entry");
+    AsmIRBuilder builder(*entry, kRaTestArch);
+
+    auto pack = [&](uint32_t src0, uint32_t src1) {
+        StinkyInstruction* cvt = builder.create(getMCIDByUOp(GFX::v_cvt_pk_fp8_f32, kRaTestArch));
+        cvt->addDestReg(StinkyRegister("v", 10, 1));
+        cvt->addSrcReg(StinkyRegister("v", src0, 1));
+        cvt->addSrcReg(StinkyRegister("v", src1, 1));
+        legalizeReadWriteSources(cvt);
+        return cvt;
+    };
+    StinkyInstruction* low = pack(1, 2);
+    StinkyInstruction* high = pack(3, 4);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* lowResult = ssaDefinedValue(*low);
+    const StinkySSAValue* highResult = ssaDefinedValue(*high);
+    ASSERT_NE(lowResult, nullptr);
+    ASSERT_NE(highResult, nullptr);
+
+    AllocationSetup setup(*func);
+    // The low half has a reader now, which is what keeps its register alive.
+    EXPECT_FALSE(lowResult->useEmpty());
+    EXPECT_TRUE(hasAffinity(setup.constraints(), lowResult->valueId()))
+        << setup.constraints().toString();
+    EXPECT_TRUE(hasAffinity(setup.constraints(), highResult->valueId()))
+        << setup.constraints().toString();
+    // Both halves are read, so neither looks like the dead narrow write below.
+    EXPECT_TRUE(setup.constraints().unreadPartialWrites().empty());
+}
+
+TEST_F(AllocationConstraintsTest, NarrowWriteNobodyReadsIsReported) {
+    // v_add_f16 writes 16 bits of a VGPR and the table does not mark it RW, so
+    // nothing says what becomes of the other half. That is the shape the FP8
+    // pack had before it was marked: a result with no reader, whose register the
+    // allocator frees at once. Reported so the question gets asked.
+    BasicBlock* entry = block("entry");
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    StinkyInstruction* add = builder.create(getMCIDByUOp(GFX::v_add_f16, kRaTestArch));
+    add->addDestReg(StinkyRegister("v", 10, 1));
+    add->addSrcReg(StinkyRegister("v", 1, 1));
+    add->addSrcReg(StinkyRegister("v", 2, 1));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* result = ssaDefinedValue(*add);
+    ASSERT_NE(result, nullptr);
+
+    AllocationSetup setup(*func);
+    const std::span<const SSAValueID> unread = setup.constraints().unreadPartialWrites();
+    EXPECT_NE(std::find(unread.begin(), unread.end(), result->valueId()), unread.end())
+        << setup.constraints().toString();
+}
+
+TEST_F(AllocationConstraintsTest, FullWidthWriteNobodyReadsIsNotReported) {
+    // A dead full-register write keeps nothing, so it says nothing about a
+    // missing read and would only be noise in the report.
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup setup(*func);
+    EXPECT_TRUE(setup.constraints().unreadPartialWrites().empty())
+        << setup.constraints().toString();
 }
 
 TEST_F(AllocationConstraintsTest, LiveInTheDispatchFilledIsPinned) {

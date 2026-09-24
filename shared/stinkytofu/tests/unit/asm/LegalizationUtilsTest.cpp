@@ -424,3 +424,45 @@ TEST_F(LegalizationUtilsTest, ImplicitRegistersNotAddedTwice) {
     EXPECT_EQ(static_cast<int>(inst->getDestRegs().size()), dstsAfterFirst)
         << "Should not add duplicate implicit dst registers";
 }
+
+// ---------------------------------------------------------------------------
+// legalizeReadWriteSources
+// ---------------------------------------------------------------------------
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceAddedForHalfPack) {
+    // The high convert of an FP8 pack keeps the low half of v10, so it reads v10.
+    StinkyInstruction* inst = createInst(GFX::v_cvt_pk_fp8_f32);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    // Appended last, past the printed sources, so the emitter never prints it.
+    ASSERT_EQ(inst->getSrcRegs().size(), 3u);
+    EXPECT_TRUE(inst->getSrcRegs()[2] == StinkyRegister("v", 10, 1));
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourceNotDuplicatedWhenAlreadyPresent) {
+    // The producer's in-place pack already names the destination as src0.
+    StinkyInstruction* inst = createInst(GFX::v_cvt_pk_fp8_f32);
+    inst->addDestReg(StinkyRegister("v", 4, 1));
+    inst->addSrcReg(StinkyRegister("v", 4, 1));
+    inst->addSrcReg(StinkyRegister("v", 5, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}
+
+TEST_F(LegalizationUtilsTest, ReadWriteSourcesLeavesFullWidthWriteAlone) {
+    // v_cvt_pk_f16_f32 replaces its whole destination, so it reads nothing back.
+    StinkyInstruction* inst = createInst(GFX::v_cvt_pk_f16_f32);
+    inst->addDestReg(StinkyRegister("v", 10, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    legalizeReadWriteSources(inst);
+
+    EXPECT_EQ(inst->getSrcRegs().size(), 2u);
+}

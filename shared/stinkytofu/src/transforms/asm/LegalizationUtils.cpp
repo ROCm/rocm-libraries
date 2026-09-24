@@ -602,4 +602,38 @@ void legalizeImplicitSpecialRegisters(StinkyInstruction* inst, uint32_t wavefron
         addUniqueSpecialDest(inst, StinkyRegister::getEXECRegister(wavefrontSize));
 }
 
+void legalizeReadWriteSources(StinkyInstruction* inst) {
+    if (inst == nullptr) return;
+    const HwInstDesc* desc = inst->getHwInstDesc();
+    if (desc == nullptr || desc->operandFields.empty()) return;
+
+    // operandFields describes the printed operands in order, so the slot a dest
+    // field names is its position among the dest fields -- the same walk
+    // collectReadWriteTies and the verifier use, so all three agree on which
+    // register a field means.
+    size_t destSlot = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t slot = destSlot++;
+        if (!field.isReadWrite) continue;
+        if (slot >= inst->getDestRegs().size()) continue;
+
+        // By value: addSrcReg can reallocate the dest vector's neighbour, and a
+        // reference into getDestRegs() would not survive that.
+        const StinkyRegister rw = inst->getDestRegs()[slot];
+        if (!rw.isRegister()) continue;
+
+        // Full-operand equality, matching collectReadWriteTies: a source that
+        // merely overlaps is a different value and would not tie.
+        bool present = false;
+        for (const StinkyRegister& src : inst->getSrcRegs()) {
+            if (src == rw) {
+                present = true;
+                break;
+            }
+        }
+        if (!present) inst->addSrcReg(rw);
+    }
+}
+
 }  // namespace stinkytofu

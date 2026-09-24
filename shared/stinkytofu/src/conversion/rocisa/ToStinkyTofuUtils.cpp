@@ -452,8 +452,14 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
         }
     }
 
+    // A read-write destination is also a read. Take it from the instruction table,
+    // since not every rocisa class lists it in getSrcParams().
+    legalizeReadWriteSources(stinkyInst);
+
 #ifndef NDEBUG
     // Verify: read-write operands must exist in both destRegs and srcRegs.
+    // legalizeReadWriteSources above guarantees this, so a failure here means an
+    // operand the table describes did not reach destRegs at all.
     {
         const auto& fields = stinkyInst->getHwInstDesc()->operandFields;
         for (const auto& field : fields) {

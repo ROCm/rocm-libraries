@@ -180,6 +180,38 @@ TEST_F(ReadWriteOperandTest, VCvtSrFp8F32_MissingDstInSrc) {
 }
 
 // ---------------------------------------------------------------------------
+// v_cvt_pk_fp8_f32  —  D0 is RW: op_sel picks which half of the destination the
+// packed pair lands in, and the other half keeps what was already there, so a
+// four-value pack is two of these writing one register.
+// HW fields: {D0, vdst, vgpr, 16, RW}, {S0, src0, src, 32}, {S1, src1, src, 32}
+// ---------------------------------------------------------------------------
+
+TEST_F(ReadWriteOperandTest, VCvtPkFp8F32_Valid) {
+    std::string error = verifyRW("v_cvt_pk_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2), vgpr(0)});
+    EXPECT_TRUE(error.empty()) << error;
+}
+
+TEST_F(ReadWriteOperandTest, VCvtPkFp8F32_MissingDstInSrc) {
+    std::string error = verifyRW("v_cvt_pk_fp8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)});
+    EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
+}
+
+// ---------------------------------------------------------------------------
+// v_cvt_pk_bf8_f32  —  D0 is RW (same pattern as the FP8 variant)
+// HW fields: {D0, vdst, vgpr, 16, RW}, {S0, src0, src, 32}, {S1, src1, src, 32}
+// ---------------------------------------------------------------------------
+
+TEST_F(ReadWriteOperandTest, VCvtPkBf8F32_Valid) {
+    std::string error = verifyRW("v_cvt_pk_bf8_f32", {vgpr(0)}, {vgpr(1), vgpr(2), vgpr(0)});
+    EXPECT_TRUE(error.empty()) << error;
+}
+
+TEST_F(ReadWriteOperandTest, VCvtPkBf8F32_MissingDstInSrc) {
+    std::string error = verifyRW("v_cvt_pk_bf8_f32", {vgpr(0)}, {vgpr(1), vgpr(2)});
+    EXPECT_NE(error.find("Read-write"), std::string::npos) << "Expected RW error, got: " << error;
+}
+
+// ---------------------------------------------------------------------------
 // v_cvt_sr_bf8_f32  —  D0 is RW (same pattern as FP8 variant)
 // HW fields: {D0, vdst, vgpr, 8, RW}, {S0, src0, src, 32}, {S1, src1, src, 32}
 // ---------------------------------------------------------------------------

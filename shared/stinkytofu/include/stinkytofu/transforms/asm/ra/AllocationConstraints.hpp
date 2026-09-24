@@ -166,6 +166,17 @@ class AllocationConstraints {
         return undefinedLiveIns_;
     }
 
+    /// Values written through a field narrower than the register, whose result
+    /// nothing reads.
+    ///
+    /// Usually a missing RW: the write keeps the rest of the register, but the
+    /// table does not say so, so the kept value looks dead and loses its register
+    /// (the FP8 pack converts, before the fix). A truly dead narrow write lands
+    /// here too. Reported only; it constrains nothing.
+    std::span<const SSAValueID> unreadPartialWrites() const {
+        return unreadPartialWrites_;
+    }
+
     std::span<const TupleRun> tupleRuns() const {
         return tupleRuns_;
     }
@@ -190,6 +201,7 @@ class AllocationConstraints {
     std::vector<const char*> pinReasonByValue_;
     std::vector<uint32_t> maxIndexByValue_;
     std::vector<SSAValueID> undefinedLiveIns_;
+    std::vector<SSAValueID> unreadPartialWrites_;
     std::vector<TupleRun> tupleRuns_;
     std::vector<AffinitySet> affinitySets_;
     std::vector<Preference> preferences_;

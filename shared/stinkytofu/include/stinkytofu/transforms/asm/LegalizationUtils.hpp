@@ -128,6 +128,23 @@ STINKYTOFU_EXPORT Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBu
 STINKYTOFU_EXPORT void legalizeImplicitSpecialRegisters(StinkyInstruction* inst,
                                                         uint32_t wavefrontSize);
 
+// Add the hidden source that each read-write destination of `inst` implies.
+//
+// A read-write (RW) destination keeps part of its old value: `s_cmov_b32` keeps
+// all of it when the condition is false, and `v_cvt_pk_fp8_f32` keeps the half
+// that op_sel does not write. That old value is an input, so the register must
+// also be listed as a source, or use-def tracking, the SSA lift and the register
+// allocator will not see the read.
+//
+// The register is added last, where the emitter does not print it, and only if
+// it is not already a source, so calling this twice is safe. Call it when the
+// instruction is built; the verifier and other early passes rely on it.
+//
+// Example (high half of an FP8 pack, which keeps the low half of v10):
+//      v10 = v_cvt_pk_fp8_f32(v1, v2)  →  v10 = v_cvt_pk_fp8_f32(v1, v2, v10)
+//      Both print as: v_cvt_pk_fp8_f32 v10, v1, v2 op_sel:[0,0,1]
+STINKYTOFU_EXPORT void legalizeReadWriteSources(StinkyInstruction* inst);
+
 }  // namespace stinkytofu
 
 #endif  // STINKYTOFU_LEGALIZATION_UTILS_HPP

@@ -1,0 +1,57 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact,classes=v,apply --print-output
+#
+# A convert that writes half a register keeps the other half, so a pack of four
+# values is two of them writing one register.
+#
+# `v_cvt_pk_fp8_f32` packs two floats into two FP8 bytes, and op_sel picks which
+# half of the destination they land in. The half it does not write keeps what was
+# already there, which is how the producer builds a whole dword: a low convert,
+# then a high convert that has to see the low one's result. HwInstDesc marks that
+# field isReadWrite, so the second convert reads its own destination and
+# collectReadWriteTies puts both results in one register.
+#
+# Without the tie the two results merely interfere -- the low one is still live
+# where the high one is defined -- so compaction gives them different registers
+# and the store gets a dword whose low half was never written. Nothing later can
+# detect that: op_sel is not a register, so the emitted code looks correct.
+#
+# The scratch def between them is what makes the register pressure real, and the
+# consumer at the end keeps the packed value alive to its use.
+#
+# CHECK-LABEL: @allocation_half_write_tie
+# CHECK: ^entry:
+#
+# The two sources of each convert die at it, so they are free to be reused.
+# CHECK-NEXT: v2 = "st.v_mov_b32"(1)
+# CHECK-NEXT: v1 = "st.v_mov_b32"(2)
+#
+# The register the pack accumulates into, initialised before the first convert.
+# CHECK-NEXT: v0 = "st.v_mov_b32"(0)
+#
+# Low half: writes v0 and reads v0, the value it keeps.
+# CHECK-NEXT: v0 = "st.v_cvt_pk_fp8_f32"(v2, v1, v0)
+#
+# Scratch defs, taking back the indices the dead sources left behind.
+# CHECK-NEXT: v2 = "st.v_mov_b32"(3)
+# CHECK-NEXT: v1 = "st.v_mov_b32"(4)
+#
+# High half: the same register again, which is the line the tie decides. v0 is
+# live here, so without the tie compaction would give this result its own index.
+# CHECK-NEXT: v0 = "st.v_cvt_pk_fp8_f32"(v2, v1, v0)
+#
+# The consumer reads the completed dword.
+# CHECK-NEXT: v0 = "st.v_mov_b32"(v0)
+#
+# CHECK-NOT: %
+
+st.func @allocation_half_write_tie() {
+^entry:
+  v20 = "st.v_mov_b32"(1)
+  v21 = "st.v_mov_b32"(2)
+  v40 = "st.v_mov_b32"(0)
+  v40 = "st.v_cvt_pk_fp8_f32"(v20, v21, v40)
+  v22 = "st.v_mov_b32"(3)
+  v23 = "st.v_mov_b32"(4)
+  v40 = "st.v_cvt_pk_fp8_f32"(v22, v23, v40)
+  v24 = "st.v_mov_b32"(v40)
+}
