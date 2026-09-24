@@ -12,11 +12,19 @@ Definition of Done from the ticket:
 - ``arch`` flows from the request end-to-end.
 - CPU tests dispatch for an architecture that is not the host, across every arch
   the dispatcher currently declares.
+
+The behavioural tests above drive the *selection* path only.  That left a real
+gap: ``library/`` is build-time-only Python, so a builder or benchmark that
+calls a gate without an ``arch`` is never imported by any GPU lane and the
+``TypeError`` ships green.  ``TestEveryGateCallSiteSuppliesArch`` closes it
+statically -- see that class for the full argument.
 """
 
 from __future__ import annotations
 
+import ast
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import kernels.common.attention_unified as au
@@ -245,6 +253,159 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
             )
             result = dispatch_attention(req)
             self.assertIsNotNone(result.spec)
+
+
+# =====================================================================
+# Static guard: every call site of an arch-gated selector supplies arch
+# =====================================================================
+
+# Anchored on the module object, never on a repo-relative literal.
+_GATE_MODULE = Path(au.__file__).resolve()
+_LIBRARY_ROOT = _GATE_MODULE.parents[2]
+
+# Gates whose ``arch`` still carries a default. A default is what lets a caller
+# omit the arch and silently get some other box's answer, so this set is a
+# RATCHET: entries may be removed as gates are tightened, never added. A new
+# name here means a new implicit host dependency was introduced.
+_ARCH_IS_OPTIONAL = frozenset(
+    {
+        "_enable_gfx942_flash_k_sliced_ldsseq",
+        "_gfx942_bf16_wide_geometry",
+        "_gfx942_bf16_wide_tile_size",
+        "_select_gfx942_flash_num_warps",
+        "attention_3d_workspace_nbytes",
+        "build_unified_attention_2d",
+        "build_unified_attention_3d",
+        "build_unified_attention_reduce",
+        "supports_native_unified_attention",
+    }
+)
+
+
+def _gate_signatures():
+    """Partition ``attention_unified``'s top-level functions that take ``arch``.
+
+    Returns ``(required, optional)``, each mapping a function name to the
+    positional index of its ``arch`` parameter (``None`` when keyword-only).
+    """
+    tree = ast.parse(_GATE_MODULE.read_text(encoding="utf-8"), str(_GATE_MODULE))
+    required, optional = {}, {}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        args = node.args
+        positional = [p.arg for p in args.posonlyargs] + [p.arg for p in args.args]
+        kwonly = [p.arg for p in args.kwonlyargs]
+        if "arch" in positional:
+            index = positional.index("arch")
+            # Defaults right-align onto the positional list.
+            has_default = index >= len(positional) - len(args.defaults)
+        elif "arch" in kwonly:
+            index = None
+            has_default = args.kw_defaults[kwonly.index("arch")] is not None
+        else:
+            continue
+        (optional if has_default else required)[node.name] = index
+    return required, optional
+
+
+def _called_name(func):
+    """Bare name for a call target: ``f(...)`` and ``au.f(...)`` both give ``f``."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _supplies_arch(call, positional_index):
+    """Whether ``call`` can be shown to pass ``arch``.
+
+    ``*args`` / ``**kwargs`` forwarding is undecidable here, so it counts as
+    supplied -- this guard reports only what it can prove.
+    """
+    if any(keyword.arg is None for keyword in call.keywords):
+        return True
+    if any(isinstance(arg, ast.Starred) for arg in call.args):
+        return True
+    if any(keyword.arg == "arch" for keyword in call.keywords):
+        return True
+    return positional_index is not None and len(call.args) > positional_index
+
+
+class TestEveryGateCallSiteSuppliesArch(unittest.TestCase):
+    """Static sweep: no in-tree caller of a required-arch gate omits the arch.
+
+    Why static, and why here. Making ``arch`` required turns every missed call
+    site into a ``TypeError`` at the moment it is reached -- which is the right
+    failure, but only if something reaches it. Most of ``library/`` is
+    build-time-only Python that no GPU lane imports, and the one production
+    caller that *is* reached sits on the launch path, which the behavioural
+    tests above deliberately do not cover. That combination is how a broken 3D
+    launch shipped through green CI. Parsing beats importing for the same
+    reason: it needs no GPU, no torch, and no module to be import-clean.
+
+    Matching is by bare name against the top-level functions of
+    ``attention_unified``, so a same-named method elsewhere in the tree would
+    be a false positive. There are none today; if one appears, rename it or
+    give this guard a skip list rather than loosening the signature.
+    """
+
+    def _sweep(self, gates):
+        misses, unparseable = [], []
+        for path in sorted(_LIBRARY_ROOT.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+            except SyntaxError as exc:
+                unparseable.append(f"{path.relative_to(_LIBRARY_ROOT)}: {exc}")
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = _called_name(node.func)
+                if name in gates and not _supplies_arch(node, gates[name]):
+                    misses.append(
+                        f"{path.relative_to(_LIBRARY_ROOT)}:{node.lineno} "
+                        f"{name}() -- no arch"
+                    )
+        return misses, unparseable
+
+    def test_gate_set_is_populated(self):
+        """A vacuous sweep passes for free, so pin that the gates were found."""
+        required, _ = _gate_signatures()
+        self.assertGreater(
+            len(required),
+            40,
+            "expected dozens of required-arch gates in attention_unified; found "
+            f"{len(required)} -- the sweep is not looking at what it thinks it is",
+        )
+
+    def test_optional_arch_gates_are_only_the_known_ones(self):
+        """Ratchet: a gate may lose its arch default, never gain one."""
+        _, optional = _gate_signatures()
+        self.assertEqual(
+            set(optional),
+            set(_ARCH_IS_OPTIONAL),
+            "the set of gates with a defaulted arch changed. Removing a name is "
+            "the intended direction -- drop it from _ARCH_IS_OPTIONAL too. Adding "
+            "one re-introduces an implicit host dependency and is what this "
+            "guard exists to block",
+        )
+
+    def test_no_call_site_omits_a_required_arch(self):
+        required, _ = _gate_signatures()
+        misses, unparseable = self._sweep(required)
+        self.assertEqual(
+            unparseable, [], f"unparseable sources under {_LIBRARY_ROOT.name}/"
+        )
+        self.assertEqual(
+            misses,
+            [],
+            "these call sites raise TypeError the moment they are reached -- the "
+            "gate requires an arch and none is passed:\n  " + "\n  ".join(misses),
+        )
 
 
 if __name__ == "__main__":
