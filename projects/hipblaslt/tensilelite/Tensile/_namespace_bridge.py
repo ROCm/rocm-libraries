@@ -112,6 +112,7 @@ def install_alias(*, alias: str, canonical: str) -> ModuleType:
     if not alias or not canonical or alias == canonical:
         raise ValueError("alias and canonical must be distinct package names")
 
+    canonical_root = importlib.import_module(canonical)
     finder = next(
         (
             item
@@ -125,7 +126,6 @@ def install_alias(*, alias: str, canonical: str) -> ModuleType:
     if finder is None:
         sys.meta_path.insert(0, _AliasFinder(alias, canonical))
 
-    canonical_root = importlib.import_module(canonical)
     for name, module in tuple(sys.modules.items()):
         if module is None:
             continue
