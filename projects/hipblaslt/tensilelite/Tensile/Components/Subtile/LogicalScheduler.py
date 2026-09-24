@@ -3308,6 +3308,59 @@ class LogicalScheduler:
             self.tile_peaks[tensor] = max(self.tile_peaks.get(tensor, 0), peak)
         return self._tail_merged_emitted
 
+    def _tailEntryInflightBound(self) -> int:
+        """How many mainloop loads may still be in flight when the tail starts.
+
+        The mainloop issues one batch of loads per DepthU and the four-deep
+        tail reads the last two batches, so at entry the data it is about to
+        read is partly still on the wire. Which part decides the count.
+
+        Reads are hoisted ahead of the MFMAs that consume them, and the scales
+        are hoisted furthest: ``LR SA k[2,3]`` sits in the tail's very first
+        slot, four k-steps ahead of its consumer. So the entry wait has to
+        cover the scale loads of the *second* batch, and with them everything
+        issued before. What it does not have to cover is whatever the mainloop
+        issues after those scales -- the trailing slices of B, which no read
+        reaches until partition 1, behind a wait the scheduler placed itself.
+
+        That trailing count is the bound. For MT256x256 fp4 it is 6 of the
+        batch's 18 loads, which the verify sweep agrees with: 8 fails, 4 (an
+        earlier guess) passes only because it is stricter than 6.
+
+        Returns 0 -- wait for everything, always safe -- when the schedule does
+        not look like the one this argument is about.
+        """
+        import math
+        emitter = self._emitter
+        if emitter is None or self._emitted is None:
+            return 0
+
+        grs = [em.source for partition in self._emitted
+               for slot in partition for em in slot if em.opType == 'gr']
+        scaleIdx = [i for i, gr in enumerate(grs) if gr.tensor in ('SA', 'SB')]
+        if not scaleIdx:
+            return 0
+
+        def _loads(gr):
+            info = emitter.tileInfoMap.get(gr.tensor)
+            if info is None:
+                return 0
+            if gr.tensor in ('SA', 'SB'):
+                return info.numGRTotal
+            span = gr.tiles.tileId_end - gr.tiles.tileId_start
+            ratio = getattr(info, 'loadRatioGR', 1.0) or 1.0
+            return max(1, math.ceil(span / ratio))
+
+        # The per-tensor totals are the batch size stated independently of the
+        # GR list, so disagreement means _loads does not model this geometry
+        # and the derived count would be a guess.
+        expected = sum(info.numGRTotal
+                       for info in emitter.tileInfoMap.values() if info)
+        if sum(_loads(gr) for gr in grs) != expected:
+            return 0
+
+        return sum(_loads(gr) for gr in grs[max(scaleIdx) + 1:])
+
     def build_tailloop_pgr0(self) -> List[List[List[EmittedModule]]]:
         """Template for Tailloop based on PGR0 schedule.
 
@@ -6001,13 +6054,11 @@ class LogicalScheduler:
             # read them.
             #
             # The count is how many of those loads may stay in flight past the
-            # barrier. Zero is the safe bound and what ships; it costs 181
-            # cycles per entry, ~23000 over the dispatch. Dropping the wait
-            # outright is *not* safe -- it fails fp4-verify 9/11 -- so some of
-            # what is in flight really is read here. The knob is for finding
-            # where that line falls; see FINDINGS F22.
+            # barrier, and _tailEntryInflightBound derives it. The knob
+            # overrides it; see FINDINGS F22 for the sweep behind the bound.
             from rocisa.instruction import SWaitCnt, SBarrier
-            entryVmcnt = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_ENTRY_VMCNT", "0"))
+            entryVmcnt = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_ENTRY_VMCNT",
+                                           str(self._tailEntryInflightBound())))
             module.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
                                 comment="four-deep tail: retire the mainloop's"
                                         " loads before reading what they wrote"))
