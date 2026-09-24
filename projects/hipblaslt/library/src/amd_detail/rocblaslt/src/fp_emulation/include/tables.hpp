@@ -596,8 +596,9 @@ namespace FixedPointEmulation
 
     // log2P(s_idx): usable CRT capacity (bits) for (s_idx+2) moduli.
     //
-    //   log2(P_s)/2 - 0.5: GEMMul8 ADP capacity (geometric mean of P_s,
-    //     -0.5 for conservative rounding).
+    //   log2(P_s)/2 - 0.5: per-side CRT capacity.  The 1/2 splits the single
+    //     CRT budget log2(M_s/2) equally between the A and B shifts; the -0.5
+    //     folds in the M_s/2 safety divisor.
     //   - 1.0: REQUIRED one-bit CRT safety margin (do NOT remove).
     //
     // Used both to pick effective_s (min s with log2P(s-2) >= log2P_needed)

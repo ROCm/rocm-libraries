@@ -111,15 +111,16 @@ namespace FixedPointEmulation
             const int32_t rm      = row_max[row];
             const float   sftA_f  = static_cast<float>(sftA_init[row]);
             const float   log2_rm = 0.5f * log2f(static_cast<float>(rm));
-            /* CRT accuracy: ensures |X_true| < M_s/2.
-             *   log2P ≥ (adp_bits − sftA) + 0.5·log2(R_i)
-             * Truncation accuracy: ensures the per-element truncation error
-             *   |ΔA · B_int| · 2^{-sftA-sftB} is within the target relative tolerance.
-             *   Data-independent floor (density term omitted):
-             *   log2P ≥ adp_bits + 6 − 2·sftA_init */
-            const float crt_val   = (adp_bits - sftA_f) + log2_rm + 200.0f;
-            const float trunc_val = (adp_bits + 6.0f - 2.0f * sftA_f) + 200.0f;
-            local_val             = fmaxf(crt_val, trunc_val);
+            /* log2_rm = 0.5*log2(R_i): A-side half of the CRT budget (A/B split).
+             * Three independent lower bounds on log2P; the row needs the max:
+             *   crt_acc: CRT grid fine enough to resolve to 2^-adp_bits.
+             *   crt_rep: |X_true| < M_s/2 representability (no adp_bits; the
+             *            wraparound guard for wide-range/cancelling inputs).
+             *   trunc:   INT8 operand quantization floor (data-independent). */
+            const float crt_acc   = (adp_bits - sftA_f) + log2_rm;
+            const float crt_rep   = 2.0f * log2_rm - sftA_f;
+            const float trunc_val = adp_bits + 6.0f - 2.0f * sftA_f;
+            local_val = fmaxf(fmaxf(crt_acc, crt_rep), trunc_val) + 200.0f;
         }
 
         /* Warp-level max reduction. */
@@ -190,11 +191,15 @@ namespace FixedPointEmulation
         {
             const float sftB_f  = static_cast<float>(sftB_init[col]);
             const float log2_cm = 0.5f * log2f(static_cast<float>(local_max));
-            /* CRT accuracy (B-side): log2P ≥ (adp_bits − sftB) + 0.5·log2(col_max). */
-            const float crt_req = (adp_bits - sftB_f) + log2_cm + 200.0f;
-            /* Truncation: data-independent floor, symmetric with adp_reduce_A_kernel. */
-            const float trunc_req  = (adp_bits + 6.0f - 2.0f * sftB_f) + 200.0f;
-            const float req_biased = fmaxf(crt_req, trunc_req);
+            /* log2_cm = 0.5*log2(C_j): B-side half of the CRT budget (A/B split).
+             * Three bounds, max over them (see adp_reduce_A_kernel):
+             *   crt_acc: CRT grid resolves to 2^-adp_bits.
+             *   crt_rep: |X_true| < M_s/2 representability (no adp_bits).
+             *   trunc:   INT8 quantization floor (data-independent). */
+            const float crt_acc    = (adp_bits - sftB_f) + log2_cm;
+            const float crt_rep    = 2.0f * log2_cm - sftB_f;
+            const float trunc_req  = adp_bits + 6.0f - 2.0f * sftB_f;
+            const float req_biased = fmaxf(fmaxf(crt_acc, crt_rep), trunc_req) + 200.0f;
             adp_atomicMaxF(adp_B_out, req_biased);
         }
     }
