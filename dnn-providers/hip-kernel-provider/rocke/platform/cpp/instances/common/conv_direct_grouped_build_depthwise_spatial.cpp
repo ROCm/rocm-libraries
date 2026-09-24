@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -79,6 +80,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     int n_iters;
     int _use_unroll;
     int total_c, total_k;
+    int is_bf16;
 
     rocke_value_t* A;
     rocke_value_t* Bp;
@@ -152,12 +154,14 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
     n_iters = p->H + p->KH - 1;
     _use_unroll = ((long)n_iters * p->KH * p->KW) <= 20000;
+    is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
 
     rocke_attr_set_int(bld, &bld->kernel->attrs, "max_workgroup_size", THREADS);
 
     /* ---- parameters ---- */
     {
-        const rocke_type_t* f16ptr = rocke_ptr_type(bld, rocke_f16(), "global");
+        const rocke_type_t* io_type = rocke_b_io_ir_type(bld, p->dtype ? p->dtype : "fp16");
+        const rocke_type_t* ioptr = rocke_ptr_type(bld, io_type, "global");
         rocke_param_opts_t ro, wo_opt, none;
 
         ro = (rocke_param_opts_t){0};
@@ -165,15 +169,15 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         ro.readonly = ro.readonly_set = true;
         ro.align = 16;
         ro.align_set = true;
-        A = rocke_b_param(bld, "A", f16ptr, &ro);
-        Bp = rocke_b_param(bld, "B", f16ptr, &ro);
+        A = rocke_b_param(bld, "A", ioptr, &ro);
+        Bp = rocke_b_param(bld, "B", ioptr, &ro);
 
         wo_opt = (rocke_param_opts_t){0};
         wo_opt.noalias = wo_opt.noalias_set = true;
         wo_opt.writeonly = wo_opt.writeonly_set = true;
         wo_opt.align = 16;
         wo_opt.align_set = true;
-        D = rocke_b_param(bld, "D", f16ptr, &wo_opt);
+        D = rocke_b_param(bld, "D", ioptr, &wo_opt);
 
         none = (rocke_param_opts_t){0};
         A_bytes = rocke_b_param(bld, "A_bytes", rocke_i32(), &none);
@@ -296,7 +300,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
                 safe_w = rocke_b_select(
                     bld, w_valid, rocke_b_mul(bld, w_off, c_half_bytes), oob_sentinel);
-                w_h = rocke_b_buffer_load_f16(bld, b_rsrc, safe_w, c0);
+                w_h = is_bf16 ? rocke_b_buffer_load_bf16(bld, b_rsrc, safe_w, c0)
+                              : rocke_b_buffer_load_f16(bld, b_rsrc, safe_w, c0);
                 weights_f32[r_const][s_const]
                     = rocke_b_select(bld, w_valid, rocke_b_cast_to_f32(bld, w_h), zero_f32);
             }
@@ -349,7 +354,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                 ok = rocke_b_land(bld, valid, q_ok);
                 safe_off
                     = rocke_b_select(bld, ok, rocke_b_mul(bld, a_off, c_half_bytes), oob_sentinel);
-                a_h = rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, c0);
+                a_h = is_bf16 ? rocke_b_buffer_load_bf16(bld, a_rsrc, safe_off, c0)
+                              : rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, c0);
                 a_f32 = rocke_b_select(bld, ok, rocke_b_cast_to_f32(bld, a_h), zero_f32);
 
                 for(r_const = 0; r_const < p->KH; ++r_const)
@@ -383,8 +389,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
                     safe_d = rocke_b_select(
                         bld, q_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);
-                    rocke_b_buffer_store_f16(
-                        bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc[P_FLUSH]));
+                    if(is_bf16)
+                        rocke_b_buffer_store_bf16(
+                            bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_bf16(bld, acc[P_FLUSH]));
+                    else
+                        rocke_b_buffer_store_f16(
+                            bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc[P_FLUSH]));
                 }
             }
 
@@ -490,7 +500,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                 ok = rocke_b_land(bld, rocke_b_land(bld, valid, j_valid), q_ok);
                 safe_off
                     = rocke_b_select(bld, ok, rocke_b_mul(bld, a_off, c_half_bytes), oob_sentinel);
-                a_h = rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, c0);
+                a_h = is_bf16 ? rocke_b_buffer_load_bf16(bld, a_rsrc, safe_off, c0)
+                              : rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, c0);
                 a_f32 = rocke_b_select(bld, ok, rocke_b_cast_to_f32(bld, a_h), zero_f32);
 
                 for(r_const = 0; r_const < KH; ++r_const)
@@ -542,8 +553,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             safe_d = rocke_b_select(
                 bld, store_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);
-            rocke_b_buffer_store_f16(
-                bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc_val));
+            if(is_bf16)
+                rocke_b_buffer_store_bf16(
+                    bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_bf16(bld, acc_val));
+            else
+                rocke_b_buffer_store_f16(
+                    bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc_val));
 
             /* Unconditional static reset */
             new_accs[P_FLUSH_j] = zero_f32;

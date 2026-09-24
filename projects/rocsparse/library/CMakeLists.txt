@@ -142,7 +142,16 @@ endif()
 
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocsparse PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_libraries(rocsparse PRIVATE -fprofile-instr-generate)
+  # Instrument host code only. Device-side coverage makes the HIP runtime abort
+  # while dumping the profile at process exit, after every test has already
+  # passed (AISPARSE-778). Both halves matter: the compile flags suppress the
+  # __profd_* counter globals, and the host-only link keeps the AMDGPU profile
+  # runtime, which contributes __llvm_profile_sections_*, out of the device image.
+  target_compile_options(rocsparse PRIVATE
+    "SHELL:-Xarch_device -fno-profile-instr-generate"
+    "SHELL:-Xarch_device -fno-coverage-mapping")
+  target_link_options(rocsparse PRIVATE -u__llvm_profile_runtime)
+  target_link_libraries(rocsparse PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
 endif()
 
 if (NOT WIN32)

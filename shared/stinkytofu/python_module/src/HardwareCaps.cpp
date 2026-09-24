@@ -330,7 +330,10 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     std::map<std::string, int> rv;
 
     rv["MaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 256;
-    rv["MaxSgpr"] = (v[0] == 12 && v[1] == 5) ? 106 : 102;
+    // Highest addressable SGPR index plus one. gfx8/gfx9 stop at s101 (102); every
+    // RDNA target (gfx10, gfx11, gfx12) addresses s0-s105 (106). Keep in lock-step
+    // with rocisa hardware_caps.hpp.
+    rv["MaxSgpr"] = v[0] >= 10 ? 106 : 102;
     rv["PhysicalMaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 512;
     // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it
     // never binds. Keep in lock-step with rocisa hardware_caps.hpp
