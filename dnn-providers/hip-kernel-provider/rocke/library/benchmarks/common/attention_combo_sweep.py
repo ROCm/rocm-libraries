@@ -676,7 +676,10 @@ def sweep(args) -> int:
                     _emit(row, rows, sink, args)
                     continue
                 if verdict.ir_digest:
-                    ir_key = (tuple(sorted(_shape_fields(req).items())), verdict.ir_digest)
+                    ir_key = (
+                        tuple(sorted(_shape_fields(req).items())),
+                        verdict.ir_digest,
+                    )
                     twin = first_by_ir.setdefault(ir_key, _spec_key(result.spec))
                     if twin != _spec_key(result.spec):
                         row = _row_skeleton(req, result.candidate, result.spec, index)

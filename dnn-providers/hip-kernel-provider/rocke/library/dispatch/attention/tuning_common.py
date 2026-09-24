@@ -274,6 +274,7 @@ def configure_sweep(level: str, tuning_sample: int = 0) -> int:
         return 0
     return max(0, int(tuning_sample))
 
+
 # Production sweep: the hand-curated stacks per (arch, codepath), walked
 # exhaustively. Codepath base knobs (_CODEPATH_KNOBS) are applied on top.
 _R4_S1 = {
