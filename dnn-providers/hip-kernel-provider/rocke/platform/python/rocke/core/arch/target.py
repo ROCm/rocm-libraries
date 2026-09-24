@@ -780,6 +780,17 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         _wmma_gfx1250_b_16x16x32,
         _wmma_gfx12_acc_16x16,
     ),
+    # bf16 sibling: same fragment layout as f16 (A/B are <16 x bfloat> per lane,
+    # same K-split across lane-halves). Only the wire type and intrinsic mangling differ.
+    "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
+        16,
+        16,
+        8,
+        32,
+        _wmma_gfx1250_a_16x16x32,
+        _wmma_gfx1250_b_16x16x32,
+        _wmma_gfx12_acc_16x16,
+    ),
     # gfx1250 FP8/BF8 K=64 WMMA. A/B carry 32 low-bit bytes per lane presented
     # as <8 x i32>; accumulator is the same 16x16 column-distributed <8 x float>
     # as the f16/bf16 K=32 atom. The block-scaled GEMM kernel computes operand

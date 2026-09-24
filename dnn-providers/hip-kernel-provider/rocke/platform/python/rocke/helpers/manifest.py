@@ -122,7 +122,9 @@ def _provenance_fields() -> Dict[str, str]:
 # ---------------------------------------------------------------------
 
 
-def gemm_args_signature(*, with_bytes: bool = False) -> List[Dict[str, Any]]:
+def gemm_args_signature(
+    *, with_bytes: bool = False, dtype: str = "fp16"
+) -> List[Dict[str, Any]]:
     """Standard GEMM kernel args signature: A, B, C ptrs + M, N, K i32s.
 
     `with_bytes=True` adds A_bytes/B_bytes/C_bytes args before the
@@ -130,10 +132,18 @@ def gemm_args_signature(*, with_bytes: bool = False) -> List[Dict[str, Any]]:
     signature; the universal GEMM doesn't need them since it doesn't
     use buffer_rsrc).
     """
+    _dtype_map = {"fp16": "f16", "bf16": "bf16"}
+    if dtype not in _dtype_map:
+        raise ValueError(
+            f"gemm_args_signature: unsupported dtype {dtype!r}; "
+            f"supported: {list(_dtype_map)}"
+        )
+    ir_type = _dtype_map[dtype]
+    ptr_type = f"ptr<{ir_type}, global>"
     sig: List[Dict[str, Any]] = [
-        {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
-        {"name": "B", "type": "ptr<f16, global>", "size_bytes": 8},
-        {"name": "C", "type": "ptr<f16, global>", "size_bytes": 8},
+        {"name": "A", "type": ptr_type, "size_bytes": 8},
+        {"name": "B", "type": ptr_type, "size_bytes": 8},
+        {"name": "C", "type": ptr_type, "size_bytes": 8},
     ]
     if with_bytes:
         sig += [

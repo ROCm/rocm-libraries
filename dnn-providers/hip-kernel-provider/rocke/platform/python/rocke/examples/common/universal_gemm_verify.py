@@ -27,6 +27,7 @@ from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.helpers.manifest import gemm_args_signature
 from rocke.instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
@@ -161,6 +162,7 @@ def main() -> int:
         threads_per_block=spec.block_size,
         default_shape=(args.m, args.n, args.k),
         atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{args.dtype}"],
+        args_signature=gemm_args_signature(dtype=args.dtype),
     )
     write_artifact(art, out, manifest)
 
