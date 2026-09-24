@@ -293,14 +293,18 @@ narrower than what the kernel templates support. Combinations outside it print
 | `deterministic == f` | `-deterministic=1` has no instance |
 | `dpad == dvpad` | `-d` and `-d_v` must fall in the same padding class (both multiples of 8, or neither) |
 
-On gfx1250 the `dq_dk_dv` pipeline is additionally selected by head dimension and head-dim
-padding, so `-d` is the argument that decides which code runs:
+On gfx1250 the `dq_dk_dv` pipeline comes out of a two-way choice, because every fp16/bf16 tile in
+the gfx125 codegen table now sets `lds_acc`:
 
 | condition | pipeline |
 |---|---|
-| hdim 32, 64 | `KRKTRVRIGLP` |
-| hdim 128, 256 | `LdsAccKRKTRVR` (dK/dV accumulators in LDS to keep occupancy 2) |
-| hdim not a multiple of 8 | `KRKTRVR` — tested before the LDS-accumulator choice, so it wins at any hdim |
-| `seqlen_q <= 32` and `batch * nhead >= 768` | `TrLoadQRQTRDOR` (decode; `dQ` in registers) |
+| `seqlen_q <= 32` and `batch * nhead >= 768` | `TrLoadQRQTRDOR` (decode; `dQ` stays in registers, hdim 64 only) |
+| everything else | `LdsAccKRKTRVR` (dK/dV accumulators in LDS to keep occupancy 2) |
+
+`KRKTRVRIGLP`, `KRKTRVR` and `TrLoadKRKTRVR` are still compiled and still selected on other
+architectures, but no gfx1250 fp16/bf16 instance reaches them. Two recent changes closed those
+routes: the LDS accumulators were extended down to hdim 32 and 64, and the `kUseLdsAcc` test was
+moved ahead of the head-dim-padding gate, so `-d=72` no longer diverts to `KRKTRVR`. Head dimension
+still picks the tile shape, and therefore the `dot_do_o` instantiation, but no longer the pipeline.
 
 Pass `-kname=1` to print which instance was dispatched.
