@@ -2055,6 +2055,7 @@ namespace
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
         tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
+        tensileProblem.setParams().setDeviceScalarAlpha(prob.deviceScalarAlpha);
         tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
         tensileProblem.setScaleA(compute_type, 1);
         tensileProblem.setScaleB(compute_type, 1);
@@ -2321,6 +2322,7 @@ namespace
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
         tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
+        tensileProblem.setParams().setDeviceScalarAlpha(prob.deviceScalarAlpha);
         tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
         tensileProblem.setScaleA(compute_type, 1);
         tensileProblem.setScaleB(compute_type, 1);

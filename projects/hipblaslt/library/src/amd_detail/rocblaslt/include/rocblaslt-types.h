@@ -574,6 +574,9 @@ struct RocblasltContractionProblem
     const void*   scaleD;
     const void*   scaleE;
     const void*   scaleAlphaVec;
+    // scaleAlphaVec aliases alpha for both device pointer modes. This flag
+    // distinguishes a single per-tensor scalar from the existing row vector.
+    bool          deviceScalarAlpha = false;
     ScalingFormat scaleAType;
     ScalingFormat scaleBType;
 

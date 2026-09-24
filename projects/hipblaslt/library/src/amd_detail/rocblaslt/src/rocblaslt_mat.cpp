@@ -249,6 +249,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
+    problem.deviceScalarAlpha = matmul_descr->pointermode == rocblaslt_pointer_mode_device;
     problem.streamKFlags = streamKFlags;
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
@@ -447,6 +448,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
+    problem.deviceScalarAlpha = matmul_descr->pointermode == rocblaslt_pointer_mode_device;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
