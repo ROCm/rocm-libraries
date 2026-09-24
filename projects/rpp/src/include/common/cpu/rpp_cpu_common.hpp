@@ -57,6 +57,13 @@ SOFTWARE.
 #define RGB_TO_GREY_WEIGHT_GREEN 0.587f
 #define RGB_TO_GREY_WEIGHT_BLUE 0.114f
 #define INTERP_BILINEAR_KERNEL_SIZE 2       // Kernel size needed for Bilinear Interpolation
+
+// Intra-image multithreading parameters
+// Minimum rows per thread for effective parallelization (avoid overhead on small images)
+// Tune this based on target platform: lower for high-performance CPUs, higher for embedded
+#ifndef RPP_MIN_ROWS_PER_THREAD
+#define RPP_MIN_ROWS_PER_THREAD 4
+#endif
 #define INTERP_BILINEAR_KERNEL_RADIUS 1.0f  // Kernel radius needed for Bilinear Interpolation
 #define INTERP_BILINEAR_NUM_COEFFS 4  // Number of coefficents needed for Bilinear Interpolation
 #define NEWTON_METHOD_INITIAL_GUESS \
@@ -287,9 +294,7 @@ inline Rpp32u get_intra_image_threads(const rpp::Handle& handle, Rpp32u batchSiz
     Rpp32u availableThreads = handle.GetNumThreads();
 
     // If image is too small, parallelization overhead outweighs benefits
-    // Require at least 4 rows per thread for effective parallelization
-    const Rpp32u minRowsPerThread = 4;
-    Rpp32u minHeightForParallelization = availableThreads * minRowsPerThread;
+    Rpp32u minHeightForParallelization = availableThreads * RPP_MIN_ROWS_PER_THREAD;
 
     if (imageHeight < minHeightForParallelization) {
         return 1;
