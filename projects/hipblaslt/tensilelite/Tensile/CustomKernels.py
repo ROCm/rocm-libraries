@@ -309,7 +309,7 @@ _HEADER_SEMANTIC_ORDER = {
 }
 
 def validateCustomPersistentArgs(kernelConfig):
-    """Require a native descriptor before accepting a custom DP layout claim."""
+    """Require an argument descriptor for DataParallel argument layout version 1."""
     version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
     if type(version) is not int or version not in (0, 1):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
@@ -321,12 +321,12 @@ def validateCustomPersistentArgs(kernelConfig):
     descriptor = kernelConfig.get("CustomKernel")
     if not isinstance(descriptor, dict) or not descriptor.get("name"):
         if version == 1 and kernelConfig.get("CustomKernelName"):
-            raise ValueError("Native persistent custom kernels require an argument descriptor")
+            raise ValueError("DataParallel argument layout version 1 requires a custom-kernel argument descriptor")
         return
     args = descriptor.get("args", [])
-    native = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
+    persistentGridArgIndices = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
     if version == 0:
-        if native:
+        if persistentGridArgIndices:
             raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
         return
     legacy = {"MagicNumberItersPerTile", "MagicShiftItersPerTile", "TotalIters",
@@ -338,11 +338,11 @@ def validateCustomPersistentArgs(kernelConfig):
             or [arg.get("semantic") for _, arg in scheduling] != ["ItersPerTile", "PersistentGrid"]
             or scheduling[1][0] != scheduling[0][0] + 1
             or any(arg.get("type") != "uint32" or arg.get("padding", 0) for _, arg in scheduling)):
-        raise ValueError("Native persistent custom arguments must be adjacent uint32 ItersPerTile and PersistentGrid")
+        raise ValueError("DataParallel version-1 scheduling arguments must be adjacent uint32 ItersPerTile and PersistentGrid")
     if (descriptor.get("workspaceType", "None") != "None"
             or descriptor.get("workspaceSizePerElemC", 0)
             or descriptor.get("workspaceSizePerElemBias", 0)):
-        raise ValueError("Native DataParallel custom kernels cannot require partial workspace")
+        raise ValueError("DataParallel custom kernels with argument layout version 1 cannot require partial workspace")
 
 
 def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
@@ -449,7 +449,7 @@ def getCustomKernelConfig(
 
     kernelIsp = kernelConfig["InternalSupportParams"]
     # Missing metadata describes a prebuilt legacy payload, even when the
-    # consuming solution was regenerated with the native DP layout selected.
+    # consuming solution was regenerated with DataParallel argument layout v1.
     kernelIsp.setdefault("PersistentLoopArgsVersion", 0)
     for key in internalSupportParams:
         if key not in kernelIsp:

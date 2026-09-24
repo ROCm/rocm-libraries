@@ -242,7 +242,7 @@ namespace
         {"StreamK", "Hybrid", 5, 0},
     }};
 
-    TEST(PersistentExecutionPolicyTest, NonPersistentAssignmentsDoNotActivateSchedulingOrNativeABI)
+    TEST(PersistentExecutionPolicyTest, NonPersistentAssignmentsDoNotActivateSchedulingOrDataParallelArgsV1)
     {
         for(auto assignment : {WorkAssignment::StaticGrid,
                                WorkAssignment::DynamicWorkQueue,
@@ -605,7 +605,7 @@ namespace
         }
     }
 
-    TEST_F(PersistentExecutionPolicySerializationTest, NativeArgumentLayoutRequiresDataParallel)
+    TEST_F(PersistentExecutionPolicySerializationTest, ArgumentLayoutV1RequiresDataParallel)
     {
         internalArgs["persistentLoopArgsVersion"] = object(1);
         internalArgs["version"]                   = object(3);
@@ -619,7 +619,7 @@ namespace
         }
     }
 
-    TEST_F(PersistentExecutionPolicySerializationTest, NativeArgumentLayoutRequiresOuterProtocolThree)
+    TEST_F(PersistentExecutionPolicySerializationTest, ArgumentLayoutV1RequiresOuterProtocolThree)
     {
         canonical(policies[1]);
         internalArgs["persistentLoopArgsVersion"] = object(1);

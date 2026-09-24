@@ -17,13 +17,13 @@ from Tensile.SolutionStructs.Naming import getKernelFileBase
 pytestmark = pytest.mark.unit
 
 
-def _native_config():
+def _data_parallel_args_v1_config():
     return {
         "TileProcessingStrategy": "DataParallel",
         "WorkAssignment": "StaticGrid",
         "InternalSupportParams": {"KernArgsVersion": 3, "PersistentLoopArgsVersion": 1},
         "CustomKernel": {
-            "name": "native_dp",
+            "name": "data_parallel_args_v1",
             "args": [
                 {"type": "uint32", "semantic": "ItersPerTile"},
                 {"type": "uint32", "semantic": "PersistentGrid"},
@@ -39,8 +39,8 @@ def _write_custom(tmp_path, config, name="prebuilt_dp"):
 
 
 @pytest.mark.parametrize("outer", [0, 1, 2, 3])
-def test_missing_prebuilt_layout_is_legacy_even_when_consumer_is_native(tmp_path, outer):
-    config = _native_config()
+def test_missing_prebuilt_layout_is_legacy_even_when_consumer_uses_v1(tmp_path, outer):
+    config = _data_parallel_args_v1_config()
     config["InternalSupportParams"] = {"KernArgsVersion": outer}
     config["CustomKernel"]["args"] = [
         {"type": "uint32", "semantic": semantic}
@@ -55,8 +55,8 @@ def test_missing_prebuilt_layout_is_legacy_even_when_consumer_is_native(tmp_path
     assert normalize_execution_policy(result)["InternalSupportParams"] == result["InternalSupportParams"]
 
 
-def test_native_custom_descriptor_round_trips_without_reordering(tmp_path):
-    config = _native_config()
+def test_data_parallel_custom_descriptor_round_trips_without_reordering(tmp_path):
+    config = _data_parallel_args_v1_config()
     config["CustomKernel"]["args"].insert(0, {"type": "address", "semantic": "AddressA"})
     config["CustomKernel"]["args"].append({"type": "float", "semantic": "Alpha"})
     name = _write_custom(tmp_path, config)
@@ -67,8 +67,8 @@ def test_native_custom_descriptor_round_trips_without_reordering(tmp_path):
 
 
 @pytest.mark.parametrize("mutation", ["wide", "padding", "separated", "reverse", "duplicate", "legacy", "workspace"])
-def test_native_custom_descriptor_rejects_incompatible_payload(mutation):
-    config = _native_config()
+def test_data_parallel_custom_descriptor_rejects_incompatible_payload(mutation):
+    config = _data_parallel_args_v1_config()
     args = config["CustomKernel"]["args"]
     if mutation == "wide":
         args[1]["type"] = "uint64"
@@ -88,21 +88,21 @@ def test_native_custom_descriptor_rejects_incompatible_payload(mutation):
         validateCustomPersistentArgs(config)
 
 
-def test_native_custom_claim_requires_descriptor_and_version():
-    config = _native_config()
+def test_data_parallel_custom_claim_requires_descriptor_and_version():
+    config = _data_parallel_args_v1_config()
     config["InternalSupportParams"]["PersistentLoopArgsVersion"] = 0
     with pytest.raises(ValueError, match="PersistentGrid requires"):
         validateCustomPersistentArgs(config)
-    config = _native_config()
+    config = _data_parallel_args_v1_config()
     del config["CustomKernel"]
-    config["CustomKernelName"] = "native_dp"
+    config["CustomKernelName"] = "data_parallel_args_v1"
     with pytest.raises(ValueError, match="argument descriptor"):
         validateCustomPersistentArgs(config)
 
 
 @pytest.mark.parametrize("semantic", ["AddressSynchronizer", "Synchronizer", "GSUSync"])
-def test_native_custom_descriptor_rejects_partial_flag_aliases(semantic):
-    config = _native_config()
+def test_data_parallel_custom_descriptor_rejects_partial_flag_aliases(semantic):
+    config = _data_parallel_args_v1_config()
     config["CustomKernel"]["args"].append({"type": "address", "semantic": semantic})
     with pytest.raises(ValueError):
         validateCustomPersistentArgs(config)
@@ -111,7 +111,7 @@ def test_native_custom_descriptor_rejects_partial_flag_aliases(semantic):
 @pytest.mark.parametrize("version", [-1, 2, 99, True, "1"])
 @pytest.mark.parametrize("regenerate", [False, True])
 def test_unknown_layout_rejected_before_regeneration(version, regenerate):
-    config = _native_config()
+    config = _data_parallel_args_v1_config()
     config.pop("CustomKernel")
     config["InternalSupportParams"]["PersistentLoopArgsVersion"] = version
     with pytest.raises(ValueError, match="Unsupported PersistentLoopArgsVersion"):
@@ -133,8 +133,8 @@ def test_generated_legacy_dp_upgrades_both_layout_versions(outer):
 
 
 @pytest.mark.parametrize("outer", [-1, 4, 99, True, "3"])
-def test_unknown_outer_version_rejected_before_native_regeneration(outer):
-    config = _native_config()
+def test_unknown_outer_version_rejected_before_data_parallel_regeneration(outer):
+    config = _data_parallel_args_v1_config()
     config.pop("CustomKernel")
     config["InternalSupportParams"] = {"KernArgsVersion": outer, "PersistentLoopArgsVersion": 0}
     with pytest.raises(ValueError, match="KernArgsVersion"):
@@ -142,8 +142,8 @@ def test_unknown_outer_version_rejected_before_native_regeneration(outer):
 
 
 @pytest.mark.parametrize("outer", [0, 1, 2])
-def test_native_payload_rejects_legacy_outer_version(outer):
-    config = _native_config()
+def test_data_parallel_payload_rejects_legacy_outer_version(outer):
+    config = _data_parallel_args_v1_config()
     config["InternalSupportParams"]["KernArgsVersion"] = outer
     with pytest.raises(ValueError, match="KernArgsVersion"):
         normalize_execution_policy(config, regenerate=False)
@@ -162,7 +162,7 @@ def test_legacy_disabled_atomic_option_does_not_survive_size_mapping():
 
 @pytest.mark.parametrize("use_beta", [False, True])
 @pytest.mark.parametrize("initial_strides", [False, True])
-def test_native_generated_signature_descriptor_and_reader_agree(tmp_path, record_property, use_beta, initial_strides):
+def test_data_parallel_generated_signature_descriptor_and_reader_agree(tmp_path, record_property, use_beta, initial_strides):
     from config_harness import _emit_one, _isolated_globals_with_isa, _toolchain_for, _solutions_from_config_unguarded
     from test_persistent_config_generation import _config
     from Tensile.Common.Types import DebugConfig
@@ -172,7 +172,7 @@ def test_native_generated_signature_descriptor_and_reader_agree(tmp_path, record
     config = _config({"TileProcessingStrategy": ["DataParallel"], "WorkAssignment": ["StaticGrid"]})
     config["BenchmarkProblems"][0][0].update(UseBeta=use_beta, UseInitialStridesAB=initial_strides,
                                            UseInitialStridesCD=initial_strides)
-    config_path = tmp_path / "native.yaml"
+    config_path = tmp_path / "data_parallel.yaml"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False))
     assembler, isa = _toolchain_for("gfx942")
     with _isolated_globals_with_isa(isa):
