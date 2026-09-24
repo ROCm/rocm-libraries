@@ -329,7 +329,7 @@ struct scan_config : ::rocprim::detail::scan_config_params
     /// \brief Limit on the number of items for a single scan kernel launch.
     static constexpr unsigned int size_limit = SizeLimit;
 
-    /// \brief Alignment
+    /// \brief Alignment of the lookback state atomic flag
     static constexpr unsigned int lookback_alignment = LookbackAlignment;
 
     constexpr scan_config()
