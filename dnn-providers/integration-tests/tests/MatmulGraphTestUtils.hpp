@@ -28,17 +28,42 @@ inline flatbuffers::FlatBufferBuilder createMatmulGraph(const int64_t aUid,
                                                         const DataType aDataType,
                                                         const DataType bDataType,
                                                         const DataType cDataType,
-                                                        const DataType computeDataType)
+                                                        const DataType computeDataType,
+                                                        const bool runtimePassByValue = false)
 {
     flatbuffers::FlatBufferBuilder builder;
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(
-        CreateTensorAttributesDirect(builder, aUid, "a", aDataType, &aStrides, &aDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(builder, bUid, "b", bDataType, &bStrides, &bDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(builder, cUid, "c", cDataType, &cStrides, &cDims));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   aUid,
+                                                   "a",
+                                                   aDataType,
+                                                   &aStrides,
+                                                   &aDims,
+                                                   false,
+                                                   TensorValue::NONE,
+                                                   0,
+                                                   runtimePassByValue));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   bUid,
+                                                   "b",
+                                                   bDataType,
+                                                   &bStrides,
+                                                   &bDims,
+                                                   false,
+                                                   TensorValue::NONE,
+                                                   0,
+                                                   runtimePassByValue));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   cUid,
+                                                   "c",
+                                                   cDataType,
+                                                   &cStrides,
+                                                   &cDims,
+                                                   false,
+                                                   TensorValue::NONE,
+                                                   0,
+                                                   runtimePassByValue));
 
     auto matmulAttrs = CreateMatmulAttributes(builder, aUid, bUid, cUid);
 

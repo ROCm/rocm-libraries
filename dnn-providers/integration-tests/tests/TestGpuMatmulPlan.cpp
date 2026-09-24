@@ -93,29 +93,361 @@ TEST(TestGpuMatmulPlanBuilder, IsApplicable)
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    // Half builder should not be applicable for a float graph
-    const GpuMatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT>
-        halfPlanBuilder;
-    EXPECT_FALSE(
-        halfPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
-
-    // Half compute builder should not be applicable for a graph with a float compute type
-    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF>
-        halfComputePlanBuilder;
-    EXPECT_FALSE(
-        halfComputePlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
-
     // Missing tensor should return false
     auto tensorMapCopy = graphWrapper.getTensorMap();
     tensorMapCopy.erase(A_UID);
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrapper.getNode(0), tensorMapCopy));
+}
 
-    // Matmul builder should not be applicable for a batchnorm fwd graph
-    auto batchnormGraphBuilder = createValidBatchnormFwdTrainingGraph();
-    auto batchnormGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
-        batchnormGraphBuilder.GetBufferPointer(), batchnormGraphBuilder.GetSize());
-    EXPECT_FALSE(floatPlanBuilder.isApplicable(batchnormGraphWrapper.getNode(0),
-                                               batchnormGraphWrapper.getTensorMap()));
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
+{
+    auto graphBuilder = createValidBatchnormFwdTrainingGraph();
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForWrongOutputDataType)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const GpuMatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT>
+        halfPlanBuilder;
+    EXPECT_FALSE(
+        halfPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForWrongComputeDataType)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF>
+        halfComputePlanBuilder;
+    EXPECT_FALSE(
+        halfComputePlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForRankMismatch)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+    const std::vector<int64_t> wrongDims = {8, 2, 2};
+    const auto wrongStrides = generateStrides(wrongDims);
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto wrongAGraphBuilder = createMatmulGraph(A_UID,
+                                                B_UID,
+                                                C_UID,
+                                                wrongDims,
+                                                wrongStrides,
+                                                dims,
+                                                strides,
+                                                dims,
+                                                strides,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT);
+    auto wrongAGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        wrongAGraphBuilder.GetBufferPointer(), wrongAGraphBuilder.GetSize());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(wrongAGraphWrapper.getNode(0),
+                                               wrongAGraphWrapper.getTensorMap()));
+
+    auto wrongBGraphBuilder = createMatmulGraph(A_UID,
+                                                B_UID,
+                                                C_UID,
+                                                dims,
+                                                strides,
+                                                wrongDims,
+                                                wrongStrides,
+                                                dims,
+                                                strides,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT);
+    auto wrongBGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        wrongBGraphBuilder.GetBufferPointer(), wrongBGraphBuilder.GetSize());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(wrongBGraphWrapper.getNode(0),
+                                               wrongBGraphWrapper.getTensorMap()));
+
+    auto wrongCGraphBuilder = createMatmulGraph(A_UID,
+                                                B_UID,
+                                                C_UID,
+                                                dims,
+                                                strides,
+                                                dims,
+                                                strides,
+                                                wrongDims,
+                                                wrongStrides,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT);
+    auto wrongCGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        wrongCGraphBuilder.GetBufferPointer(), wrongCGraphBuilder.GetSize());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(wrongCGraphWrapper.getNode(0),
+                                               wrongCGraphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForRankTooSmall)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {2};
+    const auto strides = generateStrides(dims);
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForRankTooLarge)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {2, 3, 4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForBatchIncompatible)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+    const std::vector<int64_t> wrongDims = {5, 8, 2, 2};
+    const auto wrongStrides = generateStrides(wrongDims);
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          wrongDims,
+                                          wrongStrides,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForKMismatch)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+    const std::vector<int64_t> wrongDims = {5, 8, 2, 3};
+    const auto wrongStrides = generateStrides(wrongDims);
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          wrongDims,
+                                          wrongStrides,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForMMismatch)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+    const std::vector<int64_t> wrongDims = {5, 8, 3, 2};
+    const auto wrongStrides = generateStrides(wrongDims);
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          wrongDims,
+                                          wrongStrides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForNMismatch)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+    const std::vector<int64_t> wrongDims = {5, 8, 2, 3};
+    const auto wrongStrides = generateStrides(wrongDims);
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          wrongDims,
+                                          wrongStrides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuMatmulPlanBuilder, IsApplicableReturnsFalseForPassByValueTensors)
+{
+    constexpr int64_t A_UID = 10;
+    constexpr int64_t B_UID = 11;
+    constexpr int64_t C_UID = 12;
+    const std::vector<int64_t> dims = {4, 8, 2, 2};
+    const auto strides = generateStrides(dims);
+
+    auto graphBuilder = createMatmulGraph(A_UID,
+                                          B_UID,
+                                          C_UID,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          dims,
+                                          strides,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          true);
+    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    EXPECT_FALSE(
+        floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 }
 
 // ====================================================
