@@ -56,8 +56,8 @@ public:
         = std::disjunction_v<std::is_same<T, float>, std::is_same<T, double>>;
 
     /// Block scale quantization: Y[i] = X[i] / scale[block_of(i)]
-    /// Computes the maximum absolute value in each block and writes it to the scale tensor
-    /// Then quantizes each element in the block by dividing by the scale value of the block
+    /// Computes each block's maximum absolute value, then stores maxAbs / max(Y), rounded upward,
+    /// in the scale tensor before quantizing each element with that scale.
     ///
     /// @param x         Input tensor (high-precision data)
     /// @param y         Output tensor (quantized, same shape as x)
@@ -131,6 +131,17 @@ public:
         const auto minOutValCompute
             = static_cast<ComputeDataType>(std::numeric_limits<YDataType>::lowest());
         const auto maxOutValCompute = static_cast<ComputeDataType>(maxOutVal);
+
+        // Check for Infs and NaNs in input tensor
+        hipdnn_data_sdk::utilities::iterateAlongDimensions(
+            xDims, [&](const std::vector<int64_t>& idx) {
+                const auto xVal = static_cast<ComputeDataType>(x.getHostValue(idx));
+                if(std::isnan(xVal) || std::isinf(xVal))
+                {
+                    throw std::runtime_error(
+                        "BlockScaleQuantize: input tensor contains a NaN or Inf value.");
+                }
+            });
 
         auto quantizeFunc = [&](const std::vector<int64_t>& scaleIndices) {
             const auto blockStart = scaleIndices[targetAxis] * blockSize;

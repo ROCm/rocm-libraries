@@ -59,8 +59,9 @@ TYPED_TEST(CpuFpReferenceBlockScaleQuantizeTyped, UniformInput)
     {
         for(int s = 0; s < 2; ++s)
         {
-            EXPECT_NEAR(
-                static_cast<float>(scaleTensor.getHostValue(b, s)), expectedScale, scaleTolerance);
+            EXPECT_NEAR(static_cast<float>(scaleTensor.getHostValue(b, s)) / expectedScale,
+                        1.0,
+                        scaleTolerance);
         }
     }
 
@@ -242,8 +243,12 @@ TEST(TestCpuFpReferenceBlockScaleQuantizeFp32, NonDefaultAxisBlocking)
     CpuFpReferenceBlockScaleQuantize::quantize(xTensor, yTensor, scaleTensor, 2, 0);
 
     const auto maxOutVal = std::numeric_limits<float>::max();
-    EXPECT_NEAR(scaleTensor.getHostValue(0, 3), 50.0f / maxOutVal, 1e-5f);
-    EXPECT_NEAR(scaleTensor.getHostValue(1, 5), 100.0f / maxOutVal, 1e-5f);
+    const float expectedScale0 = 50.0f / maxOutVal;
+    const float expectedScale1 = 100.0f / maxOutVal;
+    const float expectedScale2 = 1.0f / maxOutVal;
+    const auto scaleTolerance = 1e-5f;
+    EXPECT_NEAR(scaleTensor.getHostValue(0, 3) / expectedScale0, 1.0f, scaleTolerance);
+    EXPECT_NEAR(scaleTensor.getHostValue(1, 5) / expectedScale1, 1.0f, scaleTolerance);
     for(int b = 0; b < 2; ++b)
     {
         for(int c = 0; c < 8; ++c)
@@ -252,7 +257,7 @@ TEST(TestCpuFpReferenceBlockScaleQuantizeFp32, NonDefaultAxisBlocking)
             {
                 continue;
             }
-            EXPECT_NEAR(scaleTensor.getHostValue(b, c), 1.0f / maxOutVal, 1e-5f);
+            EXPECT_NEAR(scaleTensor.getHostValue(b, c) / expectedScale2, 1.0f, scaleTolerance);
         }
     }
 
@@ -489,6 +494,22 @@ TEST(TestCpuFpReferenceBlockScaleQuantizeValidation, ScaleDimMismatchNonDefaultA
 
     EXPECT_THROW(CpuFpReferenceBlockScaleQuantize::quantize(xTensor, yTensor, scaleTensor, 2, 0),
                  std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceBlockScaleQuantizeValidation, ThrowsOnNaNAndInfInput)
+{
+    Tensor<float> xTensorNaN({1, 4});
+    Tensor<float> xTensorInf({1, 4});
+    Tensor<float> yTensor({1, 4});
+    Tensor<float> scaleTensor({1, 2});
+
+    xTensorNaN.setHostValue(std::numeric_limits<float>::quiet_NaN(), 0, 0);
+    EXPECT_THROW(CpuFpReferenceBlockScaleQuantize::quantize(xTensorNaN, yTensor, scaleTensor, 2),
+                 std::runtime_error);
+
+    xTensorInf.setHostValue(std::numeric_limits<float>::infinity(), 0, 0);
+    EXPECT_THROW(CpuFpReferenceBlockScaleQuantize::quantize(xTensorInf, yTensor, scaleTensor, 2),
+                 std::runtime_error);
 }
 
 // ===========================================================================
