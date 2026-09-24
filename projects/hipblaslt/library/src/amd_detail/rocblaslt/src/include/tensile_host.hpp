@@ -319,19 +319,15 @@ TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<voi
  * re-tuning, and a matmul given no algorithm may only launch an entry that can
  * run it.
  *
- * countLookup false suppresses the hit/miss and summary accounting, for probes
- * that do not decide which kernel the call launches: the tune-mode gate for a
- * caller that passed its own algorithm, whose lookup was counted by the
- * heuristic query it came from, and the re-check made after taking the tuning
- * lock, which would otherwise count one matmul twice.
+ * A pure probe: the caller counts the lookup, because only it knows whether the
+ * probe decided which kernel the call launches.
  */
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
 int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
-                                  size_t                              max_workspace_bytes,
-                                  bool                                countLookup);
+                                  size_t                              max_workspace_bytes);
 
 /**
  * The solution index this thread last launched through runContractionProblem,

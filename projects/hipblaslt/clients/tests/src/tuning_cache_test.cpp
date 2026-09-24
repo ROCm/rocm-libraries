@@ -2206,6 +2206,30 @@ namespace
         }
     }
 
+    // A call whose search throws still launched default selection, so it is a
+    // miss and its shape one that fell back, like any other call the cache
+    // could not serve.
+    TEST_F(TuningCache, CallWhoseSearchThrowsIsStillCounted)
+    {
+        enterMode("tune", m_path);
+        hipblaslt_tuning_inject_failure_for_test(3);
+
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(256, 256, 256, AlgoFrom::Null, -1, &launched))
+            << "a failed search failed the matmul";
+        EXPECT_EQ(hipblaslt_tuning_attempts_for_test(), 1u);
+
+        const auto c = counters();
+        EXPECT_EQ(c.hits, 0u);
+        EXPECT_EQ(c.misses, 1u);
+
+        uint64_t shapes = 0, matched = 0, fellback = 0, tuned = 0;
+        hipblaslt_tuning_lookup_tally_for_test(&shapes, &matched, &fellback, &tuned);
+
+        EXPECT_EQ(shapes, 1u);
+        EXPECT_EQ(fellback, 1u);
+    }
+
     // Two threads that meet two untuned shapes at the same time both get them
     // tuned. Tune mode was asked for, so what it records must not depend on
     // which thread reached the tuning lock first.
@@ -2230,6 +2254,40 @@ namespace
         ASSERT_TRUE(ok[0] && ok[1]);
         EXPECT_EQ(valueRowCount(m_path), 2u)
             << "a shape went untuned because another thread held the tuning lock";
+    }
+
+    // Two threads meeting one untuned shape at once, with no algo: one tunes,
+    // the other waits for it, and both launch the winner. The thread that waited
+    // is served by the cache, so it counts as a hit rather than a second miss.
+    TEST_F(TuningCache, ThreadThatWaitedForTheSearchLaunchesTheWinner)
+    {
+        enterMode("tune", m_path);
+
+        std::atomic<int> arrived{0};
+        bool             ok[2]       = {false, false};
+        int              launched[2] = {-1, -1};
+        auto             run         = [&](int slot) {
+            arrived++;
+            while(arrived.load() < 2)
+                std::this_thread::yield();
+            ok[slot] = runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched[slot]);
+        };
+
+        std::thread first(run, 0);
+        std::thread second(run, 1);
+        first.join();
+        second.join();
+
+        ASSERT_TRUE(ok[0] && ok[1]);
+        const auto winners = columnValues(m_path, "solution_index");
+        ASSERT_EQ(winners.size(), 1u) << "the shape was not tuned exactly once";
+        EXPECT_EQ(launched[0], std::stoi(winners[0]));
+        EXPECT_EQ(launched[1], std::stoi(winners[0]));
+        EXPECT_EQ(hipblaslt_tuning_attempts_for_test(), 1u);
+
+        const auto c = counters();
+        EXPECT_EQ(c.hits, 1u);
+        EXPECT_EQ(c.misses, 1u);
     }
 
     // Among rows that are all partial, the newest runs, whatever ceilings they

@@ -415,8 +415,7 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
-                                  size_t                              max_workspace_bytes,
-                                  bool                                countLookup)
+                                  size_t                              max_workspace_bytes)
 {
     TensileLite::OverrideMap& m_override = TensileLite::OverrideMap::getMap();
 
@@ -426,27 +425,6 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
 
     std::vector<rocblaslt_matmul_heuristic_result> resolved;
     std::vector<int>                               index(1);
-
-    // Recorded whichever way this returns. Until now this path updated neither
-    // the counters nor any tally, so a matmul-only caller, which never enters a
-    // heuristic entry point, was invisible to both.
-    struct RecordLookup
-    {
-        const TensileLite::ProblemOverride& key;
-        bool                                count;
-        bool                                matched = false;
-        ~RecordLookup()
-        {
-            if(!count)
-                return;
-
-            TensileLite::recordTuningLookup(key, matched);
-            if(matched)
-                TensileLite::TuningCounters::instance().hits++;
-            else
-                TensileLite::TuningCounters::instance().misses++;
-        }
-    } record{key, countLookup};
 
     for(const auto& entry : entries)
     {
@@ -476,7 +454,6 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                == isSolutionSupportedNoMutation(handle, supportProblem, gemmData, &algo, &required)
            && required <= max_workspace_bytes)
         {
-            record.matched = true;
             return entry.solutionIndex;
         }
 
@@ -494,7 +471,6 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                        handle, supportProblem, gemmData, &algo, &required)
                && required <= max_workspace_bytes)
             {
-                record.matched = true;
                 return entry.solutionIndex;
             }
         }

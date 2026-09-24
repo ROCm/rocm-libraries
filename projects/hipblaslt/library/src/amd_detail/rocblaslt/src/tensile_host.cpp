@@ -5205,21 +5205,28 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // "No usable entry", not "no entry". Entries that failed name
                 // validation after a rebuild stay in the map, and testing for
                 // mere presence made them permanently un-retunable.
-                //
-                // Counted as a cache lookup only when it decides this launch,
-                // which is when the caller passed no algo. An explicit algo was
-                // counted at the heuristic query it came from, if it came from
-                // one, and it launches as given whatever this finds.
-                //
-                // The lookup runs first either way, so a shape the tuner has
-                // given up on is still counted as the fallback it is. Only then
-                // is the search itself declined, because a winnerless search
-                // records nothing and repeating it would spend the same minutes
-                // on every matmul of that shape.
                 const int cachedIndex = tuning_cache_find_valid_entry(
-                    handle, key, prob, gemmData, prob.workspaceSize, !callerSuppliedAlgo);
+                    handle, key, prob, gemmData, prob.workspaceSize);
                 if(!callerSuppliedAlgo && cachedIndex >= 0)
                     launchIndex = cachedIndex;
+
+                // Counted once, by whether this call launches a cached entry,
+                // and only when the caller left the choice to the library. An
+                // explicit algo was counted at the heuristic query it came from,
+                // if it came from one, and launches as given whatever the cache
+                // holds. A call that waits for the tuning lock is counted by what
+                // it finds once it has it, and before any search of its own,
+                // which can throw.
+                auto countLookup = [&](bool servedFromCache) {
+                    if(callerSuppliedAlgo)
+                        return;
+                    TensileLite::recordTuningLookup(key, servedFromCache);
+                    auto& counters = TensileLite::TuningCounters::instance();
+                    if(servedFromCache)
+                        counters.hits++;
+                    else
+                        counters.misses++;
+                };
 
                 // A usable entry is not necessarily final, so it does not
                 // necessarily close the gate. needsRetune decides: yes for an
@@ -5248,12 +5255,16 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
                     // The latch and the entry are re-read under the lock as well
                     // as before it. A thread that waited while another tuned this
-                    // shape would otherwise repeat the search that just finished.
+                    // shape would otherwise repeat the search that just finished,
+                    // and without an algo of its own it launches that winner.
+                    const int lockedIndex = tuning_cache_find_valid_entry(
+                        handle, key, prob, gemmData, prob.workspaceSize);
+                    if(!callerSuppliedAlgo && lockedIndex >= 0)
+                        launchIndex = lockedIndex;
+                    countLookup(lockedIndex >= 0);
+
                     if(!TensileLite::tuningAlreadyAttempted(key)
-                       && (tuning_cache_find_valid_entry(
-                               handle, key, prob, gemmData, prob.workspaceSize, false)
-                               < 0
-                           || cache.needsRetune(key, search, currentBudgetMs)))
+                       && (lockedIndex < 0 || cache.needsRetune(key, search, currentBudgetMs)))
                     {
                         TensileLite::TunedEntry winner;
                         benchmarked = true;
@@ -5359,6 +5370,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
                         reportAttempt(key, result, elapsedSeconds, tunedIndex, persisted);
                     }
+                }
+                else
+                {
+                    countLookup(cachedIndex >= 0);
                 }
             }
         }
