@@ -348,6 +348,90 @@ TEST(TestRaggedTensor, SharedAuxBacksTwoTensors)
 }
 
 // ============================================================================
+// ragged_offset_multiplier: stored (token) offsets recovered to element units
+// ============================================================================
+
+// Token-unit offsets {0,2,5} with multiplier == seqStride (H*D == 4) recover the
+// canonical element offsets {0,8,20}, so addressing, sizing, and iteration must all
+// match the multiplier==1 element form exactly.
+TEST(TestRaggedTensor, MultiplierRecoversElementOffsets)
+{
+    const int64_t multiplier = K_STRIDES[1]; // seqStride = H*D = 4
+    const std::vector<int64_t> tokenOffsets = {0, 2, 5};
+
+    auto aux = makeOffsetAux<int32_t>(tokenOffsets);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux, std::nullopt, multiplier);
+    tensor.fillWithValue(0.0f);
+
+    checkReporting(tensor, K_OFFSETS.back()); // token off[B]=5 -> 20 elements
+    checkAddressing(tensor, K_DIMS, K_STRIDES, K_OFFSETS);
+    checkIteration(tensor, K_OFFSETS);
+}
+
+// getIndex bases at the element offset (stored * multiplier), not the raw token offset.
+TEST(TestRaggedTensor, MultiplierScalesGetIndexBase)
+{
+    const std::vector<int64_t> tokenOffsets = {0, 2, 5};
+    auto aux = makeOffsetAux<int32_t>(tokenOffsets);
+    const RaggedTensor<float> tensor(
+        K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/4);
+
+    EXPECT_EQ(tensor.getIndex(1), 8); // token 2 * multiplier 4
+    EXPECT_EQ(tensor.getIndex(0), 0);
+    EXPECT_EQ(tensor.getIndex(1, 2, 1, 1), 19); // 8 + 2*4 + 1*2 + 1
+}
+
+// An explicit physicalElementCount must match the multiplier-scaled ragged_offset[B].
+TEST(TestRaggedTensor, MultiplierScalesExplicitPhysicalElementCount)
+{
+    const std::vector<int64_t> tokenOffsets = {0, 2, 5};
+    auto auxOk = makeOffsetAux<int32_t>(tokenOffsets);
+    const RaggedTensor<float> ok(K_DIMS,
+                                 K_STRIDES,
+                                 BSHD_SEQ_AXIS,
+                                 auxOk,
+                                 static_cast<size_t>(20),
+                                 /*raggedOffsetMultiplier=*/4);
+    EXPECT_EQ(ok.elementSpace(), 20u);
+
+    auto auxBad = makeOffsetAux<int32_t>(tokenOffsets);
+    EXPECT_THROW(const RaggedTensor<float> bad(
+                     K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, auxBad, static_cast<size_t>(5), 4),
+                 std::invalid_argument);
+}
+
+TEST(TestRaggedTensor, MultiplierBelowOneThrows)
+{
+    auto aux = makeOffsetAux<int32_t>({0, 2, 5});
+    EXPECT_THROW(
+        const RaggedTensor<float> tensor(
+            K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/0),
+        std::invalid_argument);
+}
+
+// Per-tensor multiplier: one shared token-offset aux addresses two tensors with distinct
+// multipliers (the D_qk != D_v case where Q and O share a token offset).
+TEST(TestRaggedTensor, SharedAuxDistinctMultipliers)
+{
+    auto aux = makeOffsetAux<int32_t>({0, 1, 2}); // one token per batch
+
+    // Q-like: H*D_qk = 4.
+    const std::vector<int64_t> dimsQ = {2, 1, 2, 2};
+    const std::vector<int64_t> stridesQ = {4, 4, 2, 1};
+    // O-like: H*D_v = 8.
+    const std::vector<int64_t> dimsO = {2, 1, 2, 4};
+    const std::vector<int64_t> stridesO = {8, 8, 4, 1};
+
+    const RaggedTensor<float> q(
+        dimsQ, stridesQ, BSHD_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/4);
+    const RaggedTensor<float> o(
+        dimsO, stridesO, BSHD_SEQ_AXIS, aux, std::nullopt, /*raggedOffsetMultiplier=*/8);
+
+    EXPECT_EQ(q.getIndex(1), 4); // token 1 * 4
+    EXPECT_EQ(o.getIndex(1), 8); // token 1 * 8
+}
+
+// ============================================================================
 // Single batch (B == 1): batch-carry in operator++ with rowOffsets of size 2
 // ============================================================================
 

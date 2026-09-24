@@ -25,11 +25,13 @@ import statistics
 import subprocess
 import tempfile
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from . import counters as _counters
+from . import perfjson as _perfjson
 from . import schema as _schema
 
 _HELPER_KERNEL_PREFIXES = ("__amd_", "__hip_", "rocclr")  # memset/fill etc - skip
@@ -179,6 +181,31 @@ def _counter_samples(trows: list[dict], raw_to_norm: dict) -> list[dict]:
     return [by_disp[k] for k in sorted(by_disp)]
 
 
+def _duration_ms_median(samples: list[dict], warmup: int) -> Optional[float]:
+    """Median target-kernel dispatch duration in ms, from the profiler's timestamps.
+
+    The fallback timing source for launchers that emit no `PerfJSON:` line. Drops the
+    first `warmup` dispatches per counter pass exactly like `_counter_medians`, so the
+    duration and the counters describe the same set of dispatches. Returns None when
+    rocprofv3 emitted no usable timestamps (older builds omit them).
+    """
+    by_pass: dict[str, list[tuple[int, Optional[int]]]] = {}
+    for s in samples:
+        ns = s.get("duration_ns")
+        by_pass.setdefault(str(s.get("counter_pass", "pmc_0")), []).append(
+            (int(s.get("dispatch_id", 0)), int(ns) if ns is not None else None)
+        )
+    kept: list[int] = []
+    for _, pairs in sorted(by_pass.items()):
+        kept.extend(
+            ns
+            for _, ns in sorted(pairs, key=lambda pair: pair[0])[warmup:]
+            if ns is not None
+        )
+    m = _median(kept)
+    return m / 1e6 if m is not None else None
+
+
 def _pick_target_kernel(rows: list[dict], match: Optional[str]) -> Optional[str]:
     """Busiest non-helper kernel whose name CONTAINS `match` (substring).
 
@@ -198,10 +225,11 @@ def _pick_target_kernel(rows: list[dict], match: Optional[str]) -> Optional[str]
 
 
 def _parse_perfjson(stdout: str) -> dict:
+    """The launcher's `PerfJSON:` payload, or {} when it emitted none."""
     for line in stdout.splitlines():
-        if line.startswith("PerfJSON:"):
+        if line.startswith(_perfjson.PREFIX):
             try:
-                return json.loads(line.removeprefix("PerfJSON:").strip())
+                return json.loads(line.removeprefix(_perfjson.PREFIX).strip())
             except Exception:
                 return {}
     return {}
@@ -284,6 +312,7 @@ def profile(
     env: Optional[dict] = None,
     timeout: int = 1800,
     warn: Optional[Callable[[str], None]] = None,
+    artifacts_dir: Optional[os.PathLike[str] | str] = None,
 ) -> dict:
     """Profile the kernel launched by `cmd` and return a measurement record.
 
@@ -305,6 +334,16 @@ def profile(
     counter values (all dispatches, keyed by Dispatch_Id) for downstream profiling.
     Opt-in (off by default) because it is much larger than the aggregate.
 
+    `artifacts_dir`: retain the original profiler workspace in this new directory
+    instead of deleting it after capture. Existing paths and retention errors raise;
+    partial output survives failures. Adds `profile_capture` metadata to the record:
+    status describes profiler execution, not whether matching counters populated.
+
+    Timing sources, in order: the launcher's `PerfJSON:` line (gives wall + profiled
+    timing plus tflops/gbs), else the profiler's dispatch timestamps (gives profiled
+    timing only). `record["timing_source"]` says which was used. With neither - i.e.
+    no PerfJSON and no profiler - there is nothing to measure and this raises.
+
     `warn(msg)` (optional) is called on each degradation (no counters selected,
     profiler failed, no matching dispatch, counters didn't populate) so a caller
     can surface it instead of the record silently degrading to wall-only.
@@ -316,6 +355,10 @@ def profile(
 
     if warmup < 0:
         raise ValueError("warmup must be non-negative")
+
+    if artifacts_dir is not None:
+        artifacts_dir = Path(artifacts_dir)
+        artifacts_dir.mkdir(parents=True, exist_ok=False)
 
     env = {**os.environ, **(env or {})}
     sel = _counters.discover(arch)  # normalized -> raw
@@ -331,14 +374,21 @@ def profile(
             f"no PMU counters available for {arch} "
             "(rocprofv3 missing/unsupported); producing a wall-only record"
         )
-    with tempfile.TemporaryDirectory(prefix="rocke_perf_prof_") as tmp:
+    workspace = (
+        nullcontext(artifacts_dir)
+        if artifacts_dir is not None
+        else tempfile.TemporaryDirectory(prefix="rocke_perf_prof_")
+    )
+    with workspace as tmp:
         tmp = Path(tmp)
         outdir = tmp / "prof"
         ran = False
         groups: list = []
         if sel:
             pmc = tmp / "pmc.txt"
-            groups = _counters.group_counters(list(sel.values()))
+            groups = _counters.group_counters(
+                list(sel.values()), keep_together=_counters.ratio_units(sel)
+            )
             _write_pmc_input(groups, pmc)
             ran, prof_stdout = _run_rocprofv3(cmd, pmc, outdir, env, timeout)
             if not ran:
@@ -372,8 +422,9 @@ def profile(
             )
             # median per counter across the target kernel's dispatches, warmup dropped
             counters_out = _counter_medians(trows, raw_to_norm, warmup)
-            if per_dispatch:
-                samples = _counter_samples(trows, raw_to_norm)
+            # Always parsed: the per-dispatch durations are the timing fallback when
+            # the launcher emits no PerfJSON. Only ATTACHED to the record on request.
+            samples = _counter_samples(trows, raw_to_norm)
             if target and not counters_out:
                 _warn(
                     f"kernel {target!r} matched but no requested counters "
@@ -404,18 +455,32 @@ def profile(
 
     # profiled: timing of the profiled run (same execution as the counters, so it
     # correlates with them). wall: a separate un-profiled run (real-world timing).
+    #
+    # A launcher that prints no `PerfJSON:` line still yields a full record: the
+    # profiler's own dispatch timestamps give kernel-level `profiled` timing, and the
+    # primary metric (busy_cycles) never came from stdout anyway. In that case the
+    # second un-profiled run is skipped - it could not be measured - so `wall` is
+    # empty. Requiring PerfJSON only when it is the ONLY possible measurement keeps a
+    # record from ever being silently metric-less.
     profiled = _perf_from_stdout(prof_stdout)
-    wall, verify = _wall(cmd, env, timeout)
+    kernel_ms = _duration_ms_median(samples, warmup)
+    if "ms_median" not in profiled and kernel_ms is not None:
+        profiled["ms_median"] = kernel_ms
+        wall, verify = {}, _verification_from_stdout(
+            prof_stdout, verified="--verify" in cmd
+        )
+        _warn(
+            "kernel command emits no PerfJSON line; timing comes from the rocprofv3 "
+            "dispatch duration (profiled) and wall timing is unavailable"
+        )
+        timing_source = "rocprofv3_duration"
+    else:
+        wall, verify = _wall(cmd, env, timeout)
+        timing_source = (
+            "perfjson" if profiled.get("ms_median") or wall.get("ms_median") else "none"
+        )
 
-    derived: dict = {}
-    busy = counters_out.get("busy_cycles")
-    total = counters_out.get("total_clocks")
-    if busy is not None and total:
-        derived["busy_fraction"] = busy / total
-    hits = counters_out.get("l2_hit")
-    misses = counters_out.get("l2_miss")
-    if hits is not None and misses is not None and (hits + misses) > 0:
-        derived["l2_hit_rate"] = hits / (hits + misses)
+    derived: dict = _counters.derive(counters_out)
     if profiled.get("ms_median") and wall.get("ms_median"):
         derived["profiler_overhead_pct"] = (
             (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0
@@ -447,6 +512,7 @@ def profile(
         "kernel": kernel,
         "wall": wall,
         "profiled": profiled,
+        "timing_source": timing_source,
         "counters": counters_out,
         "resources": resources,
         "derived": derived,
@@ -455,5 +521,15 @@ def profile(
     }
     if per_dispatch:
         record["counter_samples"] = samples  # raw per-dispatch values (opt-in)
+    if artifacts_dir is not None:
+        record["profile_capture"] = {
+            "status": "complete" if ran else "failed" if sel else "unavailable",
+            "counter_map": sel,
+            "counter_groups": groups,
+            "match_kernel": match,
+            "warmup_per_pass": warmup,
+            "raw_includes_warmup": True,
+            "raw_includes_other_kernels": True,
+        }
     _schema.validate(record)
     return record
