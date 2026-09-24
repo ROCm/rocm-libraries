@@ -336,10 +336,9 @@ class TestValidationRules(unittest.TestCase):
         def boom(*_a, **_k):
             raise AssertionError("gfx1250 gate consulted on the MX path")
 
-        with (
-            mock.patch.object(vu, "gfx1250_comp_async_layout_reject_reason", boom),
-            mock.patch.object(vu, "tdm_pad_reject_reason", boom),
-        ):
+        with mock.patch.object(
+            vu, "gfx1250_comp_async_layout_reject_reason", boom
+        ), mock.patch.object(vu, "tdm_pad_reject_reason", boom):
             for dtype in ("fp8", "fp4"):
                 for layout, expected in want.items():
                     got = vu.is_tile_config_valid(

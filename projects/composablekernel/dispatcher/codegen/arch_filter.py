@@ -41,11 +41,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import logging
 
-from codegen_common import (
-    GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
-    GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON,
-    gfx1250_comp_async_8bit_warp_tile_k_rejected,
-)
+from codegen_common import CommonTypeMappings, gfx1250_pipeline_reject_reason
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +292,11 @@ except ImportError:
         ("compv4", "cshuffle", "interwave"),
         ("compv4", "default", "interwave"),
         ("comp_tdm", "tdm", "interwave"),
+        ("comp_tdm", "cshuffle", "interwave"),
+        ("comp_tdm", "default", "interwave"),
         ("comp_tdm_v2", "tdm", "interwave"),
+        ("comp_tdm_v2", "cshuffle", "interwave"),
+        ("comp_tdm_v2", "default", "interwave"),
     }
 
     DTYPE_COMBINATIONS = {
@@ -785,74 +785,50 @@ class ArchFilter:
     def _validate_gfx1250_pipeline(
         self, config: KernelConfig, result: ValidationResult
     ):
-        """Validate the gfx1250-only Tensor Data Mover (TDM) pipelines.
+        """Validate the gfx1250 pipelines (comp_async, comp_tdm, comp_tdm_v2)
+        and the TDM epilogue.
 
-        Off gfx1250 the TDM instructions compile to no-ops and the kernel
-        silently writes zeros, so the architecture gate is exact rather than
-        family-based. The TDM pipelines must be paired with the TDM epilogue
-        (and the TDM epilogue with a TDM pipeline), are intrawave-only, and
-        comp_tdm_v2 requires exactly four waves. Only the plain GEMM operator is
-        supported (no stream-K, multi-D, grouped or preshuffle).
+        The rules come from codegen_common.gfx1250_pipeline_reject_reason, the
+        single source of truth shared with unified_gemm_codegen and
+        python/gemm_utils: TDM pipelines are gfx1250-only (off gfx1250 the TDM
+        instructions compile to no-ops and the kernel silently writes zeros),
+        need the TDM epilogue (and vice versa), intrawave, unpadded tiles and,
+        for comp_tdm_v2, exactly four waves; only the plain GEMM operator can
+        use them. Non-MX comp_async GEMM on gfx1250 needs the cshuffle
+        epilogue, an rc A/B layout, pad_m=pad_n=pad_k=True and, for fp8/bf8,
+        warp_tile_k >= 128.
 
-        Non-MX comp_async GEMM on gfx1250 must be fully padded; the rule only
-        runs when the caller passes all three pad traits.
+        comp_async is only gated for the GEMM operator on gfx1250: other
+        operators (e.g. grouped convolution) and architectures use it under
+        their own rules. Pad rules are skipped while the pads are unknown
+        (None). KernelConfig has no persistent field, so the TDM
+        "no persistent kernel" rule is enforced only by the codegen and
+        python/gemm_utils, which see the persistent trait.
         """
-        is_tdm_pipeline = config.pipeline in TDM_PIPELINES
+        is_gemm = config.operator == OperatorType.GEMM
         if (
             config.pipeline == "comp_async"
-            and self.gpu_arch.split(":")[0] == TDM_ARCH
-            and config.operator == OperatorType.GEMM
-            and None not in (config.pad_m, config.pad_n, config.pad_k)
-            and not (config.pad_m and config.pad_n and config.pad_k)
+            and config.epilogue != "tdm"
+            and (self.gpu_arch.split(":")[0] != TDM_ARCH or not is_gemm)
         ):
-            result.add_error(GFX1250_COMP_ASYNC_PAD_REJECT_REASON)
-        if (
-            config.pipeline == "comp_async"
-            and self.gpu_arch.split(":")[0] == TDM_ARCH
-            and config.operator == OperatorType.GEMM
-            and gfx1250_comp_async_8bit_warp_tile_k_rejected(
-                config.datatype_a, config.datatype_b, config.warp_tile_k
-            )
-        ):
-            result.add_error(GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON)
-        if not is_tdm_pipeline:
-            if config.epilogue == "tdm":
-                result.add_error(
-                    f"epilogue=tdm requires a TDM pipeline {TDM_PIPELINES}, "
-                    f"got {config.pipeline}"
-                )
             return
-
-        base_arch = self.gpu_arch.split(":")[0]
-        if base_arch != TDM_ARCH:
-            result.add_error(
-                f"pipeline={config.pipeline} is only supported on {TDM_ARCH}, "
-                f"got {self.gpu_arch}"
-            )
-        if config.epilogue != "tdm":
-            result.add_error(
-                f"pipeline={config.pipeline} requires epilogue=tdm, "
-                f"got {config.epilogue}"
-            )
-        if config.scheduler != "intrawave":
-            result.add_error(
-                f"pipeline={config.pipeline} requires scheduler=intrawave, "
-                f"got {config.scheduler}"
-            )
-        if config.operator != OperatorType.GEMM:
-            # TdmEpilogue has no D tensors and ignores the split/atomic memory
-            # operation, so only the plain GEMM operator can use it.
-            result.add_error(
-                f"pipeline={config.pipeline} is only supported for operator="
-                f"{OperatorType.GEMM.value}, got {config.operator.value}"
-            )
-        if config.pipeline == "comp_tdm_v2":
-            num_waves = config.warp_m * config.warp_n * config.warp_k
-            if num_waves != 4:
-                result.add_error(
-                    f"pipeline=comp_tdm_v2 requires exactly 4 waves, got "
-                    f"{config.warp_m}x{config.warp_n}x{config.warp_k}"
-                )
+        pads = (config.pad_m, config.pad_n, config.pad_k)
+        reason = gfx1250_pipeline_reject_reason(
+            self.gpu_arch,
+            config.pipeline,
+            config.epilogue,
+            config.scheduler,
+            num_waves=config.warp_m * config.warp_n * config.warp_k,
+            warp_tile_k=config.warp_tile_k,
+            dtype_a=config.datatype_a,
+            dtype_b=config.datatype_b,
+            layout=config.layout,
+            variant_supported=is_gemm,
+            variant_name=f"operator={config.operator.value}",
+            pads=None if None in pads else tuple(bool(p) for p in pads),
+        )
+        if reason:
+            result.add_error(reason)
 
     def _validate_lds_capacity(self, config: KernelConfig, result: ValidationResult):
         """Validate LDS (Local Data Share) memory capacity"""
@@ -868,6 +844,17 @@ class ArchFilter:
 
         matrix_a_size = config.tile_m * config.tile_k * elem_size_a
         matrix_b_size = config.tile_n * config.tile_k * elem_size_b_staged
+        is_gfx1250_tdm = (
+            config.pipeline in TDM_PIPELINES and self.gpu_arch.split(":")[0] == TDM_ARCH
+        )
+        if is_gfx1250_tdm:
+            # TDM uses non-transposed LDS descriptors: each group of rows
+            # spanning at least 256 bytes is followed by 16 padding bytes
+            # (same accounting as the Tile Engine validate_lds_capacity).
+            a_lds_layer = max(1, 256 // (config.tile_k * elem_size_a))
+            b_lds_layer = max(1, 256 // (config.tile_k * elem_size_b))
+            matrix_a_size += max(0, config.tile_m // a_lds_layer - 1) * 16
+            matrix_b_size += max(0, config.tile_n // b_lds_layer - 1) * 16
         total_lds = matrix_a_size + matrix_b_size
 
         # The budget depends on the target, not just the pipeline: a tile that
@@ -885,6 +872,21 @@ class ArchFilter:
                 f"Matrix A: {config.tile_m}x{config.tile_k}x{elem_size_a}={matrix_a_size}B, "
                 f"Matrix B: {config.tile_n}x{config.tile_k}x{elem_size_b}={matrix_b_size}B"
             )
+
+        if is_gfx1250_tdm:
+            # TdmEpilogue stages the full output tile in the shared LDS
+            # allocation, so it must fit the whole LDS (the "default" budget).
+            c_dtype = CommonTypeMappings.get_output_dtype(config.datatype_a)
+            c_tile_bytes = (
+                config.tile_m * config.tile_n * ELEMENT_SIZE_MAP.get(c_dtype, 2)
+            )
+            lds_total = get_lds_limit(self.gpu_arch, "default")
+            if c_tile_bytes > lds_total:
+                result.add_error(
+                    f"TDM epilogue output tile {config.tile_m}x{config.tile_n} "
+                    f"({c_dtype}) = {c_tile_bytes}B exceeds the {lds_total}B LDS "
+                    f"of {self.gpu_arch}"
+                )
 
     def _validate_dimension_alignment(
         self, config: KernelConfig, result: ValidationResult

@@ -333,7 +333,7 @@ else()
     set(GEMM_UNIVERSAL_EPILOGUES "default;cshuffle")
     set(GEMM_UNIVERSAL_SCHEDULERS "intrawave;interwave")
     if(GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL MATCHES "gfx1250")
-        # gfx1250-only pipelines: comp_async (cshuffle epilogue) and the TDM
+        # gfx1250 pipelines: non-MX comp_async (cshuffle epilogue) and the TDM
         # pipelines comp_tdm / comp_tdm_v2 (tdm epilogue)
         list(APPEND GEMM_UNIVERSAL_PIPELINES "comp_async;comp_tdm;comp_tdm_v2")
         list(APPEND GEMM_UNIVERSAL_EPILOGUES "tdm")

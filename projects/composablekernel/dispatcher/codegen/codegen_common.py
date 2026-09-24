@@ -774,6 +774,85 @@ def gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype_a, dtype_b, warp_tile_k) 
     return is_8bit and warp_tile_k < GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K
 
 
+# gfx1250 pipelines: the Tensor Data Mover pipelines (gfx1250-only; off gfx1250
+# the TDM path compiles to a no-op and the kernel silently writes zeros, so the
+# arch gate is exact) plus non-MX comp_async (MX comp_async on gfx950 is a
+# separate kernel family and is not gated here).
+GFX1250_ARCH = "gfx1250"
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+GFX1250_ONLY_PIPELINES = ("comp_async",) + TDM_PIPELINES
+TDM_PAD_REJECT_REASON = (
+    "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
+    "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
+)
+GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON = (
+    "comp_async on gfx1250 requires A row-major and B col-major (transpose-load "
+    "path incompatible with WMMA 16x16x32 K distribution)"
+)
+
+
+def gfx1250_pipeline_reject_reason(
+    gpu_target: str,
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+    num_waves: int,
+    warp_tile_k: int,
+    dtype_a: str,
+    dtype_b: str,
+    layout: str,
+    variant_supported: bool = True,
+    variant_name: str = "",
+    persistent: bool = False,
+    pads: Optional[Tuple[bool, bool, bool]] = None,
+) -> str:
+    """Why a comp_async / comp_tdm* / tdm-epilogue GEMM config is rejected.
+
+    Single source of truth for the non-MX GEMM rules shared by
+    unified_gemm_codegen, arch_filter and python/gemm_utils. Returns "" when
+    the config is accepted; every other pipeline/epilogue returns ""
+    immediately, so existing kernel sets are unchanged.
+
+    ``variant_supported`` is False for GEMM variants the pipelines do not
+    support (only plain and batched GEMM are). ``pads`` is (pad_m, pad_n,
+    pad_k); None means unknown and skips the pad rules. An empty ``layout``
+    skips the comp_async layout rule and empty dtypes skip the 8-bit
+    warp_tile_k rule.
+    """
+    is_tdm = pipeline in TDM_PIPELINES
+    if pipeline not in GFX1250_ONLY_PIPELINES and epilogue != "tdm":
+        return ""
+    if epilogue == "tdm" and not is_tdm:
+        return f"epilogue=tdm requires a TDM pipeline {TDM_PIPELINES}"
+    if normalize_gfx_arch(gpu_target).lower() != GFX1250_ARCH:
+        return f"pipeline={pipeline} requires {GFX1250_ARCH}, got {gpu_target}"
+    if scheduler != "intrawave":
+        return f"pipeline={pipeline} requires scheduler=intrawave"
+    if not variant_supported:
+        return f"pipeline={pipeline} is not supported for {variant_name}"
+    if is_tdm:
+        if epilogue != "tdm":
+            return f"pipeline={pipeline} requires epilogue=tdm"
+        if persistent:
+            return f"pipeline={pipeline} does not support the persistent kernel"
+        if pads is not None and any(pads):
+            return TDM_PAD_REJECT_REASON
+        if pipeline == "comp_tdm_v2" and num_waves != 4:
+            return "comp_tdm_v2 requires exactly 4 waves"
+        return ""
+    # Only the cshuffle epilogue carries DoubleSmemBuffer, matching the Tile
+    # Engine trait rules.
+    if epilogue != "cshuffle":
+        return f"pipeline={pipeline} requires epilogue=cshuffle"
+    if layout and layout[:2] != "rc":
+        return GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON
+    if pads is not None and not all(pads):
+        return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
+    if gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype_a, dtype_b, warp_tile_k):
+        return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
+    return ""
+
+
 def rcr_only_layout_guard(layout: str) -> Optional[str]:
     """Layout guard for operators that only support ``rcr``.
 

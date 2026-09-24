@@ -33,7 +33,7 @@ def _base_gfx_arch(gpu_target: str) -> str:
 
 GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 
-# gfx1250-only pipelines for the non-MX GEMM ops. They are opt-in per arch so
+# gfx1250 pipelines for the non-MX GEMM ops. They are opt-in per arch so
 # the pipeline sets (and therefore generated kernels) of every other arch stay
 # exactly GEMM_PIPELINES.
 GEMM_TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2"]
@@ -457,7 +457,7 @@ def is_trait_combination_valid(
                 )
             if epilogue == "tdm":
                 return False
-            # Non-MX comp_async (gfx1250-only) must be fully padded (see
+            # Non-MX comp_async (gfx1250) must be fully padded (see
             # GFX1250_COMP_ASYNC_PAD_REJECT_REASON). Skipped when the caller
             # passed no padding at all.
             pads_given = not (pad_m is None and pad_n is None and pad_k is None)
@@ -551,8 +551,8 @@ def validate_dimension_alignment(
 # Hardware capacity from ck_tile::get_lds_size() in core/arch/arch.hpp.
 # Dispatcher ArchFilter has a separate generated table; keep these in sync.
 LDS_SIZE_MAP = {
-    "gfx90a": 2**16,   # 64KB
-    "gfx942": 2**16,   # 64KB
+    "gfx90a": 2**16,  # 64KB
+    "gfx942": 2**16,  # 64KB
     "gfx950": 160 * 1024,  # 160KB
     "gfx1201": 2**16,  # 64KB
     "gfx1250": 320 * 1024,  # 320KB

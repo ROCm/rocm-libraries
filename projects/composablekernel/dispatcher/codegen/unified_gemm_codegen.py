@@ -29,9 +29,15 @@ from codegen_common import (
     TileConfig,
     TraitConfigBase,
     CommonTypeMappings as TypeMappings,
-    GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
-    GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON,
-    gfx1250_comp_async_8bit_warp_tile_k_rejected,
+    GFX1250_COMP_ASYNC_PAD_REJECT_REASON,  # noqa: F401 (re-exported)
+    GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON,  # noqa: F401 (re-exported)
+    GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON,  # noqa: F401 (re-exported)
+    GFX1250_ARCH,  # noqa: F401 (re-exported)
+    GFX1250_ONLY_PIPELINES,
+    TDM_PAD_REJECT_REASON,  # noqa: F401 (re-exported)
+    TDM_PIPELINES,
+    gfx1250_comp_async_8bit_warp_tile_k_rejected,  # noqa: F401 (re-exported)
+    gfx1250_pipeline_reject_reason,
 )
 
 # Import architecture filter for GPU-specific validation
@@ -199,19 +205,9 @@ DOUBLE_SMEM_BUFFER_PIPELINES = (
     "comp_tdm_v2",
 )
 
-# gfx1250-only pipelines. Off gfx1250 the Tensor Data Mover path compiles to a
-# no-op and the kernel silently writes zeros, so the arch gate is exact.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
-GFX1250_ONLY_PIPELINES = ("comp_async",) + TDM_PIPELINES
-GFX1250_ARCH = "gfx1250"
-TDM_PAD_REJECT_REASON = (
-    "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
-    "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
-)
-GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON = (
-    "comp_async on gfx1250 requires A row-major and B col-major (transpose-load "
-    "path incompatible with WMMA 16x16x32 K distribution)"
-)
+# The gfx1250 pipeline constants (TDM_PIPELINES, GFX1250_ONLY_PIPELINES, the
+# reject reasons) live in codegen_common next to gfx1250_pipeline_reject_reason
+# so the codegen, arch_filter and python/gemm_utils share one rule set.
 
 
 def _is_power_of_two(x: int) -> bool:
@@ -1410,7 +1406,7 @@ using CLayout = {ns_name}::CLayout;
             # configs that requested "default" -- a name/impl mismatch that also
             # breaks the config->codegen->runtime byte-parity invariant.
             if config.trait.epilogue == "cshuffle":
-                # The gfx1250-only pipelines pass the full epilogue tail (with
+                # The gfx1250 (non-MX) pipelines pass the full epilogue tail (with
                 # DoubleSmemBuffer) like the Tile Engine batched builder; the
                 # legacy pipelines keep the defaulted tail unchanged.
                 if config.trait.pipeline in GFX1250_ONLY_PIPELINES:
@@ -1862,7 +1858,7 @@ class UnifiedGemmCodegen:
         trait_configs = self._get_trait_configs()
 
         for tile, trait in itertools.product(tile_configs, trait_configs):
-            # gfx1250-only pipelines (comp_async / comp_tdm*) and the TDM
+            # gfx1250 pipelines (non-MX comp_async / comp_tdm*) and the TDM
             # epilogue: exact-arch, variant and trait gate.
             reason = self._gfx1250_pipeline_reject_reason(tile, trait, variant)
             if reason:
@@ -2076,48 +2072,25 @@ class UnifiedGemmCodegen:
     ) -> str:
         """Why a comp_async / comp_tdm* / tdm-epilogue config is rejected.
 
-        Returns an empty string when the config is accepted. Every other
-        pipeline/epilogue returns "" immediately, so existing kernel sets are
-        unchanged.
+        Returns an empty string when the config is accepted. Delegates to
+        codegen_common.gfx1250_pipeline_reject_reason, the rule set shared with
+        arch_filter and python/gemm_utils.
         """
-        pipeline = trait.pipeline
-        is_tdm = pipeline in TDM_PIPELINES
-        if pipeline not in GFX1250_ONLY_PIPELINES and trait.epilogue != "tdm":
-            return ""
-        if trait.epilogue == "tdm" and not is_tdm:
-            return f"epilogue=tdm requires a TDM pipeline {TDM_PIPELINES}"
-        base_arch = self.gpu_target.lower().split(":")[0]
-        if base_arch != GFX1250_ARCH:
-            return f"pipeline={pipeline} requires {GFX1250_ARCH}, got {self.gpu_target}"
-        if trait.scheduler != "intrawave":
-            return f"pipeline={pipeline} requires scheduler=intrawave"
-        if variant not in (GemmVariant.STANDARD, GemmVariant.BATCHED):
-            return f"pipeline={pipeline} is not supported for {variant.value}"
-        if is_tdm:
-            if trait.epilogue != "tdm":
-                return f"pipeline={pipeline} requires epilogue=tdm"
-            if trait.persistent:
-                return f"pipeline={pipeline} does not support the persistent kernel"
-            if trait.pad_m or trait.pad_n or trait.pad_k:
-                return TDM_PAD_REJECT_REASON
-            if pipeline == "comp_tdm_v2":
-                num_waves = tile.warp_m * tile.warp_n * tile.warp_k
-                if num_waves != 4:
-                    return "comp_tdm_v2 requires exactly 4 waves"
-            return ""
-        # Only the cshuffle epilogue carries DoubleSmemBuffer, matching the
-        # Tile Engine trait rules.
-        if trait.epilogue != "cshuffle":
-            return f"pipeline={pipeline} requires epilogue=cshuffle"
-        if self.layout[:2] != "rc":
-            return GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON
-        if not (trait.pad_m and trait.pad_n and trait.pad_k):
-            return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
-        if gfx1250_comp_async_8bit_warp_tile_k_rejected(
-            self.datatype, self.datatype, tile.warp_tile_k
-        ):
-            return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
-        return ""
+        return gfx1250_pipeline_reject_reason(
+            self.gpu_target,
+            trait.pipeline,
+            trait.epilogue,
+            trait.scheduler,
+            num_waves=tile.warp_m * tile.warp_n * tile.warp_k,
+            warp_tile_k=tile.warp_tile_k,
+            dtype_a=self.datatype,
+            dtype_b=self.datatype,
+            layout=self.layout,
+            variant_supported=variant in (GemmVariant.STANDARD, GemmVariant.BATCHED),
+            variant_name=variant.value,
+            persistent=bool(trait.persistent),
+            pads=(bool(trait.pad_m), bool(trait.pad_n), bool(trait.pad_k)),
+        )
 
     def _is_tile_arch_valid(
         self,

@@ -660,6 +660,16 @@ class GroupedGemmProblem:
         return cls(groups=[(int(m), int(n), int(k)) for (m, n, k) in d["groups"]])
 
 
+# ctypes run() status codes (see bindings/ctypes/*_ctypes_lib.cpp).
+# STATUS_UNSUPPORTED (-1) is the code the dispatcher returns when the selected
+# kernel rejects the problem (IsSupportedArgument throws inside run()); the
+# same code also covers host-side setup errors, so callers should treat it as
+# "not run" (skip, no verification) rather than as a numerical failure.
+STATUS_OK = 0
+STATUS_UNSUPPORTED = -1
+STATUS_NO_KERNEL = -2
+
+
 @dataclass
 class GemmResult:
     output: np.ndarray
@@ -675,7 +685,13 @@ class GemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 @dataclass
@@ -691,7 +707,13 @@ class GroupedGemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 # ============================================================================
@@ -1418,7 +1440,13 @@ class MultiDGemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 def _multi_d_layout_from_kernel_name(name: str) -> str:
@@ -2366,20 +2394,28 @@ def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> 
     return [wave_m, wave_n, wave_k] in allowed
 
 
-# --- gfx1250-only pipeline gate (parity with unified_gemm_codegen) ---------
-# comp_async / comp_tdm / comp_tdm_v2 are only generated for exact gfx1250 by
-# unified_gemm_codegen (_gfx1250_pipeline_reject_reason). expand_sweep must drop
-# the same combinations up front, otherwise it hands back configs whose header
-# is never emitted. Pipelines outside this set are untouched.
-_TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
-_GFX1250_ONLY_PIPELINES = ("comp_async",) + _TDM_PIPELINES
-# TDM bounds-clips on the real descriptor extents; the kPad right-pad
-# transforms inflate them, so TDM requires pad_m=pad_n=pad_k=False.
-# comp_async on gfx1250 requires A row-major and B col-major: the LDS
-# transpose-load path is incompatible with the WMMA 16x16x32 K distribution.
-# comp_async on gfx1250 unpadded: the async K-prefetch reads past the A/B
-# extent and the TailNumber::Two path lacks an LDS fence, so comp_async
-# requires pad_m=pad_n=pad_k=True.
+# --- gfx1250 pipeline gate (parity with unified_gemm_codegen) --------------
+# Non-MX comp_async / comp_tdm / comp_tdm_v2 are only generated for gfx1250 by
+# unified_gemm_codegen. expand_sweep must drop the same combinations up front,
+# otherwise it hands back configs whose header is never emitted. The rules live
+# in codegen_common.gfx1250_pipeline_reject_reason (single source of truth
+# shared with the codegen and arch_filter); pipelines outside that set are
+# untouched.
+_CODEGEN_DIR = Path(__file__).resolve().parent.parent / "codegen"
+
+
+@functools.lru_cache(maxsize=1)
+def _gfx1250_reject_reason_fn():
+    """codegen_common.gfx1250_pipeline_reject_reason, importable regardless of
+    whether a caller already put the codegen dir on ``sys.path``."""
+    import sys  # noqa: WPS433 (local: only needed for this lazy import)
+
+    codegen_dir = str(_CODEGEN_DIR)
+    if codegen_dir not in sys.path:
+        sys.path.append(codegen_dir)
+    from codegen_common import gfx1250_pipeline_reject_reason  # noqa: WPS433
+
+    return gfx1250_pipeline_reject_reason
 
 
 def _gfx1250_pipeline_supported(
@@ -2399,47 +2435,30 @@ def _gfx1250_pipeline_supported(
     dtype: str = "",
     warp_tile_k: int = 0,
 ) -> bool:
-    """False iff the (pipeline, epilogue) pair is a gfx1250-only combination
-    that the codegen would reject for this arch/variant/trait.
+    """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
+    the codegen would reject for this arch/variant/trait.
 
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
     comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
     8-bit warp_tile_k rule; an empty dtype skips it."""
-    if pipeline not in _GFX1250_ONLY_PIPELINES and epilogue != "tdm":
+    if pipeline not in ("comp_async", "comp_tdm", "comp_tdm_v2") and epilogue != "tdm":
         return True
-    if pipeline not in _GFX1250_ONLY_PIPELINES:
-        # The tdm epilogue is only valid together with a TDM pipeline.
-        return False
-    if arch != "gfx1250" or scheduler != "intrawave":
-        return False
-    if variant not in ("standard", "batched"):
-        return False
-    if pipeline in _TDM_PIPELINES:
-        if epilogue != "tdm" or persistent:
-            return False
-        if pad_m or pad_n or pad_k:
-            return False
-        if pipeline == "comp_tdm_v2" and wave_m * wave_n * wave_k != 4:
-            return False
-        return True
-    # comp_async
-    if layout and layout[:2] != "rc":
-        return False
-    if not (pad_m and pad_n and pad_k):
-        return False
-    if dtype:
-        try:
-            from codegen_common import (  # noqa: WPS433 (lazy, see output_dtype_for)
-                gfx1250_comp_async_8bit_warp_tile_k_rejected as _rejected,
-            )
-        except ImportError:  # codegen dir not on sys.path: same rule inline
-
-            def _rejected(dtype_a, dtype_b, wtk):
-                return (dtype_a in ("fp8", "bf8") or dtype_b in ("fp8", "bf8")) and wtk < 128
-
-        if _rejected(dtype, dtype, warp_tile_k):
-            return False
-    return epilogue == "cshuffle"
+    reason = _gfx1250_reject_reason_fn()(
+        arch,
+        pipeline,
+        epilogue,
+        scheduler,
+        num_waves=wave_m * wave_n * wave_k,
+        warp_tile_k=warp_tile_k,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        layout=layout,
+        variant_supported=variant in ("standard", "batched"),
+        variant_name=variant,
+        persistent=bool(persistent),
+        pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
+    )
+    return not reason
 
 
 def expand_sweep(
@@ -2686,7 +2705,12 @@ def expand_sweep(
         # producing wrong results (on-device max_rel 0.14-0.87 vs an fp32 CPU
         # reference; <=4-warp compv3 and all compv4/mem/interwave kernels are
         # bit-accurate). Gate it off until the pipeline is ported to wave32.
-        if arch == "gfx1250" and pipe == "compv3" and sched == "intrawave" and wm * wn == 8:
+        if (
+            arch == "gfx1250"
+            and pipe == "compv3"
+            and sched == "intrawave"
+            and wm * wn == 8
+        ):
             continue
         if not _gfx1250_pipeline_supported(
             pipe,

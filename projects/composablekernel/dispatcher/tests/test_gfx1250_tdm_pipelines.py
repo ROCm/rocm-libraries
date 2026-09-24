@@ -26,13 +26,25 @@ INCLUDE_DIR = DISPATCHER_DIR / "include"
 sys.path.insert(0, str(CODEGEN_DIR))
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
-from arch_filter import ArchFilter  # noqa: E402
+from arch_filter import (  # noqa: E402
+    ArchFilter,
+    KernelConfig,
+    OperatorType,
+    ValidationResult,
+)
 from arch_specs_generated import get_lds_limit  # noqa: E402
 from codegen_common import (  # noqa: E402
     CommonTypeMappings,
     GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,
 )
+
+TE_GEMM_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
+sys.path.insert(0, str(TE_GEMM_DIR))
+try:
+    import gemm_validation_utils as te  # noqa: E402
+except ImportError:  # pragma: no cover - TE tree not present
+    te = None
 
 TDM_TILE = dict(
     tile_m=128,
@@ -166,6 +178,190 @@ class TestArchFilter(unittest.TestCase):
                     warp_tile_k=16,
                 )
             )
+
+
+class TestArchFilterGfx1250Rejects(unittest.TestCase):
+    """ArchFilter must reject every gfx1250 config the codegen, python/gemm_utils
+    and the Tile Engine reject (codegen_common.gfx1250_pipeline_reject_reason is
+    the shared rule set)."""
+
+    PADS_TTT = dict(pad_m=True, pad_n=True, pad_k=True)
+    PADS_FFF = dict(pad_m=False, pad_n=False, pad_k=False)
+
+    def _valid(self, arch="gfx1250", **kw):
+        args = dict(TDM_TILE)
+        args.update(kw)
+        return ArchFilter(arch).is_kernel_valid(**args)
+
+    def test_tdm_rejects_any_pad(self):
+        for pipe in ("comp_tdm", "comp_tdm_v2"):
+            self.assertTrue(self._valid(pipeline=pipe, epilogue="tdm", **self.PADS_FFF))
+            for name in ("pad_m", "pad_n", "pad_k"):
+                pads = dict(self.PADS_FFF, **{name: True})
+                self.assertFalse(
+                    self._valid(pipeline=pipe, epilogue="tdm", **pads), (pipe, name)
+                )
+            self.assertFalse(
+                self._valid(pipeline=pipe, epilogue="tdm", **self.PADS_TTT)
+            )
+
+    def test_tdm_scheduler_and_epilogue(self):
+        for pipe in ("comp_tdm", "comp_tdm_v2"):
+            for epi in ("cshuffle", "default"):
+                self.assertFalse(self._valid(pipeline=pipe, epilogue=epi), (pipe, epi))
+            self.assertFalse(
+                self._valid(pipeline=pipe, epilogue="tdm", scheduler="interwave")
+            )
+        # The tdm epilogue needs a TDM pipeline on every arch.
+        for arch in ("gfx950", "gfx1250"):
+            for pipe in ("comp_async", "compv3", "compv4", "mem"):
+                self.assertFalse(
+                    self._valid(arch, pipeline=pipe, epilogue="tdm"), (arch, pipe)
+                )
+
+    def test_comp_async_layout(self):
+        self.assertTrue(
+            self._valid(pipeline="comp_async", layout="rcr", **self.PADS_TTT)
+        )
+        for layout in ("rrr", "crr", "ccr"):
+            self.assertFalse(
+                self._valid(pipeline="comp_async", layout=layout, **self.PADS_TTT),
+                layout,
+            )
+            # Other pipelines keep every layout.
+            self.assertTrue(
+                self._valid(pipeline="compv3", layout=layout, **self.PADS_TTT), layout
+            )
+
+    def test_comp_async_epilogue_and_scheduler(self):
+        self.assertFalse(
+            self._valid(pipeline="comp_async", epilogue="default", **self.PADS_TTT)
+        )
+        self.assertFalse(
+            self._valid(pipeline="comp_async", scheduler="interwave", **self.PADS_TTT)
+        )
+        self.assertTrue(
+            self._valid(pipeline="comp_async", epilogue="cshuffle", **self.PADS_TTT)
+        )
+
+    def test_comp_async_pads_must_be_ttt(self):
+        for pads in ((False, False, False), (True, False, True), (True, True, False)):
+            kw = dict(zip(("pad_m", "pad_n", "pad_k"), pads))
+            self.assertFalse(self._valid(pipeline="comp_async", **kw), pads)
+
+    def test_comp_async_fp8_warp_tile_k(self):
+        for dt in ("fp8", "bf8"):
+            kw = dict(datatype_a=dt, datatype_b=dt, datatype_c="fp16", tile_k=128)
+            for wtk in (32, 64):
+                self.assertFalse(
+                    self._valid(
+                        pipeline="comp_async", warp_tile_k=wtk, **kw, **self.PADS_TTT
+                    ),
+                    (dt, wtk),
+                )
+
+    def test_gfx950_comp_async_still_accepted(self):
+        # MX / grouped_conv comp_async on gfx950 is outside the gfx1250 gate.
+        for layout in ("rcr", "rrr"):
+            self.assertTrue(
+                self._valid(
+                    "gfx950",
+                    pipeline="comp_async",
+                    epilogue="cshuffle",
+                    layout=layout,
+                    warp_tile_m=32,
+                    warp_tile_n=32,
+                    warp_tile_k=16,
+                    **self.PADS_FFF,
+                ),
+                layout,
+            )
+
+    def test_tdm_lds_row_padding(self):
+        # 1120x128x64 fp16: A+B = 159744B fits the 163840B double-buffered
+        # budget, but the TDM 16B-per-256B-row-group padding lifts it to
+        # 169696B (Tile Engine validate_lds_capacity accounting).
+        tile = dict(tile_m=1120, tile_n=128, tile_k=64)
+        self.assertFalse(self._valid(pipeline="comp_tdm", epilogue="tdm", **tile))
+        self.assertTrue(
+            self._valid(
+                pipeline="comp_async", epilogue="cshuffle", **tile, **self.PADS_TTT
+            )
+        )
+
+    def test_tdm_c_tile_fits_lds(self):
+        # 512x512 fp16 output = 512KB > 320KB LDS; A+B alone would fit.
+        tile = dict(tile_m=512, tile_n=512, tile_k=64)
+        self.assertFalse(self._valid(pipeline="comp_tdm", epilogue="tdm", **tile))
+        self.assertTrue(self._valid(pipeline="compv3", **tile))
+
+    def test_tdm_lds_padding_64x256x256_rejected_by_both_gates(self):
+        # fp16 64x256x256: A = 32768B + 1008B pad, B = 131072B + 4080B pad,
+        # 168928B > 163840B double-buffered budget. Unpadded A+B (163840B)
+        # would just fit, so only the TDM row padding rejects it -- ArchFilter
+        # and the Tile Engine must agree.
+        tile = dict(tile_m=64, tile_n=256, tile_k=256)
+        self.assertFalse(self._valid(pipeline="comp_tdm", epilogue="tdm", **tile))
+        self.assertTrue(
+            self._valid(
+                pipeline="comp_async", epilogue="cshuffle", **tile, **self.PADS_TTT
+            )
+        )
+        if te is None:
+            self.skipTest("tile_engine gemm_validation_utils not importable")
+        te_args = dict(
+            warp_m=2,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            a_datatype="fp16",
+            b_datatype="fp16",
+            c_datatype="fp16",
+            layout="rcr",
+            gpu_target="gfx1250",
+            kernel_name_prefix="gemm_universal",
+        )
+        self.assertFalse(
+            te.is_tile_config_valid(
+                tile_m=64, tile_n=256, tile_k=256, pipeline="comp_tdm", **te_args
+            )
+        )
+        # Control: the same tile without TDM padding is accepted by the TE.
+        self.assertTrue(
+            te.is_tile_config_valid(
+                tile_m=64, tile_n=256, tile_k=256, pipeline="comp_async", **te_args
+            )
+        )
+
+    def test_comp_async_not_gated_for_grouped_conv(self):
+        # The gfx1250 comp_async GEMM rules (layout/epilogue/pads) must not
+        # leak into other operators such as grouped convolution.
+        for arch in ("gfx950", "gfx1250"):
+            for op in (OperatorType.CONV_FWD, OperatorType.CONV_BWD_WEIGHT):
+                cfg = KernelConfig(
+                    datatype_a="fp16",
+                    datatype_b="fp16",
+                    datatype_c="fp16",
+                    **TDM_TILE,
+                    pipeline="comp_async",
+                    epilogue="default",
+                    scheduler="intrawave",
+                    layout="rrr",
+                    operator=op,
+                    pad_m=False,
+                    pad_n=False,
+                    pad_k=False,
+                )
+                res = ValidationResult(valid=True)
+                ArchFilter(arch)._validate_gfx1250_pipeline(cfg, res)
+                self.assertEqual(res.errors, [], (arch, op))
+        # Same config as a GEMM on gfx1250 is rejected by the gate.
+        cfg.operator = OperatorType.GEMM
+        res = ValidationResult(valid=True)
+        ArchFilter("gfx1250")._validate_gfx1250_pipeline(cfg, res)
+        self.assertNotEqual(res.errors, [])
 
 
 class TestTypeMappings(unittest.TestCase):

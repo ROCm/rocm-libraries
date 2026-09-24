@@ -215,7 +215,7 @@ else()
     set(BATCHED_GEMM_EPILOGUES "default;cshuffle")
     set(BATCHED_GEMM_SCHEDULERS "intrawave;interwave")
     if(BATCHED_GEMM_GPU_TARGETS MATCHES "gfx1250")
-        # gfx1250-only pipelines: comp_async (cshuffle epilogue) and the TDM
+        # gfx1250 pipelines: non-MX comp_async (cshuffle epilogue) and the TDM
         # pipelines comp_tdm / comp_tdm_v2 (tdm epilogue). The weight-preshuffle
         # pipelines are not built: the batched kernel's per-batch B offset
         # assumes an unshuffled B.
