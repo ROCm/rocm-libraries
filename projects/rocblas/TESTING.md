@@ -172,10 +172,9 @@ Each test entry includes a `category`:
 | `quick` | Fast checks and quick return unit testing |
 | `pre_checkin` | PR validation breadth |
 | `nightly` | Extended breadth to larger problems |
-| `HMM` | Heterogeneous / managed-memory cases (`HMM: true`); not in default PR filters |
+| `HMM` | Heterogeneous / managed-memory cases (`HMM: true`); requires `RUN_TEST_ON_THREADS_STREAMS` plus HMM constructors in `testing_*.hpp`; not in default PR filters |
 | `stress` | Large allocations / edge cases; may need `ROCBLAS_CLIENT_RAM_GB_LIMIT` |
 | `multi_gpu` | Repeat the case across `devices`; requires `RUN_TEST_ON_THREADS_STREAMS` |
-| `HMM` | Managed-memory allocations (`HMM: true`); requires `RUN_TEST_ON_THREADS_STREAMS` plus HMM constructors in `testing_*.hpp` |
 | `known_bug` | Tracked failures; excluded from normal runs via `-*known_bug*` |
 
 Entries matching `known_bugs.yaml` are automatically reclassified. Suite YAML files `include` each other and `rocblas_common.yaml`; the root `rocblas_gtest.yaml` aggregates all suites for code generation.
