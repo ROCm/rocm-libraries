@@ -2127,6 +2127,7 @@ namespace
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
         tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
+        tensileProblem.setParams().setDeviceScalarAlpha(prob.deviceScalarAlpha);
         tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
         tensileProblem.setScaleA(compute_type, 1);
         tensileProblem.setScaleB(compute_type, 1);
@@ -2407,6 +2408,7 @@ namespace
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
         tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
+        tensileProblem.setParams().setDeviceScalarAlpha(prob.deviceScalarAlpha);
         tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
         tensileProblem.setScaleA(compute_type, 1);
         tensileProblem.setScaleB(compute_type, 1);
@@ -5314,7 +5316,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         // Under USO, the same predicate findTopSolutions uses: problem, task,
         // StreamK dynamic-queue, uniform summation order (Synchronizer pointer
         // is checked only at launch, which throws if it is missing). With USO
-        // off, selection must not widen: problemPredicate && taskPredicate only.
+        // off, retain the original filters and independently require device-scalar capability.
         bool swMatch;
         if(tensile_prob.getParams().uniformSummationOrder())
         {
@@ -5327,7 +5329,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         else
         {
             swMatch = (*solution->problemPredicate)(tensile_prob)
-                      && (*solution->taskPredicate)(task);
+                      && (*solution->taskPredicate)(task)
+                      && solution->deviceScalarAlphaSupported(tensile_prob);
         }
         if(!swMatch)
         {
@@ -5348,6 +5351,12 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
+        // Workspace sizing packs grouped arguments, so reject unsupported scalar
+        // mode before asking a solution to size that buffer.
+        for(auto const& gemm : tensile_prob.gemms)
+            if(gemm.getParams().deviceScalarAlpha())
+                return rocblaslt_status_invalid_value;
+
         auto solution
             = library->getSolutionByIndex(tensile_prob.gemms[0], *hardware, *solutionIndex);
         if(!solution)
