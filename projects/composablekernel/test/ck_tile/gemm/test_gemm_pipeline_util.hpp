@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <tuple>
@@ -27,13 +28,15 @@ enum struct GemmPipelineType
     CompAsync,
     CompAsyncEightWaves,
     CompTDMV1,
-    CompTDMV2
+    CompTDMV2,
+    CompTDMProducerConsumer
 };
 
 // Pipelines that load A and B with TDM: no padding, no split-K (TdmEpilogue), ragged extents.
 constexpr bool is_tdm_pipeline(GemmPipelineType pt)
 {
-    return pt == GemmPipelineType::CompTDMV1 || pt == GemmPipelineType::CompTDMV2;
+    return pt == GemmPipelineType::CompTDMV1 || pt == GemmPipelineType::CompTDMV2 ||
+           pt == GemmPipelineType::CompTDMProducerConsumer;
 }
 
 template <typename Layout>
@@ -188,6 +191,14 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMV2, Problem>
     using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMV2<Problem>;
 
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV2"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMProducerConsumer, Problem>
+{
+    using pipeline = ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMProducerConsumer"; }
 };
 
 template <GemmPipelineType PT, typename Problem, typename Enable = void>
@@ -403,6 +414,11 @@ class TestCkTileGemmPipeline : public ::testing::Test
         if constexpr(Persistent)
         {
             grids = Kernel::MaxOccupancyGridSize(s);
+            // At most two workgroups, so multi-tile cases loop and reuse LDS and barriers.
+            if constexpr(IsTdm)
+            {
+                grids.x = std::min(grids.x, 2u);
+            }
         }
         else
         {
@@ -442,6 +458,22 @@ class TestCkTileGemmPipeline : public ::testing::Test
         if constexpr(!Derived::check_data_type())
         {
             GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test.";
+        }
+        if constexpr(PipelineType == GemmPipelineType::CompTDMProducerConsumer)
+        {
+            if(!ck_tile::is_gfx125_supported())
+            {
+                // A skip reports as PASS; CK_TILE_REQUIRE_GFX125=1 turns it into a failure on
+                // runners that are meant to be gfx1250.
+                const char* required = std::getenv("CK_TILE_REQUIRE_GFX125");
+                if(required != nullptr && required[0] == '1')
+                {
+                    FAIL() << "CK_TILE_REQUIRE_GFX125=1 but the device reports '"
+                           << ck_tile::get_device_name() << "'";
+                }
+                GTEST_SKIP() << "hardware named barriers require gfx1250; device reports '"
+                             << ck_tile::get_device_name() << "'";
+            }
         }
         // TDM pipelines use cluster launch (multicast), not supported on gfx1250 A0 (revision 0)
         if constexpr(PipelineType == GemmPipelineType::CompTDMV1 ||

@@ -148,6 +148,16 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             list(FILTER _tdm_subtile_archs INCLUDE REGEX "^gfx125")
             set_property(TARGET test_ck_tile_gemm_pipeline_tdm_subtile_wmma PROPERTY HIP_ARCHITECTURES ${_tdm_subtile_archs})
             list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_pipeline_tdm_subtile_wmma)
+            add_gtest_executable(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
+                test_gemm_pipeline_comp_tdm_producer_consumer_wmma.cpp)
+            if(result EQUAL 0)
+                target_compile_options(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
+                    PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+                # A broken named barrier handshake hangs rather than failing, so cap the run
+                # instead of letting it hold a GPU for the 1500s CTest default.
+                set_tests_properties(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
+                    PROPERTIES TIMEOUT 900)
+            endif()
             add_gtest_executable(test_ck_tile_gemm_pipeline_comp_async_wmma test_gemm_pipeline_comp_async_wmma.cpp)
             target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
             target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
