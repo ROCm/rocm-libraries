@@ -7,12 +7,12 @@
 #include "ck_tile/core/utility/debug.hpp"
 
 #ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS
-#define CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS 0
+#define CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS 1
 #endif
 // Which operands use the padded row-major (TDM) LDS layout instead of the
 // XOR-swizzled one: bit0 K, bit1 V, bit2 Q, bit3 dO.
 #ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK
-#define CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK 0
+#define CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK 15
 #endif
 // Row padding in elements for the TDM layout. 0 isolates the question of
 // whether the swizzle removal or the padding itself is what breaks the readers.

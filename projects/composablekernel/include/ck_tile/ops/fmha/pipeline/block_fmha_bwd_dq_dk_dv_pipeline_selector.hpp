@@ -12,7 +12,7 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_trload_qr_qtr_dor_tdm.hpp"
 
 #ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM
-#define CK_TILE_FMHA_BWD_TRLOAD_TDM 0
+#define CK_TILE_FMHA_BWD_TRLOAD_TDM 1
 #endif
 
 namespace ck_tile {

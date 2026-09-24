@@ -23,7 +23,7 @@
 // gfx12 has no async global->LDS path, so the base pipeline does
 // store_tile(lds, load_tile(dram)); gfx1250 has TDM, which does it directly.
 #ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS
-#define CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS 0
+#define CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS 1
 #endif
 
 namespace ck_tile {
