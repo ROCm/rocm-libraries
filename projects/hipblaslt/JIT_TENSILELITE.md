@@ -1,5 +1,10 @@
 # Compile an explicit TensileLite recipe for GEMM
 
+This is a source guide for contributors and integration developers, maintained
+under the existing hipBLASLt code/documentation reviewer rules. See the
+[roadmap](JIT_ROADMAP.md) for ownership, source publication and deferred release
+documentation integration.
+
 The experimental TensileLite API compiles one supplied YAML recipe, loads its
 generated kernel and helpers, and returns a `hipblasLtMatmulHeuristicResult_t`.
 Use that result with `hipblasLtMatmul` or the C++ `hipblaslt_ext::Gemm` class.
