@@ -350,8 +350,32 @@ class SchedulerConfig:
 
         self.plr = 0 if self.pgr == 0 else 1
         self.offsetPartition = 1 if self.pgr >= 2 else 0
+        if self.spanNgllMerge:
+            # A partition whose target wraps past the last one is loading for
+            # the macro tile after next, so its GRs come out at mtIteration 2.
+            # Offsetting by the whole partition count makes every partition
+            # wrap, which is what puts *every* load two macro tiles ahead
+            # rather than just B's last slice. The four-deep tail needs that:
+            # it reaches its second DepthU in partition 0, far too early to
+            # issue the loads that fill it, so they have to have been issued a
+            # whole macro tile earlier and be resident by the time it starts.
+            self.offsetPartition = self.numPartitions
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
+
+    @property
+    def spanNgllMerge(self) -> bool:
+        """Does the tail run all four of a partition's k-subiterations?
+
+        Asked from two very distant places -- here, where it sets the prefetch
+        distance, and again at register allocation and emission -- so it lives
+        on the config and is read nowhere else. The two used to read the
+        environment separately with different defaults, and the build quietly
+        reserved registers for a tail it then declined to emit.
+        """
+        if self.pgr < 2 or not self.blockSched:
+            return False
+        return plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "0") != "0"
 
     @property
     def partitionSizesM(self) -> List[int]:
@@ -864,21 +888,18 @@ class LogicalScheduler:
     def _span_ngll_merge_enabled(self) -> bool:
         """Does the tail run all four of a partition's k-subiterations?
 
-        Asked at two very distant points -- register allocation and emission --
-        and they have to agree, so both go through here. Allocating for a tail
-        that is never emitted only wastes registers, but emitting one that
-        allocation did not plan for aliases the two unroll iterations onto one
-        set of tiles. This deliberately ignores the emission-side nll_ft
-        condition: it is the conservative direction.
+        Register allocation and emission both ask, and they have to agree:
+        allocating for a tail that is never emitted only wastes registers, but
+        emitting one that allocation did not plan for aliases the two unroll
+        iterations onto one set of tiles. This deliberately ignores the
+        emission-side nll_ft condition; it is the conservative direction.
 
         Off by default while the four-deep tail (build_tail_merged) is being
         brought up. It costs A the registers to stay live across four k-steps,
         and several library tiles already sit within single digits of the 256
         cap, where an overflow is a hard build failure rather than a silent drop.
         """
-        if self.config.pgr < 2 or not self.config.blockSched:
-            return False
-        return plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "0") != "0"
+        return self.config.spanNgllMerge
 
     def _lr_tile_set_count(self, num_k_groups: int = 1,
                            tensor: Optional[str] = None) -> int:
@@ -3252,83 +3273,6 @@ class LogicalScheduler:
         for tensor, peak in sub.tile_peaks.items():
             self.tile_peaks[tensor] = max(self.tile_peaks.get(tensor, 0), peak)
         return self._tail_merged_emitted
-
-    # Ops describing the global-read side of a body: the loads themselves, the
-    # pointer advances, and the wait/barrier pair that orders them against the
-    # local reads. They move between bodies as a unit.
-    _TAIL_GR_OPS = ('gr', 'gr_inc', 'wait_gr', 'sync')
-
-    def _splice_tail_gr_skeleton(self, tail_3d, ngll_3d, nll_3d) -> None:
-        """Give the four-deep tail the global-read skeleton of the pair it replaces.
-
-        The four-deep body assumes both of its DepthU were already loaded when
-        it starts, which is true of a body preceded by another four-deep body.
-        Here it is preceded by the two-deep mainloop, which only ever loads one
-        DepthU ahead, so B's loads for the tail's second half are still owed --
-        the NGLL is where the original schedule paid them, and dropping it left
-        the last DepthU multiplying against whatever was in LDS from before.
-
-        These ops move between bodies in a way the local reads could not. An LR
-        is placed a partition ahead of the MFMAs it feeds, so it only means
-        anything relative to the body it was scheduled in. A GR addresses LDS
-        through the write pointer and the MFMAs never name it, so it carries no
-        such relationship and stays correct wherever it is placed.
-
-        They do not keep their partition, though. The NGLL spread its loads
-        across all four partitions and got away with it because nothing read
-        that buffer until the NLL began. Here partition 0 reaches k2 -- and so
-        reads the buffer -- while partitions 1 to 3 have yet to run at all, so
-        every load has to be issued, and waited on, inside partition 0's first
-        half. That is much less cover than the NGLL gave them, and is the price
-        of the reordering rather than a detail of it.
-        """
-        numK = self.config.numSubIterK
-
-        for partition in tail_3d:
-            for k, dst_list in enumerate(partition):
-                dropped = {em.moduleId for em in dst_list
-                           if em.opType in self._TAIL_GR_OPS}
-                # The four-deep body's own wait/barrier ops belong to the loads
-                # it thought it already had; they go out with them.
-                partition[k] = self._rewire_before(dst_list, dropped)
-
-        def graft(dst_list, src_ops):
-            nextId = max((em.moduleId for em in dst_list), default=-1) + 1
-            carried = [copy.deepcopy(em) for em in src_ops]
-            remap = {em.moduleId: nextId + i for i, em in enumerate(carried)}
-            for em in carried:
-                em.moduleId = remap[em.moduleId]
-                # A link out of the carried set (into an LR, say) has no
-                # counterpart here, so the op becomes its own chain root --
-                # which is what gr and wait_gr already are.
-                em.before = remap.get(em.before)
-            dst_list.extend(carried)
-
-        # Loads and pointer advances: every partition's, into partition 0. They
-        # have to keep their order relative to each other, because a gr_inc
-        # swaps the write pointer the loads before it addressed through -- the
-        # NGLL issues all three B loads and only then advances, and reversing
-        # any of that sends a load into the buffer being read. Taking the loads
-        # and the advances as two groups reproduces that order exactly, since
-        # the NGLL has no advance before its last load.
-        flat = [em for part in ngll_3d for slot in part for em in slot]
-        graft(tail_3d[0][0], [em for em in flat if em.opType == 'gr'])
-        graft(tail_3d[0][numK - 1], [em for em in flat if em.opType == 'gr_inc'])
-
-        # One wait/barrier pair closes them out, at the end of the first half.
-        # The NGLL had one per partition; they were all waiting for the same
-        # loads, and here the loads are all in one place.
-        last_ngll = ngll_3d[-1][numK - 1]
-        graft(tail_3d[0][numK - 1],
-              [em for em in last_ngll if em.opType in ('wait_gr', 'sync')])
-
-        # The NLL's pair stays per-partition: it orders the tail's reads against
-        # the next macro tile's writes, which is still a per-partition question.
-        for pi, partition in enumerate(tail_3d):
-            for k, src_list in enumerate(nll_3d[pi]):
-                graft(partition[k + numK],
-                      [em for em in src_list
-                       if em.opType in self._TAIL_GR_OPS])
 
     def build_tailloop_pgr0(self) -> List[List[List[EmittedModule]]]:
         """Template for Tailloop based on PGR0 schedule.
@@ -6007,6 +5951,21 @@ class LogicalScheduler:
                                       self._ngll_per_unroll[(last + 1) % uf]))
         if nll_ft == 0:
             module.add(Label("SkipToNLL", ""))
+        if spanNgll:
+            # The four-deep body issues no global reads, so its own schedule
+            # sees nothing in flight and places no drain. What is in flight
+            # belongs to the mainloop: offsetPartition == numPartitions puts
+            # every load two macro tiles ahead, which is the half of LDS this
+            # body reads second -- and it reaches that half in partition 0,
+            # ahead of every wait it does have. The split pair never needed
+            # this, because the NGLL stood between the loads and the NLL that
+            # read them. Costs one drain at entry, and the loads have had a
+            # whole macro tile to retire by now.
+            from rocisa.instruction import SWaitCnt, SBarrier
+            module.add(SWaitCnt(vlcnt=0, dscnt=-1, vscnt=-1,
+                                comment="four-deep tail: retire the mainloop's"
+                                        " loads before reading what they wrote"))
+            module.add(SBarrier(comment="four-deep tail entry"))
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
                                   inject_pap_after_nll_drain(nll_ft_3d),
@@ -6412,15 +6371,6 @@ class LogicalScheduler:
             # registers it names are still this kernel's.
             make_emitter(self._tail_merged_scheduler.config).populate(
                 self._tail_merged_emitted, unroll_iter=0)
-            # Spliced after population so each side keeps the instructions its
-            # own config produced: the GR ops are lifted from the already
-            # emitted two-deep bodies, at the same unroll_iter the emission
-            # site would have used for them.
-            uf = self.unroll_factor
-            self._splice_tail_gr_skeleton(
-                self._tail_merged_emitted,
-                self._ngll_per_unroll[0],
-                self._nll_per_unroll[(uf - 1 + self.config.pgr) % uf])
 
         self._emitter = emitter
 
