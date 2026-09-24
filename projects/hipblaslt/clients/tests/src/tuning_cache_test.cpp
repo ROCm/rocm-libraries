@@ -56,6 +56,7 @@ extern "C" void hipblaslt_tuning_lookup_tally_for_test(uint64_t* shapes,
 extern "C" int      hipblaslt_tuning_last_launch_for_test();
 extern "C" uint64_t hipblaslt_tuning_attempts_for_test();
 extern "C" void     hipblaslt_tuning_inject_failure_for_test(int stage);
+extern "C" void     hipblaslt_tuning_reset_as_privileged_for_test();
 
 #ifdef WIN32
 static int setenv(const char* name, const char* value, int overwrite)
@@ -342,14 +343,18 @@ namespace
      *
      * verifyProduct fills A and B with ones and checks every element of D is k,
      * which is what proves the launched kernel ran on the caller's buffers.
+     * streamKMode, when not negative, is set as the descriptor's stream-K tile
+     * scheduling mode.
      */
-    bool runGemmWith(int64_t  m,
-                     int64_t  n,
-                     int64_t  k,
-                     AlgoFrom from,
-                     int      index,
-                     int*     launched,
-                     bool     verifyProduct = false)
+    bool runGemmWith(int64_t            m,
+                     int64_t            n,
+                     int64_t            k,
+                     AlgoFrom           from,
+                     int                index,
+                     int*               launched,
+                     bool               verifyProduct = false,
+                     hipblasOperation_t opA           = HIPBLAS_OP_N,
+                     int32_t            streamKMode   = -1)
     {
         *launched = -1;
 
@@ -390,13 +395,25 @@ namespace
         if(ok)
         {
             const uint64_t maxWs = wsBytes;
-            ok = hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, m, k, m) == HIPBLAS_STATUS_SUCCESS
+            const bool     plainA = opA == HIPBLAS_OP_N;
+            ok = hipblasLtMatrixLayoutCreate(
+                     &layoutA, HIP_R_16F, plainA ? m : k, plainA ? k : m, plainA ? m : k)
+                     == HIPBLAS_STATUS_SUCCESS
                  && hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_16F, k, n, k)
                         == HIPBLAS_STATUS_SUCCESS
                  && hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_16F, m, n, m)
                         == HIPBLAS_STATUS_SUCCESS
                  && hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
                         == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && (streamKMode < 0
+                     || hipblasLtMatmulDescSetAttribute(desc,
+                                                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                        &streamKMode,
+                                                        sizeof(streamKMode))
+                            == HIPBLAS_STATUS_SUCCESS)
                  && hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS
                  && hipblasLtMatmulPreferenceSetAttribute(
                         pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
@@ -983,6 +1000,155 @@ namespace
         return out.good();
     }
 
+    /**
+     * Rewrite the file as its first row reduced to the historical column set:
+     * the ten problem columns plus solution_index, with no schema_version and
+     * no name of either kind. That is what hipblaslt-bench has always written.
+     */
+    bool reduceToLegacyRow(const std::string& path)
+    {
+        static const char* const kLegacy[] = {"transA",
+                                              "transB",
+                                              "batch_count",
+                                              "m",
+                                              "n",
+                                              "k",
+                                              "a_type",
+                                              "b_type",
+                                              "c_type",
+                                              "compute_type",
+                                              "solution_index"};
+
+        const auto lines = readLines(path);
+        for(size_t i = 0; i + 1 < lines.size(); i++)
+        {
+            if(lines[i].find("transA") == std::string::npos)
+                continue;
+
+            const auto names = splitCells(lines[i]);
+            const auto vals  = splitCells(lines[i + 1]);
+
+            std::ostringstream header, values;
+            bool               first = true;
+            for(const char* want : kLegacy)
+            {
+                for(size_t c = 0; c < names.size() && c < vals.size(); c++)
+                {
+                    if(names[c] != want)
+                        continue;
+                    header << (first ? "" : ",") << names[c];
+                    values << (first ? "" : ",") << vals[c];
+                    first = false;
+                }
+            }
+
+            std::ofstream out(path, std::ios::trunc);
+            out << lines[0] << "\n    " << header.str() << "\n" << values.str() << "\n";
+            return out.good();
+        }
+        return false;
+    }
+
+    /**
+     * Cut every value row short just before the named column, leaving its header
+     * whole: what a process that died mid-append leaves behind.
+     */
+    bool truncateValueRowsBefore(const std::string& path, const std::string& column)
+    {
+        auto lines   = readLines(path);
+        bool changed = false;
+        for(size_t i = 0; i + 1 < lines.size(); i++)
+        {
+            if(lines[i].find("transA") == std::string::npos)
+                continue;
+
+            const auto names  = splitCells(lines[i]);
+            const auto values = splitCells(lines[i + 1]);
+            for(size_t c = 0; c < names.size() && c <= values.size(); c++)
+            {
+                if(names[c] != column)
+                    continue;
+
+                std::ostringstream kept;
+                for(size_t v = 0; v < c; v++)
+                    kept << (v ? "," : "") << values[v];
+                lines[i + 1] = kept.str();
+                changed      = true;
+                break;
+            }
+            i++;
+        }
+
+        if(!changed)
+            return false;
+
+        std::ofstream out(path, std::ios::trunc);
+        for(const auto& l : lines)
+            out << l << "\n";
+        return out.good();
+    }
+
+    /**
+     * Whether the C++ extension heuristic, asked with this stream-K tile mode,
+     * is served by the cache: a hit is counted only when an entry matched the
+     * key that path looks up.
+     */
+    bool extensionHeuristicHits(int64_t m, int64_t n, int64_t k, int32_t streamKMode)
+    {
+        hipblasLtHandle_t handle = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+            return false;
+
+        void* dA = nullptr;
+        void* dB = nullptr;
+        void* dD = nullptr;
+        bool  ok = hipMalloc(&dA, m * k * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dB, k * n * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dD, m * n * sizeof(uint16_t)) == hipSuccess;
+
+        const uint64_t before = counters().hits;
+        if(ok)
+        {
+            const float alpha = 1.0f;
+            const float beta  = 0.0f;
+
+            hipblaslt_ext::GemmPreference pref;
+            pref.setMaxWorkspaceBytes(32 * 1024 * 1024);
+            pref.setStreamKTileSchedulingMode(
+                static_cast<hipblasLtStreamKTileSchedulingMode_t>(streamKMode));
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     HIP_R_16F,
+                                     HIP_R_16F,
+                                     HIP_R_16F,
+                                     HIP_R_16F,
+                                     HIPBLAS_COMPUTE_32F);
+
+            hipblaslt_ext::GemmEpilogue epilogue;
+            hipblaslt_ext::GemmInputs   inputs;
+            inputs.setA(dA);
+            inputs.setB(dB);
+            inputs.setC(dD);
+            inputs.setD(dD);
+            inputs.setAlpha(&alpha);
+            inputs.setBeta(&beta);
+            gemm.setProblem(m, n, k, 1, epilogue, inputs);
+
+            std::vector<hipblasLtMatmulHeuristicResult_t> results;
+            ok = gemm.algoGetHeuristic(1, pref, results) == HIPBLAS_STATUS_SUCCESS
+                 && !results.empty();
+        }
+
+        static_cast<void>(hipFree(dD));
+        static_cast<void>(hipFree(dB));
+        static_cast<void>(hipFree(dA));
+        hipblasLtDestroy(handle);
+
+        return ok && counters().hits > before;
+    }
+
     /** One named column's value from each value row, in file order. */
     std::vector<std::string> columnValues(const std::string& path, const std::string& column)
     {
@@ -1123,6 +1289,16 @@ namespace
         EXPECT_TRUE(fileHasColumn(m_path, "schema_version"));
         EXPECT_TRUE(fileHasColumn(m_path, "compute_input_type_a"));
         EXPECT_TRUE(fileHasColumn(m_path, "gcnArchName"));
+        EXPECT_TRUE(fileHasColumn(m_path, "lde"));
+        EXPECT_TRUE(fileHasColumn(m_path, "stride_e"));
+        EXPECT_TRUE(fileHasColumn(m_path, "uniform_summation_order"));
+
+        // What the search covered, so a later run can tell whether it would
+        // search more than this one did.
+        EXPECT_TRUE(fileHasColumn(m_path, "search_all_kernels"));
+        EXPECT_TRUE(fileHasColumn(m_path, "search_max_candidates"));
+        EXPECT_TRUE(fileHasColumn(m_path, "search_workspace"));
+        EXPECT_TRUE(fileHasColumn(m_path, "hot_iters"));
 
         // Nothing reads these back, so writing them would commit the format to
         // data with no consumer.
@@ -1421,69 +1597,7 @@ namespace
     {
         enterMode("tune", m_path);
         ASSERT_TRUE(runGemm(1024, 512, 1024));
-
-        auto lines = readLines(m_path);
-        ASSERT_GE(lines.size(), 3u) << "tune mode recorded nothing";
-
-        // Reduce the row to the historical column set: the ten problem columns
-        // plus solution_index, with no schema_version and no name of either kind.
-        static const char* kLegacy[] = {"transA",
-                                        "transB",
-                                        "batch_count",
-                                        "m",
-                                        "n",
-                                        "k",
-                                        "a_type",
-                                        "b_type",
-                                        "c_type",
-                                        "compute_type",
-                                        "solution_index"};
-
-        auto split = [](const std::string& s) {
-            std::vector<std::string> out;
-            std::stringstream        ss(s);
-            std::string              cell;
-            while(std::getline(ss, cell, ','))
-            {
-                const auto b = cell.find_first_not_of(" \t");
-                const auto e = cell.find_last_not_of(" \t");
-                out.push_back(b == std::string::npos ? "" : cell.substr(b, e - b + 1));
-            }
-            return out;
-        };
-
-        std::string header, values;
-        for(size_t i = 0; i + 1 < lines.size(); i++)
-        {
-            if(lines[i].find("transA") == std::string::npos)
-                continue;
-
-            const auto names = split(lines[i]);
-            const auto vals  = split(lines[i + 1]);
-
-            std::ostringstream h, v;
-            bool               first = true;
-            for(const char* want : kLegacy)
-            {
-                for(size_t c = 0; c < names.size() && c < vals.size(); c++)
-                {
-                    if(names[c] != want)
-                        continue;
-                    h << (first ? "" : ",") << names[c];
-                    v << (first ? "" : ",") << vals[c];
-                    first = false;
-                }
-            }
-            header = h.str();
-            values = v.str();
-            break;
-        }
-        ASSERT_FALSE(header.empty());
-
-        {
-            std::ofstream out(m_path, std::ios::trunc);
-            out << lines[0] << "\n    " << header << "\n" << values << "\n";
-        }
+        ASSERT_TRUE(reduceToLegacyRow(m_path)) << "tune mode recorded nothing";
 
         enterMode("cache", m_path);
         ASSERT_TRUE(runGemm(1024, 512, 1024));
@@ -1781,7 +1895,7 @@ namespace
     // re-tuning is only correct if the completed row is also the row that runs.
     // The file is append-only, so the finishing run leaves its winner behind the
     // partial it supersedes, and equal keys come back from the multimap in
-    // insertion order: replay took the partial while needsFinishing saw the
+    // insertion order: replay took the partial while needsRetune saw the
     // complete row and declined to tune again, so the finished winner was
     // written to the file and then never used.
     TEST_F(TuningCache, CompleteRowWinsOverTheOlderPartialRow)
@@ -1842,24 +1956,67 @@ namespace
         EXPECT_EQ(valueRowCount(m_path), before) << "a complete entry was re-tuned";
     }
 
-    // Rows written before the completeness column existed must read as complete.
-    // Reading them as partial would re-tune every shape in an existing cache on
-    // the first run after an upgrade, which is the stall this whole feature is
-    // trying to avoid.
-    TEST_F(TuningCache, RowWithoutCompleteColumnIsTreatedAsComplete)
+    // A row in the format hipblaslt-bench has always written carries no
+    // completeness and no search, and must read as final. Reading it as partial
+    // would re-tune every shape of an existing tuning file on the first tune run,
+    // which is the stall this whole feature is trying to avoid.
+    TEST_F(TuningCache, LegacyRowIsNotRetuned)
     {
         enterMode("tune", m_path);
         ASSERT_TRUE(runGemm(1024, 512, 1024));
-
-        ASSERT_TRUE(dropColumn(m_path, "complete"));
-        ASSERT_FALSE(fileHasColumn(m_path, "complete"));
-        const size_t before = valueRowCount(m_path);
-        ASSERT_GT(before, 0u) << "tune mode recorded nothing";
+        ASSERT_TRUE(reduceToLegacyRow(m_path)) << "tune mode recorded nothing";
+        ASSERT_EQ(valueRowCount(m_path), 1u);
 
         enterMode("tune", m_path);
         ASSERT_TRUE(runGemm(1024, 512, 1024));
-        EXPECT_EQ(valueRowCount(m_path), before)
-            << "a row predating the column was re-tuned as if it were partial";
+        EXPECT_EQ(valueRowCount(m_path), 1u) << "a legacy row was re-tuned as if it were partial";
+    }
+
+    // A current-schema row that lost its completion column is not trusted:
+    // whether tune mode revisits a row depends on it, and a missing value can
+    // no longer be told apart from a finished search.
+    TEST_F(TuningCache, CurrentSchemaRowWithoutItsCompletionColumnIsRejected)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_TRUE(dropColumn(m_path, "complete"));
+
+        enterMode("cache", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        const auto c = counters();
+        EXPECT_EQ(c.loaded, 0u) << "a row with no completion column was loaded";
+        EXPECT_EQ(c.hits, 0u);
+    }
+
+    // A process that dies partway through an append leaves a value row shorter
+    // than its header. Cut before the completion columns, or between them, the
+    // prefix that survives is well formed and would otherwise read as a finished
+    // search.
+    TEST_F(TuningCache, TruncatedCurrentSchemaRowIsRejected)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        const auto written = readLines(m_path);
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+
+        for(const char* cutBefore : {"complete", "budget_ms"})
+        {
+            SCOPED_TRACE(std::string("value row cut before ") + cutBefore);
+            {
+                std::ofstream out(m_path, std::ios::trunc);
+                for(const auto& l : written)
+                    out << l << "\n";
+            }
+            ASSERT_TRUE(truncateValueRowsBefore(m_path, cutBefore));
+
+            enterMode("cache", m_path);
+            ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+            const auto c = counters();
+            EXPECT_EQ(c.loaded, 0u) << "a truncated row was loaded";
+            EXPECT_EQ(c.hits, 0u);
+        }
     }
 
     // A search the budget cuts short is attempted once per process. The retry
@@ -2110,5 +2267,126 @@ namespace
         int replayed = -1;
         ASSERT_TRUE(runGemm(1024, 512, 1024, 0.0f, true, false, false, &replayed));
         EXPECT_EQ(replayed, newer.first) << "replay used the older partial row " << older.first;
+    }
+
+    // A finished search of a ranked prefix says nothing about the kernels past
+    // it, so a run that searches more re-tunes the shape. A run that searches
+    // less has nothing to add, and must not.
+    TEST_F(TuningCache, NarrowerFinishedSearchIsWidenedButNotRepeated)
+    {
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_EQ(valueRowCount(m_path), 2u)
+            << "a finished two-candidate search stopped a sixteen-candidate run from tuning";
+
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_EQ(valueRowCount(m_path), 2u)
+            << "a narrower run re-tuned a shape that a wider search had finished";
+    }
+
+    // Each of these is part of the key, so a row that differs from the problem
+    // in one of them is loaded but serves nothing.
+    TEST_F(TuningCache, RowDifferingInAKeyColumnDoesNotMatch)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        const auto written = readLines(m_path);
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+
+        const std::vector<std::pair<std::string, std::string>> changes
+            = {{"lde", "12345"}, {"stride_e", "12345"}, {"uniform_summation_order", "1"}};
+        for(const auto& [column, value] : changes)
+        {
+            SCOPED_TRACE(column + "=" + value);
+            {
+                std::ofstream out(m_path, std::ios::trunc);
+                for(const auto& l : written)
+                    out << l << "\n";
+            }
+            ASSERT_TRUE(rewriteColumn(m_path, column, value));
+
+            enterMode("cache", m_path);
+            ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+            const auto c = counters();
+            EXPECT_EQ(c.loaded, 1u) << "the row was rejected rather than keyed on the column";
+            EXPECT_EQ(c.hits, 0u);
+        }
+    }
+
+    // A conjugate transpose is keyed apart from a plain one. Both are "not N",
+    // which is all the historical key records, so without the distinction a row
+    // tuned for one would serve the other.
+    TEST_F(TuningCache, ConjugateTransposeRowDoesNotServeATranspose)
+    {
+        int launched = -1;
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemmWith(
+            1024, 512, 1024, AlgoFrom::Heuristic, -1, &launched, false, HIPBLAS_OP_T));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode recorded nothing";
+        ASSERT_EQ(columnValues(m_path, "transA").at(0), "T");
+
+        enterMode("cache", m_path);
+        ASSERT_TRUE(runGemmWith(
+            1024, 512, 1024, AlgoFrom::Heuristic, -1, &launched, false, HIPBLAS_OP_T));
+        ASSERT_GE(counters().hits, 1u) << "the transposed row did not serve its own problem";
+
+        ASSERT_TRUE(rewriteColumn(m_path, "transA", "C"));
+        enterMode("cache", m_path);
+        ASSERT_TRUE(runGemmWith(
+            1024, 512, 1024, AlgoFrom::Heuristic, -1, &launched, false, HIPBLAS_OP_T));
+
+        const auto c = counters();
+        EXPECT_EQ(c.loaded, 1u) << "a conjugate-transpose row was rejected rather than keyed";
+        EXPECT_EQ(c.hits, 0u) << "a conjugate-transpose row served a plain transpose";
+    }
+
+    // The C++ extension builds its key when the gemm is created, and only later
+    // does the preference set the stream-K tile mode, which is part of the key.
+    // A row tuned with that mode through the C API must serve the extension
+    // asking with the same mode, and must not serve it asking with another.
+    TEST_F(TuningCache, ExtensionLookupKeysOnThePreferenceStreamKMode)
+    {
+        const int32_t autoMode = HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO;
+        int           launched = -1;
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemmWith(
+            1024, 512, 1024, AlgoFrom::Heuristic, -1, &launched, false, HIPBLAS_OP_N, autoMode));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode recorded nothing";
+        ASSERT_EQ(columnValues(m_path, "streamk_tile_scheduling").at(0), std::to_string(autoMode));
+
+        enterMode("cache", m_path);
+        EXPECT_TRUE(extensionHeuristicHits(1024, 512, 1024, autoMode))
+            << "the extension looked up the mode its gemm was created with, not the one its "
+               "preference set";
+        EXPECT_FALSE(extensionHeuristicHits(1024, 512, 1024, HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF));
+    }
+
+    // A process in a secure execution context (set-user-ID and the like) must
+    // not let an inherited environment turn tuning on: that would choose a file
+    // for it to write and minutes of GPU work for it to spend.
+    TEST_F(TuningCache, PrivilegedProcessIgnoresTheTuningEnvironment)
+    {
+        enterMode("tune", m_path);
+        hipblaslt_tuning_reset_as_privileged_for_test();
+
+        ASSERT_TRUE(runGemm(256, 256, 256));
+
+        EXPECT_FALSE(std::ifstream(m_path).good()) << "a privileged process wrote " << m_path;
+        EXPECT_EQ(hipblaslt_tuning_attempts_for_test(), 0u);
+
+        const auto c = counters();
+        EXPECT_EQ(c.hits + c.misses, 0u) << "a privileged process consulted the cache";
     }
 } // namespace

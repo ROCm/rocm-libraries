@@ -26,6 +26,7 @@
  * ************************************************************************ */
 
 #include "UserDrivenTuningParser.hpp"
+#include "rocblaslt_secure_env.hpp"
 #include "utility.hpp"
 
 #include <algorithm>
@@ -60,27 +61,20 @@ namespace TensileLite
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     TuningModeSingleton::TuningModeSingleton()
     {
-        if(const char* env = getenv("HIPBLASLT_TUNING_MODE"))
-        {
-            const std::string value(env);
-            if(value == "cache")
-                m_mode = TuningMode::Cache;
-            else if(value == "tune")
-                m_mode = TuningMode::Tune;
-            else
-                m_mode = TuningMode::Off;
-        }
-
-        if(const char* path = getenv("HIPBLASLT_TUNING_CACHE_PATH"))
-            m_cachePath = path;
+        load(rocblaslt_process_is_privileged());
     }
 
-    void TuningModeSingleton::reloadForTest()
+    void TuningModeSingleton::reloadForTest(bool asPrivileged)
+    {
+        load(asPrivileged || rocblaslt_process_is_privileged());
+    }
+
+    void TuningModeSingleton::load(bool isPrivileged)
     {
         m_mode = TuningMode::Off;
         m_cachePath.clear();
 
-        if(const char* env = getenv("HIPBLASLT_TUNING_MODE"))
+        if(const char* env = rocblaslt_secure_getenv_impl("HIPBLASLT_TUNING_MODE", isPrivileged))
         {
             const std::string value(env);
             if(value == "cache")
@@ -89,8 +83,21 @@ namespace TensileLite
                 m_mode = TuningMode::Tune;
         }
 
-        if(const char* path = getenv("HIPBLASLT_TUNING_CACHE_PATH"))
+        if(const char* path
+           = rocblaslt_secure_getenv_impl("HIPBLASLT_TUNING_CACHE_PATH", isPrivileged))
             m_cachePath = path;
+
+        if(rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TUNING_MODE", isPrivileged)
+           || rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TUNING_CACHE_PATH",
+                                                         isPrivileged))
+        {
+            // Once per process in practice, since the singleton is loaded once.
+            log_error(__func__,
+                      "Ignoring HIPBLASLT_TUNING_MODE and HIPBLASLT_TUNING_CACHE_PATH because the "
+                      "process is running in a secure execution context (set-uid/set-gid or "
+                      "another credential-changing exec, such as file capabilities); tuning "
+                      "stays off.");
+        }
     }
 
     TuningFileSelection selectTuningFile()
@@ -699,10 +706,17 @@ namespace TensileLite
 
         // Every field in a current row's semantic key is mandatory and strict.
         // Permissive defaults remain solely for schema-less v0 rows.
+        bool isTransposeCell(const std::string& value)
+        {
+            return value == "N" || value == "T" || value == "C";
+        }
+
+        // Every column of a current row is mandatory and strict, the search and
+        // completion columns included: those decide whether tune mode revisits
+        // the row, so a row that lost them is not trustworthy either.
         bool hasRequiredCurrentColumns(const std::map<std::string, std::string>& row)
         {
-            if((str(row, "transA") != "N" && str(row, "transA") != "T")
-               || (str(row, "transB") != "N" && str(row, "transB") != "T"))
+            if(!isTransposeCell(str(row, "transA")) || !isTransposeCell(str(row, "transB")))
                 return false;
 
             static const char* const requiredText[]
@@ -723,7 +737,11 @@ namespace TensileLite
                                                       "stride_b",
                                                       "stride_c",
                                                       "stride_d",
-                                                      "required_workspace"};
+                                                      "lde",
+                                                      "stride_e",
+                                                      "required_workspace",
+                                                      "budget_ms",
+                                                      "search_workspace"};
             for(const char* name : nonNegative)
             {
                 const auto value = exactNum(row, name);
@@ -732,6 +750,12 @@ namespace TensileLite
             }
             if(*exactNum(row, "batch_count") == 0)
                 return false;
+
+            static const char* const nonNegativeInt32[]
+                = {"search_max_candidates", "cold_iters", "hot_iters", "rotating_mb"};
+            for(const char* name : nonNegativeInt32)
+                if(!isInt32(row, name) || *exactNum(row, name) < 0)
+                    return false;
 
             static const char* const int32Fields[] = {"compute_input_type_a",
                                                       "compute_input_type_b",
@@ -759,7 +783,11 @@ namespace TensileLite
                                                      "scaleAlphaVec",
                                                      "amaxD",
                                                      "swizzle_a",
-                                                     "swizzle_b"};
+                                                     "swizzle_b",
+                                                     "uniform_summation_order",
+                                                     "complete",
+                                                     "search_all_kernels",
+                                                     "flush_icache"};
             for(const char* name : boolFields)
             {
                 const auto value = exactNum(row, name);
@@ -807,8 +835,10 @@ namespace TensileLite
 
         ProblemOverride po;
 
-        po.transA = str(row, "transA", "N") != "N";
-        po.transB = str(row, "transB", "N") != "N";
+        po.transA     = str(row, "transA", "N") != "N";
+        po.transB     = str(row, "transB", "N") != "N";
+        po.conjugateA = str(row, "transA") == "C";
+        po.conjugateB = str(row, "transB") == "C";
 
         po.m         = static_cast<size_t>(num(row, "m"));
         po.n         = static_cast<size_t>(num(row, "n"));
@@ -861,6 +891,8 @@ namespace TensileLite
         po.batchStrideB = static_cast<size_t>(num(row, "stride_b"));
         po.batchStrideC = static_cast<size_t>(num(row, "stride_c"));
         po.batchStrideD = static_cast<size_t>(num(row, "stride_d"));
+        po.colStrideE   = static_cast<size_t>(num(row, "lde"));
+        po.batchStrideE = static_cast<size_t>(num(row, "stride_e"));
         po.batchMode    = static_cast<int32_t>(num(row, "batch_mode"));
 
         po.epilogue   = static_cast<int32_t>(num(row, "epilogue"));
@@ -884,6 +916,7 @@ namespace TensileLite
         po.swizzleB              = flag(row, "swizzle_b");
         po.streamkTileScheduling = static_cast<int32_t>(num(row, "streamk_tile_scheduling"));
         po.smCountTarget         = static_cast<int32_t>(num(row, "sm_count_target"));
+        po.uniformSummationOrder = flag(row, "uniform_summation_order");
 
         // Kept unstripped. The library's own rocblaslt_internal_get_arch_name()
         // truncates at the first colon, which would discard sramecc and xnack;
@@ -911,17 +944,30 @@ namespace TensileLite
                 = static_cast<size_t>(std::max<int64_t>(0, num(row, "required_workspace")));
         entry.winnerTimeUs = real(row, "us");
 
-        // Absent means complete: rows predating the column were only ever
-        // written by a search that ran to the end of the candidate list. A
-        // malformed value falls the same way, since treating an unreadable cell
-        // as partial would re-tune the shape on every process start.
-        entry.complete = num(row, "complete", 1) != 0;
+        if(schemaVersion == TuningSchemaVersion::Current)
+        {
+            // Validated above, so these are present and well-formed.
+            entry.complete = *exactNum(row, "complete") != 0;
+            entry.budgetMs = *exactNum(row, "budget_ms");
 
-        // Negative when absent, meaning the ceiling that produced the row is
-        // unknown rather than unlimited. Defaulting to 0 would read as "the
-        // last run was already unlimited" and retire the shape from ever
-        // being finished.
-        entry.budgetMs = num(row, "budget_ms", -1);
+            TuningSearch search;
+            search.allKernels     = *exactNum(row, "search_all_kernels") != 0;
+            search.maxCandidates  = static_cast<int32_t>(*exactNum(row, "search_max_candidates"));
+            search.workspaceBytes = static_cast<size_t>(*exactNum(row, "search_workspace"));
+            search.coldIters      = static_cast<int32_t>(*exactNum(row, "cold_iters"));
+            search.hotIters       = static_cast<int32_t>(*exactNum(row, "hot_iters"));
+            search.flushICache    = *exactNum(row, "flush_icache") != 0;
+            search.rotatingMb     = static_cast<int32_t>(*exactNum(row, "rotating_mb"));
+            entry.search          = search;
+        }
+        else
+        {
+            // Legacy rows come from hipblaslt-bench or a hand-written override
+            // file, which record no search at all, so they read as complete with
+            // an unknown ceiling.
+            entry.complete = true;
+            entry.budgetMs = -1;
+        }
 
         return std::make_pair(po, entry);
     }
@@ -1027,8 +1073,11 @@ namespace TensileLite
         column("schema_version", static_cast<uint32_t>(TuningSchemaVersion::Current));
         column("git_version", currentBuildStamp());
 
-        column("transA", problem.trans_a == HIPBLAS_OP_N ? "N" : "T");
-        column("transB", problem.trans_b == HIPBLAS_OP_N ? "N" : "T");
+        auto transposeCell = [](hipblasOperation_t op) {
+            return op == HIPBLAS_OP_N ? "N" : op == HIPBLAS_OP_C ? "C" : "T";
+        };
+        column("transA", transposeCell(problem.trans_a));
+        column("transB", transposeCell(problem.trans_b));
         column("m", problem.m);
         column("n", problem.n);
         column("k", problem.k);
@@ -1042,14 +1091,17 @@ namespace TensileLite
         column("compute_input_type_a", key.computeInputTypeA);
         column("compute_input_type_b", key.computeInputTypeB);
 
-        column("lda", problem.col_stride_a);
-        column("ldb", problem.col_stride_b);
-        column("ldc", problem.col_stride_c);
-        column("ldd", problem.col_stride_d);
-        column("stride_a", problem.batch_stride_a);
-        column("stride_b", problem.batch_stride_b);
-        column("stride_c", problem.batch_stride_c);
-        column("stride_d", problem.batch_stride_d);
+        // From the key, which zeroes the strides a problem does not use.
+        column("lda", key.colStrideA);
+        column("ldb", key.colStrideB);
+        column("ldc", key.colStrideC);
+        column("ldd", key.colStrideD);
+        column("stride_a", key.batchStrideA);
+        column("stride_b", key.batchStrideB);
+        column("stride_c", key.batchStrideC);
+        column("stride_d", key.batchStrideD);
+        column("lde", key.colStrideE);
+        column("stride_e", key.batchStrideE);
         column("batch_mode", static_cast<int32_t>(problem.batchMode));
 
         column("epilogue", static_cast<int32_t>(problem.epilogue));
@@ -1073,6 +1125,7 @@ namespace TensileLite
         column("swizzle_b", problem.swizzleB ? 1 : 0);
         column("streamk_tile_scheduling", problem.streamk_tile_scheduling_ext);
         column("sm_count_target", problem.sm_count_target);
+        column("uniform_summation_order", key.uniformSummationOrder ? 1 : 0);
 
         // From the canonical builder rather than a fresh device query, so the
         // arch recorded here is byte-identical to what a later lookup compares.
@@ -1084,12 +1137,19 @@ namespace TensileLite
         column("required_workspace", entry.requiredWorkspaceBytes);
         column("us", entry.winnerTimeUs);
 
-        // Additive rather than part of the required set, so a file written
-        // before this column existed still parses. Every row emits its own
-        // header line, so a reader that does not know the column simply never
-        // looks for it.
+        // Every row emits its own header line, so a reader that does not know
+        // one of these columns simply never looks for it.
         column("complete", entry.complete ? 1 : 0);
         column("budget_ms", entry.budgetMs);
+
+        const TuningSearch search = entry.search.value_or(TuningSearch{});
+        column("search_all_kernels", search.allKernels ? 1 : 0);
+        column("search_max_candidates", search.maxCandidates);
+        column("search_workspace", search.workspaceBytes);
+        column("cold_iters", search.coldIters);
+        column("hot_iters", search.hotIters);
+        column("flush_icache", search.flushICache ? 1 : 0);
+        column("rotating_mb", search.rotatingMb);
 
         // One write for the header and the row together, rather than a flush
         // apiece. The process mutex above orders writers inside this process,
@@ -1232,7 +1292,18 @@ namespace TensileLite
                 continue;
             }
 
-            auto parsed = problemFromEntries(zipRow(splitCsv(header), splitCsv(value)));
+            const auto names  = splitCsv(header);
+            const auto values = splitCsv(value);
+
+            // A current-schema row carries exactly one value per column. zipRow
+            // pairs only up to the shorter of the two, so a value row that a crash
+            // cut short would otherwise parse as whatever prefix it kept, and with
+            // its trailing completion cells missing that could read as final.
+            if(names.size() != values.size()
+               && std::find(names.begin(), names.end(), "schema_version") != names.end())
+                continue;
+
+            auto parsed = problemFromEntries(zipRow(names, values));
             if(!parsed)
                 continue;
 

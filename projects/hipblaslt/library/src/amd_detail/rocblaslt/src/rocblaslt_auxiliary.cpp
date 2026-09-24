@@ -3209,6 +3209,15 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     static_cast<void>(tuningLastLaunchedIndexForTest());
 }
 
+// reset_for_test, then re-read the tuning variables the way a process in a
+// secure execution context does. A test binary cannot become set-user-ID, so
+// this is how the suppression is exercised.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_as_privileged_for_test()
+{
+    hipblaslt_tuning_reset_for_test();
+    TensileLite::TuningModeSingleton::getInstance().reloadForTest(true);
+}
+
 // Which solution the calling thread's last hipblasLtMatmul launched, cleared by
 // reading. The counters say that a lookup matched; only this says which kernel
 // ran, which is what an explicit-algo or algo == nullptr call has to prove.

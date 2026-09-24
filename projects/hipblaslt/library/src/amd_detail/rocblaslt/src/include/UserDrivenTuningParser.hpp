@@ -131,8 +131,10 @@ namespace TensileLite
          *
          * Only for tests, which run every mode in one process and so cannot
          * rely on the latch. Mirrors Debug::reloadDebugBitsForTest().
+         * asPrivileged reads it the way a set-user-ID process would, since a
+         * test cannot become one.
          */
-        void reloadForTest();
+        void reloadForTest(bool asPrivileged = false);
 
         // Tuning does nothing without somewhere to keep the results. There is
         // no default cache location in this milestone, on purpose: a managed
@@ -142,6 +144,11 @@ namespace TensileLite
 
     private:
         TuningModeSingleton();
+
+        // A process in a secure execution context ignores both variables, and
+        // stays off: they choose a file to write and minutes of GPU work, which
+        // an inherited environment must not be able to impose on it.
+        void load(bool isPrivileged);
 
         TuningMode  m_mode = TuningMode::Off;
         std::string m_cachePath;
@@ -275,9 +282,14 @@ namespace TensileLite
     public:
         ProblemOverride() = default;
 
-        // Orientation and shape
+        // Orientation and shape. transA and transB mean "not N", which is all
+        // the historical key recorded; conjugateA and conjugateB then separate
+        // a conjugate transpose from a plain one, which select different
+        // kernels for complex types.
         bool   transA     = false;
         bool   transB     = false;
+        bool   conjugateA = false;
+        bool   conjugateB = false;
         size_t m          = 0;
         size_t n          = 0;
         size_t k          = 0;
@@ -302,6 +314,8 @@ namespace TensileLite
         size_t batchStrideB = 0;
         size_t batchStrideC = 0;
         size_t batchStrideD = 0;
+        size_t colStrideE   = 0;
+        size_t batchStrideE = 0;
         int32_t batchMode   = 0;
 
         // Epilogue. The enum is kept whole rather than decomposed into an
@@ -331,6 +345,7 @@ namespace TensileLite
         bool    swizzleB               = false;
         int32_t streamkTileScheduling  = 0;
         int32_t smCountTarget          = 0;
+        bool    uniformSummationOrder  = false;
 
         // Device identity. Entries are scoped to the architecture they were
         // measured on; replaying a gfx942 winner on gfx950 is meaningless.
@@ -346,6 +361,8 @@ namespace TensileLite
         {
             return std::tie(transA,
                             transB,
+                            conjugateA,
+                            conjugateB,
                             m,
                             n,
                             k,
@@ -365,6 +382,8 @@ namespace TensileLite
                             batchStrideB,
                             batchStrideC,
                             batchStrideD,
+                            colStrideE,
+                            batchStrideE,
                             batchMode,
                             epilogue,
                             gradient,
@@ -385,6 +404,7 @@ namespace TensileLite
                             swizzleB,
                             streamkTileScheduling,
                             smCountTarget,
+                            uniformSummationOrder,
                             archName,
                             cuCount);
         }
@@ -419,6 +439,46 @@ namespace TensileLite
         // unambiguous without renaming the public field.
         size_t k_dim() const { return k; }
     };
+
+    /**
+     * What a tune-mode search covered and how carefully it measured.
+     *
+     * Recorded with every row tune mode writes, because whether an old result is
+     * final depends on more than whether its search finished: a finished search
+     * of two ranked candidates says nothing about the other thousand, and one
+     * filtered by a small workspace says nothing about kernels that need more.
+     */
+    struct TuningSearch
+    {
+        bool    allKernels     = true;
+        int32_t maxCandidates  = 0; // ranked-prefix length, ignored with allKernels
+        size_t  workspaceBytes = 0; // the caller's limit candidates were filtered by
+        int32_t coldIters      = 0;
+        int32_t hotIters       = 0;
+        bool    flushICache    = false;
+        int32_t rotatingMb     = 0;
+
+        bool operator==(const TuningSearch& other) const
+        {
+            return allKernels == other.allKernels && maxCandidates == other.maxCandidates
+                   && workspaceBytes == other.workspaceBytes && coldIters == other.coldIters
+                   && hotIters == other.hotIters && flushICache == other.flushICache
+                   && rotatingMb == other.rotatingMb;
+        }
+    };
+
+    /**
+     * Whether a finished search already covers everything `now` would search,
+     * measuring at least as carefully, so running `now` could not do better.
+     */
+    inline bool tuningSearchCovers(const TuningSearch& done, const TuningSearch& now)
+    {
+        const bool candidates
+            = done.allKernels || (!now.allKernels && done.maxCandidates >= now.maxCandidates);
+        return candidates && done.workspaceBytes >= now.workspaceBytes
+               && done.coldIters >= now.coldIters && done.hotIters >= now.hotIters
+               && (done.flushICache || !now.flushICache) && done.rotatingMb >= now.rotatingMb;
+    }
 
     /**
      * What a tuning file row resolves to.
@@ -471,6 +531,11 @@ namespace TensileLite
         // cache, each spending the whole ceiling to stop in exactly the same
         // place and append another identical row.
         int64_t budgetMs = -1;
+
+        // The search that produced this row, when tune mode wrote it. Rows from
+        // hipblaslt-bench or a hand-written override file have none and are
+        // treated as final.
+        std::optional<TuningSearch> search;
 
         // Build that produced this row. Carried per row rather than only in the
         // file header because appending after an upgrade makes mixed-build files
@@ -790,7 +855,7 @@ namespace TensileLite
          * complete winner beside the partial row rather than rewriting it, and a
          * multimap hands equal keys back in insertion order. Handing that order
          * to the caller replayed the superseded partial forever, while
-         * needsFinishing saw the complete row and declined to tune again, so the
+         * needsRetune saw the complete row and declined to tune again, so the
          * finished winner was written and never used. Complete rows therefore
          * come first, and the newest row wins within each group, which for rows
          * read from a file is the last one appended.
@@ -878,35 +943,47 @@ namespace TensileLite
         }
 
         /**
-         * Whether this key is worth benchmarking again to finish its search.
+         * Whether this key is worth benchmarking again although it has entries.
          *
-         * Three things must hold. The key has entries at all, so this is not
-         * simply an untuned shape. None of them finished, which is deliberately
-         * "none is complete" rather than "any is partial": the file is
-         * append-only, so the run that finishes a search appends its winner
-         * beside the partial row instead of rewriting it, and a key holding both
-         * has been tuned properly at least once. That last part holds only
-         * because find orders complete rows ahead of partial ones; the two must
-         * agree, or a key holding both replays the partial and is never allowed
-         * to retune. And this run's ceiling beats every ceiling those rows were
-         * written under, since a run that cannot get further would measure the
-         * same prefix, stop in the same place, and append another identical row.
+         * No as soon as one row is final for this run. A complete row is final
+         * when its recorded search covers what this run would search; rows with
+         * no recorded search, from hipblaslt-bench or a hand-written file, count
+         * as covering. A partial row is final when it searched exactly the way
+         * this run would, under a ceiling at least as generous, since a run that
+         * cannot get further would measure the same prefix, stop in the same
+         * place, and append another identical row.
+         *
+         * Yes otherwise, which is how a partial search is finished and how a
+         * search is widened, for example from a ranked prefix to every kernel or
+         * to a larger workspace. The file is append-only, so the new winner lands
+         * beside the old rows rather than replacing them. This has to agree with
+         * find, which serves complete rows ahead of partial ones, or a key
+         * holding both replays the partial and is never allowed to retune.
          *
          * Only the widened map is consulted: a legacy row has no completeness to
          * record and is never partial.
          */
-        bool needsFinishing(const ProblemOverride& key, int64_t currentBudgetMs)
+        bool needsRetune(const ProblemOverride& key,
+                         const TuningSearch&    now,
+                         int64_t                currentBudgetMs) const
         {
             std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
             auto                                      range = m_override.equal_range(key);
             bool                                      any   = false;
             for(auto it = range.first; it != range.second; ++it)
             {
-                any = true;
-                if(it->second.complete)
+                any                     = true;
+                const TunedEntry& entry = it->second;
+                if(entry.complete)
+                {
+                    if(!entry.search || tuningSearchCovers(*entry.search, now))
+                        return false;
+                }
+                else if((!entry.search || *entry.search == now)
+                        && !tuningBudgetIsMoreGenerous(currentBudgetMs, entry.budgetMs))
+                {
                     return false;
-                if(!tuningBudgetIsMoreGenerous(currentBudgetMs, it->second.budgetMs))
-                    return false;
+                }
             }
             return any;
         }

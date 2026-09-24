@@ -3266,9 +3266,11 @@ TensileLite::ProblemOverride
 {
     TensileLite::ProblemOverride po;
 
-    po.transA    = problem.trans_a != HIPBLAS_OP_N;
-    po.transB    = problem.trans_b != HIPBLAS_OP_N;
-    po.m         = problem.m;
+    po.transA     = problem.trans_a != HIPBLAS_OP_N;
+    po.transB     = problem.trans_b != HIPBLAS_OP_N;
+    po.conjugateA = problem.trans_a == HIPBLAS_OP_C;
+    po.conjugateB = problem.trans_b == HIPBLAS_OP_C;
+    po.m          = problem.m;
     po.n         = problem.n;
     po.k         = problem.k;
     po.batchSize = problem.batch_count;
@@ -3287,14 +3289,24 @@ TensileLite::ProblemOverride
                                                             hipDataType_to_tensile_type(problem.b_type),
                                                             problem.compute_type));
 
+    // Strides a problem does not use are keyed as zero. Callers leave them at
+    // whatever their API defaults to: a single-batch C layout leaves its batch
+    // stride at zero where the C++ extension fills in m*k, and an epilogue with
+    // no E tensor still carries an E stride. Keyed as given, one problem would
+    // miss its own entry when it arrives through the other API.
+    const bool batched = problem.batch_count > 1;
+    const bool usesE   = is_e_enabled(problem.epilogue);
+
     po.colStrideA   = problem.col_stride_a;
     po.colStrideB   = problem.col_stride_b;
     po.colStrideC   = problem.col_stride_c;
     po.colStrideD   = problem.col_stride_d;
-    po.batchStrideA = problem.batch_stride_a;
-    po.batchStrideB = problem.batch_stride_b;
-    po.batchStrideC = problem.batch_stride_c;
-    po.batchStrideD = problem.batch_stride_d;
+    po.batchStrideA = batched ? problem.batch_stride_a : 0;
+    po.batchStrideB = batched ? problem.batch_stride_b : 0;
+    po.batchStrideC = batched ? problem.batch_stride_c : 0;
+    po.batchStrideD = batched ? problem.batch_stride_d : 0;
+    po.colStrideE   = usesE ? problem.col_stride_e : 0;
+    po.batchStrideE = usesE && batched ? problem.batch_stride_e : 0;
     po.batchMode    = static_cast<int32_t>(problem.batchMode);
 
     po.epilogue   = static_cast<int32_t>(problem.epilogue);
@@ -3318,6 +3330,7 @@ TensileLite::ProblemOverride
     po.swizzleB              = problem.swizzleB;
     po.streamkTileScheduling = problem.streamk_tile_scheduling_ext;
     po.smCountTarget         = problem.sm_count_target;
+    po.uniformSummationOrder = problem.uniform_summation_order != 0;
 
     const auto& device = getDeviceIdentity();
     po.archName        = device.archName;
@@ -3355,7 +3368,13 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
     {
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(data)
+        {
             data->problem.setParams().setStreamKTileSchedulingMode(mode);
+
+            // The tuning key was built when the gemm was created, before any
+            // preference applied, and it keys on this mode.
+            data->tuningKey.streamkTileScheduling = mode;
+        }
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -3386,6 +3405,9 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         {
             const bool existing = data->problem.getParams().uniformSummationOrder();
             data->problem.setParams().setUniformSummationOrder(existing || value);
+
+            // Kept in step for the same reason as the stream-K mode above.
+            data->tuningKey.uniformSummationOrder = existing || value;
         }
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3546,9 +3568,11 @@ namespace
      */
     struct TuningPolicy
     {
+        // Through the secure accessor like the mode itself, so a process in a
+        // secure execution context runs every knob at its default.
         static int envInt(const char* name, int fallback)
         {
-            if(const char* env = getenv(name))
+            if(const char* env = rocblaslt_secure_getenv(name))
             {
                 try
                 {
@@ -3663,9 +3687,30 @@ namespace
          * matches what the bench client uses when tuning. Zero disables
          * rotation and restores the cache-hot behaviour.
          */
+        static int rotatingMegabytes()
+        {
+            return std::max(0, envInt("HIPBLASLT_TUNING_ROTATING_MB", 512));
+        }
         static size_t rotatingBytes()
         {
-            return size_t(std::max(0, envInt("HIPBLASLT_TUNING_ROTATING_MB", 512))) * 1024 * 1024;
+            return size_t(rotatingMegabytes()) * 1024 * 1024;
+        }
+
+        /**
+         * The search this run would perform for a caller with this workspace,
+         * as recorded on the rows it writes and compared against old rows.
+         */
+        static TensileLite::TuningSearch search(size_t workspaceBytes)
+        {
+            TensileLite::TuningSearch s;
+            s.allKernels     = allKernels();
+            s.maxCandidates  = s.allKernels ? 0 : candidateCap();
+            s.workspaceBytes = workspaceBytes;
+            s.coldIters      = coldIterations();
+            s.hotIters       = hotIterations();
+            s.flushICache    = flushICache();
+            s.rotatingMb     = rotatingMegabytes();
+            return s;
         }
     };
 
@@ -3884,7 +3929,7 @@ namespace
     private:
         TuningScratch()
         {
-            if(const char* env = getenv("HIPBLASLT_TUNING_SCRATCH_MAX_BYTES"))
+            if(const char* env = rocblaslt_secure_getenv("HIPBLASLT_TUNING_SCRATCH_MAX_BYTES"))
             {
                 try
                 {
@@ -4433,10 +4478,12 @@ namespace
         if(TensileLite::shouldLogTuningStart(key))
         {
             std::ostringstream msg;
+            auto opChar = [](hipblasOperation_t op) {
+                return op == HIPBLAS_OP_N ? 'N' : op == HIPBLAS_OP_C ? 'C' : 'T';
+            };
             msg << "tuning-start m=" << prob.m << " n=" << prob.n << " k=" << prob.k
-                << " batch=" << prob.batch_count
-                << " trans=" << (prob.trans_a != HIPBLAS_OP_N ? 'T' : 'N')
-                << (prob.trans_b != HIPBLAS_OP_N ? 'T' : 'N')
+                << " batch=" << prob.batch_count << " trans=" << opChar(prob.trans_a)
+                << opChar(prob.trans_b)
                 << " types=" << hip_datatype_to_string(prob.a_type) << "/"
                 << hip_datatype_to_string(prob.d_type)
                 << "; this call will block until it finishes";
@@ -4931,6 +4978,7 @@ namespace
         // down from the microsecond budget the loop actually used; zero means
         // unlimited, which a truncated search cannot have been.
         winnerOut.budgetMs = static_cast<int64_t>(budgetUs / 1000.0);
+        winnerOut.search   = TuningPolicy::search(prob.workspaceSize);
 
         if(truncated)
         {
@@ -5173,20 +5221,24 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 if(!callerSuppliedAlgo && cachedIndex >= 0)
                     launchIndex = cachedIndex;
 
-                // An entry the budget cut short is usable but not final, so it
-                // does not necessarily close the gate. needsFinishing decides,
-                // and it says yes only when this run's ceiling beats the one
-                // that produced the row: a run that cannot get further would
-                // measure the same prefix, stop in the same place, and append an
-                // identical row, which is the whole ceiling spent for nothing.
+                // A usable entry is not necessarily final, so it does not
+                // necessarily close the gate. needsRetune decides: yes for an
+                // entry the budget cut short when this run can get further, and
+                // for a finished entry whose recorded search covered less than
+                // this run would, such as a ranked prefix when this run searches
+                // every kernel. A run that cannot do better would append an
+                // identical row, which is the whole search spent for nothing.
                 //
                 // Rounded to milliseconds the same way the benchmarker records
                 // it, so the two are compared on equal terms.
                 const int64_t currentBudgetMs
                     = eligible ? static_cast<int64_t>(TuningPolicy::perShapeBudgetUs() / 1000.0)
                                : 0;
+                const TensileLite::TuningSearch search
+                    = eligible ? TuningPolicy::search(prob.workspaceSize) : TensileLite::TuningSearch{};
 
-                if(eligible && (cachedIndex < 0 || cache.needsFinishing(key, currentBudgetMs))
+                if(eligible
+                   && (cachedIndex < 0 || cache.needsRetune(key, search, currentBudgetMs))
                    && !TensileLite::tuningAlreadyAttempted(key))
                 {
                     // Waits rather than skipping: tune mode was asked for, so
@@ -5201,7 +5253,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                        && (tuning_cache_find_valid_entry(
                                handle, key, prob, gemmData, prob.workspaceSize, false)
                                < 0
-                           || cache.needsFinishing(key, currentBudgetMs)))
+                           || cache.needsRetune(key, search, currentBudgetMs)))
                     {
                         TensileLite::TunedEntry winner;
                         benchmarked = true;
