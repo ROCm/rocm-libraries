@@ -232,6 +232,19 @@ _ALU_DEP_MAX = {
 }
 
 def _delay_alu_type(inst: _inst.Instruction) -> int:
+    # Match native rocisa::_getDelayAluType, which classifies by preStr():
+    #   * MFMA/WMMA/SWMMAC are "v_..." instructions in native -> VALU. The
+    #     sparse SMFMA / MX-scale shims here can expose an empty preStr (their
+    #     mnemonic is built in to_stinky_logical, not stored in instStr), so
+    #     classify the whole MFMA family by type to count as VALU like native.
+    #   * SWaitCnt is a CompositeInstruction in native with an empty preStr
+    #     (its "s_waitcnt vmcnt(...)" text is generated in toString) -> OTHER,
+    #     but this shim stores "s_waitcnt" in instStr; force OTHER to match.
+    if isinstance(inst, (_inst.MFMAInstruction, _inst.MXMFMAInstruction,
+                         _inst.SMFMAInstruction)):
+        return _DELAY_VALU
+    if isinstance(inst, _inst.SWaitCnt):
+        return _DELAY_OTHER
     pre = inst.preStr()
     if pre.startswith("v_s_"):
         return _DELAY_TRANS
