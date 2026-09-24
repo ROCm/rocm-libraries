@@ -4,7 +4,8 @@
 # loaded global->LDS by tensor_load_to_lds (TDMInst=3) with LdsPadA=0, then read by plain
 # ds_load_b128. B uses the normal TDM path. Distinct from the gfx942 DTV swizzle path.
 # Covers: single/multi M-tile (MIWaveTile[0]=1,2), single/multi K-iteration, multi-wave
-# M split (MIWaveGroup=[2,2], numComp=2), and VectorWidthA>1 (VWA=2, TDM iterate-mode LDS pad).
+# M split (MIWaveGroup=[2,2], numComp=2), VectorWidthA>1 (VWA=2, TDM iterate-mode LDS pad),
+# and LDSSegmentInterleave (VWA=4, per-wave segment jump threaded through the swizzle-A read).
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
@@ -283,5 +284,75 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, F8 swizzle-A, LDSSegmentInterleave forced on (MIWaveGroup=[2,2], VWA=4 coarse).
+      # Regression guard for swizzle-A LSI: with LSI on, A's two LDS components are split across segments
+      # and the per-wave segment jump (wtid0*writeStrideBytes) must be threaded through the swizzle-A read
+      # (segWaveByteOff in lraTileAssignmentSwizzledTDM, applied post-pad in lraFinalOffset), else waveM=1
+      # reads A from the wrong segment -> garbage. Mirror of the swizzle-B LSI case (M<->N). VWA=4 also
+      # engages the VW>1 mO pad, so this exercises LSI composed with iterate-mode padding.
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - HalfPLR: [1]
+        - TDMIterateMode: [-1]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - LDSSegmentInterleave: [1]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
         - ActivationArgs:
           - [Enum: none]

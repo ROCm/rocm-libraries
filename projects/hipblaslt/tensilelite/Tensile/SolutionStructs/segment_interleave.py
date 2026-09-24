@@ -240,12 +240,13 @@ def evaluate(state):
     # Auto takes only the no-trade-off tight branch; the LDS-growing aligned branch needs 1.
     mode = state.get("LDSSegmentInterleave", -1)
     if mode == 0:                                              return _no("parameter off")
-    # Swizzle-A LSI is not threaded through the swizzle write/read, so keep rejecting it.
-    if pt.get("SwizzleTensorA"):                              return _no("swizzle-A: LSI not threaded (VWA==1 only)")
-    # Swizzle-B CAN interleave: the write already honors ldsBaseB + wtid0*writeStrideBytes, and the swizzle
-    # read stashes segWaveByteOff (lraTileAssignmentSwizzledTDM). Only the tight MIWaveGroup=[2,2] symmetric
-    # case where B spans its whole LDS component (pure-REPLACE branch) is validated; gate the rest below.
+    # Swizzle-A/B CAN interleave: the write honors ldsBase<tc> + wtid0*writeStrideBytes and the swizzle
+    # read stashes segWaveByteOff (lraTileAssignmentSwizzledTDM), both tc-parameterized. Only the tight
+    # MIWaveGroup=[2,2] symmetric case where the swizzled tensor spans its whole LDS component (pure-REPLACE
+    # branch) is validated; gate the rest below. A+B both-swizzle is unvalidated -- reject conservatively.
+    _swzA = bool(pt.get("SwizzleTensorA"))
     _swzB = bool(pt.get("SwizzleTensorB"))
+    if _swzA and _swzB:                                        return _no("swizzle-A+B LSI both unvalidated")
     if tuple(state.get("ISA", ()))[:2] != (12, 5):             return _no("not gfx1250")
     if not (state.get("enableTDMA") and state.get("enableTDMB") and state["NumWaves"] > 1):
         return _no("not wave-separated TDM")
@@ -276,7 +277,7 @@ def evaluate(state):
     # [4,1]/[1,4]: exactly one MIWaveGroup dim is 1 -> one active + one shared tensor.
     wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]
     if (wgM == 1) ^ (wgN == 1):
-        if _swzB:                                             return _no("swizzle-B LSI: only MIWaveGroup=[2,2] symmetric supported")
+        if _swzB or _swzA:                                    return _no("swizzle LSI: only MIWaveGroup=[2,2] symmetric supported")
         return _evaluate_asymmetric(state)
     if [wgM, wgN] != [2, 2]:
         return _no("MIWaveGroup unsupported")
@@ -284,8 +285,12 @@ def evaluate(state):
     # [2,2]: A must be coarse (VWA==WaveTileA) or port-split (VWA==WaveTileA/2, needs TDMSplit).
     _portSplit = _port_split_a(state)
     if not (_coarse(state, "A") or _portSplit):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
-    # Swizzle-B prototype: only the tight coarse case where B spans its whole LDS component (so the read's
-    # wtid0*strideWaveN term is a pure REPLACE by wtid0*writeStrideBytes). portSplit needs TDMSplit; defer.
+    # Swizzle prototype: only the tight coarse case where the swizzled tensor spans its whole LDS component
+    # (so the read's wtid0*strideWaveN term is a pure REPLACE by wtid0*writeStrideBytes). portSplit needs
+    # TDMSplit; defer. For swizzle-A the span condition is already the line-286 _coarse(A) gate above
+    # (MIWaveGroup[0]==2==numComp for [2,2]), so only the portSplit sub-path needs an explicit reject.
+    if _swzA:
+        if _portSplit:                                        return _no("swizzle-A LSI: portSplit (TDMSplit) path unsupported")
     if _swzB:
         if _portSplit:                                        return _no("swizzle-B LSI: portSplit (TDMSplit) path unsupported")
         _compColsB = state["MacroTile1"] // (state["NumWaves"] // 2)
@@ -298,7 +303,7 @@ def evaluate(state):
     # bcontig fallback [A0][B0][B1][A1] (auto-only, not user-forceable): when B can't be split
     # (odd WaveTileB), keep B whole and use it as the gap that pushes A1 into the next segment.
     if not _b_readable(state):
-        if _swzB:                                             return _no("swizzle-B LSI: B-not-readable (bcontig) path unsupported")
+        if _swzB or _swzA:                                    return _no("swizzle LSI: B-not-readable (bcontig) path unsupported")
         strideA = fA + 2 * fB                       # distance A0 -> A1: skip A0 and the whole B block
         a0 = base // SEG
         a1 = (base + strideA) // SEG
