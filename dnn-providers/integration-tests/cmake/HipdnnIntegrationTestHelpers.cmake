@@ -84,23 +84,17 @@
 #     Optional prefix for generated category suite CTest names. Defaults to
 #     ``TARGET_NAME``.
 #
-#   Support-claim mode is not a per-target keyword. Every lane this module
-#   registers gets the same flag; see the constant below.
-
-# Support-claim flag for every lane registered by this module.
+#   Support-claim mode is not a per-target keyword. Every lane names
+#   ``--test-engine``, and the binary enforces support claims by default when an
+#   engine is named: the sidecar is queried against the engine under test, every
+#   verdict is printed in the summary, and a broken claim fails that bundle's test.
 #
-# Every lane enforces: the sidecar is queried against the engine under test, every
-# verdict is printed in the summary, and a broken claim fails that bundle's test.
+#   A claim only applies to the arch and platform the run is on, and a runner with
+#   no device reports no arch, so no claim applies and nothing is enforced. A GPU
+#   lane enforces the claims for its own arch; a CPU-only lane sees no change.
 #
-# A claim only applies to the arch and platform the run is on, and a runner with no
-# device reports no arch, so no claim applies and nothing is enforced. A GPU lane
-# enforces the claims for its own arch; a CPU-only lane sees no change.
-#
-# Sidecars are git-tracked, so this does not wait on `dvc pull`; DVC carries the tensor
-# payloads, which claim checking never reads.
-set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--enforce-support-claims"
-    CACHE INTERNAL "Support-claim flag passed to every registered integration lane"
-)
+#   Sidecars are git-tracked, so enforcement does not wait on ``dvc pull``; DVC
+#   carries the tensor payloads, which claim checking never reads.
 
 # Builds the build-tree command for an external integration test.
 #
@@ -108,13 +102,10 @@ set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--enforce-support-claims"
 #   out_var - Variable to receive the command list
 # ~~~
 macro(_build_external_integration_command out_var)
-    # --enforce-support-claims, so a bundle whose sidecar promises support this engine
-    # no longer delivers fails the lane. See the constant's definition above.
     set(${out_var}
         $<TARGET_FILE:hipdnn_integration_tests>
         --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
         --test-engine ${ARG_ENGINE_NAME}
-        ${HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG}
     )
     if(ARG_TEST_CONFIG)
         list(APPEND ${out_var} "--test-config" "${ARG_TEST_CONFIG}")
@@ -158,7 +149,7 @@ macro(_stage_external_integration_install_test)
         file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
 
         if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
-            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\" \"${HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG}\"")
+            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
             if(ARG_TEST_CONFIG)
                 string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
             endif()
@@ -207,7 +198,6 @@ macro(_add_external_integration_category_suites)
         set(_category_command_args
             "--test-article" "$<TARGET_FILE:${ARG_PLUGIN_TARGET}>"
             "--test-engine" "${ARG_ENGINE_NAME}"
-            "${HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG}"
         )
         if(ARG_TEST_CONFIG)
             list(APPEND _category_command_args "--test-config" "${ARG_TEST_CONFIG}")
@@ -236,7 +226,6 @@ macro(_add_external_integration_category_suites)
             set(_category_install_command_args
                 "--test-article" "${_install_plugin}"
                 "--test-engine" "${ARG_ENGINE_NAME}"
-                "${HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG}"
             )
             if(ARG_TEST_CONFIG)
                 list(APPEND _category_install_command_args "--test-config" "${_install_config}")

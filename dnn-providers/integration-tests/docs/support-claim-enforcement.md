@@ -9,9 +9,9 @@ and the lifecycle inside `TestBody()` that decides when a claim is checked and w
 it is published.
 
 > **Under `ctest`, claims are enforced.** Every lane registered by
-> `add_external_integration_test_target()` passes `--enforce-support-claims`: the
-> sidecar is queried against the engine under test, every verdict is printed in the
-> summary, and a broken claim fails that bundle's test.
+> `add_external_integration_test_target()` names `--test-engine`, so it inherits the
+> enforcing default: the sidecar is queried against the engine under test, every
+> verdict is printed in the summary, and a broken claim fails that bundle's test.
 >
 > A claim only applies to the arch and platform the run is on, so a runner with no
 > device has no claim to enforce and nothing goes red on its account.
@@ -366,12 +366,11 @@ cannot see.
     --gtest_filter='quick_*'
 ```
 
-The `ctest` lanes pass `--enforce-support-claims`, so they print this summary and
-fail on a broken claim. There is no build option that flips the registered lanes,
-and no environment variable that changes the mode behind your back: the flag on
-each lane is whatever
-`HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG` is set to in
-`cmake/HipdnnIntegrationTestHelpers.cmake`.
+The `ctest` lanes name `--test-engine` and inherit the enforcing default, so they
+print this summary and fail on a broken claim. There is no build option that flips
+the registered lanes, and no environment variable that changes the mode behind your
+back. The default is pinned by the `TestClaimModeResolution` truth table, so turning
+it off fails a unit test.
 
 `--write-support-claims` records the support a run observed and never removes a
 claim. Retracting a claim is a deliberate, reviewed change.
