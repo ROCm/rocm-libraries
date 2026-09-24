@@ -460,9 +460,7 @@ class TestTuningSpace(unittest.TestCase):
         self.assertTrue(specs)
         self.assertTrue(any(s.kernel_spec.use_k_single_buffer for s in specs))
         for tuning_spec in specs:
-            ok, why = _supports_tuning_spec(
-                _GFX950_2D_VARIANT, tuning_spec.kernel_spec
-            )
+            ok, why = _supports_tuning_spec(_GFX950_2D_VARIANT, tuning_spec.kernel_spec)
             self.assertTrue(ok, (tuning_spec.tuning_id, why))
 
 

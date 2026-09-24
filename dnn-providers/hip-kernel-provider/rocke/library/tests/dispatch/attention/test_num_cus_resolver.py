@@ -90,7 +90,6 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             p.restore()
 
-
     def test_gfx942_fallback_off_box(self):
         """gfx942 request off-box (no visible gfx942 device) -> legacy 120 (matches develop), NOT the box's count, NOT a 304 guess."""
         p = _Patch()
@@ -105,7 +104,6 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             p.restore()
 
-
     def test_gfx950_device_query(self):
         """gfx950 on a gfx950 box -> the live CU count (256 on a 256-CU part)."""
         p = _Patch()
@@ -118,7 +116,6 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             p.restore()
 
-
     def test_gfx950_fallback_off_box(self):
         """gfx950 request off-box (running box != gfx950) -> legacy 120, never the wrong device's count."""
         p = _Patch()
@@ -130,7 +127,6 @@ class TestNumCusResolver(unittest.TestCase):
             assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 120
         finally:
             p.restore()
-
 
     def test_non_autoresolve_archs_keep_legacy_120(self):
         """Archs outside the auto-resolve set keep the legacy 120 AND never touch the
@@ -148,10 +144,11 @@ class TestNumCusResolver(unittest.TestCase):
             assert _resolve_num_cus(_req(num_cus=0, arch="gfx90a")) == 120
             assert _resolve_num_cus(_req(num_cus=0, arch="gfx1250")) == 120
             assert _resolve_num_cus(_req(num_cus=0, arch="gfxZZZ")) == 120
-            assert calls["n"] == 0, "device CU query consulted for a non-auto-resolve arch"
+            assert (
+                calls["n"] == 0
+            ), "device CU query consulted for a non-auto-resolve arch"
         finally:
             p.restore()
-
 
     def test_explicit_caller_wins_any_arch(self):
         """An explicit caller value beats the device query, on any arch."""
@@ -164,27 +161,27 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             p.restore()
 
-
     def test_routing_scales_with_num_cus(self):
         """The resolved count changes routing: an under-filled grid flips 2D->3D."""
         # b64 GQA-64/8 D64 kv8192: num_2d=768 -> 2D at 120 (target 480), 3D at 304 (target 1216)
         assert _prob(120).select_path() == "2d"
         assert _prob(304).select_path() == "3d"
 
-
     def test_target_ctas_overrides_effective_target(self):
         """target_ctas (>0) is the effective routing/segment target, bypassing num_cus*4."""
         assert _prob(120)._effective_target_ctas == 480  # auto: 120*4
-        assert _prob(120, tctas=1216)._effective_target_ctas == 1216  # override beats 480
+        assert (
+            _prob(120, tctas=1216)._effective_target_ctas == 1216
+        )  # override beats 480
         assert _prob(304, tctas=99)._effective_target_ctas == 99  # override beats 1216
         assert _prob(120, tctas=0)._effective_target_ctas == 480  # 0 => auto
-
 
     def test_target_ctas_flips_routing_without_num_cus(self):
         """Setting target_ctas alone flips 2D->3D at fixed num_cus (the knob's purpose)."""
         assert _prob(120).select_path() == "2d"  # auto target 480, num_2d=768 -> 2D
-        assert _prob(120, tctas=1216).select_path() == "3d"  # same num_cus, pinned target
-
+        assert (
+            _prob(120, tctas=1216).select_path() == "3d"
+        )  # same num_cus, pinned target
 
     def test_target_ctas_threaded_through_problem(self):
         """AttentionRequest.target_ctas reaches the built problem; the resolver ignores it."""
@@ -195,7 +192,6 @@ class TestNumCusResolver(unittest.TestCase):
         prob2 = A._problem(_req(num_cus=200, target_ctas=0))
         assert prob2.target_ctas == 0  # unset => auto
         assert prob2._effective_target_ctas == 800  # 200*4
-
 
     def test_problem_lowercases_arch_for_the_clamp(self):
         """``_problem`` lowercases ``req.arch`` into ``clamp_arch`` before it reaches
@@ -217,7 +213,6 @@ class TestNumCusResolver(unittest.TestCase):
         p_lower = A._problem(_req(num_cus=256, arch="gfx950"))
         assert au._num_segments(p_mixed) == au._num_segments(p_lower)
 
-
     def test_request_layer_rejects_mixed_case_arch(self):
         """Pins the reason the test above is defence in depth: the request layer is
         case-sensitive, so a mixed-case arch never reaches ``_problem`` at all."""
@@ -225,7 +220,6 @@ class TestNumCusResolver(unittest.TestCase):
             errors = AC._request_errors(_req(num_cus=0, arch=raw))
             assert any("unknown gfx target" in e for e in errors), (raw, errors)
         assert AC._request_errors(_req(num_cus=0, arch="gfx950")) == []
-
 
     def test_segments_bounded_after_bump(self):
         """The num_cus bump must not over-split D128 decode: clamp == pre-bump."""
@@ -271,7 +265,6 @@ class TestNumCusResolver(unittest.TestCase):
             au._RESOLVED_ATTENTION_ARCH = None
             p.restore()
 
-
     def test_gfx950_segments_conservatively_clamped(self):
         """Conservative gfx950 clamp: the num_cus bump never raises the 3D split for
         ANY already-3D shape (including D64 / long-kv that gfx942 leaves uncapped)."""
@@ -298,7 +291,6 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             au._RESOLVED_ATTENTION_ARCH = None
             p.restore()
-
 
     def test_target_ctas_bypasses_the_gfx950_clamp(self):
         """An explicit ``target_ctas > 0`` is a deliberate caller override and skips
@@ -341,7 +333,6 @@ class TestNumCusResolver(unittest.TestCase):
             au._RESOLVED_ATTENTION_ARCH = None
             p.restore()
 
-
     def test_partition_floor_is_gfx950_only(self):
         """A partitioned device (CPX / NPS4) reports the PARTITION CU count (~32).
 
@@ -373,7 +364,6 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             p.restore()
 
-
     def test_gfx942_partition_routing_matches_develop(self):
         """The floor scoping is observable downstream, not just in the resolver.
 
@@ -388,13 +378,32 @@ class TestNumCusResolver(unittest.TestCase):
             p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
             p.attr(AC, "_device_num_cus", lambda: 38)  # CPX partition
             for shape in (
-                dict(nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=1),
                 dict(
-                    nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=8192, batch=16
+                    nhead_q=32,
+                    nhead_k=8,
+                    hdim_q=128,
+                    hdim_v=128,
+                    seqlen_k=8192,
+                    batch=1,
                 ),
-                dict(nhead_q=32, nhead_k=4, hdim_q=64, hdim_v=64, seqlen_k=32768, batch=4),
                 dict(
-                    nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=4096, batch=32
+                    nhead_q=32,
+                    nhead_k=8,
+                    hdim_q=128,
+                    hdim_v=128,
+                    seqlen_k=8192,
+                    batch=16,
+                ),
+                dict(
+                    nhead_q=32, nhead_k=4, hdim_q=64, hdim_v=64, seqlen_k=32768, batch=4
+                ),
+                dict(
+                    nhead_q=32,
+                    nhead_k=8,
+                    hdim_q=128,
+                    hdim_v=128,
+                    seqlen_k=4096,
+                    batch=32,
                 ),
             ):
                 resolved = A._problem(_req(num_cus=0, arch="gfx942", **shape))
@@ -405,7 +414,6 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             au._RESOLVED_ATTENTION_ARCH = None
             p.restore()
-
 
     def test_segment_clamp_keys_on_request_arch(self):
         """The split-KV clamp keys on the arch the problem TARGETS, not the running
@@ -432,7 +440,6 @@ class TestNumCusResolver(unittest.TestCase):
         finally:
             au._RESOLVED_ATTENTION_ARCH = None
             p.restore()
-
 
     def test_every_auto_resolve_arch_clamps_the_split(self):
         """Membership in _AUTO_RESOLVE_ARCHS grants an arch the num_cus bump; the
