@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -155,6 +155,8 @@ struct TdmEpilogue
         block_sync_lds();
 
         store_tile_tdm(tdm_config, out_dram_window, out_lds_window);
+        // The store reads p_smem asynchronously; retire it before the caller reuses LDS.
+        s_wait_tensorcnt();
     };
 };
 
