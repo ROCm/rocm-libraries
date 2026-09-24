@@ -46,14 +46,15 @@ namespace
 
 /* A = [[1, 0.5, 0], [0.5, 1, 0], [0, 0, K]], padded to n with unit diagonal.
    Exact singular values: K, 1.5, (n-3) ones, 0.5. */
-vector<float> dominant_axis_matrix(rocblas_int n, double K)
+template <typename T>
+vector<T> dominant_axis_matrix(rocblas_int n, double K)
 {
-    vector<float> A(size_t(n) * n, 0.0f);
+    vector<T> A(size_t(n) * n, T(0));
     for(rocblas_int i = 0; i < n; i++)
-        A[i + i * n] = 1.0f;
-    A[0 + 1 * n] = 0.5f;
-    A[1 + 0 * n] = 0.5f;
-    A[(n - 1) + (n - 1) * n] = float(K);
+        A[i + i * n] = T(1);
+    A[0 + 1 * n] = T(0.5);
+    A[1 + 0 * n] = T(0.5);
+    A[(n - 1) + (n - 1) * n] = T(K);
     return A;
 }
 
@@ -153,16 +154,17 @@ void run_syevj(rocblas_int n,
 /* A single large entry must not mask an off-diagonal block that has not been
    rotated. Before the fix this returned after zero sweeps with the singular
    values of the unrotated matrix, sqrt(1.25) and 0.75/sqrt(1.25). */
-TEST(checkin_lapack, SYEVJ_dominant_axis_does_not_mask_block)
+template <typename T>
+void check_dominant_axis(double K, double rtol)
 {
     for(rocblas_int n : {3, 4, 8, 32, 59, 200})
     {
-        auto hA = dominant_axis_matrix(n, 4096.0);
-        auto exact = exact_sigma(n, 4096.0);
+        auto hA = dominant_axis_matrix<T>(n, K);
+        auto exact = exact_sigma(n, K);
 
-        vector<float> hS;
+        vector<T> hS;
         rocblas_int n_sweeps = -1, info = -1;
-        run_gesvdj<float>(n, hA, hS, n_sweeps, info);
+        run_gesvdj<T>(n, hA, hS, n_sweeps, info);
 
         EXPECT_EQ(info, 0) << "n = " << n;
         EXPECT_GT(n_sweeps, 0) << "n = " << n << ": the Jacobi loop never ran";
@@ -175,8 +177,15 @@ TEST(checkin_lapack, SYEVJ_dominant_axis_does_not_mask_block)
         vector<double> got(hS.begin(), hS.end());
         sort(got.begin(), got.end(), greater<double>());
         for(rocblas_int i = 0; i < n; i++)
-            EXPECT_NEAR(got[i], exact[i], exact[i] * 1e-5) << "n = " << n << ", sigma " << i;
+            EXPECT_NEAR(got[i], exact[i], exact[i] * rtol) << "n = " << n << ", sigma " << i;
     }
+}
+
+TEST(checkin_lapack, SYEVJ_dominant_axis_does_not_mask_block)
+{
+    // K is chosen above each precision's turn-on: 3.4e3 in fp32, 8.0e7 in fp64
+    check_dominant_axis<float>(4096.0, 1e-5);
+    check_dominant_axis<double>(1e9, 1e-12);
 }
 
 /* The small-size kernel used to test the sweep counter with a condition that
