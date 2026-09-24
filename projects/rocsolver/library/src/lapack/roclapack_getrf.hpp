@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "lapack_host_functions.hpp"
 #include "rocblas.hpp"
 #include "roclapack_getf2.hpp"
 #include "rocsolver/rocsolver.h"
@@ -501,7 +502,7 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
     I blk = getrf_get_innerBlkSize<ISBATCHED, T>(mm, nn, pivot);
     I jb;
     I dimx, dimy, blocks, blocksy;
-    I const max_blocks = 1024;
+    I const max_blocks = get_nblocks_yz(handle);
     dim3 grid, threads;
     size_t lmemsize;
 
@@ -675,7 +676,7 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
     static constexpr bool ISBATCHED = BATCHED || STRIDED;
     I dim = std::min(m, n);
     I blocks, blocksy;
-    I const max_blocks = 1024;
+    I const max_blocks = get_nblocks_yz(handle);
     dim3 grid, threads;
 
     // quick return if no dimensions

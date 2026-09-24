@@ -35,6 +35,7 @@
 #include "asan_helpers.hpp"
 #include "auxiliary/rocauxiliary_laswp.hpp"
 #include "lapack_device_functions.hpp"
+#include "lapack_host_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
@@ -609,7 +610,7 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I const max_blocks = 1024;
+    I const max_blocks = get_nblocks_yz(handle);
     I blocks = (batch_count - 1) / 256 + 1;
     dim3 grid(blocks, 1, 1);
     dim3 threads(256, 1, 1);

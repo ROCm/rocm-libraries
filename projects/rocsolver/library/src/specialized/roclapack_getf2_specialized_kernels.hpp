@@ -10,6 +10,7 @@
 #pragma once
 
 #include "asan_helpers.hpp"
+#include "lapack_host_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
 
@@ -734,7 +735,7 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
     dimy = I(max_threads) / dimx;
 
     // prepare kernel launch
-    I const max_blocks = 1024;
+    I const max_blocks = get_nblocks_yz(handle);
     dim3 grid(1, 1, std::min(max_blocks, batch_count));
     dim3 block(dimx, dimy, 1);
     hipStream_t stream;
@@ -771,7 +772,7 @@ void getf2_run_scale_update(rocblas_handle handle,
                             const I dimx,
                             const I dimy)
 {
-    I const max_blocks = 1024;
+    I const max_blocks = get_nblocks_yz(handle);
     size_t lmemsize = sizeof(T) * (dimx + n);
     I blocks = (m - 1) / dimx + 1;
     dim3 threads(dimx, dimy, 1);

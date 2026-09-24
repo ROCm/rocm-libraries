@@ -597,4 +597,19 @@ static void call_lasv2(T& f, T& g, T& h, T& ssmin, T& ssmax, T& snr, T& csr, T& 
     ssmin = sign(ssmin, tsign * sign(one, f) * sign(one, h));
 }
 
+static inline int get_nblocks_yz(rocblas_handle handle)
+{
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    int const num_cu = props->multiProcessorCount;
+
+    // reasonable estimate of 8 workgroups per cu
+    int const num_workgroups_per_cu = 8;
+    return (num_workgroups_per_cu * num_cu);
+}
+
+static inline int get_warpSize(rocblas_handle handle)
+{
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    return (props->warpSize);
+}
 ROCSOLVER_END_NAMESPACE
