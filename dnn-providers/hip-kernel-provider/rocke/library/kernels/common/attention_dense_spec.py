@@ -468,19 +468,34 @@ class AttentionDenseSpec:
         """
         if self.persist_decode != "auto":
             return self.persist_decode
-        # ARCH-DEPENDENT, and deliberately not chosen here. bt_hkv_minor wins on
-        # gfx942 (+7.6% geomean vs qb_major in the shipped configuration) but
-        # LOSES on gfx950 (-1.5%), where the hand-written qb_major decode is
-        # fastest. The gfx942 subclass overrides this; the base stays on the
-        # conservative choice so a new arch does not inherit a gfx942 result.
+        # ARCH-DEPENDENT, and deliberately not chosen here. The base stays on
+        # the conservative choice so a new arch does not inherit another arch's
+        # result; the gfx942 subclass overrides it.
         #
-        # Why the sweep did not catch it: qb_major is the digit order BGVQ with
-        # the ASCENDING traversal, and `asc` was pruned after the screen -- so
-        # the shipped decode's exact configuration was never in the full sweep,
-        # and no persistent qb_major reference column was carried to catch the
-        # omission. The prune was sound for the generic decode path it was
-        # measured on; it did not transfer to a hand-written decode that skips
-        # the fold entirely.
+        # CORRECTION. This comment used to record bt_hkv_minor as "-1.5% on
+        # gfx950, where the hand-written qb_major decode is fastest". That
+        # measurement was an artifact: on gfx950 ONLY, bt_hkv_minor emitted no
+        # decode tag -- an arch override of _persist_decode_name_part restated
+        # the shared map instead of extending it -- so it shared qb_major's
+        # symbol, and _DENSE_LAUNCHER_CACHE is keyed on that symbol. The A/B
+        # timed ONE binary twice; the -1.5% was noise between two runs of
+        # qb_major. Re-measured with distinct symbols, over 12 geometries
+        # including non-pow2 seqlens, MHA and non-pow2 Hkv, two passes:
+        # bt_hkv_minor is a clear WIN on gfx950 as well, by a larger margin than
+        # on gfx942, and its generic twin (digit order BVGQ + fold) agrees with
+        # it to within the noise floor on both arches.
+        #
+        # gfx950 nonetheless still selects qb_major here, pending the shipped-
+        # configuration re-measurement and golden re-bless that changing it
+        # requires. Do not re-derive the old number from this comment.
+        #
+        # Why the sweep did not catch any of it: qb_major is the digit order
+        # BGVQ with the ASCENDING traversal, and `asc` was pruned after the
+        # screen -- so the shipped decode's exact configuration was never in the
+        # full sweep, and no persistent qb_major reference column was carried to
+        # catch the omission. The prune was sound for the generic decode path it
+        # was measured on; it did not transfer to a hand-written decode that
+        # skips the fold entirely.
         #
         # Gated on ALIGNED DENSE CAUSAL, which is exactly the envelope the sweep
         # covered. causal, because the decode carries the causal fold: with every

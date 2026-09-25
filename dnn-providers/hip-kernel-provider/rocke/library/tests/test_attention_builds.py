@@ -1337,6 +1337,58 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertIn(req, names)
         self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
 
+    def test_persist_decodes_have_distinct_kernel_names_on_both_arches(self):
+        """Every selectable persistent decode must own a distinct symbol.
+
+        ``qb_major`` is the untagged baseline, so any other decode whose
+        ``_persist_decode_name_part`` returns "" shares its symbol while lowering
+        to different IR. ``_DENSE_LAUNCHER_CACHE`` is keyed on that symbol and
+        its ``assert art.kernel_name == key`` PASSES on a collision, so the
+        second decode silently runs the first one's binary and an A/B reports
+        ~1.000x -- the knob looks inert rather than broken.
+
+        This is the third time this kernel has had a name-collision bug (batch,
+        waves_per_eu, and then ``bt_hkv_minor`` on gfx950 only, where an arch
+        override RESTATED the shared tag map instead of extending it and so
+        dropped a decode added to the base). The previous guards were per-field;
+        this one enumerates the decode set itself, so adding a decode without a
+        tag fails on CPU instead of in a benchmark.
+        """
+        from kernels.gfx942.attention_dense import (
+            Gfx942AttentionDenseSpec, _IMPLEMENTED_PERSIST_DECODES as IMPL942)
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+        base = dict(
+            batch=1, seqlen_q=2048, seqlen_kv=2048, num_query_heads=32,
+            num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
+            block_n=64, persistent=True,
+        )
+        for arch, Spec, npers, impl in (
+                ("gfx942", Gfx942AttentionDenseSpec, 304, IMPL942),
+                ("gfx950", Gfx950AttentionDenseSpec, 256, None)):
+            names = {}
+            decodes = sorted(impl) if impl else [
+                "qb_major", "hkv_major", "hkv_minor", "bt_hkv_minor"]
+            for dec in decodes:
+                with self.subTest(arch=arch, decode=dec):
+                    spec = Spec(**base, num_persistent=npers,
+                                persist_decode=dec)
+                    self.assertEqual(spec.resolved_persist_decode, dec)
+                    tag = spec._persist_decode_name_part()
+                    self.assertEqual(
+                        tag == "", dec == "qb_major",
+                        f"{arch} {dec}: qb_major is the untagged baseline and "
+                        "every other decode needs a non-empty tag",
+                    )
+                    n = spec.kernel_name()
+                    self.assertNotIn(
+                        n, names,
+                        f"{arch}: persist_decode={dec!r} shares a kernel name "
+                        f"with {names.get(n)!r}; the launcher cache is keyed on "
+                        "it and would serve the wrong binary",
+                    )
+                    names[n] = dec
+
     def test_gfx950_signature_matches_the_built_kernels_params(self):
         """The gfx950 dense ABI is checked against the kernel it describes.
 

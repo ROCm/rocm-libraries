@@ -424,9 +424,19 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         # _DENSE_LAUNCHER_CACHE is keyed on that symbol -- an A/B would then time
         # one binary twice and report ~1.000x, i.e. the knob looks inert rather
         # than broken.
+        #
+        # EXTEND the shared map, never restate it. This override used to be a
+        # full copy plus the two arch-private entries, which meant a decode
+        # added to the BASE map was silently dropped here -- and that is not
+        # hypothetical: bt_hkv_minor was added to the base, implemented in this
+        # builder, and then emitted with no tag on this arch alone, sharing
+        # qb_major's symbol. A persistent A/B between them timed one binary
+        # twice. Deferring to super() first makes the arch override additive, so
+        # the next shared decode cannot go missing the same way.
+        shared = super()._persist_decode_name_part()
+        if shared:
+            return shared
         return {
-            "hkv_major": "hkvmaj",
-            "hkv_minor": "hkvmin",
             "gqa_pair": "gqapair",
             "gqa_pair_2phase": "gqapair2",
         }.get(self.resolved_persist_decode, "")

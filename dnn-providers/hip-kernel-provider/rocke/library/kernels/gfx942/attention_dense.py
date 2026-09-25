@@ -591,8 +591,10 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         Measured in the SHIPPED configuration against the decode it replaces:
         +7.6% geomean, over 5 geometries x 3 seqlens x B in {1,2,8}, zero
         correctness failures. hkv_minor is +6.5% on the same set, hkv_major
-        -4.8%. gfx950 deliberately does NOT inherit this -- there qb_major is
-        fastest, see the base class comment.
+        -4.8%. gfx950 does not inherit it today, but NOT because qb_major is
+        faster there -- that earlier finding was a symbol collision, and the
+        re-measurement makes this decode the winner on gfx950 too. See the base
+        class comment.
         """
         return "bt_hkv_minor"
 
