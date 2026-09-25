@@ -33,6 +33,7 @@ struct TestConfigs
         std::tuple{192, 128},
         std::tuple{192, -1},
         std::tuple{256, -1},
+        std::tuple{512, -1},
     };
     static constexpr auto SplitKVHDimValues = std::array{
         std::tuple{32, -1},
@@ -165,6 +166,7 @@ struct TestConfigs<FmhaFwdFp32>
         std::tuple{128, -1},
         std::tuple{192, -1},
         std::tuple{256, -1},
+        std::tuple{512, -1},
     };
     static constexpr auto SplitKVHDimValues  = std::array<std::tuple<int, int>, 0>{};
     static constexpr auto AppendKVHDimValues = std::array<std::tuple<int, int>, 0>{};
