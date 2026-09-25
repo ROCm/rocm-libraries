@@ -3,11 +3,12 @@
 
 # ROCm Version Identity Investigation
 
-Status: Final two-adapter runtime model accepted. The intermediary implementation
+Status: Final two-adapter runtime model accepted. The implemented runtime
 now uses Python SDK package identity plus core tool trampolines, and conventional
 prefixes use root-relative tools plus a base-only `.info/version` identity.
-Package-mode client requests deliberately fail until the client ships in
-`rocm-sdk-libraries` with its own trampoline.
+Package-mode client requests first honor an explicit binding, then search the
+active interpreter and user script directories for a version-compatible
+`tensilelite-client` trampoline. They fail when neither source provides one.
 
 ## Question
 
@@ -21,7 +22,7 @@ in its wheel version:
 The question is whether that identity should instead include the full ROCm
 publication version for nightly, RC, or dev installations.
 
-## Intermediary implementation
+## Implemented runtime
 
 The current wheel/runtime implementation uses the required `rocm-sdk-core`
 package to avoid expanding `rocm[devel]` for version validation:
@@ -34,8 +35,8 @@ package to avoid expanding `rocm[devel]` for version validation:
 
 The active Python SDK path therefore compares the full nightly/RC/dev identity
 without inspecting a physical core payload root. A package-mode client request
-currently reports that it is unavailable; the final model below adds a
-`rocm-sdk-libraries` trampoline once that package ships the client.
+uses an explicit binding when present, then searches the selected Python script
+directories for a version-compatible `tensilelite-client` trampoline.
 
 ## Stable release experiment
 
@@ -142,7 +143,7 @@ now accepted; the remaining tag-format decisions stay open.
 TheRock's build-time authority is `THEROCK_PACKAGE_VERSION`, not
 `THEROCK_ROCM_VERSION`:
 
-- [`compute_rocm_package_version.py`](../../../../TheRock/build_tools/compute_rocm_package_version.py)
+- [`compute_rocm_package_version.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/compute_rocm_package_version.py)
   reads the base `rocm-version` from `version.json`, then produces the Python
   publication identity. At the current checkout it reproduced:
 
@@ -157,14 +158,12 @@ TheRock's build-time authority is `THEROCK_PACKAGE_VERSION`, not
 - The same source produces distinct native package versions. For example, the
   nightly Debian and RPM forms are `10.1.0~20260813`, while the Python form is
   `10.1.0a20260813`. The full source format rules are in
-  [`docs/packaging/versioning.md`](../../../../TheRock/docs/packaging/versioning.md)
+  [`docs/packaging/versioning.md`](https://github.com/ROCm/TheRock/blob/main/docs/packaging/versioning.md)
   and `compute_rocm_package_version.py`.
 - TheRock's artifact CI computes and supplies `THEROCK_PACKAGE_VERSION` to the
-  top-level configuration. However, the hipBLASLt subproject declaration in
-  [`math-libs/BLAS/CMakeLists.txt`](../../../../TheRock/math-libs/BLAS/CMakeLists.txt)
-  currently forwards only `THEROCK_ROCM_VERSION`. A subproject gets only its
-  declared `CMAKE_ARGS`, so a full identity must be forwarded explicitly beside
-  the existing base-version argument.
+  top-level configuration. The hipBLASLt subproject declaration in
+  [`math-libs/BLAS/CMakeLists.txt`](https://github.com/ROCm/TheRock/blob/main/math-libs/BLAS/CMakeLists.txt)
+  now forwards that full package identity to the subproject.
 
 TheRock runtime artifacts retain the full Python publication identity in
 `share/therock/therock_manifest.json` under `rocm_package_version`, separately
@@ -190,7 +189,7 @@ manifest is the suitable full-version runtime source for a TheRock root; it
 does not require interpreting a toolchain build string.
 
 The downloaded wheel exposes `rocm_sdk_core.__version__` with the full value.
-The intermediary package adapter needs no root API: it validates that value and
+The Python SDK package adapter needs no root API: it validates that value and
 uses only interpreter-local core tool trampolines. The current public core
 package exposes no root or base-version helper.
 
@@ -259,11 +258,10 @@ resolved marker path rather than assume a fixed package name.
    trampoline is absent: executable `PATH` lookup cannot repair the selected
    wheel tool's native dependency closure, and mixing independently selected
    ROCm tools has no compatibility guarantee.
-3. When client capability is requested in the Python SDK package adapter, the
-   intermediary implementation returns an explicit unavailable-client error:
-   `rocm-sdk-libraries` does not yet ship the client. The final state uses that
-   package's `tensilelite-client` trampoline, which forwards `--version` and
-   all normal client arguments unchanged.
+3. When client capability is requested in the Python SDK package adapter, an
+   explicit binding wins. Otherwise, the runtime checks the active interpreter
+   and user script directories in order and selects the first
+   `tensilelite-client` whose `--version` matches the wheel.
 4. The conventional-prefix adapter resolves a physical root from `ROCM_PATH`,
    `/opt/rocm`, or a ROCm tool found on PATH. It uses root-relative tools and
    client location, and treats `.info/version` as authoritative only for the
