@@ -258,10 +258,10 @@ class TestUpdateLogic:
             assert updated_data[5][0]["ISA"] == [9, 0, 6]
             assert updated_data[5][1]["ISA"] == [10, 1, 0]
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_updates_dict_format_logic(self, mock_parse):
         """UpdateLogic should update dict-format logic in place, preserving other keys"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
+        from tensilelite.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
         mock_solution = self.create_mock_solution(isa=(9, 4, 2), include_problem_type=False)
@@ -295,10 +295,10 @@ class TestUpdateLogic:
             # Unrelated keys left untouched
             assert updated_data["LibraryType"] == "GridBased"
 
-    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    @patch('tensilelite.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_dict_solution_injects_top_level_problem_type(self, mock_parse):
         """UpdateLogic should inject top-level ProblemType when solution lacks it"""
-        from Tensile.TensileUpdateLibrary import UpdateLogic
+        from tensilelite.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
         mock_solution = self.create_mock_solution(include_problem_type=False)
