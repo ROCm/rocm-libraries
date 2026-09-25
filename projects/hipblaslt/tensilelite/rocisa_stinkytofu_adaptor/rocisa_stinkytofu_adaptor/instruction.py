@@ -455,6 +455,43 @@ def _to_stinky_register(arg: Any) -> Any:
     )
 
 
+def _true16_half_int(op: Any) -> int:
+    """``HighBitSel`` carried by @p op, or ``NONE`` when it carries none.
+
+    Port of ``regHalf`` in ``attachTrue16ModifiersFromOperands``
+    (ToStinkyTofuUtils.cpp): only register operands hold a half-select, so
+    immediates / raw strings / VCC read as NONE.
+    """
+    from .enum import HighBitSel  # noqa: WPS433
+
+    sel = getattr(op, "halfSelect", None)
+    return HighBitSel.NONE if sel is None else sel
+
+
+def _apply_true16(inst: Any, dst: Any, srcs: Any, dst1: Any = None) -> None:
+    """Attach a True16 (.l/.h) modifier derived from half-tagged operands.
+
+    The half rides on the operand (``RegisterContainer.halfSelect``, as in
+    native rocisa) but has to be re-hung on the *instruction* as a
+    True16Modifiers: the register lowers to a plain (structured)
+    StinkyRegister, and stinkytofu's true16-aware SSA/wait passes read the
+    instruction modifier (op_sel would bypass them). Mirrors the compiled
+    path's ``attachTrue16ModifiersFromOperands`` (ToStinkyTofuUtils.cpp); a
+    no-op when no operand is tagged, so 32-bit/packed ops are unaffected.
+    """
+    from .enum import HighBitSel  # noqa: WPS433
+
+    if not hasattr(inst, "set_true16"):
+        return
+    none = HighBitSel.NONE
+    dst0 = _true16_half_int(dst) if dst is not None else none
+    dstHi = _true16_half_int(dst1) if dst1 is not None else none
+    src_sels = [_true16_half_int(s) for s in srcs]
+    if dst0 == none and dstHi == none and all(s == none for s in src_sels):
+        return
+    inst.set_true16(int(dst0), int(dstHi), [int(s) for s in src_sels])
+
+
 # gfx12+ style suffix on ``s_load_*`` (matches rocisa ``ReadWriteInstruction``
 # ``typeConvert`` for ``RW_TYPE0`` when ISA major >= 11).
 _SMEM_LOAD_TYPE_SUFFIX = {
@@ -1360,7 +1397,8 @@ def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src0_reg = _to_stinky_register(self.srcs[0])
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -1460,6 +1498,47 @@ class VCndMaskB32(CommonInstruction):
         src1_reg = _to_stinky_register(self.srcs[1])
         src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
         return _st.VCndMaskB32(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+
+# -- VCndMaskB16 (native: dst, src0, src1, src2=VCC; true16 16-bit select) --
+# logicalIR: VCndMaskB16
+class VCndMaskB16(CommonInstruction):
+    """``v_cndmask_b16 dst, src0, src1, vcc`` shim (true16 16-bit select).
+
+    Same shape as VCndMaskB32 but 16-bit: the true16 half-word (.l/.h) is carried
+    on the operands themselves. Takes (dst, src0, src1, src2=VCC).
+    """
+
+    def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
+                 src2: Any = None,
+                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+        _ = kw
+        srcs = [src0, src1]
+        if src2 is not None:
+            srcs.append(src2)
+        super().__init__(
+            instType=InstType.INST_B16,
+            dst=dst,
+            srcs=srcs,
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("v_cndmask_b16")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        dst_reg = _to_stinky_register(self.dst)
+        src0_reg = _to_stinky_register(self.srcs[0])
+        src1_reg = _to_stinky_register(self.srcs[1])
+        src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
+        inst = _st.VCndMaskB16(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -2007,7 +2086,8 @@ def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
         src0_reg = _to_stinky_register(self.srcs[0])
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -2977,6 +3057,7 @@ VNotB32 = _make_scalar_unary_class("VNotB32", "v_not_b32", InstType.INST_B32)
 # logicalIR: VPrngB32
 VPrngB32 = _make_scalar_unary_class("VPrngB32", "v_prng_b32", InstType.INST_B32)
 # VCndMaskB32 — real class (see Vector ALU section above)
+# VCndMaskB16 — real class (see Vector ALU section above)
 # logicalIR: VLShiftLeftB16
 VLShiftLeftB16 = _make_vector_shift_class("VLShiftLeftB16", "v_lshlrev_b16", InstType.INST_B16)
 # VLShiftLeftB32 — real class (see Vector ALU section above)
@@ -5131,34 +5212,39 @@ def _is_container(val: Any) -> bool:
 # ==========================================================================
 
 
-class _True16Wrap:
-    """Wraps a register/input and appends a True16 ``.h``/``.l`` suffix."""
+def _input_with_half(src: Any, sel: Any) -> Any:
+    """Port of ``rocisa::inputWithHalf``/``regWithHalf`` (extension.hpp).
 
-    __slots__ = ("_inner", "_suffix")
+    Only register operands take a half-select; the C++ helper guards on
+    ``dynamic_pointer_cast<RegisterContainer>`` and returns non-register inputs
+    (immediates, raw strings) untouched. Python is untyped, so the same guard is
+    applied here - without it an immediate would render nonsense like ``1.0.l``.
 
-    def __init__(self, inner: Any, sel: Any) -> None:
-        from .enum import HighBitSel  # noqa: WPS433
-        self._inner = inner
-        self._suffix = ".h" if sel == HighBitSel.HIGH else ".l"
+    Returns a *copy*: ``regWithHalf`` clones before setting the half so the
+    caller's operand is not mutated when the same VGPR is reused for both
+    halves.
+    """
+    from .container import RegisterContainer  # noqa: WPS433
 
-    def toString(self) -> str:
-        return _input_to_str(self._inner) + self._suffix
+    if isinstance(src, RegisterContainer):
+        c = src._shallow_clone()
+        c.setHalfSelect(sel)
+        return c
+    return src
 
-    def to_stinky(self) -> Any:
-        """Return the inner register as a proper StinkyRegister.
 
-        The True16 .h/.l selection is encoded via the VOP3 op_sel modifier
-        on the instruction, NOT as a string suffix on the register. Returning
-        the structured register preserves the physical index needed by
-        InsertVgprMsbPass for correct MSB computation.
-        """
-        if hasattr(self._inner, "to_stinky"):
-            return self._inner.to_stinky()
-        import stinkytofu as _st  # noqa: WPS433
-        return _st.Register(self.toString())
+def t16(reg: Any, sel: Any) -> Any:
+    """NoSDWA-gated true16 half-select (extension.hpp::t16).
 
-    def __str__(self) -> str:
-        return self.toString()
+    On a true16 (NoSDWA) target, tag *reg* with the ``.l``/``.h`` half-word given
+    by *sel*; on legacy (SDWA) targets return *reg* unchanged. Mirrors the C++
+    helper so kernel generators can tag f16 operands unconditionally.
+    """
+    from .base import getArchCaps  # noqa: WPS433
+
+    if reg is not None and getArchCaps().get("NoSDWA", 0):
+        return _input_with_half(reg, sel)
+    return reg
 
 
 def ECvtF16toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
@@ -5168,7 +5254,7 @@ def ECvtF16toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
     if getArchCaps().get("NoSDWA", 0):
-        return VCvtF16toF32(dst=dst, src=_True16Wrap(src, sel), comment=comment)
+        return VCvtF16toF32(dst=dst, src=_input_with_half(src, sel), comment=comment)
 
     src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
     return VCvtF16toF32(
@@ -5182,11 +5268,17 @@ def ECvtF32toF16(dst: Any, src: Any, sel: Any = None, comment: str = "") -> Any:
     from .container import SDWAModifiers  # noqa: WPS433
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
-    if sel is None:
-        return VCvtF32toF16(dst=dst, src=src, comment=comment)
+    noSDWA = getArchCaps().get("NoSDWA", 0)
 
-    if getArchCaps().get("NoSDWA", 0):
-        return VCvtF32toF16(dst=_True16Wrap(dst, sel), src=src, comment=comment)
+    if sel is None:
+        # Plain 16-bit cvt is legal only on legacy; true16 must select a half
+        # (a suffix-less v_cvt_f16_f32 is fake16 and rejected by +real-true16).
+        if not noSDWA:
+            return VCvtF32toF16(dst=dst, src=src, comment=comment)
+        sel = HighBitSel.LOW
+
+    if noSDWA:
+        return VCvtF32toF16(dst=_input_with_half(dst, sel), src=src, comment=comment)
 
     dst_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
     return VCvtF32toF16(
@@ -5197,16 +5289,11 @@ def ECvtF32toF16(dst: Any, src: Any, sel: Any = None, comment: str = "") -> Any:
 def ECvtPkFP8toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
     """Unpack packed-FP8 → 2×F32, selecting src half-word (extension.hpp:537)."""
     from .base import getArchCaps  # noqa: WPS433
-    from .container import SDWAModifiers, VOP3PModifiers  # noqa: WPS433
+    from .container import SDWAModifiers  # noqa: WPS433
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
-    sel_int = 1 if sel == HighBitSel.HIGH else 0
     if getArchCaps().get("NoSDWA", 0):
-        inst = VCvtPkFP8toF32(
-            dst=dst, src=_True16Wrap(src, sel), comment=comment,
-        )
-        inst.vop3 = VOP3PModifiers(op_sel=[sel_int])
-        return inst
+        return VCvtPkFP8toF32(dst=dst, src=_input_with_half(src, sel), comment=comment)
 
     src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
     return VCvtPkFP8toF32(
@@ -5217,16 +5304,11 @@ def ECvtPkFP8toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
 def ECvtPkBF8toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
     """Unpack packed-BF8 → 2×F32, selecting src half-word (extension.hpp:566)."""
     from .base import getArchCaps  # noqa: WPS433
-    from .container import SDWAModifiers, VOP3PModifiers  # noqa: WPS433
+    from .container import SDWAModifiers  # noqa: WPS433
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
-    sel_int = 1 if sel == HighBitSel.HIGH else 0
     if getArchCaps().get("NoSDWA", 0):
-        inst = VCvtPkBF8toF32(
-            dst=dst, src=_True16Wrap(src, sel), comment=comment,
-        )
-        inst.vop3 = VOP3PModifiers(op_sel=[sel_int])
-        return inst
+        return VCvtPkBF8toF32(dst=dst, src=_input_with_half(src, sel), comment=comment)
 
     src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
     return VCvtPkBF8toF32(
@@ -5238,7 +5320,7 @@ def VCvtBF16toFP32(dst: Any, src: Any, vgprMask: Any, vi: int,
                    comment: str = "") -> Any:
     """BF16 → FP32 conversion with architecture dispatch (extension.hpp:594)."""
     from .base import getAsmCaps, getArchCaps  # noqa: WPS433
-    from .container import SDWAModifiers, VOP3PModifiers  # noqa: WPS433
+    from .container import SDWAModifiers  # noqa: WPS433
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
     if not getAsmCaps().get("HasBF16CVT", 0):
@@ -5256,15 +5338,14 @@ def VCvtBF16toFP32(dst: Any, src: Any, vgprMask: Any, vi: int,
 
     if getArchCaps().get("NoSDWA", 0):
         sel = HighBitSel.HIGH if (vi % 2) == 1 else HighBitSel.LOW
-        inst = PVCvtBF16toFP32(
-            dst=dst, src=_True16Wrap(src, sel), comment="cvt bf16 to f32",
+        return PVCvtBF16toFP32(
+            dst=dst, src=_input_with_half(src, sel),
+            comment="cvt bf16 to fp32. " + comment,
         )
-        inst.vop3 = VOP3PModifiers(op_sel=[vi % 2])
-        return inst
 
     src0_sel = SelectBit.WORD_1 if (vi % 2) == 1 else SelectBit.WORD_0
     return PVCvtBF16toFP32(
         dst=dst, src=src, sdwa=SDWAModifiers(src0_sel=src0_sel),
-        comment="cvt bf16 to f32",
+        comment="cvt bf16 to fp32. " + comment,
     )
 

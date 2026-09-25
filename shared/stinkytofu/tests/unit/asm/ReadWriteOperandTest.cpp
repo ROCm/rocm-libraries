@@ -24,6 +24,9 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
+#include <tuple>
+#include <vector>
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
@@ -79,7 +82,42 @@ class ReadWriteOperandTest : public ::testing::Test {
         config.checkReadWriteOperands = true;
         return validateStinkyIR(func, config);
     }
+
+    /// Same, with every category enabled, over a whole list of instructions.
+    std::string verifyAll(const std::vector<std::tuple<std::string, std::vector<StinkyRegister>,
+                                                       std::vector<StinkyRegister>>>& insts) {
+        Function func("test");
+        setFunctionArch(func, arch);
+        BasicBlock* bb = func.createBasicBlock("entry");
+
+        AsmIRBuilder builder(*bb, arch);
+        for (const auto& [mnemonic, destRegs, srcRegs] : insts) {
+            const HwInstDesc* desc = getDescByMnemonic(mnemonic);
+            if (!desc) return "Unknown mnemonic: " + mnemonic;
+            StinkyInstruction* inst = builder.create(desc);
+            for (const auto& r : destRegs) inst->addDestReg(r);
+            for (const auto& r : srcRegs) inst->addSrcReg(r);
+        }
+
+        AsmVerifierConfig config;
+        config.checkRegisterWidths = true;
+        config.checkReadWriteOperands = true;
+        return validateStinkyIR(func, config);
+    }
 };
+
+// ---------------------------------------------------------------------------
+// m0 is encoded in the scalar operand space, so an sdst field accepts it.
+// ---------------------------------------------------------------------------
+TEST_F(ReadWriteOperandTest, SMovB32_M0DestIsAcceptedAsScalar) {
+    std::string error = verifyAll({{"s_mov_b32", {StinkyRegister("m", 0, 1)}, {sgpr(2)}}});
+    EXPECT_TRUE(error.empty()) << error;
+}
+
+TEST_F(ReadWriteOperandTest, SMovB32_VgprDestIsStillRejected) {
+    std::string error = verifyAll({{"s_mov_b32", {vgpr(1)}, {sgpr(2)}}});
+    EXPECT_NE(error.find("Register width validation failed"), std::string::npos) << error;
+}
 
 // ---------------------------------------------------------------------------
 // s_cmov_b32  —  D0 is RW: if (SCC) s0 = s1; else s0 = s0

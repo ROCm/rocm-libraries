@@ -74,6 +74,12 @@ def _make_launcher(spec: Gfx950AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.runtime_shape:
+        sb = (
+            sb.scalar("batch", "i32")
+            .scalar("seqlen_q", "i32")
+            .scalar("seqlen_kv", "i32")
+        )
     if spec.use_sinks:
         sb = sb.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
@@ -190,6 +196,10 @@ def run(
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+    if spec.runtime_shape:
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
 

@@ -1646,8 +1646,9 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     """
     if not problem.use_fp8:
         return False
-    # The 32x32 combo reads bf16 K from LDS, so it MUST use the sync-dequant
-    # loader (bf16 K_lds), not this in-LDS-fp8 path. Never combine them.
+    # The 32x32 combo reads K from LDS at the working dtype (bf16/fp16), so it
+    # MUST use the sync-dequant loader (working-dtype K_lds), not this in-LDS-fp8
+    # path. Never combine them.
     if _enable_combo_2d(problem):
         return False
     if not _fp8_qk_loader_fits(problem):
@@ -1979,7 +1980,7 @@ def _enable_gfx942_sink_prefill_tuned(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
-    """gfx950 full-causal bf16 attention-sink prefill -> waves_per_eu=3.
+    """gfx950 full-causal bf16/fp16 attention-sink prefill -> waves_per_eu=3.
 
     Same-run A/B on gfx950 vs the shipped nw4/mw16/T64 config (waves_per_eu is
     the only difference): 1.07x @ S1024, 1.11x @ S2048, 1.15x @ S4096, reproduced
@@ -1990,7 +1991,7 @@ def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
     """
     return (
         _resolve_attention_arch() == "gfx950"
-        and problem.dtype == "bf16"
+        and problem.dtype in ("bf16", "fp16")
         and not problem.use_fp8
         and problem.head_size == 64
         and problem.block_size == 16
@@ -2474,8 +2475,9 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
 
     This wires the kernel config that the parity + trace benchmarks proved
     fastest-and-correct for the AITER prefill-2D trace family (d64 / b32 /
-    GQA-8 / bf16, with attention sinks) into production. The combo stacks,
-    on top of ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
+    GQA-8) into production: bf16 for the whole cohort, and fp16 only for sink
+    prefill (the fp16 win was measured on sinks). The combo stacks, on top of
+    ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
 
       * ``use_transposed_scalar_state``  (one m/l per lane + broadcast alpha)
       * ``use_transposed_mask_once``     (mask invariants once / KV iter; no-SW)
@@ -2500,12 +2502,18 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     """
     if _resolve_attention_arch() != "gfx950":
         return False
-    if problem.dtype != "bf16":
+    # fp16 combo is sink-prefill only (the fp16 widening was measured on sinks);
+    # non-sink fp16 stays on its existing path. bf16 admits the whole cohort.
+    # Mirror this in the C++ twin.
+    if problem.dtype == "fp16":
+        if not problem.use_sinks:
+            return False
+    elif problem.dtype != "bf16":
         return False
-    # FP8 KV is supported via the *sync-dequant* loader, which writes bf16
-    # into K_lds/V_lds (k_scale folded in) -- exactly what the 32x32 combo
-    # reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
-    # in-LDS-fp8 mode (incompatible with the bf16 32x32 reads) never fires.
+    # FP8 KV is supported via the *sync-dequant* loader, which writes the working
+    # dtype (bf16/fp16) into K_lds/V_lds (k_scale folded in) -- exactly what the
+    # 32x32 combo reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
+    # in-LDS-fp8 mode (incompatible with the working-dtype 32x32 reads) never fires.
     # This takes the fp8 prefill cohort from ~0.5x to ~0.9x vs Triton-2d.
     if problem.head_size != 64 or problem.block_size != 32:
         return False

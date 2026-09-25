@@ -271,3 +271,4 @@ class TestRegCaps:
         assert reg["MaxSgpr"] == 106
         assert reg["PhysicalMaxVgpr"] == 1024
         assert reg["PhysicalMaxVgprCU"] == 4096 * 32
+        assert reg["PhysicalMaxSgpr"] == 800
