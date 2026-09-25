@@ -4,16 +4,20 @@
 # hipdnn-integration-tests Test Categories Configuration.
 #
 # GTest-filter categories applied to the component's own GTest binaries
-# (hipdnn_integration_tests_unit_tests and hipdnn_gpu_ref_tests) via
-# apply_test_category_labels(). Each category becomes one CTest suite whose
-# --gtest_filter is built from test_patterns/exclude; labels are cumulative so
-# `ctest -L standard` runs quick + standard, etc.
+# (hipdnn_integration_tests_unit_tests, hipdnn_gpu_ref_tests and
+# hipdnn_golden_data_tests) via apply_test_category_labels(). Each category
+# becomes one CTest suite whose --gtest_filter is built from test_patterns/exclude;
+# labels are cumulative so `ctest -L standard` runs quick + standard, etc.
 #
 # Tier prefixes: gpu-ref conv tests use "Smoke", RMSNorm uses "Quick", plus
 # "Standard"/"Comprehensive"/"Full"; framework unit tests carry no tier prefix
 # and are caught by the quick catch-all (everything not Standard/Comprehensive/
-# Full). The external hipdnn_integration_tests bundle binary is categorized by
-# each provider's test_categories_integration.yaml, not this file.
+# Full). hipdnn_golden_data_tests names its tests after the bundle's path, so
+# their tier prefix is the lowercase data directory: "standard_" (quick-tier
+# bundles start "quick_" and fall into the catch-all). The PascalCase
+# "Standard*" patterns are the legacy hand-written convention and stay alongside.
+# The external hipdnn_integration_tests bundle binary is categorized by each
+# provider's test_categories_integration.yaml, not this file.
 #
 # The "comprehensive" and "full" tiers are commented out below: the
 # corresponding Comprehensive*/Full* GTest cases require ROCm-side (rock)
@@ -28,6 +32,7 @@ test_categories:
     exclude:
       - "*DISABLED*"
       - "Standard*"
+      - "standard_*"
       - "Comprehensive*"
       - "Full*"
     labels:
@@ -40,6 +45,7 @@ test_categories:
     description: "Standard-tier GPU reference cases"
     test_patterns:
       - "Standard*"
+      - "standard_*"
     exclude:
       - "*DISABLED*"
       # Standard/TestGpuRMSNormFwdRef{4D,5D}Bfp16.MatchesCpuRef fail on gfx950
@@ -82,6 +88,7 @@ test_categories:
     exclude:
       - "*DISABLED*"
       - "Standard*"
+      - "standard_*"
       - "Comprehensive*"
       - "Full*"
     labels:

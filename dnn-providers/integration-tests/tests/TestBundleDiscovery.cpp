@@ -1115,4 +1115,30 @@ TEST_F(TestBundleDiscoveryFixture, FailedBundleLoadRecordsFailureWithMessage)
     EXPECT_NONFATAL_FAILURE(test.TestBody(), "boom");
 }
 
+// The cross-lane check behind registerUnaccountedGoldenBundles(): a golden-bearing
+// bundle must end the run with a test under its name in at least one lane. Each
+// row is one bundle's (CpuRef, GpuRef) verdict pair.
+TEST(TestUnaccountedGoldenBundles, FlagsOnlyGoldenBundlesNoLaneRegistered)
+{
+    using Verdict = detail::ReferenceLaneVerdict;
+    const std::vector<Verdict> cpu{
+        Verdict::REGISTERED, // 0: CPU-only op (e.g. BatchnormInference) -- covered
+        Verdict::EXCLUDED_ON_COST, // 1: costly for CPU, GPU validates it -- covered
+        Verdict::OUTSIDE_OP_SET, // 2: neither reference implements it -- dropped
+        Verdict::EXCLUDED_ON_COST, // 3: left to a GPU lane that cannot run it -- dropped
+        Verdict::NO_GOLDEN_OUTPUTS, // 4: nothing to validate
+        Verdict::UNCOVERED_ON_COST, // 5: device-less run, skip test stands in -- covered
+    };
+    const std::vector<Verdict> gpu{
+        Verdict::OUTSIDE_OP_SET,
+        Verdict::REGISTERED,
+        Verdict::OUTSIDE_OP_SET,
+        Verdict::OUTSIDE_OP_SET,
+        Verdict::NO_GOLDEN_OUTPUTS,
+        Verdict::REGISTERED,
+    };
+
+    EXPECT_EQ(detail::bundlesNoLaneAccountsFor(cpu, gpu), (std::vector<size_t>{2, 3}));
+}
+
 // NOLINTEND(readability-identifier-naming)

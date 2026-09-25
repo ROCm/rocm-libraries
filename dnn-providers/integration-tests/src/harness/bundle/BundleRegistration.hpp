@@ -7,8 +7,8 @@
 #include <iostream>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
-#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -256,29 +256,164 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
     }
 }
 
+// What one reference lane did with one loaded bundle. REGISTERED and
+// UNCOVERED_ON_COST put a test under the bundle's name; the other three do not.
+// That difference is what bundlesNoLaneAccountsFor() checks across lanes.
+enum class ReferenceLaneVerdict
+{
+    NO_GOLDEN_OUTPUTS, ///< Nothing to validate.
+    OUTSIDE_OP_SET, ///< The reference does not implement every op in the graph.
+    EXCLUDED_ON_COST, ///< Too costly here; a GPU lane runs this session.
+    UNCOVERED_ON_COST, ///< Too costly here and no GPU lane runs: a skipping test stands in.
+    REGISTERED, ///< A validation test is registered (known-gap tests included).
+};
+
+inline const char* toString(ReferenceLaneVerdict verdict)
+{
+    switch(verdict)
+    {
+    case ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS:
+        return "carries no golden outputs";
+    case ReferenceLaneVerdict::OUTSIDE_OP_SET:
+        return "outside its supported-op set";
+    case ReferenceLaneVerdict::EXCLUDED_ON_COST:
+        return "excluded on cost (see referenceShapeIsAffordable)";
+    case ReferenceLaneVerdict::UNCOVERED_ON_COST:
+        return "excluded on cost, registered as a skipping test";
+    case ReferenceLaneVerdict::REGISTERED:
+        return "registered";
+    default:
+        return "unknown";
+    }
+}
+
+// The per-bundle decision behind registerReferenceValidationTests(). Split out so
+// it registers nothing and reaches no executor.
+//
+// `gpuLaneWillRun` says whether a GPU reference lane will actually execute in this
+// process -- selected by --reference *and* backed by a device. It does not change
+// *whether* the cost gate excludes a shape, only what the exclusion leaves behind:
+// with that lane running, the GPU lane is expected to validate the bundle (and
+// bundlesNoLaneAccountsFor() fails the run if it does not); without it nothing
+// validates the bundle, so a skipping test is registered in its place to say so.
+inline ReferenceLaneVerdict referenceLaneVerdict(const IntegrationTestBundle& bundle,
+                                                 const std::string& bundleId,
+                                                 ReferenceExecutorType referenceType,
+                                                 bool gpuLaneWillRun)
+{
+    if(!bundle.hasGoldenOutputs)
+    {
+        return ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS;
+    }
+    if(!referenceCoversGraph(referenceType, bundle.graphBuffer.data(), bundle.graphBuffer.size()))
+    {
+        return ReferenceLaneVerdict::OUTSIDE_OP_SET;
+    }
+    // Deliberate cost exclusion. It applies unconditionally: these are the shapes
+    // the scalar CPU reference needs tens of minutes for -- a 4096-token GQA bundle
+    // measured 19.6 min on a CI runner and blew the ctest timeout -- so running
+    // them is never the right answer, whatever else is or isn't covering them.
+    if(!referenceShapeIsAffordable(
+           referenceType, bundleId, bundle.graphBuffer.data(), bundle.graphBuffer.size()))
+    {
+        return gpuLaneWillRun ? ReferenceLaneVerdict::EXCLUDED_ON_COST
+                              : ReferenceLaneVerdict::UNCOVERED_ON_COST;
+    }
+    return ReferenceLaneVerdict::REGISTERED;
+}
+
+// A lane accounts for a bundle when it puts a test under the bundle's name: one
+// that validates, one that asserts a known gap, or one that skips naming why
+// nothing could validate it.
+inline bool laneAccountsFor(ReferenceLaneVerdict verdict)
+{
+    return verdict == ReferenceLaneVerdict::REGISTERED
+           || verdict == ReferenceLaneVerdict::UNCOVERED_ON_COST;
+}
+
+// Indices of golden-bearing bundles that neither lane accounts for. Such a bundle
+// was loaded, carries golden data, and ends the run with no test under its name
+// in either lane -- outside both op sets, or dropped on cost by the CPU lane on
+// the assumption that a GPU lane that does not implement it would cover it. It
+// shows up only as a stderr counter, which is the silent drop this binary exists
+// to prevent.
+//
+// Cross-lane because no single lane can see it: every bundle a lane is handed
+// ends in exactly one verdict, so "this lane registered nothing" is always
+// explained by that lane's own counters. Whether *some* lane covered the bundle
+// is the only question with a wrong answer.
+//
+// Both vectors are verdicts for the same bundles, in the same order.
+inline std::vector<size_t>
+    bundlesNoLaneAccountsFor(const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
+                             const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
+{
+    if(cpuVerdicts.size() != gpuVerdicts.size())
+    {
+        throw std::invalid_argument("bundlesNoLaneAccountsFor: lanes judged different bundle sets");
+    }
+
+    std::vector<size_t> unaccounted;
+    for(size_t i = 0; i < cpuVerdicts.size(); ++i)
+    {
+        // Both lanes read golden-ness off the same loaded bundle, so either view will do.
+        if(cpuVerdicts[i] == ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS)
+        {
+            continue;
+        }
+        if(!laneAccountsFor(cpuVerdicts[i]) && !laneAccountsFor(gpuVerdicts[i]))
+        {
+            unaccounted.push_back(i);
+        }
+    }
+    return unaccounted;
+}
+
+// Registers a failing test for every golden-bearing bundle no lane accounted for,
+// under the bundle's own name so the tier prefix (and with it the ctest category)
+// is kept.
+inline void registerUnaccountedGoldenBundles(const std::vector<LoadedBundle>& bundles,
+                                             const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
+                                             const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
+{
+    if(bundles.size() != cpuVerdicts.size())
+    {
+        throw std::invalid_argument(
+            "registerUnaccountedGoldenBundles: verdicts do not match the bundles");
+    }
+
+    for(const size_t index : bundlesNoLaneAccountsFor(cpuVerdicts, gpuVerdicts))
+    {
+        const auto& bundle = bundles[index];
+        registerFailedBundleLoad(
+            bundle.suiteName + "_Unvalidated",
+            bundle.testName,
+            std::string("This bundle carries golden data, but no reference lane registered a test "
+                        "for it, so nothing validated it. CpuRef: ")
+                + toString(cpuVerdicts[index]) + "; GpuRef: " + toString(gpuVerdicts[index])
+                + ".\n  bundle: " + bundle.jsonPath.string());
+    }
+}
+
 // Registers one validation test per bundle this reference is *required* to handle
 // and for which golden data exists. Both conditions are checked here rather than in
 // the body precisely so the harness has no skip path: if a test exists, it must run
 // and pass.
 //
-// Bundles that fall outside the reference's supported-op set are simply absent from
-// the suite, and the count is logged so the gap is visible rather than silent.
+// Bundles that fall outside the reference's supported-op set are absent from this
+// lane's suite, and the count is logged so the gap is visible. Whether another lane
+// picked them up is checked across lanes by registerUnaccountedGoldenBundles().
 //
-// Returns the number of bundles registered so the caller can tell "this reference
-// verified nothing" apart from "this whole run had nothing to verify".
-//
-// `gpuLaneWillRun` says whether a GPU reference lane will actually execute in this
-// process -- selected by --reference *and* backed by a device. It does not change
-// *whether* the cost gate excludes a shape, only what the exclusion means: with
-// that lane running the bundle is still validated and the exclusion is a pure cost
-// trade; without it nothing validates the bundle, so a skipping test is registered
-// in its place to say so.
-inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
-                                               ReferenceExecutorType referenceType,
-                                               bool gpuLaneWillRun)
+// Returns this lane's verdict for each bundle, in the order of `bundles`.
+inline std::vector<ReferenceLaneVerdict>
+    registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
+                                     ReferenceExecutorType referenceType,
+                                     bool gpuLaneWillRun)
 {
     const char* label = BundleReferenceValidationHarness::referenceLabel(referenceType);
 
+    std::vector<ReferenceLaneVerdict> verdicts;
+    verdicts.reserve(bundles.size());
     size_t registered = 0;
     size_t noGolden = 0;
     size_t uncovered = 0;
@@ -289,18 +424,21 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
 
     for(const auto& bundle : bundles)
     {
-        // Belt and braces: loadGoldenDataBundles() already filtered on this, so a
-        // bundle without golden outputs reaching here is a filter bug, not data.
-        // Counted rather than assumed away so it surfaces instead of skewing the
-        // registered-of-total line below.
-        if(!bundle.bundle->hasGoldenOutputs)
+        const std::string bundleId = bundle.suiteName + "." + bundle.testName;
+        const auto verdict
+            = referenceLaneVerdict(*bundle.bundle, bundleId, referenceType, gpuLaneWillRun);
+        verdicts.push_back(verdict);
+
+        switch(verdict)
         {
+        case ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS:
+            // Belt and braces: loadGoldenDataBundles() already filtered on this, so a
+            // bundle without golden outputs reaching here is a filter bug, not data.
+            // Counted rather than assumed away so it surfaces instead of skewing the
+            // registered-of-total line below.
             noGolden++;
-            continue;
-        }
-        if(!referenceCoversGraph(
-               referenceType, bundle.bundle->graphBuffer.data(), bundle.bundle->graphBuffer.size()))
-        {
+            break;
+        case ReferenceLaneVerdict::OUTSIDE_OP_SET:
             uncovered++;
             // Name the ops responsible, not just the tally. The op set is a
             // commitment (see ReferenceOpCoverage.hpp): "7 bundles excluded" says a
@@ -312,69 +450,55 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
             {
                 uncoveredOps.insert(std::move(nodeType));
             }
-            continue;
-        }
-
-        const std::string bundleId = bundle.suiteName + "." + bundle.testName;
-
-        // Deliberate cost exclusion, counted and printed rather than silent. It
-        // applies unconditionally: these are the shapes the scalar CPU reference
-        // needs tens of minutes for -- a 4096-token GQA bundle measured 19.6 min on
-        // a CI runner and blew the ctest timeout -- so running them is never the
-        // right answer, whatever else is or isn't covering them.
-        //
-        // What the GPU lane changes is the verdict, not the exclusion. With that
-        // lane running the bundle IS validated, just not here, and the tally below
-        // is the whole story. Without it -- `--reference cpu`, or a device-less
-        // runner where the GPU harness SKIP_IF_NO_DEVICES()s in SetUp() -- nothing
-        // validates this bundle, so it gets a skipping test under its own name
-        // rather than vanishing into a counter.
-        if(!referenceShapeIsAffordable(referenceType,
-                                       bundleId,
-                                       bundle.bundle->graphBuffer.data(),
-                                       bundle.bundle->graphBuffer.size()))
-        {
+            break;
+        case ReferenceLaneVerdict::EXCLUDED_ON_COST:
             tooCostly++;
-            if(!gpuLaneWillRun)
+            break;
+        case ReferenceLaneVerdict::UNCOVERED_ON_COST:
+            // `--reference cpu`, or a device-less runner where the GPU harness
+            // SKIP_IF_NO_DEVICES()s in SetUp(): nothing validates this bundle, so it
+            // gets a skipping test under its own name rather than vanishing into a
+            // counter.
+            tooCostly++;
+            uncoveredOnCost++;
+            registerUncoveredBundle(
+                bundle.suiteName + "_" + label,
+                bundle.testName,
+                std::string("Excluded from the ") + label
+                    + " lane on cost (see referenceShapeIsAffordable), and no GpuRef lane "
+                      "runs this session to cover it -- so nothing validated this bundle "
+                      "against its golden data.\n  bundle: "
+                    + bundle.jsonPath.string());
+            break;
+        case ReferenceLaneVerdict::REGISTERED:
+            if(findKnownReferenceGap(referenceType, bundleId) != nullptr)
             {
-                uncoveredOnCost++;
-                registerUncoveredBundle(
-                    bundle.suiteName + "_" + label,
-                    bundle.testName,
-                    std::string("Excluded from the ") + label
-                        + " lane on cost (see referenceShapeIsAffordable), and no GpuRef lane "
-                          "runs this session to cover it -- so nothing validated this bundle "
-                          "against its golden data.\n  bundle: "
-                        + bundle.jsonPath.string());
+                knownGaps++;
             }
-            continue;
+            ::testing::RegisterTest(
+                (bundle.suiteName + "_" + label).c_str(),
+                bundle.testName.c_str(),
+                nullptr,
+                nullptr,
+                __FILE__,
+                __LINE__,
+                [loaded = bundle.bundle, path = bundle.jsonPath, bundleId, referenceType]()
+                    -> ::testing::Test* {
+                    // Only the GPU reference touches a device. Passing true for the CPU
+                    // lane made SetUp() run SKIP_IF_NO_DEVICES() on work that reads and
+                    // writes host memory, so CPU golden-data validation silently skipped
+                    // on any runner without a GPU.
+                    const bool requiresDevice = referenceType == ReferenceExecutorType::GPU;
+                    auto* test = new BundleReferenceValidationHarness(
+                        referenceType, requiresDevice, sharedReferenceExecutors());
+                    test->setBundle(loaded, path, bundleId);
+                    return test;
+                });
+            registered++;
+            break;
+        default:
+            throw std::logic_error("registerReferenceValidationTests: unhandled lane verdict");
         }
-
-        if(findKnownReferenceGap(referenceType, bundleId) != nullptr)
-        {
-            knownGaps++;
-        }
-
-        ::testing::RegisterTest(
-            (bundle.suiteName + "_" + label).c_str(),
-            bundle.testName.c_str(),
-            nullptr,
-            nullptr,
-            __FILE__,
-            __LINE__,
-            [loaded = bundle.bundle, path = bundle.jsonPath, bundleId, referenceType]()
-                -> ::testing::Test* {
-                // Only the GPU reference touches a device. Passing true for the CPU
-                // lane made SetUp() run SKIP_IF_NO_DEVICES() on work that reads and
-                // writes host memory, so CPU golden-data validation silently skipped
-                // on any runner without a GPU.
-                const bool requiresDevice = referenceType == ReferenceExecutorType::GPU;
-                auto* test = new BundleReferenceValidationHarness(
-                    referenceType, requiresDevice, sharedReferenceExecutors());
-                test->setBundle(loaded, path, bundleId);
-                return test;
-            });
-        registered++;
     }
 
     // knownGaps is a subset of registered, not a third bucket: those tests still run,
@@ -396,7 +520,8 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
         }
         else
         {
-            std::cerr << "the GpuRef lane runs this session and covers them";
+            std::cerr << "the GpuRef lane runs this session and must cover them (any it does "
+                         "not fails as <bundle>_Unvalidated)";
         }
     }
     if(knownGaps > 0)
@@ -414,29 +539,7 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     }
     std::cerr << "\n";
 
-    // A reference lane that registered nothing while golden data was sitting right
-    // there verified nothing, and the whole-binary guard in main() cannot see it: a
-    // sibling reference that registered some bundles keeps the total non-zero. The
-    // legitimate ways to register zero are the ones already printed above: every
-    // bundle fell outside this reference's op set, or every one was excluded on
-    // cost. Anything else is a bundle that should have been here and isn't.
-    //
-    // `noGolden` is part of that test, not a formality. The probe errs toward
-    // loading whenever it cannot tell, so a bundle can reach here carrying nothing
-    // -- and on a tree where `dvc pull` never ran, every bundle does. Firing then
-    // would report "this lane verified nothing" as a failure when the honest answer
-    // is that there was nothing to verify.
-    if(registered == 0 && uncovered == 0 && tooCostly == 0 && noGolden != bundles.size())
-    {
-        registerFailedBundleLoad(std::string("GoldenDataValidation_") + label,
-                                 "RegisteredAtLeastOneBundle",
-                                 std::string("The ") + label
-                                     + " reference registered no golden-data validation tests, but "
-                                       "bundles carrying golden data were loaded. This lane "
-                                       "verified nothing.");
-    }
-
-    return registered;
+    return verdicts;
 }
 
 } // namespace detail
@@ -773,7 +876,7 @@ inline std::optional<std::vector<detail::LoadedBundle>> loadGoldenDataBundles()
 }
 
 /// Registers the golden-data validation suite for one reference executor, and
-/// returns how many bundles it registered.
+/// returns that lane's verdict for each bundle, in the order of `bundles`.
 ///
 /// Two harnesses, never both: verifying an engine and validating our own golden
 /// data are different jobs, so they live in different binaries. This one is the
@@ -784,11 +887,22 @@ inline std::optional<std::vector<detail::LoadedBundle>> loadGoldenDataBundles()
 /// `gpuLaneWillRun` is the caller's answer to "will a GPU reference lane actually
 /// execute this session" -- selected by --reference and backed by a device. It
 /// decides what the CPU lane's cost exclusion means, not whether it applies.
-inline size_t registerGoldenDataValidationTests(const std::vector<detail::LoadedBundle>& bundles,
-                                                ReferenceExecutorType referenceType,
-                                                bool gpuLaneWillRun)
+inline std::vector<detail::ReferenceLaneVerdict>
+    registerGoldenDataValidationTests(const std::vector<detail::LoadedBundle>& bundles,
+                                      ReferenceExecutorType referenceType,
+                                      bool gpuLaneWillRun)
 {
     return detail::registerReferenceValidationTests(bundles, referenceType, gpuLaneWillRun);
+}
+
+/// Fails every golden-bearing bundle that neither lane registered a test for.
+/// Call after both lanes have registered, with the verdicts each returned.
+inline void registerUnvalidatedGoldenDataFailures(
+    const std::vector<detail::LoadedBundle>& bundles,
+    const std::vector<detail::ReferenceLaneVerdict>& cpuVerdicts,
+    const std::vector<detail::ReferenceLaneVerdict>& gpuVerdicts)
+{
+    detail::registerUnaccountedGoldenBundles(bundles, cpuVerdicts, gpuVerdicts);
 }
 
 } // namespace hipdnn_integration_tests::bundle

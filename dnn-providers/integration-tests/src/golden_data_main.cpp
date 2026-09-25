@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -141,28 +142,43 @@ int main(int argc, char** argv) noexcept
         // bundles of which ~50 carry golden data, so this is the bulk of the
         // binary's startup; doing it per lane paid it twice and registered every
         // failing-load test twice under the same name.
-        size_t cpuRegistered = 0;
-        size_t gpuRegistered = 0;
+        using hipdnn_integration_tests::bundle::detail::ReferenceLaneVerdict;
+        std::vector<ReferenceLaneVerdict> cpuVerdicts;
+        std::vector<ReferenceLaneVerdict> gpuVerdicts;
         const auto bundles = hipdnn_integration_tests::bundle::loadGoldenDataBundles();
         if(bundles.has_value())
         {
             if(runCpu)
             {
-                cpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
+                cpuVerdicts = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
                     *bundles, hipdnn_integration_tests::ReferenceExecutorType::CPU, gpuLaneWillRun);
             }
             if(runGpu)
             {
-                gpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
+                gpuVerdicts = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
                     *bundles, hipdnn_integration_tests::ReferenceExecutorType::GPU, gpuLaneWillRun);
+            }
+            // A golden-bearing bundle that no lane put a test under -- outside both
+            // op sets, or dropped on cost by the CPU lane for a GPU lane that does
+            // not implement it -- would otherwise show up only in the counters
+            // printed above. With a single --reference the other lane's bundles are
+            // out of scope by the caller's choice, so there is nothing to cross-check.
+            if(runCpu && runGpu)
+            {
+                hipdnn_integration_tests::bundle::registerUnvalidatedGoldenDataFailures(
+                    *bundles, cpuVerdicts, gpuVerdicts);
             }
         }
 
         // Per-reference, not just per-run. A lane that registered nothing while its
-        // sibling registered plenty is invisible in the binary-wide total below, and
-        // registerReferenceValidationTests() has already turned the un-explainable
-        // version of that into a failing test. This line is the human-readable
+        // sibling registered plenty is invisible in the binary-wide total below.
+        // Every bundle it skipped is either covered by the sibling or already a
+        // failing <bundle>_Unvalidated test; this line is the human-readable
         // counterpart, printed before the run so it frames the results that follow.
+        const auto cpuRegistered
+            = std::count(cpuVerdicts.begin(), cpuVerdicts.end(), ReferenceLaneVerdict::REGISTERED);
+        const auto gpuRegistered
+            = std::count(gpuVerdicts.begin(), gpuVerdicts.end(), ReferenceLaneVerdict::REGISTERED);
         if(runCpu && runGpu && (cpuRegistered == 0) != (gpuRegistered == 0))
         {
             std::cerr << "NOTE: only one reference lane registered any golden-data validation "
