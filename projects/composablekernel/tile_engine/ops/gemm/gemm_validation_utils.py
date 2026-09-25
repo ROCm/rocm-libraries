@@ -653,8 +653,13 @@ def validate_lds_capacity(
     b_datatype: str,
     pipeline: str,
     gpu_target: str = "",
+    gfx1250_gemm_pipeline: bool = False,
 ) -> Tuple[bool, str]:
-    """Validate LDS capacity requirements."""
+    """Validate LDS capacity requirements.
+
+    gfx1250_gemm_pipeline marks a non-MX comp_async / comp_tdm* op (see
+    _uses_gfx1250_gemm_pipeline); MX comp_async keeps its own descriptor rule.
+    """
     matrix_a_size = (tile_m * tile_k) * element_size(a_datatype)
     matrix_b_size = (tile_n * tile_k) * element_size(b_datatype)
     if pipeline == "weight_preshuffle":
@@ -662,10 +667,11 @@ def validate_lds_capacity(
         matrix_b_size = 0
     elif (
         pipeline in ("comp_tdm", "comp_tdm_v2")
-        and _base_gfx_arch(gpu_target) == "gfx1250"
-    ):
-        # TDM uses non-transposed LDS descriptors. Each group of
-        # rows spanning at least 256 bytes is separated by 16 padding bytes.
+        or (pipeline == "comp_async" and gfx1250_gemm_pipeline)
+    ) and _base_gfx_arch(gpu_target) == "gfx1250":
+        # TDM and non-MX comp_async use the gfx1250 non-transposed base LDS
+        # descriptors. Each group of rows spanning at least 256 bytes is
+        # separated by 16 padding bytes.
         # GetSmemSizeA/B round to 16 bytes; valid K tiles are already aligned.
         a_lds_layer = max(1, 256 // (tile_k * element_size(a_datatype)))
         b_lds_layer = max(1, 256 // (tile_k * element_size(b_datatype)))
@@ -971,6 +977,7 @@ def is_tile_config_valid(
         b_datatype,
         pipeline,
         gpu_target,
+        _uses_gfx1250_gemm_pipeline(pipeline, kernel_name_prefix),
     )
     if not lds_valid:
         logging.debug(f"LDS validation failed: {lds_error}")

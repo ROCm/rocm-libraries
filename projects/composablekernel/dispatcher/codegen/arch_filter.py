@@ -844,26 +844,22 @@ class ArchFilter:
 
         matrix_a_size = config.tile_m * config.tile_k * elem_size_a
         matrix_b_size = config.tile_n * config.tile_k * elem_size_b_staged
-        is_gfx1250_tdm = (
-            config.pipeline in TDM_PIPELINES and self.gpu_arch.split(":")[0] == TDM_ARCH
+        is_gfx1250 = self.gpu_arch.split(":")[0] == TDM_ARCH
+        is_gfx1250_tdm = is_gfx1250 and config.pipeline in TDM_PIPELINES
+        uses_gfx1250_base_lds = is_gfx1250_tdm or (
+            is_gfx1250
+            and config.pipeline == "comp_async"
+            and config.operator == OperatorType.GEMM
         )
-        if is_gfx1250_tdm:
-            # TDM uses non-transposed LDS descriptors: each group of rows
-            # spanning at least 256 bytes is followed by 16 padding bytes
-            # (same accounting as the Tile Engine validate_lds_capacity).
+        if uses_gfx1250_base_lds:
+            # TDM and non-MX comp_async use the gfx1250 non-transposed base LDS
+            # descriptors: each group of rows spanning at least 256 bytes is
+            # followed by 16 padding bytes (same accounting as the Tile Engine
+            # validate_lds_capacity).
             a_lds_layer = max(1, 256 // (config.tile_k * elem_size_a))
             b_lds_layer = max(1, 256 // (config.tile_k * elem_size_b))
             matrix_a_size += max(0, config.tile_m // a_lds_layer - 1) * 16
             matrix_b_size += max(0, config.tile_n // b_lds_layer - 1) * 16
-        elif (
-            config.pipeline == "comp_async"
-            and config.operator == OperatorType.GEMM
-            and self.gpu_arch.split(":")[0] == TDM_ARCH
-        ):
-            # The fp8 XOR-swizzled async descriptor separates its two outer
-            # groups by 16 bytes (same accounting as the Tile Engine).
-            matrix_a_size += 16 if config.datatype_a == "fp8" else 0
-            matrix_b_size += 16 if config.datatype_b == "fp8" else 0
         total_lds = matrix_a_size + matrix_b_size
 
         # The budget depends on the target, not just the pipeline: a tile that

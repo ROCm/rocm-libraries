@@ -279,15 +279,17 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
 
     def test_tdm_lds_row_padding(self):
         # 1120x128x64 fp16: A+B = 159744B fits the 163840B double-buffered
-        # budget, but the TDM 16B-per-256B-row-group padding lifts it to
-        # 169696B (Tile Engine validate_lds_capacity accounting).
+        # budget, but the 16B-per-256B-row-group padding of the gfx1250 base
+        # LDS descriptor (TDM and non-MX comp_async) lifts it to 169696B
+        # (Tile Engine validate_lds_capacity accounting).
         tile = dict(tile_m=1120, tile_n=128, tile_k=64)
         self.assertFalse(self._valid(pipeline="comp_tdm", epilogue="tdm", **tile))
-        self.assertTrue(
+        self.assertFalse(
             self._valid(
                 pipeline="comp_async", epilogue="cshuffle", **tile, **self.PADS_TTT
             )
         )
+        self.assertTrue(self._valid(pipeline="compv3", **tile))
 
     def test_tdm_c_tile_fits_lds(self):
         # 512x512 fp16 output = 512KB > 320KB LDS; A+B alone would fit.
@@ -298,11 +300,13 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
     def test_tdm_lds_padding_64x256x256_rejected_by_both_gates(self):
         # fp16 64x256x256: A = 32768B + 1008B pad, B = 131072B + 4080B pad,
         # 168928B > 163840B double-buffered budget. Unpadded A+B (163840B)
-        # would just fit, so only the TDM row padding rejects it -- ArchFilter
-        # and the Tile Engine must agree.
+        # would just fit, so only the row padding rejects it -- ArchFilter
+        # and the Tile Engine must agree. Non-MX comp_async uses the same
+        # descriptor; without this reject it fails to link on gfx1250
+        # (local memory 337856B > 327680B).
         tile = dict(tile_m=64, tile_n=256, tile_k=256)
         self.assertFalse(self._valid(pipeline="comp_tdm", epilogue="tdm", **tile))
-        self.assertTrue(
+        self.assertFalse(
             self._valid(
                 pipeline="comp_async", epilogue="cshuffle", **tile, **self.PADS_TTT
             )
@@ -328,11 +332,30 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
                 tile_m=64, tile_n=256, tile_k=256, pipeline="comp_tdm", **te_args
             )
         )
-        # Control: the same tile without TDM padding is accepted by the TE.
-        self.assertTrue(
+        self.assertFalse(
             te.is_tile_config_valid(
                 tile_m=64, tile_n=256, tile_k=256, pipeline="comp_async", **te_args
             )
+        )
+        # Controls: mx GEMM keeps its own comp_async LDS policy, and other
+        # arches keep the unpadded budget.
+        lds_args = dict(
+            tile_m=64,
+            tile_n=256,
+            tile_k=256,
+            a_datatype="fp16",
+            b_datatype="fp16",
+            pipeline="comp_async",
+            gpu_target="gfx1250",
+        )
+        self.assertTrue(te.validate_lds_capacity(**lds_args)[0])
+        self.assertFalse(
+            te.validate_lds_capacity(**lds_args, gfx1250_gemm_pipeline=True)[0]
+        )
+        gfx950_args = {**lds_args, "gpu_target": "gfx950"}
+        self.assertEqual(
+            te.validate_lds_capacity(**gfx950_args),
+            te.validate_lds_capacity(**gfx950_args, gfx1250_gemm_pipeline=True),
         )
 
     def test_comp_async_not_gated_for_grouped_conv(self):
