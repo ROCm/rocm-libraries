@@ -310,10 +310,6 @@ pipeline {
             defaultValue: true,
             description: "")
         booleanParam(
-            name: "RUN_HIP_TIDY",
-            defaultValue: true,
-            description: "Control the Hip Tidy (clang-analyze) stage in Full Tests")
-        booleanParam(
             name: "TARGET_NOGPU",
             defaultValue: true,
             description: "")

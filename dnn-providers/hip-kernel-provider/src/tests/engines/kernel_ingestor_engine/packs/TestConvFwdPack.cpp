@@ -26,6 +26,8 @@
 
 #include "PackedKernelSource.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
+// Pointwise too: the cases below assert each engine refuses the other's graph.
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**

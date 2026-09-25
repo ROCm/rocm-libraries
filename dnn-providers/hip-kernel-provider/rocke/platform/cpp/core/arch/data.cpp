@@ -3,11 +3,10 @@
 /*
  * arch_target_arch_target_data.c -- bucket 0 of the C99 port of
  * rocke.core.arch.target: the frozen SSOT data, the lane-coord IR emitters,
- * the dtype-normalisation core, and the shared lookup tables/helpers declared in
+ * and the shared lookup tables/helpers declared in
  * rocke/arch_target_internal.h.
  *
  * This file is a faithful, byte-identical translation of:
- *   - normalize_dtype() / _DTYPE_ALIASES                  -> rocke_normalize_dtype
  *   - the _mfma / _wmma lane-coord closures                -> static rocke_lane_coord_fn
  *   - LayoutMap.coord                                      -> rocke_layout_map_coord
  *   - _MMA_FRAGMENT_INFO + _build_mma_op (precomputed)     -> per-op_id static
@@ -28,135 +27,6 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-
-/* =========================================================================
- * dtype normalisation core (shared by both buckets)
- * =========================================================================
- *
- * Mirrors target.py::normalize_dtype: strip + lower(name), then
- * _DTYPE_ALIASES.get(key, key). The canonical RHS values are interned static
- * strings; unknown spellings pass through as the lowercased text in `lowered`.
- */
-
-typedef struct rocke_ati_dtype_alias
-{
-    const char* alias; /* lowercased key */
-    const char* canonical; /* interned canonical value */
-} rocke_ati_dtype_alias_t;
-
-/* Byte-for-byte the _DTYPE_ALIASES map (insertion order is irrelevant: lookup is
- * by exact lowercased key). */
-static const rocke_ati_dtype_alias_t k_dtype_aliases[] = {
-    {"f16", "fp16"},
-    {"half", "fp16"},
-    {"fp16", "fp16"},
-    {"bf16", "bf16"},
-    {"bfloat16", "bf16"},
-    {"f32", "fp32"},
-    {"float", "fp32"},
-    {"fp32", "fp32"},
-    {"fp8", "fp8e4m3"},
-    {"fp8e4m3", "fp8e4m3"},
-    {"bf8", "bf8e5m2"},
-    {"bf8e5m2", "bf8e5m2"},
-    {"iu8", "iu8"},
-    {"iu4", "iu4"},
-    {"i8", "i8"},
-    {"int8", "i8"},
-    {"i4", "i4"},
-    {"int4", "i4"},
-    {"i32", ROCKE_DTYPE_I32},
-    {"int32", ROCKE_DTYPE_I32},
-};
-#define K_NUM_DTYPE_ALIASES ((int)(sizeof(k_dtype_aliases) / sizeof(k_dtype_aliases[0])))
-
-/* str.strip(): Python strips ASCII whitespace from both ends. */
-static int rocke_ati_is_ws(char c)
-{
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
-const char* rocke_ati_normalize_dtype(const char* name, char* lowered, size_t cap)
-{
-    int i;
-    size_t n;
-    const char* start;
-    const char* end;
-
-    if(name == NULL)
-    {
-        /* Python would raise on None.strip(); the C contract requires a result.
-         * Treat as empty string (no alias match, passes through as ""). */
-        if(lowered != NULL && cap > 0)
-        {
-            lowered[0] = '\0';
-        }
-        return (lowered != NULL && cap > 0) ? lowered : "";
-    }
-
-    /* strip(): advance over leading/trailing whitespace */
-    start = name;
-    while(*start != '\0' && rocke_ati_is_ws(*start))
-    {
-        start++;
-    }
-    end = start + strlen(start);
-    while(end > start && rocke_ati_is_ws(end[-1]))
-    {
-        end--;
-    }
-
-    /* lower() into the caller buffer (the pass-through result) */
-    n = (size_t)(end - start);
-    if(lowered == NULL || cap == 0)
-    {
-        /* No scratch: caller guarantees a known spelling. Build a small inline
-         * copy on a fixed buffer to look up; if unknown we have nowhere to
-         * return it, so fall back to "". */
-        static char tmp[64];
-        size_t m = n < sizeof(tmp) - 1 ? n : sizeof(tmp) - 1;
-        for(i = 0; (size_t)i < m; i++)
-        {
-            char c = start[i];
-            tmp[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-        }
-        tmp[m] = '\0';
-        for(i = 0; i < K_NUM_DTYPE_ALIASES; i++)
-        {
-            if(strcmp(tmp, k_dtype_aliases[i].alias) == 0)
-            {
-                return k_dtype_aliases[i].canonical;
-            }
-        }
-        return "";
-    }
-
-    if(n > cap - 1)
-    {
-        n = cap - 1;
-    }
-    for(i = 0; (size_t)i < n; i++)
-    {
-        char c = start[i];
-        lowered[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-    }
-    lowered[n] = '\0';
-
-    /* _DTYPE_ALIASES.get(key, key) */
-    for(i = 0; i < K_NUM_DTYPE_ALIASES; i++)
-    {
-        if(strcmp(lowered, k_dtype_aliases[i].alias) == 0)
-        {
-            return k_dtype_aliases[i].canonical;
-        }
-    }
-    return lowered;
-}
-
-const char* rocke_normalize_dtype(const char* name, char* scratch, size_t scratch_cap)
-{
-    return rocke_ati_normalize_dtype(name, scratch, scratch_cap);
-}
 
 /* =========================================================================
  * lane-coord emitters (static rocke_lane_coord_fn)
@@ -736,9 +606,11 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
     {
         if(b != NULL)
         {
-            const char* role_txt = (m->role == ROCKE_MMA_ROLE_ACC) ? "acc"
-                                   : (m->role == ROCKE_MMA_ROLE_A) ? "a"
-                                                                   : "b";
+            const char* role_txt = (m->role == ROCKE_MMA_ROLE_ACC)       ? "acc"
+                                   : (m->role == ROCKE_MMA_ROLE_A)       ? "a"
+                                   : (m->role == ROCKE_MMA_ROLE_B)       ? "b"
+                                   : (m->role == ROCKE_MMA_ROLE_A_SCALE) ? "a_scale"
+                                                                         : "b_scale";
             b->status = ROCKE_ERR_VALUE;
             snprintf(b->err,
                      ROCKE_ERR_MSG_CAP,
@@ -757,6 +629,39 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
     return true;
 }
 
+/* Scale slots describe logical K groups; both half-waves duplicate them. */
+static void _wmma_gfx1250_a_scale(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  int slot,
+                                  rocke_value_t** out0,
+                                  rocke_value_t** out1)
+{
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+    rocke_value_t* row = rocke_b_mod(b, lane, c16);
+    rocke_value_t* group = rocke_b_const_i32(b, slot);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = group;
+}
+
+static void _wmma_gfx1250_b_scale(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  int slot,
+                                  rocke_value_t** out0,
+                                  rocke_value_t** out1)
+{
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+    rocke_value_t* col = rocke_b_mod(b, lane, c16);
+    rocke_value_t* group = rocke_b_const_i32(b, slot);
+    if(out0)
+        *out0 = group;
+    if(out1)
+        *out1 = col;
+}
+
 /* =========================================================================
  * Per-op_id LayoutMap statics (the precomputed _build_mma_op output)
  * =========================================================================
@@ -771,6 +676,15 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
  * Naming: lm_<opidkey>_{a,b,c}. Only op_ids with at least one verified map need a
  * struct; the rest carry NULL layout pointers in the catalog directly.
  */
+
+static const rocke_layout_map_t lm_wmma_scale_k32_a
+    = {ROCKE_MMA_ROLE_A_SCALE, 4, 32, _wmma_gfx1250_a_scale};
+static const rocke_layout_map_t lm_wmma_scale_k32_b
+    = {ROCKE_MMA_ROLE_B_SCALE, 4, 32, _wmma_gfx1250_b_scale};
+static const rocke_layout_map_t lm_wmma_scale_k16_a
+    = {ROCKE_MMA_ROLE_A_SCALE, 8, 32, _wmma_gfx1250_a_scale};
+static const rocke_layout_map_t lm_wmma_scale_k16_b
+    = {ROCKE_MMA_ROLE_B_SCALE, 8, 32, _wmma_gfx1250_b_scale};
 
 /* --- mfma_f32_16x16x16_f16 / _bf16: a/b/c all present (frag 4/4/4, wave64) --- */
 static const rocke_layout_map_t lm_mfma_16x16x16_a = {ROCKE_MMA_ROLE_A, 4, 64, _mfma_a_16x16};
@@ -1017,8 +931,10 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x64_fp8_bf8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
-    {"wmma_scale_f32_16x16x128_fp8_fp8", 8},
-    {"wmma_scale16_f32_16x16x128_fp8_fp8", 8},
+    {"wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32", 8},
+    {"wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32", 8},
+    {"wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16", 8},
+    {"wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16", 8},
 };
 
 int rocke_arch_mma_c_frag_len(const char* op_id)
@@ -1045,15 +961,14 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  *
  * Frag lengths come from _MMA_FRAGMENT_INFO[op_id]; op_ids absent from that
  * table carry (0,0,0,64) and NULL maps. dtype fields hold the normalised
- * (canonical) catalog keys (interned strings from k_dtype_aliases), exactly as
+ * (canonical) catalog keys from rocke_normalize_dtype, exactly as
  * normalize_dtype(o["a"/"b"/"c"]) would produce.
  *
  * Field order of rocke_mma_op_t:
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
  *
- * NOTE: fp4/fp6 dtypes are not in _DTYPE_ALIASES, so normalize_dtype passes them
- * through as the lowercased spelling "fp4"/"fp6" (Python identity fallthrough).
+ * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
  */
 
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */
@@ -1489,11 +1404,11 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      &lm_mfma_32x32x16_a,
      &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
-    /* fp4/fp6 pass through normalize_dtype unchanged; op_ids carry frag lengths
+    /* Low-bit catalog keys use exponent/mantissa names; op_ids carry frag lengths
      * only (no verified maps), per _MMA_FRAGMENT_INFO. */
     {"mma",
-     "fp4",
-     "fp4",
+     "fp4e2m1",
+     "fp4e2m1",
      "fp32",
      16,
      16,
@@ -1507,8 +1422,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      NULL,
      NULL},
     {"mma",
-     "fp6",
-     "fp6",
+     "fp6e2m3",
+     "fp6e2m3",
      "fp32",
      16,
      16,
@@ -1742,95 +1657,153 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      &lm_wmma_gfx1250_32_b,
      &lm_wmma_gfx12_c},
     {"wmma",
-     "fp8",
-     "fp8",
+     "fp8e4m3",
+     "fp8e4m3",
      "fp32",
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_fp8_fp8",
-     32,
-     32,
+     8,
+     8,
      8,
      32,
      NULL,
      NULL,
      &lm_wmma_gfx12_c},
     {"wmma",
-     "fp8",
-     "bf8",
+     "fp8e4m3",
+     "bf8e5m2",
      "fp32",
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_fp8_bf8",
-     32,
-     32,
+     8,
+     8,
      8,
      32,
      NULL,
      NULL,
      &lm_wmma_gfx12_c},
     {"wmma",
-     "bf8",
-     "fp8",
+     "bf8e5m2",
+     "fp8e4m3",
      "fp32",
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_bf8_fp8",
-     32,
-     32,
+     8,
+     8,
      8,
      32,
      NULL,
      NULL,
      &lm_wmma_gfx12_c},
     {"wmma",
-     "bf8",
-     "bf8",
+     "bf8e5m2",
+     "bf8e5m2",
      "fp32",
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_bf8_bf8",
-     32,
-     32,
+     8,
+     8,
      8,
      32,
      NULL,
      NULL,
      &lm_wmma_gfx12_c},
-    {"wmma_scale",
-     "fp8",
-     "fp8",
+    {"wmma_scaled",
+     "fp8e4m3",
+     "fp8e4m3",
      "fp32",
      16,
      16,
      128,
-     "wmma_scale_f32_16x16x128_fp8_fp8",
+     "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32",
      16,
      16,
      8,
      32,
      NULL,
      NULL,
-     &lm_wmma_gfx12_c},
-    {"wmma_scale16",
-     "fp8",
-     "fp8",
+     &lm_wmma_gfx12_c,
+     "e8m0",
+     "e8m0",
+     ROCKE_MMA_SCALE_K32,
+     4,
+     4,
+     &lm_wmma_scale_k32_a,
+     &lm_wmma_scale_k32_b},
+    {"wmma_scaled",
+     "bf8e5m2",
+     "bf8e5m2",
      "fp32",
      16,
      16,
      128,
-     "wmma_scale16_f32_16x16x128_fp8_fp8",
+     "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32",
      16,
      16,
      8,
      32,
      NULL,
      NULL,
-     &lm_wmma_gfx12_c},
+     &lm_wmma_gfx12_c,
+     "e8m0",
+     "e8m0",
+     ROCKE_MMA_SCALE_K32,
+     4,
+     4,
+     &lm_wmma_scale_k32_a,
+     &lm_wmma_scale_k32_b},
+    {"wmma_scaled",
+     "fp8e4m3",
+     "fp8e4m3",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16",
+     16,
+     16,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c,
+     "e8m0",
+     "e8m0",
+     ROCKE_MMA_SCALE_K16,
+     8,
+     8,
+     &lm_wmma_scale_k16_a,
+     &lm_wmma_scale_k16_b},
+    {"wmma_scaled",
+     "bf8e5m2",
+     "bf8e5m2",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16",
+     16,
+     16,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c,
+     "e8m0",
+     "e8m0",
+     ROCKE_MMA_SCALE_K16,
+     8,
+     8,
+     &lm_wmma_scale_k16_a,
+     &lm_wmma_scale_k16_b},
 };
 
 /* =========================================================================

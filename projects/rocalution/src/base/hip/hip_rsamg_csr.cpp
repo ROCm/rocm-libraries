@@ -1241,6 +1241,12 @@ namespace rocalution
         free_hip(&d_max_hash);
         free_hip(&rocprim_buffer);
 
+        // LDS capacity check
+        if(max_hash_fill >= 4096)
+        {
+            return false;
+        }
+
         // Exclusive sum to obtain row offset pointers of P
         // P contains only nnz per row, so far
         DISCARD_HIP_ERROR(
@@ -1399,24 +1405,6 @@ namespace rocalution
             {
                 DISPATCH_EXTPI_INTERP_FILL(global, 64, 64, 4096);
             }
-        }
-        else
-        {
-            // More nnz per row will not fit into LDS
-            // Fall back to host
-            cast_glo->Clear();
-
-            free_hip(&cast_pi->mat_.col);
-            free_hip(&cast_pi->mat_.val);
-            free_hip(&cast_pg->mat_.col);
-            free_hip(&cast_pg->mat_.val);
-
-            cast_pi->nnz_  = 0;
-            cast_pg->nnz_  = 0;
-            cast_pi->ncol_ = 0;
-            cast_pg->ncol_ = 0;
-
-            return false;
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 

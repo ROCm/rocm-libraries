@@ -132,6 +132,7 @@ Each operation suite follows a consistent pattern:
 - **`type_dispatch.hpp`** — maps runtime `Arguments` types to template instantiations.
 - **`RocBLAS_Test<>` (CRTP)** — provides `type_filter_functor`, `function_filter`, and `name_suffix` for parameterized test names.
 - **`TEST_P` + `INSTANTIATE_TEST_CATEGORIES`** — registers tests across YAML categories.
+- **Dispatch macro in `TEST_P`** — choose `RUN_TEST_ON_THREADS_STREAMS` vs `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES` based on YAML (see [Test dispatch](#test-dispatch-threads-streams-multi-gpu-hmm) below). YAML `threads` / `streams` / `devices` / `HMM` do **not** fan out from `testing_*.hpp` itself.
 
 **YAML global filters (`gpu_arch`, `os_flags`).** Optional per-test fields in `*_gtest.yaml` restrict which GPU architectures and host OSes instantiate a case. They are **not** interpreted by `rocblas_gentest.py`; they are applied at gtest instantiation through `rocblas_client_global_filters()` in `rocblas_test.cpp`.
 
@@ -147,6 +148,21 @@ For these fields to take effect, the suite must follow the standard `RocBLAS_Tes
 
 Test names encode category, function, precision, and parameters so `--gtest_filter` can target subsets (for example `*quick*gemm*f32_r*`).
 
+### Test dispatch (threads, streams, multi-GPU, HMM)
+
+YAML can request extra devices, host threads, extra streams, or HMM allocations. Those fields are only acted on if the **`TEST_P` in `*_gtest.cpp`** wraps the harness with `RUN_TEST_ON_THREADS_STREAMS` (`rocblas_test.hpp`). The `testing_*.hpp` function still runs **once per launch** (allocate, call rocBLAS, verify). It does not iterate GPUs or threads.
+
+| `TEST_P` wrapper | What YAML can do | Typical use |
+|------------------|------------------|-------------|
+| `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(...)` | Single current HIP device, one invocation. Asserts unless `threads <= 1`, (`devices <= 1` or harness-owned GPU loop: `repeatability_check` / `multiheaded`), and `HMM` is false. | Default for most BLAS2/3 suites |
+| `RUN_TEST_ON_THREADS_STREAMS(...)` | Honors `devices` (multi-GPU loop + skip if too few GPUs), `streams` (stream pool), `threads` (host thread pool + OpenMP manager), and `HMM` (skip if `hipDeviceAttributeManagedMemory` is false on those devices). | BLAS1 suites (`axpy_gtest.cpp` and friends), GEMM, and any suite with `category: multi_gpu`, `threads:`, or `HMM: true` |
+
+Defaults in `rocblas_common.yaml` are `threads: 0`, `streams: 0`, `devices: 0`. `RUN_TEST_ON_THREADS_STREAMS` treats `0` as `1` (one device / one stream / one thread). Set `devices: 4` or `devices: [0, 2, 4]` only when that `TEST_P` uses `RUN_TEST_ON_THREADS_STREAMS`; otherwise the extra YAML cases still instantiate as Google Tests but never switch devices.
+
+**Do not add `category: multi_gpu`, `HMM: true`, or non-zero `threads` / `devices` YAML to a function whose `TEST_P` still uses `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES`.** That wrapper now asserts on those fields. Change the matching `TEST_P` first (see `tpmv` vs `tpmv_batched` in `clients/gtest/blas2/tpmv_gtest.cpp`: only the non-batched suite was switched). Batched and strided-batched variants need the same change if those YAML entries should fan out or skip unsupported HMM devices.
+
+`testing_*.hpp` still must pass `arg.HMM` into `device_vector` / `device_matrix` constructors if the YAML sets `HMM: true`; the dispatch macro only skips unsupported GPUs.
+
 ### YAML categories
 
 Each test entry includes a `category`:
@@ -157,6 +173,8 @@ Each test entry includes a `category`:
 | `pre_checkin` | PR validation breadth |
 | `nightly` | Extended breadth to larger problems |
 | `stress` | Large allocations / edge cases; may need `ROCBLAS_CLIENT_RAM_GB_LIMIT` |
+| `multi_gpu` | Repeat the case across `devices`; requires `RUN_TEST_ON_THREADS_STREAMS` |
+| `HMM` | Managed-memory allocations (`HMM: true`); requires `RUN_TEST_ON_THREADS_STREAMS` plus HMM constructors in `testing_*.hpp` |
 | `known_bug` | Tracked failures; excluded from normal runs via `-*known_bug*` |
 
 Entries matching `known_bugs.yaml` are automatically reclassified. Suite YAML files `include` each other and `rocblas_common.yaml`; the root `rocblas_gtest.yaml` aggregates all suites for code generation.
@@ -169,7 +187,8 @@ Entries matching `known_bugs.yaml` are automatically reclassified. Suite YAML fi
 | `ROCBLAS_CHECK_ERROR` | rocBLAS success |
 | `EXPECT_ROCBLAS_STATUS` | Expected error status |
 | `UNIT_CHECK` / `NEAR_CHECK` | Numerical comparison vs reference |
-| `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES` | Prevent SIGSEGV from aborting entire run |
+| `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES` | Single-device run; catch SIGSEGV as a gtest failure |
+| `RUN_TEST_ON_THREADS_STREAMS` | Same signal catch, plus YAML `threads` / `streams` / `devices` / `HMM` skip |
 
 ## Running tests
 
@@ -311,7 +330,7 @@ Performance YAML lives under `scripts/performance/`. HPA and mixed-precision GEM
 ## Adding tests (summary)
 
 1. Add `clients/include/.../testing_<fn>.hpp` harness.
-2. Add `clients/gtest/<fn>_gtest.cpp` with `RocBLAS_Test<>` dispatch, `type_filter()` via `type_filter_functor`, and `INSTANTIATE_TEST_CATEGORIES`.
+2. Add `clients/gtest/<fn>_gtest.cpp` with `RocBLAS_Test<>` dispatch, `type_filter()` via `type_filter_functor`, and `INSTANTIATE_TEST_CATEGORIES`. Use `RUN_TEST_ON_THREADS_STREAMS` in `TEST_P` if the YAML will set `threads`, `streams`, `devices`, `category: multi_gpu`, or `HMM: true`; otherwise `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES` is enough.
 3. Add `clients/gtest/<fn>_gtest.yaml` parameter matrix.
 4. Include YAML in `rocblas_gtest.yaml` and list it in `clients/gtest/CMakeLists.txt` dependencies for `rocblas_gtest.data`.
 5. Add the `.cpp` to the `rocblas-test` source list in CMake.

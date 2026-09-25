@@ -314,6 +314,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_csc_set_strided_batch`          |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_ell_set_strided_batch`          |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_get_attribute`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_set_attribute`            |
@@ -366,6 +368,7 @@ Function name                                     single double single complex d
 :cpp:func:`rocsparse_Xgthrz() <rocsparse_sgthrz>` x      x      x              x
 :cpp:func:`rocsparse_Xroti() <rocsparse_sroti>`   x      x
 :cpp:func:`rocsparse_Xsctr() <rocsparse_ssctr>`   x      x      x              x
+:cpp:func:`rocsparse_isctr`
 ================================================= ====== ====== ============== ==============
 
 Sparse level 2 functions
@@ -462,6 +465,8 @@ Function name                                                                   
 :cpp:func:`rocsparse_Xbsrilu0_analysis() <rocsparse_sbsrilu0_analysis>`                                               x      x      x              x
 :cpp:func:`rocsparse_bsrilu0_zero_pivot`
 :cpp:func:`rocsparse_Xbsrilu0_numeric_boost() <rocsparse_sbsrilu0_numeric_boost>`                                     x      x      x              x
+:cpp:func:`rocsparse_dsbsrilu0_numeric_boost`
+:cpp:func:`rocsparse_dcbsrilu0_numeric_boost`
 :cpp:func:`rocsparse_bsrilu0_clear`
 :cpp:func:`rocsparse_Xbsrilu0() <rocsparse_sbsrilu0>`                                                                 x      x      x              x
 :cpp:func:`rocsparse_Xcsric0_buffer_size() <rocsparse_scsric0_buffer_size>`                                           x      x      x              x
@@ -474,6 +479,8 @@ Function name                                                                   
 :cpp:func:`rocsparse_Xcsric0() <rocsparse_scsric0>`                                                                   x      x      x              x
 :cpp:func:`rocsparse_Xcsrilu0_buffer_size() <rocsparse_scsrilu0_buffer_size>`                                         x      x      x              x
 :cpp:func:`rocsparse_Xcsrilu0_numeric_boost() <rocsparse_scsrilu0_numeric_boost>`                                     x      x      x              x
+:cpp:func:`rocsparse_dscsrilu0_numeric_boost`
+:cpp:func:`rocsparse_dccsrilu0_numeric_boost`
 :cpp:func:`rocsparse_Xcsrilu0_analysis() <rocsparse_scsrilu0_analysis>`                                               x      x      x              x
 :cpp:func:`rocsparse_csrilu0_zero_pivot`
 :cpp:func:`rocsparse_csrilu0_singular_pivot`

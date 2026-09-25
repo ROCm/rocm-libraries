@@ -8,6 +8,8 @@ Documentation for rocFFT is available at
 ### Resolved issues
 
 * Fixed possible failures of `rocfft_plan_create` for multi-device plans.
+* Fixed out-of-bounds memory access when executing a multi-device complex-to-complex plan whose
+  bricks used non-contiguous data layouts.
 
 ## rocFFT 1.0.40 for ROCm 10.1
 
