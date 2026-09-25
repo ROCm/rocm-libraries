@@ -45,6 +45,15 @@ def _write_variant(tmp_path, name, overrides):
 
     cfg = copy.deepcopy(LibraryIO.read(_BASE))
     fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
+    # The fixture now uses canonical selectors. Translate legacy test
+    # overrides before merging so a conflict cannot masquerade as a cluster
+    # rejection (and the unclustered controls exercise real derivation).
+    overrides = dict(overrides)
+    if "StreamK" in overrides:
+        mode = overrides.pop("StreamK")[0]
+        force = overrides.pop("StreamKForceDPOnly", [0])[0]
+        overrides["TileProcessingStrategy"] = ["DataParallel" if force else "StreamK"]
+        overrides["WorkAssignment"] = [{3: "StaticGrid", 4: "DynamicWorkQueue", 5: "Hybrid"}[mode]]
     for key, val in overrides.items():
         replaced = False
         for entry in fork:

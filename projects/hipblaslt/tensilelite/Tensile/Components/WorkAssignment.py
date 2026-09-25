@@ -706,7 +706,18 @@ class StaticGrid(WorkAssignment):
         # cluster remap WorkGroup0 = cluster*Cs + peerX and WorkGroup1 = peerY. Fold
         # them into the cluster-block rank the DataParallel decode expects:
         #   rank = cluster*(Cs*Ck) + peerY*Cs + peerX
-        if persistentSpatialCluster(kernel):
+        if kernel.get("StreamKClusterMulticast", False):
+            cs = kernel["ClusterDim"][0]
+            with writer.allocTmpSgpr(1, tag="ClusterPeer") as tmp:
+                module.add(SAndB32(dst=sgpr("StreamKClusterPeer"), src0=sgpr("WorkGroup0"), src1=cs - 1,
+                                   comment="cluster peerX"))
+                module.add(SLShiftLeftB32(dst=sgpr(tmp.idx), src=sgpr("WorkGroup1"), shiftHex=log2(cs),
+                                          comment="cluster peerY * Cs"))
+                module.add(SAddU32(dst=sgpr("StreamKClusterPeer"), src0=sgpr("StreamKClusterPeer"), src1=sgpr(tmp.idx),
+                                   comment="physical peer = peerY * Cs + peerX"))
+                module.add(SLShiftRightB32(dst=sgpr("WorkGroup0"), src=sgpr("WorkGroup0"), shiftHex=log2(cs),
+                                           comment="logical StreamK worker = hardware cluster"))
+        elif persistentSpatialCluster(kernel):
             cs, ck = kernel["ClusterDim"]
             with writer.allocTmpSgpr(1, tag="ClusterDPFold") as tRes:
                 t0 = tRes.idx
@@ -733,10 +744,10 @@ class StaticGrid(WorkAssignment):
         # Cluster multicast: arrive once per workgroup at the cluster split barrier
         # here in the prologue, before the first tensor_load_to_lds, so it pairs
         # the cluster-barrier pass's first-load wait. Every later tile's wait pairs
-        # the arrive at the persistent loop close.
-        if persistentSpatialCluster(kernel):
+        # the arrive at the persistent loop close. ABI2 validates the logical
+        # worker's range first, so an idle cluster never signals a barrier.
+        if persistentSpatialCluster(kernel) and not kernel.get("StreamKClusterMulticast", False):
             module.add(self.persistentMulticastPrologueSignal(writer, kernel))
-
 
         if partition.tile_units:
             module.add(processing.computeTotalTiles(writer, kernel, partition.bound))
@@ -744,6 +755,8 @@ class StaticGrid(WorkAssignment):
             module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
         else:
             module.add(processing.initializePartition(writer, kernel))
+        if kernel.get("StreamKClusterMulticast", False):
+            module.add(self.persistentMulticastPrologueSignal(writer, kernel))
         return module
 
     def activateReservedOrAcquire(self, writer, kernel, processing, tPA, tPB):

@@ -243,11 +243,11 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     policy = resolve_policy(result)
     result["WorkAssignment"] = policy.assignment.value
     result["_PersistentLoop"] = policy.persistent
-    for option in ("StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK"):
+    for option in ("StreamKAtomic", "StreamKFixupTreeReduction", "StreamKClusterMulticast", "DebugStreamK"):
         if not policy.stream_k:
             if not legacy and option in explicit and result.get(option, 0):
                 raise UnsupportedExecutionPolicy(f"{option} requires TileProcessingStrategy=StreamK")
-            result[option] = 0
+            result[option] = False if option == "StreamKClusterMulticast" else 0
     if result.get("WorkQueueStealing", 0) and (not policy.stream_k or policy.assignment.value == "StaticGrid"):
         if not legacy or policy.persistent:
             raise UnsupportedExecutionPolicy("WorkQueueStealing requires StreamK with DynamicWorkQueue or Hybrid")
@@ -261,7 +261,7 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     support = dict(result.get("InternalSupportParams", {}))
     version = support.get("PersistentLoopArgsVersion", 0)
     outer_version = support.get("KernArgsVersion", 3)
-    if type(version) is not int or version not in (0, 1):
+    if type(version) is not int or version not in (0, 1, 2):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
@@ -274,14 +274,24 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
         # it below, while preserving explicit and prebuilt layout contracts.
         if not regenerate or handwritten or "InternalSupportParams" in explicit:
             raise ValueError("PersistentLoopArgsVersion=1 requires DataParallel/StaticGrid")
+    cluster_stream_k = bool(result.get("StreamKClusterMulticast", False))
+    if cluster_stream_k and (not policy.stream_k or policy.assignment != WorkAssignment.STATIC_GRID):
+        raise UnsupportedExecutionPolicy("StreamKClusterMulticast requires StreamK/StaticGrid")
+    if version == 2 and not cluster_stream_k:
+        if not regenerate or handwritten or "InternalSupportParams" in explicit:
+            raise ValueError("PersistentLoopArgsVersion=2 requires StreamKClusterMulticast")
+    if cluster_stream_k and (not regenerate or handwritten) and version != 2:
+        raise ValueError("StreamKClusterMulticast requires PersistentLoopArgsVersion=2")
+    if version == 2 and outer_version != 3 and (not regenerate or handwritten):
+        raise ValueError("PersistentLoopArgsVersion=2 requires KernArgsVersion=3")
     if version == 1 and outer_version != 3 and (not regenerate or handwritten):
         raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
     if regenerate and not handwritten:
         # DataParallel tile traversal and its argument layout are
         # generator capabilities. Regenerating known older logic upgrades both;
         # handwritten/prebuilt artifacts retain the layout they declare.
-        support["PersistentLoopArgsVersion"] = 1 if policy.data_parallel else 0
-        if policy.data_parallel:
+        support["PersistentLoopArgsVersion"] = 2 if cluster_stream_k else 1 if policy.data_parallel else 0
+        if policy.data_parallel or cluster_stream_k:
             support["KernArgsVersion"] = 3
     if regenerate and (legacy or support.get("PersistentLoopArgsVersion", 0) != version
                        or support.get("KernArgsVersion", outer_version) != outer_version):

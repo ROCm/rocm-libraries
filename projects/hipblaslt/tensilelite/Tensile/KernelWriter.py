@@ -7255,6 +7255,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       support = kernel["InternalSupportParams"]
       if support.get("PersistentLoopArgsVersion", 0) != 1 or support["KernArgsVersion"] != 3:
         raise ValueError("DataParallel code generation requires PersistentLoopArgsVersion=1 and KernArgsVersion=3")
+    if kernel.get("StreamKClusterMulticast", False):
+      support = kernel["InternalSupportParams"]
+      if support.get("PersistentLoopArgsVersion", 0) != 2 or support["KernArgsVersion"] != 3:
+        raise ValueError("Clustered StreamK requires PersistentLoopArgsVersion=2 and KernArgsVersion=3")
     self.language   = "ASM"
     # ISA version, such as 803
     version = tuple(kernel["ISA"])

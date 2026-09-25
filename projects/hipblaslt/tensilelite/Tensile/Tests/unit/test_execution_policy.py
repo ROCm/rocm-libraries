@@ -215,7 +215,7 @@ def test_explicit_reduction_controls_require_streamk(strategy, option):
 
 
 
-@pytest.mark.parametrize("version", (-1, 2, False, True, "1"))
+@pytest.mark.parametrize("version", (-1, 3, False, True, "1"))
 def test_unknown_persistent_argument_layout_is_rejected(version):
     with pytest.raises(ValueError, match="Unsupported PersistentLoopArgsVersion"):
         normalize_execution_policy({"TileProcessingStrategy": "DataParallel", "InternalSupportParams": {"PersistentLoopArgsVersion": version}}, regenerate=False)

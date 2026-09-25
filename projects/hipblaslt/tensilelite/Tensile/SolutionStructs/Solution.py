@@ -292,20 +292,35 @@ def _validateStreamKClusterShape(cs, ck):
 
 
 def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
-  """Validate the gfx1250 StreamK cluster cooperative-load (multicast) path.
+  """Validate persistent spatial TDM multicast on gfx1250.
 
-  The cluster co-locates ClusterDim = [Cs, Ck] StreamK workgroups: the Cs
-  M-adjacent peers share the same B over full K and the Ck N-adjacent peers
-  share the same A, so each operand is TDM-multicast across the peers that reuse
-  it. Each cluster walks whole Cs x Ck tile blocks, so sizes that are not a
-  cluster multiple need no build-time check: a peer past the tile edge aliases
-  the edge tile, keeps issuing its multicast loads, and skips the store.
-
-  The path is auto-derived from StreamK=3 + ClusterDim != [1, 1] +
-  StreamKForceDPOnly=1, so the checks below reject an unusable cluster rather
-  than an explicit opt-in. They deliberately do not reach the FDPO=0 SK3
-  cluster (cluster reduction), which develop never constrained.
+  M-adjacent peers share B and N-adjacent peers share A over the same K
+  interval. DataParallel assigns complete blocks; the StreamK opt-in splits
+  block K ranges between logical cluster workers. Boundary peers retain their
+  phantom identity, participate in loads, and suppress every completion path.
+  Ordinary StreamK cluster configurations retain their existing semantics.
   """
+  if state.get("StreamKClusterMulticast", False):
+    constraints = (
+        (isStreamK(state) and hasStaticAssignment(state), "StreamK/StaticGrid"),
+        (state.get("ClusterDim", [1, 1])[0] > 1, "ClusterDim with M extent greater than one"),
+        (not state.get("PrefetchAcrossPersistent", 0), "PrefetchAcrossPersistent=0"),
+        (state.get("PrefetchGlobalRead", 1) in (1, 2), "PrefetchGlobalRead in (1,2)"),
+        (state.get("StreamKFixupTreeReduction", 0) == 1, "StreamKFixupTreeReduction=1"),
+        (not state.get("UseSubtileImpl", 0), "UseSubtileImpl=0"),
+        (list(state.get("ClusterDim", [1, 1])) in ([2, 1], [4, 1], [2, 2], [2, 4]),
+         "ClusterDim in ([2,1], [4,1], [2,2], [2,4])"),
+        (not state.get("ProblemType", {}).get("Sparse", 0), "dense input"),
+        (not state.get("ProblemType", {}).get("OutputAmaxD", False), "OutputAmaxD=False"),
+        (not (state.get("ProblemType", {}).get("Gradient", False)
+              and state.get("ProblemType", {}).get("UseBias", False)), "no bias-gradient reduction"),
+        (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),
+        (not state.get("DebugStreamK", 0), "DebugStreamK=0"),
+    )
+    for supported, requirement in constraints:
+      if not supported:
+        reject(state, printRejectionReason, "StreamKClusterMulticast requires " + requirement)
+        return False
   if not streamKCluster(state):
     return True
 
@@ -2047,7 +2062,7 @@ class Solution(collections.abc.Mapping):
     # runtime selector". It is fully derived here, overriding whatever the
     # solution YAML said, because only the generator knows what it just emitted.
     state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
-        _supportStreamKPerTileExtraIters(state)
+        (_supportStreamKPerTileExtraIters(state) and not state.get("StreamKClusterMulticast", False))
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
@@ -2072,7 +2087,7 @@ class Solution(collections.abc.Mapping):
         # WorkGroup0 across work-groups that differ only in Y. A [1, Ck] cluster has
         # no B-sharing X peers at all and is not a multicast shape.
         if state["ClusterDim"][1] != 1 and not (streamK2DCluster(state)
-                                                and isDataParallel(state)):
+                                                and streamKCluster(state)):
           reject(state, printRejectionReason,
                  "Persistent ClusterDim Y-extent > 1 requires DataParallel "
                  "and a cluster [Cs, Ck] with both axes > 1; got %s"

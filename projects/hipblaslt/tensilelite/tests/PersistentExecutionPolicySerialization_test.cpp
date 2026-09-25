@@ -695,4 +695,34 @@ namespace
         auto grid              = emittedDescriptor.at("grid").as<std::vector<std::string>>();
         EXPECT_EQ(grid, (std::vector<std::string>{"StreamKWithBatch", "One", "One"}));
     }
+    TEST_F(PersistentExecutionPolicySerializationTest, ClusterStreamKVersionTwoRoundTripsWithoutChangingLegacyDefaults)
+    {
+        canonical(policies[2]);
+        size.erase("streamKClusterMulticast");
+        auto legacy = readSolution();
+        EXPECT_FALSE(legacy->sizeMapping.streamKClusterMulticast);
+        EXPECT_EQ(legacy->internalArgsSupport.persistentLoopArgsVersion, 0);
+        size["streamKClusterMulticast"] = object(true);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 4, 1});
+        internalArgs["persistentLoopArgsVersion"] = object(2);
+        for(int outer : {0, 1, 2})
+        {
+            internalArgs["version"] = object(outer);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        internalArgs["version"] = object(3);
+        auto decoded = readSolution();
+        EXPECT_TRUE(decoded->sizeMapping.streamKClusterMulticast);
+        EXPECT_EQ(decoded->sizeMapping.clusterDim.x, 2u);
+        EXPECT_EQ(decoded->sizeMapping.clusterDim.y, 4u);
+        EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 2);
+        size = output(decoded->sizeMapping);
+        EXPECT_TRUE(size.at("streamKClusterMulticast").as<bool>());
+        internalArgs["persistentLoopArgsVersion"] = object(0);
+        EXPECT_THROW(readSolution(), std::runtime_error);
+        internalArgs["persistentLoopArgsVersion"] = object(2);
+        size["streamKClusterMulticast"] = object(false);
+        EXPECT_THROW(readSolution(), std::runtime_error);
+    }
+
 }

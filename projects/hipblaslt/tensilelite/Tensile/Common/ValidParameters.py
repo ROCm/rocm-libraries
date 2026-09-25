@@ -908,6 +908,8 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Opt in to ABI2: clusters schedule spatial blocks with a common K range.
+    "StreamKClusterMulticast": [False, True],
     # Codegen-time toggle for single-hop next-neighbor work stealing in the
     # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
     # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue

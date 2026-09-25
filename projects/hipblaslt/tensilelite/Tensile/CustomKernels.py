@@ -311,8 +311,10 @@ _HEADER_SEMANTIC_ORDER = {
 def validateCustomPersistentArgs(kernelConfig):
     """Require an argument descriptor for DataParallel argument layout version 1."""
     version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
-    if type(version) is not int or version not in (0, 1):
+    if type(version) is not int or version not in (0, 1, 2):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
+    if version == 2:
+        raise ValueError("Custom kernels do not yet support clustered StreamK argument layout version 2")
     outer_version = kernelConfig.get("InternalSupportParams", {}).get("KernArgsVersion", 3)
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")

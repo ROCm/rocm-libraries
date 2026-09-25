@@ -371,14 +371,14 @@ def isPow2(n):
     return n > 0 and (n & (n - 1)) == 0
 
 def persistentSpatialCluster(d):
-    """Whether DataParallel uses the spatial M/N cluster launch geometry.
+    """Whether persistent workers use spatial M/N cluster geometry.
 
-    Only this full-tile path folds hardware coordinates into tile IDs and
-    removes padded peers before the cooperative-load cluster barrier.
+    DataParallel traverses padded peer tiles; opted-in StreamK partitions
+    spatial blocks in K, with a separate peer identity for output and fixup.
     """
     return (hasStaticAssignment(d)
             and d.get("ClusterDim", [1, 1])[0] > 1
-            and bool(isDataParallel(d)))
+            and (isDataParallel(d) or bool(d.get("StreamKClusterMulticast", False))))
 
 def persistentMulticast(d):
     """True when ``persistentSpatialCluster`` also issues TDM-multicast loads.
