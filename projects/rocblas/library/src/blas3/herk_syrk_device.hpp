@@ -1341,7 +1341,7 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
 
     auto* C = load_ptr_batch(d_C, abs_batch, 0, stride_C);
 
-    // Index W_C by the local batch — the workspace holds exactly chunk_size
+    // Index W_C by the local batch - the workspace holds exactly chunk_size
     // triangle slots starting at W_C[0].
     T* W_C_batch = W_C + ((int64_t(n) * (n - 1)) / 2) * local_batch;
 
