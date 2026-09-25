@@ -1,8 +1,7 @@
 # Cotenant benchmarking
 
-Run `hipblaslt-bench` (or any command) while a fixed number of CUs are occupied
-by a background "cotenant" kernel, to measure GEMM performance under CU
-contention.
+Run `hipblaslt-bench` (or any command) with LDS contention from a background
+"cotenant" kernel.
 
 Linux only: the kernel uses POSIX APIs (`unistd.h`, `pause()`, `usleep()`,
 `getpid()`) and is not built or installed on Windows.
@@ -31,20 +30,27 @@ it fails to start with a `libomp.so` error, export
 
 ## How it works
 
-`hipblaslt-cotenant-kernel` is a persistent, compute-free kernel. It reserves the
-**entire** per-CU LDS as dynamic shared memory for a single block, sized from a
-runtime device query (no per-architecture constants). This does two things at
-once: only one cotenant block fits per CU (so a grid of `N` workgroups occupies
-exactly `N` CUs), and **zero LDS remains** for anything else — so the hardware
-cannot co-schedule a benchmarked-kernel workgroup onto a cotenant-occupied CU
-either. `N` is therefore an exact count of CUs *removed* from the benchmarked
-command, not merely "one competing block per CU".
+`hipblaslt-cotenant-kernel` launches `--cus` persistent, compute-free workgroups.
+By default, each reserves the entire per-CU LDS as dynamic shared memory, so
+each lands on a distinct CU and leaves no LDS for a GEMM workgroup.
 
-Reserving only *half* the LDS still pins the cotenant to one block per CU, but
-leaves ~half the LDS free — enough for a low-LDS kernel (e.g. a shallow-`K` GEMM)
-to co-reside on a cotenant CU and run unaffected, silently under-reporting
-contention. Full-LDS reservation closes that gap; on gfx942/gfx950 it is
-permitted because a single block may take all of the per-CU LDS.
+`--max-occupancy N` (1–64, default 1) follows TensileLite's LDS-based occupancy
+control: each workgroup reserves approximately `LDS per CU / N`. Use 2 for half
+the LDS or 4 for a quarter:
+
+```bash
+hipblaslt-cotenant --cus 64 --max-occupancy 4 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
+```
+
+The allocation rounds **down** to a 256-byte granule, adding one granule if
+the result would allow more than `N` workgroups per CU. For example, 64 KiB / 3
+rounds to 21,760 bytes, allowing three workgroups based on LDS alone.
+The reservation must fit the per-block limit. Allocation granularity and other
+resources can still lower the achievable occupancy.
+The log reports the reserved bytes and HIP's theoretical maximum blocks per CU.
+This flag changes only LDS reservation; register usage and block size stay fixed.
+For values above 1, workgroups may share CUs, so `--cus` is not a guarantee of
+distinct CUs. `READY` confirms workgroup residency, not distinct-CU placement.
 
 Written for mi300 and mi350 architectures; it might not work
 correctly on other targets.
@@ -59,14 +65,13 @@ residency without polling driver internals or guessing a settle time.
 
 1. builds the kernel on first use (arch auto-detected via `rocminfo`, override
    with `--arch`; compiler defaults to `hipcc`, override with `HIPCC=...`),
-2. launches it on `--cus` CUs and waits for its `READY` marker,
+2. launches `--cus` workgroups and waits for their `READY` marker,
 3. runs the command after `--` under that contention,
 4. kills the cotenant when the command exits or the script is interrupted.
 
 Pass `--cus 0` to run the command with no cotenant at all — the uncontended
 baseline. Otherwise `--cus` must be at least 1 and less than the device CU count
-(reported by `rocminfo`); occupying every CU would leave none for the benchmark,
-so that is rejected.
+(reported by `rocminfo`). This bound applies at every max-occupancy setting.
 
 Useful flags: `--device N` (sets `HIP_VISIBLE_DEVICES`), `--wait` (max seconds to
 wait for `READY`), `--grace` (extra settle time after residency, default 0).

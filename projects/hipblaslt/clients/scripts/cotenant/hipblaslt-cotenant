@@ -4,10 +4,10 @@
 
 """Run a command (typically hipblaslt-bench) under CU contention.
 
-Launches a persistent HIP "busy" kernel pinned to a fixed number of CUs
-(one workgroup per CU), waits until all its workgroups are resident, then runs
-the given command while that contention is in effect. The cotenant is always
-killed when the command finishes or this script is interrupted.
+Launches a persistent HIP "busy" kernel with configurable LDS reservation,
+waits until all its workgroups are resident, then runs the given command while
+that contention is in effect. The cotenant is always killed when the command
+finishes or this script is interrupted.
 
     hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
 
@@ -206,7 +206,14 @@ def main() -> int:
         type=int,
         required=True,
         metavar="N",
-        help="number of CUs the cotenant occupies (0 = uncontended baseline, no cotenant)",
+        help="cotenant workgroup count (one per CU at max occupancy 1; 0 = uncontended baseline)",
+    )
+    ap.add_argument(
+        "--max-occupancy",
+        type=int,
+        default=1,
+        metavar="N",
+        help="LDS-based workgroups-per-CU limit, 1–64 (default: 1); each workgroup reserves about 1/N of CU LDS",
     )
     ap.add_argument(
         "--device", metavar="N", help="set HIP_VISIBLE_DEVICES for cotenant and command"
@@ -247,6 +254,8 @@ def main() -> int:
 
     if args.cus < 0:
         sys.exit("ERROR: --cus must be >= 0.")
+    if not 1 <= args.max_occupancy <= 64:
+        sys.exit("ERROR: --max-occupancy must be in [1, 64].")
     if not args.wait >= 0:
         sys.exit("ERROR: --wait must be >= 0.")
     if not args.grace >= 0:
@@ -286,13 +295,16 @@ def main() -> int:
         sys.exit(f"ERROR: --cus {args.cus} exceeds the device CU count ({total_cus}).")
     elif args.cus == total_cus:
         sys.exit(
-            f"ERROR: --cus {args.cus} would occupy all {total_cus} CUs and starve the benchmark; use fewer."
+            f"ERROR: --cus must be less than the device CU count ({total_cus})."
         )
 
     binary = resolve_binary(arch, env, args.binary)
 
     log_path = resolve_log_path(args.log)
-    print(f"launching cotenant on {args.cus} CUs (log: {log_path})")
+    print(
+        f"launching cotenant with {args.cus} workgroups "
+        f"(max occupancy: {args.max_occupancy}, log: {log_path})"
+    )
     try:
         log = open(log_path, "w")
     except OSError as e:
@@ -304,7 +316,7 @@ def main() -> int:
         # terminal signals (SIGINT/SIGHUP) reach it directly even if our cleanup
         # never runs. It is not a group leader, so cleanup uses os.kill, not killpg.
         cotenant = subprocess.Popen(
-            [str(binary), str(args.cus)],
+            [str(binary), str(args.cus), str(args.max_occupancy)],
             stdout=log,
             stderr=subprocess.STDOUT,
             env=env,
