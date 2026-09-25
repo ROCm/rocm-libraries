@@ -214,9 +214,12 @@ each UHD declares in its own `score.metric`:
   `(gfx942, tflops)`. Crossing metrics would substitute a number in the wrong units.
 - **A single id is a one-element list.** An existing role map needs no rewrite.
 - **A catalog ranker need not declare a metric.** A `sort_kernel_catalog` UHD with no `score.metric`
-  (a `native` comparator, a `static_order`) orders its catalog but produces no comparable number. It is
-  the engine's **default ranker**, used when no metric is requested or the requested one has no ranker;
-  at most one per architecture key. Every `predict_engine` UHD must declare a metric
+  (a `native` comparator, a `static_order`) orders its catalog but produces no comparable number; at
+  most one per architecture key. The engine's **default ranker** — used for kernel choice when no
+  metric is requested or the requested one has no ranker for the device — is that metric-less ranker
+  if there is one, else the ranker for the default metric `tflops`, else static order. The second step
+  keeps an engine that ships only a `tflops` ranker choosing its kernel exactly as it did before
+  metrics existed. Every `predict_engine` UHD must declare a metric
   ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
 
 `predict_applicable_kernels` stays single-valued: it generates the candidate set rather than scoring
@@ -2087,8 +2090,8 @@ both policies compare engines only in that metric, ordered in its registered dir
   scored — B is never evaluated under this policy, for any engine, because the policy's purpose is a
   fast answer and B's cost is a catalog enumeration per engine. Engines with no descriptor layer (e.g.
   MIOpen) contribute their A like any other engine and, if they win, use their own internal kernel
-  selection. Whether the *winner's* configuration is then filled in from its B inside the policy, or left
-  to plan build, is [Open Question 21](#ranking-metrics).
+  selection. The winner's configuration is not filled in from its B inside the policy; its kernel is
+  chosen at plan build by the metric's ranker ([Open Question 21](#ranking-metrics), resolved).
   **OPEN:** See [Open Question 7](#structural) (non-descriptor engine estimates).
 - **Thorough policy (L2 first, then L1).** Run B for every applicable engine that has it (best
   configuration + its predicted value), fall back to A for engines that do not, then compare across
@@ -3072,15 +3075,15 @@ dependency-gated and land only when a concrete need appears.
     [Open Question 19](#operational)(a), and settled with it — and whether one reference serves every op.
     *(Impacts [Section 4.4](#44-ranking-metrics).)*
 
-21. **The quick policy's winner configuration.** The quick policy never evaluates B to *rank*
-    ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)). Before metrics, it did evaluate the
-    **winner's** B once, to report that engine's configuration in the heuristic result. The options:
-    (a) keep that single evaluation, so the result names a tuned configuration at the cost of one B per
-    selection; (b) drop it, so the quick policy never evaluates B at all and the kernel is chosen at plan
-    build by the metric's ranker ([Section 11.4](#114-selecting-a-uhd-by-metric)) — paid once, for the
-    engine actually built. Recommendation: (b). It keeps the policy's cost bounded by the L1 models alone,
-    and the choice is not lost but moved to where it is needed; it makes carrying the metric to plan build
-    a requirement rather than a refinement.
+21. **The quick policy's winner configuration — RESOLVED: (b).** The quick policy never evaluates B to
+    *rank* ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)). Before metrics, it did evaluate
+    the **winner's** B once, to report that engine's configuration in the heuristic result. The options
+    were (a) keep that single evaluation, so the result names a tuned configuration at the cost of one B
+    per selection, or (b) drop it, so the quick policy never evaluates B at all and the kernel is chosen
+    at plan build by the metric's ranker ([Section 11.4](#114-selecting-a-uhd-by-metric)) — paid once,
+    for the engine actually built. (b) is what shipped: it keeps the policy's cost bounded by the L1
+    models alone, and the choice is not lost but moved to where it is needed, which makes carrying the
+    metric to plan build a requirement rather than a refinement.
     *(Impacts [Section 11.2](#112-two-engine-selection-policies-rfc-0007), [Section 11.4](#114-selecting-a-uhd-by-metric).)*
 
 22. **Constraints alongside the ranking metric.** A request ranks by one metric. A common need is a
