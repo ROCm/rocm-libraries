@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -335,6 +336,8 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
     case Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG:
         attributes.set_causal_mask_bottom_right(true);
         break;
+    default:
+        throw std::invalid_argument("buildSdpaGraph: unhandled Mask value");
     }
     if(shape.mmaCoreMode != DataType::NOT_SET)
     {
