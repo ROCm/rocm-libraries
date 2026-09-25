@@ -120,7 +120,7 @@ The fold repacks rows; it must not change any output value.
   The gate is the repo-wide bf16 attention bound of `4e-2` (`ALGORITHM.md` §10),
   which this clears by 2.6×.
 - Guards: `tests/test_gfx942_gqa_head_fold_numeric.py` (on-GPU oracle),
-  `tests/dispatch/attention/test_gfx942_gqa_head_fold.py` (CPU emit/grid/predicate),
+  `tests/test_gfx942_gqa_head_fold.py` (CPU emit/grid/predicate),
   and the golden-IR case `attention_d128_swa/gfx942/4warp_gqa_fold`, which is the
   only one of the three that runs on a host with no gfx942 GPU.
 
@@ -165,6 +165,6 @@ python rocke/library/builders/gfx942/attention/prefill/gqa_head_fold_bench.py
 pytest rocke/library/tests/test_gfx942_gqa_head_fold_numeric.py -v
 
 # structure + golden IR (no GPU required)
-pytest rocke/library/tests/dispatch/attention/test_gfx942_gqa_head_fold.py -q
+pytest rocke/library/tests/test_gfx942_gqa_head_fold.py -q
 pytest rocke/platform/tests/test_rocke_ci_static.py -q
 ```

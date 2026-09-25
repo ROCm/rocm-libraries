@@ -19,8 +19,10 @@ from .bf16_rcr import (
     GEMM_BF16_RCR_ABI_VERSION,
     GEMM_BF16_REGISTRY,
     dispatch_gemm_bf16,
+    dispatch_gemm_bf16_all,
     gemm_bf16_candidates,
     gemm_bf16_sweep_space,
+    registered_gemm_bf16_combos,
 )
 from .bf16_rcr import build_kernel as build_kernel_bf16
 from .common import GemmRequest
@@ -29,8 +31,10 @@ from .fp16_rcr import (
     GEMM_FP16_REGISTRY,
     build_kernel,
     dispatch_gemm_fp16,
+    dispatch_gemm_fp16_all,
     gemm_fp16_candidates,
     gemm_fp16_sweep_space,
+    registered_gemm_fp16_combos,
 )
 
 __all__ = [
@@ -42,9 +46,13 @@ __all__ = [
     "build_kernel",
     "build_kernel_bf16",
     "dispatch_gemm_fp16",
+    "dispatch_gemm_fp16_all",
     "dispatch_gemm_bf16",
+    "dispatch_gemm_bf16_all",
     "gemm_fp16_candidates",
     "gemm_bf16_candidates",
     "gemm_fp16_sweep_space",
     "gemm_bf16_sweep_space",
+    "registered_gemm_fp16_combos",
+    "registered_gemm_bf16_combos",
 ]
