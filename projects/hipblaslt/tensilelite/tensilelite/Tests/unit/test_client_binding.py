@@ -177,12 +177,59 @@ def test_default_client_candidate_uses_first_existing_executable_path(tmp_path, 
     client = fallback / executable
     client.parent.mkdir()
     client.write_text("client", encoding="utf-8")
+    client.chmod(0o755)
+    monkeypatch.setattr(binding, "validate_client", lambda path, version: None)
 
     def default_client():
-        return binding.default_client_candidate((primary, fallback), "test prefix")
+        return binding.default_client_candidate(
+            (primary, fallback), "test prefix", installation.version
+        )
 
     selected = binding.selected_client(default_client, installation)
-    assert selected == binding.ClientCandidate(client, "test prefix")
+    assert selected == binding.ClientCandidate(client, "test prefix", validated=True)
+
+
+def test_default_client_candidate_skips_an_incompatible_earlier_client(tmp_path, monkeypatch):
+    primary = tmp_path / "primary" / binding._CLIENT_EXECUTABLE
+    fallback = tmp_path / "fallback" / binding._CLIENT_EXECUTABLE
+    for candidate in (primary, fallback):
+        candidate.parent.mkdir()
+        candidate.write_text("client", encoding="utf-8")
+
+    def validate(path, version):
+        if path == primary:
+            raise binding.ClientBindingError("version mismatch")
+        assert path == fallback
+        assert version == "5.0.0+rocm7.2.4"
+
+    monkeypatch.setattr(binding, "validate_client", validate)
+
+    assert binding.default_client_candidate(
+        (primary.parent, fallback.parent), "Python SDK", "5.0.0+rocm7.2.4"
+    ) == binding.ClientCandidate(fallback, "Python SDK", validated=True)
+
+
+def test_default_client_candidate_reports_all_incompatible_paths(tmp_path, monkeypatch):
+    candidates = [tmp_path / name / binding._CLIENT_EXECUTABLE for name in ("first", "second")]
+    for candidate in candidates:
+        candidate.parent.mkdir()
+        candidate.write_text("client", encoding="utf-8")
+    monkeypatch.setattr(
+        binding,
+        "validate_client",
+        lambda path, version: (_ for _ in ()).throw(
+            binding.ClientBindingError(f"wrong version for {path}")
+        ),
+    )
+
+    with pytest.raises(binding.ClientBindingError, match="No compatible") as exc_info:
+        binding.default_client_candidate(
+            tuple(candidate.parent for candidate in candidates),
+            "Python SDK",
+            "5.0.0+rocm7.2.4",
+        )
+
+    assert all(str(candidate) in str(exc_info.value) for candidate in candidates)
 
 
 def _client_result(stdout="5.0.0+rocm7.2.4\n", stderr="", returncode=0):
