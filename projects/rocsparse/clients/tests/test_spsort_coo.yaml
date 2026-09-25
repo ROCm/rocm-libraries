@@ -1,0 +1,243 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: spsort_coo_bad_arg
+  category: pre_checkin
+  function: spsort_coo_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+
+#
+# quick
+#
+- name: spsort_coo
+  category: quick
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: [10]
+  N: [33]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_zero]
+
+- name: spsort_coo
+  category: quick
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: [300]
+  N: [242]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo
+  category: quick
+  function: spsort_coo
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [1]
+  N: [1, 242]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo_batched
+  category: quick
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: [10]
+  N: [33]
+  batch_count: [2]
+  baseA: [rocsparse_index_base_one]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo_batched
+  category: quick
+  function: spsort_coo
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [10]
+  N: [33]
+  batch_count: [2]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_zero]
+
+- name: spsort_coo_file
+  category: quick
+  function: spsort_coo
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1]
+
+#
+# pre_checkin
+#
+- name: spsort_coo
+  category: pre_checkin
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [2000]
+  N: [1623]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo
+  category: pre_checkin
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [8]
+  N: [1623]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo_batched
+  category: pre_checkin
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [2000]
+  N: [1623]
+  batch_count: [2]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo_batched
+  category: pre_checkin
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: [2000]
+  N: [1623]
+  batch_count: [17]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo_file
+  category: pre_checkin
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_one]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+
+- name: spsort_coo_file
+  category: pre_checkin
+  function: spsort_coo
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_one]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10]
+
+#
+# nightly
+#
+- name: spsort_coo
+  category: nightly
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [29593, 159382, 738249]
+  N: [9173, 82940, 538192]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo_batched
+  category: nightly
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [159382]
+  N: [82940]
+  batch_count: [2]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo_batched
+  category: nightly
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [29593, 159382]
+  N: [9173, 82940]
+  batch_count: [4]
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+
+- name: spsort_coo_file
+  category: nightly
+  function: spsort_coo
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_one]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mc2depi,
+             ASIC_320k]
+
+- name: spsort_coo_file
+  category: nightly
+  function: spsort_coo
+  indextype: *i32_i64
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero]
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chebyshev4,
+             webbase-1M,
+             shipsec1]

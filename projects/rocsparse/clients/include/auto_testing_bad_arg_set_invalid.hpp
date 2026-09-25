@@ -406,3 +406,15 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_spgeam_stage& p)
 {
     p = (rocsparse_spgeam_stage)-1;
 }
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spsort_stage& p)
+{
+    p = (rocsparse_spsort_stage)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spsort_input& p)
+{
+    p = (rocsparse_spsort_input)-1;
+}

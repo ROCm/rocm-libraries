@@ -877,6 +877,13 @@ constexpr double coosort_gbyte_count(rocsparse_int nnz, bool permute)
     return ((4.0 * nnz + (permute ? 2.0 * nnz : 0.0)) * sizeof(rocsparse_int)) / 1e9;
 }
 
+template <typename I, typename T>
+constexpr double spsort_coo_gbyte_count(int64_t nnz)
+{
+    // Sort the indices while tracking the permutation, then gather the values.
+    return (6.0 * nnz * sizeof(I) + nnz * sizeof(I) + 2.0 * nnz * sizeof(T)) / 1e9;
+}
+
 /*
  * ===========================================================================
  *    utility SPARSE

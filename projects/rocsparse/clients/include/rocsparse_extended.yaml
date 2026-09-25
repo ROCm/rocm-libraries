@@ -338,6 +338,7 @@ Tests:
     - sparse_to_dense_csr: *conversion_shared_mixed_index
     - sparse_to_sparse: *conversion_shared_formats
     - coosort: *conversion_shared
+    - spsort_coo: *conversion_shared
     - csrsort: *conversion_shared
     - cscsort: *conversion_shared
     - identity: *conversion_shared
