@@ -2787,55 +2787,68 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-        base = AttentionDenseSpec(**self._BASE_KWARGS)
-        self.assertTrue(
-            base.runtime_shape,
-            "test setup error: the base spec is not on the runtime-shape path",
-        )
+        for sliding_window in (0, 128):
+            with self.subTest(sliding_window=sliding_window):
+                base = AttentionDenseSpec(
+                    **self._BASE_KWARGS, sliding_window=sliding_window
+                )
+                self.assertTrue(
+                    base.runtime_shape,
+                    "test setup error: the base spec is not on the runtime-shape path",
+                )
 
-        keys, irs = {}, {}
-        for shape in self._SHAPES:
-            with self.subTest(shape=shape):
-                b, sq, sk = shape
-                spec = replace(base, batch=b, seqlen_q=sq, seqlen_kv=sk)
-                keys[shape] = attention_dense_cache_key(spec, arch="gfx950")
-                irs[shape] = self._ir_sha(spec)
+                keys, irs = {}, {}
+                for shape in self._SHAPES:
+                    with self.subTest(shape=shape):
+                        b, sq, sk = shape
+                        spec = replace(base, batch=b, seqlen_q=sq, seqlen_kv=sk)
+                        keys[shape] = attention_dense_cache_key(spec, arch="gfx950")
+                        irs[shape] = self._ir_sha(spec)
+                        self.assertEqual(
+                            spec.kernel_name(),
+                            base.kernel_name(),
+                            "symbol name carries shape on the runtime path",
+                        )
 
-        # Precondition: this is the collision the key deliberately creates.
-        self.assertEqual(
-            len(set(keys.values())),
-            1,
-            f"runtime-shape specs did not share one cache key: {self._SHAPES}",
-        )
-        # The property under test: the collision is safe only if the IR agrees.
-        self.assertEqual(
-            len(set(irs.values())),
-            1,
-            "specs sharing ONE cache key lowered to DIFFERENT IR "
-            + repr({s: irs[s][:12] for s in self._SHAPES})
-            + " -- a shape field reached codegen on the runtime path, so "
-            "_DENSE_LAUNCHER_CACHE will serve the first-compiled binary for "
-            "every other shape. Either stop baking that field, or drop it from "
-            "AttentionDenseSpec.runtime_param_fields so it splits the key again.",
-        )
+                # Precondition: this is the collision the key deliberately creates.
+                self.assertEqual(
+                    len(set(keys.values())),
+                    1,
+                    f"runtime-shape specs did not share one cache key: {self._SHAPES}",
+                )
+                # The property under test: the collision is safe only if the IR agrees.
+                self.assertEqual(
+                    len(set(irs.values())),
+                    1,
+                    "specs sharing ONE cache key lowered to DIFFERENT IR "
+                    + repr({s: irs[s][:12] for s in self._SHAPES})
+                    + " -- a shape field reached codegen on the runtime path, so "
+                    "_DENSE_LAUNCHER_CACHE will serve the first-compiled binary for "
+                    "every other shape. Either stop baking that field, or drop it from "
+                    "AttentionDenseSpec.runtime_param_fields so it splits the key again.",
+                )
 
     def test_baked_shape_specs_split_both_key_and_ir(self):
         """Control: off the runtime path, each shape keeps its own key and IR.
 
         Without this, a builder that ignored batch/seqlen_q/seqlen_kv entirely
         -- emitting one kernel that is wrong everywhere -- would satisfy the
-        guard above. ``sliding_window`` is the cheapest way off the runtime
-        path: it is a single field (``runtime_shape`` excludes it), unlike
-        ``persistent``, which also drags in num_persistent/persist_decode.
+        guard above. The persistent body bakes shape; a single qb_major workgroup
+        is valid for every shape in the cohort.
         """
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-        base = AttentionDenseSpec(**self._BASE_KWARGS, sliding_window=128)
+        base = AttentionDenseSpec(
+            **self._BASE_KWARGS,
+            persistent=True,
+            num_persistent=1,
+            persist_decode="qb_major",
+        )
         self.assertFalse(
             base.runtime_shape,
-            "test setup error: sliding_window no longer leaves the runtime path",
+            "test setup error: persistent body no longer leaves the runtime path",
         )
         self.assertEqual(base.runtime_param_fields, ())
 
