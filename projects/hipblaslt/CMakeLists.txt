@@ -911,11 +911,43 @@ if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
 endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
+    # Locate the host profile runtime explicitly. Passing
+    # -fprofile-instr-generate through a HIP link also sends the AMDGPU profile
+    # runtime to the device linker. Newer HIP runtimes reject the resulting
+    # __llvm_profile_sections_* device symbol at process teardown, after the
+    # complete test suite has passed.
+    set(HIPBLASLT_PROFILE_RUNTIME)
+    foreach(_rt clang_rt.profile clang_rt.profile_rocm
+                clang_rt.interception clang_rt.sanitizer_common)
+        foreach(_suffix "-x86_64" "")
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER}
+                        --print-file-name=lib${_rt}${_suffix}.a
+                OUTPUT_VARIABLE _rt_path
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            if(EXISTS "${_rt_path}")
+                list(APPEND HIPBLASLT_PROFILE_RUNTIME "${_rt_path}")
+                break()
+            endif()
+        endforeach()
+    endforeach()
+    if(NOT HIPBLASLT_PROFILE_RUNTIME)
+        message(FATAL_ERROR
+            "HIPBLASLT_ENABLE_COVERAGE: could not locate the clang profile runtime")
+    endif()
+    message(STATUS "Host profile runtime: ${HIPBLASLT_PROFILE_RUNTIME}")
+    set(HIPBLASLT_PROFILE_RUNTIME
+        -Wl,--start-group ${HIPBLASLT_PROFILE_RUNTIME} -Wl,--end-group
+        ${CMAKE_DL_LIBS} -lpthread -lrt)
+
     target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
+    target_link_options(hipblaslt PRIVATE -u__llvm_profile_runtime)
+    target_link_libraries(hipblaslt PRIVATE ${HIPBLASLT_PROFILE_RUNTIME})
 
     target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_link_options(hipblaslt-clients-common PUBLIC -u__llvm_profile_runtime)
+    target_link_libraries(hipblaslt-clients-common PUBLIC ${HIPBLASLT_PROFILE_RUNTIME})
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")

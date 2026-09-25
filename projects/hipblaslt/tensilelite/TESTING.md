@@ -571,19 +571,20 @@ laying out once.
 
 | Lane | Where defined | Hardware | Gates? |
 | --- | --- | --- | --- |
-| `Component CI: TensileLite coverage` | [`component-ci-tensilelite-coverage.yml`](../../../.github/workflows/component-ci-tensilelite-coverage.yml) | CPU only | No. Rolls up to `Component CI Summary`, which is not required |
+| `Component CI: TensileLite coverage` | [`component-ci-tensilelite-coverage.yml`](../../../.github/workflows/component-ci-tensilelite-coverage.yml) | CPU only | **Yes**, through the required `Component CI Summary` |
 | `preliminary` | Math CI (internal) | gfx12, gfx90a, gfx942, gfx950 | **Yes**, via the required `Math CI Summary` |
-| TheRock `Test tensilelite` | [`test_tensilelite.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/test_tensilelite.py) in TheRock | GPU runner, Linux | **Yes**, via the required `TheRock CI Summary` |
+| TheRock `Test tensilelite` | [`test_tensilelite.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/test_tensilelite.py) in TheRock | GPU runner, Linux | **Yes**, via the required `Multi-Arch CI Summary` |
 | `tensilelite-unit-codecov` | Math CI (internal) | gfx950 | No |
 
 Three observations follow from that table, and they are the ones that most often get stated
 backwards in review:
 
-**The tests gate; the coverage numbers do not.** Both required checks (`Math CI Summary` through
-`preliminary`, and `TheRock CI Summary` through the TensileLite job) execute the unit and
-characterization suites, so a broken test blocks a merge. Neither of them looks at coverage. The
-floor and the per-file ratchet are enforced only in lanes that cannot block anything. "None of it
-gates" is wrong, and so is treating a coverage regression as a merge blocker.
+**The tests and GitHub coverage floor gate; Codecov remains advisory.** `Math CI Summary` through
+`preliminary`, `Multi-Arch CI Summary` through the TensileLite job, and `Component CI Summary`
+through the CPU coverage job execute the unit and characterization suites. The Component lane also
+enforces the combined floor and per-file ratchet. Codecov's separately reported statuses are not
+required. Its per-flag project statuses reject coverage regressions, while its repository-wide patch
+status requires changed-line coverage to meet the base report's overall coverage.
 
 **Three of the four lanes hold a GPU, and only one of them needs it for these tests.** TheRock's lane
 is validating a real install, so its GPU is the point. `preliminary` needs hardware for its
@@ -602,8 +603,9 @@ stages behind it, which is why a red run so often says less than it appears to.
 **The goldens are asserted in three of the four lanes,** because every tox environment involved
 inherits syrupy from the base `[testenv]` dependency list. `preliminary` is the one that matters,
 because it gates: its unit-tree stage runs with no marker filter, so a stale golden fails a required
-check. The two coverage lanes assert them as well and cannot block a merge, though the CPU-only
-GitHub Actions lane is fast enough that it is usually where a stale golden surfaces first.
+check. The two coverage lanes assert them as well. The CPU-only GitHub Actions lane rolls up to the
+required Component summary and is fast enough that it is usually where a stale golden surfaces
+first; the Math CI upload lane remains advisory.
 
 TheRock's installed-artifact lane is the exception. It does not install syrupy, so the suite's
 `conftest.py` detects the missing plugin and skips the snapshot-using tests cleanly rather than
@@ -658,17 +660,18 @@ it is further along than it is.
 
 | Scope | Tool | Measured in | Enforced |
 | --- | --- | --- | --- |
-| TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `tensilelite/**`; Math CI measures it again for codecov | Floor plus per-file ratchet, 1 pp tolerance. Enforced in a lane that is not a required check |
+| TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `tensilelite/**`; Math CI measures it again for codecov | Floor plus per-file ratchet, 1 pp tolerance. Enforced through the required Component summary |
 | TensileLite Python, unit-only share | Same lane, reported in the split summary card | GitHub Actions | **No.** Informational only, and it is the number that tracks real progress |
 | TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on eight files |
-| TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Reported to codecov, not enforced |
+| TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Advisory Codecov no-regression target |
 
 The GitHub Actions coverage lane is CPU-only and takes roughly seven minutes. It runs the
 characterization suite and the pure unit suite once each under coverage, keeping the two selections
-disjoint so each line can be attributed to one or both, unions the results, and renders the
-non-gating split summary card. That lane is deliberately scoped and is expected to retire once the
-characterization-to-unit conversion finishes, which makes the card's characterization-only count a
-rough progress bar for the lane's own retirement.
+disjoint so each line can be attributed to one or both, unions the results, and renders an
+informational split summary card. The lane is required, but the card itself does not add a second
+gate. That lane is deliberately scoped and is expected to retire once the characterization-to-unit
+conversion finishes, which makes the card's characterization-only count a rough progress bar for the
+lane's own retirement.
 
 ### Measuring and enforcing are separate tox environments
 
@@ -691,12 +694,14 @@ Two different mechanisms carry a number, and they are easy to confuse:
 - The **enforced floor** is `fail_under = 75` in [`pyproject.toml`](pyproject.toml), checked on the
   combined characterization-plus-unit dataset, alongside the per-file floors in
   `coverage-baseline.json`. This is what actually fails a run.
-- The **codecov target** is 80% project coverage per flag, set in the monorepo's
-  [`../../../codecov.yml`](../../../codecov.yml) for `TensileLite-Unit` and `TensileLite-CPP` along
-  with every other library. No patch-coverage target is configured. Codecov's report is advisory here
-  because the job that uploads it is not a required check.
+- The **Codecov project targets** compare each flag against the matching base report, as configured
+  with `target: auto` in the monorepo's [`../../../codecov.yml`](../../../codecov.yml). This avoids a
+  fixed target above established coverage while still rejecting a regression. Separately, Codecov's
+  unflagged default patch status measures executable lines changed by the PR and requires their
+  coverage to meet the base report's overall coverage.
 
-80% is the direction of travel for the enforced floor, and the ratchet is how it gets there.
+80% is the direction of travel for the enforced Python floor, and the per-file ratchet is how it gets
+there without turning every current report into an unconditional failure.
 
 Neither mechanism sets a target on the unit-only share, and neither one would notice if the
 characterization-only count stopped falling. Both numbers can be fully satisfied by a codebase whose
@@ -713,10 +718,9 @@ they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/
 carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
 including `ExperimentalLibrary.py` at zero and much of `Tensile/Components/`.
 
-**No C++ coverage target exists** for the reasons given under
-[../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own
-structural blockers). Setting one before the host-side code is linkable in isolation would produce a
-number nobody could act on.
+**No locally enforced C++ coverage floor exists.** Codecov reports an advisory no-regression project
+status for `TensileLite-CPP`, but a separate required floor remains blocked by the constraints under
+[../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy).
 
 ## Improvement Roadmap
 

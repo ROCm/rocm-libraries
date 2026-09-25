@@ -5,8 +5,10 @@ on:
     branches:
       - develop
       - release/therock-*
+  # The repository ruleset requires this context on develop, staging, subtree,
+  # and release branches. Register it for every pull-request base so those PRs
+  # cannot wait forever for a workflow filtered out at dispatch time.
   pull_request:
-    branches: [develop]
 
 permissions:
   contents: read

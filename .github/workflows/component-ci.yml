@@ -92,6 +92,7 @@ jobs:
     name: "Component CI Summary"
     if: always()
     needs:
+      - changes
       - stinkytofu
       - rocisa
       - geko

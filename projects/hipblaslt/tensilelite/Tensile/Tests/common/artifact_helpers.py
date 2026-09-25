@@ -35,16 +35,18 @@ import warnings
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
 
-def artifact_name_for_config(config_path):
+def artifact_name_for_config(config_path, suffix=None):
     """Derive a deterministic artifact name from a YAML config path.
 
     Stable across machines because the relative path under Tensile/Tests/
     is identical in every checkout. E.g. common/gemm/fp16_tn.yaml ->
-    common__gemm__fp16_tn.
+    common__gemm__fp16_tn. ``suffix`` distinguishes independently built
+    shards of the same source config.
     """
     relpath = os.path.relpath(config_path, _TESTS_ROOT_DIR)
     name = os.path.splitext(relpath)[0]
-    return name.replace("/", "__").replace("\\", "__")
+    name = name.replace("/", "__").replace("\\", "__")
+    return f"{name}__{suffix}" if suffix else name
 
 
 def _is_use_cache_file(relpath):

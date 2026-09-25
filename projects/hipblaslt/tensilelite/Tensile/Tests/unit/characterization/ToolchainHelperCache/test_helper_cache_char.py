@@ -73,10 +73,11 @@ def test_check_cache_missing_empty_valid(tmp_path):
     assert _checkCache(cacheDir, "key") is None            # empty dir
     (entry / "a.hsaco").write_text("x")
     assert _checkCache(cacheDir, "key") is None            # flat layout -> miss
-    arch = entry / "gfx942"; arch.mkdir()
+    arch = tmp_path / "source" / "gfx942"; arch.mkdir(parents=True)
     (arch / "a.hsaco").write_text("x")
+    _populateCache(cacheDir, "key", [arch / "a.hsaco"])
     assert _checkCache(cacheDir, "key") is not None        # valid <key>/<arch>/*.hsaco
-    (arch / "b.hsaco").write_text("")                      # zero-size -> invalid
+    (cacheDir / "key" / "gfx942" / "a.hsaco").write_text("")
     assert _checkCache(cacheDir, "key") is None
 
 
@@ -125,7 +126,9 @@ def test_restore_copy_failure_falls_through_to_miss(tmp_path, monkeypatch):
 
     cache = HelperKernelCache()
     cache.restore(str(kern), str(inc), ["gfx942"], comp, str(dest))  # miss, sets key
-    co = tmp_path / "out.hsaco"; co.write_text("compiled")
+    co = tmp_path / "gfx942" / "kern.so-000-gfx942.hsaco"
+    co.parent.mkdir()
+    co.write_text("compiled")
     cache.store([str(co)])
 
     monkeypatch.setattr(HKC.shutil, "copy2", lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
@@ -160,7 +163,9 @@ def test_cache_miss_then_store_then_hit(tmp_path, monkeypatch):
     assert hit is False and paths == []
 
     # Build artifacts and store them.
-    co = tmp_path / "out.hsaco"; co.write_text("compiled")
+    co = tmp_path / "gfx942" / "kern.so-000-gfx942.hsaco"
+    co.parent.mkdir()
+    co.write_text("compiled")
     cache.store([str(co)])
 
     # HIT on a fresh instance with the same inputs.
@@ -168,4 +173,4 @@ def test_cache_miss_then_store_then_hit(tmp_path, monkeypatch):
     cache2._cacheKey = None
     hit2, paths2 = cache2.restore(str(kern), str(inc), ["gfx942"], comp, str(dest))
     assert hit2 is True
-    assert [Path(p).name for p in paths2] == ["out.hsaco"]
+    assert [Path(p).name for p in paths2] == ["kern.so-000-gfx942.hsaco"]

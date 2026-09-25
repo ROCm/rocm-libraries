@@ -2122,10 +2122,13 @@ def test_helper_cache_restore_routes_to_the_output_subtree(tmp_path, monkeypatch
     from Tensile.Toolchain import HelperKernelCache as HKC
 
     monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
-    entry = tmp_path / "cache" / "KEY" / GFX1250
-    entry.mkdir(parents=True)
-    (entry / "x.hsaco").write_text("data")
-    monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(tmp_path / "cache"))
+    cacheRoot = tmp_path / "cache"
+    sourceDir = tmp_path / "source" / GFX1250
+    sourceDir.mkdir(parents=True)
+    helper = sourceDir / f"Kernels.so-000-{GFX1250}.hsaco"
+    helper.write_text("data")
+    HKC._populateCache(cacheRoot, "KEY", [helper])
+    monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cacheRoot))
     monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
 
     cache = HKC.HelperKernelCache()
@@ -2140,7 +2143,9 @@ def test_helper_cache_restore_routes_to_the_output_subtree(tmp_path, monkeypatch
 
     assert hit
     assert len(coPaths) == 1
-    assert str(coPaths[0]).endswith(f"{GFX1250V0}/x.hsaco"), coPaths
+    assert str(coPaths[0]).endswith(
+        f"{GFX1250V0}/Kernels.so-000-{GFX1250}.hsaco"
+    ), coPaths
 
 
 HELPER_HSACO = f"Kernels.so-000-{GFX1250}.hsaco"

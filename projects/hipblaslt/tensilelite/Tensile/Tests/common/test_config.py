@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -53,16 +53,144 @@ here.
 
 import contextlib
 import os
+import signal
 import shutil
 import subprocess
 import sys
+import time
 
 import py
 import pytest
 
 from artifact_helpers import artifact_name_for_config
+from config_helpers import materializeConfig
 
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROCESS_TERMINATION_GRACE_SECONDS = 5.0
+
+
+def _terminate_direct_process(process: subprocess.Popen) -> None:
+    """Terminate and reap one process when process groups are unavailable."""
+    try:
+        process.terminate()
+    except OSError:
+        pass
+
+    try:
+        process.wait(timeout=_PROCESS_TERMINATION_GRACE_SECONDS)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError:
+        return
+
+    try:
+        process.kill()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=_PROCESS_TERMINATION_GRACE_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _reap_direct_process(process: subprocess.Popen) -> None:
+    """Reap the group leader without allowing cleanup to mask an exception."""
+    if process.poll() is not None:
+        return
+    try:
+        process.wait(timeout=_PROCESS_TERMINATION_GRACE_SECONDS)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError:
+        return
+
+    try:
+        process.kill()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=_PROCESS_TERMINATION_GRACE_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _signal_process_group(process: subprocess.Popen, sig: int) -> bool:
+    """Signal a POSIX helper process group; return False if unavailable."""
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _process_tree_is_alive(process: subprocess.Popen) -> bool:
+    """Whether the helper or another member of its process group is alive."""
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    return process.poll() is None
+
+
+def _wait_for_process_tree(
+    process: subprocess.Popen, timeout: float
+) -> bool:
+    """Wait up to ``timeout`` seconds for the helper process group to exit."""
+    deadline = time.monotonic() + timeout
+    while _process_tree_is_alive(process):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        if process.poll() is None:
+            try:
+                process.wait(timeout=min(0.05, remaining))
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            # The group leader can exit before one of its descendants.
+            time.sleep(min(0.05, remaining))
+    return True
+
+
+def _terminate_process_tree(process: subprocess.Popen) -> None:
+    """Terminate a helper tree, escalate after a grace period, and reap it."""
+    if os.name != "posix" or not _signal_process_group(process, signal.SIGTERM):
+        _terminate_direct_process(process)
+        return
+
+    if not _wait_for_process_tree(process, _PROCESS_TERMINATION_GRACE_SECONDS):
+        _signal_process_group(process, getattr(signal, "SIGKILL"))
+        _wait_for_process_tree(process, _PROCESS_TERMINATION_GRACE_SECONDS)
+
+    # Reap the direct child even when one of its descendants outlives the
+    # bounded SIGKILL wait.
+    _reap_direct_process(process)
+
+
+def _run_in_process_group(command: list[str], env: dict[str, str]) -> None:
+    """Run ``command`` and tear down all descendants if it does not succeed."""
+    popenArgs = {"env": env}
+    if os.name == "posix":
+        popenArgs["start_new_session"] = True
+    elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+        popenArgs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
+    process = subprocess.Popen(command, **popenArgs)
+    try:
+        returnCode = process.wait()
+        if returnCode:
+            raise subprocess.CalledProcessError(returnCode, command)
+    except BaseException:
+        _terminate_process_tree(process)
+        raise
 
 
 def _call_helper_in_subprocess(
@@ -72,6 +200,7 @@ def _call_helper_in_subprocess(
     output_dir: str,
     artifact_dir: str,
     tensile_args: list[str],
+    artifact_name: str,
 ) -> None:
     """Call module.func(config, output_dir, artifact_dir, tensile_args) in a subprocess.
 
@@ -82,17 +211,31 @@ def _call_helper_in_subprocess(
     script = (
         f"import sys; sys.path.insert(0, {repr(_COMMON_DIR)}); "
         f"from {module} import {func}; "
-        f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])"
+        f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[5:], "
+        f"artifact_name=sys.argv[4])"
     )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
-    subprocess.run(
-        [sys.executable, "-c", script, config, output_dir, artifact_dir, *tensile_args],
-        check=True,
-        env=env,
+    _run_in_process_group(
+        [
+            sys.executable,
+            "-c",
+            script,
+            config,
+            output_dir,
+            artifact_dir,
+            artifact_name,
+            *tensile_args,
+        ],
+        env,
     )
 
 
-def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+def test_config(
+    tensile_args: list[str],
+    config,
+    tmpdir: py.path.local,
+    pytestconfig: pytest.Config,
+) -> None:
     """Pytest wrapper: run the full build→artifact→run round-trip on a single machine.
 
     Activated in the default mode (no ``--build-only`` / ``--use-cache`` flags).
@@ -100,15 +243,34 @@ def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pyt
     """
     if pytestconfig.getoption("--build-only") or pytestconfig.getoption("--use-cache"):
         pytest.skip("split mode active — use test_config_build or test_config_run")
-    artifact_name = artifact_name_for_config(config)
+    config_path = materializeConfig(config, tmpdir.strpath)
+    artifact_name = artifact_name_for_config(
+        config.source_path, config.shard_label
+    )
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
     artifact_dir = tmpdir.strpath
     artifact_path = os.path.join(artifact_dir, artifact_name + ".tar.gz")
 
-    _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args)
+    _call_helper_in_subprocess(
+        "test_config_build",
+        "_build",
+        config_path,
+        output_dir,
+        artifact_dir,
+        tensile_args,
+        artifact_name,
+    )
     shutil.rmtree(output_dir)
     try:
-        _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args)
+        _call_helper_in_subprocess(
+            "test_config_run",
+            "_run",
+            config_path,
+            output_dir,
+            artifact_dir,
+            tensile_args,
+            artifact_name,
+        )
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.remove(artifact_path)
