@@ -407,11 +407,13 @@ if(_tensilelite_needs_canonical_wheel OR TENSILELITE_ENABLE_CLIENT)
         "build ROCm ${TENSILELITE_CLIENT_BUILD_ROCM}")
 
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_tensilelite_configure_depends})
-    configure_file(
-        "${_tensilelite_source_root}/client/TensileLiteClientVersion.hpp.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated/TensileLiteClientVersion.hpp"
-        @ONLY
-    )
+    if(TENSILELITE_ENABLE_CLIENT)
+        configure_file(
+            "${_tensilelite_source_root}/client/TensileLiteClientVersion.hpp.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated/TensileLiteClientVersion.hpp"
+            @ONLY
+        )
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
