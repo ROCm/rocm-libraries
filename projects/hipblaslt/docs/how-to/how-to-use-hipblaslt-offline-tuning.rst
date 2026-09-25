@@ -115,3 +115,68 @@ guarantees is that the index resolves to the same compiled kernel as when the ro
 does not detect a rebuild that changes only that solution's defaults, whose row is used with the new
 defaults, and it cannot find a kernel that moved to a different index: that row is rejected and the
 shape falls back to heuristic selection.
+
+Replaying a tuning cache
+========================
+
+Instead of ``HIPBLASLT_TUNING_OVERRIDE_FILE``, a tuning file can be replayed as a runtime cache:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_MODE=cache
+   export HIPBLASLT_TUNING_CACHE_PATH=tuning.txt
+
+``cache`` replays what the file contains, validating each entry as described above. ``off``, the
+default, changes nothing. Cache mode only reads the file, so any number of processes can share one,
+for example the ranks of an MPI job.
+
+Which kernel a matmul launches depends on whether it passes an algorithm. A call to
+``hipblasLtMatmul`` with an explicit ``algo`` always launches that algorithm; such a caller gets the
+cached entry from ``hipblasLtMatmulAlgoGetHeuristic``, which returns it as its first result. A call
+with ``algo=nullptr`` leaves the choice to the library and launches the cached entry when there is a
+usable one, which the override file never did.
+
+Rows written by ``hipblaslt-bench`` match on transpose, shape and the principal datatypes only,
+exactly as they do through ``HIPBLASLT_TUNING_OVERRIDE_FILE``: they do not distinguish leading
+dimensions, batch strides, epilogue details or the device. Rows that carry a ``schema_version``
+column are keyed on the complete problem, and every column of such a row is required, so a row with
+a missing or malformed value, including one cut short by an interrupted write, is ignored.
+
+``HIPBLASLT_TUNING_CACHE_PATH`` and ``HIPBLASLT_TUNING_OVERRIDE_FILE`` are mutually exclusive. With a
+tuning mode set, only the cache is consulted and the override file is ignored.
+
+A process running in a secure execution context (set-user-ID, set-group-ID, or another
+credential-changing exec such as file capabilities) ignores both tuning variables, so the cache stays
+off in it.
+
+Reading the cache output
+------------------------
+
+``cache`` mode reports what it loaded without needing any logging variable:
+
+.. code-block:: none
+
+   tuning-cache: mode=cache path=tuning.txt load=ok loaded=12
+   tuning-cache: summary shapes=14 matched=12 fellback=2 invalidated=0
+
+The first line is written when the file is first read. ``load`` is ``ok``, ``not-found``,
+``read-error`` or ``no-path``, the last meaning ``HIPBLASLT_TUNING_CACHE_PATH`` is unset and the cache
+does nothing.
+
+The summary, written as the process exits normally, is how you confirm a deployed cache is being
+used. ``shapes`` counts distinct problems the process looked up, not calls, so it stays comparable
+with ``loaded``. ``matched`` is how many of them a cache entry served and ``fellback`` how many fell
+through to default selection; those are the shapes still worth tuning. ``invalidated`` counts entries
+rejected because a rebuild moved the kernel they named. A process that is killed or aborts writes no
+summary, and one that loaded nothing and looked nothing up leaves it out.
+
+Setting ``HIPBLASLT_LOG_LEVEL=4`` adds a cache hit, miss or invalidation line once per problem. See
+:ref:`environment-variables` for where each notice is written.
+
+Limitations
+-----------
+
+* Grouped GEMM is not served from the cache, and neither is a pointer-array batch called with
+  ``algo=nullptr``.
+* ``alpha``, ``beta`` and whether ``C`` and ``D`` alias are not part of the lookup key, so an entry
+  can serve a caller whose values differ from those it was recorded with.

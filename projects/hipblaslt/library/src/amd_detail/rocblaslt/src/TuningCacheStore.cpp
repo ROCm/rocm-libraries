@@ -3,6 +3,7 @@
 
 #include "TuningCacheStore.hpp"
 #include "hipblaslt_type_strings.hpp"
+#include "rocblaslt_secure_env.hpp"
 #include "tensile_type_map.hpp"
 
 #include <algorithm>
@@ -14,6 +15,28 @@
 
 namespace TensileLite
 {
+    TuningModeConfig TuningModeConfig::fromEnvironment(bool isPrivileged)
+    {
+        TuningModeConfig config;
+
+        if(const char* env = rocblaslt_secure_getenv_impl("HIPBLASLT_TUNING_MODE", isPrivileged))
+        {
+            if(std::string(env) == "cache")
+                config.mode = TuningMode::Cache;
+        }
+
+        if(const char* path
+           = rocblaslt_secure_getenv_impl("HIPBLASLT_TUNING_CACHE_PATH", isPrivileged))
+            config.cachePath = path;
+
+        config.suppressedForSecurity
+            = rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TUNING_MODE", isPrivileged)
+              || rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TUNING_CACHE_PATH",
+                                                            isPrivileged);
+
+        return config;
+    }
+
     namespace
     {
         const char* const kGitVersionHeader = "Git Version:";

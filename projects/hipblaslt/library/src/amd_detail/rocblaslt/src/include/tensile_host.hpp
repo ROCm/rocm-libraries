@@ -181,6 +181,17 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
                                      rocblaslt_matmul_algo*       algo,
                                      size_t*                      workspaceSizeInBytes);
 
+/**
+ * isSolutionSupported without leaving gemmData's Tensile problem modified. A
+ * cache probe may test a math mode or algorithm other than the one the call
+ * goes on to launch.
+ */
+rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                   handle,
+                                               const RocblasltContractionProblem& prob,
+                                               std::shared_ptr<void>              gemmData,
+                                               rocblaslt_matmul_algo*             algo,
+                                               size_t* workspaceSizeInBytes);
+
 template <typename Tuning>
 rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                                      const rocblaslt::RocGemmType& gemmType,
@@ -224,6 +235,25 @@ TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
 
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
+
+/**
+ * The solution index of the first entry for this key that still resolves to its
+ * recorded kernel and supports this problem, or -1 when there is none.
+ *
+ * A pure probe: the caller counts the lookup, because only it knows whether the
+ * probe decided which kernel the call launches.
+ */
+int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes);
+
+/**
+ * The solution index this thread last launched through runContractionProblem,
+ * or -1, clearing it.
+ */
+int tuningLastLaunchedIndexForTest();
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 

@@ -29,6 +29,37 @@
 
 namespace TensileLite
 {
+    enum class TuningMode : uint32_t
+    {
+        Off   = 0,
+        Cache = 1,
+    };
+
+    /**
+     * HIPBLASLT_TUNING_MODE and HIPBLASLT_TUNING_CACHE_PATH as the environment
+     * sets them.
+     */
+    struct TuningModeConfig
+    {
+        TuningMode  mode = TuningMode::Off;
+        std::string cachePath;
+
+        // A process in a secure execution context ignores both variables and
+        // stays off: they choose a file for it to read, which an inherited
+        // environment must not be able to impose on it. Set when that is why
+        // the mode is off, so the caller can say so.
+        bool suppressedForSecurity = false;
+
+        static TuningModeConfig fromEnvironment(bool isPrivileged);
+
+        // There is no default cache location, so a mode without a path does
+        // nothing.
+        bool reads() const
+        {
+            return mode != TuningMode::Off && !cachePath.empty();
+        }
+    };
+
     /**
      * Row schema version.
      *

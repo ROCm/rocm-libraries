@@ -3560,6 +3560,18 @@ static void bindFlagRegion(const RocblasltContractionProblem&      prob,
     inputs.Synchronizer = prob.streamKFlags;
 }
 
+namespace
+{
+    thread_local int t_lastLaunchedIndex = -1;
+} // namespace
+
+int tuningLastLaunchedIndexForTest()
+{
+    const int index     = t_lastLaunchedIndex;
+    t_lastLaunchedIndex = -1;
+    return index;
+}
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -3596,6 +3608,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(prob.trans_b == HIPBLAS_OP_C)
             data->problem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
 
+        // Noted before algo is filled in below. An explicit algo launches as
+        // given, whatever the cache holds; the cache chooses the kernel only
+        // when the caller leaves that choice to the library.
+        const bool callerSuppliedAlgo = (algo != nullptr);
+
         if(algo == nullptr)
         {
             int returnAlgoCount;
@@ -3615,6 +3632,53 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
 
         int* solutionIndex = (int*)algo->data;
+
+        // Cache replay for a call that passed no algo. hipblasLtMatmul accepts
+        // algo == nullptr and then runs getBestSolutions above without ever
+        // entering hipblasLtMatmulAlgoGetHeuristic, so without this such a call
+        // would never be served from the cache. Only the index used for this
+        // launch changes; the caller's algo is const.
+        int launchIndex = -1;
+        try
+        {
+            const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+
+            if(tuning.reads() && !callerSuppliedAlgo && !prob.grouped_gemm
+               && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            {
+                // A matmul-only caller never reaches the heuristic entry point,
+                // which is the only other place that loads the file.
+                TensileLite::getContractionProblemsFromFile(tuning.cachePath());
+
+                const TensileLite::ProblemOverride key
+                    = RocblasltContractionProblem2ProblemOverride(prob);
+                const int cachedIndex = tuning_cache_find_valid_entry(
+                    handle, key, prob, gemmData, prob.workspaceSize);
+
+                TensileLite::recordTuningLookup(key, cachedIndex >= 0);
+                auto& counters = TensileLite::TuningCounters::instance();
+                if(cachedIndex >= 0)
+                {
+                    counters.hits++;
+                    launchIndex = cachedIndex;
+                }
+                else
+                {
+                    counters.misses++;
+                }
+            }
+        }
+        catch(...)
+        {
+            // The cache is an optimisation: a lookup that throws leaves the call
+            // on default selection rather than failing it.
+            static_cast<void>(hipGetLastError());
+            launchIndex = -1;
+        }
+
+        if(launchIndex >= 0)
+            solutionIndex = &launchIndex;
+
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
 
@@ -3785,6 +3849,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
+            t_lastLaunchedIndex = solution->index;
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
             if(rocblaslt::Debug::Instance().printLogAsMarker())
@@ -3842,7 +3907,7 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
 
         // Building the key queries the device, and this runs on every gemm
         // object creation, so only when a tuning file will be consulted.
-        const bool cacheTuningKey = OverrideSingleton::getInstance().env_mode;
+        const bool cacheTuningKey = TensileLite::selectTuningFile().active;
 
         if(gemmData)
         {
@@ -5396,6 +5461,38 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
     updateTensileProblem(prob, data->problem);
     rocblaslt::RocTuningV2* tuning = nullptr;
     return isSolutionSupported(handle, data->problem, prob, algo, tuning, workspaceSizeInBytes);
+}
+
+rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                   handle,
+                                               const RocblasltContractionProblem& prob,
+                                               std::shared_ptr<void>              gemmData,
+                                               rocblaslt_matmul_algo*             algo,
+                                               size_t* workspaceSizeInBytes)
+{
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(useRocRoller(handle, prob))
+    {
+        RocblasltContractionProblem probe = prob;
+        return isRocRollerSolutionSupported(handle, probe, algo, workspaceSizeInBytes);
+    }
+#endif
+
+    std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+    auto                             savedProblem = data->problem;
+    RocblasltContractionProblem      probe        = prob;
+
+    try
+    {
+        const rocblaslt_status status
+            = isSolutionSupported(handle, probe, gemmData, algo, workspaceSizeInBytes);
+        data->problem = std::move(savedProblem);
+        return status;
+    }
+    catch(...)
+    {
+        data->problem = std::move(savedProblem);
+        throw;
+    }
 }
 
 template <typename T>
