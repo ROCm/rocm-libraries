@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -76,6 +76,9 @@ const vector<vector<int>> large_matrix_sizeB_range = {
     {100, 0}, {150, 0}, {200, 1}, {524, 2}, {1000, 2},
 };
 
+const vector<vector<int>> large_batch_sizeA_range = {{7, 7, 7}};
+const vector<vector<int>> large_batch_sizeB_range = {{7, 0}, {7, 1}, {7, 2}};
+
 Arguments getrs_setup_arguments(getrs_tuple tup)
 {
     vector<int> matrix_sizeA = std::get<0>(tup);
@@ -102,7 +105,7 @@ Arguments getrs_setup_arguments(getrs_tuple tup)
     return arg;
 }
 
-template <typename I>
+template <typename I, int BATCH_COUNT = 3>
 class GETRS_BASE : public ::TestWithParam<getrs_tuple>
 {
 protected:
@@ -119,7 +122,7 @@ protected:
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<rocblas_int>("nrhs") == 0)
             testing_getrs_bad_arg<BATCHED, STRIDED, T, I>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_getrs<BATCHED, STRIDED, T, I>(arg);
     }
 };
@@ -129,6 +132,14 @@ class GETRS : public GETRS_BASE<rocblas_int>
 };
 
 class GETRS_64 : public GETRS_BASE<int64_t>
+{
+};
+
+class GETRS_LARGE_BATCH : public GETRS_BASE<rocblas_int, 65537>
+{
+};
+
+class GETRS_LARGE_BATCH_64 : public GETRS_BASE<rocblas_int, 65537>
 {
 };
 
@@ -216,6 +227,47 @@ TEST_P(GETRS_64, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// large batch case
+
+TEST_P(GETRS_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETRS_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETRS_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRS_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRS_LARGE_BATCH_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETRS_LARGE_BATCH_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETRS_LARGE_BATCH_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRS_LARGE_BATCH_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
 // strided_batched tests
 
 TEST_P(GETRS, strided_batched__float)
@@ -258,6 +310,48 @@ TEST_P(GETRS_64, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large strided batch
+
+TEST_P(GETRS_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETRS_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETRS_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRS_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRS_LARGE_BATCH_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETRS_LARGE_BATCH_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETRS_LARGE_BATCH_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRS_LARGE_BATCH_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GETRS,
                          Combine(ValuesIn(large_matrix_sizeA_range),
@@ -275,3 +369,13 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GETRS_64,
                          Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         GETRS_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_sizeA_range),
+                                 ValuesIn(large_batch_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         GETRS_LARGE_BATCH_64,
+                         Combine(ValuesIn(large_batch_sizeA_range),
+                                 ValuesIn(large_batch_sizeB_range)));
