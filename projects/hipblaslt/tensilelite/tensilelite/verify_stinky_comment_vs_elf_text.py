@@ -13,8 +13,8 @@ Same contract as the legacy shell helper:
 - Exit **1**: mismatch.
 - Exit **2**: usage / missing file / could not read ``.text``.
 
-Uses **llvm-readelf** from the **ROCm** install (``ROCM_PATH/bin``) when set, else **LLVM_BIN**,
-then ``PATH``. On Windows the probe tries ``llvm-readelf.exe`` first under those directories.
+Uses **llvm-readelf** from the executable paths of the selected ROCm installation.
+On Windows the probe tries ``llvm-readelf.exe`` first.
 
 CLI (no rocisa; safe ``python -m`` entry):
 
@@ -24,13 +24,13 @@ CLI (no rocisa; safe ``python -m`` entry):
 from __future__ import annotations
 
 import argparse
-import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+from ._runtime import executable_search_paths
 
 _STINKY_RE = re.compile(r"STINKY_TOTAL_INST_BYTES:\s*([0-9]+)")
 
@@ -47,8 +47,8 @@ _READELF_CANDIDATES = (
 def _find_readelf() -> Optional[List[str]]:
     """Return argv prefix ``[exe]`` for readelf/llvm-readelf, or ``None`` if not found.
 
-    Order: ``ROCM_PATH/bin`` (ROCm SDK LLVM), then ``LLVM_BIN``, then ``PATH`` via ``shutil.which``.
-    Tries ``llvm-readelf`` before ``readelf``; ``.exe`` suffix first for directory probes (Windows).
+    Search only the frozen ROCm installation's executable directories. Tries
+    ``llvm-readelf`` before ``readelf`` and the ``.exe`` suffix first.
     """
     def pick_from_dir(d: Path) -> Optional[List[str]]:
         for cand in _READELF_CANDIDATES:
@@ -57,22 +57,10 @@ def _find_readelf() -> Optional[List[str]]:
                 return [str(exe)]
         return None
 
-    rocm = (os.environ.get("ROCM_PATH") or "").strip()
-    if rocm:
-        hit = pick_from_dir(Path(rocm) / "bin")
+    for directory in executable_search_paths():
+        hit = pick_from_dir(directory)
         if hit:
             return hit
-
-    llvm_bin = (os.environ.get("LLVM_BIN") or "").strip()
-    if llvm_bin:
-        hit = pick_from_dir(Path(llvm_bin))
-        if hit:
-            return hit
-
-    for name in _READELF_CANDIDATES:
-        p = shutil.which(name)
-        if p:
-            return [p]
 
     return None
 
@@ -82,8 +70,8 @@ def _readelf_section_headers(o_path: Path) -> Tuple[int, str, str]:
     exe = _find_readelf()
     if not exe:
         hint = (
-            "no readelf/llvm-readelf found (set ROCM_PATH, LLVM_BIN, or put llvm-readelf on PATH). "
-            "Windows: ensure ROCm or LLVM bin contains llvm-readelf.exe."
+            "no readelf/llvm-readelf found in the selected ROCm executable paths. "
+            "Ensure that installation contains llvm-readelf (llvm-readelf.exe on Windows)."
         )
         return 127, "", hint
 
