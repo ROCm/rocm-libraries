@@ -83,6 +83,7 @@ if(ENABLE_HIP_FLASH2_ENGINE)
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
+        kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
@@ -99,6 +100,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )
+    # The production descriptor tree, when this configuration packs one. main() adds it
+    # beside the integration set through HIPDNN_DESCRIPTOR_RUNTIME_DIR, so the shipped
+    # engines load in this binary too; the gfx950 dense attention knob suite needs its
+    # engine. The same kind of binary-relative offset as the set above, so it holds in the
+    # build and the install tree alike. hkp_packaging_product exists exactly when the
+    # production packer writes (the top-level install rule keys on it too).
+    if(TARGET hkp_packaging_product)
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
+        )
+        add_dependencies(hip_kernel_provider_integration_tests hkp_packaging_product)
+    endif()
     # The shared descriptor-root resolver lives with the unit tests
     target_include_directories(hip_kernel_provider_integration_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../tests
