@@ -8,6 +8,8 @@
 ``assignGlobalParameters`` (config merge + env + version + hipcc-probe branches),
 and ``setupRestoreClocks``. The process-global dict is isolated per test."""
 
+from pathlib import Path
+
 import pytest
 
 import tensilelite.Common.GlobalParameters as GP
@@ -30,11 +32,21 @@ def test_print_capabilities_table(isolate_globals, isa_info_map, capsys, snapsho
     assert {"nonempty": len(out) > 0, "has_isa_row": any(c.isdigit() for c in out)} == snapshot
 
 
+
+def _stub_amdsmi(monkeypatch):
+    monkeypatch.setattr(
+        GP._runtime,
+        "executable_search_paths",
+        lambda: [Path("/selected/rocm/bin")],
+    )
+    monkeypatch.setattr(GP, "isExe", lambda path: True)
+
+
 def _set_rocm_version(monkeypatch, version="6.2.0"):
     """Set ROCM_VERSION so get_rocm_version() returns a deterministic value without
-    any subprocess calls. Also stubs locateExe to avoid amd-smi discovery issues."""
+    any subprocess calls. Also stubs the selected-runtime amd-smi discovery."""
     monkeypatch.setenv("ROCM_VERSION", version)
-    monkeypatch.setattr(GP, "locateExe", lambda d, n: f"{d}/{n}")
+    _stub_amdsmi(monkeypatch)
 
 
 def test_assign_global_parameters_basic(isolate_globals, isa_info_map, monkeypatch):
@@ -75,17 +87,16 @@ def test_assign_global_parameters_incompatible_version_exits(isolate_globals, is
         GP.assignGlobalParameters({"MinimumRequiredVersion": "999.0.0"}, isa_info_map)
 
 
-def test_assign_global_parameters_locateexe_oserror_nonfatal(isolate_globals, isa_info_map, monkeypatch):
-    # amd-smi not found (non-Windows) -> the except OSError arm is non-fatal:
-    # it warns and leaves AMDSMIPath unset (None) instead of re-raising, so the
-    # build/logic steps still run in environments that do not ship amd-smi.
+def test_assign_global_parameters_missing_selected_amdsmi_is_nonfatal(
+    isolate_globals, isa_info_map, monkeypatch
+):
+    # amd-smi not found in the selected runtime is non-fatal: it warns and
+    # leaves AMDSMIPath unset so build/logic steps can continue.
     _set_rocm_version(monkeypatch)
-    monkeypatch.setattr(GP, "locateExe",
-                        lambda d, n: (_ for _ in ()).throw(OSError("Failed to locate amd-smi")))
+    monkeypatch.setattr(GP._runtime, "executable_search_paths", lambda: [])
     monkeypatch.setattr(GP.os, "name", "posix")
     GP.assignGlobalParameters({}, isa_info_map)
     assert GP.globalParameters["AMDSMIPath"] is None
-
 
 def test_assign_global_parameters_min_version_compatible(isolate_globals, isa_info_map, monkeypatch):
     # A *present, compatible* MinimumRequiredVersion -> the 644->651 false arm.
@@ -98,7 +109,7 @@ def test_assign_global_parameters_min_version_compatible(isolate_globals, isa_in
 def test_assign_global_parameters_version_failure_warns(isolate_globals, isa_info_map, monkeypatch):
     # get_rocm_version() failure is caught + warned; assignment still completes.
     monkeypatch.setattr(GP, "get_rocm_version", lambda: (_ for _ in ()).throw(RuntimeError("no version")))
-    monkeypatch.setattr(GP, "locateExe", lambda d, n: f"{d}/{n}")
+    _stub_amdsmi(monkeypatch)
     GP.assignGlobalParameters({}, isa_info_map)
     assert "ROCmPath" in GP.globalParameters
 
