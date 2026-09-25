@@ -17865,7 +17865,12 @@ class KernelWriterAssembly(KernelWriter):
         # that block moves the slots after it and shifts the store batching, which
         # dropped the paired dwordx4 store for the unpaired pair and miscompared.
         pairQuads = 1
-        if kernel.get("UseSubtileImpl") and col128Base < 0 and \
+        # plsinBlockSchedTile, not UseSubtileImpl alone: the ring is the only part
+        # of this store that spends registers, and permlane16 reaches every gfx950
+        # MI16 subtile kernel, including bf16-input ones whose accumulators already
+        # fill the VGPR file. Four more registers there push ValuC past the 256 cap
+        # and the kernel fails to assemble.
+        if kernel.get("UseSubtileImpl") and col128Base < 0 and plsinBlockSchedTile(kernel) and \
            plsinStorePermlane16Active(kernel, True if self.states.subtileFusedFullTileStore else None):
           pairQuads = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "2")))
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
