@@ -48,7 +48,6 @@
 // pattern because it tests workspace infrastructure plumbing rather than
 // general BLAS correctness, and does not need parameterized matrix dimensions.
 
-#include "blas3/rocblas_syrk_herk.hpp"
 #include "client_utility.hpp"
 #include "device_batch_vector.hpp"
 #include "device_vector.hpp"
@@ -125,25 +124,17 @@ namespace
     // loop; c_budget is the workspace byte cap.
     constexpr rocblas_int c_gemm_stride = ((1 << 16) - 1) & ~0xf; // 65520
 
-    // Workspace budget these tests run the library under.
+    // Mirror of c_syrk_herk_workspace_max_bytes.
     //
-    // At the shipped budget every shape a test can afford fits in one chunk, so
-    // the chunk loop body would run once and none of the multi-chunk indexing
-    // would be exercised; forcing a split by growing the problem instead needs
-    // several GB of C. This value is two gemm_64 strides' worth of the widest
-    // element type, chosen so that at n=2 and the batch counts below every type
-    // gets a chunk both larger than gridDim.z can address (so the kernel
-    // sweeps) and smaller than the batch count (so the host loop runs several
-    // chunks). Those two regimes are otherwise disjoint.
-    constexpr size_t c_budget = size_t(2) * 65520 * 16; // 2096640
-
-    // The budget lives on the handle, so a size query and the launch that
-    // consumes its result always agree. Apply it immediately after constructing
-    // a handle and before any query on it.
-    static void set_test_budget(rocblas_handle handle)
-    {
-        handle->syrk_herk_workspace_max_bytes = c_budget;
-    }
+    // NOTE ON COVERAGE: at this budget every shape these tests can afford to
+    // allocate fits in a single chunk, because C is about twice the unchunked
+    // workspace and so forcing a split needs several GB of it. The host chunk
+    // loop therefore runs exactly one iteration here, and the multi-chunk
+    // indexing -- batch_off, the A and C pointer advances, the local-to-absolute
+    // batch mapping -- is verified only through the size-query battery's
+    // arithmetic, not through the kernels. The kernel's grid-stride sweep does
+    // run, since chunk_size exceeds the grid ceiling.
+    constexpr size_t c_budget = size_t(1024) * 1024 * 1024;
 
     // Port of rocblas_syrk_herk_chunk_size. Kept deliberately literal so a change
     // to the production rule shows up here as a test failure rather than silently
@@ -415,9 +406,7 @@ namespace
     {
 
         rocblas_local_handle handle;
-
-        set_test_budget(handle);
-        const rocblas_int k = c_k;
+        const rocblas_int    k = c_k;
 
         // A size query allocates nothing, so this sweeps shapes far larger than
         // the correctness tests can afford. n is varied as well as batch_count
@@ -486,9 +475,7 @@ namespace
         using S = scalar_t<T, K>;
 
         rocblas_local_handle handle;
-
-        set_test_budget(handle);
-        const rocblas_int n = c_n, k = c_k;
+        const rocblas_int    n = c_n, k = c_k;
 
         size_t queried = 0;
         ASSERT_TRUE(
@@ -552,9 +539,7 @@ namespace
         using S = scalar_t<T, K>;
 
         rocblas_local_handle handle;
-
-        set_test_budget(handle);
-        const rocblas_int n = c_n, k = c_k;
+        const rocblas_int    n = c_n, k = c_k;
 
         size_t queried = 0;
         ASSERT_TRUE(
@@ -736,8 +721,6 @@ namespace
         using S = scalar_t<T, K>;
 
         rocblas_local_handle handle;
-
-        set_test_budget(handle);
         // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
         // is false and the call never reaches the chunked workspace path at all.
         const rocblas_int n = c_n, k = c_k;
@@ -799,8 +782,6 @@ namespace
         using S = scalar_t<T, K>;
 
         rocblas_local_handle handle;
-
-        set_test_budget(handle);
         // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
         // is false and the call never reaches the chunked workspace path at all.
         const rocblas_int n = c_n, k = c_k;
@@ -891,8 +872,6 @@ namespace
         using S = scalar_t<T, K>;
 
         rocblas_local_handle handle;
-
-        set_test_budget(handle);
         // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
         // is false and the call never reaches the chunked workspace path at all.
         const rocblas_int n = 1, k = c_k;

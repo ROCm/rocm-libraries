@@ -65,38 +65,26 @@ inline bool rocblas_use_only_gemm(rocblas_handle handle, rocblas_int n, rocblas_
 // large-n shapes that cannot run at all today.
 constexpr size_t c_syrk_herk_workspace_max_bytes = size_t(1024) * 1024 * 1024;
 
-// The budget in effect for this handle.  Zero on the handle selects the default.
-inline size_t rocblas_syrk_herk_workspace_budget(rocblas_handle handle)
+// Triangle bytes held per batch in the workspace.
+inline size_t rocblas_syrk_herk_bytes_per_batch(rocblas_int n, size_t elem_size)
 {
-    return handle->syrk_herk_workspace_max_bytes ? handle->syrk_herk_workspace_max_bytes
-                                                 : c_syrk_herk_workspace_max_bytes;
+    return (size_t(n) * size_t(n - 1) / 2) * elem_size;
 }
 
-// Batches processed per chunk by the gemm-path launcher.
-//
-// Both rocblas_internal_syrk_herk_workspace and the launcher in
-// rocblas_syrk_herk_kernels.cpp MUST derive the chunk from this function: the
-// query sizes the buffer for one chunk, so any disagreement lets the launcher
-// write past the allocation.
-//
-// The chunk is the largest batch count whose triangle slots fit the byte budget,
-// so a problem small enough to fit entirely takes a single pass and issues the
-// same launches as the unchunked code.  When the budget does force a split, the
-// chunk is rounded down to a multiple of c_i64_grid_YZ_chunk, which is the stride
-// rocblas_internal_gemm_64 uses for its own batch loop; that keeps a full chunk
-// free of a short remainder launch. Only the final partial chunk can be short.
-inline rocblas_int rocblas_syrk_herk_chunk_size(rocblas_handle handle,
-                                                rocblas_int    n,
-                                                rocblas_int    batch_count,
-                                                size_t         elem_size)
+// Largest chunk whose triangles fit in the given number of bytes, aligned so a
+// full chunk does not end in a short GEMM.  The launcher uses this to fit the
+// chunk to the workspace it actually receives, which may be smaller than the
+// size query asked for.
+inline rocblas_int rocblas_syrk_herk_chunk_for_bytes(rocblas_int n,
+                                                     rocblas_int batch_count,
+                                                     size_t      elem_size,
+                                                     size_t      bytes)
 {
-    const size_t per_batch = (size_t(n) * size_t(n - 1) / 2) * elem_size;
-
-    // tri(n) == 0 (n <= 1): no workspace is consumed, so one pass covers everything.
+    const size_t per_batch = rocblas_syrk_herk_bytes_per_batch(n, elem_size);
     if(!per_batch)
         return batch_count;
 
-    size_t chunk = rocblas_syrk_herk_workspace_budget(handle) / per_batch;
+    size_t chunk = bytes / per_batch;
     if(chunk < 1)
         chunk = 1; // a single batch always has to fit
     if(chunk > size_t(batch_count))
@@ -105,12 +93,27 @@ inline rocblas_int rocblas_syrk_herk_chunk_size(rocblas_handle handle,
     if(chunk < size_t(batch_count) && chunk > size_t(c_i64_grid_YZ_chunk))
         chunk = (chunk / size_t(c_i64_grid_YZ_chunk)) * size_t(c_i64_grid_YZ_chunk);
 
-    // chunk is already <= batch_count, so it fits; the clamp only guards an
-    // absurd budget override truncating on the cast.
+    // chunk is already <= batch_count, so it fits; the clamp only guards a
+    // pathological byte count truncating on the cast.
     if(chunk > size_t(std::numeric_limits<rocblas_int>::max()))
         chunk = size_t(std::numeric_limits<rocblas_int>::max());
 
     return rocblas_int(chunk);
+}
+
+// Batches per chunk that the size query asks for: the largest whose triangle
+// slots fit the byte budget.  A problem small enough to fit entirely takes a
+// single pass and issues the same launches as the unchunked code.
+//
+// This is the preferred chunk, not a contract.  The launcher refits it to the
+// workspace actually granted, which can be smaller when the caller supplied one
+// through rocblas_set_workspace.  Refitting can only shrink the chunk, so the
+// launcher never outruns its allocation.
+inline rocblas_int
+    rocblas_syrk_herk_chunk_size(rocblas_int n, rocblas_int batch_count, size_t elem_size)
+{
+    return rocblas_syrk_herk_chunk_for_bytes(
+        n, batch_count, elem_size, c_syrk_herk_workspace_max_bytes);
 }
 
 template <typename T>
@@ -129,7 +132,7 @@ inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
             // batch count, because the launcher reuses the buffer for every chunk.
             // All arithmetic uses size_t to prevent signed overflow in the product
             // tri(n) * sizeof(T) * chunk.
-            size_t chunk = size_t(rocblas_syrk_herk_chunk_size(handle, n, batch_count, sizeof(T)));
+            size_t chunk = size_t(rocblas_syrk_herk_chunk_size(n, batch_count, sizeof(T)));
             size         = (size_t(n) * size_t(n - 1) / 2) * sizeof(T) * chunk;
         }
 

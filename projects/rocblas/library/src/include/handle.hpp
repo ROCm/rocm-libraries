@@ -119,7 +119,7 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
 
 // cached device properties for handle device
 ROCBLAS_INTERNAL_EXPORT_NOINLINE const hipDeviceProp_t*
-    rocblas_internal_get_device_prop(rocblas_handle handle);
+                                       rocblas_internal_get_device_prop(rocblas_handle handle);
 
 /*******************************************************************************
  * \brief rocblas_handle is a structure holding the rocblas library context.
@@ -233,14 +233,6 @@ public:
 
     _rocblas_handle(const _rocblas_handle&) = delete;
     _rocblas_handle& operator=(const _rocblas_handle&) = delete;
-
-    // Upper bound in bytes on the syrk/herk gemm-path workspace; zero selects
-    // the library default.  Scoped to the handle rather than being a global so
-    // that a device memory size query and the launch that consumes its result
-    // cannot derive different chunk sizes, which would let the launch write
-    // past the queried allocation.  Lowered by tests to reach the multi-chunk
-    // path, which otherwise needs several GB of C to trigger.
-    size_t syrk_herk_workspace_max_bytes = 0;
 
     // Set the HIP default device ID to the handle's device ID, and restore on exit
     auto push_device_id()

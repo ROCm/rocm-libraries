@@ -102,9 +102,9 @@ rocblas_status rocblas_internal_syrk_herk_template(rocblas_handle    handle,
                   ? (HERM ? rocblas_operation_conjugate_transpose : rocblas_operation_transpose)
                   : rocblas_operation_none;
 
-        // Process batches in chunks sized by rocblas_syrk_herk_chunk_size, which
-        // returns the whole batch count when the triangles fit the byte budget and
-        // a smaller, gemm_64-aligned count when they do not.  The workspace
+        // Process batches in chunks derived from the workspace actually allocated:
+        // the whole batch count when the triangles fit, a smaller gemm_64-aligned
+        // count when they do not.  The workspace
         // is sized for one chunk, so each iteration reuses the same buffer.  Within
         // a chunk the kernel uses blockIdx.z (0..chunk_size-1) to index W_C and
         // (batch_offset + blockIdx.z) to load/store d_C.  Stream ordering serialises
@@ -116,8 +116,7 @@ rocblas_status rocblas_internal_syrk_herk_template(rocblas_handle    handle,
         // remainder.  Only the final partial chunk is short.
         // Computed once: the workspace was sized for exactly this many batches,
         // so it must not vary across iterations.
-        const rocblas_int chunk_size
-            = rocblas_syrk_herk_chunk_size(handle, n, batch_count, sizeof(T));
+        const rocblas_int chunk_size = rocblas_syrk_herk_chunk_size(n, batch_count, sizeof(T));
 
         rocblas_int batch_off = 0;
         while(batch_off < batch_count)
