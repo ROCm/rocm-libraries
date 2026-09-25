@@ -106,8 +106,10 @@ jobs:
           set -o pipefail
           export PATH="/opt/rocm/lib/llvm/bin:/opt/rocm/bin:$PATH"
           export LD_LIBRARY_PATH="/opt/rocm/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
-          apt-get update -qq && apt-get install -y -qq ccache ninja-build || true
+          apt-get update -qq && apt-get install -y -qq ccache ninja-build make || true
           export Tensile_ASM_COMPILER_LAUNCHER=ccache Tensile_CXX_COMPILER_LAUNCHER=ccache
+          # Ninja like TheRock's build; cmake would otherwise default to Unix Makefiles.
+          export CMAKE_GENERATOR=Ninja
           python3 -m pip install --upgrade pip
           pip install PyYAML joblib packaging msgpack "cmake==3.31.10" invoke pytest pytest-xdist pytest-timeout
           mkdir -p test_results tensilelite_test_results
