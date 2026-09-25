@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_identity.hpp"
+#include "csrgemm_bitmap.hpp"
 #include "csrgemm_device.h"
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_control.hpp"
@@ -133,6 +134,12 @@ rocsparse_status rocsparse::csrgemm_mult_buffer_size_core(rocsparse_handle      
     *buffer_size += ((sizeof(J) * m - 1) / 256 + 1) * 256;
     *buffer_size += ((sizeof(J) * m - 1) / 256 + 1) * 256;
     *buffer_size += ((sizeof(I) * m - 1) / 256 + 1) * 256;
+
+    // Rows that outgrow LDS
+    size_t bitmap_size;
+    RETURN_IF_ROCSPARSE_ERROR(
+        (rocsparse::csrgemm_bitmap_buffer_size<I, J>(handle, m, n, &bitmap_size)));
+    *buffer_size += bitmap_size;
 
     info_C->csrgemm_info->buffer_size    = buffer_size[0];
     info_C->csrgemm_info->is_initialized = true;
