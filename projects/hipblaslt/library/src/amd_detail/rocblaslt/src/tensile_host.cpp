@@ -3800,6 +3800,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     catch(const std::exception& e)
     {
+        // status may already hold getBestSolutions' success for a call that
+        // passed no algo.
+        status = rocblaslt_status_internal_error;
 #if 0
         std::ostream msg;
         print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
@@ -3808,6 +3811,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     catch(...)
     {
+        status = rocblaslt_status_internal_error;
 #if 0
         std::ostream msg;
         print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
