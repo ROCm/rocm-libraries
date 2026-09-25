@@ -188,7 +188,7 @@ class GETRF_NPVT_64 : public GETF2_GETRF_NPVT<true, int64_t>
 // large batch
 
 // TODO, increase BCOUNT to 65537 (64*1024+1)
-int constexpr BCOUNT = 64;
+int constexpr BCOUNT = 1025;
 
 class GETF2_LARGE_BATCH : public GETF2_GETRF<false, rocblas_int, BCOUNT>
 {
