@@ -110,8 +110,8 @@ if(HIPBLASLT_ENABLE_YAML)
         PRIVATE
             FILE_SET tensilelite_private_headers TYPE HEADERS
                 FILES
-                    "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/llvm/Loading.hpp"
-                    "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/llvm/YAML.hpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/yaml-cpp/Loading.hpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/yaml-cpp/YAML.hpp"
     )
 else()
     target_sources(tensilelite-host

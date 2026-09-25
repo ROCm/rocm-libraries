@@ -185,7 +185,7 @@ if(HIPBLASLT_ENABLE_OPENMP)
 endif()
 
 if(HIPBLASLT_ENABLE_YAML)
-    find_package(LLVM REQUIRED)
+    find_package(yaml-cpp 0.8.0 REQUIRED)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
@@ -521,6 +521,9 @@ if(HIPBLASLT_ENABLE_HOST)
 endif()
 if(TENSILELITE_ENABLE_HOST)
     list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
+    if(HIPBLASLT_ENABLE_YAML)
+        list(APPEND _hipblaslt_export_depends PACKAGE yaml-cpp CONFIG)
+    endif()
 endif()
 
 if(_hipblaslt_export_targets)
@@ -538,12 +541,9 @@ if(_hipblaslt_export_targets)
             list(APPEND _hipblaslt_static_depends PACKAGE ZLIB)
         endif()
 
-        if(HIPBLASLT_ENABLE_YAML)
-            if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
-                list(APPEND _hipblaslt_static_depends PACKAGE LLVM)
-            endif()
-        elseif(_tensilelite_host_type STREQUAL "STATIC_LIBRARY"
-               OR _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
+        if(NOT HIPBLASLT_ENABLE_YAML
+           AND (_tensilelite_host_type STREQUAL "STATIC_LIBRARY"
+                OR _hipblaslt_target_type STREQUAL "STATIC_LIBRARY"))
             if(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
                 list(APPEND _hipblaslt_static_depends PACKAGE msgpack-cxx CONFIG)
             else()

@@ -30,7 +30,7 @@
 #include <Tensile/ContractionSolution.hpp>
 
 #ifdef TENSILE_YAML
-#include <Tensile/llvm/Loading.hpp>
+#include <Tensile/yaml-cpp/Loading.hpp>
 #endif
 
 #ifdef TENSILE_MSGPACK
@@ -74,7 +74,7 @@ namespace TensileLite
 #endif
 
 #ifdef TENSILE_YAML
-        rv = LLVMLoadLibraryFile<MyProblem, MySolution>(filename, preloaded);
+        rv = YamlCppLoadLibraryFile<MyProblem, MySolution>(filename, preloaded);
         if(rv)
             return rv;
 #endif
@@ -96,7 +96,7 @@ namespace TensileLite
 #endif
 
 #ifdef TENSILE_YAML
-        rv = LLVMLoadLibraryData<MyProblem, MySolution>(data);
+        rv = YamlCppLoadLibraryData<MyProblem, MySolution>(data);
         if(rv)
             return rv;
 #endif
