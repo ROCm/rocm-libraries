@@ -246,8 +246,7 @@ set(hipblaslt_python_dev Development.Module)
 hipblaslt_find_python("${hipblaslt_python_dev}")
 hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 
-if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
-        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+if(TENSILELITE_ENABLE_CLIENT)
     set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
     execute_process(
