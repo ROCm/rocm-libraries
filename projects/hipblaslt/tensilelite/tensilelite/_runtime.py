@@ -47,9 +47,11 @@ def client_executable() -> Path:
             lambda: default_client_candidate(
                 _installation.executable_search_paths,
                 _installation.source,
+                __version__,
             )
         )
-        validate_client(candidate.path, __version__)
+        if not candidate.validated:
+            validate_client(candidate.path, __version__)
     except ClientBindingError as exc:
         selected = (
             f"  selected client: {candidate.path}\n"
