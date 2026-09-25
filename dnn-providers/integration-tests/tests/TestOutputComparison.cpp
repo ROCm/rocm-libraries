@@ -7,19 +7,26 @@
 // returns its mismatches, so these assert on them.
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 
 #include <cstring>
 #include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 
+using hipdnn_integration_tests::ValidationSite;
 using hipdnn_integration_tests::bundle::compareOutputs;
 using hipdnn_integration_tests::bundle::compareTensor;
 using hipdnn_integration_tests::bundle::ComparisonTolerance;
@@ -111,6 +118,19 @@ ComparisonTolerance exact()
     return ComparisonTolerance::allClose(0.0f, 0.0f);
 }
 
+// Leaves new values on the device only, the way an engine or a GPU reference does:
+// the host copy still holds the old fill until something reads it back.
+void overwriteOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor, float value)
+{
+    const std::vector<float> values(tensor.elementCount(), value);
+    ASSERT_EQ(hipMemcpy(tensor.rawDeviceData(),
+                        values.data(),
+                        values.size() * sizeof(float),
+                        hipMemcpyHostToDevice),
+              hipSuccess);
+    tensor.markDeviceModified();
+}
+
 constexpr float K_RMS_THRESHOLD = 1e-4f;
 
 constexpr float K_INF = std::numeric_limits<float>::infinity();
@@ -159,8 +179,9 @@ TEST(TestOutputComparison, MatchingTensorReportsNothing)
     auto expected = floatTensor(attrs, 3.5f);
     auto actual = floatTensor(attrs, 3.5f);
 
-    EXPECT_FALSE(
-        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), "Bundle: b").has_value());
+    EXPECT_FALSE(compareTensor(
+                     K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "Bundle: b")
+                     .has_value());
 }
 
 TEST(TestOutputComparison, MismatchCarriesTheUidLabelAndDiff)
@@ -173,8 +194,8 @@ TEST(TestOutputComparison, MismatchCarriesTheUidLabelAndDiff)
     auto expected = floatTensor(attrs, 3.5f);
     auto actual = floatTensor(attrs, 9.25f);
 
-    const auto mismatch
-        = compareTensor(K_UID_A, attrs, *expected, *actual, exact(), "Bundle: my-bundle");
+    const auto mismatch = compareTensor(
+        K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "Bundle: my-bundle");
 
     ASSERT_TRUE(mismatch.has_value());
     EXPECT_EQ(mismatch->uid, K_UID_A);
@@ -197,11 +218,17 @@ TEST(TestOutputComparison, ToleranceDecidesWhetherADifferenceMatters)
     auto expected = floatTensor(attrs, 1.0f);
     auto actual = floatTensor(attrs, 1.01f);
 
-    EXPECT_TRUE(compareTensor(K_UID_A, attrs, *expected, *actual, exact(), "b").has_value());
-    EXPECT_FALSE(
-        compareTensor(
-            K_UID_A, attrs, *expected, *actual, ComparisonTolerance::allClose(0.1f, 0.1f), "b")
+    EXPECT_TRUE(
+        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
             .has_value());
+    EXPECT_FALSE(compareTensor(K_UID_A,
+                               attrs,
+                               *expected,
+                               *actual,
+                               ComparisonTolerance::allClose(0.1f, 0.1f),
+                               ValidationSite::HOST,
+                               "b")
+                     .has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +257,7 @@ TEST(TestOutputComparison, AllOutputsMatchingYieldsNoMismatches)
         actual,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
         [](const std::string&, auto) { return exact(); },
+        ValidationSite::HOST,
         "Bundle: b");
 
     EXPECT_TRUE(mismatches.empty());
@@ -256,6 +284,7 @@ TEST(TestOutputComparison, EveryDriftedTensorIsReportedNotJustTheFirst)
         actual,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
         [](const std::string&, auto) { return exact(); },
+        ValidationSite::HOST,
         "Bundle: b");
 
     ASSERT_EQ(mismatches.size(), 2u);
@@ -286,6 +315,7 @@ TEST(TestOutputComparison, OnlyTheRequestedUidsAreCompared)
         actual,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
         [](const std::string&, auto) { return exact(); },
+        ValidationSite::HOST,
         "Bundle: b");
 
     EXPECT_TRUE(mismatches.empty()) << "uid 4 drifted but was not in the list";
@@ -295,9 +325,34 @@ TEST(TestOutputComparison, OnlyTheRequestedUidsAreCompared)
 // Validator kind. ALLCLOSE grades each element against its own magnitude; RMS grades
 // the tensor against its largest. The two disagree exactly where reduction outputs
 // live: an element near zero, on a tensor whose scale is large.
+//
+// These run at both sites. A GPU reference's output is compared on the device by
+// default and golden data on the host, and the two must reach the same verdict on the
+// same data. The tensors are filled on the host; the device validators read them after
+// migration, as they read a golden tensor under --validator gpu.
 // ---------------------------------------------------------------------------
 
-TEST(TestOutputComparison, RmsAcceptsANearZeroElementThatAllcloseRejects)
+class TestOutputComparisonSite : public ::testing::TestWithParam<ValidationSite>
+{
+protected:
+    void SetUp() override
+    {
+        if(GetParam() == ValidationSite::DEVICE)
+        {
+            SKIP_IF_NO_DEVICES();
+        }
+    }
+};
+
+INSTANTIATE_TEST_SUITE_P(BothSites,
+                         TestOutputComparisonSite,
+                         ::testing::Values(ValidationSite::HOST, ValidationSite::DEVICE),
+                         [](const ::testing::TestParamInfo<ValidationSite>& info) {
+                             return std::string(info.param == ValidationSite::HOST ? "Host"
+                                                                                   : "Device");
+                         });
+
+TEST_P(TestOutputComparisonSite, RmsAcceptsANearZeroElementThatAllcloseRejects)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -309,20 +364,28 @@ TEST(TestOutputComparison, RmsAcceptsANearZeroElementThatAllcloseRejects)
     auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
     auto actual = floatTensor3(attrs, 1000.0f, 0.0011f, -1000.0f);
 
-    EXPECT_TRUE(
-        compareTensor(
-            K_UID_B, attrs, *expected, *actual, ComparisonTolerance::allClose(0.0f, 1e-4f), "b")
-            .has_value())
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              ComparisonTolerance::allClose(0.0f, 1e-4f),
+                              GetParam(),
+                              "b")
+                    .has_value())
         << "allclose should reject: rtol*|ref| is 1e-7 against a 1e-4 drift";
 
-    EXPECT_FALSE(
-        compareTensor(
-            K_UID_B, attrs, *expected, *actual, ComparisonTolerance::rms(K_RMS_THRESHOLD), "b")
-            .has_value())
+    EXPECT_FALSE(compareTensor(K_UID_B,
+                               attrs,
+                               *expected,
+                               *actual,
+                               ComparisonTolerance::rms(K_RMS_THRESHOLD),
+                               GetParam(),
+                               "b")
+                     .has_value())
         << "relative RMS is ~6e-8 against a 1e-4 threshold";
 }
 
-TEST(TestOutputComparison, RmsStillRejectsDriftLargeAgainstTheTensorScale)
+TEST_P(TestOutputComparisonSite, RmsStillRejectsDriftLargeAgainstTheTensorScale)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -332,14 +395,18 @@ TEST(TestOutputComparison, RmsStillRejectsDriftLargeAgainstTheTensorScale)
     auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
     auto actual = floatTensor3(attrs, 1000.0f, 0.001f, -900.0f);
 
-    EXPECT_TRUE(
-        compareTensor(
-            K_UID_B, attrs, *expected, *actual, ComparisonTolerance::rms(K_RMS_THRESHOLD), "b")
-            .has_value())
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              ComparisonTolerance::rms(K_RMS_THRESHOLD),
+                              GetParam(),
+                              "b")
+                    .has_value())
         << "RMS is a real check, not a pass-through";
 }
 
-TEST(TestOutputComparison, RmsFailureReportsItsThresholdNotAtolRtol)
+TEST_P(TestOutputComparisonSite, RmsFailureReportsItsThresholdNotAtolRtol)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -349,13 +416,52 @@ TEST(TestOutputComparison, RmsFailureReportsItsThresholdNotAtolRtol)
     auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
     auto actual = floatTensor3(attrs, 1000.0f, 0.001f, -900.0f);
 
-    const auto mismatch = compareTensor(
-        K_UID_B, attrs, *expected, *actual, ComparisonTolerance::rms(K_RMS_THRESHOLD), "b");
+    const auto mismatch = compareTensor(K_UID_B,
+                                        attrs,
+                                        *expected,
+                                        *actual,
+                                        ComparisonTolerance::rms(K_RMS_THRESHOLD),
+                                        GetParam(),
+                                        "b");
 
     ASSERT_TRUE(mismatch.has_value());
     EXPECT_NE(mismatch->report.find("relative RMS"), std::string::npos);
     EXPECT_EQ(mismatch->report.find("atol="), std::string::npos)
         << "atol/rtol did not decide this failure and must not be printed as if they had";
+}
+
+// Equal verdicts at both sites are the point, which is also why the verdict tests above
+// cannot tell which validator ran. The site has to build its own site's validator: a
+// DEVICE comparison that quietly built a host validator would pass every one of them.
+TEST(TestOutputComparison, EachSiteBuildsItsOwnValidator)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto built = [](const ComparisonTolerance& tolerance, ValidationSite site) {
+        auto selection = makeValidator(DataType::FLOAT, "y_out", tolerance, site);
+        EXPECT_TRUE(selection.error.empty()) << selection.error;
+        return std::move(selection.validator);
+    };
+    const auto allClose = ComparisonTolerance::allClose(0.0f, 0.0f);
+    const auto rms = ComparisonTolerance::rms(K_RMS_THRESHOLD);
+
+    const auto hostAllClose = built(allClose, ValidationSite::HOST);
+    const auto deviceAllClose = built(allClose, ValidationSite::DEVICE);
+    const auto hostRms = built(rms, ValidationSite::HOST);
+    const auto deviceRms = built(rms, ValidationSite::DEVICE);
+
+    EXPECT_NE(dynamic_cast<const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float>*>(
+                  hostAllClose.get()),
+              nullptr);
+    EXPECT_NE(
+        dynamic_cast<const hipdnn_gpu_ref::GpuFpReferenceValidation<float>*>(deviceAllClose.get()),
+        nullptr);
+    EXPECT_NE(
+        dynamic_cast<const hipdnn_test_sdk::utilities::CpuFpReferenceMiopenRmsValidation<float>*>(
+            hostRms.get()),
+        nullptr);
+    EXPECT_NE(
+        dynamic_cast<const hipdnn_gpu_ref::GpuFpReferenceRmsValidation<float>*>(deviceRms.get()),
+        nullptr);
 }
 
 // The point of the lookup taking a uid and a label: one graph, two outputs, two
@@ -387,6 +493,7 @@ TEST(TestOutputComparison, ValidatorKindIsChosenPerTensor)
             return label == "uid=4" ? ComparisonTolerance::rms(K_RMS_THRESHOLD)
                                     : ComparisonTolerance::allClose(0.0f, 1e-4f);
         },
+        ValidationSite::HOST,
         "Bundle: b");
 
     EXPECT_EQ(labelsSeen, (std::vector<std::string>{"y_out", "uid=4"}))
@@ -419,7 +526,7 @@ TEST(TestOutputComparison, LabelFromAnEmptyNameFallsBackToTheUid)
 // test body.
 // ---------------------------------------------------------------------------
 
-TEST(TestOutputComparison, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
+TEST_P(TestOutputComparisonSite, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -435,6 +542,7 @@ TEST(TestOutputComparison, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
                                              *expected,
                                              *actual,
                                              ComparisonTolerance::rms(K_RMS_THRESHOLD),
+                                             GetParam(),
                                              "Bundle: b"));
 
     // Equal tensors, so this is not a numerical verdict: it reports that the override
@@ -448,7 +556,7 @@ TEST(TestOutputComparison, RmsOnAnUnsupportedDataTypeIsReportedNotThrown)
 }
 
 // The guard is scoped to RMS: integer outputs still compare normally under the default.
-TEST(TestOutputComparison, AllcloseStillGradesIntegerOutputs)
+TEST_P(TestOutputComparisonSite, AllcloseStillGradesIntegerOutputs)
 {
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
@@ -459,8 +567,29 @@ TEST(TestOutputComparison, AllcloseStillGradesIntegerOutputs)
     auto matching = intTensor(attrs, 7);
     auto drifted = intTensor(attrs, 9);
 
-    EXPECT_FALSE(compareTensor(K_UID_INT, attrs, *expected, *matching, exact(), "b").has_value());
-    EXPECT_TRUE(compareTensor(K_UID_INT, attrs, *expected, *drifted, exact(), "b").has_value());
+    EXPECT_FALSE(compareTensor(K_UID_INT, attrs, *expected, *matching, exact(), GetParam(), "b")
+                     .has_value());
+    EXPECT_TRUE(
+        compareTensor(K_UID_INT, attrs, *expected, *drifted, exact(), GetParam(), "b").has_value());
+}
+
+// An integer output nobody wrote still holds its sentinel fill (the type's maximum). If
+// neither the engine nor the reference wrote it, both sides hold the same value, and the
+// comparison must fail anyway, at either site.
+TEST_P(TestOutputComparisonSite, UnwrittenIntegerOutputFailsEvenWhenBothSidesMatch)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
+
+    auto expected = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    auto actual = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    expected->fillWithSentinelValue();
+    actual->fillWithSentinelValue();
+
+    EXPECT_TRUE(
+        compareTensor(K_UID_INT, attrs, *expected, *actual, exact(), GetParam(), "b").has_value());
 }
 
 // A ValidatorKind with no case in makeValidator must not be graded by whichever branch
@@ -472,9 +601,63 @@ TEST(TestOutputComparison, UnhandledValidatorKindIsRefused)
     ComparisonTolerance bogus = ComparisonTolerance::allClose(0.0f, 0.0f);
     bogus.kind = static_cast<ValidatorKind>(99);
 
-    EXPECT_THROW(
-        makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, "y_out", bogus),
-        std::invalid_argument);
+    EXPECT_THROW(makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               "y_out",
+                               bogus,
+                               ValidationSite::HOST),
+                 std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// ValidationSite::DEVICE is where a GPU reference's output is compared. The engine and
+// the reference both leave fresh values on the device with a stale host copy, so the
+// device comparison has to read the device side, and the failure report — built on
+// the host — has to read those same values back rather than the stale fill.
+// ---------------------------------------------------------------------------
+
+TEST(TestGpuOutputComparison, DeviceSiteComparesTheValuesLeftOnTheDevice)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    // Host copies agree; device copies disagree.
+    auto expected = floatTensor(attrs, 3.5f);
+    auto actual = floatTensor(attrs, 3.5f);
+    ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*expected, 3.5f));
+    ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*actual, 9.25f));
+
+    const auto mismatch = compareTensor(
+        K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "Bundle: my-bundle");
+
+    ASSERT_TRUE(mismatch.has_value()) << "the device values differ; the stale host fill does not";
+    EXPECT_EQ(mismatch->label, "y_out");
+    EXPECT_NE(mismatch->report.find("9.25"), std::string::npos)
+        << "the report must show the device values, not the stale host fill";
+}
+
+TEST(TestGpuOutputComparison, DeviceSiteAcceptsMatchingDeviceValues)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    // Host copies disagree; device copies agree.
+    auto expected = floatTensor(attrs, 3.5f);
+    auto actual = floatTensor(attrs, 9.25f);
+    ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*expected, 1.0f));
+    ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*actual, 1.0f));
+
+    EXPECT_FALSE(
+        compareTensor(
+            K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "Bundle: b")
+            .has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -494,13 +677,21 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesAcceptsSameSignedInfinities
     auto expected = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
     auto actual = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
 
-    EXPECT_FALSE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+    EXPECT_FALSE(compareTensor(K_UID_B,
+                               attrs,
+                               *expected,
+                               *actual,
+                               exactMatchingInfinities(),
+                               ValidationSite::HOST,
+                               "b")
                      .has_value())
         << "both sides are -inf and both are right";
 
     // The two answers on one pair of tensors are the fact worth pinning: this kind is
     // only worth having because the default disagrees with it here.
-    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exact(), "b").has_value())
+    EXPECT_TRUE(
+        compareTensor(K_UID_B, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
+            .has_value())
         << "plain allclose computes |ref - impl| = NaN for two infinities and rejects";
 }
 
@@ -514,7 +705,13 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsOppositeSignedI
     auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
     auto actual = floatTensor3(attrs, K_INF, 1.0f, 1.0f);
 
-    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              exactMatchingInfinities(),
+                              ValidationSite::HOST,
+                              "b")
                     .has_value())
         << "the sign is part of the match; +inf where -inf belongs is a real disagreement";
 }
@@ -529,7 +726,13 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsNaN)
     auto expected = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
     auto actual = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
 
-    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              exactMatchingInfinities(),
+                              ValidationSite::HOST,
+                              "b")
                     .has_value())
         << "a NaN is not an infinity: matching NaNs stay a failure on both sides";
 }
@@ -544,7 +747,13 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsFiniteVersusInf
     auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
     auto actual = floatTensor3(attrs, -1e30f, 1.0f, 1.0f);
 
-    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              exactMatchingInfinities(),
+                              ValidationSite::HOST,
+                              "b")
                     .has_value())
         << "a very large finite value is not an infinity, however large";
 }
@@ -561,7 +770,13 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillGradesFiniteElementsBy
     auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
     auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
 
-    EXPECT_TRUE(compareTensor(K_UID_B, attrs, *expected, *actual, exactMatchingInfinities(), "b")
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              exactMatchingInfinities(),
+                              ValidationSite::HOST,
+                              "b")
                     .has_value())
         << "the matched infinity must not carry the drifted element through with it";
 
@@ -570,6 +785,7 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillGradesFiniteElementsBy
                                *expected,
                                *actual,
                                ComparisonTolerance::allCloseMatchingInfinities(0.2f, 0.0f),
+                               ValidationSite::HOST,
                                "b")
                      .has_value())
         << "atol still decides the finite elements";
@@ -602,6 +818,7 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesIsChosenPerTensor)
             labelsSeen.push_back(label);
             return label == "uid=4" ? exactMatchingInfinities() : exact();
         },
+        ValidationSite::HOST,
         "Bundle: b");
 
     EXPECT_EQ(labelsSeen, (std::vector<std::string>{"y_out", "uid=4"}))
@@ -625,9 +842,13 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnAnUnsupportedDataTypeIsRe
     auto actual = intTensor(attrs, 7);
 
     std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
-    ASSERT_NO_THROW(
-        mismatch = compareTensor(
-            K_UID_INT, attrs, *expected, *actual, exactMatchingInfinities(), "Bundle: b"));
+    ASSERT_NO_THROW(mismatch = compareTensor(K_UID_INT,
+                                             attrs,
+                                             *expected,
+                                             *actual,
+                                             exactMatchingInfinities(),
+                                             ValidationSite::HOST,
+                                             "Bundle: b"));
 
     // Equal tensors, so this is not a numerical verdict: it reports that the override
     // could not be honoured at all.
@@ -662,6 +883,7 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol
                         *expected,
                         *actual,
                         ComparisonTolerance::allCloseMatchingInfinities(1e-3f, 1e-3f),
+                        ValidationSite::HOST,
                         "b");
 
     ASSERT_TRUE(mismatch.has_value());

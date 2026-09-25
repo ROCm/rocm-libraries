@@ -353,6 +353,7 @@ def build_attention_2d(
     sliding_window=0,
     has_softcap=False,
     use_alibi=False,
+    use_sinks=False,
     **kw,
 ):
     def _build():
@@ -365,7 +366,7 @@ def build_attention_2d(
             num_query_heads=num_query_heads,
             num_kv_heads=num_kv_heads,
             dtype=dtype,
-            use_sinks=False,
+            use_sinks=use_sinks,
             sliding_window=sliding_window,
             has_softcap=has_softcap,
             use_alibi=use_alibi,
@@ -1091,6 +1092,31 @@ def build_grouped_gemm_case(name, arch, m, n, k, e):
     return _build
 
 
+def build_mxfp8_gemm_case(dtype, matrix_path):
+    def _build():
+        from rocke.instances.gfx1250.block_scaled_gemm import (
+            BlockScaledGemmSpec,
+            build_block_scaled_gemm,
+        )
+
+        return build_block_scaled_gemm(
+            BlockScaledGemmSpec(
+                name=f"irhash_mxfp8_{dtype}_{matrix_path}",
+                M=32,
+                N=48,
+                K=256,
+                dtype_a=dtype,
+                dtype_b=dtype,
+                dtype_c="bf16",
+                scale_dtype="e8m0",
+                matrix_path=matrix_path,
+                block_k=16 if matrix_path == "wmma_scale16" else 32,
+            )
+        )
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1365,6 +1391,16 @@ def cases():
             32,
         ),
     )
+
+    # Homogeneous FP8/BF8 with E8M0 scales, shared by source and installed gates.
+    for dtype in ("fp8e4m3", "bf8e5m2"):
+        for matrix_path in ("wmma_scale", "wmma_scale16"):
+            add(
+                "gemm",
+                f"gemm/gfx1250/mxfp8/{matrix_path}/{dtype}",
+                "gfx1250",
+                build_mxfp8_gemm_case(dtype, matrix_path),
+            )
 
     # Conv: problem-shape and arch variants.
     conv1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
@@ -2340,6 +2376,57 @@ def cases():
             num_kv_heads=2,
             dtype="fp16",
             use_alibi=True,
+        ),
+    )
+    # fp16 + sinks COMBO: the transposed-32x32 combo spec `_enable_combo_2d`
+    # admits for fp16+sinks. The combo knobs are passed explicitly so the golden
+    # hashes the real combo kernel (matching emit parity idx54), not a plain 2D
+    # spec. fp16 cannot set use_fast_paged_kv_desc (bf16-only).
+    _sink_combo_kw = dict(
+        num_seqs=2,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_half_local_pv=True,
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks_combo",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16_d64_sink_combo",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="fp16",
+            use_sinks=True,
+            **_sink_combo_kw,
+        ),
+    )
+    # bf16 + sinks COMBO twin (adds use_fast_paged_kv_desc, bf16-only).
+    add(
+        "attention",
+        "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_bf16_d64_sink_combo",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=True,
+            use_fast_paged_kv_desc=True,
+            **_sink_combo_kw,
         ),
     )
     add(

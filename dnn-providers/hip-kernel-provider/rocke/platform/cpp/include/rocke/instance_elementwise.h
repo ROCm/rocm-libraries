@@ -32,7 +32,7 @@
  * reason string; the convenience lower returns a rocke_status_t.
  *
  * ACTIVATION DEPENDENCY. The transcendental ops (silu/swish/tanh/sigmoid/
- * quick_gelu/gelu_tanh and the GLU binaries) reduce to the two exp2-based
+ * quick_gelu/gelu_tanh and the GLU binaries) reduce to the two shared
  * primitives rocke_sigmoid_via_exp2 / rocke_tanh_via_exp2 from
  * rocke/helper_rocke.helpers.activations.h, exactly as the Python imports
  * _sigmoid_via_exp2 / _tanh_via_exp2.

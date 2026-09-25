@@ -16,6 +16,8 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
+#include "harness/ValidationSite.hpp"
+
 namespace hipdnn_integration_tests::bundle
 {
 
@@ -104,13 +106,15 @@ using ToleranceLookup = std::function<ComparisonTolerance(
 /// Compare one tensor. Returns nullopt when it matched.
 ///
 /// Pure: no gtest, no config lookups, no harness state. Everything it needs to
-/// describe a failure is an argument.
+/// describe a failure is an argument. The mismatch report is always built on the
+/// host, whichever site made the pass/fail call.
 std::optional<TensorMismatch>
     compareTensor(int64_t uid,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                   hipdnn_data_sdk::utilities::ITensor& expected,
                   hipdnn_data_sdk::utilities::ITensor& actual,
                   ComparisonTolerance tolerance,
+                  ValidationSite site,
                   const std::string& contextLine);
 
 /// Compare every uid in `outputUids`, and keep going after the first mismatch: one
@@ -124,6 +128,7 @@ std::vector<TensorMismatch>
                    OutputTensors& actual,
                    const ExpectedTensorLookup& expectedFor,
                    const ToleranceLookup& toleranceFor,
+                   ValidationSite site,
                    const std::string& contextLine);
 
 /// The tensor's name, or "uid=N" when the graph did not give it one.
@@ -143,7 +148,7 @@ struct ValidatorSelection
     std::string error; ///< non-empty exactly when `validator` is null
 };
 
-/// Builds the validator `tolerance` selects for one output tensor.
+/// Builds the validator `tolerance` selects for one output tensor, running at `site`.
 ///
 /// RMS and ALLCLOSE_MATCHING_INFINITIES are both implemented for FLOAT/HALF/BFLOAT16/
 /// DOUBLE only — RMS has no integer formulation, and an integer has no infinity to
@@ -153,7 +158,8 @@ struct ValidatorSelection
 /// which glob over-matched, rather than as an exception unwinding out of the test body.
 ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                                  const std::string& label,
-                                 const ComparisonTolerance& tolerance);
+                                 const ComparisonTolerance& tolerance,
+                                 ValidationSite site);
 
 /// The failure report for one tensor: header plus per-element drift profile.
 ///
