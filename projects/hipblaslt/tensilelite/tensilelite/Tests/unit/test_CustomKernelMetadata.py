@@ -99,7 +99,7 @@ def test_validate_external_requires_full_custom_kernel_fields(tmp_path):
 
 
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
-    """Tensile-generated kernels carry only InternalSupportParams.KernArgsVersion;
+    """TensileLite-generated kernels carry only InternalSupportParams.KernArgsVersion;
     ProblemType and tuning state come from the consuming logic file or test YAML."""
     write_kernel(tmp_path / "tensile.s", """\
           InternalSupportParams:
@@ -446,7 +446,7 @@ def test_build_config_full_mi_emits_wavetile():
 def test_parse_tensile_yaml_malformed_raises(tmp_path):
     p = tmp_path / "bad.yaml"
     p.write_text("BenchmarkProblems: [\n")
-    with pytest.raises(RuntimeError, match="Failed to parse Tensile YAML"):
+    with pytest.raises(RuntimeError, match="Failed to parse TensileLite YAML"):
         _parse_tensile_yaml(str(p))
 
 
