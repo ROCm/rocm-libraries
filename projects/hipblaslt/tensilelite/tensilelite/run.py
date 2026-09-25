@@ -618,7 +618,7 @@ def main(argv=None):
     print1("#")
     print1("#  TensileLite v%s" % (__version__))
 
-    argParser = argparse.ArgumentParser()
+    argParser = argparse.ArgumentParser(prog="tensilelite run")
     argParser.add_argument("ConfigFile", type=os.path.realpath, nargs="+",
             help="Benchmark config.yaml file")
     argParser.add_argument("OutputPath", \

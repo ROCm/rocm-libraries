@@ -88,3 +88,9 @@ def test_create_library_for_benchmark_error_handling():
             with patch.object(M, "createLibrary", side_effect=error), patch.object(M, "printExit") as mock_exit:
                 M.createLibraryForBenchmark(logic_path, lib_path, current_path, "gfx942")
                 mock_exit.assert_called_once()
+
+def test_main_parses_paths_and_returns_zero():
+    with patch.object(M, "GenerateSummations") as generate_summations:
+        assert M.main(["logic", "output"]) == 0
+
+    generate_summations.assert_called_once_with(["logic", "output"])
