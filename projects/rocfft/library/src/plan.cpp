@@ -686,6 +686,77 @@ rocfft_location_t rocfft_plan_description_t::get_current_location() const
     return current_loc;
 }
 
+// Collapse batch dimensions that are carried as higher length
+// dimensions (indices >= dimension) into the scalar batch/distance,
+// when their input and output strides are contiguous/mergeable.  A 1D
+// (or lower-dimensional) FFT built from a multi-dimensional brick
+// otherwise keeps its extra dimensions as higher length entries; the
+// Bluestein machinery (chirp padding, stride and buffer-size
+// computations) only understands batch expressed as a scalar count +
+// distance, so leaving batch in the length array yields malformed
+// work-buffer sizes and incorrect results for multi-device Bluestein
+// sub-plans.  Non-mergeable layouts are left untouched.
+static void collapse_batch_length_dims(NodeMetaData& planData)
+{
+    const size_t dim = planData.dimension;
+    if(planData.length.size() <= dim)
+        return;
+
+    struct BatchDim
+    {
+        size_t len;
+        size_t iStride;
+        size_t oStride;
+    };
+    std::vector<BatchDim> dims;
+    for(size_t i = dim; i < planData.length.size(); ++i)
+        dims.push_back({planData.length[i], planData.inStride[i], planData.outStride[i]});
+    if(planData.batch > 1)
+        dims.push_back({planData.batch, planData.iDist, planData.oDist});
+
+    dims.erase(
+        std::remove_if(dims.begin(), dims.end(), [](const BatchDim& b) { return b.len <= 1; }),
+        dims.end());
+    std::sort(dims.begin(), dims.end(), [](const BatchDim& a, const BatchDim& b) {
+        return a.iStride < b.iStride;
+    });
+
+    size_t batch  = 1;
+    size_t iDist  = 0;
+    size_t oDist  = 0;
+    bool   merged = true;
+    for(size_t k = 0; k < dims.size(); ++k)
+    {
+        if(k == 0)
+        {
+            batch = dims[k].len;
+            iDist = dims[k].iStride;
+            oDist = dims[k].oStride;
+        }
+        else if(dims[k].iStride == iDist * batch && dims[k].oStride == oDist * batch)
+            batch *= dims[k].len;
+        else
+        {
+            merged = false;
+            break;
+        }
+    }
+    if(!merged)
+        return;
+
+    planData.length.resize(dim);
+    if(planData.outputLength.size() > dim)
+        planData.outputLength.resize(dim);
+    planData.inStride.resize(dim);
+    planData.outStride.resize(dim);
+    planData.batch = batch;
+    if(batch > 1)
+    {
+        planData.iDist = iDist;
+        planData.oDist = oDist;
+    }
+}
+
 // Populate a NodeMetaData's Bluestein strides/distances from its own
 // parameters.  Called from BuildSingleDevicePlan; idempotent so the
 // solution-map fallback recursion can safely re-invoke it.
@@ -2378,6 +2449,10 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
         }
         rootPlanData.input_buffer  = fft_operations.input.buffers[i];
         rootPlanData.output_buffer = fft_operations.output.buffers[i];
+        // Express batch as a scalar count+distance (see helper) so a
+        // 1D Bluestein sub-plan is a plain batched transform rather
+        // than one with batch carried in higher length dimensions.
+        collapse_batch_length_dims(rootPlanData);
         // partOfMultiPlan == true sets ExecPlan::mgpuPlan and allocates its stream/event.
         auto singlePlan = BuildSingleDevicePlan(rootPlanData,
                                                 item_loc,
@@ -2439,10 +2514,16 @@ size_t rocfft_plan_t::C2CBrickOneDimension(size_t                         dimIdx
     rootPlanData.outputLength = transformLengths;
     rootPlanData.inStride     = transformStride;
     rootPlanData.outStride    = transformStride;
-    rootPlanData.direction    = transformType == rocfft_transform_type_complex_forward
+
+    // Express batch as a scalar count+distance (see helper) so a 1D
+    // Bluestein sub-plan is a plain batched transform rather than one
+    // with batch carried in higher length dimensions.
+    collapse_batch_length_dims(rootPlanData);
+
+    rootPlanData.direction = transformType == rocfft_transform_type_complex_forward
                                      || transformType == rocfft_transform_type_real_forward
-                                    ? -1
-                                    : 1;
+                                 ? -1
+                                 : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
     rootPlanData.precision         = precision;
