@@ -146,30 +146,39 @@ constexpr int kArchKeyGfx1250 = archKey({12, 5, 0});
 constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
 
 /// One LDS read in an ordered burst for mixed-type drain estimation.
-/// Callers resolve per-opcode throughput / max-drain from HwInstDesc (with
-/// HWModel.lds defaults when the desc fields are 0) before pushing an entry.
+/// Callers resolve per-opcode throughput / max-drain / issue cost from
+/// HwInstDesc (with HWModel.lds defaults when the throughput/maxDrain desc
+/// fields are 0) before pushing an entry.
 struct DsLoadDrainEntry {
     int latency = 0;
     int throughput = 0;
     int maxDrain = 0;
+    /// ISA issue cost (HwInstDesc::issue), before any wavesPerDsIssuePipe
+    /// sharing multiplier. Not defaulted to a guessed constant: every caller
+    /// must supply the real per-instruction value.
+    int issueCycles = 0;
 };
 
-/// Resolve a drain-model entry from an instruction's latency and optional
-/// HwInstDesc overrides. \p dsThroughput / \p dsMaxDrain of 0 select the
-/// arch defaults on \p hw.
+/// Resolve a drain-model entry from an instruction's latency, ISA issue cost,
+/// and optional HwInstDesc overrides. \p dsThroughput / \p dsMaxDrain of 0
+/// select the arch defaults on \p hw. \p issueCycles has no arch-default
+/// fallback -- it comes straight from the instruction's own HwInstDesc.
 inline DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, int latency, int dsThroughput,
-                                             int dsMaxDrain) {
+                                             int dsMaxDrain, int issueCycles) {
     return {
         .latency = latency > 0 ? latency : hw.lds.readDrainLatency,
         .throughput = dsThroughput > 0 ? dsThroughput : hw.lds.dsLoadDefaultThroughput,
         .maxDrain = dsMaxDrain > 0 ? dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
+        .issueCycles = issueCycles,
     };
 }
 
-/// Homogeneous-burst drain estimate. Throughput and max-drain are already
-/// resolved (typically via makeDsLoadDrainEntry / HwInstDesc).
+/// Homogeneous-burst drain estimate. Throughput, max-drain and issueCycles are
+/// already resolved (typically via makeDsLoadDrainEntry / HwInstDesc) -- this
+/// takes the real per-instruction ISA issue cost, not an assumed constant.
 int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
-                               int dsLoadThroughput, int maxDrainLatency, int numWaves);
+                               int dsLoadThroughput, int maxDrainLatency, int numWaves,
+                               int issueCycles);
 
 /// Mixed-type burst drain estimate.
 ///
@@ -178,6 +187,8 @@ int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int t
 /// - max-drain cap = max over every entry's maxDrain
 /// - total load count
 /// - issue throughput as the count-weighted average of per-load throughputs
+/// - issue spacing from the last load's own issueCycles (see
+///   dsIssueCyclesForWaves), not an assumed ISA constant
 int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
                                        int numWaves);
 

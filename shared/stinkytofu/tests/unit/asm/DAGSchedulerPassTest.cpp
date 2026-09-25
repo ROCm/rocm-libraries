@@ -821,16 +821,19 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsSplitBarrierGroupOnce) {
 
 // ---------------------------------------------------------------------------
 // HWModel::Lds::wavesPerDsIssuePipe (the ds issue pipe shared between waves)
-// is TEMPORARILY DISABLED -- see HWModel.cpp -- after real hardware measured
-// it costing f8_tn_medium/mxf4_tn_medium real throughput. With it disabled,
-// NumWaves has no effect on ds issue cost end-to-end; the sharing math itself
-// stays covered at the unit level, re-enabled on a local HWModel copy
-// (HWModelDsIssue.FourWavesRunAsPairsSoTheCostDoubles and neighbors).
+// is enabled -- see HWModel.cpp -- and the WMMA-hide scheduling-budget check
+// (fitsSchedulingBudget in CDNA5.hpp) uses the real dsIssueCost(), same as the
+// clock advance in updateWMMAStatus. So a wave count that shares the issue
+// pipe (>= 2, since wavesPerDsIssuePipe == 2) genuinely fits fewer ds_loads
+// into a fixed-length co-issue window than an unshared single wave does --
+// each one costs more real cycles to issue. 2 and 4 waves land on the same
+// count because dsIssueCyclesForWaves saturates the cost at the pipe's share
+// rather than scaling further with wave count.
 //
 // The rule (4) cap is held inert here (perCap well above the ds_load count) so
 // what is measured is the window filling up, not the cap.
 // ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, DsIssueCostIsUnaffectedByWaveCountWhilePipeSharingIsDisabled) {
+TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
     auto dsInFirstWmmaWindow = [this](uint32_t numWaves) {
         SetUp();  // fresh block per run
         createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
@@ -858,10 +861,12 @@ TEST_F(DAGSchedulerPassTest, DsIssueCostIsUnaffectedByWaveCountWhilePipeSharingI
     const int twoWaves = dsInFirstWmmaWindow(2);
     const int fourWaves = dsInFirstWmmaWindow(4);
 
-    EXPECT_EQ(oneWave, fourWaves)
-        << "pipe sharing is disabled, so NumWaves must not change how many "
-           "ds_loads fit in a WMMA's co-issue window (see HWModel.cpp)";
-    EXPECT_EQ(twoWaves, fourWaves);
+    EXPECT_GT(oneWave, fourWaves)
+        << "an unshared single wave issues at the full ISA rate, so it fits "
+           "more ds_loads in the same window than a wave-sharing kernel does";
+    EXPECT_EQ(twoWaves, fourWaves)
+        << "sharing saturates at wavesPerDsIssuePipe, so 2 and 4 waves cost "
+           "the same per issue";
 }
 
 // A non-positive dsReadPerCap is not a cap anyone can mean. It used to fall

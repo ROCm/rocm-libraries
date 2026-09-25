@@ -113,15 +113,15 @@ TEST(HWModel, ConfiguredPassContextCachesMatchingModel) {
 // wave's issues are spaced out by however many share its pipe.
 // ---------------------------------------------------------------------------
 
-// gfx1250's pipe-sharing is temporarily disabled (wavesPerDsIssuePipe = 1, see
-// HWModel.cpp) after real-hardware measurement found it cost f8_tn_medium
-// ~17.5% and mxf4_tn_medium ~12.3% throughput. The tests below that exercise
-// the sharing math re-enable it on a local copy of the model, so the model
-// logic stays covered independent of whether the arch currently applies it.
-TEST(HWModelDsIssue, PipeSharingIsTemporarilyDisabled) {
+// gfx1250 models ds issue pipe sharing (wavesPerDsIssuePipe = 2, see
+// HWModel.cpp). Real-hardware measurement initially found it cost
+// f8_tn_medium ~17.5% and mxf4_tn_medium ~12.3% throughput; root cause turned
+// out to be a second consumer (CDNA5ReadyQueue's WMMA-hide scheduling-budget
+// check) feeding the same doubled cost into a threshold tuned for single-wave
+// issue cost, not this model. That check now uses the raw ISA issueCycles.
+TEST(HWModelDsIssue, PipeSharingIsEnabled) {
     const HWModel& hw = hwModelForArch({12, 5, 0});
-    EXPECT_EQ(hw.lds.wavesPerDsIssuePipe, 1)
-        << "re-enable only after hardware re-validation (see HWModel.cpp)";
+    EXPECT_EQ(hw.lds.wavesPerDsIssuePipe, 2);
 }
 
 TEST(HWModelDsIssue, SingleWaveKeepsTheIsaCost) {
@@ -130,8 +130,7 @@ TEST(HWModelDsIssue, SingleWaveKeepsTheIsaCost) {
 }
 
 TEST(HWModelDsIssue, FourWavesRunAsPairsSoTheCostDoubles) {
-    HWModel hw = hwModelForArch({12, 5, 0});
-    hw.lds.wavesPerDsIssuePipe = 2;  // re-enable for this test; see HWModel.cpp
+    const HWModel& hw = hwModelForArch({12, 5, 0});
     // 4 waves over a 2-wave pipe is 2-2: a wave contends with one partner, not
     // with all three others, so the cost saturates at the share rather than
     // scaling with the wave count.
@@ -140,8 +139,7 @@ TEST(HWModelDsIssue, FourWavesRunAsPairsSoTheCostDoubles) {
 }
 
 TEST(HWModelDsIssue, TwoWavesAreAssumedPaired) {
-    HWModel hw = hwModelForArch({12, 5, 0});
-    hw.lds.wavesPerDsIssuePipe = 2;  // re-enable for this test; see HWModel.cpp
+    const HWModel& hw = hwModelForArch({12, 5, 0});
     // UNVERIFIED on hardware: the conservative reading is that two waves share
     // one pipe. If they turn out to land on separate pipes this becomes 1, and
     // this test is the one to flip.
@@ -165,8 +163,7 @@ TEST(HWModelDsIssue, DefaultConfigIsSingleWave) {
 }
 
 TEST(HWModelDsIssue, ScalesAMultiCycleIssueCost) {
-    HWModel hw = hwModelForArch({12, 5, 0});
-    hw.lds.wavesPerDsIssuePipe = 2;  // re-enable for this test; see HWModel.cpp
+    const HWModel& hw = hwModelForArch({12, 5, 0});
     EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/4, /*numWaves=*/4), 8);
 }
 

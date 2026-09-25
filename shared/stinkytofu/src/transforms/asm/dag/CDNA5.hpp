@@ -1508,7 +1508,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                     const HwInstDesc* desc = inst.getHwInstDesc();
                     matchingDsLoads.push_back(makeDsLoadDrainEntry(
                         hw_, static_cast<int>(inst.latencyCycles), desc ? desc->dsThroughput : 0,
-                        desc ? desc->dsMaxDrain : 0));
+                        desc ? desc->dsMaxDrain : 0, static_cast<int>(inst.issueCycles)));
                     targetDSLoad = &inst;
                     targetDSLoadIt = it;  // keep updating → ends up as latest
                     break;

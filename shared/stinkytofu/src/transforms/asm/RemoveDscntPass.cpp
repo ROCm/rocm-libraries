@@ -303,9 +303,9 @@ int recomputePrefetchInFlightDsLoads(const BasicBlock& bb, const HWModel& hw,
 
         if (isDSRead(*inst) || isDSWrite(*inst)) {
             const HwInstDesc* desc = inst->getHwInstDesc();
-            inFlight.push_back(makeDsLoadDrainEntry(hw, static_cast<int>(inst->latencyCycles),
-                                                    desc ? desc->dsThroughput : 0,
-                                                    desc ? desc->dsMaxDrain : 0));
+            inFlight.push_back(makeDsLoadDrainEntry(
+                hw, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
+                desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles)));
         } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
             const size_t remaining = static_cast<size_t>(std::max(0, *keep));
             // dscnt keep=K retires the oldest loads first; keep the newest K.
@@ -492,7 +492,7 @@ class RemoveDscntPass : public StinkyInstPass {
                 const HwInstDesc* desc = inst->getHwInstDesc();
                 dsLoadsBeforeActivation.push_back(makeDsLoadDrainEntry(
                     *hw_, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
-                    desc ? desc->dsMaxDrain : 0));
+                    desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles)));
             } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
                 const int newVal = static_cast<int>(dsLoadsBeforeActivation.size()) - numDsFinished;
                 PASS_DEBUG(std::cerr << "[RemoveDscnt]   reduce dscnt: tighten wait " << *keep
@@ -594,7 +594,7 @@ class RemoveDscntPass : public StinkyInstPass {
                 const HwInstDesc* desc = inst->getHwInstDesc();
                 const DsLoadDrainEntry drain = makeDsLoadDrainEntry(
                     *hw_, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
-                    desc ? desc->dsMaxDrain : 0);
+                    desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles));
                 if (isDSRead(*inst)) {
                     inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
                                                           .latency = drain.latency,
