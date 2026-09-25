@@ -50,10 +50,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         return;
 
     // batch instance
-    T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
-    I* ipiv = load_ptr_batch<I>(ipivA, id, shiftP, strideP);
-    I* permut = (permut_idx != nullptr ? permut_idx + id * stridePI : nullptr);
-    INFO* info = infoA + id;
+    T* const A = load_ptr_batch<T>(AA, id, shiftA, strideA);
+    I* const ipiv = load_ptr_batch<I>(ipivA, id, shiftP, strideP);
+    I* const permut = (permut_idx != nullptr ? permut_idx + id * stridePI : nullptr);
+    INFO* const info = infoA + id;
 
     // shared memory (for communication between threads in group)
     // (SHUFFLES DO NOT IMPROVE PERFORMANCE IN THIS CASE)
@@ -516,21 +516,20 @@ ROCSOLVER_KERNEL void getf2_scale_update_kernel(const I m,
 
     for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
-        I tx = hipThreadIdx_x;
-        I ty = hipThreadIdx_y;
-        I i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + tx;
+        I const tx = hipThreadIdx_x;
+        I const ty = hipThreadIdx_y;
+        I const i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + tx;
 
         // shared data arrays
-        T pivot, val;
         extern __shared__ double lmem[];
-        T* x = reinterpret_cast<T*>(lmem);
-        T* y = x + hipBlockDim_x;
+        T* const x = reinterpret_cast<T*>(lmem);
+        T* const y = x + hipBlockDim_x;
 
         // batch instance
-        T* A = load_ptr_batch(AA, bid, shiftA + 1 + lda, strideA);
-        T* X = load_ptr_batch(AA, bid, shiftA + 1, strideA);
-        T* Y = load_ptr_batch(AA, bid, shiftA + lda, strideA);
-        pivot = pivotval[bid];
+        T* const A = load_ptr_batch(AA, bid, shiftA + 1 + lda, strideA);
+        T* const X = load_ptr_batch(AA, bid, shiftA + 1, strideA);
+        T* const Y = load_ptr_batch(AA, bid, shiftA + lda, strideA);
+        T const pivot = pivotval[bid];
 
         // read data from global to shared memory
         I j = tx * hipBlockDim_y + ty;
@@ -552,12 +551,18 @@ ROCSOLVER_KERNEL void getf2_scale_update_kernel(const I m,
 #pragma unroll
             for(I j = ty; j < n; j += hipBlockDim_y)
             {
-                val = A[i + j * lda];
+                T val = A[i + j * lda];
                 val -= x[tx] * y[j];
                 A[i + j * lda] = val;
             }
         }
-    }
+
+        // -----------------------------------------------
+        // synchronize to make sure LDS arrays are available
+        // for next batch iteration
+        // -----------------------------------------------
+        __syncthreads();
+    } // end for bid
 }
 
 /*************************************************************

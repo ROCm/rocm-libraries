@@ -207,16 +207,17 @@ ROCSOLVER_KERNEL void getrf_row_permutate(const I n,
                                           const rocblas_stride stridePI,
                                           const I batch_count)
 {
-    I tx = hipThreadIdx_x;
-    I ty = hipThreadIdx_y;
-    I bdx = hipBlockDim_x;
-    I j = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
+    I const tx = hipThreadIdx_x;
+    I const ty = hipThreadIdx_y;
+    I const bdx = hipBlockDim_x;
 
     I const id_start = hipBlockIdx_z;
     I const id_inc = hipGridDim_z;
 
     for(I id = id_start; id < batch_count; id += id_inc)
     {
+        I j = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
+
         if(j >= offset)
             j += blk;
 

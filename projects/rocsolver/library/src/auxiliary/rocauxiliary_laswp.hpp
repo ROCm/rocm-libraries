@@ -27,7 +27,7 @@ ROCSOLVER_KERNEL void laswp_kernel(const I n,
                                    const I k2,
                                    const I* ipivA,
                                    const rocblas_stride shiftP,
-                                   I incp,
+                                   const I incp_arg,
                                    const rocblas_stride strideP,
                                    const I batch_count)
 {
@@ -39,12 +39,15 @@ ROCSOLVER_KERNEL void laswp_kernel(const I n,
 
     for(I id = id_start; id < batch_count; id += id_inc)
     {
+        I const* const ipiv = ipivA + id * strideP + shiftP;
+        T* const A = load_ptr_batch(AA, id, shiftA, stride);
+
         for(I tid = tid_start; tid < n; tid += tid_inc)
         {
+            I incp = incp_arg;
+
             // batch instance
             // shiftP must be used so that ipiv[k1] is the desired first index of ipiv
-            const I* ipiv = ipivA + id * strideP + shiftP;
-            T* A = load_ptr_batch(AA, id, shiftA, stride);
 
             I start, end, inc;
             if(incp < 0)
