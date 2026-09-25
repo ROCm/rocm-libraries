@@ -865,6 +865,53 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnAnUnsupportedDataTypeIsRe
     EXPECT_NE(mismatch->report.find("Narrow that entry's 'tensors' glob"), std::string::npos);
 }
 
+// This kind exists only as a host validator. A GPU reference leaves its output on the
+// device, so the comparison runs there — and the two answers on one pair of tensors are
+// the fact worth pinning: identical data passes on the host and is refused on the
+// device. Serving the device request from the host validator would read device memory
+// through host pointers, so the refusal is the correct behaviour, not a gap.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnTheDeviceIsRefusedNotHostGraded)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+    auto actual = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+
+    // The control. Without it, a refusal that fired on every site would still pass.
+    EXPECT_FALSE(compareTensor(K_UID_B,
+                               attrs,
+                               *expected,
+                               *actual,
+                               exactMatchingInfinities(),
+                               ValidationSite::HOST,
+                               "b")
+                     .has_value())
+        << "on the host this kind accepts the matched infinities";
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(mismatch = compareTensor(K_UID_B,
+                                             attrs,
+                                             *expected,
+                                             *actual,
+                                             exactMatchingInfinities(),
+                                             ValidationSite::DEVICE,
+                                             "Bundle: b"));
+
+    ASSERT_TRUE(mismatch.has_value())
+        << "a device-site request must not be served by the host validator";
+    EXPECT_NE(mismatch->report.find("allclose_matching_infinities"), std::string::npos)
+        << "the operator has to be told which validator could not be honoured";
+    EXPECT_NE(mismatch->report.find("--validator cpu"), std::string::npos)
+        << "and the one flag that makes the run grade on the host instead";
+    // The data type is fine here; only the site is not. A refactor that folds this back
+    // into the data-type message would send the reader to the wrong config field.
+    EXPECT_EQ(mismatch->report.find("does not support this data type"), std::string::npos)
+        << "the report must not blame the data type for a site refusal";
+}
+
 // Unlike RMS, this kind does not replace what decided the verdict: atol and rtol are
 // exactly what graded every finite element, so the report keeps printing them.
 TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol)

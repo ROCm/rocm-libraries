@@ -44,6 +44,33 @@ std::string validatorNotApplicable(const std::string& label,
     return error.str();
 }
 
+/// The report a glob-selected validator produces when it has no implementation at the
+/// site the comparison runs on. Distinct from validatorNotApplicable because the data
+/// type is fine here and naming it would send the reader to the wrong config field: it
+/// is the site that cannot serve the request.
+///
+/// Refusing is the point. Falling back to the host validator would read device memory
+/// through host pointers, and silently grading to a validator the config did not ask
+/// for is the miscompare this whole mechanism exists to prevent.
+std::string validatorNotApplicableAtSite(const std::string& label,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                         const char* validatorName)
+{
+    std::ostringstream error;
+    error << "\nValidator override NOT APPLICABLE ON DEVICE\n"
+          << "  Tensor: " << label << "\n"
+          << "  Data type: " << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType)
+          << "\n"
+          << "  A [[validator_overrides]] entry in this engine's TOML config selected the\n  "
+          << validatorName
+          << " validator for this tensor, but it exists only as a host\n"
+             "  validator and this comparison runs on the device, where the reference left\n"
+             "  its output.\n"
+             "  Either narrow that entry's 'tensors' glob so it no longer matches this\n"
+             "  tensor, or force host validation for the run with --validator cpu.\n";
+    return error.str();
+}
+
 } // namespace
 
 std::string tensorLabel(int64_t uid, const std::string& name)
@@ -107,6 +134,14 @@ ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType 
         }
 
     case ValidatorKind::ALLCLOSE_MATCHING_INFINITIES:
+        // There is no device implementation of this kind, so a DEVICE-site request is
+        // refused rather than served by the host validator: the tensors live in device
+        // memory, and grading them through host pointers is undefined, not merely slow.
+        if(site == ValidationSite::DEVICE)
+        {
+            return {nullptr,
+                    validatorNotApplicableAtSite(label, dataType, "allclose_matching_infinities")};
+        }
         try
         {
             return {hipdnn_test_sdk::utilities::createAllCloseMatchingInfinitiesValidator(
