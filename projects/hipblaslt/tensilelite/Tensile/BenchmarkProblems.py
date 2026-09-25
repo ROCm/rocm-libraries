@@ -37,16 +37,16 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
-from Tensile import SolutionLibrary, LibraryIO
-from Tensile.KernelWriter import DebugConfig
-from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
-from Tensile.Toolchain.Component import Assembler
-from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
-from Tensile.SolutionStructs.Solution import Solution
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
+from . import SolutionLibrary, LibraryIO
+from .KernelWriter import DebugConfig
+from .KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
+from .Toolchain.Component import Assembler
+from .SolutionStructs.Problem import ProblemType, ProblemSizes
+from .SolutionStructs.Solution import Solution
+from .Common.TypeValidationErrors import ConfigTypeError
+from .SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
-from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
 
 from .BenchmarkStructs import BenchmarkProcess
 from .backends import BackendFactory
@@ -58,12 +58,12 @@ from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFil
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
-from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
+from .Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
-from Tensile.Common.Architectures import isaToGfx, gfxToVariants
-from Tensile.Common.GlobalParameters import globalParameters, startTime
-from Tensile.Common.TimingInstrumentation import timing_context
+from .Common.Architectures import isaToGfx, gfxToVariants
+from .Common.GlobalParameters import globalParameters, startTime
+from .Common.TimingInstrumentation import timing_context
 
 _CACHE_FIELDS = {
     "ConstantParams": "constantParams",

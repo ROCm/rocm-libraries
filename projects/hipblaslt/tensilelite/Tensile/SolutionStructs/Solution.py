@@ -30,20 +30,20 @@ import sys
 from enum import Enum
 from typing import List, Dict, Literal, Tuple
 
-from Tensile.AsmStoreState import VectorDataTypes
-from Tensile.Activation import ActivationType
-from Tensile.AsmStoreState import VectorDataTypes
-from Tensile.Common import assignParameterWithDefault, IsaInfo, \
+from ..AsmStoreState import VectorDataTypes
+from ..Activation import ActivationType
+from ..AsmStoreState import VectorDataTypes
+from ..Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
                     clusterEnabled, streamKCluster, streamKMulticast, \
                     streamK2DCluster, deriveWaveParams, \
                     swizzleGeometry
-from Tensile.Common.DataType import DataType
-from Tensile.Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
+from ..Common.DataType import DataType
+from ..Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
-from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
+from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
                                        dcpLdsSide, \
                                        decoupledOneBlockBoth, decouplePGRBlocks, \
                                        equalPairDegeneratesToScalar, \
@@ -52,29 +52,29 @@ from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrL
                                        DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
-from Tensile.Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
+from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload
-from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
+from ..Common.TypeValidationErrors import ConfigTypeError
+from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload
+from .LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config, \
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
                                                get_fp16_valid_blocks, get_fp32_valid_blocks, \
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
-from Tensile.Common.GlobalParameters import defaultSolution, \
+from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
-from Tensile.Common.ValidParameters import validParameters, \
+from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
                                             _skipTypeCheck, \
                                             normalizeSwInstructionPrefetch, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
-from Tensile.SolutionStructs.Naming import getSolutionNameFull
-from Tensile.SolutionStructs.Problem import ProblemType
-from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
-from Tensile.Toolchain.Component import Assembler
-from Tensile.Components.CustomSchedule import hasCustomSchedule
+from .Naming import getSolutionNameFull
+from .Problem import ProblemType
+from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
+from ..Toolchain.Component import Assembler
+from ..Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
@@ -241,7 +241,7 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
     return True
   # Lazy import: Components/Subtile pulls the Components package and would
   # deadlock at module-load time if imported from Solution.py's top level.
-  from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
+  from ..Components.Subtile.Kernel import selectABGeometry, TileInfo
   for tc in ("A", "B"):
     tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
     loadRatioGR = tileInfo.loadRatioGR
@@ -1209,7 +1209,7 @@ class Solution(collections.abc.Mapping):
       # back-imports the Components package and would deadlock at
       # module-load time if pulled from Solution.py's top-level
       # imports.
-      from Tensile.Components.StreamK import streamKVariantClass
+      from ..Components.StreamK import streamKVariantClass
       if state["StreamK"] != 0 and not streamKVariantClass(state["StreamK"]).supportsSubtileImpl:
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4, 5}")
       if state["DebugStreamK"] != 0:

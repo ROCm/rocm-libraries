@@ -25,13 +25,13 @@
 from copy import deepcopy
 import itertools
 
-from Tensile.Common.ValidParameters import checkParametersAreValid, validateInternalSupportParams
-from Tensile.Common import print1, print2, hasParam, printExit
-from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters, globalParameters, \
+from .Common.ValidParameters import checkParametersAreValid, validateInternalSupportParams
+from .Common import print1, print2, hasParam, printExit
+from .Common.GlobalParameters import defaultBenchmarkCommonParameters, globalParameters, \
                                             defaultBatchedBenchmarkFinalProblemSizes, \
                                             defaultBenchmarkFinalProblemSizes
-from Tensile.Common.ValidParameters import validParameters, validParametersForArch
-from Tensile.SolutionStructs.Problem import ProblemType
+from .Common.ValidParameters import validParameters, validParametersForArch
+from .SolutionStructs.Problem import ProblemType
 
 from .CustomKernels import getAllCustomKernelNames
 from .SolutionStructs import ProblemSizes, ActivationArgs, BiasTypeArgs, \

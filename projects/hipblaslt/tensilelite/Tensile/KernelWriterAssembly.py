@@ -92,17 +92,17 @@ from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCus
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKCluster
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
-from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
-from Tensile.Common.DataType import DataType
-from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
-from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
+from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
+from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
+from .Common.DataType import DataType
+from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
+from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
   FusedA2AWgRemap
 
-from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
-from Tensile.SolutionStructs.Naming import getKernelFileBase
-from Tensile.Toolchain.Component import Assembler
+from .KernelWriter import KernelWriter, ABMatrixInfo
+from .SolutionStructs.Naming import getKernelFileBase
+from .Toolchain.Component import Assembler
 
 def _cacheHintTensor(tc):
   return "D" if tc == "TD" else tc
