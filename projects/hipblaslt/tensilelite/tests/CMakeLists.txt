@@ -188,11 +188,13 @@ endif()
 enable_testing()
 
 if(TARGET tensilelite-client)
-    add_test(NAME TensileLiteClient.version COMMAND tensilelite-client --version)
-    string(REPLACE "." "\\." _tensilelite_version_regex "${TENSILELITE_DISTRIBUTION_VERSION}")
-    string(REPLACE "+" "\\+" _tensilelite_version_regex "${_tensilelite_version_regex}")
-    set_tests_properties(TensileLiteClient.version PROPERTIES
-        PASS_REGULAR_EXPRESSION "^${_tensilelite_version_regex}$")
+    add_test(
+        NAME TensileLiteClient.version
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLIENT=$<TARGET_FILE:tensilelite-client>"
+            "-DEXPECTED_VERSION=${TENSILELITE_DISTRIBUTION_VERSION}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_client_version.cmake"
+    )
 endif()
 
 #################################################

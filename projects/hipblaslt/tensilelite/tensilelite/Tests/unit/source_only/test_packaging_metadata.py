@@ -128,13 +128,17 @@ def test_codegen_preflight_checks_the_package_command_modules():
 def test_client_version_metadata_is_scoped_and_checked_exactly():
     top_cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
     tests_cmake = (_PROJECT_ROOT / "tests/CMakeLists.txt").read_text(encoding="utf-8")
+    version_check = (_PROJECT_ROOT / "tests/check_client_version.cmake").read_text(
+        encoding="utf-8"
+    )
 
     version_block = top_cmake.split(
         'if(TENSILELITE_ENABLE_CLIENT)\n    set(_tensilelite_source_root', 1
     )[1].split("\nendif()", 1)[0]
     assert "TENSILELITE_DISTRIBUTION_VERSION" in version_block
     assert "HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT" not in top_cmake
-    assert 'PASS_REGULAR_EXPRESSION "^${_tensilelite_version_regex}$"' in tests_cmake
+    assert '"-DEXPECTED_VERSION=${TENSILELITE_DISTRIBUTION_VERSION}"' in tests_cmake
+    assert "actual_version STREQUAL EXPECTED_VERSION" in version_check
 
 
 def test_removed_source_autobuild_option_is_not_referenced():
