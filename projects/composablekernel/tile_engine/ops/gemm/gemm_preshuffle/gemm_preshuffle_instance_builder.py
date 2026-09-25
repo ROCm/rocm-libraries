@@ -317,7 +317,7 @@ def main():
         }
 
         # Parse trait combo
-        trait_parts = args.trait_combo.split("_")
+        trait_parts = args.trait_combo.rsplit("_", 6)
         trait_combo = (
             trait_parts[0],  # pipeline
             trait_parts[1],  # epilogue

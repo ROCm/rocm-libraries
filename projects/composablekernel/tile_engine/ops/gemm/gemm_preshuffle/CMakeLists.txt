@@ -103,9 +103,15 @@ function(create_individual_gemm_preshuffle_target datatype layout trait tile_con
     
     # Add to trait-specific targets
     string(REPLACE "_" ";" trait_parts ${trait})
-    list(GET trait_parts 0 pipeline)
-    list(GET trait_parts 1 epilogue)
-    list(GET trait_parts 2 scheduler)
+    # The final six fields are epilogue, scheduler and four booleans. Pipeline
+    # names such as comp_tdm_v1 contain underscores themselves.
+    list(LENGTH trait_parts trait_count)
+    math(EXPR pipeline_count "${trait_count} - 6")
+    list(SUBLIST trait_parts 0 ${pipeline_count} pipeline_parts)
+    list(JOIN pipeline_parts "_" pipeline)
+    list(GET trait_parts ${pipeline_count} epilogue)
+    math(EXPR scheduler_index "${pipeline_count} + 1")
+    list(GET trait_parts ${scheduler_index} scheduler)
     
     add_dependencies(benchmark_gemm_preshuffle_${pipeline}_pipeline ${target_name})
     add_dependencies(benchmark_gemm_preshuffle_${epilogue}_epilogue ${target_name})
@@ -131,8 +137,9 @@ function(build_individual_gemm_preshuffle_targets datatype layout)
         # Use CMake variable if set
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${GEMM_PRESHUFFLE_CONFIG_FILE}")
         message(VERBOSE "  Using custom config: ${GEMM_PRESHUFFLE_CONFIG_FILE}")
+    elseif(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL MATCHES "^gfx1250(:[^;]+)?$" AND datatype MATCHES "^(fp16|bf16)$")
+        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config_gfx1250.json")
     else()
-        # Use default config for all layouts
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
         message(VERBOSE "  Using default config for layout ${layout}")
     endif()
@@ -232,12 +239,13 @@ message(VERBOSE "GEMM_PRESHUFFLE_DATATYPE: ${GEMM_PRESHUFFLE_DATATYPE}")
 message(VERBOSE "GEMM_PRESHUFFLE_LAYOUT: ${GEMM_PRESHUFFLE_LAYOUT}")
 message(VERBOSE "SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 
-# Filter GPU targets to only gfx90a, gfx942, and gfx950
+# Filter GPU targets to the supported preshuffle architectures.
 set(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL "")
-set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx12-generic")
+set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx1250;gfx12-generic")
 
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
-    if(target IN_LIST DESIRED_TARGETS)
+    string(REGEX REPLACE ":.*$" "" target_base "${target}")
+    if(target_base IN_LIST DESIRED_TARGETS)
         list(APPEND GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL ${target})
         message(VERBOSE "  Adding GPU target: ${target}")
     endif()
@@ -245,7 +253,7 @@ endforeach()
 
 # Skip build if no matching targets found
 if(NOT GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL)
-    message(WARNING "Skipping Tile Engine GEMM build: No supported GPU targets (gfx90a, gfx942, gfx950, gfx12-generic) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Tile Engine GEMM build: No supported GPU targets (${DESIRED_TARGETS}) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 else()
     message(VERBOSE "Building individual GEMM Preshuffle targets for GPU targets: ${GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL}")
 
@@ -292,9 +300,9 @@ else()
 
     # Create trait-based collection targets
     # These are common trait components used across all GEMM Preshuffle kernels
-    set(GEMM_PRESHUFFLE_PIPELINES "preshufflev2")
-    set(GEMM_PRESHUFFLE_EPILOGUES "default;cshuffle")
-    set(GEMM_PRESHUFFLE_SCHEDULERS "default") 
+    set(GEMM_PRESHUFFLE_PIPELINES "preshufflev2;comp_tdm_v1;comp_tdm_v2;preshuffle_tdm;comp_async")
+    set(GEMM_PRESHUFFLE_EPILOGUES "default;cshuffle;tdm")
+    set(GEMM_PRESHUFFLE_SCHEDULERS "default;intrawave")
 
     foreach(pipeline IN LISTS GEMM_PRESHUFFLE_PIPELINES)
         add_custom_target(benchmark_gemm_preshuffle_${pipeline}_pipeline)

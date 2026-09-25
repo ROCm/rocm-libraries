@@ -6,8 +6,10 @@
 """
 GPU correctness test for the preshuffle GEMM dispatcher bridge.
 
-Builds fp16 and bf16/rcr preshuffle kernels with both epilogues and persistent
-modes. Exercises short and hot loops, odd and even K tails, multiple output
+Builds the complete five-pipeline gfx1250 configuration for fp16 and bf16/rcr,
+plus padded compute TDM configurations to check rejection of partial N/K tiles,
+and the existing V2 configuration on gfx9. Exercises all supported epilogues and
+persistent modes, short and hot loops, odd and even K tails, multiple output
 tiles, and changing B values against an fp32 NumPy reference. Returns 77 when
 the GPU or dispatcher build is unavailable.
 
@@ -41,6 +43,7 @@ from gemm_utils import (  # noqa: E402
     _resolve_arch,
     _fp32_to_bf16_u16,
     _bf16_u16_to_fp32,
+    expand_sweep,
 )
 
 log = logging.getLogger(__name__)
@@ -89,17 +92,7 @@ def _max_rel_err(C_gpu: np.ndarray, C_ref: np.ndarray) -> float:
 
 
 def _make_preshuffle_config(gfx_arch: str, dtype: str) -> GemmKernelConfig:
-    """A small rcr preshuffle kernel for the requested 16-bit dtype.
-
-    The preshuffle path is codegen-only for the ``preshufflev2`` pipeline with a
-    16x16x32 warp-tile (see gemm_preshuffle/configs/default_ci_config.json); no
-    other pipeline emits the WeightPreshuffle B pack, so those parameters are
-    fixed. 128x128x64 tile / 2x2x1 waves is divisibility-valid:
-    128/(2*16)=4, 64/(1*32)=2. variant='preshuffle' appends the _preshuffle name
-    token; permute_n stays False (the only bridged shuffle, per BRIDGE_PERMUTE_N).
-    rcr (col-major B) is required for the host-side shuffle_b_v0 byte-identity
-    contract inside the .so.
-    """
+    """The existing gfx9 V2 regression configuration for a 16-bit dtype."""
     return GemmKernelConfig(
         dtype_a=dtype, dtype_b=dtype, dtype_c=dtype, dtype_acc="fp32",
         layout_a="row", layout_b="col", layout_c="row",
@@ -120,6 +113,19 @@ def _run_preshuffle(gfx_arch: str, dtype: str) -> tuple[str, str]:
         for epilogue in ("default", "cshuffle")
         for persistent in (False, True)
     ]
+    if gfx_arch == "gfx1250":
+        config_path = (Path(__file__).resolve().parents[2] / "tile_engine/ops/gemm/"
+                       "gemm_preshuffle/configs/default_config_gfx1250.json")
+        configs = expand_sweep(str(config_path), arch=gfx_arch, dtype=dtype, variant="preshuffle")
+        expected = {"preshufflev2", "comp_tdm_v1", "comp_tdm_v2", "preshuffle_tdm", "comp_async"}
+        if len(configs) != 12 or {cfg.pipeline for cfg in configs} != expected:
+            return FAIL, f"incomplete gfx1250 pipeline sweep: {len(configs)} configs"
+        # Padding must not bypass the native compute TDM N/K restrictions.
+        configs += [
+            replace(cfg, pad_n=True, pad_k=True)
+            for cfg in configs
+            if cfg.pipeline in ("comp_tdm_v1", "comp_tdm_v2")
+        ]
     paths = setup_multiple_gemm_dispatchers(configs, max_workers=4, verbose=False)
     if len(paths) != len(configs) or any(path is None for path in paths):
         return FAIL, f"preshuffle/{dtype}: kernel build failed"
@@ -130,11 +136,16 @@ def _run_preshuffle(gfx_arch: str, dtype: str) -> tuple[str, str]:
     rng = np.random.default_rng(23)
     worst = 0.0
     count = 0
+    rejected = 0
     for cfg, path in zip(configs, paths):
         runner = GpuGemmRunner(path, arch=gfx_arch)
         if runner.kernel_name != cfg.name:
             return FAIL, f"registered {runner.kernel_name!r}, expected {cfg.name!r}"
-        for M, N, K in shapes:
+        pipeline_shapes = shapes
+        if gfx_arch == "gfx1250":
+            # The default config permits partial M tiles, with full N/K tiles.
+            pipeline_shapes = shapes + [(144, 128, 128)]
+        for M, N, K in pipeline_shapes:
             # Generate fresh B even for a repeated shape, detecting stale packing.
             A = rng.uniform(-1.0, 1.0, (M, K)).astype(np.float32)
             B = rng.uniform(-1.0, 1.0, (K, N)).astype(np.float32)
@@ -157,8 +168,19 @@ def _run_preshuffle(gfx_arch: str, dtype: str) -> tuple[str, str]:
                 return FAIL, f"{label}: nonpositive time {result.time_ms}"
             worst = max(worst, error)
             count += 1
+        if cfg.pipeline in ("comp_tdm_v1", "comp_tdm_v2") and cfg.pad_n and cfg.pad_k:
+            for M, N, K in ((128, 160, 128), (128, 128, 96)):
+                result = runner.run(
+                    np.zeros((M, K), dtype=np.float32),
+                    np.zeros((K, N), dtype=np.float32),
+                    GemmProblem(M=M, N=N, K=K),
+                )
+                if result.status != -2:  # No supported kernel, before launch.
+                    return FAIL, f"{cfg.name}: accepted an unsupported partial N/K tile"
+                rejected += 1
         runner.lib.cleanup()
-    return PASS, f"preshuffle/{dtype}: {count} cases, max_rel_err={worst:.4e}"
+    return PASS, (f"preshuffle/{dtype}: {count} cases, {rejected} rejected shapes, "
+                  f"max_rel_err={worst:.4e}")
 
 
 def test_preshuffle_gpu() -> None:

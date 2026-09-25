@@ -87,6 +87,14 @@ class GeneratedTileKernelInstance : public KernelInstance
         const std::int64_t k_grain =
             static_cast<std::int64_t>(tile_k) * (problem.k_batch > 0 ? problem.k_batch : 1);
 
+        // Compute TDM's native argument check skips padding validation. Reject
+        // partial N/K tiles here: they currently produce incorrect results even
+        // when the generated problem enables padding.
+        if((key_.algorithm.pipeline == Pipeline::CompTdmV1 ||
+            key_.algorithm.pipeline == Pipeline::CompTdmV2) &&
+           (problem.k_batch != 1 || problem.N % tile_n != 0 || problem.K % tile_k != 0))
+            return false;
+
         if(require_m && !pad_m && problem.M % tile_m != 0)
             return false;
         if(require_n && !pad_n && problem.N % tile_n != 0)

@@ -184,6 +184,10 @@ class CommonTypeMappings:
         "compv4": "GemmPipelineAgBgCrCompV4",
         "compv5": "GemmPipelineAgBgCrCompV5",
         "preshufflev2": "WeightPreshufflePipelineAGmemBGmemCRegV2",
+        "comp_tdm_v1": "GemmPipelineAgBgCrCompTDMV1",
+        "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
+        "preshuffle_tdm": "WeightPreshufflePipelineAGmemBGmemCRegTDM",
+        "comp_async": "GemmPipelineAgBgCrCompAsync",
     }
 
     PIPELINE_TO_BASE = {
@@ -192,6 +196,10 @@ class CommonTypeMappings:
         "compv4": "BaseGemmPipelineAgBgCrCompV4",
         "compv5": "BaseGemmPipelineAgBgCrCompV5",
         "preshufflev2": "BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
+        "comp_tdm_v1": "BaseGemmPipelineAgBgCrCompTDM",
+        "comp_tdm_v2": "BaseGemmPipelineAgBgCrCompTDM",
+        "preshuffle_tdm": "BaseWeightPreshufflePipelineAGmemBGmemCRegTDM",
+        "comp_async": "BaseGemmPipelineAgBgCrCompAsync",
     }
 
     PIPELINE_TO_DISPATCHER = {
@@ -200,7 +208,17 @@ class CommonTypeMappings:
         "compv4": "Pipeline::CompV4",
         "compv5": "Pipeline::CompV5",
         "preshufflev2": "Pipeline::PreShuffleV2",
+        "comp_tdm_v1": "Pipeline::CompTdmV1",
+        "comp_tdm_v2": "Pipeline::CompTdmV2",
+        "preshuffle_tdm": "Pipeline::PreShuffleTdm",
+        "comp_async": "Pipeline::CompAsync",
     }
+
+    DOUBLE_BUFFER_PIPELINES = frozenset(
+        ("compv4", "preshufflev2", "comp_tdm_v1", "comp_tdm_v2", "preshuffle_tdm", "comp_async")
+    )
+
+    PACKED_B_PIPELINES = frozenset(("preshufflev2", "preshuffle_tdm"))
 
     SCHEDULER_TO_CK = {
         "intrawave": "GemmPipelineScheduler::Intrawave",
@@ -217,6 +235,7 @@ class CommonTypeMappings:
     EPILOGUE_TO_DISPATCHER = {
         "cshuffle": "Epilogue::CShuffle",
         "default": "Epilogue::Default",
+        "tdm": "Epilogue::Tdm",
     }
 
     @staticmethod

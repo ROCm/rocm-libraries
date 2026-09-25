@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import logging
+from codegen_common import CommonTypeMappings
 
 logger = logging.getLogger(__name__)
 
@@ -681,7 +682,8 @@ class ArchFilter:
     def _validate_warp_tile_combo(self, config: KernelConfig, result: ValidationResult):
         """Validate warp tile combination against architecture and data types"""
         # Use preshuffle-specific warp tiles for preshuffle operator
-        if config.operator == OperatorType.GEMM_PRESHUFFLE:
+        if (config.operator == OperatorType.GEMM_PRESHUFFLE
+                and config.pipeline in CommonTypeMappings.PACKED_B_PIPELINES):
             gpu_combos = PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS.get(
                 self.gpu_arch, {}
             )
@@ -724,6 +726,27 @@ class ArchFilter:
                     f"Preshuffle GEMM requires pipeline in {PRESHUFFLE_PIPELINES}, "
                     f"got {config.pipeline}"
                 )
+            packed_b = config.pipeline in CommonTypeMappings.PACKED_B_PIPELINES
+            expected_scheduler = "default" if packed_b else "intrawave"
+            if config.scheduler != expected_scheduler:
+                result.add_error(f"{config.pipeline} requires scheduler={expected_scheduler}")
+            tdm_compute = config.pipeline in ("comp_tdm_v1", "comp_tdm_v2")
+            epilogues = ("tdm",) if tdm_compute else ("default", "cshuffle")
+            if config.epilogue not in epilogues:
+                result.add_error(f"{config.pipeline} requires epilogue in {epilogues}")
+            if config.pipeline != "preshufflev2":
+                if self.gpu_arch != "gfx1250":
+                    result.add_error(f"{config.pipeline} is bridged only for gfx1250")
+                if config.datatype_a not in ("fp16", "bf16") or config.datatype_b != config.datatype_a:
+                    result.add_error(f"{config.pipeline} requires matching fp16/bf16 inputs")
+                if config.layout != "rcr":
+                    result.add_error(f"{config.pipeline} requires rcr layout")
+                if config.warp_k != 1:
+                    result.add_error(f"{config.pipeline} requires warp_k=1")
+                if (config.warp_tile_m, config.warp_tile_n, config.warp_tile_k) != (16, 16, 32):
+                    result.add_error(f"{config.pipeline} is bridged with a 16x16x32 warp tile")
+            if config.pipeline == "comp_tdm_v2" and config.warp_m * config.warp_n * config.warp_k != 4:
+                result.add_error("comp_tdm_v2 requires exactly four waves per workgroup")
 
         # Conv backward operations only support compv3/mem pipelines
         # (compv4/compv5 have template issues: transpose_tile2d for bwd_weight,

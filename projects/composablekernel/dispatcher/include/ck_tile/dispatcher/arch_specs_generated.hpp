@@ -5,7 +5,7 @@
  * AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
  *
  * Generated from: arch_specs.json
- * Generated at: 2026-09-16T15:00:49.741464
+ * Generated at: 2026-09-23T18:13:45.334462
  *
  * To update this file:
  * 1. Edit arch_specs.json
@@ -165,6 +165,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 65536;
         case Pipeline::CompV4: return 32768;
         case Pipeline::PreShuffleV2: return 32768;
+        case Pipeline::CompAsync: return 32768;
+        case Pipeline::CompTdmV1: return 32768;
+        case Pipeline::CompTdmV2: return 32768;
+        case Pipeline::PreShuffleTdm: return 32768;
         case Pipeline::Wavelet: return 65536;
         case Pipeline::CompV6: return 32768;
         case Pipeline::PreShuffleV1: return 32768;
@@ -180,6 +184,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 65536;
         case Pipeline::CompV4: return 32768;
         case Pipeline::PreShuffleV2: return 32768;
+        case Pipeline::CompAsync: return 32768;
+        case Pipeline::CompTdmV1: return 32768;
+        case Pipeline::CompTdmV2: return 32768;
+        case Pipeline::PreShuffleTdm: return 32768;
         case Pipeline::Wavelet: return 65536;
         case Pipeline::CompV6: return 32768;
         case Pipeline::PreShuffleV1: return 32768;
@@ -195,6 +203,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 65536;
         case Pipeline::CompV4: return 32768;
         case Pipeline::PreShuffleV2: return 32768;
+        case Pipeline::CompAsync: return 32768;
+        case Pipeline::CompTdmV1: return 32768;
+        case Pipeline::CompTdmV2: return 32768;
+        case Pipeline::PreShuffleTdm: return 32768;
         case Pipeline::Wavelet: return 65536;
         case Pipeline::CompV6: return 32768;
         case Pipeline::PreShuffleV1: return 32768;
@@ -210,6 +222,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 163840;
         case Pipeline::CompV4: return 81920;
         case Pipeline::PreShuffleV2: return 81920;
+        case Pipeline::CompAsync: return 81920;
+        case Pipeline::CompTdmV1: return 81920;
+        case Pipeline::CompTdmV2: return 81920;
+        case Pipeline::PreShuffleTdm: return 81920;
         case Pipeline::Wavelet: return 163840;
         case Pipeline::CompV6: return 81920;
         case Pipeline::PreShuffleV1: return 81920;
@@ -225,6 +241,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 65536;
         case Pipeline::CompV4: return 32768;
         case Pipeline::PreShuffleV2: return 32768;
+        case Pipeline::CompAsync: return 32768;
+        case Pipeline::CompTdmV1: return 32768;
+        case Pipeline::CompTdmV2: return 32768;
+        case Pipeline::PreShuffleTdm: return 32768;
         case Pipeline::Wavelet: return 65536;
         case Pipeline::CompV6: return 32768;
         case Pipeline::PreShuffleV1: return 32768;
@@ -240,6 +260,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 65536;
         case Pipeline::CompV4: return 32768;
         case Pipeline::PreShuffleV2: return 32768;
+        case Pipeline::CompAsync: return 32768;
+        case Pipeline::CompTdmV1: return 32768;
+        case Pipeline::CompTdmV2: return 32768;
+        case Pipeline::PreShuffleTdm: return 32768;
         case Pipeline::Wavelet: return 65536;
         case Pipeline::CompV6: return 32768;
         case Pipeline::PreShuffleV1: return 32768;
@@ -255,6 +279,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 65536;
         case Pipeline::CompV4: return 32768;
         case Pipeline::PreShuffleV2: return 32768;
+        case Pipeline::CompAsync: return 32768;
+        case Pipeline::CompTdmV1: return 32768;
+        case Pipeline::CompTdmV2: return 32768;
+        case Pipeline::PreShuffleTdm: return 32768;
         case Pipeline::Wavelet: return 65536;
         case Pipeline::CompV6: return 32768;
         case Pipeline::PreShuffleV1: return 32768;
@@ -270,6 +298,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 327680;
         case Pipeline::CompV4: return 163840;
         case Pipeline::PreShuffleV2: return 163840;
+        case Pipeline::CompAsync: return 163840;
+        case Pipeline::CompTdmV1: return 163840;
+        case Pipeline::CompTdmV2: return 163840;
+        case Pipeline::PreShuffleTdm: return 163840;
         case Pipeline::Wavelet: return 327680;
         case Pipeline::CompV6: return 163840;
         case Pipeline::PreShuffleV1: return 163840;
@@ -286,6 +318,10 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::CompV5: return 65536;
         case Pipeline::CompV4: return 32768;
         case Pipeline::PreShuffleV2: return 32768;
+        case Pipeline::CompAsync: return 32768;
+        case Pipeline::CompTdmV1: return 32768;
+        case Pipeline::CompTdmV2: return 32768;
+        case Pipeline::PreShuffleTdm: return 32768;
         case Pipeline::Wavelet: return 65536;
         case Pipeline::CompV6: return 32768;
         case Pipeline::PreShuffleV1: return 32768;

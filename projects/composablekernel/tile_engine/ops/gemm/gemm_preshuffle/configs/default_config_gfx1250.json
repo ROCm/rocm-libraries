@@ -1,0 +1,96 @@
+{
+  "tile_config": {
+    "tile_m": {
+      "values": [
+        128
+      ]
+    },
+    "tile_n": {
+      "values": [
+        128
+      ]
+    },
+    "tile_k": {
+      "values": [
+        64
+      ]
+    },
+    "warp_m": {
+      "values": [
+        2
+      ]
+    },
+    "warp_n": {
+      "values": [
+        2
+      ]
+    },
+    "warp_k": {
+      "values": [
+        1
+      ]
+    },
+    "warp_tile_m": {
+      "values": [
+        16
+      ]
+    },
+    "warp_tile_n": {
+      "values": [
+        16
+      ]
+    },
+    "warp_tile_k": {
+      "values": [
+        32
+      ]
+    }
+  },
+  "trait_config": {
+    "pipeline": {
+      "values": [
+        "preshufflev2",
+        "comp_tdm_v1",
+        "comp_tdm_v2",
+        "preshuffle_tdm",
+        "comp_async"
+      ]
+    },
+    "scheduler": {
+      "values": [
+        "default",
+        "intrawave"
+      ]
+    },
+    "epilogue": {
+      "values": [
+        "default",
+        "cshuffle",
+        "tdm"
+      ]
+    },
+    "pad_m": {
+      "values": [
+        true
+      ]
+    },
+    "pad_n": {
+      "values": [
+        false
+      ]
+    },
+    "pad_k": {
+      "values": [
+        false
+      ]
+    },
+    "persistent": {
+      "values": [
+        false,
+        true
+      ]
+    }
+  },
+  "k_block_per_cu": 1,
+  "permute_n": false
+}

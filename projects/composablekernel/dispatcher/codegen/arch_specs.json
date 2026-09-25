@@ -319,11 +319,12 @@
         "Mandatory double buffering, no configuration choice:",
         "GemmPipelineAgBgCrCompAsync::GetSmemSize() returns",
         "num_lds_buffers * smem_size with num_lds_buffers = 2.",
-        "Has no Pipeline enumerator on the C++ side, so this entry only",
-        "affects the Python validator; it is emitted to C++ only for",
-        "pipelines that exist in that enum."
+        "The dispatcher emits the same budget for Python and C++."
       ]
     },
+    "comp_tdm_v1": { "basis": "fraction", "value": 0.5 },
+    "comp_tdm_v2": { "basis": "fraction", "value": 0.5 },
+    "preshuffle_tdm": { "basis": "fraction", "value": 0.5 },
     "wavelet": {
       "basis": "fraction",
       "value": 1.0,
@@ -403,6 +404,6 @@
   
   "preshuffle_pipelines": {
     "_comment": "Pipelines supported for preshuffle GEMM variant",
-    "supported": ["preshufflev2"]
+    "supported": ["preshufflev2", "comp_tdm_v1", "comp_tdm_v2", "preshuffle_tdm", "comp_async"]
   }
 }

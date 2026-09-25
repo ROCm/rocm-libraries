@@ -53,16 +53,9 @@ _LAYOUT_WORD = {"r": "row", "c": "col"}
 # Supported GPU architectures for the bridge (single source of truth).
 _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
-# Single source of truth for the preshuffle B-shuffle permutation used by the
-# bridge. The bridge codegen only emits the NON-permuteN preshuffle pipeline
-# (WeightPreshufflePipelineAGmemBGmemCRegV2), whose device-side B packing matches
-# ck_tile::shuffle_b_v0 (permute_n=False). Old-TE's default_config.json /
-# default_ci_config.json set permute_n=true, but that is a HOST-marker that
-# selects a distinct (permuteN) TE pipeline the bridge does not generate -- it
-# does NOT map to a separate bridged device kernel. Honoring true here would
-# mis-shuffle B (GPU-verified max_rel ~1.25 vs ~5e-4). So every bridge pin reads
-# this one constant. TODO: to support permute_n=True, emit the permuteN pipeline
-# in unified_gemm_codegen and set this to a swept/config-driven value.
+# Packed-B pipelines (preshufflev2 and preshuffle_tdm) use shuffle_b_v0.
+# The compute TDM/async pipelines leave B in its ordinary layout. PermuteN is
+# not bridged; preserve the existing non-permuteN contract for packed B.
 BRIDGE_PERMUTE_N = False
 
 
@@ -601,6 +594,7 @@ class GemmKernelConfig:
             pad_k=self.pad_k,
             gfx_arch=self.gfx_arch,
             variant=self.variant,
+            persistent=self.persistent,
         )
 # ============================================================================
 # Problem

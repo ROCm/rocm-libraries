@@ -109,6 +109,16 @@ set_tests_properties(dispatcher_test_contraction_multi_abd_gpu_correctness PROPE
 # Python Tests
 # =============================================================================
 
+add_test(
+    NAME dispatcher_test_preshuffle_pipeline_matrix
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_preshuffle_pipeline_matrix.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_preshuffle_pipeline_matrix PROPERTIES
+    LABELS "dispatcher;python;bridge;codegen"
+    TIMEOUT 120
+)
+
 # Auto-correction and validation stress test
 add_test(
     NAME dispatcher_test_autocorrect

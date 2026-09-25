@@ -33,7 +33,7 @@ def _base_gfx_arch(gpu_target: str) -> str:
 
 GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 
-GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
+GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2", "comp_tdm_v1", "comp_tdm_v2", "preshuffle_tdm", "comp_async"]
 
 GEMM_ROWCOLQUANT_PIPELINES = ["compv3"]
 GEMM_MX_PIPELINES_BY_ARCH = {
@@ -338,7 +338,16 @@ def is_trait_combination_valid(
                 and not persistent_or_preshuffle_quant
             )
         )
-    if kernel_name_prefix == "gemm_aquant":
+    if kernel_name_prefix == "gemm_preshuffle":
+        if pipeline not in GEMM_PRESHUFFLE_PIPELINES:
+            return False
+        packed_b = pipeline in ("preshufflev2", "preshuffle_tdm")
+        if persistent_or_preshuffle_quant in (True, "true") and not packed_b:
+            return False
+        expected_scheduler = "default" if packed_b else "intrawave"
+        epilogues = ("tdm",) if pipeline in ("comp_tdm_v1", "comp_tdm_v2") else ("default", "cshuffle")
+        return scheduler == expected_scheduler and epilogue in epilogues
+    elif kernel_name_prefix == "gemm_aquant":
         if (pipeline, epilogue, scheduler) in AQUANT_TRAIT_UNSUPPORTED_COMBINATIONS:
             return False
         # mem pipeline does not support preshuffle
@@ -529,6 +538,8 @@ def validate_lds_capacity(
         "comp_tdm_v2",
         "comp_async_eight_waves",
         "weight_preshuffle",
+        "comp_tdm_v1",
+        "preshuffle_tdm",
     ]
     max_tile_size = hw_lds_size // 2 if double_buffer else hw_lds_size
 
@@ -597,6 +608,10 @@ def validate_gemm_preshuffle_warp_tile_combination(
     gpu_name: str,
 ) -> Tuple[bool, str]:
     """Validate warp tile combination against GPU-specific supported combinations."""
+
+    # Match the gfx1250 table for feature-qualified targets as well.
+    if _base_gfx_arch(gpu_name) == "gfx1250":
+        gpu_name = "gfx1250"
 
     # Construct the key for looking up supported combinations
     warp_tile_key = f"{a_datatype}_{b_datatype}_{c_datatype}"
@@ -757,6 +772,20 @@ def is_tile_config_valid(
     if not lds_valid:
         logging.debug(f"LDS validation failed: {lds_error}")
         return False
+
+    if kernel_name_prefix == "gemm_preshuffle" and pipeline != "preshufflev2":
+        if pipeline not in GEMM_PRESHUFFLE_PIPELINES or _base_gfx_arch(gpu_target) != "gfx1250":
+            return False
+        if a_datatype not in ("fp16", "bf16") or b_datatype != a_datatype or layout != "rcr":
+            return False
+        if [warp_tile_m, warp_tile_n, warp_tile_k] != [16, 16, 32] or warp_k != 1:
+            return False
+        if pipeline == "comp_tdm_v2" and warp_m * warp_n != 4:
+            return False
+        # Compute pipelines consume ordinary operands and must not enter MX or
+        # packed-B distribution validation merely because of their names.
+        if pipeline != "preshuffle_tdm":
+            return True
 
     if pipeline in GEMM_PIPELINES:
         gemm_valid, gemm_valid_error = validate_gemm(

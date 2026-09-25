@@ -21,7 +21,7 @@ import itertools
 import logging
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from enum import Enum
 import concurrent.futures
 
@@ -464,6 +464,11 @@ class CKTileKernelGenerator:
 
 """
 
+        if config.trait.epilogue == "tdm":
+            includes += '#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"\n'
+        if config.trait.pipeline == "preshuffle_tdm":
+            includes += '#include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_tdm.hpp"\n'
+
         if config.variant == GemmVariant.MULTI_D:
             includes += """
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
@@ -718,7 +723,7 @@ struct {struct_name} {{
     static constexpr bool kPadK = {str(tr.pad_k).lower()};
     static constexpr bool TransposeC = false;
     static constexpr bool UsePersistentKernel = {str(use_persistent_kernel).lower()};
-    static constexpr bool DoubleSmemBuffer = {str(tr.pipeline == "compv4" or tr.pipeline == "preshufflev2").lower()};
+    static constexpr bool DoubleSmemBuffer = {str(tr.pipeline in self.tm.DOUBLE_BUFFER_PIPELINES).lower()};
     static constexpr bool UseStructuredSparsity = false;
     static constexpr bool Preshuffle = {str(config.preshuffle).lower()};
     // PermuteN selects the B-preshuffle permutation used by the host-side
@@ -785,7 +790,7 @@ using CLayout = {ns_name}::CLayout;
 #define GEMM_KEY_PAD_N {int(tr.pad_n)}
 #define GEMM_KEY_PAD_K {int(tr.pad_k)}
 #define GEMM_KEY_PERSISTENT {int(tr.persistent)}
-#define GEMM_KEY_DOUBLE_BUFFER {int(tr.pipeline == "compv4" or tr.pipeline == "preshufflev2")}
+#define GEMM_KEY_DOUBLE_BUFFER {int(tr.pipeline in self.tm.DOUBLE_BUFFER_PIPELINES)}
 #define GEMM_KEY_PRESHUFFLE {int(config.preshuffle)}
 #define GEMM_KEY_TRANSPOSE_C 0
 #define GEMM_KEY_GROUPED 0
@@ -824,7 +829,7 @@ using CLayout = {ns_name}::CLayout;
             return self._launch_function_grouped(config)
         if config.variant == GemmVariant.STREAM_K:
             return self._launch_function_streamk(config)
-        if config.preshuffle:
+        if config.variant == GemmVariant.PRESHUFFLE:
             return self._launch_function_preshuffle(config)
         return self._launch_function_standard(config)
 
@@ -1024,56 +1029,40 @@ using CLayout = {ns_name}::CLayout;
     }}"""
 
     def _launch_function_preshuffle(self, config: KernelConfig) -> str:
-        """Generate launch function for preshuffle GEMM (weight preshuffle variant)
-
-        Preshuffle uses WeightPreshufflePipelineAGmemBGmemCRegV2 which has a different
-        API than standard pipelines. It's designed for weight-preshuffled GEMM operations.
-        """
+        """Launch the selected native pipeline; its Preshuffle trait controls B packing."""
+        shape_check = ""
+        if config.trait.pipeline in ("comp_tdm_v1", "comp_tdm_v2"):
+            shape_check = """
+        // Native compute TDM currently miscomputes partial N/K tiles on gfx1250.
+        if (args.k_batch != 1 || args.N % TileN != 0 || args.K % TileK != 0) {
+            throw std::runtime_error("Compute TDM requires complete N/K tiles and k_batch=1");
+        }
+"""
         return f"""
     static float launch(const GemmHostArgs& args, const stream_config& stream) {{
-        const index_t k_grain = args.k_batch * TileK;
-        const index_t K_split = (args.K + k_grain - 1) / k_grain * TileK;
-        const index_t num_loop = TilePartitioner::GetLoopNum(K_split);
-        const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
-        const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-        
-        float ave_time{{0}};
-        
-        constexpr auto scheduler = GemmPipelineScheduler::Default;  // Preshuffle uses Default scheduler
-        
-        // Preshuffle uses TileFlatmmShape instead of TileGemmShape for the problem
+        {shape_check}
+        constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
         using UniversalGemmProblem = UniversalGemmPipelineProblem<
             ADataType, BDataType, AccDataType, TileShape,
             TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
-                                            ALayout, BLayout, CLayout, TransposeC,
-                                            UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle>,
+                                   ALayout, BLayout, CLayout, TransposeC,
+                                   UseStructuredSparsity, UsePersistentKernel,
+                                   NumWaveGroups, Preshuffle>,
             scheduler>;
-        
-        using GemmPipeline = WeightPreshufflePipelineAGmemBGmemCRegV2<UniversalGemmProblem>;
+        using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
         {self._epilogue_code(config)}
-        
         using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
-        
-        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
-            auto kargs = GemmKernel::MakeKernelArgs(args);
-            
-            if (!GemmKernel::IsSupportedArgument(kargs)) {{
-                throw std::runtime_error("Arguments not supported for preshuffle kernel!");
-            }}
-            
-            const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if config.trait.persistent else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
-            const dim3 blocks = GemmKernel::BlockSize();
-            
-            constexpr int kBlockPerCu = {config.k_block_per_cu};
-            ave_time = launch_kernel(stream,
-                make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-            
-            return ave_time;
-        }};
-
-        BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
-        return ave_time;
+        static_assert(GemmKernel::UniversalGemmKernel::PersistentKernel == UsePersistentKernel,
+                      "Pipeline and launch disagree on persistent mode");
+        auto kargs = GemmKernel::MakeKernelArgs(args);
+        if (!GemmKernel::IsSupportedArgument(kargs)) {{
+            throw std::runtime_error("Arguments not supported for the selected GEMM pipeline!");
+        }}
+        const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if config.trait.persistent else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
+        const dim3 blocks = GemmKernel::BlockSize();
+        constexpr int kBlockPerCu = {config.k_block_per_cu};
+        return launch_kernel(stream,
+            make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
     }}"""
 
     def _launch_function_multi_d(self, config: KernelConfig) -> str:
@@ -1399,15 +1388,16 @@ using CLayout = {ns_name}::CLayout;
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
             TransposeC, NumWaveGroups, false, 1, 1, DoubleSmemBuffer>;
         using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
-        elif config.trait.epilogue == "cshuffle":
-            return """
+        elif config.trait.epilogue in ("cshuffle", "tdm"):
+            epilogue = "TdmEpilogue" if config.trait.epilogue == "tdm" else "CShuffleEpilogue"
+            return f"""
         using EpilogueProblem = CShuffleEpilogueProblem<
             ADataType, BDataType, tuple<>, AccDataType, CDataType,
             tuple<>, CLayout, element_wise::PassThrough,
             TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
             TransposeC, NumWaveGroups, false, 1, 1, DoubleSmemBuffer>;
-        using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
+        using GemmEpilogue = {epilogue}<EpilogueProblem>;"""
         else:
             return """
         using EpilogueProblem = DefaultGemm2DEpilogueProblem<
@@ -1529,7 +1519,7 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.algorithm.scheduler = {self.tm.SCHEDULER_TO_DISPATCHER[config.trait.scheduler]};
     key.algorithm.epilogue = {self.tm.EPILOGUE_TO_DISPATCHER[config.trait.epilogue]};
     key.algorithm.block_size = {config.block_size};
-    key.algorithm.double_buffer = {str(config.trait.pipeline in ("compv4", "preshufflev2")).lower()};
+    key.algorithm.double_buffer = {str(config.trait.pipeline in self.tm.DOUBLE_BUFFER_PIPELINES).lower()};
     key.algorithm.persistent = {str(config.trait.persistent).lower()};
     key.algorithm.preshuffle = {str(config.preshuffle).lower()};
     key.algorithm.transpose_c = false;
@@ -1588,6 +1578,7 @@ class UnifiedGemmCodegen:
 
         # Load configuration
         self.config = self._load_config(config_file)
+        self._using_default_config = config_file is None
 
         # Initialize architecture filter for GPU-specific validation
         self.arch_filter = None
@@ -1776,6 +1767,14 @@ class UnifiedGemmCodegen:
         # Get base configs
         tile_configs = self._get_tile_configs()
         trait_configs = self._get_trait_configs()
+        if variant == GemmVariant.PRESHUFFLE and self._using_default_config:
+            # The built-in mixed-variant sweep has standard GEMM traits. Preserve
+            # its V2 default, while explicit JSON pipeline choices pass through.
+            trait_configs = [
+                replace(t, pipeline="preshufflev2", scheduler="default")
+                for t in trait_configs
+                if t.pipeline == "compv3" and t.scheduler == "intrawave"
+            ]
 
         for tile, trait in itertools.product(tile_configs, trait_configs):
             # Perform variant-specific architecture validation against the
@@ -1786,6 +1785,7 @@ class UnifiedGemmCodegen:
                     variant,
                     pipeline=trait.pipeline,
                     scheduler=trait.scheduler,
+                    epilogue=trait.epilogue,
                 ):
                     continue
 
@@ -1818,52 +1818,20 @@ class UnifiedGemmCodegen:
                         )
 
             elif variant == GemmVariant.PRESHUFFLE:
-                # Preshuffle uses a fixed pipeline (preshufflev2) and scheduler
-                # (default); the epilogue is swept ([default, cshuffle] in the TE
-                # gemm_preshuffle default_config). permute_n selects the B-shuffle
-                # permutation and is a global config knob (matches Old-TE).
-                # NOTE: for the bridge this value arrives already pinned to False
-                # via gemm_utils.py::BRIDGE_PERMUTE_N (its to_codegen_json forces
-                # it), even though the TE default_config.json / default_ci_config.json
-                # ship permute_n=true -- that TE default is a host-marker for a
-                # distinct permuteN pipeline the bridge does not emit, so it does
-                # not map to a separate bridged device kernel. The get(...) default
-                # here is only the fallback for a raw config with no key.
-                permute_n = bool(self.config.get("permute_n", False))
-                preshuffle_trait = TraitConfig(
-                    pipeline="preshufflev2",
-                    epilogue=trait.epilogue,
-                    scheduler="default",
-                    pad_m=trait.pad_m,
-                    pad_n=trait.pad_n,
-                    pad_k=trait.pad_k,
-                    persistent=trait.persistent,
-                )
-                # Emit one preshuffle config per (tile, epilogue, persistent),
-                # de-duplicating over the swept pipeline/scheduler so a full sweep
-                # does not create N identical preshuffle kernels. When the caller
-                # already pins the pipeline to preshufflev2 (the bridge
-                # single-config path), accept it directly; otherwise collapse the
-                # sweep onto its first pipeline (compv3) + scheduler (intrawave).
-                is_pinned = (
-                    trait.pipeline == "preshufflev2" and trait.scheduler == "default"
-                )
-                is_sweep_anchor = (
-                    trait.pipeline == "compv3" and trait.scheduler == "intrawave"
-                )
-                if not (is_pinned or is_sweep_anchor):
+                if trait.persistent and trait.pipeline not in TypeMappings.PACKED_B_PIPELINES:
+                    # The compute pipelines do not expose UsePersistentKernel.
+                    # An occupancy grid would launch their ordinary entry point.
                     continue
-                # The CShuffle-store pow2 repeat gate applies only to the cshuffle
-                # epilogue (the default epilogue stores directly and is correct).
                 if trait.epilogue == "cshuffle" and not self._cshuffle_repeat_ok(tile):
                     continue
                 configs.append(
                     KernelConfig(
                         tile=tile,
-                        trait=preshuffle_trait,
+                        trait=trait,
                         variant=variant,
-                        preshuffle=True,
-                        permute_n=permute_n,
+                        preshuffle=trait.pipeline in TypeMappings.PACKED_B_PIPELINES,
+                        block_size=tile.warp_m * tile.warp_n * tile.warp_k * (64 if self.gpu_target.startswith("gfx9") else 32),
+                        permute_n=bool(self.config.get("permute_n", False)),
                     )
                 )
 
@@ -1985,6 +1953,7 @@ class UnifiedGemmCodegen:
         variant: GemmVariant = None,
         pipeline: str = None,
         scheduler: str = None,
+        epilogue: str = "cshuffle",
     ) -> bool:
         """Check if tile configuration is valid for target architecture
 
@@ -2036,13 +2005,8 @@ class UnifiedGemmCodegen:
             }
             operator = variant_to_operator.get(variant, OperatorType.GEMM)
 
-            # Preshuffle requires specific pipeline and scheduler
-            if variant == GemmVariant.PRESHUFFLE:
-                pipeline = "preshufflev2"
-                scheduler = "default"
-
         # Use preshuffle-specific validation (comprehensive CK-specific checks)
-        if variant == GemmVariant.PRESHUFFLE:
+        if variant == GemmVariant.PRESHUFFLE and pipeline in TypeMappings.PACKED_B_PIPELINES:
             if not is_preshuffle_config_valid(
                 tile_m=tile.tile_m,
                 tile_n=tile.tile_n,
@@ -2073,6 +2037,7 @@ class UnifiedGemmCodegen:
             warp_tile_k=tile.warp_tile_k,
             pipeline=pipeline,
             scheduler=scheduler,
+            epilogue=epilogue,
             layout=self.layout,
             operator=operator,
         )
