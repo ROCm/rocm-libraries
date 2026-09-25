@@ -234,7 +234,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
         self.assertFalse(spec.wide_lds_dma)
 
-    def test_mha_falls_back_to_qb_major_not_gqa_pair(self):
+    def test_mha_never_reaches_a_gqa_pair_decode(self):
         req = _gfx950_dense_req(
             batch=1,
             nhead_q=32,
@@ -247,17 +247,28 @@ class TestDenseGqaPairWiring(unittest.TestCase):
             dense_persistent="on",
         )
         spec = dense_spec_for_request(req)
-        # qb_major, but for a better reason than before. It used to be a
-        # FALLTHROUGH -- the old auto policy required gqa > 1, so MHA reached
-        # qb_major by construction rather than by measurement. It is now the
-        # measured choice on gfx950: in the shipped configuration qb_major is
-        # +1.5% over bt_hkv_minor and +1.8% over hkv_minor there, the opposite
-        # of gfx942. What this test has always really guarded is unchanged: MHA
-        # must never reach a gqa_pair decode, which needs gqa >= 2 and is
-        # nonsense at gqa == 1.
-        self.assertEqual(spec.resolved_persist_decode, "qb_major")
-        self.assertTrue(spec.wide_lds_dma)
+        # THE invariant, and the only one this test ever really guarded: a
+        # gqa_pair decode needs gqa >= 2 and is nonsense at gqa == 1.
+        self.assertNotIn("gqa_pair", spec.resolved_persist_decode)
         self.assertNotIn("gqapair", spec.kernel_name())
+        self.assertTrue(spec.wide_lds_dma)
+
+        # Which decode it IS has now changed twice, so assert the rule rather
+        # than a literal. This used to assert "qb_major", on a recorded gfx950
+        # measurement that turned out to be a symbol collision. The decode is
+        # now B-conditional, and B=1 takes the small-batch arm.
+        #
+        # At gqa == 1 the choice is moot in the only way that matters: the gqa
+        # digit has radix 1 and is elided, so bt_hkv_minor (BVGQ) and
+        # qb_major_fold (BGVQ) describe the SAME work-item mapping. Measured
+        # gap between them on MHA was 0.05-0.13%, i.e. noise. The arms are kept
+        # distinct anyway because they are distinct kernels for every gqa > 1.
+        self.assertEqual(spec.resolved_persist_decode, "bt_hkv_minor")
+        big = dense_spec_for_request(_gfx950_dense_req(
+            batch=32, nhead_q=32, nhead_k=32, seqlen_q=8192, seqlen_k=8192,
+            hdim_q=128, hdim_v=128, dtype="fp16", dense_persistent="on"))
+        self.assertEqual(big.resolved_persist_decode, "qb_major_fold")
+        self.assertNotIn("gqapair", big.kernel_name())
 
 
 class TestDenseGeometrySpec(unittest.TestCase):

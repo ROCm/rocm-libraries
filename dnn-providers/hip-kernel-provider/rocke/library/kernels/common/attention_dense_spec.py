@@ -33,7 +33,12 @@ _COMMON_PERSIST_DECODES = frozenset(
     # lane, query block -- carrying the same causal fold as hkv_minor. It is
     # deliberately the SAME NAME as the non-persistent grid order of the same
     # digit order: one mapping, named once, reached two ways.
-    {"auto", "qb_major", "hkv_major", "hkv_minor", "bt_hkv_minor"}
+    # qb_major_fold is qb_major's digit order (BGVQ) with the causal FOLD on
+    # the query-block digit instead of the plain ascending walk. Same mapping of
+    # work items to (batch, head), different traversal -- so it is a traversal
+    # variant of qb_major, not a new locality class, and it is named to say so.
+    {"auto", "qb_major", "qb_major_fold", "hkv_major", "hkv_minor",
+     "bt_hkv_minor"}
 )
 
 # XCD count every CDNA3/CDNA4 part this spec targets exposes. Only ``hkv_minor``
@@ -515,6 +520,34 @@ class AttentionDenseSpec:
         """Auto decode for aligned dense causal. Overridden per arch."""
         return "qb_major"
 
+    def _batch_conditional_auto_decode(self) -> str:
+        """The measured B-conditional persistent rule, shared by both arches.
+
+        Both candidates put ``bt`` in the fastest digit and differ only in the
+        SECOND: bt_hkv_minor (BVGQ) puts the kv head there, qb_major_fold (BGVQ)
+        the gqa lane. The hardware assigns ``xcd = wi % num_xcds`` and
+        ``wi = bt + B*X``, so how much that second digit reaches the chiplet map
+        is decided entirely by ``gcd(B, num_xcds)``:
+
+            B=1  -> 3 bits: the second digit alone picks the XCD
+            B=2  -> 2 bits
+            B=4  -> 1 bit
+            8|B  -> 0 bits: the two orders place every work item on the SAME XCD
+
+        So they are furthest apart at B=1 -- where BVGQ gives each chiplet
+        exactly ONE kv head's K/V and BGVQ gives it four -- and their XCD
+        placement becomes identical once the batch digit alone saturates the
+        round robin. Past that point they still differ in WHICH kv head each
+        work item carries, and there the ranking REVERSES: over the resident
+        wave BGVQ holds fewer distinct kv heads per chiplet, and it measured
+        ahead on 9/10 gfx942 and 5/10 gfx950 configs at B>=16, by up to 10%.
+
+        Hence the split at num_xcds rather than at some fitted threshold: it is
+        where the mechanism changes, not where a curve happened to cross.
+        """
+        return ("bt_hkv_minor" if self.batch < _PERSIST_XCD_MODULUS
+                else "qb_major_fold")
+
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
         """Spec fields this kernel reads as runtime kernel params instead of
@@ -574,6 +607,7 @@ class AttentionDenseSpec:
             "hkv_major": "hkvmaj",
             "hkv_minor": "hkvmin",
             "bt_hkv_minor": "bthkvmin",
+            "qb_major_fold": "qbmajfold",
         }.get(self.resolved_persist_decode, "")
 
     def kernel_name(self) -> str:

@@ -418,6 +418,23 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append(f"qbt{self.qb_traversal}")
         return tuple(parts)
 
+    def _aligned_causal_auto_decode(self) -> str:
+        """gfx950 uses the same B-conditional rule as gfx942.
+
+        It previously inherited the base's conservative ``qb_major`` on a
+        recorded finding that bt_hkv_minor "loses on gfx950 (-1.5%)". That was a
+        symbol collision, not a measurement: bt_hkv_minor emitted no decode tag
+        on this arch, so it shared qb_major's kernel name and the name-keyed
+        launcher cache timed one binary twice. With distinct symbols it wins
+        here by a LARGER margin than on gfx942.
+
+        Unlike gfx942, this arch turns the persistent path on whenever there is
+        enough work to fill the grid (``nqb*Hq*B >= num_persistent``), which
+        includes B=1 -- so BOTH arms of the rule are on the default path here,
+        and the small-batch arm is the one that matters most.
+        """
+        return self._batch_conditional_auto_decode()
+
     def _persist_decode_name_part(self) -> str:
         # EVERY non-qb_major decode needs a distinct non-empty tag. qb_major is
         # the untagged baseline, so a decode returning "" shares its symbol, and
@@ -1698,7 +1715,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             blk = b.div(r2, b.const_i32(gqa))
             hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
             qb = _qb_from_blk(blk)
-        elif spec.resolved_persist_decode == "qb_major":
+        elif spec.resolved_persist_decode in ("qb_major", "qb_major_fold"):
             # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
             # triangular causal cost index) in the MSB spreads cheap+expensive
             # query blocks across each CTA under grid-stride; a qb-fast decode
@@ -1708,7 +1725,13 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             rem = b.div(wi, b.const_i32(B))
             hq = b.mod(rem, b.const_i32(Hq))
             qb0 = b.div(rem, b.const_i32(Hq))
-            if INTERLEAVE and causal and NQB > 1:
+            if spec.resolved_persist_decode == "qb_major_fold":
+                # Same work-item -> (batch, head) mapping as qb_major; only the
+                # query-block TRAVERSAL differs. The fold pairs a cheap block
+                # with an expensive one so a CTA striding both halves carries a
+                # constant causal cost, where the plain ascending walk does not.
+                qb = _qb_from_blk(qb0)
+            elif INTERLEAVE and causal and NQB > 1:
                 odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
                 qb = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
             else:
@@ -2419,7 +2442,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             r2_e = b.div(rest_e, b.const_i32(B))
             hql_e = b.mod(r2_e, b.const_i32(gqa))
             hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
-        elif spec.resolved_persist_decode == "qb_major":
+        elif spec.resolved_persist_decode in ("qb_major", "qb_major_fold"):
+            # One branch for both: the epilogue needs only (bt, hq), and
+            # qb_major_fold differs from qb_major solely in the query-block
+            # traversal, which reaches here through q_tok0 rather than being
+            # re-decoded. Splitting them would duplicate identical code and
+            # invite the two copies to drift.
             bt_e = b.mod(wi, b.const_i32(B))
             hq_e = b.mod(b.div(wi, b.const_i32(B)), b.const_i32(Hq))
         else:

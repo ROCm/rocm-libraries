@@ -586,17 +586,29 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         return () if self.runtime_shape else super()._shape_name_parts()
 
     def _aligned_causal_auto_decode(self) -> str:
-        """gfx942 picks bt_hkv_minor (digit order BVGQ).
+        """gfx942 uses the shared B-conditional rule.
 
-        Measured in the SHIPPED configuration against the decode it replaces:
-        +7.6% geomean, over 5 geometries x 3 seqlens x B in {1,2,8}, zero
-        correctness failures. hkv_minor is +6.5% on the same set, hkv_major
-        -4.8%. gfx950 does not inherit it today, but NOT because qb_major is
-        faster there -- that earlier finding was a symbol collision, and the
-        re-measurement makes this decode the winner on gfx950 too. See the base
-        class comment.
+        NOTE for this arch specifically: ``auto`` only turns the persistent path
+        on at ``batch >= _PERSISTENT_MIN_BATCH`` (16), which is entirely inside
+        the ``qb_major_fold`` arm. The ``bt_hkv_minor`` arm is therefore reached
+        only when persistent is FORCED on at small batch -- it is not dead code,
+        but it is not what the default dispatcher selects either. The two
+        thresholds are independent and deliberately not merged: this one is a
+        property of the XCD map, that one of which path to take at all.
+
+        Historical note, kept because the number is still quoted: bt_hkv_minor
+        measured +7.6% geomean vs qb_major over 5 geometries x 3 seqlens x
+        B in {1,2,8} -- a grid that stopped at B=8 and so never saw the
+        reversal above num_xcds that the rule now handles.
+
+        hkv_minor was +6.5% and hkv_major -4.8% on that same set, so the
+        locality class is not in doubt -- only where it stops applying.
+
+        gfx950 now uses the SAME rule, via the same shared helper. It did not
+        before, on a recorded "qb_major is faster on gfx950" finding that turned
+        out to be a symbol collision; see the base class comment.
         """
-        return "bt_hkv_minor"
+        return self._batch_conditional_auto_decode()
 
     def kernel_name(self) -> str:
         """The gfx942 kernel symbol: the shared name plus everything THIS body bakes.
@@ -765,7 +777,7 @@ _SUPPORTED_HEAD_SIZES = (64, 128)
 # instead of the builder raising mid-emission. Resolved values only -- "auto" never
 # reaches the decode chain.
 _IMPLEMENTED_PERSIST_DECODES = frozenset(
-    {"qb_major", "hkv_major", "hkv_minor", "bt_hkv_minor"}
+    {"qb_major", "qb_major_fold", "hkv_major", "hkv_minor", "bt_hkv_minor"}
 )
 
 # Axis orders the NON-persistent grid implements. Separate from the persist
@@ -2176,7 +2188,8 @@ def _build_attention_dense_single_buffer(
                 hkv_wi = b.div(r2, b.const_i32(NQB))
                 hq_v = b.add(b.mul(hkv_wi, b.const_i32(gqa)), hql)
                 qb_v = _qb_from_blk(blk)
-            elif spec.resolved_persist_decode == "qb_major":
+            elif spec.resolved_persist_decode in ("qb_major",
+                                                  "qb_major_fold"):
                 # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
                 # triangular causal-cost index) in the MSB spreads cheap+expensive
                 # query blocks across each CTA under grid-stride. Optional interleave
@@ -2186,7 +2199,17 @@ def _build_attention_dense_single_buffer(
                 rem = b.div(wi, b.const_i32(B))
                 hq_v = b.mod(rem, b.const_i32(Hq))
                 qb0 = b.div(rem, b.const_i32(Hq))
-                if spec.interleave and causal and NQB > 1:
+                if spec.resolved_persist_decode == "qb_major_fold":
+                    # Identical work-item -> (batch, head) mapping as qb_major;
+                    # only the query-block TRAVERSAL differs. qb_major walks the
+                    # blocks ascending, which leaves the causal cost unbalanced
+                    # across a grid-stride phase; the fold pairs a cheap block
+                    # with an expensive one so a CTA striding both halves does
+                    # qb=X and qb=NQB-1-X at constant total cost. Measured as a
+                    # strict improvement over plain qb_major on both arches,
+                    # largest where the grid is a shallow partial second wave.
+                    qb_v = _qb_from_blk(qb0)
+                elif spec.interleave and causal and NQB > 1:
                     odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
                     qb_v = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
                 else:
