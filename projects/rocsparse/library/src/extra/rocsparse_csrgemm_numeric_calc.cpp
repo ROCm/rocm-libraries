@@ -174,18 +174,18 @@ namespace rocsparse
               typename I,
               typename J,
               typename T>
-    static inline rocsparse_status csrgemm_numeric_launcher(rocsparse_handle handle,
+    static inline rocsparse_status csrgemm_numeric_launcher(rocsparse_handle       handle,
                                                             csrgemm_bitmap_scratch scratch,
-                                                            J                group_size,
-                                                            const J*         group_offset,
-                                                            const J*         perm,
-                                                            J                m,
-                                                            J                n,
-                                                            J                k,
-                                                            const T*         alpha_device_host,
-                                                            const I*         csr_row_ptr_A,
-                                                            const J*         csr_col_ind_A,
-                                                            const T*         csr_val_A,
+                                                            J                      group_size,
+                                                            const J*               group_offset,
+                                                            const J*               perm,
+                                                            J                      m,
+                                                            J                      n,
+                                                            J                      k,
+                                                            const T* alpha_device_host,
+                                                            const I* csr_row_ptr_A,
+                                                            const J* csr_col_ind_A,
+                                                            const T* csr_val_A,
                                                             const rocsparse_mat_descr descr_B,
                                                             const I*                  csr_row_ptr_B,
                                                             const J*                  csr_col_ind_B,
@@ -372,7 +372,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 
     const rocsparse::csrgemm_bitmap_scratch bitmap_scratch
         = (d_perm != nullptr) ? rocsparse::csrgemm_bitmap_scratch_after(
-              temp_buffer, info_C->csrgemm_info->buffer_size, d_perm, m)
+                                    temp_buffer, info_C->csrgemm_info->buffer_size, d_perm, m)
                               : rocsparse::csrgemm_bitmap_scratch();
 
     // Stream
