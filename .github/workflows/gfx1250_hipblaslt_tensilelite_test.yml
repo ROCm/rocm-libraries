@@ -178,7 +178,7 @@ jobs:
           export HIPBLASLT_TEST_TIMEOUT=3600
           export HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250"
           FILTER=()
-          [ -n "$GTEST_FILTER_ARG" ] && FILTER=(--gtest_filter="$GTEST_FILTER_ARG")
+          [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
           # Cleanup CI logs.
           scrub() { sed -u -E '/Query[[:space:]]+device/d; /Device[[:space:]]+ID[[:space:]]+[0-9]/d; /PCI[[:space:]]+Chip[[:space:]]+ID/d; /GB[[:space:]]+memory/d; /SCLK|MCLK/d; /compute[[:space:]]+capability/d; /maxGridDimX/d; /sharedMemPerBlock/d; /maxThreadsPerBlock/d; /warpSize/d'; }
           # Full suite in one pass.
