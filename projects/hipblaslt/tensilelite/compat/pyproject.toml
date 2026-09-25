@@ -7,7 +7,7 @@ dynamic = ["version", "dependencies"]
 requires-python = ">=3.10"
 description = "Deprecated Tensile command aliases for ROCm TensileLite"
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 
 [project.scripts]
 Tensile = "tensilelite_tensile_compat.commands:tensile"
