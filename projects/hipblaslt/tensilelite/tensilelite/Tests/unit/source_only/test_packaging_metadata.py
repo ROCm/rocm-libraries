@@ -185,6 +185,14 @@ def test_wheel_rebuild_depends_on_top_level_runtime_modules():
     assert '"${_tensilelite_src}/tensilelite_configure_client.py"' in cmake
 
 
+def test_cmake_wheel_builds_use_isolated_source_trees():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert cmake.count("scripts/stage_release_source.py") >= 4
+    assert '"${_tensilelite_canonical_source}"' in cmake
+    assert '"${_tensilelite_compatibility_source}/compat"' in cmake
+
+
 def test_removed_source_autobuild_option_is_not_referenced():
     paths = (
         _PROJECT_ROOT.parent / "CMakeLists.txt",
