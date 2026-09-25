@@ -8,6 +8,8 @@ from enum import Enum
 
 
 class TileProcessingStrategy(str, Enum):
+    """None is ordinary GEMM; DataParallel and StreamK use persistent workgroups."""
+
     NONE = "None"
     DATA_PARALLEL = "DataParallel"
     STREAM_K = "StreamK"
@@ -33,7 +35,7 @@ class ExecutionPolicy:
         return self.strategy != TileProcessingStrategy.NONE
 
     @property
-    def data_parallel(self):
+    def persistent_data_parallel(self):
         return self.strategy == TileProcessingStrategy.DATA_PARALLEL
 
     @property
@@ -73,8 +75,8 @@ def isPersistent(state):
     return _policy(state).persistent
 
 
-def isDataParallel(state):
-    return _policy(state).data_parallel
+def isPersistentDataParallel(state):
+    return _policy(state).persistent_data_parallel
 
 
 def isStreamK(state):

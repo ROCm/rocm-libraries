@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.ExecutionPolicy import isPersistent, isStreamK, isDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy
+from Tensile.ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy
 
 import collections
 import copy
@@ -2094,7 +2094,7 @@ class Solution(collections.abc.Mapping):
     if requiresPartialReduction(state):
       # StreamK Workspace size
       state["_GlobalAccumulation"] = 'PartialsBuffer'
-    elif isDataParallel(state):
+    elif isPersistentDataParallel(state):
       state["_GlobalAccumulation"] = None
     elif state["GlobalSplitUAlgorithm"] == 'SingleBuffer':
       if computeName != state["ProblemType"]["DestDataType"].toName():
@@ -2261,7 +2261,7 @@ class Solution(collections.abc.Mapping):
         # WorkGroup0 across work-groups that differ only in Y. A [1, Ck] cluster has
         # no B-sharing X peers at all and is not a multicast shape.
         if state["ClusterDim"][1] != 1 and not (streamK2DCluster(state)
-                                                and isDataParallel(state)):
+                                                and isPersistentDataParallel(state)):
           reject(state, printRejectionReason,
                  "Persistent ClusterDim Y-extent > 1 requires DataParallel "
                  "and a cluster [Cs, Ck] with both axes > 1; got %s"
@@ -2410,7 +2410,7 @@ class Solution(collections.abc.Mapping):
     # (Contractions.TaskPredicate only emits it for a non-zero size) and makes
     # requiredWorkspaceSizeGsu report 0 bytes.
     state["_WorkspaceSizePerElemC"] = \
-        0 if isDataParallel(state) or state["GlobalSplitUAlgorithm"] == 'AtomicDest' else computeBytes
+        0 if isPersistentDataParallel(state) or state["GlobalSplitUAlgorithm"] == 'AtomicDest' else computeBytes
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = computeBytes
@@ -3422,7 +3422,7 @@ class Solution(collections.abc.Mapping):
       state["SuppressNoLoadLoop"] = True
       state["ExpandPointerSwap"] = False
       if state.get("PrefetchAcrossPersistent", 0):
-        if not isDataParallel(state):
+        if not isPersistentDataParallel(state):
           reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid")
           return
       # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
@@ -7169,7 +7169,7 @@ class Solution(collections.abc.Mapping):
       # supplies on its own. PrefetchAcrossPersistent is an independent
       # optimisation layered on the same loop, so RAP does not require it; the
       # emitters that touch PAP state ask for it separately.
-      if not isDataParallel(state):
+      if not isPersistentDataParallel(state):
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires DataParallel/StaticGrid")
         return
       # Held for RAP's own sake, but until now it arrived by way of the PAP

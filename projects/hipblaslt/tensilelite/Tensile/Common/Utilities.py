@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.ExecutionPolicy import isDataParallel, hasStaticAssignment
+from Tensile.ExecutionPolicy import isPersistentDataParallel, hasStaticAssignment
 import functools
 import math
 import os
@@ -378,7 +378,7 @@ def persistentSpatialCluster(d):
     """
     return (hasStaticAssignment(d)
             and d.get("ClusterDim", [1, 1])[0] > 1
-            and bool(isDataParallel(d)))
+            and bool(isPersistentDataParallel(d)))
 
 def persistentMulticast(d):
     """True when ``persistentSpatialCluster`` also issues TDM-multicast loads.

@@ -150,10 +150,8 @@ namespace TensileLite
                 {
                     // Validate names before ignoring inactive assignments or
                     // replacing selectors with their legacy equivalents.
-                    if(strategy != "None" && strategy != "DataParallel" && strategy != "StreamK")
-                        throw std::runtime_error("Invalid TileProcessingStrategy");
-                    if(assignment != "StaticGrid" && assignment != "DynamicWorkQueue" && assignment != "Hybrid")
-                        throw std::runtime_error("Invalid WorkAssignment");
+                    auto parsedStrategy = parseTileProcessingStrategy(strategy);
+                    auto parsedAssignment = parseWorkAssignment(assignment);
                     // Prebuilt compatibility boundary: preserve names and ABI metadata.
                     bool hasLegacy = iot::hasKey(io, "streamK") || iot::hasKey(io, "streamKForceDPOnly");
                     int legacyMode = 0, legacyDP = 0;
@@ -169,28 +167,24 @@ namespace TensileLite
                             throw std::runtime_error("Unsupported legacy StreamK mode");
                         if(legacyDP && legacyMode != 3)
                             throw std::runtime_error("StreamKForceDPOnly requires StreamK=3");
-                        std::string expectedStrategy = legacyDP ? "DataParallel" : legacyMode ? "StreamK" : "None";
-                        std::string expectedAssignment = legacyMode == 4 ? "DynamicWorkQueue" : legacyMode == 5 ? "Hybrid" : "StaticGrid";
-                        if((hasStrategy && strategy != expectedStrategy)
-                           || (hasAssignment && expectedStrategy != "None"
-                               && assignment != expectedAssignment))
+                        auto expectedStrategy = legacyDP ? TileProcessingStrategy::DataParallel
+                            : legacyMode ? TileProcessingStrategy::StreamK : TileProcessingStrategy::None;
+                        auto expectedAssignment = legacyMode == 4 ? WorkAssignment::DynamicWorkQueue
+                            : legacyMode == 5 ? WorkAssignment::Hybrid : WorkAssignment::StaticGrid;
+                        if((hasStrategy && parsedStrategy != expectedStrategy)
+                           || (hasAssignment && expectedStrategy != TileProcessingStrategy::None
+                               && parsedAssignment != expectedAssignment))
                             throw std::runtime_error("Conflicting legacy and canonical execution policy");
-                        strategy = expectedStrategy;
-                        assignment = expectedAssignment;
+                        parsedStrategy = expectedStrategy;
+                        parsedAssignment = expectedAssignment;
                         // Old nonpersistent records may retain inactive StreamK
                         // options. Normalize them only at this legacy boundary.
                         if(legacyMode == 0)
                             s.streamKAtomic = 0;
                     }
-                    if(strategy == "None") s.tileProcessingStrategy = TileProcessingStrategy::None;
-                    else if(strategy == "DataParallel") s.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
-                    else if(strategy == "StreamK") s.tileProcessingStrategy = TileProcessingStrategy::StreamK;
-                    else throw std::runtime_error("Invalid TileProcessingStrategy");
-                    if(strategy == "None") assignment = "StaticGrid";
-                    if(assignment == "StaticGrid") s.workAssignment = WorkAssignment::StaticGrid;
-                    else if(assignment == "DynamicWorkQueue") s.workAssignment = WorkAssignment::DynamicWorkQueue;
-                    else if(assignment == "Hybrid") s.workAssignment = WorkAssignment::Hybrid;
-                    else throw std::runtime_error("Invalid WorkAssignment");
+                    s.tileProcessingStrategy = parsedStrategy;
+                    s.workAssignment = parsedStrategy == TileProcessingStrategy::None
+                        ? WorkAssignment::StaticGrid : parsedAssignment;
                     s.validateExecutionPolicy();
                 }
                 iot::mapOptional(io, "prefetchAcrossPersistent", s.prefetchAcrossPersistent);

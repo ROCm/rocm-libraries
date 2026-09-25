@@ -1307,7 +1307,7 @@ namespace
         const size_t iters
             = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
         const auto split = TensileLite::streamKStaticSplit(
-            tiles, iters, grid, hardware.skFullTiles, solution->sizeMapping.isDataParallel());
+            tiles, iters, grid, hardware.skFullTiles, solution->sizeMapping.isPersistentDataParallel());
         EXPECT_TRUE(
             TensileLite::streamKStaticSplitRowUniform(split,
                                                       tiles,
@@ -1886,7 +1886,7 @@ namespace
             out.itersPerTile,
             out.grid,
             amdgpu != nullptr ? amdgpu->skFullTiles : 1,
-            solution.sizeMapping.isDataParallel());
+            solution.sizeMapping.isPersistentDataParallel());
         out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
         out.rowUniform        = TensileLite::streamKStaticSplitRowUniform(
             out.split,
