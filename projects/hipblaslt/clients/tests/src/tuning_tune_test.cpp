@@ -895,6 +895,66 @@ namespace
     }
 
     /**
+     * Rebuild the file as two value rows cloned from its first, each with the
+     * given column overrides applied.
+     *
+     * Cloning rather than composing a row from scratch keeps every key column
+     * byte-identical to what the writer emits, so both rows land under one key.
+     * That is the shape an append-only cache takes once a later run finishes a
+     * search the budget had truncated.
+     */
+    bool writeTwoRowsFromFirst(const std::string&                        path,
+                               const std::map<std::string, std::string>& firstOverrides,
+                               const std::map<std::string, std::string>& secondOverrides)
+    {
+        const auto lines  = readLines(path);
+        size_t     header = lines.size();
+        for(size_t i = 0; i + 1 < lines.size(); i++)
+        {
+            if(lines[i].find("transA") != std::string::npos)
+            {
+                header = i;
+                break;
+            }
+        }
+        if(header == lines.size())
+            return false;
+
+        const auto names = splitCells(lines[header]);
+
+        auto apply = [&](const std::map<std::string, std::string>& overrides) {
+            auto values = splitCells(lines[header + 1]);
+            for(size_t c = 0; c < names.size() && c < values.size(); c++)
+            {
+                const auto it = overrides.find(names[c]);
+                if(it != overrides.end())
+                    values[c] = it->second;
+            }
+
+            std::ostringstream row;
+            for(size_t c = 0; c < values.size(); c++)
+                row << (c ? "," : "") << values[c];
+            return row.str();
+        };
+
+        const auto first  = apply(firstOverrides);
+        const auto second = apply(secondOverrides);
+
+        std::ofstream out(path, std::ios::trunc);
+        if(!out)
+            return false;
+
+        // Whatever the writer put above the first header, including the version
+        // line the parser reads before any row.
+        for(size_t i = 0; i < header; i++)
+            out << lines[i] << "\n";
+
+        out << lines[header] << "\n" << first << "\n";
+        out << lines[header] << "\n" << second << "\n";
+        return out.good();
+    }
+
+    /**
      * Whether the C++ extension heuristic, asked with this stream-K tile mode,
      * is served by the cache: a hit is counted only when an entry matched the
      * key that path looks up.
@@ -1123,6 +1183,13 @@ namespace
         EXPECT_TRUE(fileHasColumn(m_path, "lde"));
         EXPECT_TRUE(fileHasColumn(m_path, "stride_e"));
         EXPECT_TRUE(fileHasColumn(m_path, "uniform_summation_order"));
+
+        // What the search covered, so a later run can tell whether it would
+        // search more than this one did.
+        EXPECT_TRUE(fileHasColumn(m_path, "search_all_kernels"));
+        EXPECT_TRUE(fileHasColumn(m_path, "search_max_candidates"));
+        EXPECT_TRUE(fileHasColumn(m_path, "search_workspace"));
+        EXPECT_TRUE(fileHasColumn(m_path, "hot_iters"));
 
         // Nothing reads these back, so writing them would commit the format to
         // data with no consumer.
@@ -1440,13 +1507,194 @@ namespace
         EXPECT_EQ(valueRowCount(m_path), before) << "a tuned entry was re-tuned";
     }
 
-    // A search the budget cuts short records nothing and is attempted once per
-    // process. The retry would run under the same ceiling and stop in the same
-    // place, so leaving it unlatched spends the whole ceiling on every call for
-    // the life of the process rather than once.
+    // An entry the budget cut short is usable but not final: it is replayed like
+    // any other, and a run that can finish the search replaces it rather than
+    // living with the best of an arbitrary prefix.
+    TEST_F(TuningTune_pre_checkin, PartialEntryReplaysAndIsRetuned)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_TRUE(fileHasColumn(m_path, "complete")) << "completeness was not recorded";
+
+        // Demote the row to what a search stopped by a one-second ceiling would
+        // have written. Doing it this way rather than by inducing a real
+        // truncation keeps the test off the clock: a budget that stops the
+        // search partway through is a race.
+        ASSERT_TRUE(rewriteColumn(m_path, "complete", "0"));
+        ASSERT_TRUE(rewriteColumn(m_path, "budget_ms", "1000"));
+        const size_t before = valueRowCount(m_path);
+
+        enterMode("cache", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_GE(counters().hits, 1u) << "a partial entry was not replayed";
+
+        // The fixture runs with no ceiling, which beats the recorded one.
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_GT(valueRowCount(m_path), before) << "a partial entry was never re-tuned";
+    }
+
+    // Re-tuning is worth a stall only when this run can get further than the one
+    // that gave up. Under the same ceiling it would measure the same prefix,
+    // stop in the same place, and append an identical row, so a shape that keeps
+    // truncating must not cost the ceiling on every process that opens the file.
+    TEST_F(TuningTune_pre_checkin, PartialEntryIsNotRetunedUnderTheSameCeiling)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_TRUE(rewriteColumn(m_path, "complete", "0"));
+        ASSERT_TRUE(rewriteColumn(m_path, "budget_ms", "1000"));
+
+        const size_t before = valueRowCount(m_path);
+        ASSERT_GT(before, 0u) << "tune mode recorded nothing";
+
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1000", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        EXPECT_EQ(valueRowCount(m_path), before)
+            << "a partial entry was re-tuned under the ceiling that already stopped it";
+    }
+
+    // The other half of that pair, and the one the row count cannot see. Not
+    // re-tuning is only correct if the completed row is also the row that runs.
+    // The file is append-only, so the finishing run leaves its winner behind the
+    // partial it supersedes, and equal keys come back from the multimap in
+    // insertion order: replay took the partial while needsRetune saw the
+    // complete row and declined to tune again, so the finished winner was
+    // written to the file and then never used.
+    TEST_F(TuningTune_pre_checkin, CompleteRowWinsOverTheOlderPartialRow)
+    {
+        // Two solutions the heuristic itself offers, so both rows below are
+        // genuinely valid and replay has to choose between them on order alone.
+        // Two real tuning runs would be more lifelike but not deterministic:
+        // a wider candidate pool often reaches the same winner, and then there
+        // is nothing to observe.
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+
+        const auto& partial  = identities[0];
+        const auto& finished = identities[1];
+
+        // A real row first, so every key column is exactly what the writer emits
+        // and both clones match the lookup key.
+        enterMode("tune", m_path);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+
+        ASSERT_TRUE(writeTwoRowsFromFirst(m_path,
+                                          {{"solution_index", std::to_string(partial.first)},
+                                           {"kernel_name", partial.second},
+                                           {"complete", "0"},
+                                           {"budget_ms", "1000"}},
+                                          {{"solution_index", std::to_string(finished.first)},
+                                           {"kernel_name", finished.second},
+                                           {"complete", "1"},
+                                           {"budget_ms", "0"}}));
+
+        // Reset so the rows come back from the file the way a later process sees
+        // them. Within one process the tuner replaces its own entry, which is
+        // what kept this ordering hidden.
+        enterMode("cache", m_path);
+        hipblaslt_tuning_reset_for_test();
+
+        int replayed = -1;
+        ASSERT_TRUE(runGemm(1024, 512, 1024, 0.0f, true, false, false, &replayed));
+        EXPECT_EQ(replayed, finished.first) << "replay used the superseded partial row "
+                                            << partial.first << " instead of the completed search";
+    }
+
+    // A search the budget stops keeps its best candidate only once the kernel
+    // the call would otherwise run has been measured, and that kernel goes
+    // first. The caller here passes a non-default algo and the search stops
+    // after one candidate, so the partial row must name the caller's kernel,
+    // not the one default selection would have picked.
+    TEST_F(TuningTune_pre_checkin, PartialSearchMeasuresTheCallersAlgoFirst)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+        const int given = identities[1].first;
+
+        enterMode("tune", m_path);
+        hipblaslt_tuning_inject_failure_for_test(4);
+
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given, &launched));
+        EXPECT_EQ(launched, given);
+
+        const auto indexes = columnValues(m_path, "solution_index");
+        ASSERT_EQ(indexes.size(), 1u) << "the truncated search recorded nothing";
+        EXPECT_EQ(columnValues(m_path, "complete").at(0), "0");
+        EXPECT_EQ(std::stoi(indexes[0]), given)
+            << "the partial search did not start with the caller's algo";
+    }
+
+    // The same for an algo outside the ranked prefix the tuner searches, such as
+    // one the heuristic's all-solutions fallback hands a caller. It is not among
+    // the candidates at all, so it has to be added to them, at the front.
+    TEST_F(TuningTune_pre_checkin, PartialSearchMeasuresAnAlgoOutsideTheRankedCandidates)
+    {
+        // The fixture searches the top sixteen, so take one well past them.
+        const auto identities = candidateIdentities(1024, 512, 1024, 64);
+        if(identities.size() <= 16)
+            GTEST_SKIP() << "this device offers no solution past the searched prefix";
+        const int given = identities.back().first;
+
+        enterMode("tune", m_path);
+        hipblaslt_tuning_inject_failure_for_test(4);
+
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given, &launched));
+        EXPECT_EQ(launched, given);
+
+        const auto indexes = columnValues(m_path, "solution_index");
+        ASSERT_EQ(indexes.size(), 1u) << "the truncated search recorded nothing";
+        EXPECT_EQ(std::stoi(indexes[0]), given)
+            << "an algo outside the ranked candidates was not measured first";
+    }
+
+    // A finished search of a ranked prefix says nothing about the kernels past
+    // it, so a run that searches more re-tunes the shape. A run that searches
+    // less has nothing to add, and must not.
+    TEST_F(TuningTune_pre_checkin, NarrowerFinishedSearchIsWidenedButNotRepeated)
+    {
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_EQ(valueRowCount(m_path), 2u)
+            << "a finished two-candidate search stopped a sixteen-candidate run from tuning";
+
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_EQ(valueRowCount(m_path), 2u)
+            << "a narrower run re-tuned a shape that a wider search had finished";
+    }
+
+    // A search the budget cuts short is attempted once per process. The retry
+    // would run under the same ceiling and stop in the same place, so leaving it
+    // unlatched spends the whole ceiling on every call for the life of the
+    // process rather than once.
     TEST_F(TuningTune_pre_checkin, BudgetExhaustedShapeIsNotRetried)
     {
         enterMode("tune", m_path);
+
+        // A ceiling this small stops the search either before the first
+        // candidate is measured or just after, and which one is a matter of how
+        // long setup happened to take. Both are correct, and they end
+        // differently: nothing measured is a skip that records no row, whereas
+        // one candidate measured is a partial winner that records exactly one.
+        // What must hold either way is that it happened once.
         setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1", 1);
         hipblaslt_tuning_reset_for_test();
 
@@ -1454,29 +1702,9 @@ namespace
             ASSERT_TRUE(runGemm(1024, 512, 1024));
 
         const auto c = counters();
-        EXPECT_EQ(c.skipped, 1u)
+        EXPECT_EQ(c.skipped + c.tuned, 1u)
             << "the shape re-tuned after its budget ran out, so every call pays the ceiling";
-        EXPECT_EQ(c.tuned, 0u);
-        EXPECT_EQ(valueRowCount(m_path), 0u) << "a search the budget stopped recorded a row";
-    }
-
-    // Stopped after one measured candidate, a search has a best candidate, but
-    // only of an arbitrary prefix, so it still records nothing.
-    TEST_F(TuningTune_pre_checkin, SearchTheBudgetStopsAfterMeasuringRecordsNothing)
-    {
-        enterMode("tune", m_path);
-        hipblaslt_tuning_inject_failure_for_test(4);
-
-        int launched = -1;
-        for(int i = 0; i < 2; i++)
-            ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched, true))
-                << "a stopped search failed the matmul";
-
-        const auto c = counters();
-        EXPECT_EQ(c.attempts, 1u) << "the stopped search was repeated";
-        EXPECT_EQ(c.skipped, 1u);
-        EXPECT_EQ(c.tuned, 0u);
-        EXPECT_EQ(valueRowCount(m_path), 0u);
+        EXPECT_LE(valueRowCount(m_path), 1u) << "a truncated search appended more than one row";
     }
 
     // One stale row is met three times in a tune-mode call: the heuristic

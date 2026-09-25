@@ -234,16 +234,40 @@ takes minutes, and it is paid once per shape in the first process that runs with
 and setup as well as the timed measurements. It defaults to five minutes, so that a first matmul
 cannot block a live application indefinitely, and 0 removes the ceiling entirely.
 
-A search the ceiling cuts short records nothing: candidates are not measured in order of expected
-performance, so the best of the ones it reached is usually not the shape's best kernel. The shape is
-not searched again in the same process, and runs on default selection. To tune it, raise or clear
+A search the ceiling cuts short still records its best candidate, marked incomplete. Candidates are
+not measured in order of expected performance, so the best of a truncated prefix is usually not the
+shape's best kernel. It is never worse than not tuning at all, though: the kernel the call would
+otherwise launch is put at the front of the candidate list and measured first, and a truncated search
+is recorded only when that kernel was measured, so the recorded winner is at least as fast as what
+the call would have run untuned. Recording it means a shape too large to finish gets some of the
+benefit immediately rather than none.
+
+An incomplete entry is replayed like any other. What the marking buys is that tune mode revisits the
+shape when a run comes along that can finish the search, and replaces the row, so a partial answer
+never becomes permanent. To finish such a shape, raise or clear
 ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` and run it in tune mode again; as a rough guide a
 2048x1024x2048 FP16 shape takes about 146 seconds on MI300X, and the cost grows with the problem.
-Within a single process a shape is benchmarked at most once in any case, including when an attempt
-fails after ``tuning-start``.
+
+Each row records the ceiling it was written under and the search that produced it: whether every
+kernel or a ranked prefix was searched and how long that prefix was, the workspace limit, the
+iteration counts, and whether the flush and rotation were on. A finished row is final only for a run
+that would search no more than it did, so widening the search, for example from a ranked prefix to
+every kernel, to a larger workspace, or to more iterations, tunes the shape again, while narrowing it
+does not. An incomplete row is benchmarked again when the current ceiling beats the one it was
+written under, with 0 beating every finite one, or when the search differs from the one that produced
+it. Re-running the same workload with the same settings therefore costs nothing: the search would
+measure the same candidates and stop in the same place, so it is not repeated and no second row is
+appended. Within a single process a shape is benchmarked at most once in any case, including when an
+attempt fails after ``tuning-start``. Rows written before these columns existed count as finished
+searches.
+
+Use the ceiling to bound how long tuning may run, not as a way to tune faster; to tune faster, reduce
+the candidate list or the iteration counts.
 
 The ceiling is checked between candidates, since a batch of launches already submitted cannot be
-recalled. One candidate may therefore overrun it by as much as its own measurement takes.
+recalled. One candidate may therefore overrun it by as much as its own measurement takes. A search
+that measures every candidate is kept however long it took, because a complete search gives the right
+answer regardless of its duration.
 
 The time ``hipblaslt-bench`` prints for a kernel is its own benchmark, separate from the tuner's
 measurement, so the two can disagree between kernels that are within noise of each other. The tuner
@@ -295,8 +319,9 @@ on a later one, and that tune is reported:
 
    tuning-cache: tuning-skipped in-place C==D with nonzero beta cannot be measured without mutating its input; using default selection
 
-``tuning-skipped`` means the tuner understood the problem and declined it, which is expected for
-some shapes forever. ``tuning-fallback`` means an attempt failed and is worth investigating; an
+``tuning-partial`` in place of ``tuning-done`` means the budget stopped the search and its best
+candidate was recorded as incomplete. ``tuning-skipped`` means the tuner understood the problem and
+declined it, which is expected for some shapes forever. ``tuning-fallback`` means an attempt failed and is worth investigating; an
 attempt that failed after ``tuning-start`` is not retried in the same process.
 
 Setting ``HIPBLASLT_LOG_LEVEL=4`` keeps all of the above, timestamps it like the rest of the library

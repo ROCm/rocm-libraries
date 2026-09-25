@@ -109,6 +109,8 @@ namespace TensileLite
         {
         case TuningAttempt::Tuned:
             return "tuned";
+        case TuningAttempt::TunedPartial:
+            return "tuned from a search the time budget stopped early";
         case TuningAttempt::SkippedInPlaceBeta:
             return "in-place C==D with nonzero beta cannot be measured without mutating its input";
         case TuningAttempt::SkippedExtentUnknown:
@@ -373,7 +375,9 @@ namespace TensileLite
 
         std::lock_guard<std::mutex> lock(state.mutex);
 
-        if(result == TuningAttempt::Tuned)
+        // A partial tune counts as a success here: it recorded a winner, and the
+        // run that finishes the search is a later process.
+        if(result == TuningAttempt::Tuned || result == TuningAttempt::TunedPartial)
             return state.doneKeys.insert(key).second;
 
         if(state.startKeys.count(key) != 0)

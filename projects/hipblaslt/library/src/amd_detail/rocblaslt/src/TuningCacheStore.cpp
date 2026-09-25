@@ -101,7 +101,7 @@ namespace TensileLite
 
         // Absent or unparseable cells take the caller's default. That is only
         // safe where the default narrows what an entry matches; current rows
-        // validate every cell up front instead, see hasRequiredCurrentColumns.
+        // validate every cell up front instead, see hasRequiredKeyedColumns.
         int64_t num(const std::map<std::string, std::string>& row,
                     const char*                               name,
                     int64_t                                   fallback = 0)
@@ -229,9 +229,10 @@ namespace TensileLite
             return value == "N" || value == "T" || value == "C";
         }
 
-        // Every column of a current row is mandatory and strict. Defaults would
-        // turn a damaged row into a well-formed row for some other problem.
-        bool hasRequiredCurrentColumns(const std::map<std::string, std::string>& row)
+        // Every column of a versioned row is mandatory and strict. Defaults
+        // would turn a damaged row into a well-formed row for some other
+        // problem, or a partial search into a finished one.
+        bool hasRequiredKeyedColumns(const std::map<std::string, std::string>& row)
         {
             if(!isTransposeCell(str(row, "transA")) || !isTransposeCell(str(row, "transB")))
                 return false;
@@ -301,9 +302,34 @@ namespace TensileLite
                     return false;
             }
 
-            // A current row is always validated by name at replay.
+            // A versioned row is always validated by name at replay.
             return (has(row, "kernel_name") && !str(row, "kernel_name").empty())
                    || (has(row, "solution_name") && !str(row, "solution_name").empty());
+        }
+
+        // The columns version 2 adds: whether the search finished, its ceiling,
+        // and what it covered. They decide whether tune mode revisits the row.
+        bool hasRequiredSearchColumns(const std::map<std::string, std::string>& row)
+        {
+            for(const char* name : {"budget_ms", "search_workspace"})
+            {
+                const auto value = exactNum(row, name);
+                if(!value || *value < 0)
+                    return false;
+            }
+
+            for(const char* name :
+                {"search_max_candidates", "cold_iters", "hot_iters", "rotating_mb"})
+                if(!isInt32(row, name) || *exactNum(row, name) < 0)
+                    return false;
+
+            for(const char* name : {"complete", "search_all_kernels", "flush_icache"})
+            {
+                const auto value = exactNum(row, name);
+                if(!value || (*value != 0 && *value != 1))
+                    return false;
+            }
+            return true;
         }
     } // namespace
 
@@ -317,10 +343,19 @@ namespace TensileLite
         if(has(row, "schema_version"))
         {
             const auto version = exactNum(row, "schema_version");
-            if(!version || *version != static_cast<int64_t>(TuningSchemaVersion::Current)
-               || !hasRequiredCurrentColumns(row))
+            if(!version)
                 return std::nullopt;
-            schemaVersion = TuningSchemaVersion::Current;
+            if(*version == static_cast<int64_t>(TuningSchemaVersion::FullKey))
+                schemaVersion = TuningSchemaVersion::FullKey;
+            else if(*version == static_cast<int64_t>(TuningSchemaVersion::Current))
+                schemaVersion = TuningSchemaVersion::Current;
+            else
+                return std::nullopt;
+
+            if(!hasRequiredKeyedColumns(row))
+                return std::nullopt;
+            if(schemaVersion == TuningSchemaVersion::Current && !hasRequiredSearchColumns(row))
+                return std::nullopt;
         }
 
         // Index 0 is a real solution in the shipped logic; only a negative
@@ -435,6 +470,23 @@ namespace TensileLite
             = static_cast<size_t>(std::max<int64_t>(0, num(row, "required_workspace")));
         entry.winnerTimeUs = real(row, "us");
 
+        if(schemaVersion == TuningSchemaVersion::Current)
+        {
+            // Validated above, so these are present and well-formed.
+            entry.complete = *exactNum(row, "complete") != 0;
+            entry.budgetMs = *exactNum(row, "budget_ms");
+
+            TuningSearch search;
+            search.allKernels     = *exactNum(row, "search_all_kernels") != 0;
+            search.maxCandidates  = static_cast<int32_t>(*exactNum(row, "search_max_candidates"));
+            search.workspaceBytes = static_cast<size_t>(*exactNum(row, "search_workspace"));
+            search.coldIters      = static_cast<int32_t>(*exactNum(row, "cold_iters"));
+            search.hotIters       = static_cast<int32_t>(*exactNum(row, "hot_iters"));
+            search.flushICache    = *exactNum(row, "flush_icache") != 0;
+            search.rotatingMb     = static_cast<int32_t>(*exactNum(row, "rotating_mb"));
+            entry.search          = search;
+        }
+
         return std::make_pair(po, entry);
     }
 
@@ -521,6 +573,18 @@ namespace TensileLite
         column("kernel_name", entry.kernelName.value_or(std::string{}));
         column("required_workspace", entry.requiredWorkspaceBytes);
         column("us", entry.winnerTimeUs);
+
+        column("complete", entry.complete ? 1 : 0);
+        column("budget_ms", entry.budgetMs);
+
+        const TuningSearch search = entry.search.value_or(TuningSearch{});
+        column("search_all_kernels", search.allKernels ? 1 : 0);
+        column("search_max_candidates", search.maxCandidates);
+        column("search_workspace", search.workspaceBytes);
+        column("cold_iters", search.coldIters);
+        column("hot_iters", search.hotIters);
+        column("flush_icache", search.flushICache ? 1 : 0);
+        column("rotating_mb", search.rotatingMb);
 
         return "    " + names.str() + "\n" + values.str() + "\n";
     }
