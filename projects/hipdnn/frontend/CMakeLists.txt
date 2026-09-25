@@ -165,6 +165,12 @@ install(
     COMPONENT Development
 )
 
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/hipdnn_frontend
+    COMPONENT Development
+)
+
 install(EXPORT hipdnn_frontend_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
         FILE hipdnn_frontendTargets.cmake COMPONENT Development
 )
