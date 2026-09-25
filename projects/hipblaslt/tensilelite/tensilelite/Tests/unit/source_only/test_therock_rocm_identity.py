@@ -17,7 +17,7 @@ def _resolve_version(
     tmp_path: Path,
     *,
     package_version: str | None = None,
-    rocm_version: str | None = None,
+    legacy_rocm_version: str | None = None,
 ) -> subprocess.CompletedProcess:
     script = tmp_path / "resolve.cmake"
     package_line = (
@@ -26,8 +26,8 @@ def _resolve_version(
         else ""
     )
     rocm_line = (
-        f'set(THEROCK_ROCM_VERSION "{rocm_version}")\n'
-        if rocm_version is not None
+        f'set(THEROCK_ROCM_VERSION "{legacy_rocm_version}")\n'
+        if legacy_rocm_version is not None
         else ""
     )
     script.write_text(
@@ -60,22 +60,24 @@ def test_therock_prefers_forwarded_package_identity(tmp_path):
     assert "resolved=10.1.0a20260813" in result.stdout
 
 
-def test_therock_uses_forwarded_rocm_identity_for_git_package_version(tmp_path):
+def test_therock_rejects_git_identity_even_with_legacy_rocm_version(tmp_path):
     result = _resolve_version(
         tmp_path,
         package_version="git",
-        rocm_version="10.1.0a20260814",
+        legacy_rocm_version="10.1.0a20260814",
     )
 
-    assert result.returncode == 0, result.stderr
-    assert "resolved=10.1.0a20260814" in result.stdout
+    assert result.returncode != 0
+    assert "requires a release THEROCK_PACKAGE_VERSION" in " ".join(
+        result.stderr.split()
+    )
 
 
-def test_therock_package_identity_precedes_rocm_fallback(tmp_path):
+def test_therock_package_identity_ignores_legacy_rocm_version(tmp_path):
     result = _resolve_version(
         tmp_path,
         package_version="10.1.0a20260815",
-        rocm_version="10.1.0a20260814",
+        legacy_rocm_version="10.1.0a20260814",
     )
 
     assert result.returncode == 0, result.stderr
