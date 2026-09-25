@@ -14,7 +14,7 @@ import tasks
 
 pytestmark = pytest.mark.unit
 
-_SOURCE_ROOT = Path(__file__).resolve().parents[3]
+_SOURCE_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_invoke_install_is_a_discoverable_developer_workflow():
@@ -35,6 +35,46 @@ def test_install_binds_the_actual_cmake_client_output(tmp_path):
     executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
     expected = tmp_path / "build/tensilelite/client" / executable
     assert tasks._built_client_path(tmp_path / "build") == expected
+
+
+def test_rocisa_install_uses_the_invoking_python_and_selected_rocm_compilers(
+    tmp_path, monkeypatch
+):
+    commands = []
+
+    class Context:
+        def run(self, command, **kwargs):
+            commands.append((shlex.split(command), kwargs))
+
+    stinkytofu_tasks = SimpleNamespace(
+        cmake_build_args=lambda **kwargs: [
+            f"-DCMAKE_INSTALL_PREFIX={kwargs['install_prefix']}",
+            f"-DBUILD_SHARED_LIBS={'ON' if kwargs['shared'] else 'OFF'}",
+        ]
+    )
+    monkeypatch.setattr(tasks, "_load_stinkytofu_tasks", lambda: stinkytofu_tasks)
+    monkeypatch.setattr(tasks.shutil, "which", lambda name: None)
+
+    rocm_root = tmp_path / "rocm"
+    source = tmp_path / "rocisa"
+    source.mkdir()
+    prefix = tmp_path / "prefix"
+    tasks._pip_install_rocisa(
+        Context(),
+        rocisa_dir=source,
+        stinkytofu_prefix=prefix,
+        rocm_path=str(rocm_root),
+    )
+
+    configure_command = commands[0][0]
+    assert f"-DCMAKE_C_COMPILER={rocm_root / 'bin/amdclang'}" in configure_command
+    assert f"-DCMAKE_CXX_COMPILER={rocm_root / 'bin/amdclang++'}" in configure_command
+    assert commands[-1][0][:4] == [
+        str(Path(sys.executable).absolute()),
+        "-m",
+        "pip",
+        "install",
+    ]
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")
