@@ -333,6 +333,35 @@ class TestBuildTaskCommandLine:
     def test_the_revision_option_takes_no_letter(self):
         assert self._short_flags("--asic-revision") == ()
 
+
+@_needs_tensilelite_tasks
+def test_build_client_forwards_the_selected_rocm_root(tmp_path, monkeypatch):
+    class RecordingContext:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, command):
+            self.commands.append(command)
+
+    rocm_root = tmp_path / "rocm"
+    compiler_dir = rocm_root / "bin"
+    compiler_dir.mkdir(parents=True)
+    monkeypatch.setattr(tensilelite_tasks.subprocess, "run", mock.Mock())
+    context = RecordingContext()
+
+    tensilelite_tasks.build_client.body(
+        context,
+        build_dir=str(tmp_path / "build"),
+        gpu_targets="gfx942",
+        rocm_path=str(rocm_root),
+        build=False,
+    )
+
+    configure_command = context.commands[0]
+    assert f"-DROCM_PATH={rocm_root}" in configure_command
+    assert f"-DCMAKE_C_COMPILER={compiler_dir / 'amdclang'}" in configure_command
+    assert f"-DCMAKE_CXX_COMPILER={compiler_dir / 'amdclang++'}" in configure_command
+
 # --------------------------------------------------------------------------- #
 # The shipped v0 logic tree. TensileCreateLibrary globs one tree and separates
 # the two revisions by ScheduleName alone: both declare ArchitectureName:

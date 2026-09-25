@@ -189,8 +189,10 @@ enable_testing()
 
 if(TARGET tensilelite-client)
     add_test(NAME TensileLiteClient.version COMMAND tensilelite-client --version)
+    string(REPLACE "." "\\." _tensilelite_version_regex "${TENSILELITE_DISTRIBUTION_VERSION}")
+    string(REPLACE "+" "\\+" _tensilelite_version_regex "${_tensilelite_version_regex}")
     set_tests_properties(TensileLiteClient.version PROPERTIES
-        PASS_REGULAR_EXPRESSION "^[0-9]+\\.[0-9]+\\.[0-9]+\\+rocm[0-9]+\\.[0-9]+\\.[0-9]+.*$")
+        PASS_REGULAR_EXPRESSION "^${_tensilelite_version_regex}$")
 endif()
 
 #################################################
