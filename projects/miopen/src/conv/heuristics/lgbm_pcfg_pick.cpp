@@ -53,40 +53,27 @@ int DataTypeCode(miopenDataType_t t)
     return -1;
 }
 
-// Fixed gfx_code vocabulary for solvers trained with a gfx_code feature
-// (SolverModel::has_gfx_code). Unknown arch -> -1 (the missing-category
-// sentinel). This ordering is not carried in the metadata and differs from the
-// rank model's gfx_id vocab, so it is hardcoded and must match the order the
-// pcfg models were trained with.
-int GfxCode(const std::string& gfx_id)
+// gfx_code for solvers trained with a gfx_code feature (SolverModel::has_gfx_code):
+// the gfx_id's index in the model's own trained vocab, shipped in lgbm_pcfg.bin.
+// Unknown arch -> -1 (the missing-category sentinel).
+int GfxCode(const SolverModel& model, const std::string& gfx_id)
 {
-    static const std::array<const char*, 10> kGfxOrder = {"gfx906",
-                                                          "gfx90a",
-                                                          "gfx942",
-                                                          "gfx950",
-                                                          "gfx1100",
-                                                          "gfx1101",
-                                                          "gfx1102",
-                                                          "gfx1105",
-                                                          "gfx1151",
-                                                          "gfx1201"};
-    for(int i = 0; i < static_cast<int>(kGfxOrder.size()); ++i)
-        if(gfx_id == kGfxOrder[static_cast<std::size_t>(i)])
-            return i;
-    return -1;
+    const auto& vocab = model.gfx_vocab;
+    const auto it     = std::find(vocab.begin(), vocab.end(), gfx_id);
+    return it == vocab.end() ? -1 : static_cast<int>(it - vocab.begin());
 }
 
 inline double Log1pAbs(double v) { return std::log1p(std::fabs(v)); }
 
 // Build the problem+GPU prefix, matching model_fields.build_X exactly: 14
 // log1p(|geom|) + 5 log1p(|derived|) + 6 raw GPU numerics + direction +
-// dtype_code, then (only when with_gfx_code) a trailing gfx_code categorical.
+// dtype_code, then (only when model.has_gfx_code) a trailing gfx_code categorical.
 // Order must match prob_feat_cols in the metadata.
 void FillProblemPrefix(std::vector<double>& prefix,
                        const conv::ProblemDescription& p,
                        const Handle& handle,
                        const std::string& gfx_id,
-                       bool with_gfx_code)
+                       const SolverModel& model)
 {
     const double channels = static_cast<double>(p.GetInChannels());
     const double height   = static_cast<double>(p.GetInHeight());
@@ -146,8 +133,8 @@ void FillProblemPrefix(std::vector<double>& prefix,
     prefix.push_back(static_cast<double>(DirectionPerfDbCode(p.GetDirection())));
     prefix.push_back(static_cast<double>(DataTypeCode(p.GetInDataType())));
     // optional trailing gfx_code categorical (PCFG_GFXID solvers)
-    if(with_gfx_code)
-        prefix.push_back(static_cast<double>(GfxCode(gfx_id)));
+    if(model.has_gfx_code)
+        prefix.push_back(static_cast<double>(GfxCode(model, gfx_id)));
 }
 
 // Score every candidate in the bucket and return their descriptors ordered
@@ -272,7 +259,7 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     std::vector<double> prefix;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.FillProblemPrefix");
-        FillProblemPrefix(prefix, problem, handle, gfx_id, model->has_gfx_code);
+        FillProblemPrefix(prefix, problem, handle, gfx_id, *model);
     }
 
     std::vector<std::string> ranked;

@@ -82,7 +82,7 @@ LgbmPcfgMetadata::LgbmPcfgMetadata() : bin_path(GetSystemDbPath() / "lgbm_pcfg.b
     }
 
     BinReader reader(prefix.data(), prefix.size());
-    if(!reader.ReadMagic("MIOPCFG1", 8) || reader.ReadU32() != kBinaryFormatVersion)
+    if(!reader.ReadMagic("MIOPCFG1", 8) || reader.ReadU32() != kPcfgFormatVersion)
     {
         MIOPEN_LOG_W("lgbm_pcfg: lgbm_pcfg.bin bad magic/version; picker will abstain");
         return;
@@ -124,6 +124,17 @@ bool LgbmPcfgMetadata::LoadSection(std::uint64_t offset, std::uint64_t size, Sol
     out.prob_feat_count = reader.ReadI32();
     out.arg_count       = reader.ReadI32();
     out.has_gfx_code    = reader.ReadU8() != 0;
+    if(out.has_gfx_code)
+    {
+        // A gfx_code model without its vocab cannot be encoded; reject the
+        // section so the picker abstains for this solver.
+        const std::uint16_t num_gfx = reader.ReadU16();
+        if(num_gfx == 0)
+            return false;
+        out.gfx_vocab.reserve(num_gfx);
+        for(std::uint16_t i = 0; i < num_gfx; ++i)
+            out.gfx_vocab.push_back(reader.ReadString());
+    }
 
     auto forest = std::make_shared<const LgbmForest>(reader);
     if(!reader.Ok() || !forest->IsReady())

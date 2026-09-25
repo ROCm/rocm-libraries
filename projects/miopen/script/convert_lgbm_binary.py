@@ -6,16 +6,22 @@ binary format the C++ runtime loads (see lgbm_binary.hpp / lgbm_forest.cpp).
 
 Two outputs, both little-endian, self-describing (magic + version):
 
-  lgbm_rank.bin   = "MIORANK1" u32:version  FOREST
-  lgbm_pcfg.bin   = "MIOPCFG1" u32:version  u32:num_solvers
+  lgbm_rank.bin   = "MIORANK1" u32:version(1)  FOREST
+  lgbm_pcfg.bin   = "MIOPCFG1" u32:version(2)  u32:num_solvers
                     directory[num_solvers]{ u16 name_len; name; u64 off; u64 size }
                     per-solver section{
                         i32 feat_count; i32 prob_feat_count; i32 arg_count; u8 has_gfx_code
+                        [has_gfx_code only] u16 num_gfx; str[num_gfx] gfx_vocab
                         FOREST
                         u32 num_buckets
                         bucket{ u16 key_len; key; u32 num_cands
                                 cand{ u16 desc_len; desc; f64[arg_count] args } }
                     }
+
+gfx_vocab is the solver's gfx_code category order as trained (gfx_code of a
+gfx_id == its index). It comes from the solver block's "gfx_code_vocab" list in
+lgbm_pcfg_model_meta.json and is required for every solver whose
+prob_feat_cols ends in "gfx_code".
 
 FOREST (shared, mirrors LgbmForest::Tree/Node, decoded — no decision_type logic
 left for the reader):
@@ -40,7 +46,9 @@ from pathlib import Path
 
 RANK_MAGIC = b"MIORANK1"
 PCFG_MAGIC = b"MIOPCFG1"
-VERSION = 1
+# Must match kRankFormatVersion / kPcfgFormatVersion in lgbm_binary.hpp.
+RANK_VERSION = 1
+PCFG_VERSION = 2
 
 # LightGBM decision_type bitmask (matches lgbm_forest.cpp).
 CAT_MASK = 0x01
@@ -203,7 +211,7 @@ def build_rank(kernels_dir):
     trees = parse_lightgbm_text(kernels_dir / "lgbm_rank_model.txt")
     out = bytearray()
     out += RANK_MAGIC
-    out += _u32(VERSION)
+    out += _u32(RANK_VERSION)
     out += serialize_forest(trees)
     return bytes(out), len(trees)
 
@@ -240,6 +248,23 @@ def build_pcfg(kernels_dir):
         sec += _i32(n_prob)
         sec += _i32(n_arg)
         sec += struct.pack("<B", 1 if has_gfx else 0)
+        if has_gfx:
+            vocab = block.get("gfx_code_vocab")
+            if (
+                not isinstance(vocab, list)
+                or not vocab
+                or not all(isinstance(g, str) and g for g in vocab)
+                or len(set(vocab)) != len(vocab)
+            ):
+                # Without the trained category order the runtime cannot encode
+                # gfx_code; guessing it would silently corrupt every prediction.
+                raise SystemExit(
+                    "%s: gfx_code solver needs a non-empty, unique "
+                    '"gfx_code_vocab" string list in lgbm_pcfg_model_meta.json' % name
+                )
+            sec += _u16(len(vocab))
+            for g in vocab:
+                sec += _str(g)
         sec += serialize_forest(trees)
 
         buckets = catalog.get(name, {}).get("buckets", {})
@@ -264,7 +289,7 @@ def build_pcfg(kernels_dir):
     # Assemble header + directory + sections. Directory offsets are absolute.
     header = bytearray()
     header += PCFG_MAGIC
-    header += _u32(VERSION)
+    header += _u32(PCFG_VERSION)
     header += _u32(len(sections))
 
     dir_bytes = bytearray()

@@ -125,6 +125,35 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
     ASSERT_GT(buckets_checked, 0) << "no non-empty buckets scored";
 }
 
+// A gfx_code solver encodes the live gfx_id as its index in the model's shipped
+// vocab. Every arch the catalog has buckets for must be in that vocab; a missing
+// one would silently be scored as the unknown-arch (-1) category.
+TEST_F(CPU_LgbmPcfgPicker_NONE, GfxVocabCoversEveryBucketArch)
+{
+    int gfx_solvers = 0;
+    for(const auto& solver : meta.SolverNames())
+    {
+        const auto* model = meta.Find(solver);
+        ASSERT_NE(model, nullptr);
+        if(!model->has_gfx_code)
+        {
+            EXPECT_TRUE(model->gfx_vocab.empty()) << solver << ": vocab without gfx_code";
+            continue;
+        }
+        ++gfx_solvers;
+        const std::unordered_set<std::string> vocab(model->gfx_vocab.begin(),
+                                                    model->gfx_vocab.end());
+        EXPECT_EQ(vocab.size(), model->gfx_vocab.size()) << solver << ": duplicate gfx_id";
+        for(const auto& bucket : model->buckets)
+        {
+            const auto gfx_id = bucket.first.substr(0, bucket.first.find('|'));
+            EXPECT_TRUE(vocab.count(gfx_id) == 1)
+                << solver << ": bucket arch " << gfx_id << " missing from gfx_vocab";
+        }
+    }
+    ASSERT_GT(gfx_solvers, 0) << "no gfx_code solver in the bundle";
+}
+
 // Golden-vector parity for the per-solver pcfg models: the forest walker must
 // reproduce LightGBM's raw score for every committed (features -> expected)
 // vector, across all 11 solver models. The fixture includes random+NaN rows so

@@ -172,7 +172,7 @@ const LgbmForest& LgbmForest::GetRank()
         BinReader reader(buffer.data(), buffer.size());
         // "MIORANK1" + u32 version, then a bare FOREST block. A bad header
         // forces the reader to EOF so the forest read yields a not-ready model.
-        if(!reader.ReadMagic("MIORANK1", 8) || reader.ReadU32() != kBinaryFormatVersion)
+        if(!reader.ReadMagic("MIORANK1", 8) || reader.ReadU32() != kRankFormatVersion)
         {
             MIOPEN_LOG_W("LGBM forest: lgbm_rank.bin bad magic/version; picker will abstain");
             reader.SeekTo(buffer.size());

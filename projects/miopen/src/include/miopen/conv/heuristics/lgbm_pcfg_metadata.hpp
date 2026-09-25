@@ -47,6 +47,11 @@ struct SolverModel
     int arg_count       = 0;     // per-solver candidate arg columns
     bool has_gfx_code   = false; // prefix ends with the gfx_code categorical
 
+    // gfx_code categories in the order the model was trained with: a gfx_id's
+    // code is its index here, an unknown gfx_id is -1 (the missing category).
+    // Non-empty exactly when has_gfx_code.
+    std::vector<std::string> gfx_vocab;
+
     // The solver's LightGBM forest, walked at runtime (lgbm_forest.hpp). Held
     // by pointer so SolverModel stays cheap to move within the model map.
     std::shared_ptr<const LgbmForest> forest;

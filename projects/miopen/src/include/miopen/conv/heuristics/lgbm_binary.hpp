@@ -18,10 +18,12 @@ namespace miopen {
 namespace ai {
 namespace lgbm {
 
-// Bumped whenever the on-disk layout of lgbm_rank.bin / lgbm_pcfg.bin changes.
-// A file whose version does not match is rejected (the picker abstains) rather
-// than mis-parsed. Kept in lockstep with script/convert_lgbm_binary.py.
-inline constexpr std::uint32_t kBinaryFormatVersion = 1;
+// Bumped whenever the on-disk layout of the corresponding asset changes. A file
+// whose version does not match is rejected (the picker abstains) rather than
+// mis-parsed. Kept in lockstep with script/convert_lgbm_binary.py.
+inline constexpr std::uint32_t kRankFormatVersion = 1; // lgbm_rank.bin
+// lgbm_pcfg.bin. v2: gfx_code solver sections carry their trained gfx_id vocab.
+inline constexpr std::uint32_t kPcfgFormatVersion = 2;
 
 // Cursor over an in-memory buffer holding one of the LGBM binary assets
 // (lgbm_rank.bin / lgbm_pcfg.bin). All multi-byte fields are little-endian,
