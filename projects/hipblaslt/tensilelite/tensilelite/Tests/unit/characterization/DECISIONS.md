@@ -701,3 +701,14 @@ tests carry the evidence for this change.
 **ADR:** [`adr/0032-leave-epilogues-out-by-default.md`](adr/0032-leave-epilogues-out-by-default.md)
 
 **Decision:** geko's merge adds the epilogue settings (`Activation`, `ActivationType`, `UseBias`, `BiasDataTypeList`, `UseScaleAlphaVec`, `UseScaleAB`) to every library after tuning, so carrying them (D48) made the extracted config tune the shipped epilogue kernel rather than the kernel the run tuned. They are now removed unless `--keep-epilogues` is given (a handwritten custom kernel keeps them), a benchmark header's bias types go with them, and an empty `BiasTypeArgs` is no longer written. The gfx950 `test_TensileLibLogicToYaml` golden loses those four lines, `test_benchmark_tree_to_config` no longer expects the header's bias types, and the `main()` stubs take the new argument; the kept behavior moves to new tests. Intended behavior change.
+
+## D50 — TensileLogic filter is part of the command contract
+
+**ADR:** [`adr/0037-align-logic-filter-validation.md`](adr/0037-align-logic-filter-validation.md)
+
+**Decision:** Record the `LogicFilter="**/*.yaml"` parser default and translate
+the create-library stem filter into an equivalent recursive YAML glob for the
+preceding validation command.
+
+**Classification:** intended command-line behavior. The three added snapshot
+fields expose one new parser default; no existing saved value was re-recorded.
