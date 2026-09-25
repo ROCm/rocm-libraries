@@ -150,6 +150,8 @@ def test_diagnose_env_failure_permission(tmp_path):
     joined = "\n".join(lines)
     assert "owned by another user" in joined
     assert "uv sync" in joined
+    assert ".info/version" in joined
+    assert "TENSILELITE_ROCM_VERSION=0.0.0" not in joined
     assert "rm -rf" in joined
 
 
@@ -159,6 +161,7 @@ def test_diagnose_env_failure_stale_interpreter(tmp_path):
     joined = "\n".join(lines)
     assert "no longer exists" in joined
     assert "uv sync" in joined
+    assert ".info/version" in joined
 
 
 def test_diagnose_env_failure_missing_dependency(tmp_path):
@@ -167,6 +170,7 @@ def test_diagnose_env_failure_missing_dependency(tmp_path):
     joined = "\n".join(lines)
     assert "missing required packages" in joined
     assert "uv sync" in joined
+    assert ".info/version" in joined
 
 
 def test_diagnose_env_failure_missing_xdist(tmp_path):
@@ -182,3 +186,4 @@ def test_diagnose_env_failure_generic(tmp_path):
     joined = "\n".join(lines)
     assert "could not prepare the test environment" in joined
     assert "uv sync" in joined
+    assert ".info/version" in joined

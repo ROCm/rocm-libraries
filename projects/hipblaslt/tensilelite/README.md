@@ -55,15 +55,14 @@ worktrees use an absolute gitdir pointer, so a different mount breaks git.
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
-TENSILELITE_ROCM_VERSION=0.0.0 uv sync  # provisions deps, rocisa, and the pre-commit app
+TENSILELITE_ROCM_VERSION="$(<"${ROCM_PATH:-/opt/rocm}/.info/version")" uv sync
 uv run --no-sync invoke precommit-install  # writes the git hook (once per clone)
 ```
 
 `VERSION` and `tensilelite.GENERATOR_VERSION` identify the generator format and
 must remain equal. Release wheels add the selected ROCm publication identity
-from `TENSILELITE_ROCM_VERSION`; CMake and `invoke install` set it for normal
-builds. The `0.0.0` value above is only a development bootstrap identity and
-must not be used for published wheels.
+from `TENSILELITE_ROCM_VERSION`; CMake, `invoke install`, and the command above
+derive it from the selected SDK.
 
 `git commit` from inside the container then runs the affected tests. Bypass once
 with `git commit --no-verify`. On a snapshot mismatch the hook prints a
