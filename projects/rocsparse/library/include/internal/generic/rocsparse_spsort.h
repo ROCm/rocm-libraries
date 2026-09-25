@@ -128,6 +128,9 @@ rocsparse_status rocsparse_spsort_buffer_size(rocsparse_handle            handle
 *  \retval rocsparse_status_invalid_size \p source and \p target do not have the same dimensions or number of non-zeros, or the batch strides make the batches overlap.
 *  \retval rocsparse_status_invalid_value \p source and \p target do not have the same format, index types, data type, index base or batch count, or the direction is not supported for the format of \p source.
 *  \retval rocsparse_status_not_implemented \p source is not in COO, CSR or CSC format.
+*
+*  \par Example
+*  \snippet example_rocsparse_spsort_coo.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spsort(rocsparse_handle            handle,
