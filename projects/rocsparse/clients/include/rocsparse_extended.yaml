@@ -349,6 +349,7 @@ Tests:
     - coosort: *conversion_shared
     - spsort_coo: *conversion_shared_spsort
     - spsort_csr: *conversion_shared_spsort_mixed_index
+    - spsort_csc: *conversion_shared_mixed_index
     - csrsort: *conversion_shared
     - cscsort: *conversion_shared
     - identity: *conversion_shared
