@@ -756,16 +756,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # Imported or executed directly by unit tests, so these must ship at the
-    # tensilelite root, not under scripts/.
-    install(
-        FILES
-            "${_tensilelite_src}/tensilelite/_extops/AMaxGenerator.py"
-            "${_tensilelite_src}/tensilelite/_extops/SoftmaxGenerator.py"
-            "${_tensilelite_src}/tensilelite/_extops/LayerNormGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
-        COMPONENT tests
-    )
     # Preserve executable permissions on entry points
     install(
         PROGRAMS
