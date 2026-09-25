@@ -31,7 +31,11 @@
 // reuses the same workspace buffer, so only one chunk's worth of triangle
 // slots must be live at once.
 //
-// Scope: int32 strided-batched and batched (pointer-array) syrk/herk.
+// Scope: int32 strided-batched and batched (pointer-array) syrk/herk, over
+// every type the two operations instantiate -- s/d/c/z syrk and c/z herk.
+// The workspace formula scales with sizeof(T) and the chunk loop is shared by
+// all six, so each is dispatched through the same templated battery.
+//
 // Tests exercise all architectures: on gfx90a/gfx942 where the gemm-only
 // workspace path is active, workspace-specific assertions (chunked formula,
 // canary guard) are checked; on other architectures, the API calls are still
@@ -44,44 +48,117 @@
 #include "client_utility.hpp"
 #include "device_batch_vector.hpp"
 #include "device_vector.hpp"
+#include "host_batch_vector.hpp"
 #include "rocblas.hpp"
 #include "rocblas_test.hpp"
 #include <algorithm>
-#include <numeric>
+#include <type_traits>
 #include <vector>
 
 namespace
 {
+    // -----------------------------------------------------------------------
+    // Type dispatch
+    //
+    // syrk takes alpha/beta of type T for every T, including complex.  herk
+    // takes real alpha/beta even though C is complex.  Selecting on the
+    // operation rather than on rocblas_is_complex<T> is what lets csyrk/zsyrk
+    // share this battery with cherk/zherk.
+    // -----------------------------------------------------------------------
+
+    enum class op_kind
+    {
+        syrk,
+        herk
+    };
+
+    template <typename T>
+    struct real_of
+    {
+        using type = T;
+    };
+    template <>
+    struct real_of<rocblas_float_complex>
+    {
+        using type = float;
+    };
+    template <>
+    struct real_of<rocblas_double_complex>
+    {
+        using type = double;
+    };
+
+    template <typename T>
+    using real_t = typename real_of<T>::type;
+
+    // Scalar type of alpha/beta for operation K on element type T.
+    template <typename T, op_kind K>
+    using scalar_t = std::conditional_t<K == op_kind::herk, real_t<T>, T>;
+
+    template <typename T>
+    static T make_val(double re, double im)
+    {
+        if constexpr(rocblas_is_complex<T>)
+            return T(real_t<T>(re), real_t<T>(im));
+        else
+            return T(re);
+    }
+
+    template <typename T>
+    static real_t<T> re_of(const T& v)
+    {
+        if constexpr(rocblas_is_complex<T>)
+            return std::real(v);
+        else
+            return v;
+    }
+
+    template <typename T>
+    static real_t<T> im_of(const T& v)
+    {
+        if constexpr(rocblas_is_complex<T>)
+            return std::imag(v);
+        else
+            return real_t<T>(0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Workspace size model
+    // -----------------------------------------------------------------------
+
     // tri(n) = n*(n-1)/2 -- off-diagonal element count per batch in workspace.
     static size_t tri_n(rocblas_int n)
     {
         return (size_t(n) * size_t(n - 1)) / 2;
     }
 
+    // Batches per chunk. Must match c_YZ_grid_launch_limit, which is
+    // library-internal and so cannot be referenced from a client test.
+    constexpr rocblas_int limit = (1 << 16) - 1; // 65535
+
     // Expected workspace bytes under the chunked scheme.
-    // chunk = min(batch_count, c_YZ_grid_launch_limit).
     // Mirrors the production formula in rocblas_syrk_herk.hpp.
     template <typename T>
     static size_t chunked_workspace_bytes(rocblas_int n, rocblas_int batch_count)
     {
-        constexpr rocblas_int limit = (1 << 16) - 1; // 65535 -- must match c_YZ_grid_launch_limit
-        size_t                chunk = size_t(std::min(batch_count, limit));
-        return tri_n(n) * sizeof(T) * chunk;
+        return tri_n(n) * sizeof(T) * size_t(std::min(batch_count, limit));
+    }
+
+    // A size query does not report the raw request: handle.hpp rounds it up to
+    // a 64-byte chunk. Compare against the rounded value, or every case whose
+    // raw size is not already a multiple of 64 fails.
+    static size_t rounded(size_t bytes)
+    {
+        constexpr size_t chunk = 64;
+        return ((bytes + chunk - 1) / chunk) * chunk;
     }
 
     // -----------------------------------------------------------------------
-    // Templated workspace-size query helpers.
-    //
-    // NOTE: The complex-T branch uses real-of-T for alpha/beta, matching the
-    // herk API signature.  This is correct for herk but would be wrong for
-    // csyrk / zsyrk (which take complex alpha/beta).  Do NOT reuse these
-    // helpers for complex-syrk queries without adding a separate code path.
-    //
-    // The two overloads cover strided-batched and batched API variants.
+    // Workspace size query helpers, one per API shape.
+    // Passing null A/C is legal during a size query: no memory is touched.
     // -----------------------------------------------------------------------
 
-    // Strided-batched workspace query.
-    template <typename T, typename ApiFunc>
+    template <typename T, op_kind K, typename ApiFunc>
     static bool query_strided_workspace(rocblas_handle handle,
                                         ApiFunc        api,
                                         rocblas_int    n,
@@ -91,56 +168,30 @@ namespace
                                         rocblas_int    batch_count,
                                         size_t*        bytes)
     {
-        const rocblas_fill      uplo    = rocblas_fill_lower;
-        const rocblas_operation transA  = rocblas_operation_none;
-        const rocblas_stride    strideA = rocblas_stride(lda) * k;
-        const rocblas_stride    strideC = rocblas_stride(ldc) * n;
+        using S = scalar_t<T, K>;
 
         rocblas_status st = rocblas_start_device_memory_size_query(handle);
         EXPECT_EQ(st, rocblas_status_success);
         if(st != rocblas_status_success)
             return false;
 
-        // herk takes real alpha/beta; syrk takes T-typed alpha/beta.
-        if constexpr(rocblas_is_complex<T>)
-        {
-            using U       = decltype(std::real(T{}));
-            const U alpha = U(1);
-            const U beta  = U(0);
-            st            = api(handle,
-                     uplo,
-                     transA,
-                     n,
-                     k,
-                     &alpha,
-                     nullptr,
-                     lda,
-                     strideA,
-                     &beta,
-                     nullptr,
-                     ldc,
-                     strideC,
-                     batch_count);
-        }
-        else
-        {
-            const T alpha = T(1);
-            const T beta  = T(0);
-            st            = api(handle,
-                     uplo,
-                     transA,
-                     n,
-                     k,
-                     &alpha,
-                     nullptr,
-                     lda,
-                     strideA,
-                     &beta,
-                     nullptr,
-                     ldc,
-                     strideC,
-                     batch_count);
-        }
+        const S alpha = S(1);
+        const S beta  = S(0);
+
+        st = api(handle,
+                 rocblas_fill_lower,
+                 rocblas_operation_none,
+                 n,
+                 k,
+                 &alpha,
+                 nullptr,
+                 lda,
+                 rocblas_stride(lda) * k,
+                 &beta,
+                 nullptr,
+                 ldc,
+                 rocblas_stride(ldc) * n,
+                 batch_count);
 
         EXPECT_TRUE(st == rocblas_status_size_increased || st == rocblas_status_size_unchanged)
             << "size query returned " << rocblas_status_to_string(st);
@@ -152,8 +203,7 @@ namespace
         return st == rocblas_status_success;
     }
 
-    // Batched (pointer-array) workspace query.
-    template <typename T, typename ApiFunc>
+    template <typename T, op_kind K, typename ApiFunc>
     static bool query_batched_workspace(rocblas_handle handle,
                                         ApiFunc        api,
                                         rocblas_int    n,
@@ -163,29 +213,28 @@ namespace
                                         rocblas_int    batch_count,
                                         size_t*        bytes)
     {
-        const rocblas_fill      uplo   = rocblas_fill_lower;
-        const rocblas_operation transA = rocblas_operation_none;
+        using S = scalar_t<T, K>;
 
         rocblas_status st = rocblas_start_device_memory_size_query(handle);
         EXPECT_EQ(st, rocblas_status_success);
         if(st != rocblas_status_success)
             return false;
 
-        if constexpr(rocblas_is_complex<T>)
-        {
-            using U       = decltype(std::real(T{}));
-            const U alpha = U(1);
-            const U beta  = U(0);
-            st            = api(
-                handle, uplo, transA, n, k, &alpha, nullptr, lda, &beta, nullptr, ldc, batch_count);
-        }
-        else
-        {
-            const T alpha = T(1);
-            const T beta  = T(0);
-            st            = api(
-                handle, uplo, transA, n, k, &alpha, nullptr, lda, &beta, nullptr, ldc, batch_count);
-        }
+        const S alpha = S(1);
+        const S beta  = S(0);
+
+        st = api(handle,
+                 rocblas_fill_lower,
+                 rocblas_operation_none,
+                 n,
+                 k,
+                 &alpha,
+                 nullptr,
+                 lda,
+                 &beta,
+                 nullptr,
+                 ldc,
+                 batch_count);
 
         EXPECT_TRUE(st == rocblas_status_size_increased || st == rocblas_status_size_unchanged)
             << "size query returned " << rocblas_status_to_string(st);
@@ -198,183 +247,11 @@ namespace
     }
 
     // -----------------------------------------------------------------------
-    // Workspace size query tests
+    // Canary guard
     //
-    // When the gemm-only workspace path is active:
-    //   batch_count > 65535: workspace equals the chunked bound and is
-    //     strictly less than the old un-capped formula.
-    //   batch_count <= 65535: workspace equals batch_count * tri(n) * sizeof(T).
-    //
-    // When the workspace path is NOT active (non-target arch or thresholds
-    // not met), the query returns 0 and the test verifies that fact without
-    // skipping.
-    // -----------------------------------------------------------------------
-
-    // When the workspace path is active, check that the reported value
-    // matches the chunked formula.  When batch_count > limit, also verify
-    // capping.  When the path is NOT active, the query returned 0 — no
-    // assertion needed.
-    template <typename T>
-    static void ws_check_capped(size_t reported, rocblas_int n, rocblas_int bc)
-    {
-        if(reported > 0)
-        {
-            EXPECT_EQ(reported, chunked_workspace_bytes<T>(n, bc));
-            EXPECT_LT(reported, tri_n(n) * sizeof(T) * size_t(bc)) << "workspace not capped";
-        }
-    }
-
-    template <typename T>
-    static void ws_check_uncapped(size_t reported, rocblas_int n, rocblas_int bc)
-    {
-        if(reported > 0)
-        {
-            EXPECT_EQ(reported, tri_n(n) * sizeof(T) * size_t(bc));
-        }
-    }
-
-    // ssyrk strided-batched
-    TEST(syrk_herk_chunked_workspace_size, ssyrk_strided_131070)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 131070;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<float>(
-            handle, rocblas_ssyrk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_capped<float>(reported, n, bc);
-    }
-
-    TEST(syrk_herk_chunked_workspace_size, ssyrk_strided_65536)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 65536;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<float>(
-            handle, rocblas_ssyrk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_capped<float>(reported, n, bc);
-    }
-
-    TEST(syrk_herk_chunked_workspace_size, ssyrk_strided_65535)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 65535;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<float>(
-            handle, rocblas_ssyrk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_uncapped<float>(reported, n, bc);
-    }
-
-    TEST(syrk_herk_chunked_workspace_size, ssyrk_strided_100)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 100;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<float>(
-            handle, rocblas_ssyrk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_uncapped<float>(reported, n, bc);
-    }
-
-    // ssyrk batched (pointer-array)
-    TEST(syrk_herk_chunked_workspace_size, ssyrk_batched_131070)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 131070;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_batched_workspace<float>(
-            handle, rocblas_ssyrk_batched, n, k, n, n, bc, &reported));
-        ws_check_capped<float>(reported, n, bc);
-    }
-
-    TEST(syrk_herk_chunked_workspace_size, ssyrk_batched_65535)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 65535;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_batched_workspace<float>(
-            handle, rocblas_ssyrk_batched, n, k, n, n, bc, &reported));
-        ws_check_uncapped<float>(reported, n, bc);
-    }
-
-    // dsyrk strided-batched (double precision)
-    TEST(syrk_herk_chunked_workspace_size, dsyrk_strided_131070)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 131070;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<double>(
-            handle, rocblas_dsyrk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_capped<double>(reported, n, bc);
-    }
-
-    // cherk strided-batched
-    TEST(syrk_herk_chunked_workspace_size, cherk_strided_131070)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 131070;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<rocblas_float_complex>(
-            handle, rocblas_cherk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_capped<rocblas_float_complex>(reported, n, bc);
-    }
-
-    TEST(syrk_herk_chunked_workspace_size, cherk_strided_65536)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 65536;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<rocblas_float_complex>(
-            handle, rocblas_cherk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_capped<rocblas_float_complex>(reported, n, bc);
-    }
-
-    TEST(syrk_herk_chunked_workspace_size, cherk_strided_65535)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 65535;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<rocblas_float_complex>(
-            handle, rocblas_cherk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_uncapped<rocblas_float_complex>(reported, n, bc);
-    }
-
-    TEST(syrk_herk_chunked_workspace_size, cherk_strided_100)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 100;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_strided_workspace<rocblas_float_complex>(
-            handle, rocblas_cherk_strided_batched, n, k, n, n, bc, &reported));
-        ws_check_uncapped<rocblas_float_complex>(reported, n, bc);
-    }
-
-    // cherk batched (pointer-array)
-    TEST(syrk_herk_chunked_workspace_size, cherk_batched_131070)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 131070;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_batched_workspace<rocblas_float_complex>(
-            handle, rocblas_cherk_batched, n, k, n, n, bc, &reported));
-        ws_check_capped<rocblas_float_complex>(reported, n, bc);
-    }
-
-    TEST(syrk_herk_chunked_workspace_size, cherk_batched_65535)
-    {
-        rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = 500, bc = 65535;
-        size_t               reported = 0;
-        ASSERT_TRUE(query_batched_workspace<rocblas_float_complex>(
-            handle, rocblas_cherk_batched, n, k, n, n, bc, &reported));
-        ws_check_uncapped<rocblas_float_complex>(reported, n, bc);
-    }
-
-    // -----------------------------------------------------------------------
-    // Canary / correctness tests
-    //
-    // Allocate an exact-sized workspace matching the new chunked formula and
-    // append a contiguous guard region filled with a sentinel byte.  If the
-    // kernel writes past the workspace boundary the guard bytes change and the
-    // test fails.
+    // Allocate an exact-sized workspace matching the chunked formula and append
+    // a contiguous guard region filled with a sentinel byte.  If the kernel
+    // writes past the workspace boundary the guard bytes change.
     // -----------------------------------------------------------------------
 
     constexpr unsigned char c_canary_byte  = 0xA5;
@@ -419,33 +296,140 @@ namespace
             << workspace_bytes << "-byte workspace";
     }
 
-    // Strided-batched canary helper, templated over T.
-    // On workspace-path architectures: allocates exact-sized workspace with
-    // canary guard, runs the API, verifies the guard is clean.
-    // On other architectures: exercises the API call with a small batch to
-    // avoid unnecessary large allocations.
-    template <typename T, typename ApiFunc>
-    static void run_strided_canary(ApiFunc      api,
-                                   rocblas_int  n,
-                                   rocblas_int  k,
-                                   rocblas_int  batch_count,
-                                   rocblas_fill uplo = rocblas_fill_lower)
+    // Owns a device array of batch_count pointers all aliasing one buffer.
+    // A is read-only, so sharing it keeps the A allocation independent of
+    // batch_count; a distinct A per batch would cost gigabytes at the
+    // >65535 batch counts these tests need for 16-byte types.
+    template <typename T>
+    class aliased_ptr_array
+    {
+    public:
+        aliased_ptr_array(T* base, rocblas_int batch_count)
+        {
+            std::vector<T*> host(size_t(batch_count), base);
+            if((hipMalloc)(&m_device, sizeof(T*) * size_t(batch_count)) != hipSuccess)
+            {
+                m_device = nullptr;
+                return;
+            }
+            if(hipMemcpy(
+                   m_device, host.data(), sizeof(T*) * size_t(batch_count), hipMemcpyHostToDevice)
+               != hipSuccess)
+            {
+                (void)(hipFree)(m_device);
+                m_device = nullptr;
+            }
+        }
+
+        ~aliased_ptr_array()
+        {
+            if(m_device)
+                (void)(hipFree)(m_device);
+        }
+
+        aliased_ptr_array(const aliased_ptr_array&) = delete;
+        aliased_ptr_array& operator=(const aliased_ptr_array&) = delete;
+
+        bool valid() const
+        {
+            return m_device != nullptr;
+        }
+        T* const* ptr_on_device() const
+        {
+            return m_device;
+        }
+
+    private:
+        T** m_device = nullptr;
+    };
+
+    // -----------------------------------------------------------------------
+    // Shared test geometry.
+    //
+    // n is small so that C (n*n*batch_count) stays affordable at the >65535
+    // batch counts; k is large enough to keep the gemm-only workspace path
+    // selected on the architectures that have it.
+    // -----------------------------------------------------------------------
+
+    constexpr rocblas_int c_n = 2;
+    constexpr rocblas_int c_k = 500;
+
+    // -----------------------------------------------------------------------
+    // Size-query battery: no device allocation, so it runs on every arch.
+    // -----------------------------------------------------------------------
+
+    template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
+    static void run_size_queries(StridedFn strided_api, BatchedFn batched_api)
     {
         rocblas_local_handle handle;
+        const rocblas_int    n = 32, k = c_k;
+
+        // Above the chunk limit the reported size must equal the chunked bound
+        // and be strictly below the old per-batch formula.
+        for(rocblas_int bc : {limit + 1, 65536, 131070})
+        {
+            size_t reported = 0;
+            ASSERT_TRUE(
+                (query_strided_workspace<T, K>(handle, strided_api, n, k, n, n, bc, &reported)))
+                << "strided query failed at batch_count=" << bc;
+            if(reported)
+            {
+                EXPECT_EQ(reported, rounded(chunked_workspace_bytes<T>(n, bc)))
+                    << "batch_count=" << bc;
+                EXPECT_LT(reported, tri_n(n) * sizeof(T) * size_t(bc))
+                    << "workspace not capped at batch_count=" << bc;
+            }
+
+            reported = 0;
+            ASSERT_TRUE(
+                (query_batched_workspace<T, K>(handle, batched_api, n, k, n, n, bc, &reported)))
+                << "batched query failed at batch_count=" << bc;
+            if(reported)
+                EXPECT_EQ(reported, rounded(chunked_workspace_bytes<T>(n, bc)))
+                    << "batch_count=" << bc;
+        }
+
+        // At or below the limit the chunked formula degenerates to the
+        // original per-batch size, so the fix must not change these.
+        for(rocblas_int bc : {1, 100, limit})
+        {
+            size_t reported = 0;
+            ASSERT_TRUE(
+                (query_strided_workspace<T, K>(handle, strided_api, n, k, n, n, bc, &reported)))
+                << "strided query failed at batch_count=" << bc;
+            if(reported)
+                EXPECT_EQ(reported, rounded(tri_n(n) * sizeof(T) * size_t(bc)))
+                    << "batch_count=" << bc;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Canary battery: exact-sized workspace plus guard, over both API shapes
+    // and both fill modes.
+    // -----------------------------------------------------------------------
+
+    template <typename T, op_kind K, typename ApiFunc>
+    static void run_strided_canary(ApiFunc api, rocblas_int batch_count, rocblas_fill uplo)
+    {
+        using S = scalar_t<T, K>;
+
+        rocblas_local_handle handle;
+        const rocblas_int    n = c_n, k = c_k;
 
         size_t queried = 0;
-        ASSERT_TRUE(query_strided_workspace<T>(handle, api, n, k, n, n, batch_count, &queried));
+        ASSERT_TRUE(
+            (query_strided_workspace<T, K>(handle, api, n, k, n, n, batch_count, &queried)));
 
         const bool ws_active = queried > 0;
 
-        // On non-workspace archs, use a small batch to avoid large allocations;
-        // multi-chunk iteration is only meaningful when the workspace path is active.
+        // Without the workspace path, multi-chunk iteration is meaningless;
+        // run a token batch rather than allocating for nothing.
         const rocblas_int run_bc = ws_active ? batch_count : std::min(batch_count, rocblas_int(2));
 
         void* d_ws = nullptr;
         if(ws_active)
         {
-            EXPECT_EQ(queried, chunked_workspace_bytes<T>(n, batch_count))
+            EXPECT_EQ(queried, rounded(chunked_workspace_bytes<T>(n, batch_count)))
                 << "queried workspace diverges from test formula";
             ASSERT_EQ((hipMalloc)(&d_ws, queried + c_canary_bytes), hipSuccess);
             ASSERT_TRUE(fill_canary(d_ws, queried));
@@ -453,58 +437,32 @@ namespace
         }
 
         // A aliased across all batches via stride_A=0 (read-only, safe to share).
-        const size_t a_elems = size_t(n) * size_t(k);
-        const size_t c_elems = size_t(n) * size_t(n) * size_t(run_bc);
-
-        device_vector<T> dA(a_elems);
-        device_vector<T> dC(c_elems);
+        device_vector<T> dA(size_t(n) * size_t(k));
+        device_vector<T> dC(size_t(n) * size_t(n) * size_t(run_bc));
         ASSERT_EQ(dA.memcheck(), hipSuccess);
         ASSERT_EQ(dC.memcheck(), hipSuccess);
-        ASSERT_EQ(hipMemset((T*)dA, 0, a_elems * sizeof(T)), hipSuccess);
-        ASSERT_EQ(hipMemset((T*)dC, 0, c_elems * sizeof(T)), hipSuccess);
+        ASSERT_EQ(hipMemset((T*)dA, 0, size_t(n) * size_t(k) * sizeof(T)), hipSuccess);
+        ASSERT_EQ(hipMemset((T*)dC, 0, size_t(n) * size_t(n) * size_t(run_bc) * sizeof(T)),
+                  hipSuccess);
 
-        // herk takes real alpha/beta; syrk takes T-typed alpha/beta.
-        if constexpr(rocblas_is_complex<T>)
-        {
-            using U       = decltype(std::real(T{}));
-            const U alpha = U(1);
-            const U beta  = U(1);
-            ASSERT_EQ(api(handle,
-                          uplo,
-                          rocblas_operation_none,
-                          n,
-                          k,
-                          &alpha,
-                          (T*)dA,
-                          n,
-                          0,
-                          &beta,
-                          (T*)dC,
-                          n,
-                          rocblas_stride(n) * n,
-                          run_bc),
-                      rocblas_status_success);
-        }
-        else
-        {
-            const T alpha = T(1);
-            const T beta  = T(1);
-            ASSERT_EQ(api(handle,
-                          uplo,
-                          rocblas_operation_none,
-                          n,
-                          k,
-                          &alpha,
-                          (T*)dA,
-                          n,
-                          0,
-                          &beta,
-                          (T*)dC,
-                          n,
-                          rocblas_stride(n) * n,
-                          run_bc),
-                      rocblas_status_success);
-        }
+        const S alpha = S(1);
+        const S beta  = S(1);
+
+        ASSERT_EQ(api(handle,
+                      uplo,
+                      rocblas_operation_none,
+                      n,
+                      k,
+                      &alpha,
+                      (T*)dA,
+                      n,
+                      0,
+                      &beta,
+                      (T*)dC,
+                      n,
+                      rocblas_stride(n) * n,
+                      run_bc),
+                  rocblas_status_success);
 
         if(ws_active)
         {
@@ -514,79 +472,59 @@ namespace
         }
     }
 
-    // Batched (pointer-array) canary helper, templated over T.
-    // Uses a single contiguous hipMemset (device_batch_vector allocates one
-    // contiguous block internally).
-    template <typename T, typename ApiFunc>
-    static void
-        run_batched_canary(ApiFunc api, rocblas_int n, rocblas_int k, rocblas_int batch_count)
+    template <typename T, op_kind K, typename ApiFunc>
+    static void run_batched_canary(ApiFunc api, rocblas_int batch_count, rocblas_fill uplo)
     {
+        using S = scalar_t<T, K>;
+
         rocblas_local_handle handle;
+        const rocblas_int    n = c_n, k = c_k;
 
         size_t queried = 0;
-        ASSERT_TRUE(query_batched_workspace<T>(handle, api, n, k, n, n, batch_count, &queried));
+        ASSERT_TRUE(
+            (query_batched_workspace<T, K>(handle, api, n, k, n, n, batch_count, &queried)));
 
-        const bool ws_active = queried > 0;
-
+        const bool        ws_active = queried > 0;
         const rocblas_int run_bc = ws_active ? batch_count : std::min(batch_count, rocblas_int(2));
 
         void* d_ws = nullptr;
         if(ws_active)
         {
-            EXPECT_EQ(queried, chunked_workspace_bytes<T>(n, batch_count))
+            EXPECT_EQ(queried, rounded(chunked_workspace_bytes<T>(n, batch_count)))
                 << "queried workspace diverges from test formula";
             ASSERT_EQ((hipMalloc)(&d_ws, queried + c_canary_bytes), hipSuccess);
             ASSERT_TRUE(fill_canary(d_ws, queried));
             ASSERT_EQ(rocblas_set_workspace(handle, d_ws, queried), rocblas_status_success);
         }
 
-        const size_t a_elems = size_t(n) * size_t(k);
-        const size_t c_elems = size_t(n) * size_t(n);
-
-        device_batch_vector<T> dA(a_elems, 1, run_bc);
-        device_batch_vector<T> dC(c_elems, 1, run_bc);
+        device_vector<T> dA(size_t(n) * size_t(k));
         ASSERT_EQ(dA.memcheck(), hipSuccess);
-        ASSERT_EQ(dC.memcheck(), hipSuccess);
-        ASSERT_EQ(hipMemset(dA[0], 0, a_elems * sizeof(T) * run_bc), hipSuccess);
-        ASSERT_EQ(hipMemset(dC[0], 0, c_elems * sizeof(T) * run_bc), hipSuccess);
+        ASSERT_EQ(hipMemset((T*)dA, 0, size_t(n) * size_t(k) * sizeof(T)), hipSuccess);
 
-        if constexpr(rocblas_is_complex<T>)
-        {
-            using U       = decltype(std::real(T{}));
-            const U alpha = U(1);
-            const U beta  = U(1);
-            ASSERT_EQ(api(handle,
-                          rocblas_fill_lower,
-                          rocblas_operation_none,
-                          n,
-                          k,
-                          &alpha,
-                          dA.ptr_on_device(),
-                          n,
-                          &beta,
-                          dC.ptr_on_device(),
-                          n,
-                          run_bc),
-                      rocblas_status_success);
-        }
-        else
-        {
-            const T alpha = T(1);
-            const T beta  = T(1);
-            ASSERT_EQ(api(handle,
-                          rocblas_fill_lower,
-                          rocblas_operation_none,
-                          n,
-                          k,
-                          &alpha,
-                          dA.ptr_on_device(),
-                          n,
-                          &beta,
-                          dC.ptr_on_device(),
-                          n,
-                          run_bc),
-                      rocblas_status_success);
-        }
+        aliased_ptr_array<T> dA_ptrs((T*)dA, run_bc);
+        ASSERT_TRUE(dA_ptrs.valid()) << "failed to allocate A pointer array";
+
+        device_batch_vector<T> dC(size_t(n) * size_t(n), 1, run_bc);
+        ASSERT_EQ(dC.memcheck(), hipSuccess);
+        ASSERT_EQ(hipMemset(dC[0], 0, size_t(n) * size_t(n) * size_t(run_bc) * sizeof(T)),
+                  hipSuccess);
+
+        const S alpha = S(1);
+        const S beta  = S(1);
+
+        ASSERT_EQ(api(handle,
+                      uplo,
+                      rocblas_operation_none,
+                      n,
+                      k,
+                      &alpha,
+                      dA_ptrs.ptr_on_device(),
+                      n,
+                      &beta,
+                      dC.ptr_on_device(),
+                      n,
+                      run_bc),
+                  rocblas_status_success);
 
         if(ws_active)
         {
@@ -596,241 +534,297 @@ namespace
         }
     }
 
+    template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
+    static void run_canaries(StridedFn strided_api, BatchedFn batched_api)
+    {
+        // 131070 = two full chunks, 65539 = one full chunk plus a short one,
+        // 1 = the degenerate single-batch case.
+        for(rocblas_int bc : {131070, 65539, 1})
+        {
+            run_strided_canary<T, K>(strided_api, bc, rocblas_fill_lower);
+            run_batched_canary<T, K>(batched_api, bc, rocblas_fill_lower);
+        }
+        // Upper fill saves the opposite triangle.
+        run_strided_canary<T, K>(strided_api, 131070, rocblas_fill_upper);
+        run_batched_canary<T, K>(batched_api, 131070, rocblas_fill_upper);
+    }
+
     // -----------------------------------------------------------------------
-    // Canary tests: strided-batched
+    // Numerical battery
     //
-    // batch_count = 131070: two saturated grid-z passes.
-    // batch_count = 65539:  boundary case (one element into the second pass).
-    // batch_count = 1:      degenerate single-batch (regression guard).
-    // -----------------------------------------------------------------------
-
-    TEST(syrk_herk_chunked_workspace_correctness, ssyrk_strided_batched_131070)
-    {
-        run_strided_canary<float>(rocblas_ssyrk_strided_batched, 2, 500, 131070);
-    }
-
-    TEST(syrk_herk_chunked_workspace_correctness, ssyrk_strided_batched_65539)
-    {
-        run_strided_canary<float>(rocblas_ssyrk_strided_batched, 2, 500, 65539);
-    }
-
-    TEST(syrk_herk_chunked_workspace_correctness, ssyrk_strided_batched_1)
-    {
-        run_strided_canary<float>(rocblas_ssyrk_strided_batched, 2, 500, 1);
-    }
-
-    // fill_upper: exercises the is_upper=true template branch with distinct
-    // triangle index arithmetic.
-    TEST(syrk_herk_chunked_workspace_correctness, ssyrk_strided_batched_upper_131070)
-    {
-        run_strided_canary<float>(
-            rocblas_ssyrk_strided_batched, 2, 500, 131070, rocblas_fill_upper);
-    }
-
-    TEST(syrk_herk_chunked_workspace_correctness, cherk_strided_batched_131070)
-    {
-        run_strided_canary<rocblas_float_complex>(rocblas_cherk_strided_batched, 2, 500, 131070);
-    }
-
-    TEST(syrk_herk_chunked_workspace_correctness, cherk_strided_batched_65539)
-    {
-        run_strided_canary<rocblas_float_complex>(rocblas_cherk_strided_batched, 2, 500, 65539);
-    }
-
-    TEST(syrk_herk_chunked_workspace_correctness, cherk_strided_batched_upper_131070)
-    {
-        run_strided_canary<rocblas_float_complex>(
-            rocblas_cherk_strided_batched, 2, 500, 131070, rocblas_fill_upper);
-    }
-
-    // -----------------------------------------------------------------------
-    // Canary tests: batched (pointer-array)
-    // -----------------------------------------------------------------------
-
-    TEST(syrk_herk_chunked_workspace_correctness, ssyrk_batched_131070)
-    {
-        run_batched_canary<float>(rocblas_ssyrk_batched, 2, 500, 131070);
-    }
-
-    TEST(syrk_herk_chunked_workspace_correctness, ssyrk_batched_65539)
-    {
-        run_batched_canary<float>(rocblas_ssyrk_batched, 2, 500, 65539);
-    }
-
-    TEST(syrk_herk_chunked_workspace_correctness, cherk_batched_131070)
-    {
-        run_batched_canary<rocblas_float_complex>(rocblas_cherk_batched, 2, 500, 131070);
-    }
-
-    TEST(syrk_herk_chunked_workspace_correctness, cherk_batched_65539)
-    {
-        run_batched_canary<rocblas_float_complex>(rocblas_cherk_batched, 2, 500, 65539);
-    }
-
-    // -----------------------------------------------------------------------
-    // Numerical correctness test
+    // A is all ones, so alpha*A*A^T (or A*A^H) is the constant k in every
+    // element.  Each batch starts with a distinct value in the upper triangle,
+    // which a lower-fill syrk/herk must leave untouched: on the workspace path
+    // it is saved to W_C before the GEMM overwrites all of C and restored
+    // afterwards.  Zero-filled data would hide a chunk loop that failed to
+    // advance the C pointer, because every batch would look alike; distinct
+    // per-batch values make a wrong batch index observable.
     //
-    // Verifies that syrk produces correct results by computing
-    // C = alpha * A * A^T + beta * C with known data and comparing to a
-    // host-side reference.  On workspace-path architectures this exercises
-    // the chunked save-GEMM-restore cycle; on other architectures it
-    // exercises the standard syrk kernel.  Expected values are the same
-    // regardless of which internal path is taken.
-    //
-    // batch_count is set above 65535 to exercise the multi-chunk path
-    // when active.  Batches 0 and (batch_count-1) are spot-checked; the
-    // middle batches share the same aliased A (stride_A=0) and
-    // zero-initialised C.
+    // For herk the imaginary part of the diagonal is defined to be zero, so
+    // the diagonal seeds are real; the upper triangle carries a non-zero
+    // imaginary part for the complex types.
     // -----------------------------------------------------------------------
 
-    TEST(syrk_herk_chunked_workspace_correctness, ssyrk_strided_numerical)
+    template <typename T>
+    static T expected_upper(rocblas_int b)
     {
+        // Exactly representable in float and distinct across a chunk boundary.
+        const double v = double(1 + (b % 4096));
+        return make_val<T>(v, rocblas_is_complex<T> ? -v : 0.0);
+    }
+
+    template <typename T>
+    static void expect_val_eq(const T& got, const T& want, const char* what, rocblas_int b)
+    {
+        EXPECT_EQ(re_of(got), re_of(want)) << what << " real part, batch " << b;
+        EXPECT_EQ(im_of(got), im_of(want)) << what << " imaginary part, batch " << b;
+    }
+
+    // Fills one column-major n x n C block: real diagonal, zero lower
+    // off-diagonal (the GEMM overwrites it), distinct upper off-diagonal.
+    template <typename T>
+    static void seed_c_block(T* C, rocblas_int n, rocblas_int b)
+    {
+        C[0 + 0 * n] = make_val<T>(1.0, 0.0);
+        C[1 + 1 * n] = make_val<T>(1.0, 0.0);
+        C[1 + 0 * n] = make_val<T>(0.0, 0.0);
+        C[0 + 1 * n] = expected_upper<T>(b);
+    }
+
+    template <typename T>
+    static void check_c_block(const T* C, rocblas_int n, rocblas_int k, rocblas_int b)
+    {
+        expect_val_eq(C[0 + 0 * n], make_val<T>(double(k) + 1.0, 0.0), "C[0,0]", b);
+        expect_val_eq(C[1 + 0 * n], make_val<T>(double(k), 0.0), "C[1,0]", b);
+        expect_val_eq(C[1 + 1 * n], make_val<T>(double(k) + 1.0, 0.0), "C[1,1]", b);
+        expect_val_eq(C[0 + 1 * n], expected_upper<T>(b), "C[0,1] (upper triangle preserved)", b);
+    }
+
+    template <typename T, op_kind K, typename ApiFunc>
+    static void run_strided_numerical(ApiFunc api, rocblas_int batch_count)
+    {
+        using S = scalar_t<T, K>;
+
         rocblas_local_handle handle;
+        const rocblas_int    n = c_n, k = 64;
 
-        const rocblas_int n = 2, k = 500;
-        // Just above the grid limit to force two chunks on workspace-path archs.
-        const rocblas_int batch_count = 65536;
-
-        // A is a 2x500 matrix.  Fill with a simple pattern: A[i,j] = 1.0f
-        // so that A * A^T = k * ones(n,n) = [[500,500],[500,500]].
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
 
-        // Host-side reference: C_ref = alpha * A * A^T + beta * C_init
-        // With alpha=1, beta=1, A=all-ones, C_init=identity:
-        //   A*A^T = [[k, k],[k, k]]
-        //   C_ref (lower fill, including diagonal) = [[k+1, k],[k, k+1]]
-        // The workspace path operates as: (1) save upper triangle of C to W_C,
-        // (2) GEMM overwrites all of C, (3) restore saved upper triangle from
-        // W_C back to C.  So the lower triangle gets the GEMM result and the
-        // upper triangle is restored to its C_init values.
-        const float alpha = 1.0f;
-        const float beta  = 1.0f;
-
-        std::vector<float> h_A(a_elems, 1.0f);
-        // C_init: identity (diagonal = 1, off-diagonal = 0) for each batch.
-        std::vector<float> h_C(c_elems * batch_count, 0.0f);
+        std::vector<T> h_A(a_elems, make_val<T>(1.0, 0.0));
+        std::vector<T> h_C(c_elems * size_t(batch_count));
         for(rocblas_int b = 0; b < batch_count; ++b)
-        {
-            for(rocblas_int i = 0; i < n; ++i)
-                h_C[b * c_elems + i + i * n] = 1.0f;
-        }
+            seed_c_block(h_C.data() + size_t(b) * c_elems, n, b);
 
-        device_vector<float> dA(a_elems);
-        device_vector<float> dC(c_elems * batch_count);
+        device_vector<T> dA(a_elems);
+        device_vector<T> dC(c_elems * size_t(batch_count));
         ASSERT_EQ(dA.memcheck(), hipSuccess);
         ASSERT_EQ(dC.memcheck(), hipSuccess);
-        ASSERT_EQ(hipMemcpy((float*)dA, h_A.data(), a_elems * sizeof(float), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * sizeof(T), hipMemcpyHostToDevice),
                   hipSuccess);
-        ASSERT_EQ(hipMemcpy((float*)dC,
+        ASSERT_EQ(hipMemcpy((T*)dC,
                             h_C.data(),
-                            c_elems * batch_count * sizeof(float),
+                            c_elems * size_t(batch_count) * sizeof(T),
                             hipMemcpyHostToDevice),
                   hipSuccess);
 
-        ASSERT_EQ(rocblas_ssyrk_strided_batched(handle,
-                                                rocblas_fill_lower,
-                                                rocblas_operation_none,
-                                                n,
-                                                k,
-                                                &alpha,
-                                                (float*)dA,
-                                                n,
-                                                0, // stride_A=0: alias A
-                                                &beta,
-                                                (float*)dC,
-                                                n,
-                                                rocblas_stride(n) * n,
-                                                batch_count),
+        const S alpha = S(1);
+        const S beta  = S(1);
+
+        ASSERT_EQ(api(handle,
+                      rocblas_fill_lower,
+                      rocblas_operation_none,
+                      n,
+                      k,
+                      &alpha,
+                      (T*)dA,
+                      n,
+                      0, // stride_A = 0: alias A across batches
+                      &beta,
+                      (T*)dC,
+                      n,
+                      rocblas_stride(n) * n,
+                      batch_count),
                   rocblas_status_success);
 
-        // Copy result back.
-        std::vector<float> h_result(c_elems * batch_count);
+        std::vector<T> h_result(c_elems * size_t(batch_count));
         ASSERT_EQ(hipMemcpy(h_result.data(),
-                            (float*)dC,
-                            c_elems * batch_count * sizeof(float),
+                            (T*)dC,
+                            c_elems * size_t(batch_count) * sizeof(T),
                             hipMemcpyDeviceToHost),
                   hipSuccess);
 
-        // Expected values for lower fill (column-major 2x2):
-        //   C[0,0] = k + 1 = 501 (diagonal)
-        //   C[1,0] = k     = 500 (lower off-diagonal)
-        //   C[0,1] = 0  -- upper triangle is not written by syrk (standard path),
-        //                   or saved/restored around GEMM (workspace path).
-        //   C[1,1] = k + 1 = 501 (diagonal)
-
-        auto check_batch = [&](rocblas_int b) {
-            const float* C_b = h_result.data() + b * c_elems;
-            // Column-major: element (row, col) = C_b[row + col*n]
-            EXPECT_FLOAT_EQ(C_b[0 + 0 * n], float(k + 1)) << "batch " << b << " C[0,0]";
-            EXPECT_FLOAT_EQ(C_b[1 + 0 * n], float(k)) << "batch " << b << " C[1,0]";
-            EXPECT_FLOAT_EQ(C_b[0 + 1 * n], 0.0f)
-                << "batch " << b << " C[0,1] (upper triangle, should be restored)";
-            EXPECT_FLOAT_EQ(C_b[1 + 1 * n], float(k + 1)) << "batch " << b << " C[1,1]";
-        };
-
-        // Spot-check batches: first (chunk 0), last (chunk 1), and a middle one.
-        check_batch(0);
-        check_batch(batch_count / 2);
-        check_batch(batch_count - 1);
+        // Last batch of chunk 0, first and last of chunk 1.
+        for(rocblas_int b : {0, limit - 1, limit, batch_count - 1})
+            check_c_block(h_result.data() + size_t(b) * c_elems, n, k, b);
     }
 
-    // Degenerate dimension: n=1 means tri(n)=0, no workspace used.
-    // Verify no crash and correct scalar result.
-    TEST(syrk_herk_chunked_workspace_correctness, ssyrk_strided_n1)
+    template <typename T, op_kind K, typename ApiFunc>
+    static void run_batched_numerical(ApiFunc api, rocblas_int batch_count)
     {
+        using S = scalar_t<T, K>;
+
         rocblas_local_handle handle;
+        const rocblas_int    n = c_n, k = 64;
 
-        const rocblas_int n = 1, k = 500;
-        const rocblas_int batch_count = 65536;
+        const size_t a_elems = size_t(n) * size_t(k);
+        const size_t c_elems = size_t(n) * size_t(n);
 
-        // For n=1, workspace is 0 (tri(1)=0).  Syrk should still produce
-        // correct scalar results: C = alpha*A*A^T + beta*C.
-        // A is 1x500 = all-ones, so A*A^T = [k] = [500].
-        // C_init = [1], alpha=1, beta=1 => C = 500 + 1 = 501.
+        std::vector<T> h_A(a_elems, make_val<T>(1.0, 0.0));
 
-        const float alpha = 1.0f;
-        const float beta  = 1.0f;
+        host_batch_vector<T> h_C(c_elems, 1, batch_count);
+        ASSERT_EQ(h_C.memcheck(), hipSuccess);
+        for(rocblas_int b = 0; b < batch_count; ++b)
+            seed_c_block(h_C[b], n, b);
 
-        std::vector<float> h_A(size_t(k), 1.0f);
-        std::vector<float> h_C(size_t(batch_count), 1.0f);
-
-        device_vector<float> dA(size_t(k));
-        device_vector<float> dC(size_t(batch_count));
+        device_vector<T> dA(a_elems);
         ASSERT_EQ(dA.memcheck(), hipSuccess);
-        ASSERT_EQ(dC.memcheck(), hipSuccess);
-        ASSERT_EQ(hipMemcpy((float*)dA, h_A.data(), k * sizeof(float), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * sizeof(T), hipMemcpyHostToDevice),
                   hipSuccess);
-        ASSERT_EQ(
-            hipMemcpy((float*)dC, h_C.data(), batch_count * sizeof(float), hipMemcpyHostToDevice),
-            hipSuccess);
 
-        ASSERT_EQ(rocblas_ssyrk_strided_batched(handle,
-                                                rocblas_fill_lower,
-                                                rocblas_operation_none,
-                                                n,
-                                                k,
-                                                &alpha,
-                                                (float*)dA,
-                                                n,
-                                                0, // stride_A=0
-                                                &beta,
-                                                (float*)dC,
-                                                n,
-                                                1, // stride_C=1 (single scalar)
-                                                batch_count),
+        aliased_ptr_array<T> dA_ptrs((T*)dA, batch_count);
+        ASSERT_TRUE(dA_ptrs.valid()) << "failed to allocate A pointer array";
+
+        device_batch_vector<T> dC(c_elems, 1, batch_count);
+        ASSERT_EQ(dC.memcheck(), hipSuccess);
+        ASSERT_EQ(dC.transfer_from(h_C), hipSuccess);
+
+        const S alpha = S(1);
+        const S beta  = S(1);
+
+        ASSERT_EQ(api(handle,
+                      rocblas_fill_lower,
+                      rocblas_operation_none,
+                      n,
+                      k,
+                      &alpha,
+                      dA_ptrs.ptr_on_device(),
+                      n,
+                      &beta,
+                      dC.ptr_on_device(),
+                      n,
+                      batch_count),
                   rocblas_status_success);
 
-        std::vector<float> h_result(size_t(batch_count));
+        host_batch_vector<T> h_result(c_elems, 1, batch_count);
+        ASSERT_EQ(h_result.memcheck(), hipSuccess);
+        ASSERT_EQ(h_result.transfer_from(dC), hipSuccess);
+
+        for(rocblas_int b : {0, limit - 1, limit, batch_count - 1})
+            check_c_block(h_result[b], n, k, b);
+    }
+
+    template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
+    static void run_numerical(StridedFn strided_api, BatchedFn batched_api)
+    {
+        // Just above the chunk limit so the workspace path runs two chunks.
+        constexpr rocblas_int bc = 65536;
+        run_strided_numerical<T, K>(strided_api, bc);
+        run_batched_numerical<T, K>(batched_api, bc);
+    }
+
+    // n=1 makes tri(n) zero, so no workspace is needed at any batch count.
+    // Verify the chunk loop still terminates and the scalar result is right.
+    template <typename T, op_kind K, typename ApiFunc>
+    static void run_degenerate_n1(ApiFunc api)
+    {
+        using S = scalar_t<T, K>;
+
+        rocblas_local_handle handle;
+        const rocblas_int    n = 1, k = 64;
+        const rocblas_int    batch_count = 65536;
+
+        std::vector<T> h_A(size_t(k), make_val<T>(1.0, 0.0));
+        std::vector<T> h_C(size_t(batch_count), make_val<T>(1.0, 0.0));
+
+        // Braces, not parens: device_vector<T> dA(size_t(k)) declares a function.
+        device_vector<T> dA{size_t(k)};
+        device_vector<T> dC{size_t(batch_count)};
+        ASSERT_EQ(dA.memcheck(), hipSuccess);
+        ASSERT_EQ(dC.memcheck(), hipSuccess);
+        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), size_t(k) * sizeof(T), hipMemcpyHostToDevice),
+                  hipSuccess);
         ASSERT_EQ(
-            hipMemcpy(
-                h_result.data(), (float*)dC, batch_count * sizeof(float), hipMemcpyDeviceToHost),
+            hipMemcpy((T*)dC, h_C.data(), size_t(batch_count) * sizeof(T), hipMemcpyHostToDevice),
             hipSuccess);
 
-        // Check first batch, last batch (second chunk), and a middle one.
-        EXPECT_FLOAT_EQ(h_result[0], float(k + 1));
-        EXPECT_FLOAT_EQ(h_result[batch_count / 2], float(k + 1));
-        EXPECT_FLOAT_EQ(h_result[batch_count - 1], float(k + 1));
+        const S alpha = S(1);
+        const S beta  = S(1);
+
+        ASSERT_EQ(api(handle,
+                      rocblas_fill_lower,
+                      rocblas_operation_none,
+                      n,
+                      k,
+                      &alpha,
+                      (T*)dA,
+                      n,
+                      0,
+                      &beta,
+                      (T*)dC,
+                      n,
+                      1,
+                      batch_count),
+                  rocblas_status_success);
+
+        std::vector<T> h_result(size_t(batch_count), T{});
+        ASSERT_EQ(
+            hipMemcpy(
+                h_result.data(), (T*)dC, size_t(batch_count) * sizeof(T), hipMemcpyDeviceToHost),
+            hipSuccess);
+
+        const T want = make_val<T>(double(k) + 1.0, 0.0);
+        for(rocblas_int b : {0, limit - 1, limit, batch_count - 1})
+            expect_val_eq(h_result[b], want, "C[0,0]", b);
     }
+
+    // -----------------------------------------------------------------------
+    // Instantiate the battery for every type/operation syrk and herk provide.
+    // -----------------------------------------------------------------------
+
+#define SYRK_HERK_CHUNKED_TESTS(prefix, T, KIND, STRIDED_FN, BATCHED_FN)   \
+    TEST(syrk_herk_chunked_workspace_size_pre_checkin, prefix)             \
+    {                                                                      \
+        run_size_queries<T, KIND>(STRIDED_FN, BATCHED_FN);                 \
+    }                                                                      \
+    TEST(syrk_herk_chunked_workspace_canary_pre_checkin, prefix)           \
+    {                                                                      \
+        run_canaries<T, KIND>(STRIDED_FN, BATCHED_FN);                     \
+    }                                                                      \
+    TEST(syrk_herk_chunked_workspace_correctness_pre_checkin, prefix)      \
+    {                                                                      \
+        run_numerical<T, KIND>(STRIDED_FN, BATCHED_FN);                    \
+    }                                                                      \
+    TEST(syrk_herk_chunked_workspace_correctness_pre_checkin, prefix##_n1) \
+    {                                                                      \
+        run_degenerate_n1<T, KIND>(STRIDED_FN);                            \
+    }
+
+    SYRK_HERK_CHUNKED_TESTS(
+        ssyrk, float, op_kind::syrk, rocblas_ssyrk_strided_batched, rocblas_ssyrk_batched)
+    SYRK_HERK_CHUNKED_TESTS(
+        dsyrk, double, op_kind::syrk, rocblas_dsyrk_strided_batched, rocblas_dsyrk_batched)
+    SYRK_HERK_CHUNKED_TESTS(csyrk,
+                            rocblas_float_complex,
+                            op_kind::syrk,
+                            rocblas_csyrk_strided_batched,
+                            rocblas_csyrk_batched)
+    SYRK_HERK_CHUNKED_TESTS(zsyrk,
+                            rocblas_double_complex,
+                            op_kind::syrk,
+                            rocblas_zsyrk_strided_batched,
+                            rocblas_zsyrk_batched)
+    SYRK_HERK_CHUNKED_TESTS(cherk,
+                            rocblas_float_complex,
+                            op_kind::herk,
+                            rocblas_cherk_strided_batched,
+                            rocblas_cherk_batched)
+    SYRK_HERK_CHUNKED_TESTS(zherk,
+                            rocblas_double_complex,
+                            op_kind::herk,
+                            rocblas_zherk_strided_batched,
+                            rocblas_zherk_batched)
+
+#undef SYRK_HERK_CHUNKED_TESTS
 
 } // namespace
