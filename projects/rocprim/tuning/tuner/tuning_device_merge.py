@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import OrderedDict, Callable, Dict
+from typing import OrderedDict, Callable, Dict, Any
 import sys
 import os
 
@@ -38,7 +38,7 @@ class Tuner(BaseTuner):
     def __init__(self, args: TunerArgs):
         super().__init__(args)
 
-    def _get_tune_params(self, types: Dict[str, str]) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
@@ -46,7 +46,7 @@ class Tuner(BaseTuner):
         params["ipt"] = [1, 2] + list(range(4, 33, 4))
         return params
 
-    def _get_restrictions(self, types: Dict[str, str]) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
         element_size = sum(TYPE_CONFIGS[t].size for t in types.values() if t in TYPE_CONFIGS)
         size = self.bytes_size // element_size
