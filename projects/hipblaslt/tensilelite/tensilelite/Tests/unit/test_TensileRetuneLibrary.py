@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Unit tests for TensileRetuneLibrary.py
+Unit tests for retune_library.py
 """
 
 import pytest
