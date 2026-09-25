@@ -1075,7 +1075,7 @@ constexpr partition_config_params partition_config_params_base()
     // Additional shared memory is required by the lookback scan state.
     constexpr unsigned int shared_mem_offset = sizeof(
         typename offset_lookback_scan_prefix_op<offset_t,
-                                                lookback_scan_state<offset_t>>::storage_type);
+                                                lookback_scan_state_impl<offset_t>>::storage_type);
 
     return partition_config_params{
         {fallback_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,

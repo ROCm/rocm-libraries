@@ -122,7 +122,12 @@ template<class T,
          bool   UseSleep           = false,
          size_t PreferredAlignment = 0,
          bool   IsSmall            = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
-struct lookback_scan_state;
+struct lookback_scan_state_impl;
+
+/// \brief Interface for hipCUB.
+template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
+using lookback_scan_state
+    = lookback_scan_state_impl<T, UseSleep, /* PreferredAlignment */ 0, IsSmall>;
 
 /// Reduce lanes `0-valid_items` and return the result in lane 0.
 template<typename F, typename T>
@@ -219,7 +224,7 @@ T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
 
 // Packed flag and prefix value are loaded/stored in one atomic operation.
 template<class T, bool UseSleep, size_t PreferredAlignment>
-struct lookback_scan_state<T, UseSleep, PreferredAlignment, /* IsSmall = */ true>
+struct lookback_scan_state_impl<T, UseSleep, PreferredAlignment, /* IsSmall = */ true>
 {
 public:
     // Type used for flag/flag of block prefix
@@ -263,7 +268,7 @@ public:
     /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
     /// type \p hipError_t.
     ROCPRIM_HOST_DEVICE
-    static inline hipError_t create(lookback_scan_state& state,
+    static inline hipError_t create(lookback_scan_state_impl& state,
                                     void*                temp_storage,
                                     const unsigned int   number_of_blocks,
                                     const hipStream_t /*stream*/)
@@ -518,7 +523,7 @@ private:
 // Flag, partial and final prefixes are stored in separate arrays.
 // Consistency ensured by memory fences between flag and prefixes load/store operations.
 template<class T, bool UseSleep, size_t PreferredAlignment>
-struct lookback_scan_state<T, UseSleep, PreferredAlignment, /* IsSmall = */ false>
+struct lookback_scan_state_impl<T, UseSleep, PreferredAlignment, /* IsSmall = */ false>
 {
 
 public:
@@ -563,7 +568,7 @@ public:
     /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
     /// type \p hipError_t.
     ROCPRIM_HOST_DEVICE
-    static inline hipError_t create(lookback_scan_state& state,
+    static inline hipError_t create(lookback_scan_state_impl& state,
                                     void*                temp_storage,
                                     const unsigned int   number_of_blocks,
                                     const hipStream_t    stream)
