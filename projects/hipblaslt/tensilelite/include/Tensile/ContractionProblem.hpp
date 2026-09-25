@@ -158,8 +158,8 @@ namespace TensileLite
             return m_fallbackStatus;
         }
 
-        // StreamK=5 hybrid-mode toggle. Forwarded by the host into
-        // StreamKSettings::streamKTileSchedulingMode at solve time. Values:
+        // Hybrid assignment toggle, read by the host when selecting work
+        // assignment at solve time. Values:
         //   0 = OFF  (default; SK3 static unless smCountTarget() > 0, then
         //             the origami hybrid heuristic runs like AUTO),
         //   1 = ON   (SK4 dynamic per-XCD work-queue),

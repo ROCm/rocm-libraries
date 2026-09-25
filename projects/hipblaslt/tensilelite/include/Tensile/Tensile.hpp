@@ -202,7 +202,7 @@ namespace TensileLite
                                        const std::vector<LazyLoadingInit>& preload);
 
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+    TENSILELITEHOST_EXPORT std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LoadLibraryData(std::vector<uint8_t> const& data);
 } // namespace TensileLite
 

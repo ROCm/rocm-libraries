@@ -155,7 +155,7 @@ def _make_params(iim, arch=_ARCH, mi=None, **overrides):
         "PrefetchLocalRead": 0,
         "ScheduleIterAlg": 3,
         "StaggerU": 0,
-        "StreamK": 0,
+        "TileProcessingStrategy": "None",
         "GlobalSplitU": 1,
         "WorkGroupMapping": 1,
         "MIArchVgpr": False,
@@ -235,14 +235,15 @@ def test_fused_a2a_rejects_non_bf16_d(_gp_gfx942, gfx942_iim, assembler, capsys)
 
 
 # ---------------------------------------------------------------------------
-# Guard 3: StreamK != 0 -> rejected (the fused path rides a data-parallel
-# carrier).
+# Guard 3: StreamK processing -> rejected (the fused path requires
+# nonpersistent processing).
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("streamk", [1, 2, 3])
-def test_fused_a2a_rejects_streamk(_gp_gfx942, gfx942_iim, assembler, capsys, streamk):
-    sol, out = _derive(gfx942_iim, assembler, capsys, StreamK=streamk)
+@pytest.mark.parametrize("assignment", ["StaticGrid", "DynamicWorkQueue", "Hybrid"])
+def test_fused_a2a_rejects_streamk(_gp_gfx942, gfx942_iim, assembler, capsys, assignment):
+    sol, out = _derive(gfx942_iim, assembler, capsys,
+                       TileProcessingStrategy="StreamK", WorkAssignment=assignment)
     assert sol.get("Valid") is False
-    assert "FusedGemmA2A requires StreamK=0" in out
+    assert "FusedGemmA2A requires TileProcessingStrategy=None" in out
 
 
 # ---------------------------------------------------------------------------

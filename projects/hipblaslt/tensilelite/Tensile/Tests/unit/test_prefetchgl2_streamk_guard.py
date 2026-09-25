@@ -47,7 +47,7 @@ pytestmark = pytest.mark.unit
 # message would fire for StreamK==3 under the pre-AIHPBLAS-4142 guard, so this is
 # what makes the tests catch a regression); the negative tests assert the new
 # message fires.
-GUARD_REASON = "PrefetchGL2 only supports DP-first (StreamK==3) Stream-K"
+GUARD_REASON = "PrefetchGL2 with persistent execution requires WorkAssignment=StaticGrid"
 OLD_GUARD_REASON = "PrefetchGL2 does not support Stream-K"
 
 
@@ -242,13 +242,24 @@ def test_prefetchgl2_streamk0_accepted(_gp_gfx1250, gfx1250_iim, assembler, caps
 
 
 # ---------------------------------------------------------------------------
-# Negative: PrefetchGL2 + any non-DP-first non-zero Stream-K (1, 2, 4, 5) is
-# still rejected by the PrefetchGL2 Stream-K guard. PrefetchAcrossPersistent=0 so
+# Negative: retired modes fail during normalization; dynamic and hybrid
+# assignment fail the PrefetchGL2 guard. PrefetchAcrossPersistent=0 so
 # the PAP "requires StreamK=3" guard does not reject first, making the PrefetchGL2
 # Stream-K guard the deciding criterion. A future over-broadening of the guard
 # regresses these.
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("streamk", [1, 2, 4, 5])
+@pytest.mark.parametrize("streamk", [1, 2])
+def test_prefetchgl2_rejects_retired_streamk_at_normalization(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, streamk
+):
+    with pytest.raises(ValueError, match="modes 1 and 2 are retired"):
+        _derive(
+            gfx1250_iim, assembler, capsys,
+            StreamK=streamk, PrefetchAcrossPersistent=0,
+        )
+
+
+@pytest.mark.parametrize("streamk", [4, 5])
 def test_prefetchgl2_rejects_non_dpfirst_streamk(
     _gp_gfx1250, gfx1250_iim, assembler, capsys, streamk
 ):

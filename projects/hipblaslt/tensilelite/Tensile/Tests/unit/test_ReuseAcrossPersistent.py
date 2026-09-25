@@ -89,7 +89,8 @@ def _codegenKernel(**overrides):
     kernel = {
         "ReuseAcrossPersistent": 1,
         "PrefetchAcrossPersistent": 1,
-        "StreamK": 3,
+        "TileProcessingStrategy": "DataParallel",
+        "WorkAssignment": "StaticGrid",
         "PrefetchGlobalRead": 2,
         "UseCustomMainLoopSchedule": 0,
         "SuppressNoLoadLoop": True,
@@ -107,17 +108,12 @@ def _papEnabled(**overrides):
     )
 
 
-def test_pap_survives_the_suppressed_nll_for_halfplr_and_rap():
-    """Suppressing the NLL removes where PAP's next-tile prefetch used to live.
-
-    Only the features that re-emit it elsewhere may keep PAP. RAP is one of them
-    -- derivation turns SuppressNoLoadLoop on for it -- so without RAP in this
-    predicate every RAP kernel would silently lose PAP at codegen.
-    """
-    assert _papEnabled()
-    assert _papEnabled(ReuseAcrossPersistent=0, HalfPLR=1)
-    assert not _papEnabled(ReuseAcrossPersistent=0, HalfPLR=0)
-    assert _papEnabled(ReuseAcrossPersistent=0, HalfPLR=0, SuppressNoLoadLoop=False)
+def test_pap_codegen_consumes_the_validated_capability():
+    """Backend conditions are resolved once, before code generation."""
+    assert _papEnabled(_PrefetchAcrossPersistentEnabled=True)
+    assert _papEnabled(_PrefetchAcrossPersistentEnabled=True, ReuseAcrossPersistent=0, HalfPLR=1)
+    assert not _papEnabled(_PrefetchAcrossPersistentEnabled=False)
+    assert not _papEnabled(_PrefetchAcrossPersistentEnabled=False, ReuseAcrossPersistent=0)
 
 
 def test_pap_is_off_when_its_own_flag_is_off_whatever_rap_says():
@@ -233,8 +229,8 @@ def _make_params(gfx1250_iim, **overrides):
         "GlobalSplitUAlgorithm": "MultipleBuffer",
         "TDMInst": 3,
         "LDSTrInst": False,
-        "StreamK": 3,
-        "StreamKForceDPOnly": 1,
+        "TileProcessingStrategy": "DataParallel",
+        "WorkAssignment": "StaticGrid",
         "PrefetchAcrossPersistent": 1,
         "ReuseAcrossPersistent": 1,
         "UseSubtileImpl": False,
@@ -293,20 +289,13 @@ def test_rap_resident_ktiles_never_falls_below_the_section_floor(
     assert sol["_RAPNumResidentKTiles"] >= sol["PrefetchGlobalRead"] + 1
 
 
-def test_rap_flag_is_cleared_when_there_is_no_persistent_loop(
+def test_rap_requires_a_persistent_loop(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    """Without Stream-K there are no persistent iterations to reuse across.
-
-    Derivation clears the flag here rather than rejecting, which is the safe
-    direction now that codegen trusts it: the alternative is a kernel that
-    reaches the emitters claiming residency it cannot have.
-    """
-    # GlobalSplitU picks up the split Stream-K was providing; without one of the
-    # two the solution is rejected before RAP is looked at.
-    sol, out = _derive(gfx1250_iim, assembler, capsys, StreamK=0, GlobalSplitU=1)
-    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
-    assert sol["ReuseAcrossPersistent"] == 0
+    """An explicit RAP request requires a persistent execution strategy."""
+    with pytest.raises(ValueError, match="ReuseAcrossPersistent requires a persistent"):
+        _derive(gfx1250_iim, assembler, capsys, TileProcessingStrategy="None",
+                PrefetchAcrossPersistent=0, GlobalSplitU=1)
 
 
 def test_rap_off_does_not_derive_a_resident_block(
@@ -440,8 +429,8 @@ def test_rap_k_predicates_admit_a_range_of_whole_ktiles(
     "overrides, reason",
     [
         pytest.param(
-            {"StreamKForceDPOnly": 0},
-            "ReuseAcrossPersistent requires StreamK = 3 and StreamKForceDPOnly = 1",
+            {"TileProcessingStrategy": "StreamK"},
+            "ReuseAcrossPersistent requires DataParallel/StaticGrid",
             id="without_dp_only",
         ),
         pytest.param(

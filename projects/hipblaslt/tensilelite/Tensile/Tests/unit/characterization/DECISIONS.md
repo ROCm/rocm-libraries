@@ -548,3 +548,11 @@ the selectors after an intentional generation-input change.
 the exact emitter-status multiset for its bounded sample. Remove throwaway
 warm-up emits because canonicalization already removes the known scheduler-state
 difference.
+
+## D33 — Canonical persistent execution policy in generated names and schemas
+
+[ADR 0014](adr/0014-canonical-persistent-policy-names.md) records the intended
+policy-field migration in generated names, derived solution state, parameter
+registries, and serialized defaults. The scoped codegen updates preserve
+fixture membership, kernel counts, and emission return codes. Explicit names
+for prebuilt kernels remain part of the compatibility contract.

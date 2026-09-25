@@ -152,10 +152,12 @@ def test_augment_overrides_existing_param_in_place():
     config = _base_config()
     augment_config(config, [("StreamK", [3])])
     fork = _fork(config)
-    streamk_entries = [d for d in fork if "StreamK" in d]
-    # Overridden in place, not duplicated.
-    assert len(streamk_entries) == 1
-    assert streamk_entries[0]["StreamK"] == [3]
+    # Policy overrides replace the old spelling and retain the matrix group.
+    assert not any("StreamK" in d for d in fork)
+    groups = next(d["Groups"] for d in fork if "Groups" in d)
+    assert groups[0] == [{"MatrixInstruction": [16, 16, 16, 1]}]
+    assert groups[1][0]["TileProcessingStrategy"] == "StreamK"
+    assert groups[1][0]["WorkAssignment"] == "StaticGrid"
 
 
 def test_augment_preserves_structure_and_other_keys():
@@ -228,7 +230,8 @@ def test_solution_matches_bool_int_distinct():
 
 def test_summarize_solution_lists_present_keys():
     summary = summarize_solution(_states()[1])
-    assert "StreamK=5" in summary and "DepthU=64" in summary
+    assert "TileProcessingStrategy=StreamK" in summary
+    assert "WorkAssignment=Hybrid" in summary and "DepthU=64" in summary
     assert summarize_solution({}) == "(no summary keys)"
 
 
@@ -560,6 +563,81 @@ def test_apply_overrides_writes_scalar_in_place():
     state = {"PrefetchGlobalRead": 0}
     _apply_overrides(state, [("PrefetchGlobalRead", [1]), ("NewParam", ["x"])])
     assert state == {"PrefetchGlobalRead": 1, "NewParam": "x"}
+
+
+@pytest.mark.parametrize("canonical", [False, True], ids=["legacy-source", "canonical-source"])
+@pytest.mark.parametrize("source_dp, target_dp", [(False, True), (True, False)])
+def test_apply_legacy_dp_override_preserves_assignment(canonical, source_dp, target_dp):
+    state = (
+        {"TileProcessingStrategy": "DataParallel" if source_dp else "StreamK",
+         "WorkAssignment": "StaticGrid", "_PersistentLoop": True}
+        if canonical else
+        {"StreamK": 3, "StreamKForceDPOnly": int(source_dp)}
+    )
+    state["AssignedDerivedParameters"] = True
+    state["AssignedProblemIndependentDerivedParameters"] = True
+
+    _apply_overrides(state, [("StreamKForceDPOnly", [int(target_dp)])])
+
+    assert state["TileProcessingStrategy"] == ("DataParallel" if target_dp else "StreamK")
+    assert state["WorkAssignment"] == "StaticGrid"
+    assert state["_PersistentLoop"] is True
+    assert "StreamK" not in state and "StreamKForceDPOnly" not in state
+    assert state["AssignedDerivedParameters"] is False
+    assert state["AssignedProblemIndependentDerivedParameters"] is False
+
+
+@pytest.mark.parametrize("canonical", [False, True], ids=["legacy-source", "canonical-source"])
+@pytest.mark.parametrize(
+    "legacy_key, canonical_key, initial, replacement",
+    [("StreamKXCCMapping", "PersistentXCCMapping", 8, 4),
+     ("StreamKWorkStealing", "WorkQueueStealing", 1, 0)],
+)
+def test_apply_legacy_alias_override_replaces_inherited_value(
+    canonical, legacy_key, canonical_key, initial, replacement
+):
+    state = (
+        {"TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue",
+         canonical_key: initial}
+        if canonical else {"StreamK": 4, legacy_key: initial}
+    )
+
+    _apply_overrides(state, [(legacy_key, [replacement])])
+
+    assert state[canonical_key] == replacement
+    assert legacy_key not in state
+    assert state["TileProcessingStrategy"] == "StreamK"
+    assert state["WorkAssignment"] == "DynamicWorkQueue"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [[("StreamKForceDPOnly", [1]), ("TileProcessingStrategy", ["StreamK"])],
+     [("StreamK", [4]), ("WorkAssignment", ["Hybrid"])],
+     [("StreamKXCCMapping", [4]), ("PersistentXCCMapping", [8])],
+     [("StreamKWorkStealing", [0]), ("WorkQueueStealing", [1])]],
+)
+def test_apply_overrides_rejects_explicit_alias_conflicts(overrides):
+    state = {"TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid"}
+    original = dict(state)
+    with pytest.raises(ValueError, match="Conflicting"):
+        _apply_overrides(state, overrides)
+    assert state == original
+
+
+def test_apply_consistent_legacy_and_canonical_overrides():
+    state = {"TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid"}
+    _apply_overrides(state, [("StreamKForceDPOnly", [1]),
+                             ("TileProcessingStrategy", ["DataParallel"])])
+    assert state["TileProcessingStrategy"] == "DataParallel"
+    assert state["WorkAssignment"] == "StaticGrid"
+
+
+@pytest.mark.parametrize("mode", [4, 5])
+def test_apply_legacy_dp_override_preserves_unsupported_source_assignment(mode):
+    state = {"StreamK": mode}
+    with pytest.raises(ValueError, match="requires non-atomic StreamK=3"):
+        _apply_overrides(state, [("StreamKForceDPOnly", [1])])
 
 
 def test_unique_staged_name_disambiguates_collisions():
