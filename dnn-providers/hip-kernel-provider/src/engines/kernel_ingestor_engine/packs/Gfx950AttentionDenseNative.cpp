@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -108,7 +109,8 @@ constexpr std::string_view V_TOKEN = "gfx950_attention_dense.v.uid";
 constexpr std::string_view O_TOKEN = "gfx950_attention_dense.o.uid";
 /// The mask type graphMatches derived, so kernelMatches does not re-derive it.
 constexpr std::string_view CAUSAL_TOKEN = "gfx950_attention_dense.causal";
-/// The sliding window size derived from left_bound.
+/// The sliding window the candidate must have been built with. Always 0: maskTypeFor
+/// declines every left bound, so no graph that reaches the bind asks for a window.
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_dense.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_dense.scale_bits";
@@ -152,6 +154,24 @@ const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
     return &node.attributesAs<data_objects::SdpaAttributes>();
 }
 
+/// The product of @p factors, or nullopt when it does not fit in int64_t.
+///
+/// Every product of graph-controlled extents goes through this. The extents are whatever
+/// the graph claims, so an unchecked product is signed overflow -- undefined, and in
+/// practice a wrapped value that can equal a stride or pass a bound it should fail.
+std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
+{
+    int64_t product = 1;
+    for(const int64_t factor : factors)
+    {
+        if(__builtin_mul_overflow(product, factor, &product))
+        {
+            return std::nullopt;
+        }
+    }
+    return product;
+}
+
 /// Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
 /// checked before anything indexes an axis.
 bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
@@ -185,6 +205,9 @@ bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
  * extent is 1. A single-head tensor is byte-identically BSHD and BHSD while the two
  * spellings disagree on strides[H] -- a strict compare would decline a graph the kernel
  * serves perfectly, and graph_match returning nullopt empties the WHOLE engine catalog.
+ *
+ * An expected stride too large for int64_t is one no stride can equal, so that axis
+ * fails unless it is unit-extent.
  */
 bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
 {
@@ -195,12 +218,13 @@ bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
     const int64_t sequence = dims->Get(SEQ_AXIS);
     const int64_t headSize = dims->Get(HEAD_SIZE_AXIS);
 
-    const auto axisOk = [&](uint32_t axis, int64_t expected) {
-        return dims->Get(axis) == 1 || strides->Get(axis) == expected;
+    const auto axisOk = [&](uint32_t axis, std::optional<int64_t> expected) {
+        return dims->Get(axis) == 1 || (expected.has_value() && strides->Get(axis) == *expected);
     };
 
-    return axisOk(BATCH_AXIS, sequence * heads * headSize) && axisOk(HEAD_AXIS, headSize)
-           && axisOk(SEQ_AXIS, heads * headSize) && axisOk(HEAD_SIZE_AXIS, 1);
+    return axisOk(BATCH_AXIS, checkedProduct({sequence, heads, headSize}))
+           && axisOk(HEAD_AXIS, headSize) && axisOk(SEQ_AXIS, checkedProduct({heads, headSize}))
+           && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
 /// The mask kinds this engine serves. Narrower than
@@ -361,11 +385,10 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
     //
     // Three operands here: Q, K and V. O is held to the same rule, but at §5, on the
-    // conditional that compares its extents against the problem shape. The ordering is
-    // deliberate. hasBshdStrides multiplies an operand's OWN extents together to derive
-    // the stride it expects, and until dimension agreement has accepted O's extents they
-    // are whatever the graph claimed -- so that arithmetic must not run on a shape this
-    // engine has not yet agreed it can address.
+    // conditional that compares its extents against the problem shape, so that an output
+    // whose extents disagree declines on the disagreement. hasBshdStrides derives the
+    // strides it expects through checkedProduct, so its arithmetic is defined on any
+    // extents and the placement decides only which check declines a graph.
     //
     // The answer is the same wherever the clause sits: the kernel bakes BSHD for the
     // epilogue exactly as it does for the inputs, so a differently-strided output is
@@ -406,9 +429,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         return std::nullopt;
     }
     // O is Q's shape: the epilogue reuses the query base and stride verbatim. O's layout
-    // clause rides on the same conditional, AFTER the four dimension compares, so that
-    // short-circuit evaluation keeps O's layout arithmetic off any set of extents the
-    // compares have already rejected -- see §4.
+    // clause rides on the same conditional, AFTER the four dimension compares -- see §4.
     if(o->dims()->Get(BATCH_AXIS) != problem.batch
        || o->dims()->Get(HEAD_AXIS) != problem.numQueryHeads
        || o->dims()->Get(SEQ_AXIS) != problem.seqLenQ
@@ -430,15 +451,19 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         return std::nullopt;
     }
 
-    // --- 6. 32-bit addressing. K/V bound is bytes, Q/O is elements.
+    // --- 6. 32-bit addressing. K/V bound is bytes, Q/O is elements. A product too large
+    // for int64_t is past the limit, so it declines like one that fits and exceeds it.
     constexpr int64_t INT32_LIMIT = 2147483648LL; // 2^31
     constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and fp16 only
-    if(problem.batch * problem.seqLenKv * problem.numKvHeads * problem.headSize * BYTES_PER_ELEMENT
-       >= INT32_LIMIT)
+    const auto kvBytes = checkedProduct(
+        {problem.batch, problem.seqLenKv, problem.numKvHeads, problem.headSize, BYTES_PER_ELEMENT});
+    if(!kvBytes.has_value() || *kvBytes >= INT32_LIMIT)
     {
         return std::nullopt;
     }
-    if(problem.batch * problem.seqLenQ * problem.numQueryHeads * problem.headSize >= INT32_LIMIT)
+    const auto qElements
+        = checkedProduct({problem.batch, problem.seqLenQ, problem.numQueryHeads, problem.headSize});
+    if(!qElements.has_value() || *qElements >= INT32_LIMIT)
     {
         return std::nullopt;
     }
@@ -543,10 +568,13 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     {
         return std::nullopt;
     }
-    // mma_core_mode: UNSET and explicit FLOAT are inert. Written as an allow-list:
-    // the naive `!= UNSET` silently declines every shipped SdpaFwd bundle (they set FLOAT).
-    if(attributes.mma_core_mode() != data_objects::DataType::UNSET
-       && attributes.mma_core_mode() != data_objects::DataType::FLOAT)
+    // mma_core_mode is the MMA operand precision. This kernel's MFMA operands are the
+    // graph's own fp16/bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
+    // describe what it runs. FLOAT and every FP8 mode ask for operands it never forms, so
+    // they decline. An allow-list, so an enum value added later declines until judged.
+    const auto mmaCoreMode = attributes.mma_core_mode();
+    if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::HALF
+       && mmaCoreMode != data_objects::DataType::BFLOAT16)
     {
         return std::nullopt;
     }

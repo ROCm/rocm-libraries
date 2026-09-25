@@ -313,17 +313,22 @@ int64_t ieee754Bits(float value)
 // ---------------------------------------------------------------------------
 
 /// The ABI the rocKE builder declares: four `ptr<dtype, global>`, then `scale` as f32,
-/// then `batch`, `seqlen_q`, `seqlen_kv` as i32. Recorded so the signature comparison
-/// agrees and the failure below is the archive's, not a signature mismatch;
-/// TestGfx950AttentionDenseSignature.cpp owns that comparison.
+/// then `batch`, `seqlen_q`, `seqlen_kv` as i32 -- named, as hkp_pack records it. Recorded
+/// so the signature comparison agrees and the failure below is the archive's, not a
+/// signature mismatch; TestGfx950AttentionDenseSignature.cpp owns that comparison.
 std::vector<KernelArgument> recordedSignature()
 {
     constexpr uint32_t POINTER_BYTES = 8;
     constexpr uint32_t SCALAR_BYTES = 4;
 
-    const KernelArgument buffer{"global_buffer", POINTER_BYTES, 0, ""};
-    const KernelArgument scalar{"by_value", SCALAR_BYTES, 0, ""};
-    return {buffer, buffer, buffer, buffer, scalar, scalar, scalar, scalar};
+    return {KernelArgument{"global_buffer", POINTER_BYTES, 0, "q_ptr"},
+            KernelArgument{"global_buffer", POINTER_BYTES, 0, "k_ptr"},
+            KernelArgument{"global_buffer", POINTER_BYTES, 0, "v_ptr"},
+            KernelArgument{"global_buffer", POINTER_BYTES, 0, "o_ptr"},
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"}};
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, carrying the

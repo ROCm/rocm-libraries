@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -63,12 +64,13 @@
  * values out of the C++ under test would assert only that it equals itself.
  *
  * WHAT IS PINNED. requireSignatureMatch compares `kind` and `size`, and `name` only when
- * both sides carry one. The pack records no names, so these cases reach kind, size, count
- * and order. `offset` is printed and never compared, which is why every expectation below
- * carries zero for it: it is not part of the comparison and the pack's own list does not
- * populate it either. f32 and i32 are indistinguishable at this seam -- both are
- * `by_value` of 4 bytes -- so the scale-versus-shape split within the by-value tail is
- * pinned only by position and width, not by element type.
+ * both sides carry one. The descriptor records the names hkp_pack lowers from the Python
+ * parameter list, so the recorded ABI here carries them too, and the cases reach kind,
+ * size, count, order and name. The name comparison is the only one that tells the four
+ * pointers apart, or `scale` (f32) from the i32 shape parameters -- all four by-value
+ * slots are `by_value` of 4 bytes -- so an exchange of two like slots, or a slot under
+ * another name, is refused by name alone. `offset` is printed and never compared, which
+ * is why every expectation below carries zero for it.
  *
  * No device, no compile and no launch: the archive named here does not exist, and both
  * the signature refusal and the archive's absence are raised on the host.
@@ -112,12 +114,17 @@ constexpr std::size_t SCALE_INDEX = 4;
 constexpr std::size_t LAST_INDEX = 7;
 
 /// (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv): four buffers, then
-/// an f32, then three i32.
+/// an f32, then three i32, under the names attention_dense_signature gives them.
 std::vector<KernelArgument> pythonAbi()
 {
-    const KernelArgument buffer{BUFFER_KIND, POINTER_BYTES, 0, ""};
-    const KernelArgument scalar{BY_VALUE_KIND, SCALAR_BYTES, 0, ""};
-    return {buffer, buffer, buffer, buffer, scalar, scalar, scalar, scalar};
+    return {KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "q_ptr"},
+            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "k_ptr"},
+            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "v_ptr"},
+            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "o_ptr"},
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "scale"},
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "batch"},
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_q"},
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_kv"}};
 }
 
 /// The form a persistent body would take: the same four pointers and scale, with the
@@ -407,6 +414,49 @@ TEST(TestGfx950AttentionDenseSignature, RefusesAWidenedScalarSlot)
     // a 64-bit slot would take the next four bytes of the segment as its high half.
     expectRefused(withArgument(LAST_INDEX, KernelArgument{BY_VALUE_KIND, POINTER_BYTES, 0, ""}),
                   "the shape parameters are 32-bit");
+}
+
+// =============================================================================
+// Name
+// =============================================================================
+
+TEST(TestGfx950AttentionDenseSignature, RefusesEachSlotUnderAnotherName)
+{
+    // Kind, size, count and order all agree; only the one slot's name differs. A pack that
+    // marshals under another spelling than the Python declares is refused rather than
+    // launched on the chance that the two lists still line up.
+    const auto abi = pythonAbi();
+    for(std::size_t index = 0; index < abi.size(); ++index)
+    {
+        auto renamed = abi;
+        renamed.at(index).name += "_renamed";
+        expectRefused(renamed, abi.at(index).name.c_str());
+    }
+}
+
+TEST(TestGfx950AttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
+{
+    // Every pair of slots sharing a kind and a size, exchanged: the four pointers among
+    // themselves, and the four by-value scalars -- scale included -- among themselves.
+    // Kind and size agree position by position, so the names are the only thing that
+    // separates each of these from the shipped ABI; accepted, the kernel reads keys as
+    // queries, or a batch count as a sequence length, with no fault and no status.
+    const auto abi = pythonAbi();
+    for(std::size_t first = 0; first < abi.size(); ++first)
+    {
+        for(std::size_t second = first + 1; second < abi.size(); ++second)
+        {
+            if(abi.at(first).kind != abi.at(second).kind
+               || abi.at(first).size != abi.at(second).size)
+            {
+                continue;
+            }
+            auto exchanged = abi;
+            std::swap(exchanged.at(first), exchanged.at(second));
+            const std::string what = abi.at(first).name + " <-> " + abi.at(second).name;
+            expectRefused(exchanged, what.c_str());
+        }
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

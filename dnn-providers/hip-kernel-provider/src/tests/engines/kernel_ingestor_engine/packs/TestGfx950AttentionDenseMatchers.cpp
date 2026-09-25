@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -14,11 +15,13 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
@@ -26,6 +29,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
+#include "Gfx950AttentionDenseBshdBundles.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -41,15 +45,19 @@
  *
  * gfx950-specific behaviors covered:
  *   - LAYOUT: every operand's stride spelling is set independently, so each tensor's clause
- *     of the layout gate is pinned by a case that flips that tensor and nothing else. Q, K
- *     and V are gated together; O is gated from the O-dimension conditional instead, so
- *     that an output whose extents were never accepted declines before its own layout
- *     arithmetic runs. All four are gated in graph_match either way; prepare() re-checks
- *     the output as defence in depth for a caller that reaches the handler without having
- *     matched.
+ *     of the layout gate is pinned by a case that flips that tensor and nothing else, and
+ *     a stride vector can be written out whole, so each axis's clause is pinned by a case
+ *     that perturbs that axis and nothing else. Q, K and V are gated together; O is gated
+ *     from the O-dimension conditional instead. All four are gated in graph_match either
+ *     way; prepare() re-checks the output as defence in depth for a caller that reaches
+ *     the handler without having matched.
  *   - SHAPE: per-operand dimension overrides sit beside the layout fields, so a single
  *     operand can disagree with the problem shape on one axis while staying dense BSHD for
  *     its own extents. That is what makes the cross-operand agreement clauses reachable.
+ *   - EXTENT ARITHMETIC: each 32-bit bound is pinned one step either side of its limit,
+ *     and every product of graph extents that does not fit in int64_t declines.
+ *   - BUNDLES: every checked-in SdpaFwd/bshd bundle is embedded at configure time and
+ *     held to the graph_match verdict and cold winner recorded for it.
  *   - RAGGED: declined. The catalog is aligned-only: a candidate whose `ragged` field is
  *     not 0 is declined at every shape, its own authored one included, and a graph whose
  *     lengths no tile divides admits no candidate at all.
@@ -119,6 +127,13 @@ std::vector<int64_t> paddedBshdStrides(int64_t heads, int64_t sequence, int64_t 
     return {sequence * rowStride, headSize, rowStride, 1};
 }
 
+/// BSDH strides for the same LOGICAL dims -- token-major like BSHD, but with head_size
+/// outer to head, so the head axis is the unit-stride one.
+std::vector<int64_t> bsdhStrides(int64_t heads, int64_t sequence, int64_t headSize)
+{
+    return {sequence * headSize * heads, 1, headSize * heads, heads};
+}
+
 /// The stride spelling one operand carries. Chosen per tensor so a fixture can hand Q
 /// one layout and K, V or O another -- the mixed-layout graph is the hazard the
 /// per-operand clauses of the matcher exist to catch.
@@ -126,7 +141,8 @@ enum class StrideLayout
 {
     BSHD,
     BHSD,
-    PADDED_BSHD
+    PADDED_BSHD,
+    BSDH
 };
 
 std::vector<int64_t>
@@ -138,10 +154,26 @@ std::vector<int64_t>
         return bhsdStrides(heads, sequence, headSize);
     case StrideLayout::PADDED_BSHD:
         return paddedBshdStrides(heads, sequence, headSize);
+    case StrideLayout::BSDH:
+        return bsdhStrides(heads, sequence, headSize);
     case StrideLayout::BSHD:
     default:
         return bshdStrides(heads, sequence, headSize);
     }
+}
+
+/// An operand's stride vector: @p stridesOverride verbatim when set, otherwise derived
+/// from @p layout and the operand's own extents. A ternary, not value_or: value_or
+/// evaluates its argument, and for an overriding spec that argument is a product of
+/// extents chosen precisely because it does not fit.
+std::vector<int64_t> operandStrides(const std::optional<std::vector<int64_t>>& stridesOverride,
+                                    StrideLayout layout,
+                                    int64_t heads,
+                                    int64_t sequence,
+                                    int64_t headSize)
+{
+    return stridesOverride.has_value() ? *stridesOverride
+                                       : stridesFor(layout, heads, sequence, headSize);
 }
 
 struct GraphSpec
@@ -154,7 +186,9 @@ struct GraphSpec
     int64_t headSize = HEAD_SIZE;
     int64_t headSizeV = HEAD_SIZE;
     data_objects::DataType dataType = data_objects::DataType::BFLOAT16;
+    std::optional<data_objects::DataType> kDataType;
     std::optional<data_objects::DataType> vDataType;
+    std::optional<data_objects::DataType> oDataType;
     StrideLayout qLayout = StrideLayout::BSHD;
     StrideLayout kLayout = StrideLayout::BSHD;
     StrideLayout vLayout = StrideLayout::BSHD;
@@ -176,13 +210,28 @@ struct GraphSpec
     std::optional<int64_t> oNumHeads;
     std::optional<int64_t> oSeqLen;
     std::optional<int64_t> oHeadSize;
+    std::optional<int64_t> kHeadSize;
+    std::optional<int64_t> vNumHeads;
+    std::optional<int64_t> vSeqLen;
+    std::optional<int64_t> vHeadSize;
 
-    // O's stride vector, written out instead of derived from O's extents. The layout
-    // fields above cannot spell a graph whose extents are too large to multiply together:
-    // stridesFor would have to evaluate the very product the matcher must not evaluate.
-    // A spec that sets this carries the strides verbatim and the fixture computes nothing
-    // from O's dims.
+    // K's dims written out whole, for the one family of graphs the per-axis overrides
+    // cannot spell: an operand of another rank.
+    std::optional<std::vector<int64_t>> kDimsOverride;
+
+    // Per-operand stride vectors, written out instead of derived from the operand's
+    // extents. They spell a single-axis stride perturbation the layout fields cannot, and
+    // a graph whose extents are too large to multiply together: stridesFor would have to
+    // evaluate the very product the matcher must not evaluate. A spec that sets one
+    // carries it verbatim and the fixture computes nothing from that operand's dims.
+    std::optional<std::vector<int64_t>> qStridesOverride;
+    std::optional<std::vector<int64_t>> kStridesOverride;
+    std::optional<std::vector<int64_t>> vStridesOverride;
     std::optional<std::vector<int64_t>> oStridesOverride;
+
+    // The operand, by uid, flagged virtual or runtime pass-by-value.
+    std::optional<int64_t> virtualUid;
+    std::optional<int64_t> passByValueUid;
 
     // Mask. Defaults to top-left causal.
     std::optional<int64_t> leftBound = -1;
@@ -197,11 +246,28 @@ struct GraphSpec
     std::optional<int64_t> attnMaskUid;
     std::optional<int64_t> scaleTensorUid;
     std::optional<int64_t> seqLenQUid;
+    std::optional<int64_t> seqLenKvUid;
+    std::optional<int64_t> seedUid;
+    std::optional<int64_t> offsetUid;
+    std::optional<int64_t> dropoutMaskUid;
+    std::optional<int64_t> dropoutScaleUid;
     std::optional<int64_t> pageTableKUid;
+    std::optional<int64_t> pageTableVUid;
+    std::optional<int32_t> maxSeqLenKv;
     std::optional<int64_t> sinkTokenUid;
     std::optional<int64_t> blockMaskUid;
     std::optional<int64_t> statsUid;
+    std::optional<int64_t> maxUid;
+    std::optional<int64_t> sumExpUid;
+    std::optional<int64_t> rngDumpUid;
     std::optional<int64_t> descaleQUid;
+    std::optional<int64_t> descaleKUid;
+    std::optional<int64_t> descaleVUid;
+    std::optional<int64_t> descaleSUid;
+    std::optional<int64_t> scaleSUid;
+    std::optional<int64_t> scaleOUid;
+    std::optional<int64_t> amaxSUid;
+    std::optional<int64_t> amaxOUid;
     std::optional<float> dropoutProbability;
     std::optional<bool> generateStats;
     bool alibiMask = false;
@@ -234,43 +300,52 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
 
     const std::vector<int64_t> qDims{
         spec.qBatch.value_or(spec.batch), spec.numQueryHeads, spec.seqLenQ, spec.headSize};
-    const std::vector<int64_t> kDims{
-        spec.kBatch.value_or(spec.batch), spec.numKvHeads, spec.seqLenKv, spec.headSize};
+    const int64_t keyHeadSize = spec.kHeadSize.value_or(spec.headSize);
+    const std::vector<int64_t> kDims = spec.kDimsOverride.value_or(std::vector<int64_t>{
+        spec.kBatch.value_or(spec.batch), spec.numKvHeads, spec.seqLenKv, keyHeadSize});
+    const int64_t valueHeads = spec.vNumHeads.value_or(spec.numKvHeads);
+    const int64_t valueSeqLen = spec.vSeqLen.value_or(spec.seqLenKv);
+    const int64_t valueHeadSize = spec.vHeadSize.value_or(spec.headSizeV);
     const std::vector<int64_t> vDims{
-        spec.vBatch.value_or(spec.batch), spec.numKvHeads, spec.seqLenKv, spec.headSizeV};
+        spec.vBatch.value_or(spec.batch), valueHeads, valueSeqLen, valueHeadSize};
     const std::vector<int64_t> oDims{
         spec.oBatch.value_or(spec.batch), outputHeads, outputSeqLen, outputHeadSize};
 
-    const auto qStrides = stridesFor(spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
-    const auto kStrides = stridesFor(spec.kLayout, spec.numKvHeads, spec.seqLenKv, spec.headSize);
-    const auto vStrides = stridesFor(spec.vLayout, spec.numKvHeads, spec.seqLenKv, spec.headSizeV);
-    // A ternary, not value_or: value_or evaluates its argument, and for an overriding spec
-    // that argument is the product of extents chosen precisely because it does not fit.
-    const std::vector<int64_t> oStrides
-        = spec.oStridesOverride.has_value()
-              ? *spec.oStridesOverride
-              : stridesFor(spec.oLayout, outputHeads, outputSeqLen, outputHeadSize);
+    const auto qStrides = operandStrides(
+        spec.qStridesOverride, spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
+    const auto kStrides = operandStrides(
+        spec.kStridesOverride, spec.kLayout, spec.numKvHeads, spec.seqLenKv, keyHeadSize);
+    const auto vStrides = operandStrides(
+        spec.vStridesOverride, spec.vLayout, valueHeads, valueSeqLen, valueHeadSize);
+    const auto oStrides = operandStrides(
+        spec.oStridesOverride, spec.oLayout, outputHeads, outputSeqLen, outputHeadSize);
 
     const std::vector<int64_t>* const qStridesPtr = spec.omitStrides ? nullptr : &qStrides;
     const std::vector<int64_t>* const kStridesPtr = spec.omitStrides ? nullptr : &kStrides;
     const std::vector<int64_t>* const vStridesPtr = spec.omitStrides ? nullptr : &vStrides;
     const std::vector<int64_t>* const oStridesPtr = spec.omitStrides ? nullptr : &oStrides;
 
+    const auto tensorFor = [&](int64_t uid,
+                               data_objects::DataType dataType,
+                               const std::vector<int64_t>* strides,
+                               const std::vector<int64_t>& dims) {
+        return data_objects::CreateTensorAttributesDirect(builder,
+                                                          uid,
+                                                          nullptr,
+                                                          dataType,
+                                                          strides,
+                                                          &dims,
+                                                          spec.virtualUid == uid,
+                                                          data_objects::TensorValue::NONE,
+                                                          0,
+                                                          spec.passByValueUid == uid);
+    };
+
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, Q_UID, nullptr, spec.dataType, qStridesPtr, &qDims, false));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, K_UID, nullptr, spec.dataType, kStridesPtr, &kDims, false));
-    tensors.push_back(
-        data_objects::CreateTensorAttributesDirect(builder,
-                                                   V_UID,
-                                                   nullptr,
-                                                   spec.vDataType.value_or(spec.dataType),
-                                                   vStridesPtr,
-                                                   &vDims,
-                                                   false));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, O_UID, nullptr, spec.dataType, oStridesPtr, &oDims, false));
+    tensors.push_back(tensorFor(Q_UID, spec.dataType, qStridesPtr, qDims));
+    tensors.push_back(tensorFor(K_UID, spec.kDataType.value_or(spec.dataType), kStridesPtr, kDims));
+    tensors.push_back(tensorFor(V_UID, spec.vDataType.value_or(spec.dataType), vStridesPtr, vDims));
+    tensors.push_back(tensorFor(O_UID, spec.oDataType.value_or(spec.dataType), oStridesPtr, oDims));
 
     const auto attributesFor = [&]() {
         data_objects::SdpaAttributesBuilder attributesBuilder(builder);
@@ -307,9 +382,37 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
         {
             attributesBuilder.add_seq_len_q_tensor_uid(*spec.seqLenQUid);
         }
+        if(spec.seqLenKvUid.has_value())
+        {
+            attributesBuilder.add_seq_len_kv_tensor_uid(*spec.seqLenKvUid);
+        }
+        if(spec.seedUid.has_value())
+        {
+            attributesBuilder.add_seed_tensor_uid(*spec.seedUid);
+        }
+        if(spec.offsetUid.has_value())
+        {
+            attributesBuilder.add_offset_tensor_uid(*spec.offsetUid);
+        }
+        if(spec.dropoutMaskUid.has_value())
+        {
+            attributesBuilder.add_dropout_mask_tensor_uid(*spec.dropoutMaskUid);
+        }
+        if(spec.dropoutScaleUid.has_value())
+        {
+            attributesBuilder.add_dropout_scale_tensor_uid(*spec.dropoutScaleUid);
+        }
         if(spec.pageTableKUid.has_value())
         {
             attributesBuilder.add_page_table_k_tensor_uid(*spec.pageTableKUid);
+        }
+        if(spec.pageTableVUid.has_value())
+        {
+            attributesBuilder.add_page_table_v_tensor_uid(*spec.pageTableVUid);
+        }
+        if(spec.maxSeqLenKv.has_value())
+        {
+            attributesBuilder.add_max_seq_len_kv(*spec.maxSeqLenKv);
         }
         if(spec.sinkTokenUid.has_value())
         {
@@ -323,9 +426,49 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
         {
             attributesBuilder.add_stats_tensor_uid(*spec.statsUid);
         }
+        if(spec.maxUid.has_value())
+        {
+            attributesBuilder.add_max_tensor_uid(*spec.maxUid);
+        }
+        if(spec.sumExpUid.has_value())
+        {
+            attributesBuilder.add_sum_exp_tensor_uid(*spec.sumExpUid);
+        }
+        if(spec.rngDumpUid.has_value())
+        {
+            attributesBuilder.add_rng_dump_tensor_uid(*spec.rngDumpUid);
+        }
         if(spec.descaleQUid.has_value())
         {
             attributesBuilder.add_descale_q_tensor_uid(*spec.descaleQUid);
+        }
+        if(spec.descaleKUid.has_value())
+        {
+            attributesBuilder.add_descale_k_tensor_uid(*spec.descaleKUid);
+        }
+        if(spec.descaleVUid.has_value())
+        {
+            attributesBuilder.add_descale_v_tensor_uid(*spec.descaleVUid);
+        }
+        if(spec.descaleSUid.has_value())
+        {
+            attributesBuilder.add_descale_s_tensor_uid(*spec.descaleSUid);
+        }
+        if(spec.scaleSUid.has_value())
+        {
+            attributesBuilder.add_scale_s_tensor_uid(*spec.scaleSUid);
+        }
+        if(spec.scaleOUid.has_value())
+        {
+            attributesBuilder.add_scale_o_tensor_uid(*spec.scaleOUid);
+        }
+        if(spec.amaxSUid.has_value())
+        {
+            attributesBuilder.add_amax_s_tensor_uid(*spec.amaxSUid);
+        }
+        if(spec.amaxOUid.has_value())
+        {
+            attributesBuilder.add_amax_o_tensor_uid(*spec.amaxOUid);
         }
         if(spec.dropoutProbability.has_value())
         {
@@ -680,12 +823,13 @@ KernelSpec vitSemantic()
     return spec;
 }
 
-/// Runs graph_match, then kernel_match over @p candidates, and returns the survivors'
-/// tiles -- ranked through the engine's score symbol and the SDK's NativeKernelHeuristic
-/// when @p rank, in authoring order otherwise.
-std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
-                                  const std::vector<KernelSpec>& candidates,
-                                  bool rank)
+/// Runs graph_match over @p graph, then kernel_match over @p candidates, and returns the
+/// survivors' tiles -- ranked through the engine's score symbol and the SDK's
+/// NativeKernelHeuristic when @p rank, in authoring order otherwise.
+std::vector<Tile>
+    matchCandidatesIn(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
+                      const std::vector<KernelSpec>& candidates,
+                      bool rank)
 {
     registerNativeIngestorSymbols();
     const auto graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
@@ -693,9 +837,6 @@ std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
     const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
         std::string(KERNEL_MATCHER_SYMBOL));
 
-    auto builder = buildSdpaGraph(graphSpec);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
@@ -731,6 +872,16 @@ std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
         tiles.emplace_back(entry.getIntMetadata("block_m"), entry.getIntMetadata("block_n"));
     }
     return tiles;
+}
+
+std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
+                                  const std::vector<KernelSpec>& candidates,
+                                  bool rank)
+{
+    auto builder = buildSdpaGraph(graphSpec);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    return matchCandidatesIn(graph, candidates, rank);
 }
 
 TileSet admittedTiles(const GraphSpec& graph, const std::vector<KernelSpec>& candidates)
@@ -876,6 +1027,113 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)
     EXPECT_FALSE(matchGraph(padded).has_value());
 }
 
+// ---------------------------------------------------------------------------
+// One stride axis at a time. hasBshdStrides ANDs four per-axis clauses, and the layouts
+// above each break two at once (BHSD: head and sequence; padded: sequence and batch).
+// Each case below perturbs exactly one axis of one operand at B=2, H=4, so no axis is
+// unit-extent and exempt, and that axis's clause is the only one that can decline it.
+// ---------------------------------------------------------------------------
+
+/// Indices into a (B, H, S, D) stride vector.
+constexpr std::size_t BATCH_STRIDE = 0;
+constexpr std::size_t HEAD_STRIDE = 1;
+constexpr std::size_t ELEMENT_STRIDE = 3;
+
+/// The packed BSHD strides of the base shape with the stride at @p axis replaced.
+std::vector<int64_t> packedStridesWith(std::size_t axis, int64_t stride)
+{
+    auto strides = bshdStrides(HEADS, SEQ, HEAD_SIZE);
+    strides.at(axis) = stride;
+    return strides;
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAPaddedBatchStrideAlone)
+{
+    // A query sliced out of a larger allocation: rows and heads packed, batches spaced one
+    // row further apart. The kernel bakes S * H * D as the batch pitch, so every batch
+    // after the first is read one row early.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec padded = spec;
+    padded.qStridesOverride
+        = packedStridesWith(BATCH_STRIDE, SEQ * HEADS * HEAD_SIZE + HEADS * HEAD_SIZE);
+    EXPECT_FALSE(matchGraph(padded).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAKeyValueCacheViewByItsBatchStride)
+{
+    // K and V as views of a cache allocated for twice the sequence: each batch's rows are
+    // packed, but batches sit a whole cache length apart.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    const auto cacheView = packedStridesWith(BATCH_STRIDE, 2 * SEQ * HEADS * HEAD_SIZE);
+    GraphSpec keyView = spec;
+    keyView.kStridesOverride = cacheView;
+    EXPECT_FALSE(matchGraph(keyView).has_value());
+
+    GraphSpec valueView = spec;
+    valueView.vStridesOverride = cacheView;
+    EXPECT_FALSE(matchGraph(valueView).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABroadcastBatchStride)
+{
+    // Batch stride 0: one K broadcast across the batch. The kernel would read a distinct
+    // K per batch from memory that holds one.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec broadcast = spec;
+    broadcast.kStridesOverride = packedStridesWith(BATCH_STRIDE, 0);
+    EXPECT_FALSE(matchGraph(broadcast).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAHeadStrideAlone)
+{
+    // Rows packed at H * D, heads at a 2 * D pitch: the heads overlap one another.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec overlapping = spec;
+    overlapping.kStridesOverride = packedStridesWith(HEAD_STRIDE, 2 * HEAD_SIZE);
+    EXPECT_FALSE(matchGraph(overlapping).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABroadcastHeadStride)
+{
+    // Head stride 0: the MQA-expanded view, one KV head presented as H of them. The
+    // kernel would read H distinct heads from memory that holds one.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec expanded = spec;
+    expanded.kStridesOverride = packedStridesWith(HEAD_STRIDE, 0);
+    EXPECT_FALSE(matchGraph(expanded).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesANonUnitElementStrideAlone)
+{
+    // head_size stride 2 with every other axis packed: legal as a stride vector, and read
+    // by the kernel as if contiguous.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec strided = spec;
+    strided.qStridesOverride = packedStridesWith(ELEMENT_STRIDE, 2);
+    EXPECT_FALSE(matchGraph(strided).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBsdhLayout)
+{
+    // Token-major like BSHD but head fastest-varying: same row and batch pitch, with the
+    // head and element strides exchanged.
+    GraphSpec spec;
+    spec.qLayout = StrideLayout::BSDH;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBottomRightCausalWhenSeqLensDiffer)
 {
     // Top-left causal clamp != bottom-right when Sq != Skv: serving it is a wrong answer.
@@ -892,6 +1150,37 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsBottomRightCausalWhenSeqLensMatc
     GraphSpec spec;
     spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     EXPECT_TRUE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesTheDeprecatedBottomRightBooleanAtUnequalSeqLens)
+{
+    // causal_mask_bottom_right alone, no bounds: bottom-right causal, which the top-left
+    // kernel serves only at Sq == Skv. Read as top-left instead, Sq != Skv would be
+    // served with the other corner's mask.
+    GraphSpec spec;
+    spec.leftBound = std::nullopt;
+    spec.rightBound = std::nullopt;
+    spec.causalMaskBottomRightDeprecated = true;
+    spec.seqLenKv = SEQ * 2;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, ServesTheDeprecatedBottomRightBooleanAtEqualSeqLens)
+{
+    // The positive neighbour: at Sq == Skv the corners coincide, and the graph is served
+    // by the causal candidate and refused by the unmasked one.
+    GraphSpec spec;
+    spec.leftBound = std::nullopt;
+    spec.rightBound = std::nullopt;
+    spec.causalMaskBottomRightDeprecated = true;
+
+    KernelSpec causal;
+    causal.causal = 1;
+    EXPECT_TRUE(matchesKernel(spec, causal));
+
+    KernelSpec unmasked;
+    unmasked.causal = 0;
+    EXPECT_FALSE(matchesKernel(spec, unmasked));
 }
 
 // ---------------------------------------------------------------------------
@@ -912,6 +1201,70 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMultiNodeGraph)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandOfAnotherRank)
+{
+    // Every axis index the matcher reads assumes rank 4. A rank-5 K carries all four of
+    // them and more, so only the rank check stands between it and a match; rank 3 would
+    // have its missing axis read out of bounds.
+    const auto packed = bshdStrides(HEADS, SEQ, HEAD_SIZE);
+    const std::vector<int64_t> rank4Dims{BATCH, HEADS, SEQ, HEAD_SIZE};
+    const std::vector<int64_t> rank5Dims{BATCH, HEADS, SEQ, HEAD_SIZE, 1};
+    const std::vector<int64_t> rank5Strides{packed.at(0), packed.at(1), packed.at(2), 1, 1};
+
+    GraphSpec control;
+    control.kDimsOverride = rank4Dims;
+    control.kStridesOverride = packed;
+    EXPECT_TRUE(matchGraph(control).has_value());
+
+    GraphSpec bothRank5 = control;
+    bothRank5.kDimsOverride = rank5Dims;
+    bothRank5.kStridesOverride = rank5Strides;
+    EXPECT_FALSE(matchGraph(bothRank5).has_value());
+
+    GraphSpec dimsRank5 = control;
+    dimsRank5.kDimsOverride = rank5Dims;
+    EXPECT_FALSE(matchGraph(dimsRank5).has_value());
+
+    GraphSpec stridesRank5 = control;
+    stridesRank5.kStridesOverride = rank5Strides;
+    EXPECT_FALSE(matchGraph(stridesRank5).has_value());
+
+    GraphSpec rank3 = control;
+    rank3.kDimsOverride = std::vector<int64_t>{BATCH, HEADS, SEQ};
+    rank3.kStridesOverride = std::vector<int64_t>{packed.at(0), packed.at(1), packed.at(2)};
+    EXPECT_FALSE(matchGraph(rank3).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAZeroExtent)
+{
+    // A zero batch or a zero-length KV sequence. The fixture's strides stay consistent
+    // with the zero and no bound is approached, so the extent check is the only one that
+    // fails.
+    GraphSpec noBatch;
+    noBatch.batch = 0;
+    EXPECT_FALSE(matchGraph(noBatch).has_value());
+
+    GraphSpec noKeys;
+    noKeys.seqLenKv = 0;
+    EXPECT_FALSE(matchGraph(noKeys).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAVirtualOperand)
+{
+    // A virtual tensor has no device buffer for the launch to hand the kernel.
+    GraphSpec spec;
+    spec.virtualUid = K_UID;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAPassByValueOperand)
+{
+    // A runtime pass-by-value tensor is a scalar, not a buffer the ABI takes a pointer to.
+    GraphSpec spec;
+    spec.passByValueUid = V_UID;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedHeadSize)
 {
     GraphSpec spec;
@@ -922,7 +1275,10 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedHeadSize)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
 {
-    // hipDNN permits D_qk != D_v; the kernel has ONE head_size.
+    // hipDNN permits D_qk != D_v; the kernel has ONE head_size. O's head size follows V's,
+    // so V and O disagree together here and either clause declines this graph; the V and
+    // O clauses are isolated by DeclinesValueHeadSizeMismatch and
+    // DeclinesOutputHeadSizeMismatch.
     GraphSpec spec;
     spec.headSizeV = 64;
     EXPECT_FALSE(matchGraph(spec).has_value());
@@ -939,8 +1295,8 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
 // Each case perturbs exactly one axis of one operand and leaves that operand's strides
 // dense BSHD for its own extents, so the layout gate passes and the cross-tensor clause
 // named in the comment is the only thing that can decline the graph. Each is paired
-// with the unperturbed spec as its positive control. The last case is the exception that
-// proves the ordering: its extents are too large to derive strides from at all.
+// with the unperturbed spec as its positive control. DeclinesOverflowingOutputExtents is
+// the exception: its extents are too large to derive strides from at all.
 // ---------------------------------------------------------------------------
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputBatchMismatch)
@@ -983,9 +1339,9 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputSequenceLengthMismatch)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputHeadSizeMismatch)
 {
-    // Kills the O-vs-headSize clause, which compares O against Q's head size. headSizeV
-    // is left at the default so V still agrees with Q and the V clause -- the one
-    // DeclinesMismatchedHeadSizes pins -- cannot be what stops this graph.
+    // Kills the O-vs-headSize clause, which compares O against Q's head size. Only O's
+    // extent moves, so V still agrees with Q and the V head-size clause -- which
+    // DeclinesValueHeadSizeMismatch pins -- cannot be what stops this graph.
     const GraphSpec spec;
     EXPECT_TRUE(matchGraph(spec).has_value());
 
@@ -999,19 +1355,16 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOverflowingOutputExtents)
     // Holds the domain that makes the O clause order matter, and pins the decline over
     // it. O's extents here are positive and rank-4, so the well-formedness predicate
     // passes them through, but S * H * D for those extents is 2^63 -- one past
-    // INT64_MAX. That product is exactly what hasBshdStrides forms to derive the batch
-    // stride it expects, so a matcher evaluating O's layout before dimension agreement
-    // would form it on extents it has not accepted, in the signed type the graph
-    // declares. As ordered, the head-count compare rejects the graph and short-circuits
-    // that arithmetic away.
+    // INT64_MAX. That product is what hasBshdStrides derives O's batch stride from, and
+    // checkedProduct reports it as not fitting, so evaluating O's layout first would
+    // decline this graph too, with no overflow either way. As ordered, the head-count
+    // compare rejects the graph before O's layout is read.
     //
     // This case CANNOT distinguish the two orderings, and no case can. Every check
     // between the layout gate and the O-dimension compare returns nullopt on failure, so
     // moving O's layout clause changes which check declines a graph and never whether one
-    // does -- the accept sets are identical. The ordering therefore rests on that
-    // short-circuit argument rather than on a red/green result, and what this case is for
-    // is keeping the overflow-capable domain reachable and declined, so the argument
-    // stays about a shape the suite actually exercises.
+    // does -- the accept sets are identical. What this case is for is keeping the
+    // overflow-capable domain reachable and declined.
     //
     // O's strides are the ordinary dense BSHD spelling of the PROBLEM shape, the vector a
     // real output carries, so no stride value is what rejects this graph -- and, being
@@ -1065,6 +1418,53 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesQueryBatchDisagreement)
     EXPECT_FALSE(matchGraph(mismatched).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesValueHeadCountMismatch)
+{
+    // Kills the V-vs-numKvHeads clause. V is addressed with K's base and stride, so a V
+    // with more heads than K is read with K's head count: whole heads never read.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.vNumHeads = HEADS * 2;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesValueSequenceLengthMismatch)
+{
+    // Kills the V-vs-seqLenKv clause. A V shorter than K is read past its end.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.vSeqLen = SEQ / 2;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesValueHeadSizeMismatch)
+{
+    // Kills the V-vs-headSize clause. Only V's head size moves -- O keeps Q's -- so the O
+    // clause cannot be what stops this graph.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.vHeadSize = 64;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyHeadSizeMismatch)
+{
+    // Kills the K-vs-headSize clause. The kernel has one head size, taken from Q; a
+    // narrower K is read with Q's row width.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.kHeadSize = 64;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesNonDivisibleGqaGrouping)
 {
     // Integer division drops the remainder heads silently.
@@ -1079,6 +1479,33 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMixedOperandDataTypes)
     GraphSpec spec;
     spec.vDataType = data_objects::DataType::HALF;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAKeyOfAnotherDataType)
+{
+    // Kills the K dtype clause: an fp16 K beside a bf16 Q is read at bf16.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    GraphSpec mismatched = spec;
+    mismatched.kDataType = data_objects::DataType::HALF;
+    EXPECT_FALSE(matchGraph(mismatched).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOutputOfAnotherDataType)
+{
+    // Kills the O dtype clause: the epilogue writes the input's element width, so an fp16
+    // or fp32 O beside bf16 inputs is written in the wrong format.
+    const GraphSpec spec;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    for(const auto outputType : {data_objects::DataType::HALF, data_objects::DataType::FLOAT})
+    {
+        SCOPED_TRACE(data_objects::EnumNameDataType(outputType));
+        GraphSpec mismatched = spec;
+        mismatched.oDataType = outputType;
+        EXPECT_FALSE(matchGraph(mismatched).has_value());
+    }
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedDataType)
@@ -1111,6 +1538,145 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesGraphsPastThe32BitExtentLimit)
     spec.numKvHeads = 128;
     spec.seqLenQ = 131072;
     spec.seqLenKv = 131072;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// The 32-bit bounds, one at a time. rocKE's predicate (attention_dense_spec.py) declines
+// B*Skv*Hkv*D*2 >= 2^31 bytes for K/V and B*Sq*Hq*D >= 2^31 elements for Q/O. Each pair
+// below sits one step either side of one bound while the other stays far below its own,
+// so each bound, its strictness and its bytes factor are pinned separately.
+// ---------------------------------------------------------------------------
+
+constexpr int64_t INT32_LIMIT = int64_t{1} << 31;
+
+TEST(TestGfx950AttentionDenseGraphMatch, QueryElementBoundAdmitsTheLastGraphUnderIt)
+{
+    // Hq = Hkv = 1 and D128: B*Sq*Hq*D = 128 * Sq, so Sq = 2^24 lands exactly on 2^31 and
+    // Sq = 2^24 - 1 is the largest graph under it. K/V is 256 tokens, 64 KiB.
+    GraphSpec spec;
+    spec.batch = 1;
+    spec.numQueryHeads = 1;
+    spec.numKvHeads = 1;
+    spec.seqLenKv = 256;
+
+    spec.seqLenQ = INT32_LIMIT / HEAD_SIZE - 1;
+    EXPECT_TRUE(matchGraph(spec).has_value()) << "2^31 - 128 elements";
+
+    spec.seqLenQ = INT32_LIMIT / HEAD_SIZE;
+    EXPECT_FALSE(matchGraph(spec).has_value()) << "exactly 2^31 elements";
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, KeyValueByteBoundAdmitsTheLastGraphUnderIt)
+{
+    // Hq = Hkv = 1 and D128: B*Skv*Hkv*D*2 = 256 * Skv bytes, so Skv = 2^23 lands exactly
+    // on 2^31 bytes -- 2^30 elements, half of what the Q/O bound allows, which is what
+    // pins the bytes factor. Q is 256 tokens.
+    GraphSpec spec;
+    spec.batch = 1;
+    spec.numQueryHeads = 1;
+    spec.numKvHeads = 1;
+    spec.seqLenQ = 256;
+
+    spec.seqLenKv = INT32_LIMIT / (HEAD_SIZE * 2) - 1;
+    EXPECT_TRUE(matchGraph(spec).has_value()) << "2^31 - 256 bytes";
+
+    spec.seqLenKv = INT32_LIMIT / (HEAD_SIZE * 2);
+    EXPECT_FALSE(matchGraph(spec).has_value()) << "exactly 2^31 bytes";
+}
+
+// ---------------------------------------------------------------------------
+// Extents whose products do not fit in int64_t. Every one is declined, and every one
+// would be accepted by an unchecked product that wrapped modulo 2^64: the wrapped value
+// is 0 or INT64_MIN, which is under any bound and equals the strides written below. The
+// fixture forms none of these products either -- strides are written out wherever
+// deriving them would overflow.
+// ---------------------------------------------------------------------------
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAKeyValueByteCountPastInt64)
+{
+    // B = 2^24, Skv = 2^32, Hkv = 1, D64: K/V is 2^63 bytes. Q is B * 1 * 1 * 64 = 2^30
+    // elements, under its bound, and K's own batch stride 2^38 fits, so the K/V bound's
+    // overflow decline is the only thing that stops this graph.
+    GraphSpec spec;
+    spec.batch = int64_t{1} << 24;
+    spec.numQueryHeads = 1;
+    spec.numKvHeads = 1;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = int64_t{1} << 32;
+    spec.headSize = 64;
+    spec.headSizeV = 64;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryElementCountPastInt64)
+{
+    // B = 2^23, Sq = 2^34, Hq = 1, D64: Q is 2^63 elements. K/V is B * 1 * 1 * 64 * 2 =
+    // 2^30 bytes, under its bound, and Q's own batch stride 2^40 fits, so the Q/O bound's
+    // overflow decline is the only thing that stops this graph.
+    GraphSpec spec;
+    spec.batch = int64_t{1} << 23;
+    spec.numQueryHeads = 1;
+    spec.numKvHeads = 1;
+    spec.seqLenQ = int64_t{1} << 34;
+    spec.seqLenKv = 1;
+    spec.headSize = 64;
+    spec.headSizeV = 64;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryBatchStrideOf2To67)
+{
+    // Q dims {2, 2^30, 2^30, 128}: S * H * D = 2^67, which wraps to 0. Q and O carry
+    // batch stride 0 beside packed head, row and element strides, so a wrapped product
+    // would accept Q's layout; the checked one fails the batch axis.
+    const std::vector<int64_t> wrappedStrides{0, HEAD_SIZE, (int64_t{1} << 30) * HEAD_SIZE, 1};
+    GraphSpec spec;
+    spec.numQueryHeads = int64_t{1} << 30;
+    spec.seqLenQ = int64_t{1} << 30;
+    spec.numKvHeads = 1;
+    spec.qStridesOverride = wrappedStrides;
+    spec.oStridesOverride = wrappedStrides;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyValueExtentsOf2To97Bytes)
+{
+    // B = S = H = 2^30 on every operand, D64: K/V is 2^97 bytes and Q is 2^96 elements,
+    // both wrapping to 0, and S * H * D = 2^66 wraps to the batch stride 0 every operand
+    // carries. Unchecked, every clause passes; checked, the batch-stride product is the
+    // first to overflow and the layout gate declines.
+    constexpr int64_t EXTENT = int64_t{1} << 30;
+    const std::vector<int64_t> wrappedStrides{0, 64, EXTENT * 64, 1};
+    GraphSpec spec;
+    spec.batch = EXTENT;
+    spec.numQueryHeads = EXTENT;
+    spec.numKvHeads = EXTENT;
+    spec.seqLenQ = EXTENT;
+    spec.seqLenKv = EXTENT;
+    spec.headSize = 64;
+    spec.headSizeV = 64;
+    spec.qStridesOverride = wrappedStrides;
+    spec.kStridesOverride = wrappedStrides;
+    spec.vStridesOverride = wrappedStrides;
+    spec.oStridesOverride = wrappedStrides;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesTheGraphMatchGateCounterexample)
+{
+    // The review's counterexample: packed BSHD, bf16, H8, D128, unmasked, Q {2^20, 8,
+    // 2^34, 128} and K/V {2^20, 8, 2^33, 128}. Every stride fits, and both bound
+    // products are exactly 2^64, which wraps to 0. Every length is a multiple of every
+    // tile, so unchecked the whole catalog would admit it.
+    GraphSpec spec;
+    spec.batch = int64_t{1} << 20;
+    spec.numQueryHeads = 8;
+    spec.numKvHeads = 8;
+    spec.seqLenQ = int64_t{1} << 34;
+    spec.seqLenKv = int64_t{1} << 33;
+    spec.leftBound = std::nullopt;
+    spec.rightBound = std::nullopt;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
@@ -1193,6 +1759,46 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesFp8Descale)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryOtherSpellingOfEachDeclinedFeature)
+{
+    // The cases above decline each feature through one spelling. Every other uid that
+    // requests the same feature -- varlen's KV side, the remaining four dropout inputs,
+    // the V page table, the rest of the FP8 scales and amaxes, and the softmax auxiliary
+    // outputs -- is set here on its own, so dropping any one of them from its decline
+    // is seen.
+    using UidField = std::optional<int64_t> GraphSpec::*;
+    const std::vector<std::pair<const char*, UidField>> spellings{
+        {"seq_len_kv", &GraphSpec::seqLenKvUid},
+        {"seed", &GraphSpec::seedUid},
+        {"offset", &GraphSpec::offsetUid},
+        {"dropout_mask", &GraphSpec::dropoutMaskUid},
+        {"dropout_scale", &GraphSpec::dropoutScaleUid},
+        {"page_table_v", &GraphSpec::pageTableVUid},
+        {"descale_k", &GraphSpec::descaleKUid},
+        {"descale_v", &GraphSpec::descaleVUid},
+        {"descale_s", &GraphSpec::descaleSUid},
+        {"scale_s", &GraphSpec::scaleSUid},
+        {"scale_o", &GraphSpec::scaleOUid},
+        {"amax_s", &GraphSpec::amaxSUid},
+        {"amax_o", &GraphSpec::amaxOUid},
+        {"max", &GraphSpec::maxUid},
+        {"sum_exp", &GraphSpec::sumExpUid},
+        {"rng_dump", &GraphSpec::rngDumpUid},
+    };
+    for(const auto& [name, field] : spellings)
+    {
+        SCOPED_TRACE(name);
+        GraphSpec spec;
+        spec.*field = EXTRA_UID;
+        EXPECT_FALSE(matchGraph(spec).has_value());
+    }
+
+    // Paged KV's scalar spelling.
+    GraphSpec maxSeqLenKv;
+    maxSeqLenKv.maxSeqLenKv = static_cast<int32_t>(SEQ);
+    EXPECT_FALSE(matchGraph(maxSeqLenKv).has_value());
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAlibiMask)
 {
     GraphSpec spec;
@@ -1214,19 +1820,43 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesNonAutoImplementationHint)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, AcceptsMmaCoreModeFloat)
+TEST(TestGfx950AttentionDenseGraphMatch, AcceptsTheSixteenBitMmaCoreModes)
 {
-    // Allow-list, not `!= UNSET`: shipped SdpaFwd bundles set FLOAT.
-    GraphSpec spec;
-    spec.mmaCoreMode = data_objects::DataType::FLOAT;
-    EXPECT_TRUE(matchGraph(spec).has_value());
+    // mma_core_mode is the MMA operand precision, and this kernel's operands are the
+    // graph's fp16/bf16 inputs. HALF is also what the cuDNN-compat shim sets whenever the
+    // caller leaves the field unset, so declining it would decline every shim graph.
+    for(const auto mode : {data_objects::DataType::UNSET,
+                           data_objects::DataType::HALF,
+                           data_objects::DataType::BFLOAT16})
+    {
+        SCOPED_TRACE(data_objects::EnumNameDataType(mode));
+        GraphSpec spec;
+        spec.mmaCoreMode = mode;
+        EXPECT_TRUE(matchGraph(spec).has_value());
+    }
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedMmaCoreMode)
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMmaCoreModeFloat)
 {
+    // An fp32-operand MMA is a computation this kernel never performs.
     GraphSpec spec;
-    spec.mmaCoreMode = data_objects::DataType::BFLOAT16;
+    spec.mmaCoreMode = data_objects::DataType::FLOAT;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryFp8MmaCoreMode)
+{
+    for(const auto mode : {data_objects::DataType::FP8_E4M3,
+                           data_objects::DataType::FP8_E5M2,
+                           data_objects::DataType::FP8_E8M0,
+                           data_objects::DataType::FP8_E4M3_FNUZ,
+                           data_objects::DataType::FP8_E5M2_FNUZ})
+    {
+        SCOPED_TRACE(data_objects::EnumNameDataType(mode));
+        GraphSpec spec;
+        spec.mmaCoreMode = mode;
+        EXPECT_FALSE(matchGraph(spec).has_value());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1285,7 +1915,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBidirectionalSlidingWindow)
     // A graph with both left_bound and a non-zero right_bound is a bidirectional
     // window. The gfx950 kernel is hard-causal (upper mask only) and has no
     // right-bound field, so serving it would produce silent wrong numerics.
-    // The review's exact scenario: left=127, right=64, same shape as a shipped SWA variant.
+    // The review's scenario: left=127, right=64. No windowed variant ships.
     GraphSpec spec;
     spec.leftBound = 127;
     spec.rightBound = 64;
@@ -1335,6 +1965,27 @@ TEST(TestGfx950AttentionDenseKernelMatch, AlignedCandidateAcceptsDifferentSeqLen
     KernelSpec kernel;
     kernel.seqLenKv = SEQ * 2;
     EXPECT_TRUE(matchesKernel(GraphSpec{}, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadSize)
+{
+    // head_size is baked (the builder's single D), and 256/64 is a legal tile at both
+    // head sizes, so only the head-size compare separates the candidates. A D64 binary
+    // serving a D128 graph reads half of every row, and the reverse reads past it.
+    GraphSpec d64Graph;
+    d64Graph.headSize = 64;
+    d64Graph.headSizeV = 64;
+    KernelSpec d64Candidate;
+    d64Candidate.headSize = 64;
+    KernelSpec d128Candidate;
+    d128Candidate.headSize = 128;
+
+    EXPECT_TRUE(matchesKernel(d64Graph, d64Candidate));
+    EXPECT_FALSE(matchesKernel(d64Graph, d128Candidate));
+
+    const GraphSpec d128Graph;
+    EXPECT_TRUE(matchesKernel(d128Graph, d128Candidate));
+    EXPECT_FALSE(matchesKernel(d128Graph, d64Candidate));
 }
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadCount)
@@ -1754,114 +2405,131 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
 }
 
 // ---------------------------------------------------------------------------
-// The shapes the checked-in BSHD bundles carry.
+// The checked-in BSHD bundles.
 //
-// The integration bundles are the only place a tile is launched rather than
-// merely selected, and a bundle that quietly stops reaching its tile still
-// passes: the engine keeps serving it on the baseline. These cases read each
-// bundle's numbers back as a GraphSpec, so a shape edited under
-// integration-test-bundles/ without re-deriving the divisibility rules fails
-// here, on a host, rather than silently narrowing on-device coverage to 256/64.
+// The integration bundles are the only place a tile is launched rather than merely
+// selected, and a bundle that quietly stops reaching its tile still passes: the engine
+// keeps serving it on the baseline. Every SdpaFwd/bshd bundle is embedded into this
+// binary when it is configured and parsed here with the SDK's own JSON reader, so an
+// edit under integration-test-bundles/ that changes which graph the engine accepts, or
+// which tile a cold build selects, fails here on a host rather than silently narrowing
+// on-device coverage. The table below is the other half: a bundle with no entry fails,
+// and so does an entry with no bundle.
 // ---------------------------------------------------------------------------
 
-/// One checked-in BSHD bundle's graph, as its JSON spells it.
-GraphSpec bundleGraph(data_objects::DataType dataType,
-                      int64_t batch,
-                      int64_t numQueryHeads,
-                      int64_t numKvHeads,
-                      int64_t seqLenQ,
-                      int64_t seqLenKv,
-                      int64_t headSize)
+/// What one bundle must do: the causal flag of the cohort that serves it, the tiles of
+/// that cohort its shape admits, and the one a cold plan build selects.
+struct BundleExpectation
 {
-    GraphSpec graph;
-    graph.dataType = dataType;
-    graph.batch = batch;
-    graph.numQueryHeads = numQueryHeads;
-    graph.numKvHeads = numKvHeads;
-    graph.seqLenQ = seqLenQ;
-    graph.seqLenKv = seqLenKv;
-    graph.headSize = headSize;
-    graph.headSizeV = headSize;
-    return graph;
+    std::string_view path;
+    int64_t causal;
+    TileSet admitted;
+    Tile coldWinner;
+};
+
+/// Keyed by path relative to integration-test-bundles/.
+std::vector<BundleExpectation> bshdBundleExpectations()
+{
+    const TileSet everyD64Tile = tileSetOf(d64Tiles());
+    const TileSet everyD128Tile = tileSetOf(d128Tiles());
+    // 384 and 1152 are multiples of 128 and not of 256, so no block_m 256 tile serves.
+    const TileSet bm128Tiles{{128, 32}, {128, 64}, {128, 128}};
+    // Skv 288 is an odd multiple of 32, so only the block_n 32 tiles serve.
+    const TileSet bn32Tiles{{128, 32}, {256, 32}};
+    const Tile baseline{256, 64};
+    const Tile bm128Bn32{128, 32};
+    return {
+        {"quick/SdpaFwd/bshd/bf16/hd128_causal_bm128/Small.json", 1, bm128Tiles, bm128Bn32},
+        {"quick/SdpaFwd/bshd/bf16/hd128_causal_gqa/Small.json", 1, everyD128Tile, baseline},
+        {"quick/SdpaFwd/bshd/bf16/hd128_causal_mha/Small.json", 1, everyD128Tile, baseline},
+        {"quick/SdpaFwd/bshd/bf16/hd64_causal_gqa/Small.json", 1, everyD64Tile, baseline},
+        {"quick/SdpaFwd/bshd/bf16/hd64_nomask_bn32/Small.json", 0, bn32Tiles, bm128Bn32},
+        {"quick/SdpaFwd/bshd/fp16/hd128_causal_mha/Small.json", 1, everyD128Tile, baseline},
+        {"quick/SdpaFwd/bshd/fp16/hd64_causal_gqa/Small.json", 1, everyD64Tile, baseline},
+        {"quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json", 0, everyD64Tile, baseline},
+        {"standard/SdpaFwd/bshd/bf16/hd128_causal_mha/Prefill.json", 1, everyD128Tile, baseline},
+        {"standard/SdpaFwd/bshd/bf16/hd128_nomask_bm128/Prefill.json", 0, bm128Tiles, bm128Bn32},
+        {"standard/SdpaFwd/bshd/bf16/hd128_nomask_gqa/Prefill.json", 0, everyD128Tile, baseline},
+        {"standard/SdpaFwd/bshd/fp16/hd128_causal_crossattn/Prefill.json",
+         1,
+         everyD128Tile,
+         baseline},
+    };
 }
 
-/// The aligned cohort the catalog ships for @p graph's semantic fields: one
-/// candidate per tile authored at that head size, on canonical build inputs.
-std::vector<KernelSpec> bundleCohort(const GraphSpec& graph, int64_t causal)
+/// @p json parsed into the flatbuffer graph the engine sees, through the SDK reader the
+/// integration harness loads bundles with.
+flatbuffers::FlatBufferBuilder parseBundle(std::string_view json)
 {
+    const auto parsed = nlohmann::json::parse(json.begin(), json.end());
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::json::to<data_objects::Graph>(builder, parsed));
+    return builder;
+}
+
+/// The aligned cohort the catalog ships for @p graph's semantic fields -- dtype, head
+/// size and head counts read from its Q and K -- with one candidate per tile authored at
+/// that head size, on canonical build inputs.
+std::vector<KernelSpec>
+    bundleCohort(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
+                 int64_t causal)
+{
+    constexpr flatbuffers::uoffset_t HEAD_AXIS = 1;
+    constexpr flatbuffers::uoffset_t HEAD_SIZE_AXIS = 3;
+
+    const auto& attributes = graph.getNodeWrapper(0).attributesAs<data_objects::SdpaAttributes>();
+    const auto& tensors = graph.getTensorMap();
+    const auto* q = tensors.at(attributes.q_tensor_uid());
+    const auto* k = tensors.at(attributes.k_tensor_uid());
+
     KernelSpec semantic = canonicalAligned();
-    semantic.dtype = graph.dataType == data_objects::DataType::HALF ? "FP16" : "BF16";
-    semantic.headSize = graph.headSize;
-    semantic.numQueryHeads = graph.numQueryHeads;
-    semantic.numKvHeads = graph.numKvHeads;
+    semantic.dtype = q->data_type() == data_objects::DataType::HALF ? "FP16" : "BF16";
+    semantic.headSize = q->dims()->Get(HEAD_SIZE_AXIS);
+    semantic.numQueryHeads = q->dims()->Get(HEAD_AXIS);
+    semantic.numKvHeads = k->dims()->Get(HEAD_AXIS);
     semantic.causal = causal;
-    return cohortOf(semantic, graph.headSize == 64 ? d64Tiles() : d128Tiles());
+    return cohortOf(semantic, semantic.headSize == 64 ? d64Tiles() : d128Tiles());
 }
 
 TEST(TestGfx950AttentionDenseTileMatch, BshdBundleShapesReachTheTilesTheyWereAuthoredFor)
 {
-    // quick/SdpaFwd/bshd/bf16/hd128_causal_bm128/Small.json -- 384 is a multiple of
-    // 128 and not of 256, so the baseline cannot serve and a bm128 tile leads.
-    GraphSpec causalBm128 = bundleGraph(data_objects::DataType::BFLOAT16, 1, 16, 2, 384, 384, 128);
-    causalBm128.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    const auto expectations = bshdBundleExpectations();
 
-    // quick/SdpaFwd/bshd/bf16/hd64_nomask_bn32/Small.json -- 288 is an odd multiple
-    // of 32, so block_n alone does the excluding and Sq != Skv rides along.
-    GraphSpec nomaskBn32 = bundleGraph(data_objects::DataType::BFLOAT16, 1, 32, 8, 512, 288, 64);
-    nomaskBn32.rightBound = -1;
-
-    // quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json -- Hkv 1, and the only
-    // fp16 unmasked bundle. Every authored D64 tile divides it, 256/256 included.
-    GraphSpec nomaskMqa = bundleGraph(data_objects::DataType::HALF, 2, 8, 1, 512, 512, 64);
-    nomaskMqa.rightBound = -1;
-
-    // standard/SdpaFwd/bshd/bf16/hd128_nomask_bm128/Prefill.json -- 1152 = 9 * 128,
-    // the tile-forcing case at a prefill length rather than a small one.
-    GraphSpec nomaskBm128
-        = bundleGraph(data_objects::DataType::BFLOAT16, 2, 64, 8, 1152, 1152, 128);
-    nomaskBm128.rightBound = -1;
-
-    // standard/SdpaFwd/bshd/fp16/hd128_causal_crossattn/Prefill.json -- top-left
-    // causal through the deprecated boolean, which unlike bottom-right is served
-    // at Sq != Skv.
-    GraphSpec causalCrossAttention
-        = bundleGraph(data_objects::DataType::HALF, 1, 32, 4, 512, 2048, 128);
-    causalCrossAttention.causalMaskDeprecated = true;
-    causalCrossAttention.rightBound = -1;
-
-    struct Case
+    std::set<std::string_view> embedded;
+    for(const auto& bundle : gfx950AttentionDenseBshdBundles())
     {
-        const char* bundle;
-        GraphSpec graph;
-        int64_t causal;
-        TileSet admitted;
-        Tile coldWinner;
-    };
-    const std::vector<Case> cases{
-        {"bf16/hd128_causal_bm128",
-         causalBm128,
-         1,
-         TileSet{{128, 32}, {128, 64}, {128, 128}},
-         {128, 32}},
-        {"bf16/hd64_nomask_bn32", nomaskBn32, 0, TileSet{{128, 32}, {256, 32}}, {128, 32}},
-        {"fp16/hd64_nomask_mqa", nomaskMqa, 0, tileSetOf(d64Tiles()), {256, 64}},
-        {"bf16/hd128_nomask_bm128",
-         nomaskBm128,
-         0,
-         TileSet{{128, 32}, {128, 64}, {128, 128}},
-         {128, 32}},
-        {"fp16/hd128_causal_crossattn", causalCrossAttention, 1, tileSetOf(d128Tiles()), {256, 64}},
-    };
+        SCOPED_TRACE(bundle.path);
+        embedded.insert(bundle.path);
 
-    for(const auto& c : cases)
+        const auto expected = std::find_if(
+            expectations.begin(), expectations.end(), [&bundle](const BundleExpectation& entry) {
+                return entry.path == bundle.path;
+            });
+        if(expected == expectations.end())
+        {
+            ADD_FAILURE() << "this bundle has no entry in bshdBundleExpectations()";
+            continue;
+        }
+
+        auto builder = parseBundle(bundle.json);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto cohort = bundleCohort(graph, expected->causal);
+
+        EXPECT_EQ(tileSetOf(matchCandidatesIn(graph, cohort, /*rank=*/false)), expected->admitted);
+
+        const auto order = matchCandidatesIn(graph, cohort, /*rank=*/true);
+        EXPECT_FALSE(order.empty()) << "no candidate survived, so the bundle would skip";
+        if(!order.empty())
+        {
+            EXPECT_EQ(order.front(), expected->coldWinner);
+        }
+    }
+
+    for(const auto& expected : expectations)
     {
-        SCOPED_TRACE(c.bundle);
-        const auto cohort = bundleCohort(c.graph, c.causal);
-        EXPECT_EQ(admittedTiles(c.graph, cohort), c.admitted);
-
-        const auto order = coldOrder(c.graph, cohort);
-        ASSERT_FALSE(order.empty()) << "no candidate survived, so the bundle would skip";
-        EXPECT_EQ(order.front(), c.coldWinner);
+        EXPECT_EQ(embedded.count(expected.path), 1U)
+            << expected.path << " has an entry in bshdBundleExpectations() but no bundle";
     }
 }
 
