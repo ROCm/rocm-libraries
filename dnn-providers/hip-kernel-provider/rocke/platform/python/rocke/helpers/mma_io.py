@@ -82,6 +82,15 @@ def load_matrix_fragment(
     ):
         raise ValueError("matrix fragment offset exceeds i32 range")
     alignment = gcd(alignment_bytes, layout.chunk_bytes, origin_bytes)
+    # Use 2--4-word vectors; retain storage-element loads for a one-word tail.
+    word_loads = (
+        unit_bytes == 1
+        and carrier_type == I32
+        and layout.chunk_bytes % 4 == 0
+        and layout.chunk_bytes % 16 != 4
+    )
+    load_type = I32 if word_loads else unit_type
+    load_step = 4 if word_loads else 1
     lane_chunk = b.mul(lane_group, b.const_i32(chunk_units))
     step_base = b.add(row_base, b.const_i32(origin_bytes // unit_bytes))
     chunks = []
@@ -94,18 +103,27 @@ def load_matrix_fragment(
         consumed = 0
         max_width = 8 if unit_bytes == 4 else 16
         while remaining:
-            width = min(max_width, 1 << (remaining.bit_length() - 1))
+            width = (
+                min(4, remaining // 4)
+                if word_loads
+                else min(max_width, 1 << (remaining.bit_length() - 1))
+            )
             at = b.add(offset, b.const_i32(consumed)) if consumed else offset
             load_align = gcd(alignment, consumed * unit_bytes)
+            # Form the byte address before loading words; preserve signed i32 offsets.
+            load_ptr = b.global_ptr_add(ptr, b.sext(at, I64)) if word_loads else ptr
+            load_at = b.const_i32(0) if word_loads else at
             if width == 1:
                 value = b.vector_splat(
-                    b.global_load(ptr, at, unit_type, align=load_align), 1
+                    b.global_load(load_ptr, load_at, load_type, align=load_align), 1
                 )
             else:
-                value = b.global_load_vN(ptr, at, unit_type, width, align=load_align)
+                value = b.global_load_vN(
+                    load_ptr, load_at, load_type, width, align=load_align
+                )
             chunks.append(value)
-            consumed += width
-            remaining -= width
+            consumed += width * load_step
+            remaining -= width * load_step
     payload = chunks[0]
     for chunk in chunks[1:]:
         payload = b.vec_concat(payload, chunk)

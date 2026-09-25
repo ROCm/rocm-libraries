@@ -106,6 +106,8 @@ static int emit(const char* dtype, bool hip, bool include_prologue = true)
         }
         else
             layout = rocke_scaled_matrix_layout(dtype, 16);
+        if(strcmp(dtype, "fp6") == 0 && padded)
+            CHECK(rocke_matrix_fragment_layout_init(&layout, &layout.fragment, 16, 2, 16));
         auto* base = rocke_b_const_i32(&b, padded ? (typed ? 129 : 97) : 0);
         auto* thread = rocke_b_thread_id_x(&b);
         auto* lane = rocke_b_mod(&b, thread, rocke_b_const_i32(&b, 32));

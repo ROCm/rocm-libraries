@@ -85,6 +85,13 @@ The loader checks dtype/packing width, pointer identity, whole-unit chunk and
 origin alignment, carrier capacity, and static i32 displacement limits. It
 reduces the supplied alignment for chunk spacing and K origin. A 24-byte FP6
 chunk becomes 16-byte and 8-byte loads without reading past the chunk.
+For byte-stored operands with i32 carriers, the loader selects up to four words
+per load. It produces i32 vectors directly when every load has at least two
+words. A 12-byte chunk produces three i32 lanes (`i32x3` in HIP), with the
+original byte-address alignment. Address calculation remains in bytes, and the
+loaded words concatenate into the operand fragment without intermediate byte
+vectors. Typed chunks, partial words, and one-word tails retain their storage
+element loads and final carrier bitcast when needed.
 
 The existing `global_load_vN` and `smem_load_vN` builders also accept contiguous
 96-bit payloads: twelve byte elements, six 16-bit elements, or three 32-bit

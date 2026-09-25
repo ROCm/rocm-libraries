@@ -90,6 +90,11 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                         / layout->lane_groups)
             ckc::raise_status(ROCKE_ERR_VALUE, "matrix fragment offset exceeds i32 range");
         int alignment = gcd(alignment_bytes, gcd(chunk_bytes, origin_bytes));
+        // Use 2--4-word vectors; retain storage-element loads for a one-word tail.
+        const bool word_loads = unit_bytes == 1 && rocke_type_eq(carrier_type, rocke_i32())
+                                && chunk_bytes % 4 == 0 && chunk_bytes % 16 != 4;
+        const auto* load_type = word_loads ? rocke_i32() : unit_type;
+        const int load_step = word_loads ? 4 : 1;
         auto* lane_chunk = rocke_b_mul(b, lane_group, rocke_b_const_i32(b, chunk_units));
         auto* step_base = rocke_b_add(b, row_base, rocke_b_const_i32(b, origin_bytes / unit_bytes));
         /* Collect loads before concatenation to preserve Python SSA numbering. */
@@ -112,16 +117,27 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                 int width = 1;
                 while(width < max_width && uint64_t(width * 2) <= remaining)
                     width *= 2;
+                if(word_loads)
+                    width = remaining / 4 < 4 ? int(remaining / 4) : 4;
                 auto* at
                     = consumed ? rocke_b_add(b, offset, rocke_b_const_i32(b, consumed)) : offset;
                 int load_align = gcd(alignment, consumed * unit_bytes);
+                // Form the byte address before loading words; preserve signed i32 offsets.
+                auto* load_ptr
+                    = word_loads ? rocke_b_global_ptr_add(b, ptr, rocke_b_sext(b, at, rocke_i64()))
+                                 : ptr;
+                auto* load_at = word_loads ? rocke_b_const_i32(b, 0) : at;
                 auto* value
-                    = width == 1 ? rocke_b_vector_splat(
-                                       b, rocke_b_global_load(b, ptr, at, unit_type, load_align), 1)
-                                 : rocke_b_global_load_vN(b, ptr, at, unit_type, width, load_align);
+                    = width == 1
+                          ? rocke_b_vector_splat(
+                                b,
+                                rocke_b_global_load(b, load_ptr, load_at, load_type, load_align),
+                                1)
+                          : rocke_b_global_load_vN(
+                                b, load_ptr, load_at, load_type, width, load_align);
                 chunks[num_chunks++] = value;
-                consumed += width;
-                remaining -= width;
+                consumed += width * load_step;
+                remaining -= width * load_step;
             }
         }
         auto* payload = chunks[0];

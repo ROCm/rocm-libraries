@@ -98,6 +98,8 @@ def build_transport(dtype):
             if typed
             else scaled_matrix_layout(dtype, 16)
         )
+        if dtype == "fp6" and padded:
+            layout = MatrixFragmentLayout(layout.fragment, 16, 2, 16)
         base = b.const_i32((129 if typed else 97) if padded else 0)
         lane = b.mod(b.thread_id_x(), b.const_i32(32))
         group = b.div(lane, b.const_i32(16))
@@ -239,9 +241,24 @@ def test_fragment_offset_bounds(dtype, count, groups, k0, valid):
 
 
 def test_hip_declares_only_encountered_missing_vector_widths():
+    for case, widths in (("fp6", [4, 2, 4, 2]), ("fp6_padded", [3, 3, 3, 3])):
+        kernel = build_transport(case)
+        loads = [op for op in kernel.body.ops if op.name == "memref.global_load_vN"]
+        assert [op.result.type for op in loads] == [VectorType(I32, n) for n in widths]
+        assert not any(op.name == "arith.bitcast" for op in kernel.body.ops)
+    for count in (4, 20):
+        b = IRBuilder("scalar_tail")
+        ptr = b.param("A", PtrType(I8, "global"))
+        zero = b.const_i32(0)
+        layout = MatrixFragmentLayout(
+            FragmentPacking(BitPacking(8), count, 32, count // 4), count, 1, 1
+        )
+        load_matrix_fragment(b, ptr, zero, zero, 0, dtype="e8m0", layout=layout)
+        assert not any(op.name == "tile.global_ptr_add" for op in b.kernel.body.ops)
     source = lower_kernel_to_hip(build_transport("fp6"), arch="gfx1250")
-    for name in ("i8x24", "i8x40", "i32x12"):
+    for name in ("i32x6", "i32x10", "i32x12"):
         assert source.count(f"using {name} =") == 1
+    assert "using i8x" not in source
     assert "using f16x32 =" not in source
     source = lower_kernel_to_hip(build_transport("f16"), arch="gfx1250")
     assert source.count("using f16x32 =") == 1
@@ -319,7 +336,7 @@ def test_hip_rejects_unsupported_vector_element(elem_type):
 
 @pytest.mark.parametrize(
     "dtype,copy_bytes,alignment",
-    [("fp6", 16, 8), ("fp6_padded", 16, 1), ("f16", 32, 16)],
+    [("fp6", 16, 8), ("fp6_padded", 12, 1), ("f16", 32, 16)],
 )
 def test_hip_compiler_preserves_fragment_load_alignment(dtype, copy_bytes, alignment):
     """Inspect compiler IR: source parity cannot detect a shared alignment bug."""
@@ -339,6 +356,8 @@ def test_hip_compiler_preserves_fragment_load_alignment(dtype, copy_bytes, align
         if int(size) == copy_bytes
     ]
     assert source_alignments, "expected unaligned-safe fragment payload copies"
+    if dtype == "fp6_padded":
+        assert len(source_alignments) == 4
     assert all(value <= alignment for value in source_alignments), source_alignments
 
 
