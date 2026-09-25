@@ -3021,6 +3021,12 @@ namespace TensileLite
                 // value = [XCC, XCCG]
                 std::array<int, 2> value;
                 size_t             cuCount;
+                // Non-standard-CU devices (e.g. MI300A 228 CU) need generic
+                // gfx942 (XCC=8) heuristic entries: fallbackStatus is only set
+                // by the runtime AFTER heuristic evaluation, so the predicate
+                // misses it on the first lookup. Cache isStandardCU() here and
+                // treat the non-standard case as an implicit fallback below.
+                bool isStandardCUDevice = true;
 
                 WorkgroupMappingXCCCheck()
                 {
@@ -3029,6 +3035,7 @@ namespace TensileLite
                     Hardware const& hardware = *pHardware;
                     AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
                     cuCount                  = pAMDGPU->computeUnitCount;
+                    isStandardCUDevice       = pAMDGPU ? pAMDGPU->isStandardCU() : true;
                 }
                 WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
@@ -3038,6 +3045,7 @@ namespace TensileLite
                     Hardware const& hardware = *pHardware;
                     AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
                     cuCount                  = pAMDGPU->computeUnitCount;
+                    isStandardCUDevice       = pAMDGPU ? pAMDGPU->isStandardCU() : true;
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
@@ -3063,7 +3071,9 @@ namespace TensileLite
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
-                    size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
+                    bool const treatAsFallback
+                        = problem.getParams().fallbackStatus() || !isStandardCUDevice;
+                    size_t XCC  = treatAsFallback ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
                 }
@@ -3073,7 +3083,9 @@ namespace TensileLite
                 {
                     if(value[0] == -1)
                         return true;
-                    size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
+                    bool const treatAsFallback
+                        = problem.getParams().fallbackStatus() || !isStandardCUDevice;
+                    size_t XCC  = treatAsFallback ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,
                                         stream,
