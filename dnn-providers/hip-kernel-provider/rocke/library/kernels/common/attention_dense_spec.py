@@ -107,6 +107,110 @@ SHIPPED_DIGIT_ORDERS = MappingProxyType(
 
 QB_TRAVERSALS = ("asc", "rev", "fold")
 
+# EXPERIMENTAL kv-phase split orders. A SEPARATE FAMILY, not extra permutations.
+#
+# The motivation: at B>1 the distinct K/V data is indexed by the PAIR (bt, hkv),
+# so there are B*Hkv distinct tensors and the ideal schedule gives each XCD one
+# of them at a time, sweeping B*Hkv/num_xcds phases. Expressing that needs the
+# fused identity F = bt*Hkv + hkv to appear in TWO positions at once -- its low
+# log2(num_xcds) bits fastest, so xcd = wi % num_xcds selects the tensor, and
+# its high bits slowest, so the machine sweeps phases. A permutation of four
+# digits cannot do that, which is why this is a family rather than an axis.
+#
+# Notation: lowercase 'x' is F's low part (radix num_xcds) and must be FASTEST
+# -- that is the whole point, since it is what xcd = wi % num_xcds reads.
+# Lowercase 'y' is F's high part; 'G' and 'Q' are the ordinary gqa-lane and
+# query-block digits. The three non-x characters are free, so the family has
+# 3! = 6 members.
+#
+# y does NOT have to be slowest. Putting it slowest (xGQy, xQGy) maximises the
+# phase effect the idea targets: one K/V tensor per chiplet, swept over
+# B*Hkv/num_xcds phases. Putting Q slowest instead (xGyQ, xQyG) gives up some of
+# that to buy the property every measured winner has -- a query block that never
+# wraps, so each CTA sweeps the whole causal cost range instead of being pinned
+# to one block. The two are a real trade, not a preference, which is why both
+# are in the family.
+#
+# IMPORTANT -- the split is a relabelling, not a new mapping, when Hkv == 8
+# exactly: then F % 8 == hkv and F // 8 == bt, so x and y ARE the V and B
+# digits and every split order equals a permutation (xGQy == VGQB,
+# xQGy == VQGB, xGyQ == VGBQ, xQyG == VQBG). It is genuinely new only when
+# Hkv != num_xcds -- Hkv in {4, 10, 32, 40} among the shapes in use -- because
+# only then does the fused identity cut across a digit boundary. Measuring the
+# family on Hkv == 8 shapes measures permutations already swept.
+KV_SPLIT_ORDERS = tuple(
+    "x" + "".join(p) for p in __import__("itertools").permutations("yGQ")
+)
+
+# Public alias: builders reconstruct the fused identity as x + MODULUS*y and
+# must use the same modulus the split plan did.
+KV_SPLIT_MODULUS = _PERSIST_XCD_MODULUS
+
+
+def is_kv_split(order: str) -> bool:
+    """Whether ``order`` names the kv-phase split family rather than one of the
+    24 digit permutations. Case-sensitive on purpose: the split letters are
+    lowercase precisely so an order string cannot be mistaken for a permutation
+    after an ``.upper()`` somewhere in a name path."""
+    return order in KV_SPLIT_ORDERS
+
+
+def kv_split_steps(order: str, radices: dict) -> tuple[tuple, ...]:
+    """``((name, radix, is_tail), ...)`` fastest-first for a kv-split order.
+
+    Radix-1 steps are dropped, exactly as :func:`decode_plan` elides them: at
+    B*Hkv == num_xcds there is a single phase and ``y`` disappears; at gqa == 1
+    the ``G`` step does.
+    """
+    if order not in KV_SPLIT_ORDERS:
+        raise ValueError(f"not a kv-split order: {order!r}")
+    fused = radices["B"] * radices["V"]
+    if fused % _PERSIST_XCD_MODULUS:
+        # Deliberately a hard error, not a silent fallback. Without it the decode
+        # produces batch indices >= B -- measured 48 of 320 work items at
+        # 40/10 B=1 -- which reads out of bounds rather than merely mis-ordering.
+        raise ValueError(
+            f"kv-split needs batch*num_kv_heads ({fused}) divisible by "
+            f"{_PERSIST_XCD_MODULUS}"
+        )
+    rad = {"x": _PERSIST_XCD_MODULUS,
+           "y": fused // _PERSIST_XCD_MODULUS,
+           "G": radices["G"], "Q": radices["Q"]}
+    steps = [(c, rad[c]) for c in order]
+    live = [(n, r) for n, r in steps if r > 1]
+    return tuple((n, r, i + 1 >= len(live)) for i, (n, r) in enumerate(live))
+
+
+def qb_rotation_period(order: str, radices: dict) -> int:
+    """Radix product up to and INCLUDING the query-block digit, or 0 if the
+    query block is the slowest live digit.
+
+    ``phase = wi // period`` counts how many times the query-block digit has
+    wrapped, so rotating the block by it hands each CTA a different block on
+    each pass. A period of 0 means the rotation is provably inert: the query
+    block is already the slowest digit, so it never wraps and every CTA already
+    sweeps the whole range. The six permutations ending in Q are exactly that
+    case -- and they are the ones that measured best, which is the same fact
+    seen from the other side.
+    """
+    if is_kv_split(order):
+        names = list(order)
+        rad = dict(radices)
+        rad["x"] = _PERSIST_XCD_MODULUS
+        rad["y"] = (radices["B"] * radices["V"]) // _PERSIST_XCD_MODULUS
+    else:
+        names = list(parse_digit_order(order))
+        rad = radices
+    live = [n for n in names if rad[n] > 1]
+    if "Q" not in live or live[-1] == "Q":
+        return 0
+    period = 1
+    for n in live:
+        period *= rad[n]
+        if n == "Q":
+            break
+    return period
+
 
 def parse_digit_order(order: str) -> tuple[str, ...]:
     """Validate an order string and return it as a tuple, fastest digit first.
@@ -116,6 +220,11 @@ def parse_digit_order(order: str) -> tuple[str, ...]:
     and leaves others unwritten, i.e. a wrong-answer bug that looks like a
     tolerance failure.
     """
+    if is_kv_split(order):
+        raise ValueError(
+            f"{order!r} is a kv-split order, not a digit permutation; it is a "
+            "separate family and has no four-digit letter tuple"
+        )
     letters = tuple(order.upper())
     if len(letters) != len(DIGIT_LETTERS) or set(letters) != set(DIGIT_LETTERS):
         raise ValueError(
@@ -168,9 +277,51 @@ def decode_plan(order: str, radices: dict) -> tuple[tuple, ...]:
     return tuple(steps)
 
 
-def decode_reference(wi: int, order: str, radices: dict) -> dict:
+def split_fused_to_digits(fused: int, radices: dict, bt_minor: bool):
+    """Split the fused K/V identity back into ``(bt, hkv)``.
+
+    Two conventions, and the choice is NOT cosmetic -- it decides where the
+    family collapses onto an ordinary permutation, because the collapse happens
+    exactly when the fused index lines up with a digit boundary:
+
+      bt_minor=False  F = bt*Hkv + hkv   degenerate when Hkv == num_xcds
+      bt_minor=True   F = hkv*B  + bt    degenerate when B   == num_xcds
+
+    The structural metrics are identical either way -- both fuse the same pair
+    into the same 8-way residue structure, so only WHICH tensor lands on which
+    chiplet differs, not how many. What does differ is the address distribution:
+    with K laid out [B, S, Hkv, D], the 8 co-resident tensors are stride-D
+    interleaved under bt_minor=False and a whole batch element apart under
+    bt_minor=True. That is a DRAM channel question, not an L2 one.
+    """
+    if bt_minor:
+        return fused % radices["B"], fused // radices["B"]
+    return fused // radices["V"], fused % radices["V"]
+
+
+def decode_reference(wi: int, order: str, radices: dict,
+                     phase_rotate: bool = False,
+                     bt_minor: bool = False) -> dict:
     """Pure-Python oracle for the generic decode -- the same arithmetic a builder
-    emits, used to prove equivalence with the hand-written decodes without a GPU."""
+    emits, used to prove equivalence with the hand-written decodes without a GPU.
+
+    Covers both families and the optional query-block phase rotation, so one
+    oracle checks everything the builders can emit.
+    """
+    if is_kv_split(order):
+        out = {d: 0 for d in DIGIT_LETTERS}
+        vals, cur = {}, wi
+        for name, radix, is_tail in kv_split_steps(order, radices):
+            vals[name] = cur if is_tail else cur % radix
+            if not is_tail:
+                cur //= radix
+        fused = (vals.get("x", 0)
+                 + _PERSIST_XCD_MODULUS * vals.get("y", 0))
+        out["B"], out["V"] = split_fused_to_digits(fused, radices, bt_minor)
+        out["G"] = vals.get("G", 0)
+        out["Q"] = vals.get("Q", 0)
+        _apply_rotation(out, wi, order, radices, phase_rotate)
+        return out
     out = {d: 0 for d in DIGIT_LETTERS}
     cur = wi
     for kind, digits, radix, is_tail in decode_plan(order, radices):
@@ -184,7 +335,18 @@ def decode_reference(wi: int, order: str, radices: dict) -> dict:
             out[digits[0]] = val
         if not is_tail:
             cur //= radix
+    _apply_rotation(out, wi, order, radices, phase_rotate)
     return out
+
+
+def _apply_rotation(out: dict, wi: int, order: str, radices: dict,
+                    enabled: bool) -> None:
+    """Rotate the decoded query block by the pass index, in place."""
+    if not enabled:
+        return
+    period = qb_rotation_period(order, radices)
+    if period:
+        out["Q"] = (out["Q"] + wi // period) % radices["Q"]
 
 
 def traverse_qb(blk: int, nqb: int, traversal: str) -> int:

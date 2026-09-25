@@ -88,6 +88,11 @@ from kernels.common.attention_dense_spec import (
     decode_plan,
     digit_radices,
     parse_digit_order,
+    is_kv_split,
+    kv_split_steps,
+    KV_SPLIT_MODULUS,
+    KV_SPLIT_ORDERS,
+    qb_rotation_period,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 
@@ -174,6 +179,28 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     digit_order: str = ""
     qb_traversal: str = ""
 
+    # qb_phase_rotate: EXPERIMENTAL, orthogonal to both order families. Rotates
+    # the query block by the PASS index -- how many times the query-block digit
+    # has wrapped -- so a CTA gets a different block on each pass instead of the
+    # same one every time.
+    #
+    # It exists because the orders with the best K/V-per-XCD locality are
+    # exactly the ones that pin each CTA to one query block, whose causal cost
+    # varies NQB-fold; that imbalance is why they measured WORSE than orders
+    # with far poorer locality. Rotation is the knob that decouples the two.
+    #
+    # Provably INERT, and rejected as such, when the query block is already the
+    # slowest live digit: it never wraps, so every CTA already sweeps the whole
+    # range. That is the six permutations ending in Q -- today's winners.
+    qb_phase_rotate: bool = False
+
+    # kv_split_bt_minor: which component of the fused K/V identity is MINOR.
+    # False -> F = bt*Hkv + hkv (degenerate when Hkv == num_xcds)
+    # True  -> F = hkv*B  + bt  (degenerate when B   == num_xcds)
+    # Only meaningful with a kv-split digit_order; rejected otherwise, because
+    # off the split path it would move the kernel NAME without moving the IR.
+    kv_split_bt_minor: bool = False
+
     # REMOVED -- `reverse_qb` and `batch_outer`, the two persistent-path sweep knobs
     # ported from gfx942. Both measured NEGATIVE on BOTH architectures; the verdicts
     # are preserved at their decode sites below and in the gfx942 sibling, so they
@@ -216,8 +243,32 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                     "wide_lds_dma requires K/V slab padding of 8/32 elements"
                 )
 
+        if self.kv_split_bt_minor and not is_kv_split(self.digit_order):
+            raise ValueError(
+                "kv_split_bt_minor selects which component of the FUSED K/V "
+                "identity is minor, so it is meaningful only with a kv-split "
+                f"digit_order; got digit_order={self.digit_order!r}. Off that "
+                "path it would move the kernel name without moving the IR."
+            )
         if self.digit_order:
-            parse_digit_order(self.digit_order)  # raises on a non-permutation
+            _rad = digit_radices(
+                (self.seqlen_q + self.block_m - 1) // self.block_m,
+                self.batch, self.num_kv_heads,
+                self.num_query_heads // self.num_kv_heads)
+            if is_kv_split(self.digit_order):
+                kv_split_steps(self.digit_order, _rad)  # raises on divisibility
+            else:
+                parse_digit_order(self.digit_order)  # raises on a non-permutation
+            if self.qb_phase_rotate and not qb_rotation_period(
+                    self.digit_order, _rad):
+                # Rejected rather than silently ignored: a no-op knob that still
+                # changes the kernel NAME would enter a sweep as a second label
+                # for one kernel and be reported as an independent measurement.
+                raise ValueError(
+                    f"qb_phase_rotate is inert for digit_order="
+                    f"{self.digit_order!r} at this shape (the query block is "
+                    "already the slowest live digit, so it never wraps)"
+                )
             if self.qb_traversal and self.qb_traversal not in QB_TRAVERSALS:
                 raise ValueError(
                     f"qb_traversal must be one of {sorted(QB_TRAVERSALS)}, "
@@ -416,6 +467,10 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append(f"ord{self.digit_order.upper()}")
         if self.qb_traversal:
             parts.append(f"qbt{self.qb_traversal}")
+        if self.qb_phase_rotate:
+            parts.append("qbrot")
+        if self.kv_split_bt_minor:
+            parts.append("btmin")
         return tuple(parts)
 
     def _aligned_causal_auto_decode(self) -> str:
@@ -1353,7 +1408,35 @@ def build_attention_dense(
     return b.kernel
 
 
-def _emit_digit_decode(b, lin, order, radices):
+def _emit_kv_split_decode(b, lin, order, radices, bt_minor):
+    """Emit the EXPERIMENTAL kv-phase split decode.
+
+    ``F = bt*Hkv + hkv`` is the identity of the K/V tensor a work item reads.
+    Its low ``KV_SPLIT_MODULUS`` bits are decoded FIRST, so ``xcd = wi % 8``
+    selects the tensor directly, and its high bits LAST, so the machine sweeps
+    ``B*Hkv/8`` phases with one tensor resident per chiplet. Every radix is a
+    compile-time constant, so this is magic-number multiplies like the
+    permutation decode beside it.
+    """
+    zero = b.const_i32(0)
+    vals = {"x": zero, "y": zero, "G": zero, "Q": zero}
+    cur = lin
+    for name, radix, is_tail in kv_split_steps(order, radices):
+        vals[name] = cur if is_tail else b.mod(cur, b.const_i32(radix))
+        if not is_tail:
+            cur = b.div(cur, b.const_i32(radix))
+    fused = b.add(vals["x"],
+                  b.mul(vals["y"], b.const_i32(KV_SPLIT_MODULUS)))
+    if bt_minor:
+        bsz = b.const_i32(radices["B"])
+        bt, hkv = b.mod(fused, bsz), b.div(fused, bsz)
+    else:
+        hkv_r = b.const_i32(radices["V"])
+        bt, hkv = b.div(fused, hkv_r), b.mod(fused, hkv_r)
+    return {"Q": vals["Q"], "G": vals["G"], "B": bt, "V": hkv}
+
+
+def _emit_digit_decode(b, lin, order, radices, bt_minor=False):
     """Generalized mixed-radix decode of ``lin`` into the four work digits.
 
     Mirrors the gfx942 sibling exactly; the emit PLAN (elide radix-1 digits, skip
@@ -1364,6 +1447,8 @@ def _emit_digit_decode(b, lin, order, radices):
     Only reached from the PERSISTENT body, where the whole problem shape is baked,
     so every radix here is a compile-time constant.
     """
+    if is_kv_split(order):
+        return _emit_kv_split_decode(b, lin, order, radices, bt_minor)
     zero = b.const_i32(0)
     out = {d: zero for d in ("Q", "B", "V", "G")}
     cur = lin
@@ -1404,10 +1489,19 @@ def _digit_decode_values(b, lin, spec, nqb, causal):
     """
     gqa = spec.num_query_heads // spec.num_kv_heads
     rad = digit_radices(nqb, spec.batch, spec.num_kv_heads, gqa)
-    d = _emit_digit_decode(b, lin, spec.digit_order, rad)
+    d = _emit_digit_decode(b, lin, spec.digit_order, rad,
+                           spec.kv_split_bt_minor)
     hq = b.add(b.mul(d["V"], b.const_i32(gqa)), d["G"])
+    blk = d["Q"]
+    if spec.qb_phase_rotate:
+        # phase = lin // period, with period a compile-time constant; rotate
+        # BEFORE the traversal so the two compose rather than fight.
+        period = qb_rotation_period(spec.digit_order, rad)
+        if period:
+            blk = b.mod(b.add(blk, b.div(lin, b.const_i32(period))),
+                        b.const_i32(nqb))
     trav = spec.qb_traversal or "asc"
-    qb = _emit_qb_traversal(b, d["Q"], nqb, trav if causal else "asc")
+    qb = _emit_qb_traversal(b, blk, nqb, trav if causal else "asc")
     return qb, hq, d["B"], d["V"], d["G"]
 
 

@@ -260,6 +260,15 @@ _PRIVATE_PERTURBATIONS = {
     # `digitorder_d128_fp16` below exists as a base.
     "digit_order": ("BGVQ", "VGQB"),
     "qb_traversal": ("fold", "rev"),
+    # EXPERIMENTAL phase rotation. Orthogonal to the order, and legal only where
+    # it is not provably inert. That rules out every order ENDING in Q --
+    # including the `digitorder_d128_fp16` base's BGVQ -- because a slowest
+    # query block never wraps. `digitorder_rot_d128_fp16` below exists to give
+    # this field a base where it is live.
+    "qb_phase_rotate": (True, False),
+    # Which component of the fused K/V identity is minor. Legal only on a
+    # kv-split order, so the split base below is what exercises it.
+    "kv_split_bt_minor": (True, False),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -307,6 +316,30 @@ _INJECTIVITY_BASES = {
         dtype="fp16",
         digit_order="BGVQ",
         qb_traversal="fold",
+    ),
+    # A base whose query block is NOT the slowest digit, so qb_phase_rotate is
+    # live rather than rejected as inert. VGQB is also the order that measured
+    # perfect K/V-per-XCD locality and WORST overall -- the case the rotation
+    # was added to rescue -- so this base is the interesting one, not a filler.
+    # A kv-split base: the only place kv_split_bt_minor is legal. batch*Hkv
+    # must be a multiple of 8, which batch=2 x num_kv_heads=8 satisfies.
+    "kvsplit_d128_fp16": dict(
+        head_size=128,
+        dtype="fp16",
+        digit_order="xGyQ",
+        qb_traversal="fold",
+        batch=2,
+    ),
+    "digitorder_rot_d128_fp16": dict(
+        head_size=128,
+        dtype="fp16",
+        digit_order="VGQB",
+        qb_traversal="fold",
+        # batch>1 is LOAD-BEARING, not decoration: at batch==1 the B digit has
+        # radix 1 and is elided, which makes Q the slowest LIVE digit again and
+        # the rotation inert -- so this base would silently stop exercising the
+        # field it exists for.
+        batch=2,
     ),
 }
 
@@ -779,6 +812,25 @@ _CONTRACT_GRID = [
     dict(digit_order="BGVQ", default_grid_order="hq_major"),
     # REJECTED: unknown traversal.
     dict(digit_order="BGVQ", qb_traversal="sideways"),
+    # --- private: kv-phase split family + phase rotation ---
+    # accepted: the split needs batch*num_kv_heads % 8 == 0, and the default
+    # base is batch=2 x num_kv_heads=8 = 16.
+    dict(digit_order="xGQy"),
+    dict(digit_order="xQGy", qb_traversal="fold", qb_phase_rotate=True),
+    dict(digit_order="xGQy", persistent=True, num_persistent=228),
+    dict(digit_order="xGyQ", kv_split_bt_minor=True),
+    # REJECTED: meaningful only on a split order -- elsewhere it would move the
+    # kernel name without moving the IR.
+    dict(kv_split_bt_minor=True),
+    dict(digit_order="BVGQ", kv_split_bt_minor=True),
+    # REJECTED: split orders are a family, not permutations -- a permutation
+    # letter set must not be accepted in split position and vice versa.
+    dict(digit_order="xQyG"),
+    dict(digit_order="XGQY"),
+    # REJECTED: rotation is inert when the query block is already slowest.
+    dict(digit_order="BVGQ", qb_phase_rotate=True),
+    # REJECTED: the split cannot honour batch*num_kv_heads % 8 != 0.
+    dict(digit_order="xGQy", batch=1, num_kv_heads=10, num_query_heads=40),
 ]
 
 
