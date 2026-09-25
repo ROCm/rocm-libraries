@@ -1008,13 +1008,16 @@ namespace
         return chunk + chunk / 2;
     }
 
-    // Value seeded at strictly-upper (row, col).  Distinct per element, so the
-    // triangle readback detects a packing that permutes slots and not merely
-    // one that skips them.  Both components are at most n, exact in float.
+    // Value seeded at strictly-upper (row, col).  Both indices are folded into
+    // the real part, so every element differs for real types as well as complex
+    // and the triangle readback detects a packing that permutes slots, not just
+    // one that skips them.  The base keeps these clear of expected_upper's range
+    // (at most 4097); the largest value at n=512 is 623775, exact in float.
     template <typename T>
     static T upper_seed(rocblas_int row, rocblas_int col)
     {
-        return make_val<T>(double(row + 1), rocblas_is_complex<T> ? double(col + 1) : 0.0);
+        const double v = 100000.0 + double(row) * 1024.0 + double(col);
+        return make_val<T>(v, rocblas_is_complex<T> ? -v : 0.0);
     }
 
     // Seeds one n x n block: real diagonal, zero strictly-lower (the GEMM
