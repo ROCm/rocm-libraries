@@ -14,7 +14,10 @@ _PYTHON_CMAKE = _TENSILELITE_ROOT.parent / "cmake" / "hipblaslt_python.cmake"
 
 
 def _resolve_version(
-    tmp_path: Path, *, package_version: str | None = None
+    tmp_path: Path,
+    *,
+    package_version: str | None = None,
+    rocm_version: str | None = None,
 ) -> subprocess.CompletedProcess:
     script = tmp_path / "resolve.cmake"
     package_line = (
@@ -22,9 +25,15 @@ def _resolve_version(
         if package_version is not None
         else ""
     )
+    rocm_line = (
+        f'set(THEROCK_ROCM_VERSION "{rocm_version}")\n'
+        if rocm_version is not None
+        else ""
+    )
     script.write_text(
         "set(HIPBLASLT_ENABLE_THEROCK ON)\n"
         f"{package_line}"
+        f"{rocm_line}"
         f'include("{_PYTHON_CMAKE.as_posix()}")\n'
         "hipblaslt_resolve_build_rocm_version(resolved)\n"
         'message(STATUS "resolved=${resolved}")\n',
@@ -50,3 +59,25 @@ def test_therock_prefers_forwarded_package_identity(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "resolved=10.1.0a20260813" in result.stdout
+
+
+def test_therock_uses_forwarded_rocm_identity_for_git_package_version(tmp_path):
+    result = _resolve_version(
+        tmp_path,
+        package_version="git",
+        rocm_version="10.1.0a20260814",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "resolved=10.1.0a20260814" in result.stdout
+
+
+def test_therock_package_identity_precedes_rocm_fallback(tmp_path):
+    result = _resolve_version(
+        tmp_path,
+        package_version="10.1.0a20260815",
+        rocm_version="10.1.0a20260814",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "resolved=10.1.0a20260815" in result.stdout
