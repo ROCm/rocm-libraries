@@ -3,25 +3,12 @@
 
 """The packaged dialect: rocKE/hip descriptors that hkp_pack lowers.
 
-What these defend, stated as the failure each would catch:
-
-- Emitting a direct_load key (``source_file``) on a rocKE kernel, or a rocKE
-  key (``builder``) on an embedded_source one. Both are hard errors downstream
-  -- the runtime loader rejects unknown keys outright, and hkp_pack validates a
-  closed field set per kind -- but only after the bundle looks finished.
-- Putting packaged descriptors in ``descriptors/<slug>/`` instead of at their
-  authored subpath. The subpath is preserved verbatim into the staged and
-  installed trees, so getting it wrong relocates the shipped layout.
-- Telling an author to splice a packaged bundle into HIPDNN_DESCRIPTOR_FILES.
-  That list is for descriptors the RUNTIME loader reads; adding an unlowered
-  ``kind: rocke`` descriptor there installs a second copy the loader rejects,
-  dropping the pack and then the engine.
-- Accepting a packaged pack with no ``arch``. hkp_pack requires it and the
-  runtime loader does not, so this passes every runtime-shaped check and then
-  fails at pack time.
+``arch`` is required by hkp_pack and not by the runtime loader, so a pack
+missing it passes every runtime-shaped check and fails only at pack time.
 """
 
 import json
+import re
 
 import pytest
 from codegen.config_loader import ConfigError, load_config
@@ -75,9 +62,9 @@ class TestPackagedLayout:
         assert config.is_packaged
         assert config.descriptor_dir == "descriptors/rocKE/gfx950_attention_dense"
 
-    def test_direct_load_keeps_the_slug_layout(self, scale_add_config):
+    def test_direct_load_writes_into_its_authored_set(self, scale_add_config):
         assert not scale_add_config.is_packaged
-        assert scale_add_config.descriptor_dir == "descriptors/scale_add"
+        assert scale_add_config.descriptor_dir == "test_descriptors/unit/scale_add"
 
     def test_authored_subpath_defaults_to_kind_over_slug(self):
         config = make_minimal_config(
@@ -108,8 +95,7 @@ class TestPackagedKdp:
         assert ks["source"] == "kernels/gfx950/attention_dense.py"
         assert ks["builder"] == "build_attention_dense"
         # Every non-defaulted AttentionDenseSpec field must be present: hkp_pack
-        # hydrates with Spec(**fields), so a missing one is a TypeError at pack
-        # time, after the descriptor already looks complete.
+        # hydrates with Spec(**fields), so a missing one is a TypeError at pack time.
         for required in (
             "batch",
             "seqlen_q",
@@ -129,54 +115,55 @@ class TestPackagedKdp:
 
 
 class TestPackagedFragments:
-    """A packaged bundle must NOT be spliced into the runtime descriptor list."""
+    """Neither dialect emits a CMake edit for descriptor installation."""
+
+    @staticmethod
+    def _payload(tmp_path, name):
+        text = (tmp_path / "fragments" / name).read_text()
+        return text, [
+            line
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
 
     def test_descriptor_files_fragment_splices_nothing(
         self, generator, gfx950_attention_dense_config, tmp_path
     ):
         generator.render(gfx950_attention_dense_config, tmp_path)
-        text = (tmp_path / "fragments" / "cmake_descriptor_files.txt").read_text()
-        payload = [
-            line
-            for line in text.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
+        text, payload = self._payload(tmp_path, "cmake_descriptor_files.txt")
         assert payload == [], (
-            "a packaged bundle emitted CMake payload lines; splicing an "
-            "unlowered rocke descriptor into HIPDNN_DESCRIPTOR_FILES installs a "
-            "copy the runtime loader rejects"
+            "a packaged bundle emitted CMake payload lines; a list naming an "
+            "unlowered rocke descriptor installs a copy the runtime loader rejects"
         )
         assert "hkp_pack" in text and "authored subpath" in text.lower()
 
-    def test_ingestor_kernels_fragment_splices_nothing(
+    def test_census_fragment_registers_the_suite_this_run_writes(
         self, generator, gfx950_attention_dense_config, tmp_path
     ):
-        generator.render(gfx950_attention_dense_config, tmp_path)
-        text = (tmp_path / "fragments" / "cmake_ingestor_kernels.txt").read_text()
-        payload = [
-            line
-            for line in text.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
-        assert payload == []
-        # The rocKE module is not in this repo's build; name it so an author
-        # does not go looking for a source stem to add.
-        assert "kernels/gfx950/attention_dense.py" in text
+        """The call is spliced verbatim, so its suite must be one this run actually
+        wrote: a census whose gtest filter matches nothing runs zero cases and reports
+        success."""
+        written = generator.render(gfx950_attention_dense_config, tmp_path)
+        text, _payload = self._payload(tmp_path, "cmake_test_sources.txt")
+        assert "hkp_register_census_tests(TARGET hip_kernel_provider_tests" in text
+        assert "PACK_NAME product" in text
+        suite = re.search(r"^\s*SUITES (\w+)$", text, re.MULTILINE)
+        assert suite, f"the census call names no single suite:\n{text}"
+        assert re.search(
+            r"^\s*\)$", text, re.MULTILINE
+        ), f"the census call is never closed, so the splice would not parse:\n{text}"
+        assert f"tests/{suite.group(1)}.cpp" in written
 
-    def test_direct_load_fragment_still_splices_real_paths(
+    def test_direct_load_fragment_splices_nothing_either(
         self, generator, scale_add_config, tmp_path
     ):
-        """The packaged branch must not have disarmed the direct_load one."""
+        """Installation is by directory in BOTH roots: a hand-maintained list would put
+        the shard's contents under two authorities that disagree when a file is
+        added."""
         generator.render(scale_add_config, tmp_path)
-        text = (tmp_path / "fragments" / "cmake_descriptor_files.txt").read_text()
-        payload = [
-            line.strip()
-            for line in text.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
-        assert payload
-        for rel in payload:
-            assert (tmp_path / "descriptors" / rel).exists()
+        text, payload = self._payload(tmp_path, "cmake_descriptor_files.txt")
+        assert payload == []
+        assert scale_add_config.descriptor_dir in text
 
 
 class TestPackagedValidation:
@@ -234,7 +221,6 @@ class TestPackagedValidation:
             _check_kernel_source_fields(config)
 
     def test_the_shipped_gfx950_config_loads_clean(self, gfx950_attention_dense_config):
-        """The worked example is real: it must survive every pre-mint check."""
         config = gfx950_attention_dense_config
         assert config.dialect == DIALECT_PACKAGED
         assert config.kernel_source_kind == "rocke"
@@ -243,7 +229,6 @@ class TestPackagedValidation:
 
 class TestDialectDefaultIsBackwardCompatible:
     def test_config_without_dialect_key_is_direct_load(self, scale_add_config):
-        """Every config written before dialects existed keeps its behaviour."""
         assert scale_add_config.dialect == DIALECT_DIRECT_LOAD
 
     def test_direct_load_output_is_unchanged_by_the_dialect_work(

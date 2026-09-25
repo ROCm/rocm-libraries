@@ -1,291 +1,142 @@
-# Real workloads — deciding what to compile, and proving it runs
-
-**You are sent here from RUNBOOK step 2a (which shapes exist), step 3 (which to ship) and
-step 8e (proving it).** You owe two things before generating: the list of real shapes your
-kernel can serve, and a *count* of how many your proposed variant set covers.
-
-The tool is **`ROCm/dnn-benchmarking`** — a separate repository, not part of this tree.
-It is the project's inventory of what callers actually run, and it is the only source
-here that answers *"will anyone use this kernel?"*
-
-> Prefer that repository's own docs over this page — all three paths below are **in the
-> dnn-benchmarking checkout, not this tree**: `README.md` for the CLI and setup,
-> `docs/troubleshooting.md`, and each workload's `MANIFEST.md` for provenance. This file <!-- skill-paths: external-path -->
-> covers only what an ingestor integration needs and the traps that cost real time.
-
----
-
-## Why this is not optional
-
-An AOT variant set is a **compile-time commitment**. A kernel that bakes its extents
-serves the shapes you compiled and declines everything else, so "capable but no variant"
-and "unsupported" are the same thing to a caller.
-
-Everything else the runbook points you at for sizing — the dispatcher, the spec's knob
-comments, the `supports_*` predicate — is **kernel-side**. It tells you what the kernel
-*can* be built for. None of it tells you what anyone will *ask* for. That gap is not
-theoretical:
-
-| Attempt | How the set was sized | Real graphs served |
-|---|---|---|
-| 1 | kernel-side sources only | **0 / 38** |
-| 2 | model traces, `microbench/` assumed synthetic | **33 / 118** |
-| 3 | every servable graph enumerated and counted | **118 / 118** |
-
-Both failures passed every mechanical gate in this runbook — legal specs, clean
-descriptors, green desk check, green validator, passing tests. The set was wrong and
-nothing in the integration could see it.
-
----
-
-## The corpus
-
-```bash
-git clone https://github.com/ROCm/dnn-benchmarking && cd dnn-benchmarking
-ls Workloads/models/       # real model traces
-ls Workloads/microbench/   # per-library shape collections
-dvc pull Workloads/models/*.dvc Workloads/microbench/*.dvc
-```
-
-Graphs are the **same JSON your matcher already walks** — same node types, same tensor
-`dims`/`strides` — so they load with the reader you used at step 2a, and your own bundles
-run through `dnn-benchmark` unchanged.
-
-**`microbench/` does NOT mean synthetic.** It is a provenance label: these suites are
-rendered from real shapes found in a library's source. The `aiter` MANIFEST is explicit —
-*"Every JSON here was rendered by the committed hipDNN emitters from a real shape found in
-the aiter source. No shapes were invented."* AITER, hipBLASLt and the rest serve real
-customers. Discarding a `microbench/` suite on the assumption that it is a synthetic sweep
-is exactly how attempt 2 above missed 72 shapes it could have served. **Read the MANIFEST
-before you exclude anything.**
-
----
-
-## Step 2a — enumerate what exists
-
-Extract every graph for your op and classify it with **the same predicate your matcher
-uses**. A triage that checks two or three attributes will call a graph servable that your
-`graph_match` declines on the fourth, and the error is always optimistic.
-
-```python
-# For each graph: parse, apply your full Tier-3 decline list, then ask the kernel.
-ok, why = supports_<op>(Spec(**derived_fields))
-```
-
-Record three buckets, and put them in `graph_contract.md`:
-
-1. **Servable** — your kernel can build for it. This is your candidate shape list.
-2. **Declined** — outside scope. Each should map to a named row of your step-2b rejection
-   checklist. *A decline you cannot name is a bug in your understanding, not a scope call.*
-3. **Declined but shippable** — the kernel could build it and you simply have no variant.
-   **This bucket is invisible from inside your own bundles** and is the one that matters.
-
-Also read what the corpus tells you that the in-tree bundles cannot:
-
-- **Layout.** Real traces and in-tree test bundles can disagree on stride order for the
-  same logical dims. Whichever you read first silently decides what your matcher enforces.
-  *(In one run the split was total: every one of 3654 real graphs used one order, every
-  in-tree bundle the other.)*
-- **Feature spelling.** Where a schema carries both a modern field set and the deprecated
-  one it replaced, real traces and authored bundles routinely pick opposite spellings. A
-  matcher handling only its own bundles' convention passes CI and mis-serves production.
-- **Shape magnitude.** Authored tests are small on purpose; traces are not. Here the gap
-  was two orders of magnitude.
-
----
-
-## Step 3 — count coverage before you generate
-
-**The gate is a number, not a judgement.** For every servable graph, does a proposed
-variant match it? Report `covered / servable`.
-
-```
-servable real graphs : 118
-covered by your set  : 118   (100%)
-```
-
-A set that covers a small fraction is a test matrix, not a shipping set. Widen it, or
-scope the remainder out **deliberately and in writing** — scoping out is legitimate,
-never having looked is not.
-
-Two things this count will not tell you, so decide them explicitly:
-
-- **Deliberately synthetic variants are sometimes correct.** If every real shape happens
-  to satisfy a knob's constraint, that knob's other values are unreachable by any real
-  graph and `score` never chooses them. Shipping a synthetic shape that *forces* the other
-  value is how you keep the tuning axis alive. Say why it exists.
-- **Compile cost scales with shape, not variant count.** In this run 56 toy kernels packed
-  in 17 s; 65 real-shape kernels took 233 s — same order of kernels, **~8× per kernel**.
-  The emitted IR was byte-identical in size; the cost was in the backend, because the
-  kernel bakes its loop trip counts and LLVM sees 4 iterations at a toy length and 512 at
-  a production one. Budget by shape, not by count.
-
----
-
-## Step 8e — run it
-
-Required, and **never wired into CI** — that repo's README says not to use it in build or
-CI pipelines. Run it by hand, carry the findings into step 9.
-
-### Setting up against YOUR engine
-
-The trap that costs the most time: `setup_env.py` builds hipDNN, the providers and the
-Python bindings **from its `rocm-libraries` submodule**, which tracks `develop`. Left
-alone, it benchmarks an engine that does not include your work.
-
-**Point the submodule at your branch and let it build one coherent stack:**
-
-```bash
-git -C rocm-libraries fetch --depth 1 origin <your-branch>
-git -C rocm-libraries checkout FETCH_HEAD
-python3 setup_env.py --workspace .workspace --torch-mode rocm --gpu-arch <arch> \
-  --torch-index-url https://rocm.nightlies.amd.com/whl-multi-arch/ -y
-source .workspace/.venv/bin/activate
-```
-
-- **That submodule clone is the flaky step, and every 8e run pays it.** It is a large
-  monorepo; a fresh full clone degrades badly under load and can hang long enough to burn
-  a whole device allocation. Make it cheap and bounded: a blobless clone
-  (`--filter=blob:none`), a sparse checkout of only the paths you need, and a persistent
-  local reference clone to borrow objects from — all wrapped in `timeout` so a hang fails
-  fast instead of eating the allocation. This turns minutes-to-never into seconds.
-- **If you sparse-checkout the submodule, add `.dvc` explicitly.** A cone-mode checkout
-  drops the repository-root `.dvc/` directory while keeping the `*.dvc` pointer files
-  scattered through `Workloads/`. The outer repo then adopts orphaned pointers naming a
-  DVC remote nothing defines, and `dvc pull` fails with a remote-does-not-exist error that
-  reads like a credentials problem. `git sparse-checkout add .dvc` fixes it.
-
-- The `--torch-index-url` is TheRock's nightly channel, and it is in that repo's own
-  Dockerfile. **PyTorch must match the container's ROCm.** A mismatch fails at
-  `import hipdnn_frontend` *after* `import torch` with an undefined HSA symbol — a
-  confusing error, because the bindings import fine on their own.
-- Do **not** hand-build the bindings wheel and combine it with `--reuse-artifacts`. That
-  mixes two independently-built stacks and fails with an undefined `libhipdnn_backend`
-  symbol. The submodule route exists to prevent exactly this.
-- If you must reuse an existing install, set `ROCM_PATH` to it and pass
-  `--plugin-path $ROCM_PATH/lib/hipdnn_plugins/engines` — otherwise your engine is simply
-  absent and every graph reports "no engines applicable".
-
-**`setup_env.py` builds with the ingestor OFF, and the symptom is identical to the one
-above.** `HIPDNN_ENABLE_KERNEL_INGESTOR` defaults to **OFF** in both hipDNN and the
-provider (`git grep -n 'option(HIPDNN_ENABLE_KERNEL_INGESTOR'`), so a stock
-`setup_env.py` build produces a plugin that is **present but empty** — and every graph
-reports "no engines applicable", exactly like the missing-`--plugin-path` case. Two
-different faults, one message; that is what makes this expensive to spot.
-
-Tell them apart before changing anything — the plugin file's existence is the
-discriminator, so ask that question first:
-
-| Plugin `.so` | Your engine listed | Fault |
-|---|---|---|
-| absent | — | wrong `--plugin-path` (bullet above) |
-| present, no `arch_content/` | — | pointed at the wrong plugin **directory** — see below |
-| present, with `arch_content/` | no | built with the ingestor OFF |
-
-`hipdnn_list_engines` against the built tree answers the second column; an empty list
-from a plugin that exists is the signature.
-
-**A third fault prints the same message: the torch wheel ships more than one plugin
-directory.** One carries the provider's installed descriptors and one does not, so a
-`find ... | head -1` can select a real plugin directory with no descriptor tree under it.
-**Select on the presence of `arch_content/<arch>`, never on the directory's name** — the
-names are wheel-layout detail and will change; the `arch_content` tree is what the loader
-actually needs.
-
-The fix is to get `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (plus whatever production-pack
-flags your engine needs) into the provider build that `setup_env.py` drives, via its
-repeatable `--cmake-arg`.
-
-**As of writing that flag is UNMERGED** (ROCm/dnn-benchmarking#43, open), so unless your
-submodule already carries it, expect the escalation path below rather than this command:
-
-```bash
-python3 setup_env.py --workspace .workspace --torch-mode rocm --gpu-arch <arch> \
-  --torch-index-url https://rocm.nightlies.amd.com/whl-multi-arch/ -y \
-  --cmake-arg HIPDNN_ENABLE_KERNEL_INGESTOR=ON
-```
-
-`NAME=VALUE`; `-DNAME=VALUE` also works. Extras are appended after the tool's own
-defaults, so a repeat overrides a default.
-
-For a **`packaged`/rocKE** engine the ingestor flag alone is not enough, and the
-packaging flags are a conjunction, not a list — `HkpPackaging.cmake` hard-fails the
-configure if you enable a producer without the wheels, or set a source root with no
-producer. Read the guard before choosing, rather than copying flags from here:
-
-```bash
-git grep -n 'FATAL_ERROR' -- '*HkpPackaging.cmake'
-```
-
-**If `setup_env.py --help` does not list `--cmake-arg`, your submodule predates it** —
-that flag arrived in ROCm/dnn-benchmarking#43. Update the submodule, or say so and
-escalate. Do **not** benchmark without it: a green run against an ingestor-less build
-measures the incumbent, and reads as though your engine lost.
-
-### What to run
-
-```bash
-# your own bundles, against an INDEPENDENT reference
-dnn-benchmark --graph '<your bundles>/*.json' --validate pytorch -v
-
-# the corpus your engine claims to serve
-dnn-benchmark --graph 'Workloads/models/<model>.tar.gz' --validate pytorch -o model.json
-```
-
-`--validate pytorch` is the point: stage 8's in-tree reference and your matcher can share
-a misunderstanding, and PyTorch cannot participate in it.
-
-### Performance, including against PyTorch
-
-`--engine <id>` selects by **numeric id**, which is how you attribute a run to your engine
-while engine-name exposure is still pending.
-
-For a best-case comparison, benchmark twice — once to find the best variant, once to use
-it:
-
-```bash
-# 1. oracle sweep: times every applicable candidate and persists the winner
-HIPDNN_FORCE_BENCHMARKING=1 dnn-benchmark --graph "$G" --plugin-path $P --iters 10 -o /dev/null
-
-# 2. your best, record reused
-dnn-benchmark --graph "$G" --plugin-path $P --warmup 10 --iters 50 -o mine.json
-
-# 3. PyTorch, both a named backend and normal dispatch
-# a named backend/library, where the op has selectors (see that repo's README)
-dnn-benchmark --graph "$G" --backend pytorch [--pytorch-<op>-backend <sel>] \
-  [--pytorch-rocm-fa-library <lib>] -o named_backend.json
-dnn-benchmark --graph "$G" --backend pytorch -o pytorch_default.json
-```
-
-Compare against **default dispatch** as well as a named library: default is what a real
-caller gets. Also check the kernel's own docstring claims — rocKE modules frequently
-record measured results, and your `score` encodes some of them as a ranking. Verify the
-ranking against a measurement instead of shipping the assertion; a `score` that ranks
-backwards passes every correctness test.
-
----
-
-## Two limits that bound stage 8 itself
-
-**The in-tree reference cannot verify production shapes.** `gpu-ref` is one thread per
-output element looping over every KV position — untiled, O(problem size). Measured here:
-milliseconds at a toy length, ~20 minutes at 8192, **~8 hours at 32768**, against tier
-budgets of 600 s and 1800 s. Verify correctness at shapes the reference can evaluate; run
-the production shapes through `dnn-benchmark`, which validates against PyTorch. Do not
-author a bundle you cannot afford to verify.
-
-**Detach long device jobs properly.** `nohup … &` dies with the session and leaves an
-empty log that reads like a job still running. Use `setsid nohup … < /dev/null &`.
-
-**And distinguish infrastructure from defects.** A job that fails with
-`No space left on device` or `pyxis: failed to create container filesystem` never started
-your payload. Re-run excluding that node before debugging your engine.
-
----
-
-## GATE
-
-- `graph_contract.md` carries the three buckets, with counts.
-- The step-3 batch states `covered / servable` and names anything scoped out.
-- Step 8e has run: your bundles under `--validate pytorch`, the corpus triaged, and any
-  *declined-but-shippable* rows either added to the set or listed at step 9 with a reason.
+# Workload identity and runtime evidence
+
+**Authoritative for the measurement and accounting rules** — cohort conditions, sweep
+terminal statuses, the runtime outcome ledger and the required reporting statistics.
+[RUNBOOK.md](RUNBOOK.md) owns execution and command sequencing; where the two appear to
+differ on a measurement rule, this page governs.
+
+The sweep reference — from the repository root in
+`projects/hipdnn/tools/IngestorGenerator/tools/README-sweeps.md`, RUNBOOK's
+`$GEN/tools/README-sweeps.md` — owns the Python CLI and YAML schema.
+
+## Provenance, scope and semantic identity
+
+Inventory external workloads and the owners' benchmarks and published results, keeping
+populations separate by source. Kernel predicates say what can build or serve, not what
+callers ask for. The external `ROCm/dnn-benchmarking` project supplies the benchmark CLI
+and graph corpora; use its current setup and workload manifests, not an assumed
+provider-installed executable. `microbench/` is a provenance label, not proof of
+synthetic data.
+
+Each declared source needs total, parsed, servable, covered and excluded counts with
+reasons and original identities. Missing or unreadable input is not an empty population.
+Request JSON feeds mining and parity; actual graph JSON directories feed the sweep.
+`mine_shapes.py` accepts published CSV, graph directories and optional `--rocke-bench`
+input. Omit sources only when outside the approved scope.
+
+Every semantic request field participates in identity, including unmasked/causal/window
+and sink semantics and independent Q/K/V dimensions. Provenance does not split the
+semantic key, but deduplication must retain **all original corpus/source/graph
+occurrences**. Inspect real dims/strides, attributes and UID topology, not filenames.
+Distinguish unsupported, malformed/unrepresentable and missing-variant outcomes, and
+never reduce the denominator to successful timing rows.
+
+## Applicability and reference contract
+
+rocKE profiles scope the candidate registry to the actual kernel family/algorithm and
+required opt-in selector. Reference candidates must implement
+`admits(request) -> (bool, str)`; **there is no `_supports` fallback**, and False
+requires a nonempty reason. Missing or noncallable APIs, bad signatures, exceptions,
+invalid returns and generic constructor/factory failures are operational errors:
+reconciliation exits 2, including under escape flags. They are not unsupported-shape
+evidence.
+
+Reference-only support requires investigating variants, matcher semantics or the
+reference claim, plus an explicit scope decision for exclusions. Applicability does not
+prove numerical truth — use [graph-contract.md](graph-contract.md)'s reference
+capability rules. Direct-load engines use their own explicit corpus and reference.
+
+## Installed measurement contract
+
+Each arm retains source/config, descriptor/payload, plugin/runtime and installation
+identities from a coherent stack. The exact installed UED name must map to the expected
+benchmark engine name/ID; another engine, a name prefix or a reference-provider row
+cannot satisfy attribution. The sweep supplies the benchmark's `--engine` argument from
+that discovered ID; phase-owned arguments must not be overridden.
+
+The YAML example is not an inventory. Replace corpus counts, total installed KDP-entry
+counts, paths and served floors with actual inputs. Paths resolve from the YAML
+directory with no shell or environment interpolation. Hazard exclusions fail if present
+rather than silently filtering; use `exclude_tensors: none` when appropriate.
+
+### Conditions a comparative cohort must satisfy
+
+All hold simultaneously, or the numbers are not comparable:
+
+- **One session.** A single device, node, session and job for every arm. A diagnostic
+  cross-session resume is not a comparative cohort, whatever its status token says.
+- **Baseline first, fixed order**, so ordering effects land identically on each arm.
+- **Gated warmup, discarded.** The warmup is gated on the arm actually being served; an
+  ungated warmup can time a decline.
+- **At least three rounds**, with the round drift reported, not averaged away.
+- **Isolated caches and logs** per arm, so no arm inherits another's compiled or tuned
+  state.
+- **Correctness separately, once per corpus per arm** — never inferred from a timing
+  row.
+
+Reference capability must cover the approved features and shapes. Narrow the corpus
+under an explicit scope decision to keep runtime affordable, never by dropping
+correctness obligations. Final measurements use fresh output produced after the final
+generation, build and install.
+
+### Terminal sweep statuses
+
+| Status | Exit | Means | Accepts? |
+|---|---|---|---|
+| `SWEEP_DONE` | 0 | Every required phase and gate completed **with correctness enabled** | Yes — the only final acceptance |
+| `SWEEP_TIMING_ONLY` | 0 | Reached under explicit `correctness.enabled: false`; timing ran, correctness was never asked | **No** — exit 0 here is not success |
+| `SWEEP_INCOMPLETE` | 1 | One or more required gates unmet | No |
+| — | 2 | Invalid config, operational error, or interruption | No |
+
+Exit 0 alone proves nothing: read the status token. Timing results cannot excuse a
+failed or missing comparison, a numerical mismatch, a NaN or unwritten output, and an
+infrastructure failure is never reportable as a kernel test result.
+
+## Complete final runtime join
+
+Every input in every final corpus/phase needs an outcome ledger row. These fields are
+the complete required set:
+
+| Field | Required evidence |
+|---|---|
+| Semantic key | All request fields except provenance |
+| Original occurrence | Corpus/source/graph identity and staged file identity |
+| Input binding | Phase key/fingerprint and final artifact identities |
+| Attribution | Exact expected and observed engine ID/name |
+| Outcome | Served, explicitly declined, execution error, missing or ambiguous |
+| Evidence | Result/log path and actually observed decline reason where applicable |
+
+Absence of a timing row is not a decline. A decline is only what runtime evidence
+recorded; reasons unavailable there cannot be reconstructed from offline policy.
+
+The join is **corpus/phase-local** — never across corpora or phases — and rejects an
+input with no outcome row, a graph name duplicated or otherwise ambiguous within its
+corpus, and an input-binding fingerprint that does not match the final artifact
+identities.
+
+Semantic deduplication must not discard original occurrences: the ledger carries one row
+per original occurrence even when several share a semantic key. Missing, ambiguous and
+error outcomes block runtime acceptance; they are not roundable to a decline.
+
+Only the complete join supports the per-corpus graph-name-to-reason JSON consumed by
+`reconcile_applicability.py --declines`. Do not mix same-named graphs across corpora or
+present a sparse accepted mapping as complete runtime evidence. Without the join,
+reconciliation is **offline only**.
+
+## Required reporting statistics
+
+A measurement report states all of the following; none substitutes for another.
+
+| Statistic | Definition |
+|---|---|
+| Coverage counts | Covered, servable and total, each by original source |
+| Exact-engine served | Count whose observed engine ID equals the expected installed UED's ID |
+| Independently validated | Count whose numerics were checked against a capable independent reference |
+| Declines, exclusions, blocked | Every one, by original source, with its actually observed reason |
+| Geomean of ratios | Geometric mean of per-input arm/baseline time ratios |
+| Time-weighted total | Sum-baseline over sum-arm across the corpus, reported alongside the geomean |
+| Round drift | Spread across the at-least-three rounds, so a single round cannot stand alone |
+| Byte-identical controls | Determined from artifact hashes, not from equal displayed metadata |
+
+A minimum served floor does not waive any other line. Changed final installed content
+invalidates every result bound to the old inputs; re-measure rather than reuse.

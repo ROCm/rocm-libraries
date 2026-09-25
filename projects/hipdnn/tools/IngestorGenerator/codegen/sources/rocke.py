@@ -3,27 +3,13 @@
 
 """Introspects a rocKE builder module for the descriptor fields it implies.
 
-Unlike ``hiprtc``, this adapter does not scan text. rocKE builders carry the
-answer in their own type annotations, so the extraction is exact:
+The builder's first non-``arch`` parameter annotation is its spec dataclass --
+the same annotation ``hkp_pack._resolve_spec_class`` reads -- and that
+dataclass's fields are the descriptor's ``spec`` block, its non-defaulted
+fields required because the packager hydrates with ``Spec(**fields)``. The
+signature must be exactly ``(spec, *, arch)``.
 
-1. The builder's first non-``arch`` parameter is annotated with its spec
-   dataclass. ``hkp_pack``'s ``_resolve_spec_class`` reads exactly that
-   annotation and hard-fails when it is not a dataclass, so reading it here
-   agrees with the packager by construction rather than by convention.
-2. That dataclass's fields ARE the ``spec`` block a descriptor must carry, and
-   its non-defaulted fields are the ones a descriptor MUST supply -- the
-   packager hydrates with ``Spec(**fields)``, so a missing required field is a
-   ``TypeError`` at pack time.
-3. The builder must take exactly ``(spec, *, arch)``. Checked here so the
-   author learns at config time instead of after a comgr run.
-
-Everything the design reserves for a human stays reserved: this adapter never
-picks the engine name, the arch list, the knobs, or the UMD-vs-graph_match
-split. It reports what the builder can prove about itself.
-
-rocKE is imported lazily and only when this adapter runs. IngestorGenerator
-does not depend on rocKE being importable; a config that names no rocKE source
-never reaches this module.
+rocKE is imported lazily, so IngestorGenerator does not require it.
 """
 
 import dataclasses
@@ -38,20 +24,15 @@ from .base import CandidateKernel, SourceAdapterResult
 class RockeIntrospectionError(RuntimeError):
     """A rocKE module/builder could not be introspected.
 
-    Distinct from ``ConfigError``: this means the *source* could not be read,
-    not that the config is malformed. The caller turns it into whichever it is.
+    Distinct from ``ConfigError``: the source could not be read, rather than
+    the config being malformed.
     """
 
 
 def module_path_from_source(source: str) -> str:
     """``kernels/gfx950/attention_dense.py`` -> ``kernels.gfx950.attention_dense``.
-
-    Mirrors ``hkp_pack.rocke_compile._module_from_source``. A descriptor's
-    ``source`` for ``kind: rocke`` is a dotted module path resolved through the
-    importable ``kernels`` package -- NOT a file under the descriptor root --
-    but authors reliably write it slash-style, so both spellings are accepted
-    here and normalized to the dotted form the packager imports.
-    """
+    Mirrors ``hkp_pack.rocke_compile._module_from_source``: a ``kind: rocke``
+    ``source`` is a dotted module path, and slash-style is normalized."""
     text = source.strip()
     if text.endswith(".py"):
         text = text[: -len(".py")]
@@ -65,7 +46,7 @@ class SpecField:
     name: str
     #: The annotation's readable name (``int``, ``str``, ``bool``, ...).
     type_name: str
-    #: ``None`` when the field has no default -- i.e. a descriptor MUST set it.
+    #: ``None`` when the field has no default, i.e. a descriptor must set it.
     default: object = None
     required: bool = False
 
@@ -82,8 +63,7 @@ class RockeBuilderInfo:
     #: packager's own rejection reason, raised before any config is written.
     signature_error: str = ""
     #: Arches the module's ``supports_*`` predicate accepts, when one exists
-    #: and is spec-shaped. Empty means "could not be determined" -- NOT "none".
-    #: rocKE declares arch support nowhere; it is only ever derived by asking.
+    #: and is spec-shaped. Empty means "undetermined", not "none".
     supported_arches: list[str] = dataclasses.field(default_factory=list)
 
     @property
@@ -98,12 +78,9 @@ def _type_name(annotation) -> str:
 
 
 def _check_spec_arch_signature(builder_fn, builder: str) -> str:
-    """Mirror of ``hkp_pack._require_spec_arch_signature``, returning the reason.
-
-    Kept as a returned string rather than a raise so the adapter can report a
-    complete picture (fields AND the signature problem) in one pass instead of
-    dying on the first fault.
-    """
+    """Mirror of ``hkp_pack._require_spec_arch_signature``, returning the
+    reason instead of raising so fields and the signature problem are reported
+    in one pass."""
     params = inspect.signature(builder_fn).parameters
     names = list(params)
     positional = [
@@ -153,22 +130,12 @@ def _resolve_spec_class(module, builder_fn):
 def _probe_supported_arches(
     module, spec_cls, builder: str, spec_values=None
 ) -> list[str]:
-    """Ask the module's ``supports_*`` predicate which arches it accepts.
+    """Ask the module's ``supports_*`` predicate which arches it accepts, the
+    only place rocKE declares arch support.
 
-    rocKE declares arch support NOWHERE -- not in a spec, not in a manifest --
-    so the only honest way to learn it is to construct a spec and ask.
-
-    ``spec_values`` is the config's real ``spec`` block when there is one. That
-    matters: a spec's ``__post_init__`` validates its own fields, so a
-    synthesized placeholder (``1`` everywhere) usually raises and the probe
-    reports nothing. Asking about the ACTUAL spec an author is packaging is
-    both answerable and the only question worth asking -- arch support is a
-    property of a spec, not of a builder.
-
-    Returns empty for "could not determine", never for "unsupported". Partial
-    coverage is expected and documented in ``hkp_pack.rocke_compile``: the
-    tiled family's predicates take individual keyword-only args and cannot be
-    called generically at all.
+    Arch support is a property of a spec, so pass ``spec_values`` (the config's
+    ``spec`` block); a synthesized placeholder usually fails the spec's
+    ``__post_init__``. An empty result means "undetermined", not "unsupported".
     """
     predicate = getattr(module, builder.replace("build_", "supports_", 1), None)
     if predicate is None or not callable(predicate):
@@ -178,9 +145,9 @@ def _probe_supported_arches(
     except Exception:
         spec = None
     if spec is None:
-        # No real spec to ask about (or it did not construct). Fall back to a
-        # required-fields-only placeholder, which works for the specs whose
-        # __post_init__ is permissive and harmlessly reports nothing otherwise.
+        # No constructible spec: fall back to a required-fields-only
+        # placeholder, which answers for permissive specs and reports nothing
+        # otherwise.
         required = [
             f.name
             for f in dataclasses.fields(spec_cls)
@@ -204,21 +171,14 @@ def _probe_supported_arches(
     return accepted
 
 
-#: Arches worth asking a predicate about. Not a support claim -- just the
-#: question set. A predicate that accepts none of these reports empty, which
-#: the caller must treat as "unknown", never as "unsupported".
+#: Arches worth asking a predicate about; not a support claim.
 _CANDIDATE_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1250")
 
 
 def introspect(source: str, builder: str, spec_values=None) -> RockeBuilderInfo:
-    """Import ``source``, resolve ``builder``, and report what it proves.
-
-    ``source`` may be dotted or slash-style; both normalize to the dotted
-    module path the packager imports. Pass ``spec_values`` -- the config's own
-    ``spec`` block -- to make the arch probe answerable: arch support is a
-    property of a specific spec, so asking about a synthesized one usually just
-    trips the spec's own validation.
-    """
+    """Import ``source`` (dotted or slash-style), resolve ``builder``, and
+    report what it proves. ``spec_values`` -- the config's ``spec`` block --
+    makes the arch probe answerable; see `_probe_supported_arches`."""
     dotted = module_path_from_source(source)
     try:
         module = importlib.import_module(dotted)
@@ -266,13 +226,10 @@ def introspect(source: str, builder: str, spec_values=None) -> RockeBuilderInfo:
 
 
 class RockeAdapter:
-    """Reports a rocKE builder's spec surface as generator candidates.
-
-    Constructed with the ``source``/``builder`` pair a descriptor will name,
-    because a rocKE kernel is identified by module+function, not by a file on
-    disk -- so ``infer()`` takes no paths (the ``SourceAdapter`` protocol's
-    ``*sources`` is accepted and ignored).
-    """
+    """Reports a rocKE builder's spec surface as generator candidates. A rocKE
+    kernel is identified by module+function, so the adapter takes the
+    descriptor's ``source``/``builder`` pair and ``infer()`` ignores
+    ``*sources``."""
 
     def __init__(self, source: str, builder: str, spec_values=None):
         self.source = source
@@ -283,9 +240,8 @@ class RockeAdapter:
         info = introspect(self.source, self.builder, self.spec_values)
         if info.signature_error:
             raise RockeIntrospectionError(info.signature_error)
-        # Every spec field is a candidate KMD field: it is exactly what varies
-        # between two instantiations of this kernel. Which ones become real KMD
-        # fields, and which become knobs, stays a human decision.
+        # Every spec field is a candidate KMD field: it is what varies between
+        # instantiations of this kernel.
         return SourceAdapterResult(
             kernels=[
                 CandidateKernel(
@@ -294,7 +250,7 @@ class RockeAdapter:
                     template_params=[f.name for f in info.fields],
                 )
             ],
-            # One builder is one operation: its variants differ only in spec
+            # One builder is one operation; variants differ only in spec
             # values, which is the single-pack shape.
             suggested_pack_count=1,
         )

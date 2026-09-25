@@ -3,9 +3,8 @@
 
 """CLI subprocess tests for generate.py.
 
-Exit-code contract (frozen in the phase-2 shared contract):
-exit 0 success; exit 1 on ConfigError or a render failure; exit 2 from
-argparse on a bad flag. --dry-run must not create the output dir.
+Exit-code contract: exit 0 success; exit 1 on ConfigError or a render failure;
+exit 2 from argparse on a bad flag. --dry-run must not create the output dir.
 --force is required to overwrite an existing non-empty output directory.
 """
 
@@ -82,7 +81,7 @@ class TestDryRun:
             str(tmp_path / "out"),
             "--dry-run",
         )
-        assert "descriptors/scale_add/scale_add.kmd.json" in result.stdout
+        assert "test_descriptors/unit/scale_add/scale_add.kmd.json" in result.stdout
         assert "packs/ScaleAddNative.cpp" in result.stdout
 
 
@@ -97,7 +96,6 @@ class TestForceOverwrite:
         )
         assert result.returncode == 1
         assert "--force" in result.stderr
-        # The pre-existing file must survive untouched.
         assert (output_dir / "existing_file.txt").read_text() == "hand-authored content"
 
     def test_existing_nonempty_dir_with_force_succeeds(self, tmp_path):
@@ -115,7 +113,6 @@ class TestForceOverwrite:
         assert result.returncode == 0, result.stderr
 
     def test_existing_empty_dir_without_force_succeeds(self, tmp_path):
-        """--force only guards a NON-empty directory."""
         output_dir = tmp_path / "out"
         output_dir.mkdir()
 
@@ -130,7 +127,7 @@ class TestGeneratedOutput:
         result = run_cli(
             "--config", str(SCALE_ADD_CONFIG), "--output-dir", str(tmp_path / "out")
         )
-        assert "Generated 15 files" in result.stdout
+        assert "Generated 14 files" in result.stdout
 
     def test_success_writes_files_to_disk(self, tmp_path):
         output_dir = tmp_path / "out"
@@ -139,6 +136,10 @@ class TestGeneratedOutput:
         )
         assert result.returncode == 0, result.stderr
         assert (
-            output_dir / "descriptors" / "scale_add" / "scale_add.kmd.json"
+            output_dir
+            / "test_descriptors"
+            / "unit"
+            / "scale_add"
+            / "scale_add.kmd.json"
         ).exists()
         assert (output_dir / "packs" / "ScaleAddNative.cpp").exists()

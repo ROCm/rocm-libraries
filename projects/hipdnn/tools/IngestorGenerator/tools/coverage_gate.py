@@ -1,37 +1,24 @@
-"""Three checks that answer three different questions. Counts answer none of them.
+"""Three checks that answer three different questions; a descriptor count
+answers none of them.
 
-A descriptor-count gate once passed on an arm that served ZERO graphs. The count was
-right: the descriptors were on disk, all of them, correctly named. They just never
-reached a GPU, because a duplicate catalog tuple made the loader reject the whole
-engine and every graph fell through to a different one -- while the phase ran to
-completion and exited 0.
+  1. STATIC -- do the descriptors describe what they claim?
+     (`verify_variant_sets.py`.) Runs anywhere, no build and no rocKE.
+     `--mode` picks which claim is made and has no default.
+  2. LOADS  -- does the engine survive the loader's own rules?
+     (`hipdnn_validate_descriptors`.) Needs a build, no GPU; the only cheap
+     rung that catches an engine dropped for a duplicate catalog tuple.
+  3. SERVES -- does it serve graphs on a device, and how many? Needs a GPU.
 
-So "did it work" decomposes, and each rung sees a failure the others cannot:
+This tool runs 1 and 2 and reports 3's requirement explicitly.
 
-  1. STATIC -- do the descriptors describe what they claim? (`verify_variant_sets.py`:
-     binary nesting, catalog-tuple uniqueness, no sentinel, metadata matches binary,
-     matcher vocabulary.) Runs on any machine, needs no build.
-  2. LOADS  -- does the ENGINE survive the loader's own rules?
-     (`hipdnn_validate_descriptors`, which round-trips a bundle exactly as a provider
-     would at plugin-load time.) Needs a build, no GPU. This is the rung that catches
-     the dropped engine, and the only cheap one that can.
-  3. SERVES -- does it serve graphs ON A DEVICE, and how many? Needs a GPU. The
-     preflight that caught two failures every static check passed.
-
-This tool runs 1 and 2 and reports 3's requirement explicitly rather than pretending
-the first two imply it. Rungs 1 and 2 both passing means the descriptors are
-well-formed and the engine loads. It does NOT mean anything was served.
-
-    coverage_gate.py --tree <descriptors> --profile <profile.yaml> \\
+    coverage_gate.py --tree <descriptors> --mode full \\
+                     --profile <profile.yaml> \\
                      --validator <build>/bin/hipdnn_validate_descriptors \\
                      --expect-engine hipkernel:Gfx942AttentionDense
 
-DIALECTS. Rung 2 wants the PACKED tree, not the authored one. A `kind: rocke`
-descriptor is an authoring form that `hkp_pack` lowers to `kind: kpack` at build
-time; the runtime loader has never heard of `builder` and rejects it. Pointing rung 2
-at the authored tree therefore fails with a genuine-looking error about an unknown
-key, which is the loader being right. The gate says so rather than leaving it to be
-rediscovered.
+Rung 2 and `--mode full` want the packed tree: `hkp_pack` lowers a
+`kind: rocke` descriptor to `kind: kpack` at build time, and the runtime
+loader rejects `builder` as an unknown key.
 """
 
 from __future__ import annotations
@@ -43,33 +30,48 @@ import subprocess
 import sys
 from pathlib import Path
 
+#: Rung 1's two claims, spelled exactly as `verify_variant_sets.py` spells them.
+MODES = ("full", "structural")
 
-def run_static(tree: Path, profile: Path | None, tool: Path) -> tuple[bool, str]:
-    """Rung 1. Structural properties of the SET."""
-    argv = [sys.executable, str(tool), "set", str(tree)]
+
+def run_static(
+    tree: Path,
+    profile: Path | None,
+    tool: Path,
+    mode: str,
+    arch: str | None = None,
+    kpack_python_dir: str | None = None,
+) -> tuple[bool, str]:
+    """Rung 1: structural properties of the set, plus compiled agreement in
+    full mode, read off `verify_variant_sets`' exit code.
+
+    Under `--mode full` a check that could not run fails the tool; under
+    `--mode structural` compiled specialization agreement is not checked and
+    the rung reports itself as structural-only.
+    """
+    argv = [sys.executable, str(tool), "set", str(tree), "--mode", mode]
     if profile:
         argv += ["--profile", str(profile)]
+    if arch:
+        argv += ["--arch", arch]
+    if kpack_python_dir:
+        argv += ["--kpack-python-dir", kpack_python_dir]
     result = subprocess.run(argv, capture_output=True, text=True)
-    narrowed = "NOT CHECKED" in result.stdout
-    ok = result.returncode == 0 and not narrowed
-    detail = result.stdout.strip() or result.stderr.strip()
-    if narrowed:
-        detail += (
-            "\n      a NOT CHECKED line is a NARROWED run, not a pass -- supply a "
-            "profile so the policy and vocabulary checks actually execute"
-        )
-    return ok, detail
+    # Both streams on failure: progress goes to stdout and refusals -- an
+    # unresolvable reference, an ambiguous tree -- to stderr.
+    parts = [result.stdout.strip()]
+    if result.returncode != 0:
+        parts.append(result.stderr.strip())
+    detail = "\n".join(p for p in parts if p)
+    return result.returncode == 0, detail
 
 
 def run_loads(
     tree: Path, validator: Path, expect_engines: list[str]
 ) -> tuple[bool, str, list[str]]:
-    """Rung 2. Does the loader accept the engine, under its own rules?
-
-    Reports the engine LIST, not a boolean, because the historical failure is an
-    engine that silently vanishes: the file count is unchanged, the exit code is 0,
-    and the only observable is that a name is missing from this list.
-    """
+    """Rung 2: does the loader accept the engine? Reports the engine list
+    rather than a boolean, since an engine dropped at load leaves the file
+    count and exit code unchanged."""
     argv = [str(validator), str(tree), "--json"]
     for name in expect_engines:
         argv += ["--expect-engine", name]
@@ -102,6 +104,30 @@ def main(argv=None) -> int:
         description="Run the static and loader rungs, and state what rung 3 needs.",
     )
     parser.add_argument("--tree", required=True, help="Descriptor root to check.")
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=MODES,
+        help="What rung 1 is allowed to claim. full: check the producing compiler's "
+        "evidence against these descriptors, this schema, this architecture and the "
+        "payload bytes they name; a missing or mismatched record FAILS. structural: "
+        "run only the checks that need no compiled evidence and report compiled "
+        "specialization agreement as NOT CHECKED. There is no default: the two make "
+        "different claims and a silent choice would print one under the other's "
+        "name.",
+    )
+    parser.add_argument(
+        "--arch",
+        help="The architecture whose shard rung 1 is checking, forwarded to "
+        "verify_variant_sets.py. Required under --mode full when the tree does not "
+        "pin exactly one.",
+    )
+    parser.add_argument(
+        "--kpack-python-dir",
+        help="Directory holding the rocm_kpack package, forwarded to "
+        "verify_variant_sets.py so --mode full can read the payload bytes a packed "
+        "descriptor names. Omit it to use the installed one.",
+    )
     parser.add_argument("--profile", help="Kernel profile for the static rung.")
     parser.add_argument(
         "--validator",
@@ -134,8 +160,21 @@ def main(argv=None) -> int:
     print("coverage gate")
     failures = []
 
-    ok, detail = run_static(tree, profile, static_tool)
-    print(f"  1. STATIC   {'PASS' if ok else 'FAIL'}")
+    ok, detail = run_static(
+        tree, profile, static_tool, args.mode, args.arch, args.kpack_python_dir
+    )
+    if not ok:
+        verdict = "FAIL"
+    elif args.mode == "structural":
+        # Named on the rung's own line, not only in the summary: a reader
+        # scanning for "1. STATIC PASS" must not find it on a run that never
+        # checked a shipped binary against the metadata selecting it.
+        verdict = (
+            "PASS (STRUCTURAL ONLY -- compiled specialization agreement NOT checked)"
+        )
+    else:
+        verdict = "PASS"
+    print(f"  1. STATIC   {verdict}")
     for line in detail.splitlines():
         print(f"      {line}")
     if not ok:
@@ -161,9 +200,8 @@ def main(argv=None) -> int:
         )
         failures.append("loads-not-run")
 
-    # Rung 3 is stated, never inferred. The whole point of the three-rung split is
-    # that "the descriptors are fine and the engine loads" has been true of an arm
-    # that served nothing.
+    # Rung 3 is stated, never inferred: descriptors that are fine and an engine
+    # that loads can still serve nothing.
     print("  3. SERVES   NOT RUN (needs a GPU)")
     print(
         f"      Run the corpus on a device and require at least "
@@ -176,6 +214,21 @@ def main(argv=None) -> int:
     if failures:
         print(f"GATE FAILED ({', '.join(failures)})")
         return 1
+    if args.mode == "structural":
+        print(
+            "GATE PASSED on rungs 1 and 2, STRUCTURALLY: the descriptors are "
+            "well-formed and the engine"
+        )
+        print(
+            "loads. Nothing here checked that any shipped binary agrees with the "
+            "metadata that"
+        )
+        print(
+            "selects it -- only --mode full reads the producing compiler's evidence "
+            "-- and nothing"
+        )
+        print("was served either; rung 3 is still owed.")
+        return 0
     print("GATE PASSED on rungs 1 and 2: descriptors are well-formed and the engine")
     print("loads. That is NOT evidence anything was served -- rung 3 is still owed.")
     return 0

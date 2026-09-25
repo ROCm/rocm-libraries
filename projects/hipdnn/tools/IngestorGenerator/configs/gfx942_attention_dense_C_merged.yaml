@@ -65,7 +65,6 @@ graph_match:
   discriminator: none
 kernel_source_kind: rocke
 workspace_policy: none
-delegates_to_existing_plan: false
 packs:
 - name: attention_dense
   arch:

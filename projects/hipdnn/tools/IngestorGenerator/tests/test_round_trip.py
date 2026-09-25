@@ -1,21 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The generate -> validate round trip, as a permanent (opt-in) regression.
+"""The validator's two opt-in regressions: the generate -> validate round trip and
+the discriminating mutation fixtures under ``tests/fixtures/validate_descriptors/``.
 
-This is deliberately NOT part of the default ``pytest`` run: it depends on
-``hipdnn_validate_descriptors``, a C++ binary this Python tool's own test
-suite does not and should not build. Point ``HIPDNN_VALIDATE_DESCRIPTORS``
-at a build configured with ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON`` and run
-with the ``round_trip`` marker selected:
+Both need ``hipdnn_validate_descriptors``, a C++ binary this Python suite does not
+build -- it exists only under ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON`` -- so they skip
+unless pointed at one:
 
     HIPDNN_VALIDATE_DESCRIPTORS=<build-dir>/bin/hipdnn_validate_descriptors \\
         .venv/bin/python -m pytest -m round_trip
-
-Skipped (not failed) when the env var is unset or names a nonexistent path
--- there is no default hipDNN build containing this binary (it only exists
-under HIPDNN_ENABLE_KERNEL_INGESTOR=ON), so a bare `pytest` run must not
-fail on a missing tool it was never asked to find.
 """
 
 import json
@@ -48,20 +42,78 @@ def validator():
     return path
 
 
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "validate_descriptors"
+FIXTURE_ENGINE = "hipkernel:ValidateFixture"
+
+# Each malformed bundle differs from valid/ by exactly one field. The marker is a token
+# the loader can only emit because it reached THAT mutation; for duplicate_tuple it is
+# the kernel id, since that diagnostic names the kernel rather than the colliding
+# value. See the fixtures' README for the mechanism each one trips.
+MALFORMED_FIXTURES = [
+    ("bad_arch", "GFX942"),
+    ("dangling_uuid", "9341b3cb-3540-44f6-9066-f3695a3b6a2d"),
+    ("duplicate_tuple", "4dfc8557-7e87-48d1-b512-be076419fad0"),
+    ("undeclared_knob", "tile_count"),
+]
+
+
+def _run_validator(validator, root):
+    """Validate a fixture bundle, always naming the engine it should expose: malformed
+    bundles fail by making the loader DROP the engine, leaving no error behind, and
+    ``--expect-engine`` turns that silent drop into a non-zero exit."""
+    result = subprocess.run(
+        [str(validator), str(root), "--expect-engine", FIXTURE_ENGINE, "--json"],
+        capture_output=True,
+        text=True,
+    )
+    return result, json.loads(result.stdout)
+
+
+def test_valid_fixture_validates_clean(validator):
+    """The baseline every malformed bundle is a one-field mutation of."""
+    result, payload = _run_validator(validator, FIXTURE_ROOT / "valid")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert payload["success"] is True
+    assert FIXTURE_ENGINE in payload["engines"]
+    assert payload["expected_engines_missing"] == []
+
+
+@pytest.mark.parametrize(
+    "name,marker", MALFORMED_FIXTURES, ids=[n for n, _ in MALFORMED_FIXTURES]
+)
+def test_malformed_fixture_is_rejected(validator, name, marker):
+    result, payload = _run_validator(validator, FIXTURE_ROOT / name)
+
+    assert result.returncode != 0, (
+        f"{name} validated clean; it differs from valid/ by exactly one deliberate "
+        f"defect and must be rejected"
+    )
+    assert payload["success"] is False
+    assert FIXTURE_ENGINE in payload["expected_engines_missing"], (
+        f"{name} failed, but {FIXTURE_ENGINE} still loaded -- the defect did not "
+        f"suppress the engine, so this bundle is not testing what it claims"
+    )
+
+    diagnostics = " ".join(d["message"] for d in payload["diagnostics"])
+    assert marker in diagnostics, (
+        f"{name} was rejected, but no diagnostic mentions {marker!r}; the bundle may "
+        f"be failing for a reason other than its one deliberate defect. Diagnostics: "
+        f"{diagnostics}"
+    )
+
+
 def test_scale_add_round_trip_validates_clean(
     validator, generator, scale_add_config, tmp_path
 ):
-    written = generator.render(scale_add_config, tmp_path)
-    native_rel = next(f for f in written if f.endswith("Native.cpp"))
+    generator.render(scale_add_config, tmp_path)
 
     result = subprocess.run(
         [
             str(validator),
-            str(tmp_path / "descriptors"),
+            str(tmp_path / scale_add_config.descriptor_dir),
             "--expect-engine",
             scale_add_config.engine.name,
-            "--native-source",
-            str(tmp_path / native_rel),
             "--json",
         ],
         capture_output=True,
@@ -72,26 +124,19 @@ def test_scale_add_round_trip_validates_clean(
     assert payload["success"] is True
     assert scale_add_config.engine.name in payload["engines"]
     assert payload["expected_engines_missing"] == []
-    native_checks = payload["native_source_checks"]
-    assert len(native_checks) == 1
-    assert native_checks[0]["clean"] is True
-    assert native_checks[0]["in_source_not_in_descriptors"] == []
 
 
 def test_binary_ops_round_trip_validates_clean(
     validator, generator, binary_ops_config, tmp_path
 ):
-    written = generator.render(binary_ops_config, tmp_path)
-    native_rel = next(f for f in written if f.endswith("Native.cpp"))
+    generator.render(binary_ops_config, tmp_path)
 
     result = subprocess.run(
         [
             str(validator),
-            str(tmp_path / "descriptors"),
+            str(tmp_path / binary_ops_config.descriptor_dir),
             "--expect-engine",
             binary_ops_config.engine.name,
-            "--native-source",
-            str(tmp_path / native_rel),
             "--json",
         ],
         capture_output=True,

@@ -1,18 +1,25 @@
 {% set slug = config.engine.slug %}
+## Splice point 1: NO CMAKE EDIT IS REQUIRED to install this bundle's descriptors.
+##
+## Place the authored files under the root the bundle targets; the build picks them up
+## by directory. A TEST bundle goes under `test_descriptors/<set>/<slug>/`, walked by
+## hkp_wire_pack_target and installed by
+## install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/" ...) under
+## HIPKERNELPROVIDER_ENABLE_TESTS. A SHIPPED bundle goes under
+## `descriptors/<producer>/<bundle>/`, reached through the
+## HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT CACHE PATH (default: the in-tree
+## E/descriptors/) and installed under if(TARGET hkp_packaging_product).
+##
+## That cache variable and HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT are the only
+## roots an author repoints, and repointing one adds no CMake.
+##
 {% if config.is_packaged %}
-## Splice point 1 (packaged dialect): NOTHING to splice into HIPDNN_DESCRIPTOR_FILES.
-##
-## HIPDNN_DESCRIPTOR_FILES lists descriptors the provider installs for the RUNTIME
-## loader to read directly. A packaged bundle does not take that path: hkp_pack walks
-## its source root recursively, compiles or lowers each UKD, and writes the shipped
-## descriptors into the per-arch tree itself. Adding these files to
-## HIPDNN_DESCRIPTOR_FILES would install a SECOND, unlowered copy carrying
-## `kind: {{ config.kernel_source_kind }}`, which the runtime loader rejects
-## ("no implementation yet") -- dropping the pack, then the engine.
-##
-## What to do instead: place the authored files under the packager's source root, at
-## the authored subpath below, and make sure that root is the one the build points at
-## (HIPKERNELPROVIDER_DESCRIPTOR_SOURCE_ROOT / the `descriptors/` example tree).
+## This is a PACKAGED bundle: the runtime loader does not read its descriptors as
+## authored. hkp_pack walks the shipped source root recursively, compiles or lowers
+## each UKD, and writes the descriptors into the per-arch tree, rewriting
+## `kind: {{ config.kernel_source_kind }}` to `kind: kpack`. A second, unlowered copy
+## would hand the loader a kind it rejects ("no implementation yet"), dropping the pack
+## and then the engine, so the authored files belong under the shipped source root only.
 ##
 ## Authored subpath (preserved verbatim into the staged and installed trees):
 ##     {{ config.descriptor_dir }}/
@@ -32,20 +39,26 @@
 {% endif %}
 ##     kernel_dtype_matches_graph.umd.json
 {% else %}
-## Splice point 1: dnn-providers/hip-kernel-provider/CMakeLists.txt:335
-## Append these lines (one per descriptor file, relative to .../descriptors/) to the
-## existing HIPDNN_DESCRIPTOR_FILES list. Do not replace the list -- append.
-    {{ slug }}/{{ slug }}.kmd.json
-    {{ slug }}/{{ slug }}.ued.json
-    {{ slug }}/{{ slug }}.udd.json
+## This is a DIRECT-LOAD bundle: the runtime loader reads these files as authored, out
+## of the shard belonging to the set `{{ config.authored_subpath }}`. The set is a pack
+## target walked by directory, so a bundle written into the wrong set installs cleanly
+## and is then invisible to the binary meant to read it.
+##
+## Authored subpath:
+##     {{ config.descriptor_dir }}/
+##
+## Files placed there by this run:
+##     {{ slug }}.kmd.json
+##     {{ slug }}.ued.json
+##     {{ slug }}.udd.json
 {% if config.engine.has_heuristic %}
-    {{ slug }}/{{ slug }}.uhd.json
+##     {{ slug }}.uhd.json
 {% endif %}
-    {{ slug }}/kernel_dtype_matches_graph.umd.json
+##     kernel_dtype_matches_graph.umd.json
 {% for pack in config.packs %}
-    {{ slug }}/{{ config.kdp_stem(pack) }}.kdp.json
+##     {{ config.kdp_stem(pack) }}.kdp.json
 {% if config.is_multi_pack %}
-    {{ slug }}/operation_is_{{ pack.discriminator }}.umd.json
+##     operation_is_{{ pack.discriminator }}.umd.json
 {% endif %}
 {% endfor %}
 {% endif %}

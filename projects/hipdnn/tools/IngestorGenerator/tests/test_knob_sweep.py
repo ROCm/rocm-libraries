@@ -115,11 +115,18 @@ class TestIsolationIsActuallyIsolated:
         ), f"arms differ from parity in more than the knob under test: {offenders}"
 
     def test_every_arm_covers_the_same_shapes_as_the_baseline(self, isolated):
-        """An arm that serves fewer shapes is measuring a different corpus."""
+        """An arm that serves fewer shapes is measuring a different corpus, so it may
+        only do so out loud: the engine's predicate declines some shapes at that
+        setting, and the sweep must say how many it covers."""
         base = len(_specs(isolated["dir"] / "arm_parity.yaml"))
         assert base > 0
         for arm in sorted(isolated["dir"].glob("arm_*.yaml")):
-            assert len(_specs(arm)) == base, f"{arm.name} serves a different corpus"
+            covered = len(_specs(arm))
+            if covered != base:
+                assert (
+                    f"NARROWED: covers {covered} of {base} served shapes"
+                    in isolated["stdout"]
+                ), f"{arm.name} serves a different corpus without saying so"
 
     def test_an_arm_equal_to_parity_is_flagged_not_silently_shipped(self, isolated):
         """A knob value the dispatcher already resolves makes the arm the baseline

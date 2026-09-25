@@ -2,8 +2,12 @@
   "version": "0.1",
   "id": "kdp-attention",
   "name": "Attention pack",
-  "arch": ["gfx950"],
-  "matchers": ["umd-attention"],
+  "arch": [
+    "gfx950"
+  ],
+  "matchers": [
+    "umd-attention"
+  ],
   "engine": "ued-attention",
   "dispatch": "udd-attention",
   "kernelDescriptors": [
@@ -11,7 +15,9 @@
       "version": "0.1",
       "id": "ukd-attention-dense-d64",
       "name": "Attention dense d64",
-      "arch": ["gfx950"],
+      "arch": [
+        "gfx950"
+      ],
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx950/attention_dense.py",
@@ -25,14 +31,47 @@
           "head_size": 64
         }
       },
-      "metadata": { "family": "attention_dense", "batch": 1, "head_size": 64 },
-      "priority": 0
+      "metadata": {
+        "family": "attention_dense",
+        "batch": 1,
+        "head_size": 64
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "ued-attention",
+              "kmd_id": "kmd-attention",
+              "metadata_fields": [
+                "batch",
+                "head_size"
+              ],
+              "matcher_only_fields": [
+                "family"
+              ],
+              "bindings": {
+                "batch": {
+                  "field": "batch"
+                },
+                "head_size": {
+                  "field": "head_size"
+                }
+              },
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
     },
     {
       "version": "0.1",
       "id": "ukd-attention-dense-d128",
       "name": "Attention dense d128",
-      "arch": ["gfx950"],
+      "arch": [
+        "gfx950"
+      ],
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx950/attention_dense.py",
@@ -46,8 +85,39 @@
           "head_size": 128
         }
       },
-      "metadata": { "family": "attention_dense", "batch": 1, "head_size": 128 },
-      "priority": 0
+      "metadata": {
+        "family": "attention_dense",
+        "batch": 1,
+        "head_size": 128
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "ued-attention",
+              "kmd_id": "kmd-attention",
+              "metadata_fields": [
+                "batch",
+                "head_size"
+              ],
+              "matcher_only_fields": [
+                "family"
+              ],
+              "bindings": {
+                "batch": {
+                  "field": "batch"
+                },
+                "head_size": {
+                  "field": "head_size"
+                }
+              },
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
     }
   ]
 }

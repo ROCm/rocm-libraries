@@ -3,7 +3,14 @@
 
 """Unit tests for codegen/models.py -- the derived @property surface."""
 
-from codegen.models import EngineSpec, KmdField
+import pytest
+
+from codegen.models import (
+    DEFAULT_FIXTURE_ARCH,
+    EngineSpec,
+    KmdField,
+    wave_size_for_arch,
+)
 from tests.helpers import make_engine, make_minimal_config, make_pack
 
 
@@ -108,6 +115,21 @@ class TestIngestorConfigDerivation:
         assert "block_size" in names
         assert "dtype" not in names
 
+    def test_device_fixture_arch_is_the_first_packs_first_arch(self):
+        config = make_minimal_config(packs=[make_pack(arch=["gfx1201", "gfx1200"])])
+        assert config.device_fixture_arch == "gfx1201"
+
+    def test_device_fixture_arch_falls_back_when_no_pack_names_one(self):
+        config = make_minimal_config(packs=[make_pack()])
+        assert not config.packs[0].arch
+        assert config.device_fixture_arch == DEFAULT_FIXTURE_ARCH
+
+    def test_device_fixture_wave_size_follows_the_fixture_arch(self):
+        cdna = make_minimal_config(packs=[make_pack(arch=["gfx942"])])
+        rdna = make_minimal_config(packs=[make_pack(arch=["gfx1201"])])
+        assert cdna.device_fixture_wave_size == 64
+        assert rdna.device_fixture_wave_size == 32
+
     def test_is_multi_pack(self):
         single = make_minimal_config(packs=[make_pack(name="a")])
         multi = make_minimal_config(
@@ -118,3 +140,27 @@ class TestIngestorConfigDerivation:
         )
         assert not single.is_multi_pack
         assert multi.is_multi_pack
+
+
+class TestWaveSizeForArch:
+    """The hand-mirrored arch -> wavefront-width rule. Its upstream is rocKE's
+    ``core/arch/data/arch_specs.json`` and the ids below are that file's own, so drift
+    shows up here."""
+
+    @pytest.mark.parametrize("arch", ["gfx90a", "gfx942", "gfx950"])
+    def test_cdna_targets_are_wave64(self, arch):
+        assert wave_size_for_arch(arch) == 64
+
+    @pytest.mark.parametrize(
+        "arch", ["gfx1030", "gfx1100", "gfx1151", "gfx11-generic", "gfx1201", "gfx1250"]
+    )
+    def test_gfx10_through_gfx12_targets_are_wave32(self, arch):
+        """Including ``gfx1250``, which rocKE files under CDNA and still runs 32
+        lanes."""
+        assert wave_size_for_arch(arch) == 32
+
+    def test_an_unrecognized_arch_takes_the_wave64_default(self):
+        """64 rather than a raise: the prefix rule is about the arch FAMILY, and wave64
+        is what every non-gfx10/11/12 AMD target has shipped."""
+        assert wave_size_for_arch("gfx999") == 64
+        assert wave_size_for_arch("") == 64

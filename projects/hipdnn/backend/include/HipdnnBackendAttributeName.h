@@ -545,6 +545,11 @@ typedef enum
      * (hipdnnBackendDescriptor_t of a HIPDNN_BACKEND_TENSOR_DESCRIPTOR, optional) */
     HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC = 1310,
 
+    /** @brief Multiplier applied to the stored ragged offset to recover the element
+     * offset (`element_offset = stored_offset * multiplier`, int64, default 1). A value
+     * of `H*D` lets a token-unit offset tensor be bound directly as the ragged offset. */
+    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER = 1311,
+
     /** @} */
 
     /**

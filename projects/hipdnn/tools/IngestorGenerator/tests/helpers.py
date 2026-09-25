@@ -4,6 +4,7 @@
 """Factory helpers for building minimal valid model instances in unit tests."""
 
 from codegen.models import (
+    DIALECT_DIRECT_LOAD,
     EngineSpec,
     GraphMatchSpec,
     IngestorConfig,
@@ -45,7 +46,9 @@ def make_pack(**overrides) -> PackSpec:
 
 
 def make_minimal_config(**overrides) -> IngestorConfig:
-    """A minimal valid single-pack IngestorConfig, for unit tests."""
+    """A minimal valid single-pack IngestorConfig. ``specialization`` is derived from
+    the caller's final ``kmd_fields`` as the all-matcher-only declaration the
+    direct-load dialect requires; pass your own to test the declaration itself."""
     defaults = dict(
         engine=make_engine(),
         kmd_fields=[make_kmd_field(), KmdField(name="dtype", type="string")],
@@ -53,4 +56,17 @@ def make_minimal_config(**overrides) -> IngestorConfig:
         graph_match=GraphMatchSpec(),
     )
     defaults.update(overrides)
+    if defaults.get("dialect", DIALECT_DIRECT_LOAD) == DIALECT_DIRECT_LOAD:
+        # Required of a direct-load bundle; the loader refuses one without it. The
+        # packaged dialect legitimately falls back to <kind>/<slug>.
+        defaults.setdefault("authored_subpath", "unit")
+    defaults.setdefault(
+        "specialization",
+        {
+            "metadata_fields": [],
+            "matcher_only_fields": [f.name for f in defaults["kmd_fields"]],
+            "bindings": {},
+            "vocabulary": {},
+        },
+    )
     return IngestorConfig(**defaults)

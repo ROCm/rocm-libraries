@@ -1,51 +1,34 @@
-"""Generate the variant set rocKE's own dispatcher would resolve -- one command.
+"""Generate the variant set rocKE's own dispatcher would resolve.
 
-STAGE 1 OF AN INTEGRATION, and the only configuration whose correctness argues from
-rocKE's behaviour rather than from measurement. Everything after it is a deviation
-that has to be justified; this is the thing deviations are measured against.
+Stage 1 of an integration, and the only configuration argued from rocKE's
+behaviour rather than from measurement: the validators, the spec dataclass and
+the ``supports_*`` predicate answer what is legal, the dispatcher answers what
+the library ships. Calling the factory applies rules the dispatcher derives
+from the request (``persistent = work >= num_persistent``).
 
-It answers the question the mining sources do not. The validators, the spec
-dataclass and the ``supports_*`` predicate all answer "what is LEGAL?". The
-dispatcher is the only source that says "what does the library itself SHIP for this
-request?", and the difference is not academic: a field the dispatcher DERIVES from
-the request (``persistent = work >= num_persistent``) reads as an ordinary local
-variable, gets missed by a human transcribing constants, and silently takes the
-dataclass default instead -- which was the opposite of the dispatcher's answer on
-62 of 145 variants, for a lever the kernel's own notes mark "KEEP everywhere". No
-gate caught it. Descriptors validated, the desk check was clean, correctness passed
-on device; the only symptom was a performance number, misattributed three times.
-
-Calling the factory cannot make that mistake. A rule is applied rather than read.
-
-WHAT IT EMITS. One variant per servable shape, at the dispatcher's own resolved
-spec, as a generator config ready for ``generate.py``. Not a cross-product: the
-dispatcher returns exactly one spec per shape, and that IS the tuning surface rocKE
-exposes for the op.
+Emits one variant per servable shape, at the dispatcher's resolved spec, as a
+generator config ready for ``generate.py``. Not a cross-product: one spec per
+shape.
 
     dispatch_parity.py --profile <profile.yaml> --shapes <corpus.json> \\
                        --out configs/<slug>_A.yaml
 
-THE TWO DENOMINATORS. "Does the kernel support this shape?" has two answers and
-they differ by 59 on the published corpus. A support check that only calls the
-predicate misses every shape rejected at SPEC CONSTRUCTION -- those raise
-``ValueError`` before a predicate ever runs, so the constructor must be inside the
-try. Both rejection kinds are reported here, separately and by reason, because
-"uncovered and unexplained" is the state that hides a defect: an uncovered servable
-shape is a defect until proven otherwise, and the proof is this cheap.
+A request-construction failure means the corpus and the request class disagree
+about what a shape is, so it aborts (``ParityError``, ``FAIL`` on stderr, exit
+2). A decline -- the eligibility predicate returning false with a reason -- is
+a per-shape outcome, counted and printed by ``--report-gaps``.
 
-WHAT IT DELIBERATELY DOES NOT DO. It does not sweep. A knob that is CONSTANT across
-every dispatch decision is not a tuning axis -- it is a value rocKE ships -- and
---report-knobs prints that partition so a sweep can start from what actually varies
-instead of from a cross-product of everything nameable. On gfx942 attention_dense
-the surface is 8 shape fields plus waves_per_eu and persistent; the other twelve
-knobs are dispatch-invisible, and the ones a commit message says were "swept" were
-explored, not shipped.
+This tool does not sweep. ``--report-knobs`` partitions the spec fields into
+those that vary across dispatch decisions and those the library ships (see
+``knob_partition``).
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import dataclasses
+import inspect
 import itertools
 import json
 import math
@@ -58,15 +41,45 @@ class ParityError(RuntimeError):
     """The dispatcher could not be reached or asked. Never a shape-level decline."""
 
 
-def _load_profile(path: str) -> dict:
-    """Parse a profile as JSON, falling back to YAML.
+def _predicate_result(predicate, *args, **kwargs) -> tuple[bool, str]:
+    """Invoke an eligibility API without converting operational errors to declines."""
+    if not callable(predicate):
+        raise ParityError("eligibility predicate is not callable")
+    try:
+        inspect.signature(predicate).bind(*args, **kwargs)
+        result = predicate(*args, **kwargs)
+    except Exception as exc:
+        raise ParityError(f"eligibility predicate failed: {exc}") from exc
+    if (
+        type(result) is not tuple
+        or len(result) != 2
+        or type(result[0]) is not bool
+        or type(result[1]) is not str
+        or (not result[0] and not result[1].strip())
+    ):
+        raise ParityError(
+            "eligibility predicate must return (bool, str), with a decline reason"
+        )
+    return result
 
-    The mapping check covers BOTH paths. It used to sit only on the YAML branch, so a
-    file that parsed as valid JSON but was not an object -- a bare list, say -- sailed
-    through and crashed several frames later with `AttributeError: 'list' object has
-    no attribute 'get'`, which names neither the file nor the problem. Sibling tools
-    (verify_variant_sets, variant_reachability) already had it outside the try.
-    """
+
+def _eligible(candidate, request) -> tuple[bool, str]:
+    """Ask one candidate the complete eligibility question. `admits` is the
+    only eligibility API, so a candidate not exposing it raises rather than
+    reading as a decline."""
+    try:
+        # Static lookup distinguishes absence from a descriptor that raises on access.
+        inspect.getattr_static(candidate, "admits")
+        predicate = getattr(candidate, "admits")
+    except Exception as exc:
+        raise ParityError(f"cannot look up eligibility API 'admits': {exc}") from exc
+    return _predicate_result(predicate, request)
+
+
+def _load_profile(path: str) -> dict:
+    """Parse a profile as JSON, falling back to YAML. The mapping check covers
+    both paths: valid JSON that is not an object would otherwise crash several
+    frames later naming neither the file nor the problem."""
     text = Path(path).read_text()
     try:
         loaded = json.loads(text)
@@ -119,19 +132,15 @@ class Resolution:
     shape: dict
     spec: object | None = None
     reason: str | None = None
-    #: "constructed" (spec built and predicate accepted), "declined" (predicate said
-    #: no), or "rejected" (spec construction raised -- the answer the predicate alone
-    #: never sees).
+    #: "constructed" (spec built and predicate accepted) or "declined"
+    #: (the predicate returned a validated false result).
     kind: str = "constructed"
 
 
 def _required(decl: dict, scope: str, *keys: str) -> list:
-    """Pull `keys` out of a profile block, naming the block when one is missing.
-
-    A bare `decl["module"]` raises `KeyError: 'module'` with no indication of WHICH
-    profile block was incomplete -- and a profile has several blocks that all take a
-    `module`. The tool has a named error type for exactly this kind of thing; this
-    makes the profile-shape failures use it too.
+    """Pull `keys` out of a profile block, naming the block when one is
+    missing: a bare `decl["module"]` raises `KeyError: 'module'` without
+    saying which of the profile's several blocks was incomplete.
     """
     missing = [k for k in keys if k not in decl]
     if missing:
@@ -143,7 +152,7 @@ def _required(decl: dict, scope: str, *keys: str) -> list:
 
 
 def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
-    """Ask the dispatcher for every shape, keeping both kinds of refusal apart."""
+    """Ask the dispatcher for every shape; API errors are operational failures."""
     dispatch = profile.get("dispatch") or {}
     request_decl = profile.get("request") or {}
     predicate_decl = profile.get("predicate") or {}
@@ -160,10 +169,9 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
 
     out: list[Resolution] = []
     for shape in shapes:
-        # Keys prefixed `_` are carried metadata, not request fields. Provenance
-        # travels with a shape so a result can be split by where the shape came
-        # from -- the split that turned "the win is synthetic" from a suspicion
-        # into a measurement -- but the request class would reject the key.
+        # Keys prefixed `_` are carried provenance, not request fields: they
+        # travel with a shape so results can be split by origin, but the
+        # request class would reject the key.
         fields = {
             **defaults,
             **{k: v for k, v in shape.items() if not k.startswith("_")},
@@ -171,27 +179,16 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
         if arch and "arch" not in fields:
             fields["arch"] = arch
         try:
-            # The constructor is INSIDE the try on purpose. Structural rejections --
-            # a decode Sq the block size cannot divide, an unsupported head_size --
-            # raise here, before any predicate runs. Calling only the predicate
-            # reports those shapes as supported and ships a wrong denominator.
             request = request_cls(**fields)
             spec = factory(request)
         except Exception as exc:
-            out.append(
-                Resolution(
-                    shape, reason=f"{type(exc).__name__}: {exc}", kind="rejected"
-                )
-            )
-            continue
+            raise ParityError(f"request/spec construction failed: {exc}") from exc
         if predicate is not None:
-            supported, why = predicate(spec, arch=arch) if arch else predicate(spec)
+            supported, why = _predicate_result(
+                predicate, spec, **({"arch": arch} if arch else {})
+            )
             if not supported:
-                out.append(
-                    Resolution(
-                        shape, reason=str(why) or "predicate declined", kind="declined"
-                    )
-                )
+                out.append(Resolution(shape, reason=why, kind="declined"))
                 continue
         out.append(Resolution(shape, spec=spec))
     return out
@@ -200,9 +197,8 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
 def knob_partition(resolutions: list[Resolution]) -> tuple[list[str], list[str]]:
     """(varies, constant) across the dispatcher's own decisions.
 
-    The mechanical form of "which knobs may be exposed". A field the dispatcher
-    resolves identically for every shape it serves is not an axis -- it is a value
-    the library ships. Sweeping it measures a configuration rocKE would never pick.
+    A field the dispatcher resolves identically for every shape it serves is not a
+    tuning axis -- it is a value the library ships.
     """
     served = [r.spec for r in resolutions if r.spec is not None]
     if not served:
@@ -216,20 +212,11 @@ def knob_partition(resolutions: list[Resolution]) -> tuple[list[str], list[str]]
 
 
 def _kernel_name(slug: str, spec, index: int) -> str:
-    """A name derived from the spec's OWN fields, whatever op this is.
+    """A kernel name derived from the spec's own fields, whatever op this is.
 
-    The first version listed attention's field names and abbreviated those it found.
-    On any other op it found none of them and every variant collapsed onto the same
-    string -- two distinct conv variants both named `conv_fwd_dtfp16`. Nothing
-    downstream catches that: the config loader checks PACK name uniqueness, not
-    kernel names, and de-duplication keys on metadata rather than name, so the
-    colliding entries ship as separate descriptors that are impossible to tell apart
-    in a log, a winner record or a failure message.
-
-    So the fields come from the dataclass. Scalars only -- a name is an identifier,
-    not a serialisation -- and the index is appended unconditionally, because a name
-    built from a subset of fields is only unique by luck and this tool cannot know
-    which subset a given kernel varies over.
+    Hand-listing one op's field names collapses other ops' variants onto the
+    same string, and nothing downstream catches it. Scalars only, with the
+    index appended unconditionally.
     """
     parts = [slug]
     try:
@@ -269,40 +256,67 @@ def _policy_resolvers(profile: dict) -> dict:
     return resolvers
 
 
+def _specialization(profile: dict) -> dict:
+    """The profile's `specialization` block, carried through to the emitted
+    config so a machine without rocKE can say which metadata fields the
+    producing compiler specialized on and how each is read off the builder.
+
+    Without it the descriptors' `provenance.specialization_contract` cannot be
+    written, so a knob resolved by a standalone policy callback needs an
+    explicit builder-owned readout.
+    """
+    declaration = profile.get("specialization")
+    if not isinstance(declaration, dict) or not declaration:
+        raise ParityError(
+            "the profile declares no 'specialization' block, so the emitted config "
+            "cannot state which metadata fields the producing compiler specializes "
+            "on. Declare 'metadata_fields' with a 'bindings' entry each, and "
+            "'matcher_only_fields' for the rest."
+        )
+    bindings = declaration.get("bindings") or {}
+    for knob in profile.get("policies") or {}:
+        binding = bindings.get(knob)
+        if not isinstance(binding, dict) or set(binding) not in ({"field"}, {"method"}):
+            raise ParityError(
+                f"'{knob}' is resolved here by a standalone policy callback but the "
+                f"specialization block binds no builder-owned readout for it. Add "
+                f"bindings.{knob} naming the attribute or zero-argument accessor on "
+                f"the builder's own spec object, as {{'method': '<accessor>'}} or "
+                f"{{'field': '<attr>'}}. There is no convention to infer one from, "
+                f"and moving it to matcher_only_fields would claim the compiler does "
+                f"not specialize on a field it does."
+            )
+    return copy.deepcopy(declaration)
+
+
 def build_config(
     resolutions: list[Resolution], profile: dict, knobs: dict | None = None
 ) -> dict:
-    """A generator config carrying one kernel per served shape.
+    """A generator config carrying one kernel per served shape, with every spec
+    field the dispatcher set written out verbatim rather than transcribed.
 
-    Every spec field the dispatcher set is written out verbatim. That is the point:
-    a derived field is indistinguishable from a constant once it is a value, and the
-    only way to be sure one was not missed is to never transcribe any of them.
-
-    POLICY-OWNED KNOBS need one more step. The dispatcher returns the SHARED spec
-    and deliberately leaves gfx942-private knobs alone -- `use_exp2_fast` is absent
-    from it entirely, meaning "the kernel's policy decides at build time". The
-    binary is still definite, so the descriptor must SAY which one it is: the
-    matcher compares metadata, and a knob absent there resolves to the KMD default,
-    which is a different kernel. Resolving it here is right and resolving it in the
-    generator would be wrong -- the generator must not import rocKE, and guessing a
-    policy without asking it is what shipped an explicit `false` over a policy that
-    answers True above a sequence-length threshold, throwing away the win it was
-    measured to give.
+    Policy-owned knobs need one more step: the dispatcher returns the shared
+    spec and leaves arch-private knobs absent, meaning the kernel's policy
+    decides at build time. The matcher compares metadata, where an absent knob
+    falls back to the KMD default and names a different kernel, so the knob is
+    resolved here rather than in the generator, which must not import rocKE.
     """
     slug = profile["slug"]
     metadata_fields = list(profile.get("metadata_fields") or [])
     vocabulary = dict(profile.get("vocabulary") or {})
     resolvers = _policy_resolvers(profile)
-    # Arch-PRIVATE fields are absent from the shared spec the dispatcher returns, but
-    # the engine may still read them from the catalog: the gfx942 matcher checks
-    # `seqlen_q % block_m == 0` and prepare() passes block_m to the grid helper, so a
-    # descriptor omitting it states no tile at all -- while the C++ compiles fine and
-    # the omission is invisible. The builder's own spec class carries the value the
-    # binary is actually built with, so ask it rather than leaving a hole.
+    # Resolved before any kernel is built, so a knob with no declared readout
+    # is refused while the message can still name it.
+    specialization = _specialization(profile)
+    # Arch-private fields are absent from the shared spec the dispatcher
+    # returns, but the engine may still read them from the catalog: the gfx942
+    # matcher checks `seqlen_q % block_m == 0`, so a descriptor omitting it
+    # states no tile at all. The builder's spec class carries the value the
+    # binary is built with, so ask it.
     arch_decl = profile.get("arch_spec") or {}
     arch_defaults: dict = {}
-    # Every field the BUILDER's spec accepts, defaulted or not. Distinct from
-    # arch_defaults: a pinned knob must be written into the spec whenever the
+    # Every field the builder's spec accepts, defaulted or not. Distinct from
+    # arch_defaults: a pinned knob is written into the spec whenever the
     # builder would accept it, including fields whose default is MISSING.
     arch_field_names: set = set()
     if arch_decl:
@@ -326,14 +340,10 @@ def build_config(
                 f"{values!r}. An empty list's cross-product is empty, which would "
                 f"silently emit ZERO kernels instead of failing here."
             )
-        # A knob the BUILDER's spec does not accept can only ever be written to
-        # metadata, which makes both arms name the SAME binary under two catalog
-        # entries: identical kernels, one of which the matcher will prefer for
-        # reasons that have nothing to do with the knob. The sweep then measures
-        # 1.000x and reports "no effect" for a knob whose other side was never
-        # compiled. Refuse rather than emit that, and say which of the two real
-        # cases the author is in -- a typo, or a knob that needs the arch spec
-        # promoted the way the builder does it.
+        # A knob the builder's spec does not accept can only be written to
+        # metadata, which makes both arms name the same binary under two
+        # catalog entries; the sweep then reports "no effect" for a knob whose
+        # other side was never compiled.
         if arch_field_names and knob not in arch_field_names:
             raise ParityError(
                 f"--knobs names '{knob}', which the builder's spec class "
@@ -369,30 +379,18 @@ def build_config(
             if isinstance(value, bool):
                 value = int(value)
             if name in vocabulary and isinstance(value, str):
-                # The matcher compares the hipDNN spelling; the spec carries the
-                # builder's. Copying one over the other declines every graph while
-                # the engine still loads and every count reconciles.
+                # The matcher compares the hipDNN spelling; the spec carries
+                # the builder's. Copying one over the other declines every
+                # graph while the engine still loads.
                 mapping = vocabulary[name]
                 if isinstance(mapping, dict):
                     value = mapping.get(value, value)
             metadata[name] = value
-        # The SHIPPING cross-product. Stage 4a-3 builds the package from the knobs
-        # that measurably earned a slot, over the shapes the dispatcher resolves --
-        # so the base set stays dispatcher-derived (never hand-transcribed) and only
-        # the surviving knobs multiply it.
-        #
-        # This cannot be expressed as a pack `axes:` block: axes cross ONE
-        # kernel_template, and here every shape carries its own resolved spec. The
-        # cross-product therefore has to happen where the specs are, which is here.
-        #
-        # A pinned knob overrides what the policy resolved above, and that is the
-        # point of sweeping it -- but only for knobs the author listed. Everything
-        # absent from --knobs keeps its policy-resolved value, because pinning a knob
-        # the kernel resolves by policy DISCARDS the policy, and a generated set can
-        # be strictly worse than a smaller one exactly that way.
-        # With no --knobs this is a single empty combination: the parity set, one
-        # kernel per servable shape, name and payload byte-identical to what this
-        # tool emitted before --knobs existed.
+        # The shipping cross-product: dispatcher-resolved shapes crossed with
+        # the knobs that earned a slot. Not a pack `axes:` block, since axes
+        # cross one kernel_template and here every shape carries its own spec.
+        # Knobs absent from --knobs keep their policy-resolved value; with no
+        # --knobs this is a single empty combination, the parity set.
         axis_names = sorted(knobs)
         for combo in itertools.product(*[knobs[k] for k in axis_names]):
             pinned = dict(zip(axis_names, combo))
@@ -402,12 +400,10 @@ def build_config(
                 variant_metadata[knob] = (
                     int(value) if isinstance(value, bool) else value
                 )
-                # Write it into the SPEC, not only the metadata. The spec is what
-                # the builder compiles, and an arch-private knob is absent from the
-                # shared spec the dispatcher returns -- so a `knob in variant_spec`
-                # guard silently skips exactly the knobs most worth sweeping, and
-                # both arms build one binary. The refusal above guarantees the
-                # builder accepts this field, so setting it is always legal.
+                # Write it into the spec, not only the metadata: the spec is
+                # what the builder compiles, and an arch-private knob is absent
+                # from the shared spec, so a `knob in variant_spec` guard would
+                # skip exactly the knobs worth sweeping.
                 variant_spec[knob] = value
             name = _kernel_name(slug, resolution.spec, index)
             if pinned:
@@ -424,19 +420,16 @@ def build_config(
                     "metadata": variant_metadata,
                 }
             )
-    # `dialect: packaged` is not a default worth guessing: a rocKE builder can only
-    # be authored packaged (hkp_pack lowers it through comgr at build time and
-    # rewrites the descriptor to kind: kpack), and the loader rejects the pairing
-    # outright otherwise. Stating it here means the emitted config is directly
-    # generatable rather than a skeleton someone has to finish.
+    # `dialect: packaged` is stated rather than guessed: a rocKE builder can
+    # only be authored packaged, and the loader rejects any other pairing.
     return {
         "dialect": profile.get("dialect", "packaged"),
         "authored_subpath": profile.get("authored_subpath", f"rocKE/{slug}"),
         "engine": profile["engine"],
         "kmd_fields": profile["kmd_fields"],
+        "specialization": specialization,
         "kernel_source_kind": profile.get("kernel_source_kind", "rocke"),
         "workspace_policy": profile.get("workspace_policy", "none"),
-        "delegates_to_existing_plan": profile.get("delegates_to_existing_plan", False),
         "packs": [
             {
                 "name": profile.get("pack", slug),
@@ -450,25 +443,17 @@ def build_config(
 def _compact(config: dict, knob_fields: list, profile: dict) -> str:
     """The enumerated config, rewritten as `variants` and rendered.
 
-    A fully-enumerated set is one YAML block per kernel: the largest shipped gfx942
-    attention_dense config was 89,265 lines for 2,710 kernels, and a config nobody
-    can read is a config nobody checks -- while being the ONE file in a descriptor
-    PR worth reviewing, since the descriptors are its deterministic output.
-
-    Shared with the retrofit path (`factorise_config.py`) rather than reimplemented,
-    so the two cannot disagree about what a compact config means. The factoriser
-    verifies its own output by re-expanding it, so a set that cannot be compacted
-    losslessly fails here instead of shipping a config that generates something else.
+    Shared with the retrofit path (`factorise_config.py`) so the two cannot
+    disagree about what a compact config means.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from factorise_config import FactoriseError, _round_trip, dump, factorise
 
     try:
         compact = factorise(config, list(knob_fields), profile.get("vocabulary") or {})
-        # Not optional. The compact form is what ships, so it has to be checked
-        # against the enumeration it stands for -- and that check is also what
-        # catches a kernel-name collision before the loader's own uniqueness check
-        # rejects the whole pack -- and it names the inference that caused it.
+        # Not optional: the compact form is what ships, so it is checked
+        # against the enumeration it stands for. That check also catches a
+        # kernel-name collision before the loader's pack-level check does.
         _round_trip(config, compact)
     except FactoriseError as exc:
         raise ParityError(
@@ -508,7 +493,7 @@ def main(argv=None) -> int:
         "--knobs",
         help="JSON mapping of knob name to the list of values that SURVIVED the "
         "sweep, e.g. '{\"use_exp2_fast\": [0, 1]}'. The dispatcher-resolved set is "
-        "crossed with it to build the shipping package (stage 4a-3). Omit it and "
+        "crossed with it to build the shipping package (RUNBOOK §6). Omit it and "
         "you get the parity set: one kernel per servable shape.",
     )
     args = parser.parse_args(argv)
@@ -526,16 +511,14 @@ def main(argv=None) -> int:
 
     served = [r for r in resolutions if r.spec is not None]
     declined = [r for r in resolutions if r.kind == "declined"]
-    rejected = [r for r in resolutions if r.kind == "rejected"]
 
     print("dispatcher parity")
     print(f"  shapes in         {len(resolutions)}")
     print(f"  servable          {len(served)}")
     print(f"  declined          {len(declined)}  (predicate said no)")
-    print(f"  rejected          {len(rejected)}  (spec construction raised)")
 
     if args.report_gaps:
-        for resolution in declined + rejected:
+        for resolution in declined:
             print(f"    [{resolution.kind}] {resolution.shape} -- {resolution.reason}")
 
     if args.report_knobs:
@@ -564,16 +547,10 @@ def main(argv=None) -> int:
                     f"values, got {type(knobs).__name__}."
                 )
             config = build_config(resolutions, profile, knobs)
-            # Emit the COMPACT form. build_config stays the source of truth --
-            # every spec field the dispatcher set, written out, never transcribed --
-            # and factorise_config collapses the result into the shape x knob-set
-            # form a reviewer can read. One mechanism, not two: the factoriser
-            # re-expands what it wrote and refuses to emit anything that does not
-            # reproduce the enumeration kernel-for-kernel, so the compact config and
-            # the longhand one it stands for cannot drift.
-            #
-            # The knob axes are exactly --knobs: the dispatcher returns ONE spec per
-            # shape, so those are the only fields that vary within a shape.
+            # Emit the compact form; build_config stays the source of truth and
+            # `_compact` refuses anything that does not re-expand
+            # kernel-for-kernel. The knob axes are exactly --knobs, since the
+            # dispatcher returns one spec per shape.
             text = _compact(config, sorted(knobs), profile)
         except json.JSONDecodeError as exc:
             print(f"FAIL: --knobs is not valid JSON: {exc}", file=sys.stderr)
@@ -590,10 +567,9 @@ def main(argv=None) -> int:
                 f"= {len(served)} servable shapes x {arms} surviving knob "
                 f"combination(s) ({', '.join(sorted(knobs))})"
             )
-            # The cap the runbook's 4a-3 gate states, enforced where the number is
-            # actually known. Past the low thousands the pack time, the archive and
-            # the catalog all stop being reasonable, and the marginal variant is
-            # almost never the one that wins.
+            # The cap the runbook states, enforced where the number is known:
+            # past the low thousands the pack time, the archive and the catalog
+            # all stop being reasonable.
             if count > 4000:
                 print(
                     f"  WARNING: {count} descriptors is past the low-thousands cap. "

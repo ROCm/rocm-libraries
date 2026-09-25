@@ -36,6 +36,26 @@ RMSnormBwdParams::RMSnormBwdParams(
 {
 }
 
+RMSnormBwdParams::RMSnormBwdParams(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+    : _dy(tensorMap.at(pointwiseAttributes.in_0_tensor_uid()))
+    , _x(tensorMap.at(attributes.x_tensor_uid()))
+    , _scale(tensorMap.at(attributes.scale_tensor_uid()))
+    , _invRMS(tensorMap.at(attributes.inv_rms_tensor_uid()))
+    , _dx(tensorMap.at(attributes.dx_tensor_uid()))
+    , _dscale(tensorMap.at(attributes.dscale_tensor_uid()))
+    , _dbias(attributes.dbias_tensor_uid().has_value()
+                 ? tensorMap.at(attributes.dbias_tensor_uid().value())
+                 : nullptr)
+    , _optActivation(parseActivation(pointwiseAttributes))
+    , _y(tensorMap.at(pointwiseAttributes.in_1_tensor_uid().value()))
+{
+}
+
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::dy() const
 {
     return _dy;
@@ -71,6 +91,16 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::
     return _dbias;
 }
 
+const std::optional<ActivationParams>& RMSnormBwdParams::optActivation() const
+{
+    return _optActivation;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormBwdParams::y() const
+{
+    return _y;
+}
+
 RMSnormBwdPlan::RMSnormBwdPlan(RMSnormBwdParams&& params)
     : _params(std::move(params))
 {
@@ -95,15 +125,24 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     }
 
     // Get problem dimensions
-    const unsigned normalizeDim = getNormalizeDim(_params.x()->dims(), _params.scale()->dims());
-    const int64_t stride = getStride(_params.x(), normalizeDim);
-    const int64_t outerSize = getOuterSize(_params.x()->dims(), normalizeDim, stride);
-    const int64_t innerSize = getInnerSize(_params.x()->dims(), normalizeDim);
+    const ProblemDescription problem(_params.x(), _params.scale(), Direction::BACKWARD);
+    const int64_t stride = problem.stride();
+    const int64_t outerSize = problem.outerSize();
+    const int64_t innerSize = problem.innerSize();
     if(outerSize * stride >= UINT32_MAX)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Unsupported number of workgroups: "
                                                            + std::to_string(outerSize * stride));
+    }
+
+    // Get activation parameters and activation mode
+    auto activationMode = ActivationMode::PASTHRU;
+    if(const auto& activation = _params.optActivation(); activation.has_value())
+    {
+        _activationAlpha = static_cast<float>(activation->alpha);
+        _activationBeta = static_cast<float>(activation->beta);
+        activationMode = activation->mode;
     }
 
     // Determine input/output data type configuration
@@ -112,16 +151,18 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     const auto dXDataType = _params.dx()->data_type();
     const auto scaleDataType = _params.scale()->data_type();
     const auto computeDataType = _params.invRMS()->data_type();
+    const auto yDataType = _params.y() == nullptr ? dYDataType : _params.y()->data_type();
     const std::string xTypeString = getKernelParamTypeString(xDataType);
     const std::string dYTypeString = getKernelParamTypeString(dYDataType);
     const std::string dXTypeString = getKernelParamTypeString(dXDataType);
     const std::string scaleTypeString = getKernelParamTypeString(scaleDataType);
     const std::string computeTypeString = getKernelParamTypeString(computeDataType);
+    const std::string yTypeString = getKernelParamTypeString(yDataType);
 
     // Calculate block and grid dimensions
     const unsigned int xlocalsize = 256;
     const auto xgridsizeBwdData = static_cast<unsigned int>(outerSize * stride);
-    const auto xgridsizeBwdWeightBias
+    const auto xgridsizeBwdScaleBias
         = static_cast<unsigned int>((innerSize + xlocalsize - 1) / xlocalsize);
     const unsigned int ylocalsize = 1;
     const unsigned int ygridsize = 1;
@@ -139,17 +180,19 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     options.add("HIP_PLUGIN_RMSNORM_DX_TYPE", dXTypeString);
     options.add("HIP_PLUGIN_RMSNORM_SCALE_TYPE", scaleTypeString);
     options.add("HIP_PLUGIN_RMSNORM_COMPUTE_TYPE", computeTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_Y_TYPE", yTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_NRN_OP_ID", static_cast<int>(activationMode));
 
     // Compile kernels and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("RMSNormBwd.cpp", options);
     _runnableKernels.push_back(_compiledProgram->getKernel("RMSnormBwdData"));
-    _runnableKernels.push_back(_compiledProgram->getKernel("RMSnormBwdWeightBias"));
+    _runnableKernels.push_back(_compiledProgram->getKernel("RMSnormBwdScaleBias"));
     for(auto& kernel : _runnableKernels)
     {
         kernel->setBlockSize(xlocalsize, ylocalsize, zlocalsize);
     }
     _runnableKernels[0]->setGridSize(xgridsizeBwdData, ygridsize, zgridsize);
-    _runnableKernels[1]->setGridSize(xgridsizeBwdWeightBias, ygridsize, zgridsize);
+    _runnableKernels[1]->setGridSize(xgridsizeBwdScaleBias, ygridsize, zgridsize);
 }
 
 void RMSnormBwdPlan::execute([[maybe_unused]] const Handle& handle,
@@ -181,6 +224,11 @@ void RMSnormBwdPlan::execute([[maybe_unused]] const Handle& handle,
                                : hipdnn_plugin_sdk::findDeviceBuffer(
                                      _params.dbias()->uid(), deviceBuffers, numDeviceBuffers)
                                      .ptr;
+    void* yBufferPtr = _params.y() == nullptr
+                           ? nullptr
+                           : hipdnn_plugin_sdk::findDeviceBuffer(
+                                 _params.y()->uid(), deviceBuffers, numDeviceBuffers)
+                                 .ptr;
 
     // Run the BwdData kernel
     _runnableKernels[0]->launch(handle.getStream(),
@@ -188,15 +236,21 @@ void RMSnormBwdPlan::execute([[maybe_unused]] const Handle& handle,
                                 xBuffer.ptr,
                                 scaleBuffer.ptr,
                                 invRMSBuffer.ptr,
-                                dXBuffer.ptr);
+                                dXBuffer.ptr,
+                                yBufferPtr,
+                                _activationAlpha,
+                                _activationBeta);
 
-    // Run the BwdWeightBias kernel
+    // Run the BwdScaleBias kernel
     _runnableKernels[1]->launch(handle.getStream(),
                                 dYBuffer.ptr,
                                 xBuffer.ptr,
                                 invRMSBuffer.ptr,
                                 dScaleBufferPtr.ptr,
-                                dBiasBufferPtr);
+                                dBiasBufferPtr,
+                                yBufferPtr,
+                                _activationAlpha,
+                                _activationBeta);
 }
 
 } // namespace hip_kernel_provider::rmsnorm

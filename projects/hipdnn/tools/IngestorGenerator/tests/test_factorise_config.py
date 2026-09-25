@@ -4,8 +4,7 @@
 """Unit tests for tools/factorise_config.py.
 
 The tool's contract is one sentence: the compact config it writes expands to the
-enumeration it was given, kernel-for-kernel and key-for-key. Everything here either
-checks that contract directly or checks one thing that would silently break it.
+enumeration it was given, kernel-for-kernel and key-for-key.
 """
 
 import copy
@@ -50,8 +49,8 @@ def _kernel(name: str, spec: dict, metadata: dict) -> dict:
     }
 
 
-#: Two shapes x two block_m arms, with the tri-state appearing in three of its four
-#: states -- pinned on, pinned off, and left to the kernel's own policy.
+#: Two shapes x two block_m arms, with the tri-state in three of its four states:
+#: pinned on, pinned off, and left to the kernel's own policy.
 SAMPLE = _enumerated(
     [
         _kernel(
@@ -126,7 +125,7 @@ class TestRoundTrip:
         ]
 
     def test_the_tool_refuses_a_compaction_that_does_not_round_trip(self):
-        """The check is not advisory: an unrepresentable set must fail, never ship."""
+        """An unrepresentable set must fail, never ship."""
         broken = _compact()
         broken["packs"][0]["variants"][0]["shapes"][0]["seqlen_q"] = 99
         with pytest.raises(factorise_config.FactoriseError, match="round trip"):
@@ -135,7 +134,6 @@ class TestRoundTrip:
 
 class TestHoisting:
     def test_constant_kernel_source_keys_move_to_kernel_defaults(self):
-        """`kind`, `source` and `builder` are byte-identical in every entry."""
         pack = _compact()["packs"][0]
         assert pack["kernel_defaults"] == {
             "kind": "rocke",
@@ -166,7 +164,6 @@ class TestHoisting:
 
 class TestKnobSets:
     def test_shapes_sharing_an_arm_list_share_one_knob_set(self):
-        """The whole point: 655 shapes, a handful of distinct arm lists."""
         group = _compact()["packs"][0]["variants"][0]
         assert len(group["shapes"]) == 2
         assert len(group["knob_sets"]) == 2
@@ -193,8 +190,8 @@ class TestKnobSets:
 
 class TestTriState:
     def test_a_policy_decided_knob_stays_absent_from_the_arm(self):
-        """Absent means the kernel's policy decides at build time. Writing the
-        resolved value into the spec instead would pin a different binary."""
+        """Absent means the kernel's policy decides at build time; writing the resolved
+        value into the spec would pin a different binary."""
         group = _compact()["packs"][0]["variants"][0]
         policy_arms = [
             arm
@@ -227,16 +224,10 @@ class TestTriState:
         )
 
 
-#: The SAME four kernels as `SAMPLE`, with the policy-decided knob written in its
-#: other legal spelling: PRESENT AND None rather than omitted.
-#:
-#: Both spellings mean "the kernel's own policy decides this at build time"; which
-#: one a config carries is an artefact of how the spec was produced, not a
-#: difference in meaning. A hand-authored spec omits the key.
-#: `dispatch_parity.build_config` dumps the builder's dataclass wholesale
-#: (`dataclasses.fields(resolution.spec)`), so every declared-but-unset policy knob
-#: arrives present-and-None -- which is what every real dispatcher-derived config
-#: looks like.
+#: The SAME four kernels as `SAMPLE`, with the policy-decided knob PRESENT AND None
+#: rather than omitted. Both spellings mean the kernel's policy decides at build time:
+#: a hand-authored spec omits the key, while `dispatch_parity.build_config` dumps the
+#: builder's dataclass wholesale, so every declared-but-unset knob arrives as None.
 SAMPLE_NONE_SPELLING = _enumerated(
     [
         _kernel(
@@ -266,24 +257,19 @@ SAMPLE_NONE_SPELLING = _enumerated(
 class TestTriStateNoneSpelling:
     """A spec key present as None means "policy decides", exactly like omitting it.
 
-    Three predicates decide this, and each one used to be a membership test that the
-    present-and-None form falls straight through:
+    Three predicates decide this, and a membership test at any of them falls through the
+    present-and-None form:
 
       factorise_config `resolved`     `field not in entry["spec"]`
       factorise_config `policy_knobs` `f not in e["spec"]`
       config_loader    metadata       `elif field_name in spec`
 
-    Every test below fails if any of the three regresses to a membership test. They
-    are the regression guard for that fix: the enumerated fixtures elsewhere in this
-    file all use the OMITTED spelling, so nothing else here exercises this path.
+    The enumerated fixtures elsewhere in this file all use the OMITTED spelling.
     """
 
     def test_a_none_spec_records_what_the_policy_chose(self):
-        """Guards `resolved`.
-
-        A membership test treats None as a pinned value, so no `resolved` block is
-        emitted and the policy's actual answer is lost.
-        """
+        """Guards `resolved`: a membership test treats None as a pinned value, so no
+        `resolved` block is emitted and the policy's answer is lost."""
         group = factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY)[
             "packs"
         ][0]["variants"][0]
@@ -299,26 +285,17 @@ class TestTriStateNoneSpelling:
         assert group["policy_knobs"] == ["use_exp2_fast"]
 
     def test_a_none_spec_does_not_reach_metadata(self, tmp_path):
-        """Guards the config_loader arm, and is the failure the real set hit.
-
-        On the gfx942 set `use_exp2_fast` is None in all 64 specs while metadata
-        carries the policy's real per-shape 0/1. A membership test writes the None
-        into metadata, which then fails its own declared kmd_fields type:
-
-            metadata 'use_exp2_fast' = None does not match its declared
-            kmd_fields type 'int'
-
-        Either that error, or -- with a looser type -- None silently becomes the
-        catalog key for a binary built from the policy's actual answer.
-        """
+        """Guards the config_loader arm: on the gfx942 set `use_exp2_fast` is None in
+        every spec while metadata carries the policy's real per-shape 0/1, so a
+        membership test writes the None into metadata, either failing its declared `int`
+        type or becoming the catalog key for a binary built from the policy's actual
+        answer."""
         compact = factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY)
         for kernel in _expand(tmp_path, compact):
             assert kernel.metadata["use_exp2_fast"] is not None
             assert isinstance(kernel.metadata["use_exp2_fast"], int)
 
     def test_both_spellings_produce_the_same_kernels(self, tmp_path):
-        """The two spellings differ only in provenance, so they must agree on every
-        expanded kernel -- name, spec and metadata alike."""
         omitted_dir = tmp_path / "a"
         none_dir = tmp_path / "b"
         omitted_dir.mkdir()
@@ -334,9 +311,8 @@ class TestTriStateNoneSpelling:
         ]
 
     def test_none_and_pinned_false_stay_distinguishable(self, tmp_path):
-        """The tri-state's whole point. `False` is a pinned value that builds a
-        specific binary; None is the policy deciding. Collapsing them ships the
-        wrong kernel under the right name."""
+        """`False` is a pinned value that builds a specific binary; collapsing it onto
+        None ships the wrong kernel under the right name."""
         by_name = {
             k.name: k
             for k in _expand(
@@ -356,27 +332,18 @@ class TestTriStateNoneSpelling:
 
 class TestNameTemplates:
     def test_a_field_binds_only_when_it_matches_every_entry(self):
-        """A coincidence is not a binding.
-
-        `block_m` and `seqlen_q` could each explain a single entry's token; only the
-        field that explains ALL of them may claim the slot, because a template
-        inferred from a subset renders the wrong name on the next input.
-        """
+        """A coincidence is not a binding: `block_m` and `seqlen_q` could each explain a
+        single entry's token, so only the field that explains ALL of them may claim the
+        slot."""
         template = _compact()["packs"][0]["variants"][0]["name"]
         assert "{seqlen_q}" in template
         assert "{block_m}" in template
 
     def test_a_field_that_coincides_on_only_the_first_entry_does_not_bind(self):
-        """The DISCRIMINATING case for "matches every entry".
-
-        Entry 0's `bm128` agrees with `block_m`. Entry 1's `bm999` agrees with
-        nothing -- its block_m is 256. A binder that checked only the first entry
-        would bind `bm{block_m}` and render entry 1 as `bm256`: a name that is not
-        its own, and a silent rename of a shipped kernel.
-
-        Sound behaviour is to refuse the binding and let the token fall into the
-        per-arm `tag`, which is what the assertions below pin.
-        """
+        """The DISCRIMINATING case for "matches every entry". Entry 0's `bm128` agrees
+        with `block_m`; entry 1's `bm999` agrees with nothing -- its block_m is 256. A
+        binder checking only the first entry would render entry 1 as `bm256`, silently
+        renaming a shipped kernel."""
         config = _enumerated(
             [
                 _kernel(
@@ -482,12 +449,8 @@ class TestRendering:
 
 
 class TestCommandLine:
-    """The CLI is what every real user goes through, so it needs its own coverage.
-
-    Calling `factorise`/`_round_trip` directly proves those functions work; it does
-    not prove `main` WIRES them together. Deleting the round-trip guard from `main`
-    is invisible to a test that calls the guard itself.
-    """
+    """Calling `factorise`/`_round_trip` directly proves those functions work, not that
+    `main` WIRES them together."""
 
     def _write(self, tmp_path, config):
         path = tmp_path / "long.yaml"
@@ -516,14 +479,9 @@ class TestCommandLine:
         assert [k.metadata for k in got] == [k.metadata for k in want]
 
     def test_main_refuses_to_write_when_the_round_trip_fails(self, tmp_path):
-        """The guard must be WIRED INTO the CLI, not merely exist.
-
-        Omitting `--vocabulary` when the set needs it is the realistic way to get a
-        lossy conversion: the metadata keeps the builder's spelling (`bf16`) where
-        the matcher expects hipDNN's (`BF16`), which loads cleanly and matches
-        nothing. `main` must exit non-zero and leave no file behind rather than
-        write a config that generates a different descriptor set.
-        """
+        """Omitting `--vocabulary` when the set needs it is the realistic lossy
+        conversion: the metadata keeps the builder's `bf16` where the matcher expects
+        `BF16`, which loads cleanly and matches nothing."""
         src = self._write(tmp_path, SAMPLE)
         out = tmp_path / "compact.yaml"
         argv = self._argv(src, out)
@@ -537,3 +495,52 @@ class TestCommandLine:
         assert factorise_config.main(self._argv(src, out)) == 0
         group = yaml.safe_load(out.read_text())["packs"][0]["variants"][0]
         assert group["vocabulary"]["dtype"]["bf16"] == "BF16"
+
+
+class TestTheSpecializationDeclarationSurvives:
+    """A source config's `specialization` block reaches the compact form unchanged.
+
+    It says which metadata fields the producing compiler specialized on and how each is
+    read off the builder object, and it reaches exactly one UKD field rather than one
+    per kernel, so the kernel-for-kernel round trip cannot see it go missing.
+    """
+
+    # Every kmd_field of SAMPLE is a key of the rocke kernels' spec, so the partition is
+    # metadata_fields-only: calling any of them matcher-only would waive a field that
+    # demonstrably reached the compiler. `use_exp2_fast` is tri-state and absent from
+    # two specs, so it binds to the spec's zero-argument effective accessor.
+    DECLARATION = {
+        "metadata_fields": ["dtype", "seqlen_q", "block_m", "use_exp2_fast"],
+        "matcher_only_fields": [],
+        "bindings": {
+            "dtype": {"field": "dtype"},
+            "seqlen_q": {"field": "seqlen_q"},
+            "block_m": {"field": "block_m"},
+            "use_exp2_fast": {"method": "resolved_use_exp2_fast"},
+        },
+        "vocabulary": {"dtype": {"bf16": "BF16"}},
+    }
+
+    def test_it_round_trips_through_the_producer_unchanged(self, tmp_path):
+        source = copy.deepcopy(SAMPLE)
+        source["specialization"] = copy.deepcopy(self.DECLARATION)
+        path = tmp_path / "long.yaml"
+        path.write_text(yaml.safe_dump(source, sort_keys=False))
+        out = tmp_path / "compact.yaml"
+        assert (
+            factorise_config.main(
+                [
+                    "--config",
+                    str(path),
+                    "--out",
+                    str(out),
+                    "--knobs",
+                    ",".join(KNOBS),
+                    "--vocabulary",
+                    "dtype:bf16=BF16,fp16=FP16",
+                ]
+            )
+            == 0
+        )
+        assert yaml.safe_load(out.read_text())["specialization"] == self.DECLARATION
+        assert load_config(out).specialization == self.DECLARATION

@@ -40,13 +40,43 @@ vocabulary:
 
 policies:
   # `use_exp2_fast` is tri-state: True, False, or None meaning "ask the policy".
-  # None is NOT False -- the policy is seqlen-dependent and returns True in most of
-  # the range, so pinning the field discards it. Args are spec keys, passed
-  # positionally in the order the kernel's own resolver takes them.
+  # None is NOT False -- the policy depends on the grid (`persistent`) and returns
+  # True for everything but bf16 D128 on the default grid, so pinning the field
+  # discards it. Args are spec keys, passed positionally in the order the kernel's
+  # own resolver takes them.
   use_exp2_fast:
     module: kernels.gfx942.attention_dense
     function: _use_exp2_fast
-    args: [head_size, dtype, seqlen_q]
+    args: [head_size, dtype, persistent]
+
+# What the COMPILER specialized on, carried by each emitted KDP as
+# provenance.specialization_contract. Every metadata field is a field of
+# Gfx942AttentionDenseSpec handed to `build_attention_dense`, bound to the spec
+# attribute it was read from -- except `use_exp2_fast`, whose field is the tri-state
+# request and whose compiled value is what the builder's own
+# `resolved_use_exp2_fast()` answers.
+specialization:
+  metadata_fields:
+    [dtype, batch, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, head_size,
+     causal, block_n, block_m, waves_per_eu, persistent, num_persistent, use_exp2_fast]
+  matcher_only_fields: []
+  bindings:
+    dtype: {field: dtype}
+    batch: {field: batch}
+    num_query_heads: {field: num_query_heads}
+    num_kv_heads: {field: num_kv_heads}
+    seqlen_q: {field: seqlen_q}
+    seqlen_kv: {field: seqlen_kv}
+    head_size: {field: head_size}
+    causal: {field: causal}
+    block_n: {field: block_n}
+    block_m: {field: block_m}
+    waves_per_eu: {field: waves_per_eu}
+    persistent: {field: persistent}
+    num_persistent: {field: num_persistent}
+    use_exp2_fast: {method: resolved_use_exp2_fast}
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}
 
 # ---------------------------------------------------------------------------
 # Stage-1 parity (tools/dispatch_parity.py). One profile drives both tools: the

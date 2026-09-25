@@ -1,41 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The generated native stub -- the single most important artifact this tool
-produces, and until now the least tested.
+"""A real compiler's verdict on the emitted C++. ``packs/<Name>Native.cpp`` is what an
+agent or a human fills in to make an engine serve real graphs (see RUNBOOK.md)."""
 
-``packs/<Name>Native.cpp`` is what an agent (or a human) fills in to make an
-engine serve real graphs (RUNBOOK.md Step 6, "THIS IS THE WORK"). Existing
-tests cover two isolated substring traps
-(``test_generator.py::TestRequiredTrapAssertions``) but nothing asserts the
-file's overall shape: that every hook is genuinely a placeholder (none
-silently emitted as a working body that looks finished but isn't), that the
-symbol constants match what the same run's descriptors name, that the
-registration block wires the right functions to the right symbols, and that
-the C++ is structurally sound enough to compile.
-
-Four classes, one per contract:
-
-- ``TestEveryHookIsAPlaceholder`` -- a hook whose body silently does real
-  work (returns something other than the documented placeholder value) would
-  look finished and never get filled in; RUNBOOK.md Step 6's own gate
-  (``grep -c "FILL THIS OUT"`` == 0) only fires once a human/agent starts
-  editing, so nothing currently catches a *template* regression that stops
-  emitting a TODO for a given hook.
-- ``TestSymbolsMatchDescriptors`` -- the generator emits both the native
-  symbol constants and the descriptor JSON from the same ``config``/``ids``,
-  but nothing asserts they actually agree; a change to one without the other
-  would silently break the loader's symbol pre-flight (native-pack.md:261
-  "Nothing in the type system ties the JSON strings to the C++ constants").
-- ``TestStructuralSoundness`` -- balanced braces, every declared hook
-  present, and the registration block references the config's own
-  register-function name and dispatch handler.
-- ``TestRealCompile`` -- best-effort host compile with g++, guarded by a
-  session fixture that skips (not fails) when the plugin SDK's CMake-baked
-  version/config headers are unavailable, and reports honestly whether it ran.
-"""
-
-import re
 import subprocess
 import shutil
 import tempfile
@@ -43,269 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from codegen.generator import mint_ids
-
-# ---------------------------------------------------------------------------
-# Placeholder-value contract per hook. Keyed on a regex that isolates the
-# hook's own body (never spilling into a sibling function), and the value the
-# template is documented to emit while unfilled. A hook silently returning
-# anything else has stopped being a stub.
-# ---------------------------------------------------------------------------
-_HOOK_BODY_PATTERNS = {
-    "graph_match": (
-        r"GraphMatches\(const MatchContext& /\*context\*/\)\n\{\n(.*?)\n\}",
-        "return std::nullopt;",
-    ),
-    "kernel_match": (
-        r"bool kernelMatches\(.*?\)\n\{\n(.*?)\n\}",
-        "return false;",
-    ),
-    "score": (
-        r"double scoreKernel\(.*?\)\n\{\n(.*?)\n\}",
-        "return 0.0;",
-    ),
-    "dispatch_prepare": (
-        r"std::unique_ptr<PreparedDispatch> prepare\(.*?\n    \{\n(.*?)\n    \}",
-        "return std::make_unique<Prepared",
-    ),
-    "dispatch_launch": (
-        r"void launch\(.*?\n    \{\n(.*?)\n    \}",
-        "",  # launch's stub body is TODO-only, no return value
-    ),
-}
-
-
-def _hook_body(rendered: str, key: str) -> str:
-    pattern, _ = _HOOK_BODY_PATTERNS[key]
-    match = re.search(pattern, rendered, re.S)
-    assert match, f"could not isolate the '{key}' hook body in rendered output"
-    return match.group(1)
-
-
-def _hook_statement(body: str) -> str:
-    """The hook body with '//'-only comment lines dropped, so a check can
-    require the REMAINING code be EXACTLY the placeholder statement -- not
-    merely end with it. `body.strip().endswith(...)` alone would still pass
-    if a template regression inserted real logic (a branch, a helper call)
-    ahead of the placeholder `return`; this is what actually distinguishes a
-    stub from a hook that quietly started doing work."""
-    kept = [
-        line
-        for line in body.splitlines()
-        if line.strip() and not line.strip().startswith("//")
-    ]
-    return "\n".join(kept).strip()
-
-
-class TestEveryHookIsAPlaceholder:
-    """Every hook body is a TODO placeholder -- none silently emitted as a
-    working body. A hook that renders real logic instead of a `TODO` marker
-    would parse, validate, and enumerate cleanly while quietly no longer
-    being the stub RUNBOOK.md Step 6 tells an agent to fill in."""
-
-    @pytest.mark.parametrize("key", sorted(_HOOK_BODY_PATTERNS))
-    def test_hook_body_carries_a_todo_marker(self, generator, scale_add_config, key):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        body = _hook_body(rendered, key)
-        assert "TODO - FILL THIS OUT" in body or "TODO" in body, (
-            f"'{key}' hook body carries no TODO marker -- it may have silently "
-            f"become a working implementation:\n{body}"
-        )
-
-    def test_graph_match_returns_the_documented_nullopt(
-        self, generator, scale_add_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        body = _hook_body(rendered, "graph_match")
-        assert _hook_statement(body) == "return std::nullopt;", (
-            "graph_match's stub must be EXACTLY 'return std::nullopt;' "
-            f"(declining every graph), no other code, until filled in; got:\n{body}"
-        )
-
-    def test_kernel_match_returns_the_documented_false(
-        self, generator, scale_add_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        body = _hook_body(rendered, "kernel_match")
-        assert _hook_statement(body) == "return false;", (
-            "kernel_match's stub must be EXACTLY 'return false;', no other "
-            f"code, until filled in; got:\n{body}"
-        )
-
-    def test_score_returns_the_documented_zero(self, generator, scale_add_config):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        body = _hook_body(rendered, "score")
-        assert _hook_statement(body) == "return 0.0;", (
-            "score's stub must be EXACTLY 'return 0.0;', no other code, "
-            f"until filled in; got:\n{body}"
-        )
-
-    def test_operation_matcher_is_a_placeholder_multi_pack(
-        self, generator, binary_ops_config
-    ):
-        """Multi-pack engines emit one operationMatches() per pack -- also a
-        stub, and not covered by the single-pack fixture above."""
-        rendered = generator._render_template(
-            "native.cpp.j2", binary_ops_config, ids=mint_ids(binary_ops_config)
-        )
-        matches = re.findall(
-            r"OperationMatches\(const MatchContext& /\*context\*/, "
-            r"const BoundTokens& /\*bound\*/\)\n\{\n(.*?)\n\}",
-            rendered,
-            re.S,
-        )
-        assert len(matches) == len(binary_ops_config.packs), (
-            "expected one OperationMatches stub per pack, "
-            f"found {len(matches)} of {len(binary_ops_config.packs)}"
-        )
-        for body in matches:
-            assert _hook_statement(body) == "return false;", (
-                "per-pack operation matcher stub must be EXACTLY "
-                f"'return false;', no other code; got:\n{body}"
-            )
-
-
-class TestSymbolsMatchDescriptors:
-    """The symbol constants the native stub declares must be exactly the
-    symbols the SAME run's descriptors name -- the loader's symbol
-    pre-flight is the only thing that would otherwise catch a mismatch
-    (native-pack.md: 'Nothing in the type system ties the JSON strings to
-    the C++ constants')."""
-
-    def test_single_pack_symbols_match_descriptor_json(
-        self, generator, scale_add_config, tmp_path
-    ):
-        written = generator.render(scale_add_config, tmp_path)
-        native_rel = next(w for w in written if w.endswith("Native.cpp"))
-        native_text = (tmp_path / native_rel).read_text()
-
-        # Pull every constexpr std::string_view SYMBOL = "..."; constant.
-        declared = dict(
-            re.findall(r'constexpr std::string_view (\w+) = "([^"]+)";', native_text)
-        )
-        assert declared, "no symbol constants found -- the scan is broken, not the file"
-
-        ued_rel = next(w for w in written if w.endswith(".ued.json"))
-        udd_rel = next(w for w in written if w.endswith(".udd.json"))
-        umd_rel = next(
-            w for w in written if w.endswith("kernel_dtype_matches_graph.umd.json")
-        )
-        import json
-
-        ued = json.loads((tmp_path / ued_rel).read_text())
-        udd = json.loads((tmp_path / udd_rel).read_text())
-        umd = json.loads((tmp_path / umd_rel).read_text())
-
-        assert declared["GRAPH_MATCHER_SYMBOL"] == ued["graph_match"]["native"]
-        assert declared["DISPATCH_SYMBOL"] == udd["dispatch_symbol"]
-        assert declared["KERNEL_MATCHER_SYMBOL"] == umd["match_symbol"]
-        assert declared["SCORE_SYMBOL"] == scale_add_config.score_symbol
-
-    def test_multi_pack_operation_symbols_match_per_pack_umds(
-        self, generator, binary_ops_config, tmp_path
-    ):
-        written = generator.render(binary_ops_config, tmp_path)
-        native_rel = next(w for w in written if w.endswith("Native.cpp"))
-        native_text = (tmp_path / native_rel).read_text()
-        declared = dict(
-            re.findall(r'constexpr std::string_view (\w+) = "([^"]+)";', native_text)
-        )
-
-        import json
-
-        for pack in binary_ops_config.packs:
-            umd_rel = next(
-                w
-                for w in written
-                if w.endswith(f"operation_is_{pack.discriminator}.umd.json")
-            )
-            umd = json.loads((tmp_path / umd_rel).read_text())
-            const_name = f"{pack.discriminator.upper()}_MATCHER_SYMBOL"
-            assert const_name in declared, f"native stub never declares {const_name}"
-            assert declared[const_name] == umd["match_symbol"]
-
-    def test_registration_wires_every_declared_symbol(
-        self, generator, scale_add_config
-    ):
-        """Every constant declared must appear as a scope.add(...) argument in
-        register<Name>Symbols() -- a declared-but-unregistered symbol is dead
-        and a registered-but-undeclared one would not compile."""
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        declared = {
-            name
-            for name in re.findall(r"constexpr std::string_view (\w+) =", rendered)
-            if name.endswith("SYMBOL")
-        }
-        reg_match = re.search(
-            r"void register\w+Symbols\(SymbolScope<Handle>& scope\)\n\{\n(.*?)\n\}",
-            rendered,
-            re.S,
-        )
-        assert reg_match, "registration function not found"
-        reg_body = reg_match.group(1)
-        registered = set(re.findall(r"scope\.add\(std::string\((\w+)\)", reg_body))
-        assert declared == registered, (
-            f"declared symbols {declared} and registered symbols {registered} "
-            "disagree -- a symbol constant with no scope.add() is dead, and "
-            "vice versa would not compile"
-        )
-
-
-class TestStructuralSoundness:
-    """Minimum mechanical soundness: balanced braces, every declared hook
-    present in the emitted text, and the registration block references the
-    config's own pack/dispatch names -- not another engine's, copy-pasted."""
-
-    def test_braces_are_balanced(self, generator, scale_add_config):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        assert rendered.count("{") == rendered.count("}"), (
-            f"unbalanced braces: {rendered.count('{')} opens, "
-            f"{rendered.count('}')} closes"
-        )
-
-    def test_every_declared_hook_present(self, generator, scale_add_config):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        for needle in (
-            "GraphMatches(const MatchContext&",
-            "bool kernelMatches(",
-            "double scoreKernel(",
-            "size_t workspaceBytes(",
-            "std::unique_ptr<PreparedDispatch> prepare(",
-            "void launch(",
-        ):
-            assert needle in rendered, f"hook signature '{needle}' missing"
-
-    def test_registration_references_this_configs_dispatch_handler(
-        self, generator, scale_add_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        assert f"&{scale_add_config.engine.camel_name}DispatchHandler()" in rendered
-        assert f"void register{scale_add_config.engine.pascal_name}Symbols(" in rendered
-
-    def test_multi_pack_registration_references_every_pack_matcher(
-        self, generator, binary_ops_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", binary_ops_config, ids=mint_ids(binary_ops_config)
-        )
-        for pack in binary_ops_config.packs:
-            assert f"&{pack.discriminator}OperationMatches" in rendered
+from codegen.generator import cpp_escape, mint_ids
 
 
 def _find_include_dir(name: str) -> Path | None:
@@ -317,17 +23,9 @@ def _find_include_dir(name: str) -> Path | None:
 
 @pytest.fixture(scope="module")
 def compile_env():
-    """Best-effort host-compile environment for the emitted native stub.
-
-    The plugin SDK's ``version.h``/``CacheRootDefaults.h`` headers are
-    CMake-configured (``.h.in`` templates), so a from-scratch compile needs
-    stand-ins for them. Generates minimal ones from the real ``.in``
-    templates (substituting placeholder values -- the macros' actual values
-    are irrelevant to whether the emitted stub parses) rather than skipping
-    outright, so the check actually runs rather than silently reporting
-    nothing. Skips (never fails) when a prerequisite -- compiler, SDK
-    sources beside this checkout, or a vendored flatbuffers -- is absent.
-    """
+    """Best-effort host-compile environment for the emitted native stub. The SDKs'
+    ``version.h``/``CacheRootDefaults.h`` are CMake-configured, so a from-scratch
+    compile needs stand-ins. Skips rather than fails when a prerequisite is absent."""
     gxx = shutil.which("g++") or shutil.which("clang++")
     if gxx is None:
         pytest.skip("no host C++ compiler (g++/clang++) found on PATH")
@@ -358,10 +56,6 @@ def compile_env():
         pytest.skip("no flatbuffers/array.h found (checked /opt/rocm/include)")
 
     gen_dir = Path(tempfile.mkdtemp(prefix="ingestor_gen_include_"))
-    # Stand-in CMake-configured headers, generated from the real .in
-    # templates with placeholder substitutions -- their content is
-    # irrelevant to whether the emitted native stub parses; only their
-    # presence (and the macros they define) matters.
     configure_targets = {
         "hipdnn_data_sdk/utilities/CacheRootDefaults.h": (
             data_sdk
@@ -441,17 +135,132 @@ def _compile(compile_env, source: str, tmp_path: Path) -> subprocess.CompletedPr
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-class TestRealCompile:
-    """Host-compile the emitted stub with g++, best-effort.
+#: A minimal stand-in for the gtest surface the emitted test files use, so parsing them
+#: does not pull googletest into this tool's test environment. Each expectation macro
+#: must instantiate the operation real gtest performs, not merely name its operands;
+#: ``TestTheGtestStandIn`` holds those properties directly.
+_GTEST_STUB_HEADER = """#pragma once
 
-    The plugin SDK's ``version.h``/``CacheRootDefaults.h`` headers are
-    CMake-configured (``.h.in`` templates), so a from-scratch compile needs
-    stand-ins for them. This fixture generates minimal ones from the real
-    ``.in`` templates (substituting placeholder values -- the macros' actual
-    values are irrelevant to whether the emitted stub parses) rather than
-    skipping outright, so the check actually runs rather than silently
-    reporting nothing.
-    """
+struct GTestMsg
+{
+    template <typename T>
+    GTestMsg& operator<<(const T&)
+    {
+        return *this;
+    }
+};
+
+template <typename A, typename B>
+GTestMsg gtestEqual(const A& lhs, const B& rhs)
+{
+    (void)static_cast<bool>(lhs == rhs);
+    return GTestMsg();
+}
+
+template <typename A, typename B>
+GTestMsg gtestUnequal(const A& lhs, const B& rhs)
+{
+    (void)static_cast<bool>(lhs != rhs);
+    return GTestMsg();
+}
+
+template <typename T>
+GTestMsg gtestBoolean(const T& value)
+{
+    (void)static_cast<bool>(value);
+    return GTestMsg();
+}
+
+namespace testing
+{
+class Test
+{
+public:
+    virtual ~Test() = default;
+
+protected:
+    virtual void SetUp() {}
+    virtual void TearDown() {}
+};
+} // namespace testing
+
+#define TEST(a, b) void a##_##b##_generated_test()
+#define TEST_F(fixture, name)                \\
+    struct fixture##_##name##_case : fixture \\
+    {                                        \\
+        void testBody();                     \\
+    };                                       \\
+    void fixture##_##name##_case::testBody()
+#define GTEST_SKIP() GTestMsg()
+#define EXPECT_TRUE(x) gtestBoolean((x))
+#define EXPECT_FALSE(x) gtestBoolean((x))
+#define ASSERT_TRUE(x) gtestBoolean((x))
+#define ASSERT_FALSE(x) gtestBoolean((x))
+#define EXPECT_EQ(a, b) gtestEqual((a), (b))
+#define EXPECT_NE(a, b) gtestUnequal((a), (b))
+#define ASSERT_EQ(a, b) gtestEqual((a), (b))
+#define ASSERT_NE(a, b) gtestUnequal((a), (b))
+"""
+
+
+@pytest.fixture(scope="module")
+def host_cxx():
+    """A host C++ compiler and nothing else: the stand-in cases include no SDK header,
+    flatbuffers or provider source, so they must not inherit ``compile_env``'s skips."""
+    gxx = shutil.which("g++") or shutil.which("clang++")
+    if gxx is None:
+        pytest.skip("no host C++ compiler (g++/clang++) found on PATH")
+    return gxx
+
+
+def _parse_against_the_stub(
+    gxx: str, body: str, tmp_path: Path, stem: str
+) -> subprocess.CompletedProcess:
+    """``-fsyntax-only`` a fragment written against the stand-in, nothing else."""
+    gtest_dir = tmp_path / "stub" / "gtest"
+    gtest_dir.mkdir(parents=True, exist_ok=True)
+    (gtest_dir / "gtest.h").write_text(_GTEST_STUB_HEADER)
+    src_path = tmp_path / f"{stem}.cpp"
+    src_path.write_text("#include <string>\n#include <gtest/gtest.h>\n\n" + body)
+    cmd = [
+        gxx,
+        "-fsyntax-only",
+        "-std=c++20",
+        "-I",
+        str(tmp_path / "stub"),
+        str(src_path),
+    ]
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def _parse_test_stub(
+    compile_env, source: str, tmp_path: Path, stem: str
+) -> subprocess.CompletedProcess:
+    """``-fsyntax-only`` one emitted gtest file against the stand-in above."""
+    gtest_dir = tmp_path / "stub" / "gtest"
+    gtest_dir.mkdir(parents=True, exist_ok=True)
+    (gtest_dir / "gtest.h").write_text(_GTEST_STUB_HEADER)
+    src_path = tmp_path / f"{stem}.cpp"
+    src_path.write_text(source)
+    cmd = [
+        compile_env["gxx"],
+        "-fsyntax-only",
+        "-std=c++20",
+        "-D__HIP_PLATFORM_AMD__",
+        "-DHIPDNN_ENABLE_KERNEL_INGESTOR",
+        "-I",
+        str(tmp_path / "stub"),
+    ]
+    for inc in compile_env["includes"]:
+        cmd += ["-I", str(inc)]
+    cmd.append(str(src_path))
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+class TestRealCompile:
+    """Host-compile the emitted stub with g++, best-effort. Every case runs
+    ``-fsyntax-only``, so linking, symbol registration, loading and dispatch belong to
+    the provider's own tests."""
 
     def test_single_pack_stub_compiles(
         self, compile_env, generator, scale_add_config, tmp_path
@@ -467,23 +276,13 @@ class TestRealCompile:
     def test_packaged_dialect_stub_compiles(
         self, compile_env, generator, gfx950_attention_dense_config, tmp_path
     ):
-        """The packaged branch emits code the other two configs never exercise.
-
-        Both compile tests above use direct_load configs, so the
-        `{% if config.is_packaged %}` block -- an entire extra function
-        definition, placed outside the pack's anonymous namespace so the
-        IngestorPacks.cpp row can reference it -- was emitted by nothing that
-        compiles. It was added to fix a link error; emitting a *syntax* error in
-        its place would have passed every test.
-        """
+        """The only config reaching the `{% if config.is_packaged %}` block: an extra
+        function definition outside the pack's anonymous namespace so IngestorPacks.cpp
+        can reference it."""
         config = gfx950_attention_dense_config
         assert config.is_packaged, "fixture is no longer the packaged-dialect one"
         rendered = generator._render_template(
             "native.cpp.j2", config, ids=mint_ids(config)
-        )
-        assert "ModuleCache()" in rendered, (
-            "packaged config emitted no module-cache reset -- the table row names "
-            "one, so this stub would not link"
         )
         result = _compile(compile_env, rendered, tmp_path)
         assert (
@@ -493,52 +292,87 @@ class TestRealCompile:
     def test_matcher_test_stub_parses(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """The OTHER emitted C++ file. Nothing compiled it.
-
-        `test_matchers.cpp.j2` gained three pre-wired `GTEST_SKIP()` stubs this
-        session and no test has ever fed it to a compiler -- the same gap the
-        packaged native stub had, one template over. A malformed stub would ship
-        and first fail inside the provider's build, days later.
-
-        gtest is not a dependency of this tool, so this parses against a minimal
-        stand-in for the handful of macros the emitted file uses. That is enough
-        to catch the realistic defect (an unbalanced stub, a bad string
-        concatenation) without pulling googletest into the generator's test env.
-        """
-        gtest_dir = tmp_path / "stub/gtest"
-        gtest_dir.mkdir(parents=True)
-        (gtest_dir / "gtest.h").write_text(
-            "#pragma once\n"
-            "struct GTestMsg { template <typename T>\n"
-            "    GTestMsg& operator<<(const T&) { return *this; } };\n"
-            "#define TEST(a, b) void a##_##b##_generated_test()\n"
-            "#define GTEST_SKIP() GTestMsg()\n"
-            "#define EXPECT_TRUE(x) (void)(x)\n"
-            "#define EXPECT_FALSE(x) (void)(x)\n"
-            "#define EXPECT_NE(a, b) (void)0\n"
-            "#define EXPECT_EQ(a, b) (void)0\n"
-        )
+        """`test_matchers.cpp.j2` ships pre-wired `GTEST_SKIP()` stubs."""
         rendered = generator._render_template(
             "test_matchers.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
-        src = tmp_path / "TestMatchers.cpp"
-        src.write_text(rendered)
-        cmd = [
-            compile_env["gxx"],
-            "-fsyntax-only",
-            "-std=c++20",
-            "-D__HIP_PLATFORM_AMD__",
-            "-DHIPDNN_ENABLE_KERNEL_INGESTOR",
-            "-I",
-            str(tmp_path / "stub"),
-        ]
-        for inc in compile_env["includes"]:
-            cmd += ["-I", str(inc)]
-        cmd.append(str(src))
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = _parse_test_stub(compile_env, rendered, tmp_path, "TestMatchers")
         assert (
             result.returncode == 0
         ), f"emitted matcher-test stub does not parse:\n{result.stderr}"
+
+    def test_pack_census_stub_parses(
+        self, compile_env, generator, scale_add_config, tmp_path
+    ):
+        """Unlike the two stubs an author finishes, the census is emitted complete and
+        meant to run as written, so a defect in it ships inside something that looks
+        finished."""
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
+        )
+        result = _parse_test_stub(compile_env, rendered, tmp_path, "TestPacks")
+        assert (
+            result.returncode == 0
+        ), f"emitted pack-census test does not parse:\n{result.stderr}"
+
+    def test_multi_pack_census_stub_parses(
+        self, compile_env, generator, binary_ops_config, tmp_path
+    ):
+        """The census's multi-pack arm counts one graph-scoped matcher per pack, against
+        the single-pack arm's zero: different code, not a constant."""
+        config = binary_ops_config
+        assert config.is_multi_pack, "fixture is no longer the multi-pack one"
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", config, ids=mint_ids(config)
+        )
+        result = _parse_test_stub(compile_env, rendered, tmp_path, "TestPacksMulti")
+        assert (
+            result.returncode == 0
+        ), f"emitted multi-pack census does not parse:\n{result.stderr}"
+
+    def test_heuristic_free_stubs_parse(
+        self, compile_env, generator, heuristic_free_config, tmp_path
+    ):
+        """Every shipped config declares `heuristic: native`, so this is the only case
+        parsing the `{% else %}` arms of all three templates."""
+        config = heuristic_free_config
+        assert not config.engine.has_heuristic
+        ids = mint_ids(config)
+        native = generator._render_template("native.cpp.j2", config, ids=ids)
+        result = _compile(compile_env, native, tmp_path)
+        assert (
+            result.returncode == 0
+        ), f"heuristic-free native stub failed to compile:\n{result.stderr}"
+
+        for template, stem in (
+            ("test_matchers.cpp.j2", "TestMatchersNoHeuristic"),
+            ("test_packs.cpp.j2", "TestPacksNoHeuristic"),
+        ):
+            rendered = generator._render_template(template, config, ids=ids)
+            result = _parse_test_stub(compile_env, rendered, tmp_path, stem)
+            assert (
+                result.returncode == 0
+            ), f"heuristic-free {template} does not parse:\n{result.stderr}"
+
+    def test_the_census_parse_catches_a_typo_inside_an_expectation(
+        self, compile_env, generator, scale_add_config, tmp_path
+    ):
+        """An expectation macro that discarded its operands would let this class report
+        success on a file real gtest rejects."""
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
+        )
+        broken = rendered.replace(
+            "EXPECT_EQ(loaded, _expected->packNames)",
+            "EXPECT_EQ(loaded, _expected->thisMemberDoesNotExist)",
+            1,
+        )
+        assert broken != rendered, "the census no longer carries the mutated statement"
+        result = _parse_test_stub(compile_env, broken, tmp_path, "TestPacksBroken")
+        assert result.returncode != 0, (
+            "an undeclared member inside EXPECT_EQ parsed cleanly -- the gtest "
+            "stand-in is discarding the operands it is handed"
+        )
 
     def test_multi_pack_stub_compiles(
         self, compile_env, generator, binary_ops_config, tmp_path
@@ -554,8 +388,7 @@ class TestRealCompile:
     def test_compile_catches_a_real_break(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """Sanity check on the check itself: an actually-broken stub must fail
-        to compile, or this whole class is silently vacuous."""
+        """An actually-broken stub must fail to compile, or this class is vacuous."""
         rendered = generator._render_template(
             "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
@@ -566,4 +399,171 @@ class TestRealCompile:
         assert result.returncode != 0, (
             "a deliberately broken stub compiled cleanly -- the compile check "
             "is not exercising real errors"
+        )
+
+
+#: Declarations the stand-in cases below are written against. ``ExplicitlyBool``'s
+#: conversion is explicit because that is the form gtest's own contextual conversion
+#: accepts.
+_STAND_IN_PREAMBLE = """
+struct NoBoolConversion
+{
+};
+
+struct ExplicitlyBool
+{
+    explicit operator bool() const { return true; }
+};
+"""
+
+#: Fragments real gtest rejects. Each names the operation the stand-in has to
+#: instantiate for the rejection to happen.
+_REJECTED_BY_REAL_GTEST = {
+    "equality between incomparable types": "EXPECT_EQ(std::string{}, 5);",
+    "asserted equality between incomparable types": "ASSERT_EQ(std::string{}, 5);",
+    "inequality between incomparable types": "EXPECT_NE(std::string{}, 5);",
+    "asserted inequality between incomparable types": "ASSERT_NE(std::string{}, 5);",
+    "truth of a value with no bool conversion": "EXPECT_TRUE(NoBoolConversion{});",
+    "falsity of a value with no bool conversion": "EXPECT_FALSE(NoBoolConversion{});",
+    "an undeclared identifier as an operand": "EXPECT_EQ(noSuchIdentifier, 1);",
+}
+
+#: The other side: everything the emitted files actually do must still parse, or the
+#: stand-in would reject real code instead of bad code.
+_ACCEPTED_BY_REAL_GTEST = """
+EXPECT_EQ(std::string("a"), std::string("a"));
+EXPECT_EQ(std::string("a"), "a");
+EXPECT_NE(std::string("a"), std::string("b"));
+ASSERT_EQ(std::string("a").size(), 1U);
+ASSERT_NE(std::string("a"), std::string("b"));
+EXPECT_TRUE(ExplicitlyBool{});
+EXPECT_FALSE(std::string("a").empty());
+ASSERT_TRUE(ExplicitlyBool{}) << "a chained message still compiles";
+ASSERT_FALSE(false) << "and so does one on an ASSERT_";
+GTEST_SKIP() << "as does the skip form the matcher stubs ship";
+"""
+
+
+class TestTheGtestStandIn:
+    """``TestRealCompile``'s verdict is only as strong as the operations this header
+    instantiates."""
+
+    @pytest.mark.parametrize(
+        "statement",
+        list(_REJECTED_BY_REAL_GTEST.values()),
+        ids=list(_REJECTED_BY_REAL_GTEST),
+    )
+    def test_the_stand_in_rejects_what_real_gtest_rejects(
+        self, host_cxx, statement, tmp_path
+    ):
+        body = f"{_STAND_IN_PREAMBLE}\nvoid subject()\n{{\n    {statement}\n}}\n"
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "StandInRejects")
+        assert result.returncode != 0, (
+            f"{statement} parsed cleanly against the gtest stand-in, so an emitted "
+            "file carrying it would pass this suite and fail the provider's build"
+        )
+
+    def test_the_stand_in_accepts_what_the_emitted_files_write(
+        self, host_cxx, tmp_path
+    ):
+        """The positive control: the rejections above must be discriminating."""
+        statements = "\n    ".join(_ACCEPTED_BY_REAL_GTEST.strip().splitlines())
+        body = f"{_STAND_IN_PREAMBLE}\nvoid subject()\n{{\n    {statements}\n}}\n"
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "StandInAccepts")
+        assert result.returncode == 0, (
+            "well-typed expectations were rejected by the gtest stand-in:\n"
+            f"{result.stderr}"
+        )
+
+
+#: Values a generated C++ string literal must survive, keyed by what each attacks.
+#: ``cpp_escape`` is the only thing between these and the emitted census: no pattern
+#: charset-validates kernel names and ``engine.sdk_version`` is free-form. ASCII only,
+#: since each case is checked byte-for-byte against its own code points below.
+_HOSTILE_LITERAL_VALUES = {
+    "quote-ends-the-literal": 'scale_add."f32"',
+    "backslash-changes-the-string": "scale_add" + chr(92) + "path",
+    "trailing-backslash-continues-the-line": "ends_with" + chr(92),
+    "newline-runs-past-the-line": "line\nnext",
+    "carriage-return-runs-past-the-line": "line\rnext",
+    "maximal-munch-hex": "\x1f32",
+    "tab-and-named-escapes": "tab\there",
+    "delete-and-low-controls": "del\x7fsoh\x01end",
+}
+
+#: The subset whose RAW form a C++ front end refuses, each key naming the failure its
+#: escaping prevents. Tab, DEL and the low control characters are LEGAL raw and denote
+#: the same bytes, as ``test_a_raw_control_character_is_accepted`` pins; escaping them
+#: keeps the census readable rather than making it compile.
+_MUST_BE_ESCAPED_TO_COMPILE = (
+    "quote-ends-the-literal",
+    "backslash-changes-the-string",
+    "trailing-backslash-continues-the-line",
+    "newline-runs-past-the-line",
+    "carriage-return-runs-past-the-line",
+)
+
+
+def _byte_assertions(escaped: str, value: str) -> str:
+    """C++ that fails to compile unless ``escaped`` denotes exactly ``value``. Compares
+    against integer code points, since a string literal would need escaping too and
+    would check ``cpp_escape`` against itself."""
+    lines = [
+        f'constexpr std::string_view kSubject = "{escaped}";',
+        f"static_assert(kSubject.size() == {len(value)}, "
+        '"the escaped literal denotes a different number of characters");',
+    ]
+    lines += [
+        f"static_assert(kSubject[{index}] == {ord(character)}, "
+        f'"character {index} of the escaped literal is not the authored one");'
+        for index, character in enumerate(value)
+    ]
+    return "\n".join(lines)
+
+
+class TestEscapedLiteralsDenoteTheAuthoredBytes:
+    """A real compiler's verdict on ``cpp_escape``, not a string comparison.
+
+    The value cases in ``test_generator.py`` compare a render against an escaping
+    written by the same hand. These hand the escaped text to a C++ front end instead:
+    the backslash and control-character cases parse either way and differ only in what
+    the literal MEANS, which ``static_assert`` settles at compile time.
+    """
+
+    @pytest.mark.parametrize(
+        "value", _HOSTILE_LITERAL_VALUES.values(), ids=_HOSTILE_LITERAL_VALUES.keys()
+    )
+    def test_the_escaped_value_parses_and_means_what_was_authored(
+        self, host_cxx, value, tmp_path
+    ):
+        assert value.isascii(), "byte-for-byte comparison below assumes ASCII"
+        body = "#include <string_view>\n\n" + _byte_assertions(cpp_escape(value), value)
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "EscapedLiteral")
+        assert result.returncode == 0, (
+            f"the escaping of {value!r} does not denote the authored string:\n"
+            f"{result.stderr}"
+        )
+
+    @pytest.mark.parametrize("case", _MUST_BE_ESCAPED_TO_COMPILE)
+    def test_the_same_value_unescaped_is_rejected(self, host_cxx, case, tmp_path):
+        """Without it, a ``cpp_escape`` returning its input unchanged would pass
+        whichever cases need no escaping; the lone backslash parses and is caught only
+        by the byte assertions."""
+        value = _HOSTILE_LITERAL_VALUES[case]
+        body = "#include <string_view>\n\n" + _byte_assertions(value, value)
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "RawLiteral")
+        assert result.returncode != 0, (
+            f"the raw form of {value!r} compiled and denoted the authored bytes, so "
+            "the escaped case proves nothing about the escaping"
+        )
+
+    def test_a_raw_control_character_is_accepted(self, host_cxx, tmp_path):
+        """Why the control above covers only part of the table: an assumed rejection
+        would make the escape-or-fail set look stronger than it is."""
+        value = _HOSTILE_LITERAL_VALUES["delete-and-low-controls"]
+        body = "#include <string_view>\n\n" + _byte_assertions(value, value)
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "RawControl")
+        assert result.returncode == 0, (
+            "a raw control character was refused inside a string literal, so it "
+            f"belongs in the escape-or-fail set:\n{result.stderr}"
         )

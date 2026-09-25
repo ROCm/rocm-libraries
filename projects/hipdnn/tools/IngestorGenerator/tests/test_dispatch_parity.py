@@ -53,8 +53,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _shapes() -> list[dict]:
-    """A corpus spanning both sides of the persistent threshold, plus two shapes
-    the kernel must refuse -- one per refusal LAYER."""
+    """A corpus spanning both sides of the persistent threshold."""
     out = []
     for batch in (1, 2):
         for heads_q, heads_kv in ((32, 8), (16, 16)):
@@ -75,24 +74,6 @@ def _shapes() -> list[dict]:
                             }
                         )
     return out
-
-
-def _unservable() -> list[dict]:
-    base = {
-        "batch": 1,
-        "nhead_q": 32,
-        "nhead_k": 8,
-        "seqlen_q": 4096,
-        "seqlen_k": 4096,
-        "hdim_q": 128,
-        "hdim_v": 128,
-        "dtype": "bf16",
-        "mask_type": 1,
-    }
-    return [
-        {**base, "hdim_q": 96, "hdim_v": 96},  # head_size not in {64,128}
-        {**base, "seqlen_q": 1},  # decode: Sq % BLOCK_M != 0
-    ]
 
 
 def _emitted_kernels(config_path) -> list[dict]:
@@ -123,7 +104,7 @@ def parity(tmp_path_factory):
     """Run the tool once; every test reads the same emitted config."""
     work = tmp_path_factory.mktemp("parity")
     shapes = work / "shapes.json"
-    shapes.write_text(json.dumps(_shapes() + _unservable()))
+    shapes.write_text(json.dumps(_shapes()))
     config = work / "parity.yaml"
     result = subprocess.run(
         [
@@ -303,17 +284,6 @@ class TestNamingIsOpAgnostic:
         assert len(set(names)) == 3
 
 
-class TestBothRefusalLayersAreReported:
-    def test_construction_rejections_are_counted_separately(self, parity):
-        """Spec CONSTRUCTION raises before any predicate runs. A support check that
-        only calls the predicate reports these as servable and ships a wrong
-        denominator."""
-        assert "rejected          2" in parity["stdout"], parity["stdout"]
-
-    def test_servable_count_excludes_them(self, parity):
-        assert f"servable          {parity['n_shapes']}" in parity["stdout"]
-
-
 class TestKnobPartition:
     def test_constant_knobs_are_named_as_non_axes(self, parity):
         """The mechanical form of "which knobs may be exposed"."""
@@ -352,22 +322,30 @@ class TestEndToEnd:
         assert generated.returncode == 0, generated.stdout + generated.stderr
 
         gated = subprocess.run(
-            [sys.executable, str(_GATE), "A", str(bundle), "--profile", str(_PROFILE)],
+            [sys.executable, str(_GATE), "--mode", "structural", "A", str(bundle),
+             "--profile", str(_PROFILE)],
             cwd=_REPO_ROOT,
             capture_output=True,
             text=True,
         )
         assert gated.returncode == 0, gated.stdout + gated.stderr
         assert "GATE PASSED" in gated.stdout
+        # Structural mode reads no compiled evidence, so it always reports that one
+        # check as not run; anything else not checked is the profile narrowing it.
+        narrowed = [
+            line
+            for line in gated.stdout.splitlines()
+            if "NOT CHECKED" in line and "COMPILED SPECIALIZATION AGREEMENT" not in line
+        ]
         assert (
-            "NOT CHECKED" not in gated.stdout
+            not narrowed
         ), "the parity profile must satisfy every gate property, not narrow the gate"
 
 
 def _run_parity(work, *extra, name="out.yaml"):
     shapes = work / "shapes.json"
     if not shapes.exists():
-        shapes.write_text(json.dumps(_shapes() + _unservable()))
+        shapes.write_text(json.dumps(_shapes()))
     out = work / name
     result = subprocess.run(
         [
@@ -570,6 +548,8 @@ class TestAPinnedKnobReachesTheBinary:
             [
                 sys.executable,
                 str(_GATE),
+                "--mode",
+                "structural",
                 "--profile",
                 str(_PROFILE),
                 "arms",

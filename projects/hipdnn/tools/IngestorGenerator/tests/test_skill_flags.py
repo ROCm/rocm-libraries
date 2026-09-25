@@ -56,11 +56,21 @@ def test_the_tools_are_discovered(tools):
     assert len(tools) >= 8, f"only found {sorted(tools)}"
 
 
-def test_every_tool_declares_at_least_one_flag(declared):
+def test_every_tool_declares_at_least_one_flag(tools, declared):
     """Guards the `add_argument` pattern itself: a tool that switched to
     single-quoted or f-string flag names would silently declare nothing, and
-    every citation against it would then read as dangling."""
-    empty = sorted(name for name, flags in declared.items() if not flags)
+    every citation against it would then read as dangling. A tool whose
+    arguments are all positional (`field_audit.py`) declares none by design,
+    so only a tool whose `add_argument` calls name a `--` flag counts."""
+    empty = sorted(
+        name
+        for name, flags in declared.items()
+        if not flags
+        and any(
+            "add_argument(" in line and "--" in line
+            for line in tools[name].read_text().splitlines()
+        )
+    )
     assert not empty, (
         f"no flags extracted from {empty} -- tests/skill_flags.py's "
         f"_ADD_ARGUMENT_RE no longer matches how these tools declare arguments"

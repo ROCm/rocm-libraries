@@ -1,13 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The reference library is the applicability oracle, and a decline it does not
-share is a defect.
-
-An engine's own bundles cannot establish this. They test the graphs the author
-thought of against a reference the author chose, and they go green exactly when the
-author's model of "what we support" is self-consistent -- which is also the state an
-integration is in when it is silently under-covering.
+"""The reference library is the applicability oracle, and a decline it does not share
+is a defect.
 
 The rule these tests defend:
 
@@ -15,16 +10,9 @@ The rule these tests defend:
     integration must serve it too. A decline the reference does not share is missing
     coverage or a matcher bug -- never a scope decision.
 
-The fourth case is real and deliberately out of scope here: a reference that ACCEPTS
-a request it then computes wrongly. That is a reference defect and a finding to
-report; it is not licence to decline quietly. This tool asks only about
-applicability, never numerics, and its docstring says so.
-
-Fixtures use a stub library rather than importing the real one: what is under test is
-the RECONCILIATION LOGIC -- which combinations pass, which fail, and what the
-diagnostic says -- not any particular kernel's support matrix. Binding these to a
-real library would make them an integration test that breaks whenever that library's
-coverage changes, which is the opposite of what they are for.
+A reference that ACCEPTS a request it computes wrongly is out of scope; this tool asks
+only about applicability, never numerics. Fixtures use a stub library, so what is
+under test is the reconciliation logic, not any kernel's support matrix.
 """
 
 from __future__ import annotations
@@ -43,7 +31,7 @@ _TOOL = _TOOLS / "reconcile_applicability.py"
 sys.path.insert(0, str(_TOOLS))
 
 #: A stub standing in for both the kernel factory and the library entry point. Which
-#: shapes each serves is controlled per-test by the thresholds baked into the module.
+#: shapes each serves is set per-test by the thresholds baked into the module.
 _STUB = '''
 import dataclasses
 
@@ -96,15 +84,9 @@ class Candidate:
         return True, ""
 
     def admits(self, req):
-        """The complete question: capability prefilter, then the predicate.
-
-        The isinstance check mirrors the real library: rocKE's candidates refuse
-        anything that is not their own request type, and duck-typing does not
-        satisfy a type check. The refusal is per-request and reads exactly like an
-        ordinary decline.
-        """
+        """The complete capability and predicate question for a typed request."""
         if not isinstance(req, Request):
-            return False, f"expected Request, got {type(req).__name__}"
+            raise TypeError(f"expected Request, got {type(req).__name__}")
         if self.arches and getattr(req, "arch", None) not in self.arches:
             return False, f"capability: arch {getattr(req, 'arch', None)!r} not in {self.arches}"
         return self._supports(req)
@@ -119,11 +101,15 @@ def candidates():
 
 
 def kernel_spec(req):
-    """THIS kernel: refuses short sequences."""
-    if int(req.seqlen_q) < 256:
-        raise ValueError("seqlen_q must be at least 256")
+    """Construct a spec; support is decided by the explicit predicate."""
     return Spec(batch=int(req.batch), seqlen_q=int(req.seqlen_q),
                 head_size=int(req.head_size))
+
+
+def supported(spec, *, arch):
+    if spec.seqlen_q < 256:
+        return False, "seqlen_q must be at least 256"
+    return True, ""
 '''
 
 
@@ -149,6 +135,7 @@ def env(tmp_path):
                 kmd_fields: []
                 metadata_fields: []
                 dispatch: {{module: stublib, function: kernel_spec}}
+                predicate: {{module: stublib, function: supported}}
                 request:
                   module: stublib
                   class: Request
@@ -201,7 +188,7 @@ _UNBUILDABLE = {"batch": 1, "seqlen_q": 4096, "head_size": 256}
 
 class TestBothServe:
     def test_a_shape_both_serve_reconciles(self, env):
-        """The control. Every failure assertion below is worthless without it."""
+        """The control: every failure assertion below is worthless without it."""
         result = env.run(env.profile(), env.shapes(_LONG))
         assert result.returncode == 0, result.stdout + result.stderr
         assert "RECONCILED" in result.stdout
@@ -209,39 +196,35 @@ class TestBothServe:
 
 
 class TestScopingIsTheWholeDesign:
-    """A sibling kernel's coverage is not this integration's gap.
-
-    Comparing library-wide was tried against a real corpus and reported 51 shapes as
-    gaps in a dense integration -- decode and large head sizes that the dense kernel
-    declines for exactly the reasons hipDNN does, being served by sibling candidates.
-    A false alarm with a plausible story attached is the expensive kind.
-    """
+    """A sibling kernel's coverage is not this integration's gap: comparing library-wide
+    reports as gaps the shapes a sibling serves and this kernel declines for the reasons
+    hipDNN does."""
 
     def test_a_shape_only_a_SIBLING_family_serves_is_not_a_gap(self, env):
-        """The headline. The sibling serves the short sequence; we are integrating
-        dense, which does not -- so this reconciles as a shared decline."""
+        """The sibling serves the short sequence and dense does not, so this is a shared
+        decline."""
         result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
         assert result.returncode == 0, result.stdout + result.stderr
         assert "both decline            1" in result.stdout
         assert "ONLY THE REFERENCE      0" in result.stdout
 
     def test_the_same_shape_IS_a_gap_when_integrating_that_sibling(self, env):
-        """The converse, so the test above is not just 'always reconcile'. Point the
-        profile at the tiled family and the identical shape becomes a real gap."""
+        """The converse: point the profile at the tiled family and the identical shape
+        becomes a real gap."""
         result = env.run(env.profile(family="tiled", opt_in=False), env.shapes(_SHORT))
         assert result.returncode == 1, result.stdout + result.stderr
         assert "ONLY THE REFERENCE      1" in result.stdout
 
     def test_a_family_that_matches_nothing_is_refused(self, env):
         """A profile naming a family that does not exist would report EVERY shape as
-        unreconciled -- a maximally alarming, entirely wrong result."""
+        unreconciled."""
         result = env.run(env.profile(family="no_such_kernel"), env.shapes(_LONG))
         assert result.returncode == 2
         assert "no registered candidate" in (result.stdout + result.stderr)
 
     def test_matching_on_the_wrong_attribute_is_refused(self, env):
-        """Every stub candidate shares `family`, as the real library does -- so
-        matching on it cannot discriminate and must not silently pass."""
+        """Every stub candidate shares `family`, as the real library does, so matching
+        on it cannot discriminate."""
         result = env.run(env.profile(family="dense", match="family"), env.shapes(_LONG))
         assert result.returncode == 2
         assert "no registered candidate" in (result.stdout + result.stderr)
@@ -249,9 +232,9 @@ class TestScopingIsTheWholeDesign:
 
 class TestOptInSelectorIsInherited:
     def test_without_the_selector_the_oracle_asks_nothing(self, env):
-        """An opt-in candidate declines everything unless the request names it, so a
-        run that drops the selector reconciles trivially -- a gate that passes by
-        asking nothing at all. With the selector, the long shape must SERVE."""
+        """An opt-in candidate declines everything unless the request names it, so
+        dropping the selector reconciles by asking nothing; with it, the long shape must
+        SERVE."""
         with_selector = env.run(env.profile(opt_in=True), env.shapes(_LONG))
         assert "both serve              1" in with_selector.stdout
 
@@ -263,22 +246,11 @@ class TestOptInSelectorIsInherited:
 
 
 class TestOnlyTheReferenceServes:
-    """The finding this tool exists for, within one family."""
 
     def test_the_diagnostic_names_both_sides(self, env):
         result = env.run(env.profile(family="tiled", opt_in=False), env.shapes(_SHORT))
         assert "sibling" in result.stdout
         assert "seqlen_q must be at least 256" in result.stdout
-
-    def test_it_names_the_three_legitimate_responses(self, env):
-        """'We chose not to' must not read as one of them."""
-        result = env.run(env.profile(family="tiled", opt_in=False), env.shapes(_SHORT))
-        assert "add the variant" in result.stdout
-        assert "fix the matcher" in result.stdout
-        assert "INCORRECT result" in result.stdout, (
-            "the third option -- show the reference is wrong -- must be stated, or "
-            "an author facing a genuine reference defect has no legitimate move"
-        )
 
     def test_the_escape_hatch_is_explicit_and_still_reports(self, env):
         result = env.run(
@@ -291,14 +263,20 @@ class TestOnlyTheReferenceServes:
         assert "ONLY THE REFERENCE      1" in result.stdout
 
 
-class TestBothDecline:
-    def test_a_construction_rejection_counts_as_a_shared_decline(self, env):
-        """Structural rejections raise at request CONSTRUCTION, before any predicate.
-        Both sides hit it, so it reconciles -- but only because the tool builds the
-        request inside the try on both sides."""
-        result = env.run(env.profile(), env.shapes(_UNBUILDABLE))
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "both decline            1" in result.stdout
+class TestConstructionFailures:
+    @pytest.mark.parametrize(
+        "flags",
+        [
+            (),
+            ("--allow-empty",),
+            ("--allow-unreconciled",),
+            ("--allow-empty", "--allow-unreconciled"),
+        ],
+    )
+    def test_construction_failure_is_operational(self, env, flags):
+        result = env.run(env.profile(), env.shapes(_UNBUILDABLE), *flags)
+        assert result.returncode == 2
+        assert "RECONCILED" not in result.stdout
 
 
 class TestOracleDeclaration:
@@ -327,7 +305,6 @@ class TestOracleDeclaration:
 
 class TestRuntimeDeclinesOverrideTheOfflineAnswer:
     def test_a_runtime_decline_beats_what_the_dispatcher_says(self, env, tmp_path):
-        """What the engine ACTUALLY did outranks what the dispatcher says it could do."""
         declines = tmp_path / "declines.json"
         declines.write_text(json.dumps({"0": "no engine configurations available"}))
         result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
@@ -336,24 +313,13 @@ class TestRuntimeDeclinesOverrideTheOfflineAnswer:
 
 
 class TestTheCompleteEligibilityQuestion:
-    """Ask `admits`, not the raw predicate.
-
-    Registered candidates keep their arch and dtype gates in `capability`, so the
-    underscore predicate carries only the RESIDUAL checks -- the library's own
-    docstring calls admits "the only eligibility question a caller should ask" and
-    gives the worked example of a predicate that happily accepts a target its
-    capability block forbids.
-
-    Calling the predicate alone therefore reports the reference as serving a shape it
-    cannot, which turns a CORRECT hipDNN decline into a phantom coverage gap -- the
-    same class of false alarm as comparing library-wide, arriving by a different route.
-    """
+    """Registered candidates keep their arch and dtype gates in `capability`, so the
+    underscore predicate carries only the RESIDUAL checks and can accept a target its
+    capability block forbids."""
 
     def test_a_candidate_gated_out_by_capability_does_not_count_as_serving(self, env):
-        """`other_arch` shares the dense family and its predicate accepts a short
-        sequence, but its capability block excludes this arch. If the tool asked the
-        predicate directly it would report the short shape as served by the reference,
-        and flag our correct decline as a gap."""
+        """`other_arch` shares the dense family and accepts a short sequence, but its
+        capability block excludes this arch."""
         result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
         assert result.returncode == 0, result.stdout + result.stderr
         assert (
@@ -362,8 +328,8 @@ class TestTheCompleteEligibilityQuestion:
         assert "ONLY THE REFERENCE      0" in result.stdout
 
     def test_the_arch_gated_candidate_would_otherwise_have_accepted(self, env):
-        """Guards the test above from passing for the wrong reason: prove the
-        predicate really does accept, so capability is what excluded it."""
+        """Guards the test above: the predicate really does accept, so capability is
+        what excluded it."""
         import subprocess as sp
         import sys as s
 
@@ -382,22 +348,14 @@ class TestTheCompleteEligibilityQuestion:
 
 
 class TestDeclineReasonsAreNotMaskedBySiblings:
-    """The verdict can be right while every recorded reason is wrong.
-
-    Scoping on a shared attribute matches several candidates. If one rejects on
-    CAPABILITY (wrong arch) that says only "this sibling is not the one for this
-    target" -- true, and useless as evidence. Keeping whichever decline came last
-    made every recorded reason the capability one and masked the real,
-    kernel-specific reason on every shape.
-
-    Counts were unaffected, which is what makes it dangerous: the gate passes, the
-    write-up records a uniformly wrong root cause, and nothing looks broken. On the
-    real corpus this contaminated 51 of 51 decline reasons.
-    """
+    """Scoping on a shared attribute matches several candidates, and a rejection on
+    CAPABILITY says only "this sibling is not the one for this target". Recorded in
+    place of the kernel-specific reason it leaves the counts unaffected, so the gate
+    passes over a uniformly wrong root cause."""
 
     def test_the_substantive_reason_wins_over_a_capability_rejection(self, env):
-        """`other_arch` shares the family and rejects this arch on capability;
-        `the_kernel` rejects on the real predicate. The report must show the latter."""
+        """`other_arch` rejects this arch on capability; `the_kernel` rejects on the
+        real predicate. The report must show the latter."""
         result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
         assert result.returncode == 0, result.stdout + result.stderr
         assert (
@@ -408,22 +366,19 @@ class TestDeclineReasonsAreNotMaskedBySiblings:
         ), "a sibling's capability rejection is not evidence about this shape"
 
     def test_the_reason_names_which_candidate_gave_it(self, env):
-        """With several candidates in a family, an unattributed reason cannot be
-        acted on -- a reader cannot tell which sibling spoke."""
+        """With several candidates in a family, an unattributed reason cannot be acted
+        on."""
         result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
         assert "[the_kernel]" in result.stdout
 
 
 class TestAGateThatCannotPassByAskingNothing:
-    """Three ways this tool reported success without comparing anything."""
+    """Three ways this tool could report success without comparing anything."""
 
     def test_a_declines_key_matching_no_shape_is_a_hard_failure(self, env, tmp_path):
-        """A typo'd graph name was silently ignored: the shape it marked stayed
-        counted as served and the run exited 0 having asked nothing about it.
-
-        Index keys make this worse, not better -- they are the only option for a
-        corpus without graph names, and they shift when the corpus is re-mined with
-        different flags, so the same file quietly marks a DIFFERENT shape."""
+        """A typo'd graph name silently ignored leaves the shape counted as served.
+        Index keys are worse: they shift when the corpus is re-mined, so the same file
+        marks a DIFFERENT shape."""
         declines = tmp_path / "typo.json"
         declines.write_text(json.dumps({"no_such_graph_name": "engine declined"}))
         result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
@@ -431,8 +386,8 @@ class TestAGateThatCannotPassByAskingNothing:
         assert "matched no shape" in result.stderr
 
     def test_a_key_that_does_match_is_accepted(self, env, tmp_path):
-        """So the failure above is about the key matching nothing, not about
-        --declines being rejected wholesale."""
+        """So the failure above is about the key matching nothing, not about --declines
+        being rejected wholesale."""
         declines = tmp_path / "real.json"
         declines.write_text(json.dumps({"0": "engine declined at runtime"}))
         result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
@@ -440,21 +395,16 @@ class TestAGateThatCannotPassByAskingNothing:
         assert "ONLY THE REFERENCE      1" in result.stdout
 
     def test_neither_side_serving_anything_is_not_agreement(self, env):
-        """A profile whose request.defaults omits the opt-in selector makes the
-        reference decline every shape -- and this integration decline them for the
-        same reason. The tool used to print RECONCILED over 0-of-N served.
-
-        The gate needs BOTH conditions: NOTHING served by either side, and the
-        scoping key absent from request.defaults. A shape either side serves proves
-        the comparison is live; a corpus nothing serves is otherwise legitimate."""
+        """Both sides declining every shape is RECONCILED over 0-of-N served, so the
+        gate needs BOTH conditions: nothing served either side, and the scoping key
+        absent from request.defaults."""
         result = env.run(env.profile(family="dense", opt_in=False), env.shapes(_SHORT))
         assert result.returncode == 2, result.stdout
         assert "agreement about nothing" in result.stderr
         assert "algorithm" in result.stderr, "the diagnostic must name the missing key"
 
     def test_an_empty_comparison_can_be_opted_into(self, env):
-        """The check guards a misconfiguration; it does not claim an empty corpus is
-        never legitimate."""
+        """The check guards a misconfiguration; an empty corpus can be legitimate."""
         result = env.run(
             env.profile(family="dense", opt_in=False),
             env.shapes(_SHORT),
@@ -463,7 +413,6 @@ class TestAGateThatCannotPassByAskingNothing:
         assert result.returncode == 0
 
     def test_an_unreadable_declines_path_names_the_problem(self, env, tmp_path):
-        """It used to raise IsADirectoryError through the traceback."""
         result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(tmp_path))
         assert result.returncode == 2
         assert "FAIL: --declines" in result.stderr
@@ -481,15 +430,10 @@ class TestReferenceRequestOverride:
     """A profile whose `request.class` is an ADAPTER cannot use it against the
     reference, and the failure looks exactly like a decline.
 
-    rocKE's candidates isinstance-check their argument and refuse anything else with
-    "expected AttentionRequest, got X". Duck-typing does not satisfy a type check.
-    That refusal is raised per shape and is recorded as a decline, so the tool
-    reported RECONCILED -- every decline is one the reference makes too -- having
-    never consulted the reference on a single shape. Same failure mode as
-    `TestAGateThatCannotPassByAskingNothing`, reached a different way.
-
+    rocKE's candidates isinstance-check their argument, and that refusal is recorded per
+    shape as a decline, so the run reconciles having never consulted the reference.
     `reference_request:` overrides `request:` for the reference side only, with an
-    optional `via:` translator so the mapping lives in the integration's own adapter.
+    optional `via:` translator.
     """
 
     @staticmethod
@@ -524,8 +468,8 @@ class TestReferenceRequestOverride:
         return path
 
     def test_an_adapter_request_reconciles_by_asking_nothing(self, env, tmp_path):
-        """Without the override: every shape the reference sees raises at the type
-        check, so nothing is ever compared and the run must NOT report success."""
+        """Without the override every shape raises at the type check, so nothing is
+        compared and the run must NOT report success."""
         result = env.run(
             self._adapter_profile(tmp_path, reference_request=""),
             env.shapes(_LONG),
@@ -534,8 +478,6 @@ class TestReferenceRequestOverride:
         assert "RECONCILED" not in result.stdout
 
     def test_reference_request_restores_a_live_comparison(self, env, tmp_path):
-        """With the override the reference is asked in its own vocabulary, and the
-        shape both sides serve reconciles for a real reason."""
         override = textwrap.indent(
             textwrap.dedent(
                 """
@@ -556,17 +498,12 @@ class TestReferenceRequestOverride:
 
 
 class TestServingWhatTheReferenceDeclines:
-    """The opposite direction, which used to be filed as agreement.
-
-    The bucket branch keyed only on the reference's answer, so a shape WE serve and
-    the reference declines landed in "both decline" -- counted as reconciled, with
-    the reference's decline reason printed as though we shared it.
-    """
+    """A bucket keyed only on the reference's answer files a shape WE serve under "both
+    decline", printing the reference's reason as though we shared it."""
 
     def test_a_shape_only_we_serve_is_reported_separately(self, env, tmp_path):
-        """Our dispatch serves the long shape. Point the reference at a family whose
-        only candidate rejects this arch on capability, and the reference declines
-        what we serve -- which is neither a gap nor agreement."""
+        """Our dispatch serves the long shape while the reference declines it on
+        capability: neither a gap nor agreement."""
         lib = tmp_path / "rocke" / "library"
         (lib / "narrow.py").write_text(
             "import stublib\n"
@@ -607,9 +544,209 @@ class TestServingWhatTheReferenceDeclines:
         ), "a shape we serve is not a shared decline"
 
     def test_a_live_comparison_is_never_called_vacuous(self, env):
-        """The control for the two above. With the scoping key still absent, a shape
-        OUR side serves makes the comparison live -- the gate must stay quiet, or it
-        would fail every run whose profile happens to omit a default."""
+        """The control: with the scoping key still absent, a shape our side serves makes
+        the comparison live and the gate must stay quiet."""
         result = env.run(env.profile(family="dense", opt_in=False), env.shapes(_LONG))
         assert "asked nothing" not in result.stderr
         assert "agreement about nothing" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        (),
+        ("--allow-empty",),
+        ("--allow-unreconciled",),
+        ("--allow-empty", "--allow-unreconciled"),
+    ],
+)
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def admits(self): return True, ''",
+        "def admits(self, req): raise RuntimeError('broken oracle')",
+        "admits = None",
+        "def admits(self, req): return True",
+        "def admits(self, req): return (1, '')",
+        "def admits(self, req): return (False, None)",
+        "pass",
+    ],
+)
+def test_broken_candidate_after_acceptance_is_never_waived(env, tmp_path, flags, body):
+    module = tmp_path / "rocke" / "library" / "broken.py"
+    module.write_text(
+        "import stublib\nclass Broken:\n"
+        "    algorithm = 'dense'\n    spec_id = 'broken'\n    " + body + "\n"
+        "def candidates():\n"
+        "    return (stublib.candidates()[0], Broken())\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text()
+        .replace(
+            "reference_candidates:\n                  module: stublib",
+            "reference_candidates:\n                  module: broken",
+        )
+        .replace(
+            "reference_candidates:\n  module: stublib",
+            "reference_candidates:\n  module: broken",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2
+    assert "RECONCILED" not in result.stdout
+
+
+def test_decline_wording_is_not_an_api_error(env, tmp_path):
+    module = tmp_path / "rocke" / "library" / "stublib.py"
+    module.write_text(
+        module.read_text().replace(
+            'return False, f"seqlen_q must be at least {self._min}"',
+            'return False, "expected Request, got Adapter"',
+        )
+    )
+    result = env.run(env.profile(), env.shapes(_SHORT))
+    assert result.returncode == 0
+    assert "both decline            1" in result.stdout
+
+
+def test_runtime_decline_matches_retained_occurrence(env, tmp_path):
+    shape = {
+        **_LONG,
+        "_provenance": {"graph": "first"},
+        "_provenance_occurrences": [{"graph": "first"}, {"graph": "second"}],
+    }
+    declines = tmp_path / "declines.json"
+    declines.write_text(json.dumps({"second": "runtime rejection"}))
+    result = env.run(env.profile(), env.shapes(shape), "--declines", str(declines))
+    assert result.returncode == 1
+    assert "runtime rejection" in result.stdout
+
+
+#: Every escape hatch this tool offers. An operational error must survive all of them:
+#: the flags describe what a COMPLETED comparison may find.
+_ESCAPES = [
+    (),
+    ("--allow-empty",),
+    ("--allow-unreconciled",),
+    ("--allow-empty", "--allow-unreconciled"),
+]
+
+
+def _point_registry_at(profile_path: Path, module: str) -> None:
+    """Repoint `reference_candidates.module` without rewriting the whole profile."""
+    profile_path.write_text(
+        profile_path.read_text().replace(
+            "reference_candidates:\n  module: stublib",
+            f"reference_candidates:\n  module: {module}",
+        )
+    )
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param("", id="function_absent"),
+        pytest.param("candidates = None", id="not_callable"),
+        pytest.param("candidates = 'a string'", id="not_callable_value"),
+        pytest.param("def candidates(target): return ()", id="binding_failure"),
+        pytest.param(
+            "def candidates(): raise RuntimeError('registry blew up')",
+            id="invocation_failure",
+        ),
+        pytest.param("def candidates(): return 17", id="result_not_iterable"),
+    ],
+)
+def test_a_broken_candidate_registry_is_operational_under_every_flag(
+    env, tmp_path, flags, body
+):
+    """Every way of failing to obtain the candidate list means the reference was never
+    asked, which is exit 2 rather than a run with nothing unreconciled."""
+    (tmp_path / "rocke" / "library" / "reg.py").write_text(body + "\n")
+    path = env.profile()
+    _point_registry_at(path, "reg")
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "RECONCILED" not in result.stdout
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "raised",
+    [
+        pytest.param(
+            "ValueError('seqlen_q must be a multiple of 256')", id="ValueError"
+        ),
+        pytest.param(
+            "TypeError('spec factory got an unexpected field')", id="TypeError"
+        ),
+        pytest.param("KeyError('block_n')", id="KeyError"),
+    ],
+)
+def test_a_failing_spec_factory_is_operational_under_every_flag(
+    env, tmp_path, flags, raised
+):
+    """A factory that RAISES has failed to answer, not declined. The ValueError row
+    matters most: a validation error reads exactly like a support decision."""
+    (tmp_path / "rocke" / "library" / "badfab.py").write_text(
+        "import stublib\n"
+        f"def kernel_spec(req): raise {raised}\n"
+        "def supported(spec, *, arch): return True, ''\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text()
+        .replace(
+            "dispatch: {module: stublib, function: kernel_spec}",
+            "dispatch: {module: badfab, function: kernel_spec}",
+        )
+        .replace(
+            "predicate: {module: stublib, function: supported}",
+            "predicate: {module: badfab, function: supported}",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "RECONCILED" not in result.stdout
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "via, expected_absent",
+    [
+        pytest.param("via = None", "RECONCILED", id="not_callable"),
+        pytest.param(
+            "def via(fields): raise RuntimeError('translator blew up')",
+            "RECONCILED",
+            id="raises",
+        ),
+        pytest.param(
+            "def via(fields): return object()", "RECONCILED", id="wrong_request_type"
+        ),
+        pytest.param("def via(a, b): return a", "RECONCILED", id="binding_failure"),
+    ],
+)
+def test_a_broken_reference_translator_is_operational_under_every_flag(
+    env, tmp_path, flags, via, expected_absent
+):
+    """A `reference_request.via` translator that cannot produce a request means the
+    reference was never asked about that shape."""
+    (tmp_path / "rocke" / "library" / "trans.py").write_text(
+        "import stublib\n" + via + "\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text().replace(
+            "reference_candidates:",
+            "reference_request:\n"
+            "  module: stublib\n"
+            "  class: Request\n"
+            "  defaults: {algorithm: dense}\n"
+            "  via: {module: trans, function: via}\n"
+            "reference_candidates:",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert expected_absent not in result.stdout

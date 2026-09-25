@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 """Unit tests for codegen/sources/ -- the EngineSpec-producing adapter
-interface (Task 2A.3): InteractiveAdapter (no inference) and HiprtcAdapter
-(scans a .cpp for __global__ entry points and candidate KMD fields)."""
+interface: InteractiveAdapter (no inference) and HiprtcAdapter (scans a .cpp
+for __global__ entry points and candidate KMD fields)."""
 
 from codegen.sources import HiprtcAdapter, InteractiveAdapter, SourceAdapterResult
 
@@ -62,8 +62,6 @@ class TestHiprtcAdapter:
         assert "HIP_PLUGIN_CONV_BLOCK_SIZE" in result.kernels[0].template_params
 
     def test_locally_defined_macro_is_not_a_candidate_field(self, tmp_path):
-        """A #define this file sets itself is not externally supplied -- it is
-        not a config-facing KMD field candidate."""
         source = self._write(
             tmp_path,
             "Local.cpp",
