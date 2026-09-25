@@ -1,0 +1,20 @@
+{% extends "common/base.h.jinja2" %}
+{% block config_constructor -%}
+histogram_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} },
+                        {{ config.max_grid_size }},
+                        {{ config.shared_impl_max_bins }},
+                        {{ config.shared_impl_histograms }},
+                        {1024, 4}}
+{%- endblock %}
+
+{% block tparams -%}
+class value_type, unsigned int channels, unsigned int active_channels
+{%- endblock %}
+
+{% block config_guard scoped %}
+    ({% if not type.value_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= {{ type.value_type.size }})
+    {% if type.value_type.size_min > 0 %}&& (sizeof(value_type) > {{ type.value_type.size_min }}){% endif %} && (channels == {{ type.channels.type }}) && (active_channels == {{ type.active_channels.type }}))
+{%- endblock %}
+
+{% block config_base_type -%}histogram_config_params_base<value_type, channels, active_channels>{%- endblock -%}

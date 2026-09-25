@@ -6,8 +6,8 @@ scan_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} },
                     {{ config.block_scan_algo }} }
 {%- endblock %}
 
-{% block target_tparams -%}
-template<class Target, class value_type>
+{% block tparams -%}
+class value_type
 {%- endblock %}
 
 {% block config_guard scoped %}

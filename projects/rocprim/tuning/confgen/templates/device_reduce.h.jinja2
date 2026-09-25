@@ -3,8 +3,8 @@
 reduce_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} }, ::rocprim::block_reduce_algorithm::using_warp_reduce }
 {%- endblock %}
 
-{% block target_tparams -%}
-template<class Target, class key_type>
+{% block tparams -%}
+class key_type
 {%- endblock %}
 
 {% block config_guard scoped %}
