@@ -24,6 +24,7 @@ import unittest
 
 import kernels.common.attention_unified as au
 from dispatch.attention import (
+    AttentionMaskType,
     AttentionRequest,
     attention_candidates,
     dispatch_attention,
@@ -32,7 +33,12 @@ from dispatch.attention import (
 # gfx942's own spec factory. NOT the package-level ``dense_spec_for_request``,
 # which is gfx950's and would hand back an untuned spec for a gfx942 request.
 from dispatch.attention.gfx942 import _dense_spec
-from kernels.gfx942.attention_dense import build_attention_dense
+from kernels.common.attention_dense_spec import AttentionDenseSpec
+from kernels.gfx942.attention_dense import (
+    Gfx942AttentionDenseSpec,
+    build_attention_dense,
+    supports_attention_dense,
+)
 
 _NAME = "attention_gfx942_dense"
 _SPEC_ID = "gfx942_attention_dense"
@@ -129,12 +135,10 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             self.assertIn("capability", why)
             self.assertIn("fp8", why)
 
-    def test_rejects_sliding_window(self):
+    def test_admits_sliding_window(self):
         with _Gfx942Arch():
-            ok, why = _candidate().admits(_req(sliding_window=64))
-            self.assertFalse(ok)
-            self.assertIn("capability", why)
-            self.assertIn("sliding_window", why)
+            ok, _ = _candidate().admits(_req(sliding_window=64))
+            self.assertTrue(ok)
 
     def test_rejects_sinks(self):
         with _Gfx942Arch():
@@ -153,6 +157,77 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             self.assertFalse(ok)
             self.assertNotIn("capability", why)
             self.assertIn("ragged", why)
+
+
+class TestGfx942BottomRightSafety(unittest.TestCase):
+    def test_moving_bottom_right_declines_at_capability(self):
+        for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
+            with self.subTest(mask_type=mask_type), _Gfx942Arch():
+                ok, why = _candidate().admits(
+                    _req(
+                        seqlen_q=2048,
+                        seqlen_k=4096,
+                        mask_type=mask_type,
+                        dense_persistent="off",
+                    )
+                )
+                self.assertFalse(ok)
+                self.assertIn("capability", why)
+                self.assertIn("causal_bottom_right", why)
+
+    def test_direct_factory_rejects_moving_bottom_right(self):
+        for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
+            with self.subTest(mask_type=mask_type):
+                with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
+                    _dense_spec(
+                        _req(
+                            seqlen_q=2048,
+                            seqlen_k=4096,
+                            mask_type=mask_type,
+                            dense_persistent="off",
+                        )
+                    )
+
+    def test_concrete_support_rejects_shared_bottom_right_spec(self):
+        common = dict(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=4096,
+            num_query_heads=128,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            causal_bottom_right=True,
+            dtype="bf16",
+        )
+        spec = AttentionDenseSpec(**common)
+        ok, why = supports_attention_dense(spec, arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("causal_bottom_right", why)
+        with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
+            Gfx942AttentionDenseSpec(**common)
+
+    def test_equal_length_bottom_right_preserves_persistent_policy(self):
+        common = dict(
+            seqlen_q=8192,
+            seqlen_k=8192,
+            dense_persistent="auto",
+        )
+        mask_pairs = (
+            (AttentionMaskType.TOP_LEFT_CAUSAL, 2),
+            (1, AttentionMaskType.BOTTOM_RIGHT_CAUSAL),
+        )
+        with _Gfx942Arch():
+            for top_left, bottom_right in mask_pairs:
+                with self.subTest(top_left=top_left, bottom_right=bottom_right):
+                    top_left_spec = _dense_spec(_req(mask_type=top_left, **common))
+                    bottom_right_req = _req(mask_type=bottom_right, **common)
+                    bottom_right_spec = _dense_spec(bottom_right_req)
+                    self.assertEqual(bottom_right_spec, top_left_spec)
+                    self.assertFalse(bottom_right_spec.causal_bottom_right)
+                    self.assertTrue(bottom_right_spec.persistent)
+                    ok, why = _candidate().admits(bottom_right_req)
+                    self.assertTrue(ok, why)
 
 
 class TestGfx942DensePersistent(unittest.TestCase):
@@ -198,6 +273,41 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
             spec = _dense_spec(req)
             kd = build_attention_dense(spec, arch="gfx942")
             self.assertEqual(kd.name, dispatch_attention(req).spec.kernel_name_override)
+
+
+class TestGfx942SlidingWindow(unittest.TestCase):
+    """Sliding-window pass-through and capability tests, mirroring gfx950's suite."""
+
+    def test_sliding_window_zero_by_default(self):
+        with _Gfx942Arch():
+            spec = _dense_spec(_req())
+            self.assertEqual(spec.sliding_window, 0)
+
+    def test_sliding_window_passes_through_to_spec(self):
+        with _Gfx942Arch():
+            spec = _dense_spec(_req(sliding_window=128))
+            self.assertEqual(spec.sliding_window, 128)
+
+    def test_sliding_window_appears_in_kernel_name(self):
+        with _Gfx942Arch():
+            spec = _dense_spec(_req(sliding_window=256))
+            self.assertIn("swa256", spec.kernel_name())
+
+    def test_different_window_sizes(self):
+        with _Gfx942Arch():
+            for window in (64, 128, 256):
+                spec = _dense_spec(_req(sliding_window=window))
+                self.assertEqual(spec.sliding_window, window)
+
+    def test_sliding_window_in_supports_features(self):
+        self.assertIn("sliding_window", _candidate().capability.supports_features)
+
+    def test_sliding_window_requires_causal(self):
+        """sliding_window without causal is rejected by _dense_spec (spec validates it)."""
+        with _Gfx942Arch():
+            ok, why = _candidate().admits(_req(sliding_window=128, mask_type=0))
+            self.assertFalse(ok)
+            self.assertNotIn("capability", why)
 
 
 if __name__ == "__main__":
