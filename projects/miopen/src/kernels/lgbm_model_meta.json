@@ -23,10 +23,6 @@
       "dilation_width",
       "dilation_depth",
       "groups",
-      "flop_cnt",
-      "bytes_read",
-      "bytes_written",
-      "bytes_processed",
       "tn_log_flops",
       "tn_log_M",
       "tn_log_N",
@@ -84,10 +80,6 @@
       "dilation_width",
       "dilation_depth",
       "groups",
-      "flop_cnt",
-      "bytes_read",
-      "bytes_written",
-      "bytes_processed",
       "tn_log_flops",
       "tn_log_M",
       "tn_log_N",
@@ -2492,5 +2484,8 @@
       "TransposedConvBinWinoRxS<3-2>",
       "TransposedConvBinWinogradRxSf2x3g1"
     ]
-  }
+  },
+  "_note_unseen_arch": "UNSEEN-ARCHITECTURE PATH (DESIGN Change 2, layer 1). When the live GPU's gfx_id is not in rank.categorical_vocab.gfx_id (a new/untrained arch), the C++ picker (lgbm_pick.cpp) MUST encode the gfx_id cell as rank.gfx_id_unseen_code (-1 == missing -> LightGBM default branch) and score normally, instead of the legacy hard-gate 'if(gfx_code < 0) return {}'. The model is trained with gfx_id masked on rank.gfxid_mask_p of train rows, so the default branch predicts from the physical GPU-numeric features (cu_count, wave_size, lds_size_per_workgroup_kb, l2_cache_total_kb, boost_clock_mhz, vram_bytes). All other categoricals already follow the same unknown->-1->missing rule (see the lgbm_rank_golden.json encoding). Mirrors the layer-2 pcfg gfx_code .fillna(-1) behavior.",
+  "_note_v18": "v18 gold-only (255lv/800t, 41 feat). Trained on exhaustively-tuned (mode1/enforce4) labels only. oracle gold-val geo 1.0147 top1 94.35%. See results/2026-06-24_v18_tier_AB.md.",
+  "_note_candidate": "2026-09-25: removed flop_cnt, bytes_read, bytes_written, bytes_processed (59->55 feat). MIOpen feeds them as NaN at runtime (lgbm_pick.cpp: 'cannot be reproduced at inference'), so the deployed model had train/serve skew: actual runtime geomean 1.0180/top1 92.48% vs offline 1.0144/93.92%. New 55-feat model is 1.0144/93.93% AT runtime (no NaN features). Info was redundant (tn_log_flops + geometry cover it). REQUIRES paired C++ change: drop kIdxFlopCnt/BytesRead/Written/Processed fills and shift all kIdx>=26 down by 4 (golden test enforces)."
 }

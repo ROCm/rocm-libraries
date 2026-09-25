@@ -36,9 +36,9 @@ namespace lgbm {
 
 namespace {
 
-// Indices into the 59-feature row, matching model_meta.json rank.feature_order:
-// 39 base features + 20 derived (13 tn_* GEMM-geometry + 7 al_* tile-alignment)
-// at 26..45, then the categorical and GPU blocks. GPU inputs are the six
+// Indices into the 55-feature row, matching model_meta.json rank.feature_order:
+// 35 base features + 20 derived (13 tn_* GEMM-geometry + 7 al_* tile-alignment)
+// at 22..41, then the categorical and GPU blocks. GPU inputs are the six
 // hipDeviceProp_t fields + gfx_id; derived features come from conv dims +
 // cu_count.
 constexpr int kIdxNMiniBatchSize = 0;
@@ -63,40 +63,43 @@ constexpr int kIdxDilationHeight = 18;
 constexpr int kIdxDilationWidth  = 19;
 constexpr int kIdxDilationDepth  = 20;
 constexpr int kIdxGroups         = 21;
-constexpr int kIdxFlopCnt        = 22;
-constexpr int kIdxBytesRead      = 23;
-constexpr int kIdxBytesWritten   = 24;
-constexpr int kIdxBytesProcessed = 25;
-// Derived TunaNet GEMM-geometry features occupy indices [26..38] in
+// flop_cnt/bytes_read/bytes_written/bytes_processed (formerly indices 22..25)
+// were REMOVED 2026-09-25. They were fed as NaN here because they are not
+// reproducible at runtime, which left the model with a train/serve skew (it was
+// trained on real values). The model was retrained without them (59 -> 55
+// features); every index below shifted down by 4. Their signal is redundant with
+// tn_log_flops + the geometry features, so offline quality was unchanged while
+// the actual runtime geomean improved (1.0180 -> 1.0144, top1 92.5% -> 93.9%).
+// Derived TunaNet GEMM-geometry features occupy indices [22..34] in
 // EngineeredConvFeatures output order (tn_log_flops, tn_log_M/N/K,
 // tn_M_over_N/M_over_K/N_over_K, tn_log_gemm_size, tn_log_work_per_cu,
 // tn_spatial_reduction, tn_filter_coverage, tn_channel_ratio, tn_group_density).
 // They are written as a contiguous block from this base index.
-constexpr int kIdxTnBlockBegin = 26;
+constexpr int kIdxTnBlockBegin = 22;
 constexpr int kNumTnFeatures   = 13;
-// Derived tile-alignment features (39..45).
-constexpr int kIdxAlC64     = 39;
-constexpr int kIdxAlC32     = 40;
-constexpr int kIdxAlOc64    = 41;
-constexpr int kIdxAlOc32    = 42;
-constexpr int kIdxAlN8      = 43;
-constexpr int kIdxAlCRem64  = 44;
-constexpr int kIdxAlOcRem64 = 45;
-// Categorical problem features (46..50).
-constexpr int kIdxDataType  = 46;
-constexpr int kIdxDirection = 47;
-constexpr int kIdxInLayout  = 48;
-constexpr int kIdxFilLayout = 49;
-constexpr int kIdxOutLayout = 50;
-// GPU numeric features (51..56), all hipDeviceProp_t-backed.
-constexpr int kIdxCuCount               = 51;
-constexpr int kIdxWaveSize              = 52;
-constexpr int kIdxLdsSizePerWorkgroupKb = 53;
-constexpr int kIdxL2CacheTotalKb        = 54;
-constexpr int kIdxBoostClockMhz         = 55;
-constexpr int kIdxVramBytes             = 56;
-constexpr int kIdxGfxId                 = 57;
-constexpr int kIdxSolverName            = 58;
+// Derived tile-alignment features (35..41).
+constexpr int kIdxAlC64     = 35;
+constexpr int kIdxAlC32     = 36;
+constexpr int kIdxAlOc64    = 37;
+constexpr int kIdxAlOc32    = 38;
+constexpr int kIdxAlN8      = 39;
+constexpr int kIdxAlCRem64  = 40;
+constexpr int kIdxAlOcRem64 = 41;
+// Categorical problem features (42..46).
+constexpr int kIdxDataType  = 42;
+constexpr int kIdxDirection = 43;
+constexpr int kIdxInLayout  = 44;
+constexpr int kIdxFilLayout = 45;
+constexpr int kIdxOutLayout = 46;
+// GPU numeric features (47..52), all hipDeviceProp_t-backed.
+constexpr int kIdxCuCount               = 47;
+constexpr int kIdxWaveSize              = 48;
+constexpr int kIdxLdsSizePerWorkgroupKb = 49;
+constexpr int kIdxL2CacheTotalKb        = 50;
+constexpr int kIdxBoostClockMhz         = 51;
+constexpr int kIdxVramBytes             = 52;
+constexpr int kIdxGfxId                 = 53;
+constexpr int kIdxSolverName            = 54;
 
 // SetNumeric, DirectionPerfDbCode, DataTypeName are shared with the perf-config
 // picker; see lgbm_common.hpp. SetCategorical is layer-1-only (the solver_name
@@ -123,13 +126,11 @@ common::ConvDirection ToEngineeredDirection(conv::Direction d)
     return common::ConvDirection::Forward;
 }
 
-// Fill the base problem feature block (indices 0..25). The 4 workload features
-// (flop_cnt/bytes_*) are fed as NaN because they cannot be reproduced at
-// runtime; LightGBM routes NaN through the trained missing branch.
+// Fill the base problem feature block (indices 0..21). The former flop_cnt/bytes_*
+// workload features were removed from the model (they were only fillable as NaN);
+// see the index block above.
 void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
 {
-    const double nan_v = std::numeric_limits<double>::quiet_NaN();
-
     SetNumeric(row[kIdxNMiniBatchSize], static_cast<double>(p.GetBatchSize()));
     SetNumeric(row[kIdxChannels], static_cast<double>(p.GetInChannels()));
     SetNumeric(row[kIdxDepth], static_cast<double>(p.GetInDepth()));
@@ -152,14 +153,9 @@ void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
     SetNumeric(row[kIdxDilationWidth], static_cast<double>(p.GetDilationW()));
     SetNumeric(row[kIdxDilationDepth], static_cast<double>(p.GetDilationD()));
     SetNumeric(row[kIdxGroups], static_cast<double>(p.GetGroupCount()));
-
-    SetNumeric(row[kIdxFlopCnt], nan_v);
-    SetNumeric(row[kIdxBytesRead], nan_v);
-    SetNumeric(row[kIdxBytesWritten], nan_v);
-    SetNumeric(row[kIdxBytesProcessed], nan_v);
 }
 
-// Fill the 13 tn_* GEMM-geometry features (26..38) via common::EngineeredConvFeatures
+// Fill the 13 tn_* GEMM-geometry features (22..34) via common::EngineeredConvFeatures
 // (shared with the TunaNet/candidate-selection encoders). H_out/W_out come from
 // the output descriptor; 2D geometry is used for all convs, with 3D extent carried
 // by the base depth/spatial features.
@@ -183,7 +179,7 @@ void FillTunaNetFeatures(LgbmEntry* row, const conv::ProblemDescription& p, std:
         SetNumeric(row[kIdxTnBlockBegin + i], static_cast<double>(feats[i]));
 }
 
-// Fill the 7 al_* tile-alignment features (39..45). Integer divisibility /
+// Fill the 7 al_* tile-alignment features (35..41). Integer divisibility /
 // last-64-tile under-fill of the GEMM-contracting channel dims (see
 // deploy/README_CPP_DERIVED.md).
 void FillAlignFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
@@ -202,7 +198,7 @@ void FillAlignFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
     SetNumeric(row[kIdxAlOcRem64], static_cast<double>((64 - (c_out % 64)) % 64) / 64.0);
 }
 
-// Fill the categorical problem features (46..50).
+// Fill the categorical problem features (42..46).
 void FillProblemCategoricals(LgbmEntry* row,
                              const conv::ProblemDescription& p,
                              const LgbmMetadata& meta)
