@@ -9,6 +9,7 @@ import pytest
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.Components.StreamK import StreamKHybrid
+from Tensile.Components.WorkAssignment import Hybrid
 from Tensile.ExecutionPolicy import normalize_execution_policy
 
 from rocisa.code import Module, RegSet
@@ -45,7 +46,8 @@ def mock_streamk_writer():
 
 def emit_mode_extraction_module():
     writer = MagicMock()
-    return StreamKHybrid._emitModeExtraction(StreamKHybrid, writer, {"StreamK": 5})
+    kernel = normalize_execution_policy({"StreamK": 5})
+    return Hybrid().extractMode(writer, kernel)
 
 
 def reg_name(reg) -> str:
