@@ -18,7 +18,7 @@ CONFIG = Path(__file__).parent / "test_data" / "output_amax.yaml"
 @pytest.mark.parametrize("destination", ["h", "b"])
 @pytest.mark.parametrize("output_amax", [False, True])
 def test_amax_activation_uses_accumulator_precision(destination, output_amax):
-    from Tensile.SolutionStructs import ProblemType
+    from tensilelite.SolutionStructs import ProblemType
 
     config = yaml.safe_load(CONFIG.read_text())["BenchmarkProblems"][0][0]
     config.update(
@@ -58,7 +58,7 @@ def _assert_scalar_scales_ready_before_use(assembly):
 
 @pytest.mark.parametrize("stream_k", [1, 2, 3, 4, 5])
 def test_streamk_amax_combination_rejected_before_derivation(stream_k, capsys):
-    from Tensile.SolutionStructs import Solution
+    from tensilelite.SolutionStructs import Solution
 
     state = {"StreamK": stream_k, "ProblemType": {"OutputAmaxD": True}, "Valid": True}
     Solution.assignDerivedParameters(state, False, True, False, None, None)
@@ -68,7 +68,7 @@ def test_streamk_amax_combination_rejected_before_derivation(stream_k, capsys):
 
 @pytest.mark.parametrize("gsu", [-1, 0, 2, 4])
 def test_split_reduction_amax_rejected_before_derivation(gsu, capsys):
-    from Tensile.SolutionStructs import Solution
+    from tensilelite.SolutionStructs import Solution
 
     state = {"GlobalSplitU": gsu, "ProblemType": {"OutputAmaxD": True}, "Valid": True}
     Solution.assignDerivedParameters(state, False, True, False, None, None)
