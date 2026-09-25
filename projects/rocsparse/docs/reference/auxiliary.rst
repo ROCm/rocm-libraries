@@ -607,6 +607,11 @@ rocsparse_csc_set_strided_batch
 
 .. doxygenfunction:: rocsparse_csc_set_strided_batch
 
+rocsparse_ell_set_strided_batch
+-------------------------------
+
+.. doxygenfunction:: rocsparse_ell_set_strided_batch
+
 rocsparse_spmat_get_attribute
 -----------------------------
 

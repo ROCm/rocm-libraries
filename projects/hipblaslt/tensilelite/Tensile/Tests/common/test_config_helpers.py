@@ -16,6 +16,11 @@ import pytest
 
 from config_helpers import configMarks, findAvailableArchs
 
+# These validate the gfx1250 xfail/ffm marking logic in-process, so tag them into the gfx1250 arch suite (-m gfx1250) alongside the
+# auto-added `common` mark, keeping them collected wherever gfx1250 marking is
+# exercised.
+pytestmark = pytest.mark.gfx1250
+
 # configMarks takes rootDir only to compute the config's relpath (for the
 # directory-name marks); the four gfx1250 configs live under Tensile/Tests.
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,10 +31,12 @@ _FFM_FAIL_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "tdm_multicast_gfx
 _PLAIN_GFX1250_CONFIG = os.path.join(
     _COMMON_DIR, "streamk", "gfx1250", "core", "sk_mxf4_force_dp_only.yaml"
 )
-# A config tagged ``xfail-gfx1250``.
-_XFAIL_GFX1250_CONFIG = os.path.join(
-    _COMMON_DIR, "streamk", "gfx1250", "sk_mxf4gemm_tdm_pap_ext.yaml"
+# A base gfx1250 config tagged ``skip-gfx1250-strict``.
+_SKIP_GFX1250_STRICT_CONFIG = os.path.join(
+    _COMMON_DIR, "streamk", "gfx1250", "sk_mxf4gemm_tdm_ext.yaml"
 )
+# A gfx1250-strict config, tagged ``skip-gfx1250`` but not ``skip-gfx1250-strict``.
+_STRICT_ONLY_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "bf16_gfx1250-strict.yaml")
 
 _FFM_MEMFILE = "/dev/shm/hsakmt_model_root_test"
 
@@ -67,27 +74,33 @@ def test_unmarked_config_never_xfails_under_ffm(monkeypatch):
     assert pytest.mark.xfail not in marks
 
 
-def test_find_available_archs_strips_version_suffix():
-    """A versioned target (e.g. a trailing vN) normalizes to the base gfx arch."""
-    assert findAvailableArchs("gfx1250v0") == ["gfx1250"]
+def test_find_available_archs_keeps_stepping_name():
+    """A stepping is its own architecture: its name passes through whole, and
+    does not also bring in its base arch."""
+    assert findAvailableArchs("gfx1250-strict") == ["gfx1250-strict"]
     assert findAvailableArchs("gfx942") == ["gfx942"]
-    assert findAvailableArchs("gfx1250v0;gfx942") == ["gfx1250", "gfx942"]
+    assert findAvailableArchs("gfx1250-strict;gfx942") == ["gfx1250-strict", "gfx942"]
 
 
-def test_xfail_gfx1250_fires_on_versioned_target(monkeypatch):
-    """xfail-gfx1250 must trigger even when the runner reports a versioned target,
-    since the mark keys on the base arch (regression guard for the vN suffix)."""
-    monkeypatch.delenv("HSA_MODEL_MEMFILE", raising=False)  # ensure HW mode, not FFM
-    archs = findAvailableArchs("gfx1250v0")
-    marks = configMarks(_XFAIL_GFX1250_CONFIG, _TESTS_ROOT, archs)
-    assert pytest.mark.xfail in marks
+def test_skip_gfx1250_strict_fires_on_strict_target():
+    """A skip-gfx1250-strict config is skipped on a gfx1250-strict target."""
+    archs = findAvailableArchs("gfx1250-strict")
+    marks = configMarks(_SKIP_GFX1250_STRICT_CONFIG, _TESTS_ROOT, archs)
+    assert pytest.mark.skip in marks
 
 
-def test_xfail_gfx1250_suppressed_under_ffm(monkeypatch):
-    """An xfail-gfx1250 config passes under FFM (no CheckASMCodeSize / emulated exec),
-    so the strict xfail must be suppressed there — else it XPASS-fails. Regression for
-    the FFM XPASS(strict) problem; the HW xfail (test above) is unchanged."""
-    monkeypatch.setenv("HSA_MODEL_MEMFILE", _FFM_MEMFILE)
-    archs = findAvailableArchs("gfx1250v0")
-    marks = configMarks(_XFAIL_GFX1250_CONFIG, _TESTS_ROOT, archs)
-    assert pytest.mark.xfail not in marks
+def test_skip_gfx1250_strict_inert_on_base_target():
+    """A skip-gfx1250-strict config runs on a base gfx1250 target."""
+    archs = findAvailableArchs("gfx1250")
+    marks = configMarks(_SKIP_GFX1250_STRICT_CONFIG, _TESTS_ROOT, archs)
+    assert pytest.mark.skip not in marks
+
+
+def test_base_skip_gfx1250_inert_on_strict_target():
+    """A base skip-gfx1250 mark does not fire on a gfx1250-strict target. The two
+    spellings carry mirrored marks, so inheriting the base's would skip every
+    config written for the stepping."""
+    strict = configMarks(_STRICT_ONLY_CONFIG, _TESTS_ROOT, findAvailableArchs("gfx1250-strict"))
+    base = configMarks(_STRICT_ONLY_CONFIG, _TESTS_ROOT, findAvailableArchs("gfx1250"))
+    assert pytest.mark.skip not in strict
+    assert pytest.mark.skip in base

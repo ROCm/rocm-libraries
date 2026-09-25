@@ -115,7 +115,9 @@ def _combo_prob(**overrides) -> UnifiedAttentionProblem:
 
 
 class TestEnableCombo2d(unittest.TestCase):
-    """_enable_combo_2d fires only for the exact gfx950+bf16+d64/b32+GQA-8+S>256 cohort."""
+    """_enable_combo_2d fires for the gfx950 d64/b32/GQA-8/S>256 cohort: bf16
+    (sinks or not), or fp16 only when use_sinks (the fp16 widening was measured
+    on sink prefill)."""
 
     _BIAS_BUG = (
         "PR #9220: Python _enable_combo_2d missing bias guard (C++ still refuses bias)"
@@ -141,8 +143,13 @@ class TestEnableCombo2d(unittest.TestCase):
     def test_softcap_blocks_combo(self):
         self.assertFalse(self._gate(_combo_prob(softcap=50.0)), self._BIAS_BUG)
 
-    def test_fp16_blocks_combo(self):
+    def test_fp16_no_sinks_blocks_combo(self):
+        # fp16 combo is sink-prefill only; non-sink fp16 stays off the combo path.
         self.assertFalse(self._gate(_combo_prob(dtype="fp16")))
+
+    def test_fp16_sinks_enables_combo(self):
+        # fp16 + sinks is the one fp16 shape the widening admits to combo.
+        self.assertTrue(self._gate(_combo_prob(dtype="fp16", use_sinks=True)))
 
     def test_wrong_head_size_blocks_combo(self):
         self.assertFalse(self._gate(_prob(128, 32, 64, 8)))
