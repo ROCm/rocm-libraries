@@ -14968,12 +14968,19 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileHoistedAddrArm = -1
     self.states.subtileHoistedAddrDVgpr = -1
     self.states.subtileHoistedAddrBlockN = -1
-    self.states.subtileAbsRows = 0
     # Absolute row addressing serves the block-scheduled store, so it follows the
     # same tile scope. Other tiles reach the row-advance sites through store shapes
     # this deferral does not model, and addressing their rows absolutely corrupts D.
+    #
+    # It also only neutralises D's cursor, and addStore advances Srd<tc> per row for
+    # the co-stores the same way. Bias and the StreamK workspace are held off this
+    # path at runtime -- computePostLoopFusedStore folds AddressBias==nullptr and
+    # StreamKLocalStart into the fused predicate, so a live bias (read or gradient)
+    # and a split contributor both take the plain arm. E and TD have no such term,
+    # but no UseSubtileImpl solution sets UseE, MultipleBufferSingleKernel or
+    # StoreRemapVectorWidth, so they cannot reach this store at all.
     self.states.subtileAbsRowAddr = plsinBlockSchedTile(kernel) and \
-                                    plsinDebugEnv("TENSILE_PLSIN_ABS_STORE_ADDR", "0") != "0"
+                                    plsinDebugEnv("TENSILE_PLSIN_ABS_STORE_ADDR", "1") != "0"
     _nStages = self.states.subtileStoreStages
     if _nStages > 1:
       _tt1Vals = sorted({e[0] for e in elements[0]})
@@ -17860,7 +17867,7 @@ class KernelWriterAssembly(KernelWriter):
         pairQuads = 1
         if kernel.get("UseSubtileImpl") and col128Base < 0 and \
            plsinStorePermlane16Active(kernel, True if self.states.subtileFusedFullTileStore else None):
-          pairQuads = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "1")))
+          pairQuads = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "2")))
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
         cvtVgpr = self.vgprPool.checkOutAligned(numCvtVgprs, cvtAlign, tag="globalWriteElements_cvtVgpr")
         # Slot 0 of the ring is the cvt block's own quad, which the paired store
@@ -18434,7 +18441,6 @@ class KernelWriterAssembly(KernelWriter):
     # Each arm re-derives SrdD from the tile origin, so the rows an absolutely
     # addressed store has passed restart with it. Carrying the count across arms
     # is what sent the FUSED arm's second copy off the end of D.
-    self.states.subtileAbsRows = 0
 
 
     actPCMaxTempSgpr_ = None

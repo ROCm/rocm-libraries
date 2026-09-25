@@ -4234,7 +4234,8 @@ class LogicalScheduler:
                         # the later subtiles while the earlier ones are already
                         # storable, so the drain can ride them subtile by subtile.
                         lastWoven = (self._weaveLastPartitionDrain(selfCover, units,
-                                                                  f"{label}_p{pi}")
+                                                                  f"{label}_p{pi}",
+                                                                  writer.states.subtileAbsRowAddr)
                                      if units and selfCover is not None else None)
                         if lastWoven is not None:
                             selfCover = lastWoven
@@ -5363,7 +5364,7 @@ class LogicalScheduler:
                              placed=idx, stride=stride, relaxed=relaxed)
         return woven
 
-    def _weaveLastPartitionDrain(self, partModule, units, label):
+    def _weaveLastPartitionDrain(self, partModule, units, label, absRowAddr):
         """Scatter the LAST partition's drain through its own trailing MFMAs.
 
         Partitions 0..n-2 hand their drain to the next partition. The last has no
@@ -5391,7 +5392,12 @@ class LogicalScheduler:
         # cover the bias store path -- see the note there.
         if not self.config.blockSched:
             return None
-        if plsinDebugEnv("TENSILE_PLSIN_LAST_DRAIN_WEAVE", "0") == "0":
+        # Reordering the drain is only safe once the rows are absolute; that gate
+        # also drops out for kernels whose co-stores keep their own cursor, so
+        # asking it here keeps the two from drifting apart.
+        if not absRowAddr:
+            return None
+        if plsinDebugEnv("TENSILE_PLSIN_LAST_DRAIN_WEAVE", "1") == "0":
             return None
         flat = list(partModule.flatitems())
         mfmaPos = [i for i, inst in enumerate(flat)

@@ -336,10 +336,9 @@ class GlobalWriteBatchWriter:
     self._subtileAllStoresEndLabel = None # end-of-all-stores label (N cbranch target)
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
     self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
-    # Absolute row addressing: the same deferral, carried as a row count rather
-    # than as an instruction. See _subtileStoreSoffset.
+    # Absolute row addressing: the SrdD row advance is dropped and each store
+    # names its own row through soffset. See _subtileStoreSoffset.
     self._subtileAbsRowAddr = parentWriter.states.subtileAbsRowAddr
-    self._subtilePendingAbsRows = 0
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
     # Component B (PLSIN_STORE_HOIST_ADDR): the lane-adjusted dwordx4 base
     # (addrDVgpr + lane_group*8) is identical for every paired store that shares
@@ -1052,24 +1051,16 @@ class GlobalWriteBatchWriter:
       self.parentWriter.sgprPool.checkIn(sgprIdx)
 
   def _subtileDeferRow(self, addrCalc):
-    """Take this element's row advance, as a count rather than as an s_add.
+    """Drop this element's row advance: the row rides in the store's soffset.
 
-    Returns True when the caller must not emit ``incrementToNextRow`` because
-    the row is being carried absolutely instead. Deferred to the same place the
-    instruction was, so the row a store lands on does not change.
+    Returns True when the caller must not emit ``incrementToNextRow``. Nothing
+    is carried between elements -- each store recovers its own row from its
+    coordinates in _subtileStoreSoffset -- so there is no state here to keep in
+    step with the order the stores end up being emitted in.
     """
-    if not self._subtileAbsRowAddr:
-      return False
-    self._subtilePendingAbsRows += addrCalc.rowInc
-    return True
+    return self._subtileAbsRowAddr
 
-  def _subtileFlushRow(self):
-    """Apply the deferred row advance, where the s_add used to be emitted."""
-    if self._subtilePendingAbsRows:
-      self.parentWriter.states.subtileAbsRows += self._subtilePendingAbsRows
-      self._subtilePendingAbsRows = 0
-
-  def _subtileStoreSoffset(self, module):
+  def _subtileStoreSoffset(self, module, addrCalc):
     """Address this store's row through soffset instead of the SrdD cursor.
 
     SrdD is one cursor that the whole store walks, advanced by a relative
@@ -1086,9 +1077,18 @@ class GlobalWriteBatchWriter:
     Returns the soffset operand, and the scratch to release once the store is
     emitted (None when the caller should keep the cursor behaviour).
     """
-    if not self._subtileAbsRowAddr:
+    if not self._subtileAbsRowAddr or not self.ss.optSrdIncForRow:
       return 0, None
-    rows = self.parentWriter.states.subtileAbsRows
+    # The element's own row, not a count of the rows walked to reach it. A
+    # running counter is only correct while the stores run in the order the
+    # counter was accumulated in, which is the one thing absolute addressing
+    # exists to allow us to break: reordering the drain leaves the count -- and
+    # so every store after the move -- on the wrong row. coordOffset1 comes from
+    # the element's coordinates, so it holds under any order.
+    #
+    # Off the optSrdIncForRow path the row is already folded into the address
+    # vgpr, and adding it here as well would count it twice.
+    rows = addrCalc.coordOffset1
     if not rows:
       return 0, None
     packedC1 = self.kernel["PackedC1IndicesX"]
@@ -2159,7 +2159,6 @@ class GlobalWriteBatchWriter:
         if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
           _ngTarget.add(self._subtileNGroupSkipLabel)
           self._subtileNGroupSkipLabel = None
-          self._subtileFlushRow()
           if self._subtilePendingSrdDInc is not None:
             _ngTarget.add(self._subtilePendingSrdDInc)
             self._subtilePendingSrdDInc = None
@@ -3991,7 +3990,6 @@ class GlobalWriteBatchWriter:
       if self._subtileNGroupSkipLabel is not None:
         targetModule.add(self._subtileNGroupSkipLabel)
         self._subtileNGroupSkipLabel = None
-      self._subtileFlushRow()
       if self._subtilePendingSrdDInc is not None:
         targetModule.add(self._subtilePendingSrdDInc)
         self._subtilePendingSrdDInc = None
@@ -4048,7 +4046,6 @@ class GlobalWriteBatchWriter:
     if self._subtileNGroupSkipLabel is not None:
       targetModule.add(self._subtileNGroupSkipLabel)
       self._subtileNGroupSkipLabel = None
-    self._subtileFlushRow()
     if self._subtilePendingSrdDInc is not None:
       targetModule.add(self._subtilePendingSrdDInc)
       self._subtilePendingSrdDInc = None
@@ -4341,7 +4338,8 @@ class GlobalWriteBatchWriter:
     def commitPending(dscnt):
       nonlocal pending
       if pending is not None:
-        mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt))
+        mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt,
+                                            pending[4]))
         pending = None
 
     def issuePaired(pairAddrCalc, sumIdx0, sumIdx1, tt0, blockIdxN):
@@ -4358,7 +4356,7 @@ class GlobalWriteBatchWriter:
       # Commit the group issued on the previous iteration: its ds_bpermute overlapped
       # this issue.  Leave dscnt=4 (this group's four ds_bpermute) still in flight.
       commitPending(dscnt=4)
-      pending = (packBuf[buf], addrBuf[buf], globalOffset, tt0)
+      pending = (packBuf[buf], addrBuf[buf], globalOffset, tt0, pairAddrCalc)
       pipeK += 1
 
     def flushAtTransition(blockIdxN):
@@ -4396,7 +4394,10 @@ class GlobalWriteBatchWriter:
                     blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
       else:
         # sba=0 element: defer the SrdD row increment (as the guarded path does).
-        if optInc and addrCalc.rowInc:
+        # Under absolute addressing the cursor must not move at all: this path is
+        # inside the same store as the guarded one, and a surviving advance here
+        # would be added on top of the row each store already names in soffset.
+        if optInc and addrCalc.rowInc and not self._subtileDeferRow(addrCalc):
           pendingInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
         partnerElementIdx = elementIdx + 1
         partnerExists = (partnerElementIdx < len(self.batchElements) and
@@ -4581,7 +4582,7 @@ class GlobalWriteBatchWriter:
     globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
     for vPack, vAddr, cols in ((cvt.vgprBf16Temp, cvt.vgprColAddrQ,  "0-7"),
                                (cvt.vgprColPackB, cvt.vgprColAddrR,    "8-15")):
-      _soff, _soffTmp = self._subtileStoreSoffset(module)
+      _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
       module.add(BufferStoreB128(
         src=vgpr(vPack, 4),
         vaddr=vgpr(vAddr),
@@ -4805,7 +4806,7 @@ class GlobalWriteBatchWriter:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
-    _soff, _soffTmp = self._subtileStoreSoffset(module)
+    _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
     module.add(BufferStoreB128(
       src=vgpr(vPack, 4),
       vaddr=vgpr(vAddrScratch),
@@ -4881,7 +4882,8 @@ class GlobalWriteBatchWriter:
                          comment="adjusted D addr = addrDVgpr + lane_group*8"))
     return module, globalOffset
 
-  def _emitPairedStoreCommit(self, vPack: int, vAddrScratch: int, globalOffset: int, tt0: int, dscnt: int):
+  def _emitPairedStoreCommit(self, vPack: int, vAddrScratch: int, globalOffset: int, tt0: int,
+                             dscnt: int, addrCalc):
     """COMMIT half of the pipelined paired store: wait for this group's ds_bpermute
     (leaving `dscnt` younger ds ops in flight), do the 2 permlane swaps, and emit the
     dwordx4 store.  `dscnt` = number of ds_bpermute from LATER groups still in flight
@@ -4896,7 +4898,7 @@ class GlobalWriteBatchWriter:
     module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0<->2"))
     module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1<->3"))
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
-    _soff, _soffTmp = self._subtileStoreSoffset(module)
+    _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
     module.add(BufferStoreB128(
       src=vgpr(vPack, 4),
       vaddr=vgpr(vAddrScratch),
@@ -5019,7 +5021,7 @@ class GlobalWriteBatchWriter:
     bpeCurr = self.parentWriter.states.bpeCexternal
     bpe     = self.parentWriter.states.bpeCexternalGSU1
     globalOffset = addrCalc.globalOffset * bpe // bpeCurr
-    _soff, _soffTmp = self._subtileStoreSoffset(module)
+    _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
     module.add(BufferStoreB64(
       src=vgpr(vPack+0, 2),
       vaddr=vgpr(vAddr),
@@ -5238,7 +5240,7 @@ class GlobalWriteBatchWriter:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpInrSgpr, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
-    _soff, _soffTmp = self._subtileStoreSoffset(module)
+    _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
     module.add(BufferStoreB64(
       src=vgpr(vPack+0, 2),
       vaddr=vgpr(vPack+2),

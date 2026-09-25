@@ -474,7 +474,6 @@ class StateValues:
   subtileHoistedAddrDVgpr: int           = -1
   # Rows the fused store has already passed, when it addresses them absolutely
   # rather than by advancing SrdD. See GlobalWriteBatch._subtileStoreSoffset.
-  subtileAbsRows: int                    = 0
   subtileAbsRowAddr: bool                = False
   subtileHoistedAddrBlockN: int          = -1
   subtileHoistedAddrArm: int             = -1
