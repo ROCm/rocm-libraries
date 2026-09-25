@@ -15,7 +15,7 @@ import hashlib
 from importlib import metadata, util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 import subprocess
 import sys
 from urllib.parse import unquote, urlparse
@@ -213,9 +213,26 @@ def _distribution_package_dir(distribution: metadata.Distribution) -> Path | Non
     raw_direct_url = distribution.read_text("direct_url.json")
     if raw_direct_url:
         try:
-            parsed = urlparse(json.loads(raw_direct_url)["url"])
+            direct_url = json.loads(raw_direct_url)["url"]
+            parsed = urlparse(direct_url)
         except (KeyError, TypeError, json.JSONDecodeError):
             return None
         if parsed.scheme == "file":
-            return (Path(unquote(parsed.path)) / "tensilelite").resolve()
+            return (Path(_file_url_path(direct_url)) / "tensilelite").resolve()
     return None
+
+
+def _file_url_path(url: str, *, platform: str = sys.platform) -> PurePath:
+    """Convert a PEP 610 file URL without losing Windows drive or UNC roots."""
+    parsed = urlparse(url)
+    path = unquote(parsed.path)
+    authority = unquote(parsed.netloc)
+    if platform == "win32":
+        if authority and authority != "localhost":
+            return PureWindowsPath(f"//{authority}{path}")
+        if len(path) >= 3 and path[0] == "/" and path[2] == ":":
+            path = path[1:]
+        return PureWindowsPath(path)
+    if authority and authority != "localhost":
+        return PurePosixPath(f"//{authority}{path}")
+    return PurePosixPath(path)
