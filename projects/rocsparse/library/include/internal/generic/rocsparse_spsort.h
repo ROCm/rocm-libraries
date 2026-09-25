@@ -130,6 +130,8 @@ rocsparse_status rocsparse_spsort_buffer_size(rocsparse_handle            handle
 *  \retval rocsparse_status_not_implemented \p source is not in COO, CSR or CSC format.
 *
 *  \par Example
+*  \snippet example_rocsparse_spsort.cpp doc example
+*  \par Example
 *  \snippet example_rocsparse_spsort_coo.cpp doc example
 */
 ROCSPARSE_EXPORT
