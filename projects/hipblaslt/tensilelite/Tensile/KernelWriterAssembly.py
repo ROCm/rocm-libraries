@@ -85,7 +85,7 @@ from .CustomKernels import isCustomKernelConfig, getCustomKernelSource
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKCluster, plsinStagingEligible
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinDebugEnv
+from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinDebugEnv, plsinBlockSchedTile
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
 from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
@@ -14968,7 +14968,11 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileHoistedAddrDVgpr = -1
     self.states.subtileHoistedAddrBlockN = -1
     self.states.subtileAbsRows = 0
-    self.states.subtileAbsRowAddr = plsinDebugEnv("TENSILE_PLSIN_ABS_STORE_ADDR", "0") != "0"
+    # Absolute row addressing serves the block-scheduled store, so it follows the
+    # same tile scope. Other tiles reach the row-advance sites through store shapes
+    # this deferral does not model, and addressing their rows absolutely corrupts D.
+    self.states.subtileAbsRowAddr = plsinBlockSchedTile(kernel) and \
+                                    plsinDebugEnv("TENSILE_PLSIN_ABS_STORE_ADDR", "0") != "0"
     _nStages = self.states.subtileStoreStages
     if _nStages > 1:
       _tt1Vals = sorted({e[0] for e in elements[0]})
@@ -18399,6 +18403,10 @@ class KernelWriterAssembly(KernelWriter):
     ss = StoreState(self, kernel, gwvw, edge, beta, atomic, element, vectorDataTypes, dim=factorDim)
     # New store arm: any dwordx4 base hoisted in a previous arm is unreachable from here.
     self.states.subtileStoreArmId += 1
+    # Each arm re-derives SrdD from the tile origin, so the rows an absolutely
+    # addressed store has passed restart with it. Carrying the count across arms
+    # is what sent the FUSED arm's second copy off the end of D.
+    self.states.subtileAbsRows = 0
 
 
     actPCMaxTempSgpr_ = None
@@ -19092,12 +19100,7 @@ class KernelWriterAssembly(KernelWriter):
           addr0 = vgpr(addrCalc.addrDVgpr,2)
           addr1 = ""
         # CLS: also seed the SRD chain on elt0/batch0 (rowInc==0).
-        if self.states.subtileAbsRowAddr:
-          # The row rides in soffset instead of the cursor; see
-          # GlobalWriteBatch._subtileStoreSoffset. This path emits its increment
-          # where it is called, so the row advances here too.
-          self.states.subtileAbsRows += addrCalc.rowInc
-        elif (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
+        if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
           module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS01, forceinitrow0=1,
                                                  overrideAfterPrimerRows=overrideAfterPrimerRows))
 
