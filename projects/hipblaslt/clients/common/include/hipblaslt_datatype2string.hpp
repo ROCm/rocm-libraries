@@ -30,6 +30,7 @@
 #include "hipblaslt_scaling_format.hpp"
 #include "hipblaslt_ostream.hpp"
 #include <hipblaslt/hipblaslt.h>
+#include <optional>
 #include <string>
 
 enum class hipblaslt_initialization
@@ -232,7 +233,12 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
 }
 
 // clang-format off
-inline hipblaslt_initialization string2hipblaslt_initialization(const std::string& value)
+// Returns std::nullopt for an unrecognized string rather than a silent invalid
+// enum value, so callers must handle the bad-input case explicitly. Non-throwing
+// (only string comparisons), hence noexcept. See PR #6514 review observation #3
+// (davidd-amd) / AIHPBLAS-3551.
+inline std::optional<hipblaslt_initialization>
+    string2hipblaslt_initialization(const std::string& value) noexcept
 {
     return
         value == "rand_int"   ? hipblaslt_initialization::rand_int   :
@@ -250,7 +256,7 @@ inline hipblaslt_initialization string2hipblaslt_initialization(const std::strin
         value == "nan"        ? hipblaslt_initialization::nan        :
         value == "norm_dist_one_special" ? hipblaslt_initialization::norm_dist_one_special :
         value == "uniform_low_precision" ? hipblaslt_initialization::uniform_low_precision :
-        static_cast<hipblaslt_initialization>(0);
+        std::optional<hipblaslt_initialization>{};
 }
 // clang-format on
 inline const hipblaslt_activation_type string_to_hipblaslt_activation_type(const std::string& value)
