@@ -1501,22 +1501,21 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in cls._DT_FP16_BF16:
-            m64_d128_constraint = "a.max_seqlen_q < 2048"
-            if dtype == "bf16":
-                # Short causal grids benefit from twice as many Q workgroups.
-                # Keep the dense/other-trait policy and custom tune tables intact;
-                # use M128 again once its grid supplies more than two blocks/CU.
-                m64_d128_constraint += (
-                    " || (!t.is_group_mode && t.is_v_rowmajor"
-                    " && !t.has_logits_soft_cap && !t.has_dropout"
-                    " && !t.skip_min_seqlen_q"
-                    " && (t.mask_type == mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right)"
-                    " && a.window_size_left < 0 && a.window_size_right == 0"
-                    " && a.seqlen_q == a.seqlen_k && a.seqlen_q % 128 == 0"
-                    " && a.hdim_q == 128 && a.hdim_v == 128"
-                    " && a.stride_q == a.hdim_q && a.nhead_stride_q > a.hdim_q"
-                    " && get_num_blocks(128) <= 2 * num_cus)"
-                )
+            # Short causal grids benefit from twice as many Q workgroups. Keep the
+            # dense/other-trait policy and custom tune tables intact; use M128 again
+            # once its grid supplies more than two blocks/CU.
+            m64_d128_constraint = (
+                "a.max_seqlen_q < 2048"
+                " || (!t.is_group_mode && t.is_v_rowmajor"
+                " && !t.has_logits_soft_cap && !t.has_dropout"
+                " && !t.skip_min_seqlen_q"
+                " && (t.mask_type == mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right)"
+                " && a.window_size_left < 0 && a.window_size_right == 0"
+                " && a.seqlen_q == a.seqlen_k && a.seqlen_q % 128 == 0"
+                " && a.hdim_q == 128 && a.hdim_v == 128"
+                " && a.stride_q == a.hdim_q && a.nhead_stride_q > a.hdim_q"
+                " && get_num_blocks(128) <= 2 * num_cus)"
+            )
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 32,  32) : [FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
