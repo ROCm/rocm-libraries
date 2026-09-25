@@ -14,7 +14,7 @@
 #
 # Classification: solver-backed-under-assumptions (os.name == "posix").
 # The five supported* helpers each branch on os.name: on POSIX,
-# supportedDeviceEnumerator accepts rocm_agent_enumerator/amdgpu-arch (not hipinfo);
+# supportedDeviceEnumerator accepts offload-arch/amdgpu-arch/rocm_agent_enumerator (not hipinfo);
 # on Windows the set swaps. Witnesses confirmed in-container (tl-char) by the
 # Verify phase over 16-element domain with 0 mismatches vs real guard.
 #
@@ -51,7 +51,7 @@ POSIX_SUPPORTED = frozenset([
     "amdclang++", "clang++",                # C++/HIP compiler
     "clang-offload-bundler",                # offload bundler
     "hipcc", "hipconfig",                   # hip
-    "rocm_agent_enumerator", "amdgpu-arch", # device enumerator (posix)
+    "offload-arch", "rocm_agent_enumerator", "amdgpu-arch", # device enumerator (posix)
 ])
 
 

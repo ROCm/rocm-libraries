@@ -45,7 +45,8 @@ def test_supported_predicates(fn, name, expected):
 
 
 def test_supported_device_enumerator_posix():
-    # On posix only rocm_agent_enumerator / amdgpu-arch are accepted.
+    # POSIX accepts the ordered fallback set used by deviceEnumeratorCandidates.
+    assert V.supportedDeviceEnumerator("offload-arch") is True
     assert V.supportedDeviceEnumerator("rocm_agent_enumerator") is True
     assert V.supportedDeviceEnumerator("amdgpu-arch") is True
     assert V.supportedDeviceEnumerator("/opt/rocm/bin/amdgpu-arch") is True
