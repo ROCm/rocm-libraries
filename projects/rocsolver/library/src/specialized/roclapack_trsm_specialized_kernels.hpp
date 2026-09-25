@@ -312,11 +312,7 @@ ROCSOLVER_KERNEL void conj_unit_forward_substitution_kernel(const I nx,
             B[idb] = c;
         }
 
-        // --------------------------------------------
-        // synchronize to make sure the LDS lmem[] array
-        // is ready for next batch item
-        // --------------------------------------------
-        __syncthreads();
+        // Shared memory is not overwritten until the next iteration's first substitution barrier.
     } // end for bid
 }
 
