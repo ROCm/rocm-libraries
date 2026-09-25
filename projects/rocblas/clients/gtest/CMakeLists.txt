@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,7 @@ set(rocblas_no_tensile_test_source
     rocblas_test.cpp
     asan_helpers_gtest.cpp
     general_gtest.cpp
+    host_alloc_gtest.cpp
     set_get_pointer_mode_gtest.cpp
     set_get_atomics_mode_gtest.cpp
     set_get_alpha_beta_stride_gtest.cpp
