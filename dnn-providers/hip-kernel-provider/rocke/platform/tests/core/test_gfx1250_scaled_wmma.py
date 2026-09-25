@@ -271,8 +271,8 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
 
     def test_native_block_scaled_gemm_uses_packed_e8m0_in_instruction(self):
         for matrix_path, block_k, scale_ty, fragment_load, load_count in (
-            ("wmma_scale", 32, "i32", "load <16 x i8>", 8),
-            ("wmma_scale16", 16, "i64", "load <16 x i8>", 8),
+            ("wmma_scale", 32, "i32", "load <4 x i32>", 8),
+            ("wmma_scale16", 16, "i64", "load <4 x i32>", 8),
         ):
             with self.subTest(matrix_path=matrix_path):
                 spec = BlockScaledGemmSpec(
@@ -335,14 +335,14 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
             M=16,
             N=16,
             K=128,
-            dtype_b="bf8",
+            dtype_b="fp16",
             scale_dtype="e8m0",
             block_k=32,
             matrix_path="wmma_scale",
         )
         ok, why = is_valid_spec(bad_dtype)
         self.assertFalse(ok)
-        self.assertIn("requested operand and scale contract", why)
+        self.assertIn("A/B must be", why)
 
         bad_block = BlockScaledGemmSpec(
             name="bad_block",
