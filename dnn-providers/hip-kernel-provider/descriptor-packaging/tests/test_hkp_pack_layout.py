@@ -23,7 +23,7 @@ import pytest
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
-from hkp_pack.pipeline import compile_intermediate, run_pipeline
+from hkp_pack.pipeline import _agreement_inputs, compile_intermediate, run_pipeline
 
 ARCH = "gfx942"
 ROCKE_ARCH = "gfx950"
@@ -161,6 +161,32 @@ def test_a_hidden_folder_is_skipped_and_logged(tmp_path, empty_arch_fixture):
     skipped = [m for m in logs if m.startswith("skipping hidden path")]
     assert any("vendor.kdp.json" in m for m in skipped), logs
     assert all(".vendor" in m for m in skipped), logs
+
+
+@pytest.mark.quick
+def test_a_non_descriptor_json_is_skipped_and_logged(tmp_path, empty_arch_fixture):
+    """A `.json` carrying no type token is passed over, and it is named in the log.
+
+    The source root is user-supplied, so an incidental file like a
+    `compile_commands.json` must be tolerated rather than abort the pack. The
+    log line is half the behaviour: skipping silently would be the same
+    invisible omission the hidden-path case above is logged to prevent.
+
+    Removing either the log call or the skip in `load_flat_input` fails this.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/a", empty_arch_fixture)
+    incidental = root / "hip" / "a" / "compile_commands.json"
+    incidental.write_text("[]", encoding="utf-8")
+    logs = []
+
+    flat = load_flat_input(root, log=logs.append)
+
+    assert {d.rel_dir.as_posix() for d in flat.descriptors} == {"hip/a"}
+    assert not [d for d in flat.descriptors if d.path.name == incidental.name]
+
+    skipped = [m for m in logs if m.startswith("skipping non-descriptor file")]
+    assert any(incidental.name in m for m in skipped), logs
 
 
 # --- B. Path-preserving output (real compile) -------------------------------
@@ -471,6 +497,58 @@ def test_failed_arch_leaves_no_partial_tree(
     assert not (out_root / "gfx950").exists()
     # No staging residue either.
     assert not list(out_root.glob(".*staging"))
+
+
+def test_failed_arch_removes_its_previous_good_output(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+):
+    """A re-pack that fails must delete the shard its last good run wrote.
+
+    The partial-tree case above starts from an empty output root, so it holds
+    only the staging cleanup: it passes whether or not the failure path removes
+    a PRE-EXISTING <out>/<arch>. Pack once to create that shard, then re-pack
+    the same arch into the same root with the arch failing. A surviving shard
+    would be stale -- built from the previous sources, installed by
+    install(DIRECTORY ... OPTIONAL) as though current, and wrong at dispatch.
+
+    Removing the `out_arch_dir` rmtree from run_pipeline's failure path fails
+    this and nothing else in the suite.
+    """
+    from hkp_pack import pipeline
+
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    out_root = tmp_path / "out"
+
+    pipeline.run_pipeline(
+        source_root=root,
+        arches=[ARCH],
+        out_root=out_root,
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+    good_shard = out_root / ARCH
+    assert good_shard.is_dir() and any(good_shard.rglob("*.kpack"))
+
+    def always_fail(flat, inter, out_arch_dir, *a, **kw):
+        raise HkpPackError(f"induced {inter.arch}")
+
+    monkeypatch.setattr(pipeline, "pack_arch", always_fail)
+
+    with pytest.raises(HkpPackError, match=ARCH):
+        pipeline.run_pipeline(
+            source_root=root,
+            arches=[ARCH],
+            out_root=out_root,
+            hipcc=hipcc,
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )
+
+    assert (
+        not good_shard.exists()
+    ), "a failed re-pack left the previous run's shard, which install() would ship as current"
 
 
 def test_failure_names_every_failed_arch(
@@ -1164,19 +1242,24 @@ _EMBEDDED_SOURCE = {
 }
 
 
-def _embedded_source_root(tmp_path, fixture, kernel_source):
-    """Nest `fixture` under one child folder and set its inline UKD's source.
-
-    The fixture carries exactly one inline UKD, so replacing its kernel_source
-    puts the whole root on the kind under test.
+def _inline_ukd_root(tmp_path, fixture, mutate):
+    """Nest `fixture` under one child folder and mutate its inline UKD; the fixture
+    carries exactly one, so mutating it puts the whole root on the shape under test.
     """
     root = tmp_path / "root"
     _nest(root, "pointwise", fixture)
     kdp = root / "pointwise" / "solo.kdp.json"
     doc = _read(kdp)
-    doc["kernelDescriptors"][0]["kernel_source"] = kernel_source
+    mutate(doc["kernelDescriptors"][0])
     kdp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
     return root
+
+
+def _embedded_source_root(tmp_path, fixture, kernel_source):
+    """A root whose one inline UKD carries `kernel_source`."""
+    return _inline_ukd_root(
+        tmp_path, fixture, lambda ukd: ukd.update(kernel_source=kernel_source)
+    )
 
 
 @pytest.mark.quick
@@ -1264,6 +1347,55 @@ def test_a_kind_no_producer_handles_fails_the_compile(
     message = str(excinfo.value)
     assert f"kernel_source has unsupported kind '{kind}'" in message
     assert "expected" not in message, message
+
+
+def _drop_specialization_contract(ukd):
+    ukd["provenance"].pop("specialization_contract")
+
+
+def _embedded_source_without_contract(ukd):
+    ukd["kernel_source"] = dict(_EMBEDDED_SOURCE)
+    _drop_specialization_contract(ukd)
+
+
+@pytest.mark.quick
+def test_a_passthrough_kind_carries_no_specialization_obligation(
+    tmp_path, empty_arch_fixture
+):
+    """An embedded kernel packs carrying no specialization contract at all: no
+    producer runs, so the walk collects neither a consumer record nor an
+    observation request and carries the authored kernel_source through, while the
+    KDP's engine and KMD still resolve -- so the exemption is the kind's, not a
+    missing catalog's.
+    """
+    root = _inline_ukd_root(
+        tmp_path, empty_arch_fixture, _embedded_source_without_contract
+    )
+    flat = load_flat_input(root)
+
+    assert _agreement_inputs(flat, ARCH) == ({}, {})
+
+    inter = compile_intermediate(
+        flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter"
+    )
+    [entry] = inter.kdps[0].entries
+    assert entry.doc["kernel_source"] == _EMBEDDED_SOURCE
+    assert inter.variant_co == {}
+
+
+@pytest.mark.quick
+def test_a_compiling_kind_without_a_contract_is_still_refused(
+    tmp_path, empty_arch_fixture
+):
+    """The waiver is scoped to the pass-through kinds and nothing else: the same
+    descriptor with the same contract removed, on a kind a producer compiles, stays
+    refused before a compiler is reached.
+    """
+    root = _inline_ukd_root(tmp_path, empty_arch_fixture, _drop_specialization_contract)
+    flat = load_flat_input(root)
+
+    with pytest.raises(HkpPackError, match="missing/invalid specialization_contract"):
+        compile_intermediate(flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter")
 
 
 @pytest.mark.quick

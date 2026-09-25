@@ -103,9 +103,10 @@ class TestAggregate(unittest.TestCase):
         self.assertAlmostEqual(out["derived"]["l2_hit_rate"], 80 / 100)
 
     def test_partial_counter_capture_is_not_reported_as_stable(self):
-        out = aggregate.aggregate(
-            [_rec(busy=100, total=1000), _rec(ms=1.0), _rec(busy=120, total=1000)]
-        )
+        recs = [_rec(busy=100, total=1000), _rec(ms=1.0), _rec(busy=120, total=1000)]
+        for rec in recs:
+            rec["timing_source"] = "perfjson"
+        out = aggregate.aggregate(recs)
         self.assertNotIn("busy_cycles", out["counters"])
         self.assertIsNone(out["spread"]["busy_cycles_pct"])
 
@@ -154,6 +155,35 @@ class TestAggregate(unittest.TestCase):
             aggregate.aggregate([_rec(shape={"M": 8}), _rec(shape={"M": 16})])
         with self.assertRaises(ValueError):
             aggregate.aggregate([_rec(op="gemm"), _rec(op="conv")])
+
+    def test_legacy_perfjson_aggregates_with_explicit_source(self):
+        legacy = _rec(ms=1.0, prof_ms=2.0)
+        explicit = {**legacy, "timing_source": "perfjson"}
+        for records in ([legacy, explicit], [explicit, legacy]):
+            with self.subTest(first_source=records[0].get("timing_source")):
+                out = aggregate.aggregate(records)
+                self.assertEqual(out["wall"]["ms_median"], 1.0)
+                self.assertEqual(out["profiled"]["ms_median"], 2.0)
+                self.assertEqual(out["n_samples"], 2)
+                self.assertEqual(out["timing_source"], "perfjson")
+
+    def test_unknown_legacy_profiled_source_is_not_inferred(self):
+        legacy = _rec(prof_ms=2.0)
+        for source in ("perfjson", "rocprofv3_duration"):
+            with self.subTest(source=source), self.assertRaisesRegex(
+                ValueError, "multiple timing sources"
+            ):
+                aggregate.aggregate([legacy, {**legacy, "timing_source": source}])
+        out = aggregate.aggregate([legacy, _rec(prof_ms=4.0)])
+        self.assertEqual(out["profiled"]["ms_median"], 3.0)
+
+    def test_mixed_timing_sources_raise(self):
+        first = _rec(prof_ms=1.0)
+        first["timing_source"] = "perfjson"
+        second = _rec(prof_ms=1.0)
+        second["timing_source"] = "rocprofv3_duration"
+        with self.assertRaisesRegex(ValueError, "multiple timing sources"):
+            aggregate.aggregate([first, second])
 
     def test_empty_raises(self):
         with self.assertRaises(ValueError):

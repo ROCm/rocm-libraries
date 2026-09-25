@@ -65,6 +65,7 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
     case NA::ReductionAttributes:
         return tol::reduction::getTolerance<T>();
     case NA::RMSNormAttributes:
+    case NA::RMSNormBackwardAttributes:
         return tol::rmsnorm::getTolerance<T>();
     case NA::PointwiseAttributes:
         return tol::pointwise::getTolerance<T>();
