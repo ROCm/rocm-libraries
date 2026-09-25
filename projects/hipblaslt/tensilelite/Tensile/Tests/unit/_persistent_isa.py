@@ -21,6 +21,8 @@ class Machine:
         self.scc = False
         self.exec = True
         self.barriers = 0
+        self.barrier_operations = []
+        self.writes = []
 
     def __getitem__(self, name):
         return self.registers.get(reg(name), 0)
@@ -34,6 +36,8 @@ class Machine:
         try:
             return int(operand, 0)
         except ValueError:
+            if operand == "0.0":
+                return 0
             if operand.startswith(("s", "v", "exec")):
                 return 0
             raise AssertionError("Unknown operand " + operand)
@@ -61,6 +65,13 @@ class Machine:
                 continue
             opcode, _, operands = line.partition(" ")
             args = [a.strip() for a in operands.split(",")]
+            if opcode in ("s_cbranch_vccz", "s_cbranch_vccnz"):
+                taken = bool(self.registers.get("vcc", 0)) == (opcode == "s_cbranch_vccnz")
+                if taken:
+                    if args[0] not in labels:
+                        return args[0]
+                    pc = labels[args[0]]
+                continue
             if opcode in ("s_branch", "s_cbranch_scc0", "s_cbranch_scc1"):
                 taken = opcode == "s_branch" or self.scc == (opcode == "s_cbranch_scc1")
                 if taken:
@@ -70,6 +81,7 @@ class Machine:
                 continue
             if opcode in ("s_barrier", "s_barrier_signal", "s_barrier_wait"):
                 self.barriers += 1
+                self.barrier_operations.append((opcode, operands.strip()))
                 continue
             if opcode in ("s_nop", "s_waitcnt"):
                 continue
@@ -87,7 +99,8 @@ class Machine:
             elif opcode.startswith("s_cmp_"):
                 predicate = opcode.split("_")[2]
                 self.scc = {"eq": vals[0] == vals[1], "lt": vals[0] < vals[1],
-                            "ge": vals[0] >= vals[1], "gt": vals[0] > vals[1]}[predicate]
+                            "ge": vals[0] >= vals[1], "gt": vals[0] > vals[1],
+                            "le": vals[0] <= vals[1], "lg": vals[0] != vals[1]}[predicate]
             elif opcode == "s_bitcmp1_b32":
                 self.scc = bool(vals[0] & (1 << vals[1]))
             elif opcode in ("s_add_u32", "v_add_u32"):
@@ -95,9 +108,21 @@ class Machine:
                 if opcode == "s_add_u32":
                     self.scc = result > 0xffffffff
                 result &= 0xffffffff
+            elif opcode == "s_addc_u32":
+                result = vals[1] + vals[2] + int(self.scc)
+                self.scc = result > 0xffffffff
+                result &= 0xffffffff
+            elif opcode in ("s_min_u32", "s_max_u32", "s_max_i32"):
+                left, right = vals[1:3]
+                if opcode == "s_max_i32":
+                    left = left if left < 0x80000000 else left - 0x100000000
+                    right = right if right < 0x80000000 else right - 0x100000000
+                result = (min(left, right) if opcode == "s_min_u32" else max(left, right)) & 0xffffffff
+            elif opcode == "s_mul_hi_u32":
+                result = (vals[1] * vals[2]) >> 32
             elif opcode in ("s_sub_u32", "v_sub_u32"):
                 result = (vals[-2] - vals[-1]) & 0xffffffff
-            elif opcode in ("s_mul_i32", "v_mul_u32_u24"):
+            elif opcode in ("s_mul_i32", "v_mul_u32_u24", "v_mul_lo_u32"):
                 result = (vals[1] * vals[2]) & 0xffffffff
             elif opcode == "s_and_b32":
                 result = vals[1] & vals[2]
@@ -109,7 +134,15 @@ class Machine:
                 result = vals[1] ^ vals[2]
                 self.scc = bool(result)
             elif opcode in ("s_lshr_b32", "s_lshl_b32"):
-                result = vals[1] >> vals[2] if opcode == "s_lshr_b32" else (vals[1] << vals[2]) & 0xffffffff
+                result = vals[1] >> (vals[2] & 31) if opcode == "s_lshr_b32" else (vals[1] << (vals[2] & 31)) & 0xffffffff
+            elif opcode == "v_cvt_f64_u32":
+                result = float(vals[1])
+            elif opcode == "v_rcp_f64":
+                result = 1.0 / vals[1]
+            elif opcode == "v_mul_f64":
+                result = vals[1] * vals[2]
+            elif opcode == "v_cvt_u32_f64":
+                result = int(vals[1]) & 0xffffffff
             elif opcode == "v_cvt_f32_u32":
                 result = self.f32(vals[1])
             elif opcode == "v_rcp_iflag_f32":
@@ -118,12 +151,14 @@ class Machine:
                 result = self.f32(vals[1] * vals[2])
             elif opcode == "v_cvt_u32_f32":
                 result = int(vals[1]) & 0xffffffff
-            elif opcode.startswith("v_cmp_") or opcode in ("v_cmpx_eq_u32", "v_cmpx_gt_u32"):
-                result = int(vals[1] == vals[2] if "_eq_" in opcode else vals[1] > vals[2])
+            elif opcode.startswith("v_cmp_") or opcode in ("v_cmpx_eq_u32", "v_cmpx_gt_u32", "v_cmpx_ge_u32"):
+                result = int(vals[1] == vals[2] if "_eq_" in opcode else
+                             vals[1] >= vals[2] if "_ge_" in opcode else vals[1] > vals[2])
             else:
                 raise AssertionError("Uninterpreted instruction: " + line)
             if result is not None:
                 self.registers[args[0]] = result
+                self.writes.append((args[0], result))
                 if args[0].startswith("exec"):
                     self.exec = bool(result)
         return None
