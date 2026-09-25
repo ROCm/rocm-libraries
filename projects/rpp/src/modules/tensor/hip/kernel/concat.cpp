@@ -259,6 +259,17 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
             dstGenericDescPtr->strides[0] = dstGenericDescPtr->strides[2];
         }
 
+        // srcPtr1GenericDescPtr/srcPtr2GenericDescPtr/dstGenericDescPtr are caller-owned and may
+        // live in ordinary host memory, but the kernel dereferences strides on-device. Stage the
+        // (already axis-adjusted) stride arrays into scratchBufferPinned as well, right after
+        // dimsBuffer's used range, mirroring how dimsBuffer itself is passed to the kernel below.
+        Rpp32u* src1StridesStaging = dimsBuffer + batchSize * numDims * 2;
+        Rpp32u* src2StridesStaging = src1StridesStaging + RPPT_MAX_DIMS;
+        Rpp32u* dstStridesStaging = src2StridesStaging + RPPT_MAX_DIMS;
+        memcpy(src1StridesStaging, srcPtr1GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(src2StridesStaging, srcPtr2GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(dstStridesStaging, dstGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+
         for (int batchCount = 0; batchCount < batchSize; batchCount++) {
             Rpp32u* roi1 = roiTensor + batchCount * numDims * 2;
             Rpp32u* roi2 = roiTensor2 + batchCount * numDims * 2;
@@ -285,9 +296,9 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
                                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), srcPtr1 + src1Offsets[batchCount],
-                               srcPtr2 + src2Offsets[batchCount], srcPtr1GenericDescPtr->strides,
-                               srcPtr2GenericDescPtr->strides, dstPtr + dstOffsets[batchCount],
-                               dstGenericDescPtr->strides, srcDims1, srcDims2);
+                               srcPtr2 + src2Offsets[batchCount], src1StridesStaging,
+                               src2StridesStaging, dstPtr + dstOffsets[batchCount],
+                               dstStridesStaging, srcDims1, srcDims2);
             HIP_CHECK_LAUNCH_RETURN();
         }
     } else if (numDims == 3) {
@@ -348,6 +359,17 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
             dstGenericDescPtr->strides[0] = dstGenericDescPtr->strides[1] = 1;
         }
 
+        // srcPtr1GenericDescPtr/srcPtr2GenericDescPtr/dstGenericDescPtr are caller-owned and may
+        // live in ordinary host memory, but the kernel dereferences strides on-device. Stage the
+        // (already axis-adjusted) stride arrays into scratchBufferPinned as well, right after
+        // dimsBuffer's used range, mirroring how dimsBuffer itself is passed to the kernel below.
+        Rpp32u* src1StridesStaging = dimsBuffer + batchSize * numDims * 2;
+        Rpp32u* src2StridesStaging = src1StridesStaging + RPPT_MAX_DIMS;
+        Rpp32u* dstStridesStaging = src2StridesStaging + RPPT_MAX_DIMS;
+        memcpy(src1StridesStaging, srcPtr1GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(src2StridesStaging, srcPtr2GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(dstStridesStaging, dstGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+
         for (int batchCount = 0; batchCount < batchSize; batchCount++) {
             Rpp32u* roi1 = roiTensor + batchCount * numDims * 2;
             Rpp32u* roi2 = roiTensor2 + batchCount * numDims * 2;
@@ -384,9 +406,9 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
                                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), srcPtr1 + src1Offsets[batchCount],
-                               srcPtr2 + src2Offsets[batchCount], srcPtr1GenericDescPtr->strides,
-                               srcPtr2GenericDescPtr->strides, dstPtr + dstOffsets[batchCount],
-                               dstGenericDescPtr->strides, srcDims1, srcDims2);
+                               srcPtr2 + src2Offsets[batchCount], src1StridesStaging,
+                               src2StridesStaging, dstPtr + dstOffsets[batchCount],
+                               dstStridesStaging, srcDims1, srcDims2);
             HIP_CHECK_LAUNCH_RETURN();
         }
     } else {
@@ -444,13 +466,24 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
 
         globalThreads_x = maxElements;
 
+        // srcPtr1GenericDescPtr/srcPtr2GenericDescPtr/dstGenericDescPtr are caller-owned and may
+        // live in ordinary host memory, but the kernel dereferences strides on-device. Stage the
+        // stride arrays into scratchBufferPinned as well, right after dstOffsets' used range,
+        // mirroring how mergedRoiTensor/srcOffsets/dstOffsets are already passed to the kernel.
+        Rpp32u* src1StridesStaging = dstOffsets + batchSize;
+        Rpp32u* src2StridesStaging = src1StridesStaging + RPPT_MAX_DIMS;
+        Rpp32u* dstStridesStaging = src2StridesStaging + RPPT_MAX_DIMS;
+        memcpy(src1StridesStaging, srcPtr1GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(src2StridesStaging, srcPtr2GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(dstStridesStaging, dstGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+
         hipLaunchKernelGGL(concat_generic_hip_tensor,
                            dim3(ceil((float)globalThreads_x / 1024),
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(1024, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM), 0,
-                           handle.GetStream(), srcPtr1, srcPtr2, srcPtr1GenericDescPtr->strides,
-                           srcPtr2GenericDescPtr->strides, dstPtr, dstGenericDescPtr->strides, axis,
+                           handle.GetStream(), srcPtr1, srcPtr2, src1StridesStaging,
+                           src2StridesStaging, dstPtr, dstStridesStaging, axis,
                            dstGenericDescPtr->numDims - 1, mergedRoiTensor, srcOffsets, dstOffsets);
         HIP_CHECK_LAUNCH_RETURN();
     }

@@ -116,15 +116,37 @@ RppStatus hip_exec_transpose_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDesc
         int globalThreads_x = (dstGenericDescPtr->strides[0] + 7) >> 3;
         int globalThreads_y = dstGenericDescPtr->dims[0];
         int globalThreads_z = 1;
+        Rpp32u tensorDims = dstGenericDescPtr->numDims - 1;
+
+        // srcGenericDescPtr/dstGenericDescPtr are caller-owned and may live in ordinary host
+        // memory, but the kernel dereferences strides/dims on-device (and this path runs at
+        // every rank, not just rank >= 4). Stage the small arrays through the handle's scratch
+        // buffers instead of passing host pointers directly into the kernel launch.
+        Rpp32u* stagingHost = reinterpret_cast<Rpp32u*>(
+            handle.GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
+        Rpp32u* srcStridesStagingHost = stagingHost;
+        Rpp32u* dstStridesStagingHost = srcStridesStagingHost + RPPT_MAX_DIMS;
+        Rpp32u* dstDimsStagingHost = dstStridesStagingHost + RPPT_MAX_DIMS;
+        memcpy(srcStridesStagingHost, srcGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(dstStridesStagingHost, dstGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(dstDimsStagingHost, dstGenericDescPtr->dims + 1, tensorDims * sizeof(Rpp32u));
+
+        Rpp32u* stagingDevice =
+            reinterpret_cast<Rpp32u*>(handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
+        Rpp32u* srcStridesStagingDevice = stagingDevice;
+        Rpp32u* dstStridesStagingDevice = srcStridesStagingDevice + RPPT_MAX_DIMS;
+        Rpp32u* dstDimsStagingDevice = dstStridesStagingDevice + RPPT_MAX_DIMS;
+        RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(stagingDevice, stagingHost,
+                                               3 * RPPT_MAX_DIMS * sizeof(Rpp32u),
+                                               hipMemcpyHostToDevice, handle.GetStream()));
 
         hipLaunchKernelGGL(transpose_generic_hip_tensor,
                            dim3(ceil((float)globalThreads_x / 1024),
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(1024, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM), 0,
-                           handle.GetStream(), srcPtr, srcGenericDescPtr->strides, dstPtr,
-                           dstGenericDescPtr->strides, dstGenericDescPtr->dims + 1,
-                           dstGenericDescPtr->numDims - 1, permTensor);
+                           handle.GetStream(), srcPtr, srcStridesStagingDevice, dstPtr,
+                           dstStridesStagingDevice, dstDimsStagingDevice, tensorDims, permTensor);
         HIP_CHECK_LAUNCH_RETURN();
     }
 
