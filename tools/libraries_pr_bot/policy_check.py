@@ -526,6 +526,24 @@ def summarize_required_checks(
     return missing, failing, conc_by_name
 
 
+def pending_required_checks(
+    policy: Policy,
+    check_runs: List[Dict[str, Any]],
+) -> List[str]:
+    """Return required checks that are missing or still waiting on conclusion."""
+    by_name = {
+        r.get("name"): r
+        for r in check_runs
+        if isinstance(r, dict) and isinstance(r.get("name"), str)
+    }
+    pending: List[str] = []
+    for name in policy.required_checks:
+        run = by_name.get(name)
+        if run is None or run.get("conclusion") is None:
+            pending.append(name)
+    return pending
+
+
 def upsert_comment(
     owner: str, repo: str, pr_number: int, token: str, marker: str, body: str
 ) -> None:
@@ -611,8 +629,15 @@ def build_policy_table_comment(
     results = sorted(results, key=lambda r: order_index.get(r.name, len(TABLE_ORDER)))
 
     all_passed = all(r.passed for r in results)
+    has_pending = any(r.pending for r in results)
+    has_failures = any(
+        not r.passed and not r.pending and not r.wip and not r.tbe and not r.warn
+        for r in results
+    )
     if all_passed and ready:
         heading = "### ✅ All Checks Passed — Ready for Review"
+    elif has_pending and not has_failures:
+        heading = "### ⏳ Waiting on Required Checks"
     elif all_passed:
         heading = "### ✅ All Policy Checks Passed"
     else:
@@ -666,20 +691,30 @@ def build_policy_table_comment(
         if not r.passed and not r.pending and not r.wip and not r.tbe and not r.warn
     )
     if not all_passed:
-        failing_names = [
-            r.name
-            for r in results
-            if not r.passed and not r.pending and not r.wip and not r.tbe and not r.warn
-        ]
-        failing_list = "\n".join(f"> - ❌ {n}" for n in failing_names)
-        footer = (
-            f"\n\n> ⚠️ **{failing_count} policy check(s) failed.** "
-            "Please address the issues above before this PR can be Reviewed.\n>\n"
-            "> 🚫 **Please fix the failed policies**\n"
-            f"{failing_list}\n>\n"
-            f"> The **`{NOT_READY_LABEL}`** label was added to this PR. Once all "
-            "policies pass, the label is removed automatically."
-        )
+        if has_pending and not has_failures:
+            footer = (
+                "\n\n> ⏳ Required checks are still running or have not started yet.\n"
+                "> This PR is not ready for review until they complete."
+            )
+        else:
+            failing_names = [
+                r.name
+                for r in results
+                if not r.passed
+                and not r.pending
+                and not r.wip
+                and not r.tbe
+                and not r.warn
+            ]
+            failing_list = "\n".join(f"> - ❌ {n}" for n in failing_names)
+            footer = (
+                f"\n\n> ⚠️ **{failing_count} policy check(s) failed.** "
+                "Please address the issues above before this PR can be Reviewed.\n>\n"
+                "> 🚫 **Please fix the failed policies**\n"
+                f"{failing_list}\n>\n"
+                f"> The **`{NOT_READY_LABEL}`** label was added to this PR. Once all "
+                "policies pass, the label is removed automatically."
+            )
     elif ready:
         footer = "\n\n> 🎉 All checks passed! This PR is ready for review."
     else:
@@ -1259,9 +1294,36 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if time.time() - start > args.timeout_seconds:
-            print("❌ Timed out waiting for required checks to complete.")
+            final_results = results + build_check_results(policy, runs)
+            waiting_on = pending_required_checks(policy, runs)
+            wait_note = (
+                "⏳ Required checks have not all concluded yet. "
+                "This bot run is exiting without failing so those checks can "
+                "report independently."
+            )
+            upsert_comment(
+                owner,
+                repo,
+                pr_number,
+                token,
+                marker,
+                build_policy_table_comment(final_results, marker, note=wait_note),
+            )
+            fix_marker = "<!-- therock-pr-bot-fix-policies -->"
+            waiting_lines = "\n".join(f"- ⏳ {name}" for name in waiting_on) or "- ⏳ Pending"
+            upsert_comment(
+                owner,
+                repo,
+                pr_number,
+                token,  # type: ignore[arg-type]
+                fix_marker,
+                f"{fix_marker}\n"
+                "⏳ Waiting for required checks to start or finish:\n"
+                f"{waiting_lines}",
+            )
+            print("⚠️  Timed out waiting for required checks to complete.")
             print(json.dumps(last, indent=2))
-            return 1
+            return 0
 
         time.sleep(args.poll_seconds)
 
