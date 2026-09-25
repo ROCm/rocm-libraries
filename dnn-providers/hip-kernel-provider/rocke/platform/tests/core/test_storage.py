@@ -58,7 +58,7 @@ def test_matrix_payload_and_padding(dtype, live):
 )
 def test_scales_use_common_bit_packing(count, block_k, word):
     scales = ScalePacking(count, block_k)
-    assert scales.association.block_k == block_k
+    assert scales.block_k == block_k
     assert scales.fragment.pack(list(range(1, count + 1))) == (word,)
     assert scales.packing == BitPacking(8)
     assert scales.word_bits == count * 8

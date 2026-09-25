@@ -124,11 +124,16 @@ def pack_fragment_bits(
 ) -> list[Value]:
     """Pack unsigned encoded patterns into integer carriers, including split fields.
 
-    The loader must return canonical patterns with zero high bits. Tensor decoding
-    and numeric quantization are separate operations.
+    Encoded fields are at most 32 bits; i64 carriers support eight-byte scale
+    words. The loader must return canonical patterns with zero high bits. Tensor
+    decoding and numeric quantization are separate operations.
     """
     if fragment.carrier_bits not in (32, 64):
         raise ValueError("IR pattern packing currently requires i32 or i64 carriers")
+    if fragment.packing.element_bits > 32:
+        raise ValueError(
+            "IR pattern packing supports encoded fields of at most 32 bits"
+        )
     word_type = I64 if fragment.carrier_bits == 64 else I32
     constant = b.const_i64 if fragment.carrier_bits == 64 else b.const_i32
     words = [constant(0) for _ in range(fragment.carrier_count)]

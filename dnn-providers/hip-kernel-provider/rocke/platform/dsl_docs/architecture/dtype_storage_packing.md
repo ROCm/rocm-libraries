@@ -109,15 +109,16 @@ i32 carriers. FP8 occupies all sixteen words. FP4 occupies eight and pads eight.
 The FP6 transport descriptor occupies twelve and pads four, without enabling
 FP6 catalog entries or numerical conversions.
 
-`ScaleAssociation` records `block_k`: how many source K elements share one
-scale. This is separate from the bit layout. Existing `ScalePacking(count,
-block_k)` remains a compatibility adapter, exposing both the association and a
-shared `FragmentPacking`.
+`ScalePacking(count, block_k)` records how many source K elements share one
+scale in `block_k` and exposes the byte layout through a shared `FragmentPacking`.
+Scale association and bit layout remain separate properties of this contract.
 
 Current scaled-WMMA scale fragments hold four eight-bit patterns in i32 for K32,
 or eight in i64 for K16. The first K group occupies the low byte. The A/B scale
 coordinate maps determine which scales each lane loads. The same
 `pack_fragment_bits` helper can pack six-bit fields that cross word boundaries.
+Its IR contract accepts encoded fields of at most 32 bits in i32 or i64 carriers;
+wide encoded fields are outside the current operand requirements.
 
 ## Mirroring and follow-up work
 

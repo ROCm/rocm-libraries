@@ -33,6 +33,7 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
 /* Callback returns a canonical unsigned pattern in an integer carrier.
  * ctx and output pointer array are borrowed for the duration of this call. */
 typedef rocke_value_t* (*rocke_load_bits_fn)(rocke_ir_builder_t* b, int index, void* ctx);
+/* Encoded fields are at most 32 bits; i64 carriers support eight-byte scales. */
 rocke_status_t rocke_h_pack_fragment_bits(rocke_ir_builder_t* b,
                                           rocke_load_bits_fn load_bits,
                                           void* ctx,

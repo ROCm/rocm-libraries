@@ -308,3 +308,12 @@ def test_quant_type_diagnostic_matches_native():
         text=True,
     )
     assert result.stdout == str(error.value)
+
+
+def test_reject_wide_encoded_fields_before_emission():
+    b = IRBuilder("unsupported_packing")
+    fragment = FragmentPacking(BitPacking(40), 2, 64, 2)
+    before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError, match="encoded fields of at most 32 bits"):
+        pack_fragment_bits(b, lambda j: b.const_i64(1 << 35), fragment)
+    assert len(b.kernel.body.ops) == before

@@ -116,7 +116,7 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 
 
 def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
-    """Make the native storage comparisons available to both pytest passes."""
+    """Build the configured suite and supply native parity to both pytest passes."""
     env = dict(os.environ)
     executable = env.get("ROCKE_STORAGE_TEST")
     if not executable and (build_root / "CMakeCache.txt").is_file():
@@ -127,8 +127,6 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
                 str(build_root),
                 "--config",
                 config,
-                "--target",
-                "rocke_storage",
             ],
             check=True,
         )

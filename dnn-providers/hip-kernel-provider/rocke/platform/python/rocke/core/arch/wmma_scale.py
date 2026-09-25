@@ -11,17 +11,6 @@ from ..dtypes import dtype_info
 from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
 
 
-@dataclass(frozen=True)
-class ScaleAssociation:
-    """Number of source K elements sharing one scale."""
-
-    block_k: int
-
-    def __post_init__(self) -> None:
-        if self.block_k <= 0:
-            raise ValueError("scale block_k must be positive")
-
-
 def scaled_matrix_layout(dtype: str, abi_words: int) -> MatrixFragmentLayout:
     """gfx1250 scaled operand layout, independent of atom availability.
 
@@ -51,12 +40,9 @@ class ScalePacking:
     block_k: int
 
     def __post_init__(self) -> None:
-        self.association
+        if self.block_k <= 0:
+            raise ValueError("scale block_k must be positive")
         self.fragment
-
-    @property
-    def association(self) -> ScaleAssociation:
-        return ScaleAssociation(self.block_k)
 
     @property
     def packing(self) -> BitPacking:

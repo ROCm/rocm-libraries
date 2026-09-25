@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import shutil
 
 import pytest
 
@@ -67,8 +68,6 @@ def test_runner_passes_registered_fixture_to_both_backends(
         str(tmp_path),
         "--config",
         "Debug",
-        "--target",
-        "rocke_storage",
     ]
     assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
 
@@ -188,3 +187,34 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
     )
     assert runner.main() == 1
     assert all(command[0] != runner.sys.executable for command in calls)
+
+
+def test_fresh_build_prepares_entire_ctest_suite(runner, tmp_path):
+    if not shutil.which("cmake") or not shutil.which("ctest"):
+        pytest.skip("CMake and CTest required for fresh-build regression")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "main.c").write_text("int main(void) { return 0; }\n")
+    (source / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(runner_fixture C)\n"
+        "enable_testing()\n"
+        "add_library(rocke_core STATIC main.c)\n"
+        "add_executable(rocke_storage main.c)\n"
+        "add_executable(rocke_dtypes main.c)\n"
+        "add_test(NAME rocke_storage COMMAND rocke_storage)\n"
+        "add_test(NAME rocke_dtypes COMMAND rocke_dtypes)\n"
+    )
+    build = tmp_path / "build"
+    subprocess.run(["cmake", "-S", str(source), "-B", str(build)], check=True)
+    # Reproduce the byte-identity gate's partial build before pytest setup.
+    subprocess.run(
+        ["cmake", "--build", str(build), "--target", "rocke_core"], check=True
+    )
+    env = runner.native_pytest_env(build, "Release")
+    assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
+    assert runner.ctest_ready(build, "Release")
+    subprocess.run(
+        ["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure"],
+        check=True,
+    )

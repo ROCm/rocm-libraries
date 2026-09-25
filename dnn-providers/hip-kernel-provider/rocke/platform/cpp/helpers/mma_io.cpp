@@ -160,6 +160,9 @@ rocke_status_t rocke_h_pack_fragment_bits(rocke_ir_builder_t* b,
         if(f.carrier_bits != 32 && f.carrier_bits != 64)
             ckc::raise_status(ROCKE_ERR_VALUE,
                               "IR pattern packing currently requires i32 or i64 carriers");
+        if(f.packing.element_bits > 32)
+            ckc::raise_status(ROCKE_ERR_VALUE,
+                              "IR pattern packing supports encoded fields of at most 32 bits");
         const auto* word_type = f.carrier_bits == 64 ? rocke_i64() : rocke_i32();
         auto constant = [&](uint64_t value) {
             return f.carrier_bits == 64 ? rocke_b_const_i64(b, int64_t(value))

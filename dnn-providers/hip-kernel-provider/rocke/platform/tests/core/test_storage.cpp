@@ -229,6 +229,20 @@ int main(int argc, char** argv)
         rocke_ir_builder_free(&b);
         return 0;
     }
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "unsupported_packing") == ROCKE_OK);
+        rocke_bit_packing_t packing;
+        rocke_fragment_packing_t fragment;
+        rocke_value_t* words[2];
+        CHECK(rocke_bit_packing_init(&packing, 40, 0));
+        CHECK(rocke_fragment_packing_init(&fragment, &packing, 2, 64, 2));
+        CHECK(rocke_h_pack_fragment_bits(&b, load_bits, NULL, &fragment, words, 2)
+              == ROCKE_ERR_VALUE);
+        CHECK(strstr(rocke_ir_builder_error(&b), "encoded fields of at most 32 bits"));
+        CHECK(b.kernel->body->num_ops == 0);
+        rocke_ir_builder_free(&b);
+    }
     CHECK(test_fragment_inputs() == 0);
     CHECK(test_fragment_offset_bounds() == 0);
     CHECK(rocke_dtype_info("e4m3") == rocke_dtype_info("fp8e4m3"));
