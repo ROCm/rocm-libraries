@@ -437,7 +437,7 @@ attention_dense_cache_key(spec, arch) -> (arch, type(spec), <fields not in runti
 
 The declaration lives on the spec that owns the body, not in the shared key function, because the two must agree: declaring a field the body still bakes is a cache collision — different problems served by the wrong binary. `library/tests/test_attention_builds.py::TestAttentionDenseRuntimeShapeCollision` guards that direction by asserting specs sharing a key lower to identical IR.
 
-Today only `library/kernels/gfx950/attention_dense.py` opts in, declaring `("batch", "seqlen_q", "seqlen_kv")` on its aligned dense path. Sub-modes that still bake seqlen into the body — persistent, ragged, varlen, paged, sliding-window — declare nothing and keep per-shape identity. `library/kernels/gfx942/attention_dense.py` and every other family also declare nothing, so their identity is unchanged.
+Today only `library/kernels/gfx950/attention_dense.py` opts in, declaring `("batch", "seqlen_q", "seqlen_kv")` on its aligned, unshifted dense path. Sub-modes that still bake seqlen into the body — persistent, ragged, varlen, paged, sliding-window, and bottom-right causal with unequal Q/K lengths — declare nothing and keep per-shape identity. Equal-length bottom-right adds no extra shape specialization. `library/kernels/gfx942/attention_dense.py` and every other family also declare nothing, so their identity is unchanged.
 
 A spec on the runtime path also drops the `sq`/`sk` tokens from its symbol name, since one symbol now covers all shapes. See `## Runtime Assumptions` in [runtime/limitations.md](../runtime/limitations.md) for why partial specialization (baking `batch` while keeping the seqlens runtime) is not safe to ship yet.
 
