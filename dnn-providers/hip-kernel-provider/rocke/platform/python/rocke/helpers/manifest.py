@@ -25,7 +25,7 @@ Schema (version `ck.dsl.example.manifest/v1`):
       "grid_explicit": [gx, gy, gz],         // optional, overrides grid_order
       "grid_order": "MN" | "NM",             // optional
       "args_signature": [
-        {"name": ..., "type": "ptr<f16,global>" | "i32", "size_bytes": ...},
+        {"name": ..., "type": "ptr<f16,global>" | "ptr<bf16,global>" | "i32", "size_bytes": ...},
         ...
       ],
       "sig_has_bytes": 0 | 1,                // 1 if A_bytes/B_bytes/D_bytes are kernel args

@@ -12,14 +12,17 @@ from ....runtime.hip_module import Runtime
 from .utils import as_u8_buffer, nbytes, require_numpy
 
 
-def _gemm_dtype_from_manifest(manifest: dict):
-    """Return (np_storage_dtype, is_bf16) from args_signature ptr type."""
-    import numpy as np
+def _gemm_is_bf16(manifest: dict) -> bool:
+    """Whether the GEMM operands are bf16, per the ``A`` ptr type.
 
+    The manifest ``kind`` is ``gemm_fp16`` for every GEMM, so the element
+    type is carried by ``args_signature`` (``ptr<bf16, global>`` vs
+    ``ptr<f16, global>``, emitted by ``helpers.manifest.gemm_args_signature``).
+    Both are 2 bytes wide, so only the interpretation differs.
+    """
     sig = manifest.get("args_signature", [])
     ptr_type = next((a.get("type", "") for a in sig if a.get("name") == "A"), "")
-    is_bf16 = "bf16" in ptr_type
-    return np.float16, is_bf16
+    return "bf16" in ptr_type
 
 
 def run_gemm_manifest_problem(
@@ -31,7 +34,7 @@ def run_gemm_manifest_problem(
         M, N, K = int(ds[0]), int(ds[1]), int(ds[2])
     else:
         M, N, K = shape
-    _, is_bf16 = _gemm_dtype_from_manifest(manifest)
+    is_bf16 = _gemm_is_bf16(manifest)
     rng = np.random.default_rng(0xC0FFEE)
     A_f32 = None  # float32 inputs for bf16 reference, set when is_bf16
     B_f32 = None
