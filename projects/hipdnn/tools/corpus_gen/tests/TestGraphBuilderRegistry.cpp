@@ -336,6 +336,13 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
                              {"stride_w", int64_t{2}},
                              {"dilation_h", int64_t{1}},
                              {"dilation_w", int64_t{1}},
+                             {"spatial", std::string("2d")},
+                             {"layout", std::string("channels_first")},
+                             {"D", int64_t{1}},
+                             {"T", int64_t{1}},
+                             {"pad_d", int64_t{0}},
+                             {"stride_d", int64_t{1}},
+                             {"dilation_d", int64_t{1}},
                              {"dtype", std::string("fp16")}};
 
     const auto built = buildGraphFor(*parsed.metadata, conv1);
@@ -380,7 +387,14 @@ TEST(TestGraphBuilderRegistry, TheShippedMetadataCoversEveryDeclaredDtype)
                            {"stride_h", int64_t{1}},
                            {"stride_w", int64_t{1}},
                            {"dilation_h", int64_t{1}},
-                           {"dilation_w", int64_t{1}}};
+                           {"dilation_w", int64_t{1}},
+                           {"spatial", std::string("2d")},
+                           {"layout", std::string("channels_first")},
+                           {"D", int64_t{1}},
+                           {"T", int64_t{1}},
+                           {"pad_d", int64_t{0}},
+                           {"stride_d", int64_t{1}},
+                           {"dilation_d", int64_t{1}}};
         point["dtype"] = value;
 
         const auto built = buildGraphFor(*parsed.metadata, point);
@@ -412,6 +426,13 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionAdmitsARealLayer)
                                     {"stride_w", int64_t{1}},
                                     {"dilation_h", int64_t{1}},
                                     {"dilation_w", int64_t{1}},
+                                    {"spatial", std::string("2d")},
+                                    {"layout", std::string("channels_first")},
+                                    {"D", int64_t{1}},
+                                    {"T", int64_t{1}},
+                                    {"pad_d", int64_t{0}},
+                                    {"stride_d", int64_t{1}},
+                                    {"dilation_d", int64_t{1}},
                                     {"dtype", std::string("fp16")}};
 
     EXPECT_TRUE(detail::satisfiesConstraints(*parsed.metadata, resnetLayer3))
@@ -727,6 +748,7 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
                              {"head_dim", int64_t{64}},
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
+                             {"generate_stats", false},
                              {"dtype", std::string("fp16")}};
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
@@ -792,6 +814,7 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
                                  {"head_dim", int64_t{128}},
                                  {"is_causal", true},
                                  {"alignment", anchor},
+                                 {"generate_stats", false},
                                  {"dtype", std::string("bf16")}};
         const auto built = buildGraphFor(*parsed.metadata, point);
         ASSERT_TRUE(built.ok()) << anchor << ": " << built.error;
@@ -805,6 +828,75 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
         EXPECT_EQ(attributes->right_bound().value(), 0) << anchor;
         EXPECT_EQ(attributes->diagonal_alignment(), expected) << anchor;
     }
+}
+
+TEST(TestGraphBuilderRegistry, AShippedUnaryActivationLeavesItsParametersUnset)
+{
+    // A present relu_upper_clip makes ReLU a clamp: written as 0 by default, every "ReLU" in
+    // the corpus was a clamp to [0, 0], which MIOpen accepts and computes as such.
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/pointwise_unary.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    const ProblemPoint relu{{"D0", int64_t{2}},
+                            {"D1", int64_t{64}},
+                            {"D2", int64_t{8}},
+                            {"D3", int64_t{8}},
+                            {"mode", std::string("RELU_FWD")},
+                            {"dtype", std::string("fp16")}};
+    const auto built = buildGraphFor(*parsed.metadata, relu);
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* attributes = asGraph(built.bytes)->nodes()->Get(0)->attributes_as_PointwiseAttributes();
+    ASSERT_NE(attributes, nullptr);
+    EXPECT_EQ(attributes->operation(), PointwiseMode::RELU_FWD);
+    EXPECT_FALSE(attributes->relu_lower_clip().has_value());
+    EXPECT_FALSE(attributes->relu_upper_clip().has_value());
+    EXPECT_FALSE(attributes->relu_lower_clip_slope().has_value());
+    EXPECT_FALSE(attributes->in_1_tensor_uid().has_value()) << "a unary node has one input";
+}
+
+TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
+{
+    // generate_stats without a stats tensor is a graph no engine can run; with the flag the
+    // statistics tensor is part of the graph and named by the node.
+    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    const ProblemPoint point{{"batch", int64_t{2}},
+                             {"heads", int64_t{8}},
+                             {"heads_kv", int64_t{8}},
+                             {"seqlen_q", int64_t{64}},
+                             {"seqlen_k", int64_t{64}},
+                             {"head_dim", int64_t{128}},
+                             {"is_causal", false},
+                             {"alignment", std::string("top_left")},
+                             {"generate_stats", true},
+                             {"dtype", std::string("bf16")}};
+    const auto built = buildGraphFor(*parsed.metadata, point);
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* graph = asGraph(built.bytes);
+    const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
+    ASSERT_NE(attributes, nullptr);
+    ASSERT_TRUE(attributes->generate_stats().has_value());
+    EXPECT_TRUE(attributes->generate_stats().value());
+    ASSERT_TRUE(attributes->stats_tensor_uid().has_value());
+    bool found = false;
+    for(const auto* tensor : *graph->tensors())
+    {
+        if(tensor->uid() == attributes->stats_tensor_uid().value())
+        {
+            found = true;
+            EXPECT_EQ(tensor->data_type(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+            EXPECT_EQ(std::vector<int64_t>(tensor->dims()->begin(), tensor->dims()->end()),
+                      (std::vector<int64_t>{2, 8, 64, 1}));
+        }
+    }
+    EXPECT_TRUE(found) << "the node names a stats tensor the graph does not carry";
 }
 
 } // namespace hipdnn_corpus_gen

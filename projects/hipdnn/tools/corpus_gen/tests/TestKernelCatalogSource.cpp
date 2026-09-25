@@ -265,6 +265,7 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
                              // Supplied here because this point is built directly rather than
                              // harvested; a pack gets it from `kernel_catalog.constants`.
                              {"alignment", std::string("top_left")},
+                             {"generate_stats", false},
                              {"dtype", std::string("bf16")}};
     const auto built = buildAdmissible(metadata, point);
     ASSERT_TRUE(built.has_value());

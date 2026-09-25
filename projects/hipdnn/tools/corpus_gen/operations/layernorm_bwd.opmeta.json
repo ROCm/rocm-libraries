@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
-  "operation": "layernorm_fwd",
-  "display_name": "LayerNorm Forward",
-  "description": "Layer normalization over the trailing normalized dimensions.",
+  "operation": "layernorm_bwd",
+  "display_name": "Layer Normalization, Backward",
+  "description": "Gradients of layer normalization over the trailing hidden dimension: dx from dy, and dscale and dbias.",
   "parameters": {
     "batch": {
       "type": "int64"
@@ -66,11 +66,11 @@
     }
   },
   "graph_builder": {
-    "function": "layernormForward",
+    "function": "layernormBackward",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
     "arguments": [
       {
-        "name": "dims",
+        "name": "dyDims",
         "kind": "expr",
         "value": [
           "$q.batch",
@@ -79,9 +79,79 @@
         ]
       },
       {
-        "name": "strides",
+        "name": "dyStrides",
         "kind": "strides_of",
-        "of": "dims"
+        "of": "dyDims"
+      },
+      {
+        "name": "xDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "xStrides",
+        "kind": "strides_of",
+        "of": "xDims"
+      },
+      {
+        "name": "scaleDims",
+        "kind": "expr",
+        "value": [
+          1,
+          1,
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "scaleStrides",
+        "kind": "strides_of",
+        "of": "scaleDims"
+      },
+      {
+        "name": "dxDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "dxStrides",
+        "kind": "strides_of",
+        "of": "dxDims"
+      },
+      {
+        "name": "dscaleDims",
+        "kind": "expr",
+        "value": [
+          1,
+          1,
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "dscaleStrides",
+        "kind": "strides_of",
+        "of": "dscaleDims"
+      },
+      {
+        "name": "dbiasDims",
+        "kind": "expr",
+        "value": [
+          1,
+          1,
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "dbiasStrides",
+        "kind": "strides_of",
+        "of": "dbiasDims"
       },
       {
         "name": "dataType",
@@ -102,6 +172,11 @@
         "name": "rank",
         "kind": "direct",
         "source": "$q.rank"
+      },
+      {
+        "name": "normalizedDimCount",
+        "kind": "constant",
+        "constant": 1
       }
     ],
     "// types": "Operands carry the declared dtype; statistics accumulate in fp32. Left to default, compute follows io, and hip-kernel-provider's Layernorm plan builder refuses any node whose compute_data_type is not fp32."

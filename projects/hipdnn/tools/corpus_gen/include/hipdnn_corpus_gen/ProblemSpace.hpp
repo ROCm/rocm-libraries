@@ -76,7 +76,13 @@ struct ExplorationRequest
     /// Largest number of categorical combinations to explore. Reported when it binds, never
     /// silently applied: a corpus covering three of twelve dtype/layout combinations and
     /// saying nothing is indistinguishable from one that covered the space.
-    size_t maxCombinations = 64;
+    size_t maxCombinations = 1024;
+
+    /// Oracle calls spent first on a combination no archetype was admitted for. If they find no
+    /// served point the combination is declined and gets no more: without this, every declined
+    /// dtype or mode spends the full @ref budgetPerCombination proving it, which dominated the
+    /// cost of any operation with many categorical values.
+    int64_t probeBudget = 2000;
 
     /// Largest enumerated skeleton to try before sampling. The cross product of an
     /// operation's regime buckets grows quickly, and every point costs an oracle call.
@@ -633,7 +639,19 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 
         if(search.targetCount > 0)
         {
-            const auto found = buildFeasibleShapeSet(oracle, search);
+            auto found = [&]() {
+                if(!result.problems.empty() || request.probeBudget >= search.oracleBudget)
+                {
+                    return buildFeasibleShapeSet(oracle, search);
+                }
+                // Nothing anchored: probe first, and search in full only if it found anything.
+                // The full search retraces the probe's walk from the same seed, so those calls
+                // are answered from the memo rather than asked again.
+                auto probe = search;
+                probe.oracleBudget = request.probeBudget;
+                auto probed = buildFeasibleShapeSet(oracle, probe);
+                return probed.stats.distinct == 0 ? probed : buildFeasibleShapeSet(oracle, search);
+            }();
             result.stats = found.stats;
             for(const auto& shape : found.shapes)
             {

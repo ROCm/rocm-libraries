@@ -427,4 +427,35 @@ TEST(TestOperationMetadata, AConstantMayNotOverrideWhatAPackActuallySaid)
         << load.errors.front();
 }
 
+TEST(TestOperationMetadata, AConditionalDimsElementIsOmittedWhenItsConditionIsFalse)
+{
+    // One declaration, two ranks: D is present for 3-D problems and absent for 2-D ones.
+    auto declaration = layernormMetadata();
+    declaration["parameters"]["spatial"] = {{"type", "enum"}, {"values", {"2d", "3d"}}};
+    declaration["graph_builder"]["arguments"][0]["value"]
+        = nlohmann::json::array({"$q.batch",
+                                 {{"when", {{"==", {"$q.spatial", "3d"}}}}, {"value", 7}},
+                                 "$q.seq_len",
+                                 "$q.hidden_dim"});
+    const auto load = parseOperationMetadata(declaration);
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+
+    ProblemPoint point{{"batch", int64_t{4}},
+                       {"seq_len", int64_t{512}},
+                       {"hidden_dim", int64_t{1024}},
+                       {"dtype", std::string("fp16")},
+                       {"forward_phase", std::string("TRAINING")},
+                       {"spatial", std::string("3d")}};
+    auto resolved = resolveArguments(load.metadata->graphBuilder, point);
+    ASSERT_TRUE(resolved.ok()) << resolved.error;
+    EXPECT_EQ(std::get<std::vector<int64_t>>(resolved.arguments[0].value),
+              (std::vector<int64_t>{4, 7, 512, 1024}));
+
+    point["spatial"] = std::string("2d");
+    resolved = resolveArguments(load.metadata->graphBuilder, point);
+    ASSERT_TRUE(resolved.ok()) << resolved.error;
+    EXPECT_EQ(std::get<std::vector<int64_t>>(resolved.arguments[0].value),
+              (std::vector<int64_t>{4, 512, 1024}));
+}
+
 } // namespace hipdnn_corpus_gen

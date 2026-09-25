@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
-  "operation": "conv_fwd",
-  "display_name": "Convolution Forward",
-  "description": "Forward convolution, NCHW input and KCRS filter, 2-D spatial.",
+  "operation": "conv_bias_activation",
+  "display_name": "Convolution, Bias and Activation (fused)",
+  "description": "A forward convolution whose output is optionally offset by a per-channel bias and then passed through an activation, as one graph. The convolution problem space is conv_fwd's.",
   "parameters": {
     "N": {
       "type": "int64",
@@ -81,6 +81,26 @@
         "int8"
       ],
       "description": "Element type of x, w and y. The list is the subset of the backend's eighteen convertible types that a convolution is actually run in: the float types, the fp8 pairs including the FNUZ spellings AMD hardware uses, and int8 for quantized inference. Types reached only through block scaling (fp4, fp6, int4) are declared on the quantize operations that produce them, not here."
+    },
+    "fusion": {
+      "type": "enum",
+      "values": [
+        "bias_activation",
+        "activation"
+      ],
+      "description": "conv -> bias -> activation (three nodes) or conv -> activation (two)."
+    },
+    "mode": {
+      "type": "enum",
+      "values": [
+        "RELU_FWD",
+        "SIGMOID_FWD",
+        "TANH_FWD",
+        "GELU_FWD",
+        "SWISH_FWD",
+        "ELU_FWD"
+      ],
+      "description": "The activation, as a FlatBuffers PointwiseMode enumerator name; its parameters are left unset."
     },
     "spatial": {
       "type": "enum",
@@ -208,7 +228,7 @@
     }
   },
   "graph_builder": {
-    "function": "convolutionForward",
+    "function": "convolutionBiasActivation",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
     "arguments": [
       {
@@ -1284,6 +1304,30 @@
         ]
       },
       {
+        "name": "biasDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.K",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "biasStrides",
+        "kind": "strides_of",
+        "of": "biasDims"
+      },
+      {
         "name": "prePadding",
         "kind": "expr",
         "value": [
@@ -1365,9 +1409,19 @@
         "name": "intermediateDataType",
         "kind": "constant",
         "constant": "float"
+      },
+      {
+        "name": "fusion",
+        "kind": "direct",
+        "source": "$q.fusion"
+      },
+      {
+        "name": "mode",
+        "kind": "direct",
+        "source": "$q.mode"
       }
     ],
-    "// types": "Operands carry the declared dtype; accumulation is fp32 regardless. That is what mixed precision means -- fp16 or bf16 storage with fp32 accumulate -- and it is also a hard gate: MIOpen's convolution builder declines any node whose compute_data_type is not FLOAT, so a uniform-fp16 graph is refused before applicability is even considered."
+    "// types": "Operands and bias carry the declared dtype; the convolution output and both intermediates are fp32, and the convolution and activation compute in fp32 while the bias add computes in the bias type -- MIOpen's ConvFwdBiasActiv contract."
   },
   "constraints": [
     {

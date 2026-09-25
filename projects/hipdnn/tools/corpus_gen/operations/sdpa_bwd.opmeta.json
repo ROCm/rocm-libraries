@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
-  "operation": "sdpa_fwd",
-  "display_name": "Scaled Dot-Product Attention Forward",
-  "description": "Multi-head attention forward. Q is [batch, heads, seqlen_q, head_dim]; K and V share seqlen_k.",
+  "operation": "sdpa_bwd",
+  "display_name": "Scaled Dot-Product Attention, Backward",
+  "description": "Gradients of scaled dot-product attention: dq, dk and dv from dO, given q, k, v, the forward output o and its softmax statistics. The same problem space as sdpa_fwd.",
   "parameters": {
     "batch": {
       "type": "int64"
@@ -47,10 +47,6 @@
         "fp16",
         "bf16"
       ]
-    },
-    "generate_stats": {
-      "type": "bool",
-      "description": "The training forward: also write the softmax statistics (logsumexp) the backward pass consumes."
     }
   },
   "stratification_axis": "arithmetic_intensity",
@@ -253,30 +249,8 @@
     "an argument no descriptor supplies. A parameter mapped under `metadata` is refused here,",
     "so a constant can never overwrite what a descriptor actually said."
   ],
-  "kernel_catalog": {
-    "metadata": {
-      "batch": "batch",
-      "heads": "num_query_heads",
-      "heads_kv": "num_kv_heads",
-      "seqlen_q": "seqlen_q",
-      "seqlen_k": "seqlen_kv",
-      "head_dim": "head_size",
-      "is_causal": "causal",
-      "dtype": "dtype"
-    },
-    "enums": {
-      "dtype": {
-        "BF16": "bf16",
-        "FP16": "fp16"
-      }
-    },
-    "constants": {
-      "alignment": "top_left",
-      "generate_stats": false
-    }
-  },
   "graph_builder": {
-    "function": "sdpaForward",
+    "function": "sdpaBackward",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
     "arguments": [
       {
@@ -420,6 +394,166 @@
         ]
       },
       {
+        "name": "dODims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_q",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "dOStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_q",
+                  "$q.heads"
+                ]
+              },
+              "$q.head_dim"
+            ]
+          },
+          "$q.head_dim",
+          {
+            "*": [
+              "$q.heads",
+              "$q.head_dim"
+            ]
+          },
+          1
+        ]
+      },
+      {
+        "name": "dqDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_q",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "dqStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_q",
+                  "$q.heads"
+                ]
+              },
+              "$q.head_dim"
+            ]
+          },
+          "$q.head_dim",
+          {
+            "*": [
+              "$q.heads",
+              "$q.head_dim"
+            ]
+          },
+          1
+        ]
+      },
+      {
+        "name": "dkDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads_kv",
+          "$q.seqlen_k",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "dkStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_k",
+                  "$q.heads_kv"
+                ]
+              },
+              "$q.head_dim"
+            ]
+          },
+          "$q.head_dim",
+          {
+            "*": [
+              "$q.heads_kv",
+              "$q.head_dim"
+            ]
+          },
+          1
+        ]
+      },
+      {
+        "name": "dvDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads_kv",
+          "$q.seqlen_k",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "dvStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_k",
+                  "$q.heads_kv"
+                ]
+              },
+              "$q.head_dim"
+            ]
+          },
+          "$q.head_dim",
+          {
+            "*": [
+              "$q.heads_kv",
+              "$q.head_dim"
+            ]
+          },
+          1
+        ]
+      },
+      {
+        "name": "statsDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_q",
+          1
+        ]
+      },
+      {
+        "name": "statsStrides",
+        "kind": "strides_of",
+        "of": "statsDims"
+      },
+      {
+        "name": "statsDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
         "name": "dataType",
         "kind": "dtype_of",
         "source": "$q.dtype"
@@ -452,34 +586,9 @@
         "name": "diagonalAlignment",
         "kind": "direct",
         "source": "$q.alignment"
-      },
-      {
-        "name": "generateStats",
-        "kind": "direct",
-        "source": "$q.generate_stats"
-      },
-      {
-        "name": "statsDims",
-        "kind": "expr",
-        "value": [
-          "$q.batch",
-          "$q.heads",
-          "$q.seqlen_q",
-          1
-        ]
-      },
-      {
-        "name": "statsStrides",
-        "kind": "strides_of",
-        "of": "statsDims"
-      },
-      {
-        "name": "statsDataType",
-        "kind": "constant",
-        "constant": "float"
       }
     ],
-    "// types": "Operands carry the declared dtype; accumulation and the score matrix are fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hip-kernel-provider's SdpaFwdPlanBuilder refuses outright ('Compute data type must be FLOAT') and the ingestor engines decline at graph_match -- a live-engine corpus then admits nothing, indistinguishable from naming an engine that does not exist. The training forward's softmax statistics are fp32.",
+    "// types": "Operands carry the declared dtype; accumulation and the score matrix are fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hip-kernel-provider's SdpaFwdPlanBuilder refuses outright ('Compute data type must be FLOAT') and the ingestor engines decline at graph_match -- a live-engine corpus then admits nothing, indistinguishable from naming an engine that does not exist. The softmax statistics saved by the forward pass are fp32.",
     "// layout": "BSHD: dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles and the retired Python bundler wrote them. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph, and a live-engine corpus for rocKE comes out empty. AITER serves BSHD too, so this keeps both engines in the contest.",
     "// scale": "attnScale is stated, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so omitting it empties a rocKE corpus. 1/sqrt(head_dim) is the standard scale and what the shipped bundles carry."
   },

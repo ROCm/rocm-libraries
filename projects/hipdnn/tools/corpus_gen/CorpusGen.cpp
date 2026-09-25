@@ -504,6 +504,16 @@ int runGenerator(const std::vector<std::string>& args)
 
     // Created only when an engine was named. Without one the whole run is device-free, and
     // opening a handle would make a corpus that needs no GPU fail on a machine without one.
+    // MIOpen answers applicability by counting solutions, and in immediate mode it first runs
+    // its AI solver predictor (TunaNet) to order them -- which dominates every convolution
+    // query here while changing nothing this tool reads: a count above zero. Off, MIOpen counts
+    // through its WTI fallback instead; on gfx942 the two gave the identical corpus, query for
+    // query. Set only when the caller has not, so it can still be turned back on.
+    if(options.haveEngineId)
+    {
+        setenv("MIOPEN_DEBUG_ENABLE_AI_IMMED_MODE_FALLBACK", "0", /*overwrite=*/0);
+    }
+
     hipdnnHandle_t handle = nullptr;
     if(options.haveEngineId && hipdnnCreate(&handle) != HIPDNN_STATUS_SUCCESS)
     {
@@ -1016,6 +1026,31 @@ int runGenerator(const std::vector<std::string>& args)
             }
         }
 
+
+        // Spread a cut over every categorical combination as well as the regime, so a count
+        // below the pools' size takes a proportional share of each dtype, layout and mode.
+        for(auto& pool : pools)
+        {
+            for(auto& entry : pool.second)
+            {
+                std::string stratum;
+                for(const auto& parameter : metadata.parameters)
+                {
+                    if(parameter.type != hipdnn_corpus_gen::ParameterType::ENUM
+                       && parameter.type != hipdnn_corpus_gen::ParameterType::BOOL)
+                    {
+                        continue;
+                    }
+                    const auto held = entry.point.find(parameter.name);
+                    if(held != entry.point.end())
+                    {
+                        stratum += parameter.name + "=" + hipdnn_corpus_gen::asText(held->second)
+                                   + ",";
+                    }
+                }
+                entry.stratum = stratum + "|" + entry.regime;
+            }
+        }
 
         std::map<std::string, int64_t> dropped;
         const auto deduplicated = hipdnn_corpus_gen::deduplicate(pools, dropped);

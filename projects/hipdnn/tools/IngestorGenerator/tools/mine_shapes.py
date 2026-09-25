@@ -822,10 +822,13 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
     `q.alignment` is always `top_left`: `MASK_TYPE` deliberately carries no
     `bottom_right` spelling, so no source here can say bottom-right, and writing the
     column at all keeps the row buildable (the declaration's argument resolution is
-    strict about a parameter it reads being present).
+    strict about a parameter it reads being present). `q.generate_stats` is always
+    `false` for the same reason: every source here records inference forwards, and
+    none says whether a shape also ran as a training forward.
     """
     columns = ["name", "op", "q.batch", "q.heads", "q.heads_kv", "q.seqlen_q",
-               "q.seqlen_k", "q.head_dim", "q.is_causal", "q.alignment", "q.dtype"]
+               "q.seqlen_k", "q.head_dim", "q.is_causal", "q.alignment",
+               "q.generate_stats", "q.dtype"]
     dropped: dict[str, int] = {}
     written = 0
     with path.open("w", newline="") as handle:
@@ -847,7 +850,7 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
                 shape["batch"], shape["nhead_q"], shape["nhead_k"],
                 shape["seqlen_q"], shape["seqlen_k"], shape["hdim_q"],
                 "true" if shape["mask_type"] == MASK_TYPE["causal"] else "false",
-                "top_left", shape["dtype"],
+                "top_left", "false", shape["dtype"],
             ])
             written += 1
     return {"written": written, "dropped": dropped}

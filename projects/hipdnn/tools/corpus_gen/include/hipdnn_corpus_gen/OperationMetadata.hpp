@@ -151,6 +151,13 @@ struct BuilderArgument
     /// EXPR whose `value` was one expression rather than an array: it resolves to a single
     /// floating-point scalar, unfloored -- a softmax scale of rsqrt(head_dim) is not a dim.
     bool scalarExpression = false;
+    /// How many list elements an array EXPR has. The program holds these first, then the
+    /// conditions of any element written `{"when": <condition>, "value": <expr>}`.
+    size_t elementCount = 0;
+    /// Per element, the program index of its `when` condition, if it has one. An element whose
+    /// condition is false is omitted, which is how one declaration spells tensors of two ranks
+    /// -- [N, C, D, H, W] for 3-D problems and [N, C, H, W] for 2-D ones.
+    std::vector<std::optional<size_t>> elementConditions;
     std::string of; ///< STRIDES_OF
     nlohmann::json constant; ///< CONSTANT
 };
@@ -860,9 +867,39 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 {
                     const auto& value = argument.at("value");
                     resolved.scalarExpression = !value.is_array();
-                    resolved.expressions = hipdnn_plugin_sdk::uhd::expression::Program(
-                        resolved.scalarExpression ? std::vector<nlohmann::json>{value}
-                                                  : value.get<std::vector<nlohmann::json>>());
+                    std::vector<nlohmann::json> program;
+                    std::vector<nlohmann::json> conditions;
+                    if(resolved.scalarExpression)
+                    {
+                        program.push_back(value);
+                    }
+                    else
+                    {
+                        for(const auto& element : value)
+                        {
+                            const bool conditional = element.is_object() && element.size() == 2
+                                                     && element.contains("when")
+                                                     && element.contains("value");
+                            program.push_back(conditional ? element.at("value") : element);
+                            resolved.elementConditions.push_back(
+                                conditional ? std::optional<size_t>(conditions.size())
+                                            : std::nullopt);
+                            if(conditional)
+                            {
+                                conditions.push_back(element.at("when"));
+                            }
+                        }
+                        resolved.elementCount = program.size();
+                        for(auto& condition : resolved.elementConditions)
+                        {
+                            if(condition.has_value())
+                            {
+                                *condition += resolved.elementCount;
+                            }
+                        }
+                        program.insert(program.end(), conditions.begin(), conditions.end());
+                    }
+                    resolved.expressions = hipdnn_plugin_sdk::uhd::expression::Program(program);
                 }
                 catch(const std::exception& error)
                 {

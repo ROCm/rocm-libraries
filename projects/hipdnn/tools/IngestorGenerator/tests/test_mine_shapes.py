@@ -716,10 +716,11 @@ class TestQueryCsv:
             "1,32,8,4096,4096,128,bf16,causal\n")
         assert rc == 0, log
         assert lines[0] == ("name,op,q.batch,q.heads,q.heads_kv,q.seqlen_q,"
-                            "q.seqlen_k,q.head_dim,q.is_causal,q.alignment,q.dtype")
+                            "q.seqlen_k,q.head_dim,q.is_causal,q.alignment,q.generate_stats,"
+                            "q.dtype")
         assert lines[1].split(",")[1:] == [
             "sdpa_fwd", "1", "32", "8", "4096", "4096", "128", "true",
-            "top_left", "bf16"]
+            "top_left", "false", "bf16"]
 
     def test_alignment_is_always_top_left(self, tmp_path):
         """No source here can say bottom-right -- `MASK_TYPE` deliberately carries no
@@ -728,7 +729,15 @@ class TestQueryCsv:
         rc, log, lines = self._mine(
             tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
         assert rc == 0, log
-        assert lines[1].split(",")[-2] == "top_left"
+        assert lines[1].split(",")[-3] == "top_left"
+
+    def test_generate_stats_is_always_false(self, tmp_path):
+        """Every source records inference forwards; none says a shape also ran as a training
+        forward, so the column is written as false rather than left for the tool to refuse."""
+        rc, log, lines = self._mine(
+            tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
+        assert rc == 0, log
+        assert lines[1].split(",")[-2] == "false"
 
     def test_a_windowed_shape_is_dropped_by_name_and_counted(self, tmp_path):
         """`sdpa_fwd` declares no window parameter, so a swin shape cannot be written --

@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
-  "operation": "conv_fwd",
-  "display_name": "Convolution Forward",
-  "description": "Forward convolution, NCHW input and KCRS filter, 2-D spatial.",
+  "operation": "conv_bwd_weights",
+  "display_name": "Convolution, Backward Weights",
+  "description": "The gradient of a convolution with respect to its filter: dw from x and dy. The same problem space as conv_fwd -- dy has y's shape and dw has w's.",
   "parameters": {
     "N": {
       "type": "int64",
@@ -208,7 +208,7 @@
     }
   },
   "graph_builder": {
-    "function": "convolutionForward",
+    "function": "convolutionBackwardWeights",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
     "arguments": [
       {
@@ -361,7 +361,7 @@
         ]
       },
       {
-        "name": "wDims",
+        "name": "dwDims",
         "kind": "expr",
         "value": [
           "$q.K",
@@ -385,7 +385,7 @@
         ]
       },
       {
-        "name": "wStrides",
+        "name": "dwStrides",
         "kind": "expr",
         "value": [
           {
@@ -535,7 +535,7 @@
         ]
       },
       {
-        "name": "yDims",
+        "name": "dyDims",
         "kind": "expr",
         "value": [
           "$q.N",
@@ -674,7 +674,7 @@
         ]
       },
       {
-        "name": "yStrides",
+        "name": "dyStrides",
         "kind": "expr",
         "value": [
           {
