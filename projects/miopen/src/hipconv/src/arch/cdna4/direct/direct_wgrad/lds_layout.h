@@ -206,23 +206,6 @@ struct TransposeSwizzle
     // Rung d is the round-0 unshifted read displaced d columns, and rungs that fold onto it share
     // one address register; see the ladder section of the doc and `load_s_ladder`.
 
-    // Whether the read at (round, shift) is the round-0 read at rung 4 * round + shift.
-    //
-    // Survives the unfold because a round-0 column's low three bits are at most 3, so a round's
-    // four columns stay inside one packed image.
-    static constexpr bool rounds_are_rungs()
-    {
-        for(int round = 0; round < read_rounds; ++round)
-            for(int shift = 0; shift < shifts; ++shift)
-                for(int lane = 0; lane < 64; ++lane)
-                    for(int c4_ = 0; c4_ < C4; ++c4_)
-                        if(offset_uint2_shifted(read_col(lane, round), shift, c4_) !=
-                           offset_uint2_shifted(
-                               read_col(lane, 0), round * cols_per_round + shift, c4_))
-                            return false;
-        return true;
-    }
-
     // The uint2 distance to the read displaced `d` columns, or no_rung where it is not fixed.
     //
     // The rotation moves with the column, so the distance is fixed only where every column the
