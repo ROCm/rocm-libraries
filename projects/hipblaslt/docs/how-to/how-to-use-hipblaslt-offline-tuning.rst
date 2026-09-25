@@ -8,10 +8,10 @@
 Using hipBLASLt offline tuning
 ********************************
 
-``hipblaslt-bench`` can help find the best-performing GEMM kernel for a given set of GEMM problems
-and provide the best solution index for a given problem size.
-This index can be used directly in future GEMM calls through the User Offline Tuning mechanism.
-However, these indices cannot be reused across library releases or across different device architectures.
+``hipblaslt-bench`` can find the best-performing GEMM kernel for a given set of GEMM problems and record
+its solution index in a tuning file, which later GEMM calls use through the User Offline Tuning mechanism.
+A recorded index belongs to the device architecture it was measured on, and another build of hipBLASLt
+uses it only while it still names the same kernel; see `How tuned entries are validated`_.
 
 Use the command line interface to access this functionality. See :ref:`clients` for more details.
 
@@ -39,8 +39,9 @@ To find and use the best GEMM kernel for a problem, follow these steps:
 
       hipblaslt-bench --api_method c -m 1024 -n 512 -k 1024 --lda 1024 --ldb 1024 --ldc 1024 --ldd 1024  --stride_a 0 --stride_b 0 --stride_c 0 --stride_d 0  --alpha 1.000000 --beta 1.000000 --transA N --transB N --batch_count 1  --a_type f16_r --b_type f16_r --c_type f16_r --d_type f16_r --scale_type f32_r --bias_type f32_r   --compute_type f32_r --algo_method index --solution_index 56073
 
-#. Set the environment variable ``HIPBLASLT_TUNING_FILE=<file_name>`` to tune and store the tuning result, which indicates the best solution
-   indices for the GEMM problems. The ``<file_name>`` points to the tuning file.
+#. Set the environment variable ``HIPBLASLT_TUNING_FILE=<file_name>`` and run the command. ``hipblaslt-bench`` then tunes the
+   problem with hipBLASLt's own tune mode, the tuner that ``HIPBLASLT_TUNING_MODE=tune`` uses (see `Runtime tuning`_), appends the
+   winner to ``<file_name>``, and times the winner.
 
    In the Bash shell, set the following environment variable:
 
@@ -48,13 +49,13 @@ To find and use the best GEMM kernel for a problem, follow these steps:
 
       export HIPBLASLT_TUNING_FILE=tuning.txt
 
-   Additionally, you can set the environment variable to specify that the solution found in the tuning stage is under the constraint of the max workspace size setting:
+   Candidates must fit in the workspace limit, which you can set with:
 
    .. code-block:: bash
 
       export HIPBLASLT_TUNING_USER_MAX_WORKSPACE=<value> (Default value is: 128 * 1024 * 1024)
 
-   The default settings for the following parameters in ``hipblaslt-bench`` are changed in the tuning environment.
+   These ``hipblaslt-bench`` options set how candidates are measured, and their defaults change in the tuning environment:
 
    .. code-block:: bash
 
@@ -63,15 +64,28 @@ To find and use the best GEMM kernel for a problem, follow these steps:
       --requested_solution <value>    (Default value is: -1)
       --rotating <value>              (Default value is: 512)
 
+   Each candidate gets ``--cold_iters`` untimed launches and then ``--iters`` timed ones, against ``--rotating`` megabytes of
+   rotating memory, with the instruction cache flushed between launches. ``--requested_solution -1`` measures
+   every kernel that can run the problem, and a positive value measures that many of the heuristic's top-ranked kernels. The
+   search has no time limit unless ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` sets one. A problem the file already holds is not
+   tuned again. Grouped GEMM and pointer-array batched problems are not tuned.
+
    After the tuning completes, the expected output is displayed as follows:
 
-   .. code-block:: bash
+   .. code-block:: none
 
-      ./hipblaslt-bench --api_method c -m 1024 -n 512 -k 1024 --lda 1024 --ldb 1024 --ldc 1024 --ldd 1024  --stride_a 0 --stride_b 0 --stride_c 0 --stride_d 0  --alpha 1.000000 --beta 1.000000 --transA N --transB N --batch_count 1  --a_type f16_r --b_type f16_r --c_type f16_r --d_type f16_r --scale_type f32_r --bias_type f32_r   --compute_type f32_r --algo_method index --solution_index 56073
+      tuning-cache: mode=tune path=tuning.txt load=not-found loaded=0
+      tuning-cache: tuning-start m=1024 n=512 k=1024 batch=1 trans=NN types=f16_r/f16_r; this call will block until it finishes
+      tuning-cache: tuning-done winner=56537 elapsed=78.9s persisted=yes
+      [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,swizzle_a,swizzle_b,activation_type,bias_vector,bias_type,aux_type,rotating_buffer,flush,use_gpu_timer,hipblaslt-Gflops,hipblaslt-GB/s,us
+          N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,0,0,none,0,f16_r,f16_r,512,1,0,66613.8,363.509,16.1189
+          --Solution index: 56537
+          --Solution name:  <solution_name>
+          --kernel name:    <kernel_name>
+      tuning-cache: summary shapes=1 matched=1 fellback=0 tuned=1 invalidated=0
 
-      Winner:
-      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,solution_index,kernel_name
-      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,66613.8,363.509,16.1189,56537,<kernel_name>
+   The ``tuning-cache`` lines go to standard error and the rest to standard output. The time printed is ``hipblaslt-bench``'s own
+   measurement of the winner, which can differ from the time the tuner recorded in the file.
 
 
 #. Set the environment variable ``HIPBLASLT_TUNING_OVERRIDE_FILE=<file_name>`` to load the tuning file and override
@@ -90,9 +104,11 @@ To find and use the best GEMM kernel for a problem, follow these steps:
 
       ./hipblaslt-bench --api_method c -m 1024 -n 512 -k 1024 --lda 1024 --ldb 1024 --ldc 1024 --ldd 1024  --stride_a 0 --stride_b 0 --stride_c 0 --stride_d 0  --alpha 1.000000 --beta 1.000000 --transA N --transB N --batch_count 1  --a_type f16_r --b_type f16_r --c_type f16_r --d_type f16_r --scale_type f32_r --bias_type f32_r   --compute_type f32_r --algo_method heuristic --requested_solution 1 --print_kernel_info
 
-      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,solution_index,kernel_name
-      [0]:
-      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,37575.2,205.047,28.5758,56537,<kernel_name>
+      [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,swizzle_a,swizzle_b,activation_type,bias_vector,bias_type,aux_type,rotating_buffer,flush,use_gpu_timer,hipblaslt-Gflops,hipblaslt-GB/s,us
+          N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,0,0,none,0,f16_r,f16_r,0,0,0,37575.2,205.047,28.5758
+          --Solution index: 56537
+          --Solution name:  <solution_name>
+          --kernel name:    <kernel_name>
 
 How tuned entries are validated
 ===============================
@@ -120,8 +136,10 @@ Runtime tuning
 ==============
 
 Instead of tuning offline with ``hipblaslt-bench``, hipBLASLt can benchmark candidate kernels itself
-the first time an application runs a GEMM shape and remember the winner. Runtime tuning is off until
-you ask for it, with two environment variables:
+the first time an application runs a GEMM shape and remember the winner. It is the tuner
+``hipblaslt-bench`` uses with ``HIPBLASLT_TUNING_FILE``, so the two pick winners the same way.
+
+Runtime tuning is off until you ask for it, with two environment variables:
 
 .. code-block:: bash
 
@@ -131,7 +149,6 @@ you ask for it, with two environment variables:
 ``tune`` benchmarks supported candidates for each shape it has not seen before, at that shape's first
 matmul, and appends the winner to the cache file. ``cache`` only replays what the file already
 contains, validating each entry as described above. ``off`` is the default and changes nothing.
-Either mode can also read a file written by ``hipblaslt-bench``.
 
 Which kernel a matmul launches depends on whether it passes an algorithm. A call to
 ``hipblasLtMatmul`` with an explicit ``algo`` always launches that algorithm: the cache serves such a
@@ -142,15 +159,17 @@ either way, but only a call with ``algo=nullptr`` launches it straight away. A c
 heuristic before the shape was tuned, and reuses that algorithm, keeps launching it until it queries
 the heuristic again.
 
-Rows written by tune mode carry a schema version and the complete problem key, and every column of
-such a row is required: a row with a missing or malformed value, including one a crash cut short, is
-ignored. Strides a problem does not use, such as the batch strides of a single batch or the E strides
-of an epilogue without an E tensor, are recorded as zero, and so is a scalar or vector scaling format
-when neither ``A`` nor ``B`` is scaled, so a problem matches its own entry whether it arrives through
-the C API or the C++ extension. Rows without a schema version, written by ``hipblaslt-bench`` or by
-hand, keep the historical matching: they distinguish transpose, shape and the principal datatypes,
-but not leading dimensions, batch strides, epilogue details or device identity. Do not put problems
-that differ only in one of those omitted fields in such a file.
+``hipblaslt-bench`` writes its tuning file with the same tuner, so a cache file and an offline tuning
+file hold the same rows and either can be read as the other. These rows include a schema version and
+use the complete problem key, and every column of such a row is required: a row with a missing or
+malformed value, including one a crash cut short, is ignored. Strides a problem does not use, such as
+the batch strides of a single batch or the E strides of an epilogue without an E tensor, are recorded
+as zero, and so is a scalar or vector scaling format when neither ``A`` nor ``B`` is scaled, so a
+problem matches its own entry whether it arrives through the C API or the C++ extension. Rows without
+a schema version, written by an older ``hipblaslt-bench`` or by hand, retain the historical matching
+behavior: they distinguish transpose, shape and the principal datatypes, but not leading dimensions,
+batch strides, epilogue details or device identity. Do not put problems that differ only in one of
+those omitted fields in such a file.
 
 ``HIPBLASLT_TUNING_CACHE_PATH`` and ``HIPBLASLT_TUNING_OVERRIDE_FILE`` are mutually exclusive. With a
 tuning mode set, only the cache is consulted and the override file is ignored.

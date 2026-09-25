@@ -73,9 +73,9 @@ For more information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-u
       - **Value**
 
     * - | ``HIPBLASLT_TUNING_FILE``
-        | Specifies file to store tuning results with best solution indices for GEMM problems.
+        | Makes ``hipblaslt-bench`` tune each problem it runs with hipBLASLt's tune mode and append the winner to this file.
       - | Path to tuning file (for example, ``tuning.txt``)
-        | File stores optimal kernel indices for reuse
+        | Read back with ``HIPBLASLT_TUNING_OVERRIDE_FILE`` or ``HIPBLASLT_TUNING_CACHE_PATH``
 
     * - | ``HIPBLASLT_TUNING_OVERRIDE_FILE``
         | Specifies file to load tuning results and override default kernel selection.

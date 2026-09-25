@@ -4798,6 +4798,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             for(int i = 0; i < returnedAlgoCount; i++)
                 workspace_size = std::max(workspace_size, heuristicResult[i].workspaceSize);
             CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+
+            // The library searches only kernels that fit the workspace it is
+            // handed, so tuning hands it the limit rather than the pick's need.
+            if(hipblaslt_bench_options::tuning_pass())
+                workspace_size = max_workspace_size;
         }
         else
         {
@@ -6145,29 +6150,15 @@ void testing_matmul_with_bias(const Arguments& arg,
         e_c_type, e_d_type, e_compute_type, e_scaleA, e_scaleB, e_scaleC, e_scaleD, e_amaxD,      \
         e_swizzle_a, e_swizzle_b, e_activation_type, e_bias_vector, e_bias_type, e_aux_type
 
-            const char* tuningEnv     = getenv("HIPBLASLT_TUNING_FILE");
-            int32_t     solutionIndex = ((tuningEnv && heuristicResult.size() == 1)
-                                     || (arg.print_solution_found && arg.print_kernel_info))
+            int32_t     solutionIndex = (arg.print_solution_found && arg.print_kernel_info)
                                             ? hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
                                             : -1;
             std::string solutionName  = "";
             std::string kernelName    = "";
-            std::string archName      = "";
-            std::string cuNum         = "";
 
-            // The tuning file has no grouped GEMM key, so a grouped winner would
-            // be read back as a single GEMM of the same shape.
-            if(tuningEnv && !do_grouped_gemm && heuristicResult.size() == 1)
+            if(arg.print_solution_found)
             {
-                archName = deviceProps.gcnArchName;
-                cuNum    = std::to_string(deviceProps.multiProcessorCount);
-            }
-
-            if(arg.print_solution_found || tuningEnv)
-            {
-                // A tuning run records the winner's kernel name, which comes
-                // from best_k_name below.
-                if(arg.print_kernel_info || tuningEnv)
+                if(arg.print_kernel_info)
                 {
                     if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                     {
@@ -6181,13 +6172,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                             solutionName = groupedGemmVec[0].getSolutionName();
                             kernelName   = groupedGemmVec[0].getKernelName();
                         }
-
-                        // The ext accessor joins every kernel the solution
-                        // launches with "; ". Replay compares against the main
-                        // kernel's name alone, which the algo accessor returns.
-                        if(tuningEnv)
-                            kernelName = hipblaslt_ext::getKernelNameFromAlgo(
-                                handle, heuristicResult[sol].algo);
                     }
                     else
                     {
@@ -6204,8 +6188,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                     solutionIndex,
                     solutionName,
                     kernelName,
-                    archName,
-                    cuNum,
                     arg,
                     (uint32_t)tuningVec[heuristicTuningIndex[sol]].getSplitK(),
                     (uint32_t)tuningVec[heuristicTuningIndex[sol]].getWgm(),
@@ -6238,23 +6220,14 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(heuristicResult.size() > 1)
         {
-            const char* tuningEnv = getenv("HIPBLASLT_TUNING_FILE");
             int32_t     solutionIndex
-                = (tuningEnv || arg.print_kernel_info)
+                = arg.print_kernel_info
                       ? hipblaslt_ext::getIndexFromAlgo(heuristicResult[best_sol].algo)
                       : -1;
             std::string solutionName = "";
             std::string kernelName   = "";
-            std::string archName     = "";
-            std::string cuNum        = "";
-            if(tuningEnv && !do_grouped_gemm)
-            {
-                archName = deviceProps.gcnArchName;
-                cuNum    = std::to_string(deviceProps.multiProcessorCount);
-            }
 
-            // Same reason as the per-candidate loop above.
-            if(arg.print_kernel_info || tuningEnv)
+            if(arg.print_kernel_info)
             {
                 solutionName = best_s_name;
                 kernelName   = best_k_name;
@@ -6268,8 +6241,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                 solutionIndex,
                 solutionName,
                 kernelName,
-                archName,
-                cuNum,
                 arg,
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getSplitK(),
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getWgm(),
