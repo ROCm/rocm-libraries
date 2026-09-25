@@ -130,6 +130,9 @@ jobs:
         if: ${{ github.event_name == 'push' || inputs.run_hipblaslt }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
+          # Set on the test step, mirroring the nightly;
+          # StreamKMultiStream.ConcurrentStreamsDoNotDeadlock wedges at iteration 0 without it.
+          HSA_HOTSWAP_DISABLE: "1"
         run: |
           set -o pipefail
           export LD_LIBRARY_PATH="/opt/rocm/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
@@ -139,22 +142,12 @@ jobs:
           export HIPBLASLT_TEST_TIMEOUT=3600
           BIN=build/release/clients/hipblaslt-test
           LOG="$GITHUB_WORKSPACE/test_results/hipblaslt_test.log"
-          # Isolate the concurrent-streams StreamK test (hotswap off) when the filter
-          # selects it; the rest runs normally. Drop once the StreamK deadlock is fixed.
-          DL='StreamKMultiStream.ConcurrentStreamsDoNotDeadlock'
-          USER_FILTER=()
-          [ -n "$GTEST_FILTER_ARG" ] && USER_FILTER=(--gtest_filter="$GTEST_FILTER_ARG")
-          rc=0
-          if "$BIN" --gtest_list_tests "${USER_FILTER[@]}" 2>/dev/null | grep -q 'ConcurrentStreamsDoNotDeadlock'; then
-            if   [[ "$GTEST_FILTER_ARG" == *-* ]]; then REST="${GTEST_FILTER_ARG}:*${DL}*"
-            elif [ -n "$GTEST_FILTER_ARG" ];       then REST="${GTEST_FILTER_ARG}-*${DL}*"
-            else                                        REST="-*${DL}*"; fi
-            HSA_HOTSWAP_DISABLE=1 "$BIN" --gtest_filter="*${DL}*" 2>&1 | tee    "$LOG" || rc=1
-            "$BIN" --gtest_filter="$REST" 2>&1 | tee -a "$LOG" || rc=1
-          else
-            "$BIN" "${USER_FILTER[@]}" 2>&1 | tee "$LOG" || rc=1
-          fi
-          exit $rc
+          # Cleanup CI logs.
+          scrub() { sed -u -E '/Query[[:space:]]+device/d; /Device[[:space:]]+ID[[:space:]]+[0-9]/d; /PCI[[:space:]]+Chip[[:space:]]+ID/d; /GB[[:space:]]+memory/d; /SCLK|MCLK/d; /compute[[:space:]]+capability/d; /maxGridDimX/d; /sharedMemPerBlock/d; /maxThreadsPerBlock/d; /warpSize/d'; }
+          FILTER=()
+          [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
+          # Full suite in one pass.
+          "$BIN" "${FILTER[@]}" 2>&1 | scrub | tee "$LOG"
 
       - name: Run TensileLite common tests (fresh client)
         timeout-minutes: 240
