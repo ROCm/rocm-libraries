@@ -125,7 +125,7 @@
     "tensilelite/tensilelite_logic/parse_arguments.py": 100.0,
     "tensilelite/tensilelite_logic/run.py": 89.9,
     "tensilelite/tensilelite_logic/valid_chip_id.py": 100.0,
-    "tensilelite/tensilelite_logic/ValidCorpusConsistency.py": 95.35,
+    "tensilelite/tensilelite_logic/valid_corpus_consistency.py": 95.35,
     "tensilelite/tensilelite_logic/valid_matrix_instruction.py": 100.0,
     "tensilelite/tensilelite_logic/valid_work_group.py": 100.0,
     "tensilelite/tensilelite_logic/valid_work_group_mapping_xcc.py": 100.0,

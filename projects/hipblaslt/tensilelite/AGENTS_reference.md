@@ -46,7 +46,7 @@ make -j8
 
 ```bash
 tox -e lint          # flake8 (pyflakes errors only, E/W ignored)
-tox -e format        # black (line-length=100) on Common/, TensileCreateLibrary/, Utilities/Decorators/
+tox -e format        # black (line-length=100) on Common/, tensilelite_create_library/, Utilities/Decorators/
 tox -e isort         # isort (black profile) on same directories
 ```
 
