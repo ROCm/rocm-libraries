@@ -54,6 +54,7 @@ set(ROCALUTION_TEST_SOURCES
 # AMG
   test_pairwise_amg.cpp
   test_ruge_stueben_amg.cpp
+  test_rsamg_extpi_host_fallback.cpp
   test_saamg.cpp
   test_saamg_host_fallback.cpp
   test_uaamg.cpp

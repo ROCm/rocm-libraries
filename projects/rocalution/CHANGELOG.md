@@ -1,6 +1,11 @@
 # Changelog for rocALUTION
 
-Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
+Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
+
+## (Unreleased) rocALUTION 4.1.1
+
+### Resolved issues
+* Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
 
 ## (Unreleased) rocALUTION 4.1.1
 
