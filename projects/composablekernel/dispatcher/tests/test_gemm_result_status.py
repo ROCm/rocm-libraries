@@ -6,18 +6,20 @@
 """
 CPU-only checks for the explicit "unsupported" run status.
 
-The ctypes run() entry point returns -1 when the selected kernel rejects the
-problem (IsSupportedArgument throws inside the dispatcher). That is not a
+The ctypes run() entry point returns -3 when the selected kernel rejects the
+problem (IsSupportedArgument throws "... not supported ..." inside run()). That is not a
 numerical failure: the kernel never launched. GemmResult and friends expose it
 as ``unsupported`` (``success`` stays False for backward compatibility), and the
 search-space sweep counts it as a skip without verifying the output.
 
+-1 (host/HIP/launch error) and -2 (no suitable kernel) stay real failures.
 The ctypes library is mocked, so no GPU or built .so is needed.
 
 Run: python3 -m pytest tests/test_gemm_result_status.py -v
 """
 
 import argparse
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -26,6 +28,8 @@ from unittest import mock
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
+BINDINGS_DIR = DISPATCHER_DIR / "bindings" / "ctypes"
+STATUS_ERROR = -1
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -53,7 +57,7 @@ def _result(cls, status):
 
 class TestResultStatus(unittest.TestCase):
     def test_status_values(self):
-        self.assertEqual((STATUS_OK, STATUS_UNSUPPORTED, STATUS_NO_KERNEL), (0, -1, -2))
+        self.assertEqual((STATUS_OK, STATUS_UNSUPPORTED, STATUS_NO_KERNEL), (0, -3, -2))
 
     def test_properties(self):
         for cls in (GemmResult, GroupedGemmResult, MultiDGemmResult):
@@ -66,9 +70,25 @@ class TestResultStatus(unittest.TestCase):
                 self.assertFalse(rej.success, "success must stay False")
                 self.assertTrue(rej.unsupported)
 
-                nk = _result(cls, STATUS_NO_KERNEL)
-                self.assertFalse(nk.success)
-                self.assertFalse(nk.unsupported)
+                for code in (STATUS_ERROR, STATUS_NO_KERNEL):
+                    bad = _result(cls, code)
+                    self.assertFalse(bad.success)
+                    self.assertFalse(bad.unsupported)
+
+    def test_bindings_return_unsupported_code(self):
+        # Each binding feeding these results maps a "not supported" launch
+        # exception to STATUS_UNSUPPORTED, not to the error/no-kernel codes.
+        for lib in (
+            "gemm_ctypes_lib.cpp",
+            "grouped_gemm_ctypes_lib.cpp",
+            "multi_d_gemm_ctypes_lib.cpp",
+            "gemm_multi_abd_ctypes_lib.cpp",
+        ):
+            with self.subTest(lib=lib):
+                src = (BINDINGS_DIR / lib).read_text()
+                tail = src[src.index('find("not supported")') :]
+                first_return = re.search(r"return\s+(-?\d+)\s*;", tail)
+                self.assertEqual(first_return.group(1), "-3", lib)
 
 
 def _fake_runner(status, time_ms=0.0):
@@ -107,7 +127,7 @@ class TestRunnerMockedLib(unittest.TestCase):
 
 
 class TestSearchSpaceCountsSkip(unittest.TestCase):
-    """The sweep loop counts status -1 as a skip and never verifies it."""
+    """The sweep loop counts STATUS_UNSUPPORTED as a skip and never verifies it."""
 
     @classmethod
     def setUpClass(cls):
@@ -168,9 +188,11 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
         self.assertEqual(verified, ["k0"], "unsupported kernel must not be verified")
 
     def test_real_failure_still_fails(self):
-        rc, verified = self._run([STATUS_OK, STATUS_NO_KERNEL])
-        self.assertEqual(rc, 1)
-        self.assertEqual(verified, ["k0"])
+        for code in (STATUS_ERROR, STATUS_NO_KERNEL):
+            with self.subTest(status=code):
+                rc, verified = self._run([STATUS_OK, code])
+                self.assertEqual(rc, 1)
+                self.assertEqual(verified, ["k0"])
 
     def test_all_unsupported_is_not_green(self):
         rc, verified = self._run([STATUS_UNSUPPORTED, STATUS_UNSUPPORTED])

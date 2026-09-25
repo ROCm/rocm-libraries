@@ -216,7 +216,9 @@ class BatchedGemmKernelBuilder(GemmKernelBuilder):
             self._bool_from_str(trait_parts[5]),
         )
 
-        generated_name, _ = self._generate_kernel_instance(tile_config, trait_combo)
+        generated_name, _ = self._generate_kernel_instance(
+            tile_config, trait_combo, validate=True
+        )
         if kernel_name and kernel_name != generated_name:
             raise ValueError(
                 f"Kernel name mismatch: expected {kernel_name}, generated {generated_name}"

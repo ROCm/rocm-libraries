@@ -266,6 +266,33 @@ class GemmKernelBuilder:
     def _uses_persistent_trait(self):
         return self.kernel_name_prefix != "batched_gemm"
 
+    def _check_instance_valid(self, tile_config, trait_combo):
+        """Run the --list_kernels trait/tile validators on one --gen_single instance."""
+        pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
+            self._normalize_trait_combo(trait_combo)
+        )
+        if not is_trait_combination_valid(
+            pipeline,
+            epilogue,
+            scheduler,
+            persistent,
+            self.kernel_name_prefix,
+            self.layout,
+            pad_m,
+            pad_n,
+            pad_k,
+        ):
+            raise ValueError(
+                f"unsupported trait combination {pipeline}-{epilogue}-{scheduler}"
+                f" (pad {pad_m}/{pad_n}/{pad_k}, persistent {persistent})"
+            )
+        keys = ("tile", "warp", "warp_tile")
+        dims = [tile_config[f"{k}_{d}"] for k in keys for d in "mnk"]
+        if not self._validate_tile_config(*dims, pipeline):
+            raise ValueError(
+                f"tile config {tile_config} is not valid for {pipeline} on {self.gpu_target}"
+            )
+
     def _normalize_trait_combo(self, trait_combo):
         if len(trait_combo) == 7:
             return trait_combo
@@ -575,8 +602,9 @@ class GemmKernelBuilder:
                 )
         return combinations
 
-    def _generate_kernel_instance(self, tile_config, trait_combo):
-        """Generate a single kernel instance"""
+    def _generate_kernel_instance(self, tile_config, trait_combo, validate=False):
+        """Generate a single kernel instance; validate=True (--gen_single) rejects
+        tile/trait combos that --list_kernels would not emit."""
 
         k_block_per_cu = self.config.get("k_block_per_cu", 1)
 
@@ -619,6 +647,8 @@ class GemmKernelBuilder:
                 "comp_tdm_v2": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
             }
             self._check_pipeline_allowed_for_op(pipeline, epilogue, pad_m, pad_n, pad_k)
+            if validate:
+                self._check_instance_valid(tile_config, trait_combo)
         elif self.kernel_name_prefix == "gemm_preshuffle":
             # Map pipeline names to the correct pipeline implementation
             pipeline_impl_map = {

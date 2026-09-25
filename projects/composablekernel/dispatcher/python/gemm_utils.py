@@ -661,13 +661,13 @@ class GroupedGemmProblem:
 
 
 # ctypes run() status codes (see bindings/ctypes/*_ctypes_lib.cpp).
-# STATUS_UNSUPPORTED (-1) is the code the dispatcher returns when the selected
-# kernel rejects the problem (IsSupportedArgument throws inside run()); the
-# same code also covers host-side setup errors, so callers should treat it as
-# "not run" (skip, no verification) rather than as a numerical failure.
+# STATUS_UNSUPPORTED (-3) is returned only when the selected kernel rejects the
+# problem (IsSupportedArgument throws "... not supported ..." inside run());
+# callers treat it as "not run" (skip, no verification). Every other negative
+# code (-1 host/HIP/launch error, -2 no suitable kernel) is a real failure.
 STATUS_OK = 0
-STATUS_UNSUPPORTED = -1
 STATUS_NO_KERNEL = -2
+STATUS_UNSUPPORTED = -3
 
 
 @dataclass
