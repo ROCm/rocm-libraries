@@ -10554,6 +10554,9 @@ class KernelWriterAssembly(KernelWriter):
           module.add(assignment.persistentMulticastZeroIterClusterWait(self, kernel))
         if self.states.doShadowInit:
           shadowName = Label.getFormatting("ShadowInitStart")
+          if kernel.get("StreamKClusterMulticast", False):
+            assignment = Component.WorkAssignment.find(self)
+            module.add(assignment.persistentMulticastZeroIterClusterWait(self, kernel))
           module.add(SCBranchSCC1(labelName=shadowName, \
               comment="skip to ShadowInitStart iter b/c numIter==0"))
         else:
