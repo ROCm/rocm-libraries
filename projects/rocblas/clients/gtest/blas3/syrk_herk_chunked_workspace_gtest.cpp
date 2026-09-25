@@ -48,6 +48,7 @@
 // pattern because it tests workspace infrastructure plumbing rather than
 // general BLAS correctness, and does not need parameterized matrix dimensions.
 
+#include "blas3/rocblas_syrk_herk.hpp"
 #include "client_utility.hpp"
 #include "device_batch_vector.hpp"
 #include "device_vector.hpp"
@@ -55,8 +56,6 @@
 #include "rocblas.hpp"
 #include "rocblas_test.hpp"
 #include <algorithm>
-#include <cstdlib>
-#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -126,74 +125,25 @@ namespace
     // loop; c_budget is the workspace byte cap.
     constexpr rocblas_int c_gemm_stride = ((1 << 16) - 1) & ~0xf; // 65520
 
-    // Lowers the library's workspace budget for the duration of a test.
+    // Workspace budget these tests run the library under.
     //
     // At the shipped budget every shape a test can afford fits in one chunk, so
-    // the chunk loop body would run exactly once and none of the multi-chunk
-    // indexing would be exercised. Forcing a split by growing the problem instead
-    // would need several GB of C.
-    class scoped_workspace_budget
+    // the chunk loop body would run once and none of the multi-chunk indexing
+    // would be exercised; forcing a split by growing the problem instead needs
+    // several GB of C. This value is two gemm_64 strides' worth of the widest
+    // element type, chosen so that at n=2 and the batch counts below every type
+    // gets a chunk both larger than gridDim.z can address (so the kernel
+    // sweeps) and smaller than the batch count (so the host loop runs several
+    // chunks). Those two regimes are otherwise disjoint.
+    constexpr size_t c_budget = size_t(2) * 65520 * 16; // 2096640
+
+    // The budget lives on the handle, so a size query and the launch that
+    // consumes its result always agree. Apply it immediately after constructing
+    // a handle and before any query on it.
+    static void set_test_budget(rocblas_handle handle)
     {
-    public:
-        explicit scoped_workspace_budget(size_t bytes)
-        {
-            const char* current = std::getenv(c_env);
-            m_had_previous      = current != nullptr;
-            if(m_had_previous)
-                m_previous = current;
-
-            set_env(std::to_string(bytes).c_str());
-        }
-
-        ~scoped_workspace_budget()
-        {
-            if(m_had_previous)
-                set_env(m_previous.c_str());
-            else
-                unset_env();
-        }
-
-        scoped_workspace_budget(const scoped_workspace_budget&) = delete;
-        scoped_workspace_budget& operator=(const scoped_workspace_budget&) = delete;
-
-    private:
-        static constexpr const char* c_env = "ROCBLAS_INTERNAL_SYRK_HERK_WORKSPACE_MAX_BYTES";
-
-        static void set_env(const char* value)
-        {
-#ifdef _WIN32
-            _putenv_s(c_env, value);
-#else
-            setenv(c_env, value, 1);
-#endif
-        }
-
-        static void unset_env()
-        {
-#ifdef _WIN32
-            _putenv_s(c_env, "");
-#else
-            unsetenv(c_env);
-#endif
-        }
-
-        bool        m_had_previous = false;
-        std::string m_previous;
-    };
-
-    // The two budgets exercise disjoint regimes, so the numerical battery runs
-    // under both:
-    //
-    //   c_budget       small enough that the affordable shapes split into many
-    //                  chunks, exercising the host chunk loop and the
-    //                  batch_offset arithmetic. chunk_size stays well under the
-    //                  grid ceiling, so the kernel never sweeps.
-    //   c_sweep_budget large enough to hold every batch in one chunk, making
-    //                  chunk_size exceed what gridDim.z can address, which is
-    //                  the only way to reach the kernel's grid-stride sweep with
-    //                  a non-empty triangle.
-    constexpr size_t c_budget       = 4096;
-    constexpr size_t c_sweep_budget = size_t(16) * 1024 * 1024;
+        handle->syrk_herk_workspace_max_bytes = c_budget;
+    }
 
     // Port of rocblas_syrk_herk_chunk_size. Kept deliberately literal so a change
     // to the production rule shows up here as a test failure rather than silently
@@ -463,10 +413,11 @@ namespace
     template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
     static void run_size_queries(StridedFn strided_api, BatchedFn batched_api)
     {
-        scoped_workspace_budget budget_guard(c_budget);
 
         rocblas_local_handle handle;
-        const rocblas_int    k = c_k;
+
+        set_test_budget(handle);
+        const rocblas_int k = c_k;
 
         // A size query allocates nothing, so this sweeps shapes far larger than
         // the correctness tests can afford. n is varied as well as batch_count
@@ -534,10 +485,10 @@ namespace
     {
         using S = scalar_t<T, K>;
 
-        scoped_workspace_budget budget_guard(c_budget);
-
         rocblas_local_handle handle;
-        const rocblas_int    n = c_n, k = c_k;
+
+        set_test_budget(handle);
+        const rocblas_int n = c_n, k = c_k;
 
         size_t queried = 0;
         ASSERT_TRUE(
@@ -600,10 +551,10 @@ namespace
     {
         using S = scalar_t<T, K>;
 
-        scoped_workspace_budget budget_guard(c_budget);
-
         rocblas_local_handle handle;
-        const rocblas_int    n = c_n, k = c_k;
+
+        set_test_budget(handle);
+        const rocblas_int n = c_n, k = c_k;
 
         size_t queried = 0;
         ASSERT_TRUE(
@@ -662,9 +613,8 @@ namespace
     template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
     static void run_canaries(StridedFn strided_api, BatchedFn batched_api)
     {
-        // Several chunks, several chunks plus a short tail, and the degenerate
-        // single-batch case.
-        for(rocblas_int bc : {131070, 65539, 1})
+        // Several chunks, a single chunk, and the degenerate single-batch case.
+        for(rocblas_int bc : {600000, 65539, 1})
         {
             run_strided_canary<T, K>(strided_api, bc, rocblas_fill_lower);
             run_batched_canary<T, K>(batched_api, bc, rocblas_fill_lower);
@@ -781,13 +731,13 @@ namespace
     }
 
     template <typename T, op_kind K, typename ApiFunc>
-    static void run_strided_numerical(ApiFunc api, rocblas_int batch_count, size_t budget)
+    static void run_strided_numerical(ApiFunc api, rocblas_int batch_count)
     {
         using S = scalar_t<T, K>;
 
-        scoped_workspace_budget budget_guard(budget);
-
         rocblas_local_handle handle;
+
+        set_test_budget(handle);
         // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
         // is false and the call never reaches the chunked workspace path at all.
         const rocblas_int n = c_n, k = c_k;
@@ -844,13 +794,13 @@ namespace
     }
 
     template <typename T, op_kind K, typename ApiFunc>
-    static void run_batched_numerical(ApiFunc api, rocblas_int batch_count, size_t budget)
+    static void run_batched_numerical(ApiFunc api, rocblas_int batch_count)
     {
         using S = scalar_t<T, K>;
 
-        scoped_workspace_budget budget_guard(budget);
-
         rocblas_local_handle handle;
+
+        set_test_budget(handle);
         // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
         // is false and the call never reaches the chunked workspace path at all.
         const rocblas_int n = c_n, k = c_k;
@@ -921,20 +871,15 @@ namespace
     template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
     static void run_numerical(StridedFn strided_api, BatchedFn batched_api)
     {
-        // 65536 puts a single batch in the second chunk, so its local index is
-        // always 0 and a local/absolute mix-up there is invisible. 131070 gives a
-        // second chunk with a full set of live slots and a non-zero batch offset,
-        // which is the only shape where both indices are simultaneously non-trivial.
-        for(rocblas_int bc : {65536, 131070})
+        // 65536 fits one chunk at the test budget, so it covers the single-pass
+        // case where the arguments are identical to the unchunked code, while
+        // still being large enough that the kernel sweeps. 600000 splits into
+        // several chunks for every element type, so the host loop, a non-zero
+        // batch_offset and the sweep are all live at once.
+        for(rocblas_int bc : {65536, 600000})
         {
-            // c_budget splits into many chunks; c_sweep_budget keeps it to one
-            // chunk too large for gridDim.z, which is the only way the kernel's
-            // grid-stride sweep runs over a non-empty triangle.
-            for(size_t budget : {c_budget, c_sweep_budget})
-            {
-                run_strided_numerical<T, K>(strided_api, bc, budget);
-                run_batched_numerical<T, K>(batched_api, bc, budget);
-            }
+            run_strided_numerical<T, K>(strided_api, bc);
+            run_batched_numerical<T, K>(batched_api, bc);
         }
     }
 
@@ -945,9 +890,9 @@ namespace
     {
         using S = scalar_t<T, K>;
 
-        scoped_workspace_budget budget_guard(c_budget);
-
         rocblas_local_handle handle;
+
+        set_test_budget(handle);
         // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
         // is false and the call never reaches the chunked workspace path at all.
         const rocblas_int n = 1, k = c_k;

@@ -114,11 +114,15 @@ rocblas_status rocblas_internal_syrk_herk_template(rocblas_handle    handle,
         // than the copy kernel's larger gridDim.z ceiling, so a full chunk lowers to
         // exactly one GEMM launch instead of a 65520-batch launch plus a 15-batch
         // remainder.  Only the final partial chunk is short.
+        // Computed once: the workspace was sized for exactly this many batches,
+        // so it must not vary across iterations.
+        const rocblas_int chunk_size
+            = rocblas_syrk_herk_chunk_size(handle, n, batch_count, sizeof(T));
+
         rocblas_int batch_off = 0;
         while(batch_off < batch_count)
         {
-            rocblas_int chunk = std::min(batch_count - batch_off,
-                                         rocblas_syrk_herk_chunk_size(n, batch_count, sizeof(T)));
+            rocblas_int chunk = std::min(batch_count - batch_off, chunk_size);
 
             // Save: copy triangular region of C into workspace
             if(rocblas_fill_upper == uplo)
