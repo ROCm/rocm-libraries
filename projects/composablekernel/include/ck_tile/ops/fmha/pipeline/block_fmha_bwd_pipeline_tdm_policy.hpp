@@ -8,31 +8,15 @@
 
 namespace ck_tile {
 
-#ifndef CK_TILE_FMHA_BWD_PREFETCH_QDO
-#define CK_TILE_FMHA_BWD_PREFETCH_QDO 1
-#endif
-
 // Depth of the Q/dO/LSE/D software pipeline, in tiles. 2 reproduces the
-// ping-pong exactly, byte for byte; 3 leaves one tile in flight across every
-// wait and 4 leaves two. The hot loop is unrolled by this factor so the slot
-// index is a compile-time constant; the wait count falls out of the depth as
+// ping-pong exactly; 3 leaves one tile in flight across every wait and 4 leaves
+// two. The hot loop is unrolled by this factor so the slot index is a
+// compile-time constant, and the wait count falls out of the depth as
 // kTdmPerTile * (slots - 2) -- see the derivation in the pipeline.
 //
-// Depth alone is not the lever. Measured on gfx1250, b2h8 s4096 d128 bf16
-// nomask, arm order rotated, causal flat as the control:
-//
-//     slots=2  0.7124 ms  (baseline)
-//     slots=3  0.7244 ms  -1.66%
-//     slots=4  0.8040 ms  -11.39%, and run-to-run spread widens 1% -> 8.6%
-//
-// Default is nevertheless 3, because depth pairs with
-// CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE: that fold frees `s_wait_xcnt` but strips
-// the address VALU that was covering the TDM transfer, and the extra in-flight
-// tile covers it instead. Neither change wins alone (+0.2% and +1.1%); together
-// they are -2.18% nomask with causal neutral (n=8 interleaved, all valid).
-// Re-measured 2026-09-15 on b07-3; see the comment on DQ_STATIC_STRIDE in
-// kernel/fmha_bwd_kernel.hpp for the ATT stall counters. slots=4 was not
-// re-tested against the fold.
+// Depth only pays paired with the static dQ stride in fmha_bwd_kernel.hpp:
+// that fold strips the address VALU which was covering the TDM transfer, and
+// the extra in-flight tile covers it instead. Neither wins alone.
 #ifndef CK_TILE_FMHA_BWD_QDO_SLOTS
 #define CK_TILE_FMHA_BWD_QDO_SLOTS 3
 #endif
@@ -40,21 +24,17 @@ namespace ck_tile {
 // Depth for masked instances, which do not benefit: the per-pixel mask VALU
 // already covers the transfer, their Q loop is half as long, and on the batch
 // path mirror tile pairing has doubled the body so any unroll lands on twice as
-// much code. 0 means "use the value above"; 2 leaves them on the ping-pong the
-// pipeline always ran, which at depth 2 is a single body copy.
+// much code. 0 means "use the value above".
 #ifndef CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED
 #define CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED 2
 #endif
 
-// Issue the dQ atomic one whole cache line at a time.
+// The dQ atomic is issued one whole 128 B cache line at a time.
 //
 // A wave32 wmma C fragment gives lanes 0-15 row r and lanes 16-31 row r+8, each
-// 16 columns wide. At fp32 that is two 64 B pieces of two different rows, so a
-// single buffer_atomic_add_f32 straddles two 128 B lines and the kernel issues
-// exactly twice the dQ atomic L2 requests the arithmetic needs (measured
-// 16.08 M against a 8.39 M floor; aiter sits on the floor).
-//
-// The fix has two halves, and both live behind this macro:
+// 16 columns wide. At fp32 that is two 64 B pieces of two different rows, so an
+// unmodified buffer_atomic_add_f32 straddles two cache lines and doubles the dQ
+// atomic L2 request count. Two changes fix it, and neither works alone:
 //   * gemm_4 packs its N iterations against the warp index rather than across
 //     it, so one warp owns 32 adjacent dQ columns instead of two 16-column
 //     blocks 64 apart (GetSGradKTBlockGemm, MakeKTRegBlockDescriptor,
@@ -62,32 +42,18 @@ namespace ck_tile {
 //   * the pipeline folds each N-adjacent register pair with
 //     v_permlane16_swap_b32 and stores through MakeQGradStoreBlockDistribution,
 //     which describes the folded layout: one row, 32 columns, 128 B.
-#ifndef CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
-#define CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE 1
-#endif
-
-// Second half only: set this to 0 with the above at 1 to get the packed gemm_4
-// without the fold, which prices the operand re-mapping on its own. Not a
-// shipping configuration -- it has all of the cost and none of the benefit.
-#ifndef CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD
-#define CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
-#endif
 
 // Policy for the bwd pipeline that keeps the dK and dV accumulators in LDS
 // instead of registers.
 //
-// Why: on gfx1250 (wave32, 1024 VGPRs/SIMD) the two fp32 accumulators are
-// kN0*headdim floats each, i.e. kN0*headdim/kBlockSize per lane. At kN0=64,
-// headdim=128, kBlockSize=128 that is 64 VGPRs apiece -- 128 of the 597 the
-// kernel needs, which is exactly what pushes it from 2 waves/SIMD down to 1.
-// Measured: headdim 64 -> 377 VGPRs, occupancy 2, 226 TFLOPS;
-//           headdim 128 -> 597 VGPRs, occupancy 1, 120 TFLOPS.
-// LDS is nearly free here (36 KiB of the 320 KiB a gfx1250 workgroup may take),
-// so the accumulators are the one large thing that can move without cost.
+// Why: the two fp32 accumulators are kN0*headdim floats each, i.e.
+// kN0*headdim/kBlockSize VGPRs per lane -- at kN0=64, headdim=128 that is 64
+// apiece, enough to push the kernel from 2 waves/SIMD down to 1. LDS is nearly
+// free here, so the accumulators are the one large thing that can move.
 //
 // Everything else is inherited unchanged; this policy only adds the two
 // accumulator descriptors and re-does the smem budget.
-struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
+struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
 {
     // Padding, in floats, added to the leading dimension of each accumulator.
     //
@@ -122,7 +88,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // XOR swizzling is not an option for these four: TDM writes a plain box
     // without going through the descriptor, so a reader-side XOR would have
     // nothing to cancel against. dS, which IS written through its descriptor by
-    // store_tile, keeps its XOR -- measured better there than padding.
+    // store_tile, keeps its XOR instead.
     static constexpr index_t kOperandLdsPad = 8;
 
     // ---- K: one plain box, K^T read back by ds_load_tr ----------------------
@@ -137,9 +103,6 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // pattern, so a descriptor-level XOR has no opportunity to cancel the way it
     // does on the per-element load_tile path. That is also exactly what TDM
     // needs, so the two changes want the same layout.
-    //
-    // Verified on gfx1250 against the shuffle path as reference: both produce
-    // K^T with extent [0..kQKHeaddim-1]x[0..kN0-1] and zero mismatches.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsWriteBlockDescriptor()
     {
@@ -169,7 +132,6 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         return 0;
     }
 
-#if CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
     // gemm_4 with PackMNIter on, which is the block gemm's own supported way of
     // ordering the outer N dimension <NWarp, NIterPerWarp> instead of
     // <NIterPerWarp, NWarp>.
@@ -221,7 +183,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     }
 
     // The dQ store layout produced by folding the gemm_4 C fragment with
-    // v_permlane16_swap_b32; see CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE above.
+    // v_permlane16_swap_b32; see the dQ atomic note at the top of this file.
     //
     // Before the fold, register (m_iter, n_iter, e) holds
     //     M = (mwarp*MIterPerWarp + m_iter)*16 + mlane*8 + e     mlane = lane>>4
@@ -277,7 +239,6 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                 sequence<1, 2, 1, 1>,
                 sequence<1, 1, 2, 3>>{});
     }
-#endif
 
     // Same encoding the base policy builds for gemm_4's B operand, wrapped so
     // that load_tile_transpose fills it. Identical logical content, different
@@ -297,7 +258,6 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
         constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
 
-#if CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
         // PackMNIter ordering -- must stay the exact type MakeBBlockDistribution
         // Encode() returns, the block gemm static_asserts on it.
         constexpr auto kt_block_outer_dstr_encoding = tile_distribution_encoding<
@@ -307,15 +267,6 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
             tuple<sequence<0, 0>>,
             sequence<1, 2>,
             sequence<1, 0>>{};
-#else
-        constexpr auto kt_block_outer_dstr_encoding = tile_distribution_encoding<
-            sequence<MWarp>,
-            tuple<sequence<NIterPerWarp, NWarp>, sequence<KIterPerWarp>>, // 2 4, 4
-            tuple<sequence<0, 1>>,
-            tuple<sequence<0, 1>>,
-            sequence<1, 2>,
-            sequence<0, 0>>{};
-#endif
 
         constexpr auto kt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             kt_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
@@ -422,9 +373,6 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     //
     // Unlike K, dO is re-loaded every Q iteration, so the shuffle this removes
     // was in the hot loop.
-    //
-    // Verified on gfx1250 against the shuffle path as reference: both produce
-    // dO^T with zero mismatches over the whole tile.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeOGradLdsBlockDescriptor()
     {
@@ -612,10 +560,9 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
         constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
 
-#if CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
-        // PackMNIter ordering. At MWarp == 1 this addresses the same elements as
-        // the branch below, but the block gemm compares encodings by type, so it
-        // still has to be spelled the packed way.
+        // PackMNIter ordering. At MWarp == 1 it addresses the same elements as
+        // the unpacked <MIterPerWarp, MWarp> spelling, but the block gemm
+        // compares encodings by type, so it still has to be spelled packed.
         constexpr auto ds_block_outer_dstr_encoding =
             tile_distribution_encoding<sequence<NWarp>,
                                        tuple<sequence<MWarp, MIterPerWarp>, sequence<KIterPerWarp>>,
@@ -623,15 +570,6 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                                        tuple<sequence<0, 0>>,
                                        sequence<1, 2>,
                                        sequence<1, 0>>{};
-#else
-        constexpr auto ds_block_outer_dstr_encoding =
-            tile_distribution_encoding<sequence<NWarp>,
-                                       tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
-                                       tuple<sequence<1, 0>>,
-                                       tuple<sequence<1, 0>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 0>>{};
-#endif
 
         constexpr auto ds_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             ds_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
@@ -848,9 +786,9 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // time: V could not be written until K and KT had been read back out, which
     // is why V used to be parked in registers first. That ordering constraint is
     // fatal for TDM -- issuing the load late and waiting on TENSORcnt right
-    // afterwards exposes the whole global->LDS latency (measured 0.39 TFLOPS
-    // against a 48.65 baseline), and issuing it early lands the V box on top of
-    // K. Giving V its own kN0*kVHeaddim*sizeof(V) bytes lets the TDM issue sit at
+    // afterwards exposes the whole global->LDS latency, and issuing it early
+    // lands the V box on top of K. Its own kN0*kVHeaddim*sizeof(V) bytes let
+    // the TDM issue sit at
     // the top of the prologue and the TENSORcnt wait sit just before the first
     // read, so the transfer overlaps the K staging that follows it.
     //
@@ -972,19 +910,16 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                           number<log2_floor(row_dwords) - 1>{});
     }
 
-    // Double-buffering Q/dO is a trade, not a free win: measured +3.2% on nomask
-    // at a low core clock and ~0 at boost, against about -1.3% on causal across
-    // four batches on two machines. Causal has the mask VALU to cover the
-    // transfer already, so only the unmasked instance takes it -- and only that
-    // instance pays the 36,800 B.
+    // Double-buffering Q/dO is a trade, not a free win: causal already has the
+    // mask VALU covering the transfer, so only the unmasked instance takes it --
+    // and only that instance pays the extra LDS.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool UseQDOPrefetch()
     {
         // Strict superset of `!IsMasking`: masked instances gain the second
         // Q/dO pair too, except storerandval, which already sits at 994-998
         // VGPR and spills into the 1024 ceiling if the buffers are added.
-        return CK_TILE_FMHA_BWD_PREFETCH_QDO &&
-               !(Problem::FmhaMask::IsMasking && Problem::FmhaDropout::IsStoreRandval);
+        return !(Problem::FmhaMask::IsMasking && Problem::FmhaDropout::IsStoreRandval);
     }
 
     // How many Q/dO/LSE/D slots the pipeline rotates through.
@@ -1005,23 +940,21 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         }
         else
         {
-            // Masked instances measured worse at every depth above 2 -- batch
-            // causal -31..-43% at depth 4 and group causal -10..-13% -- while
-            // the same code is worth +13..+45% on unmasked instances whose Q
-            // loop is long enough. Masking is the discriminator, not tile
-            // pairing: group causal does not pair and still loses.
+            // Masked instances lose at every depth above 2, while unmasked
+            // ones with a long enough Q loop gain. Masking is the
+            // discriminator, not tile pairing: group causal does not pair and
+            // still loses.
             if constexpr(Problem::FmhaMask::IsMasking && CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED > 0)
             {
                 return CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED;
             }
             else if constexpr(Problem::kQDOSlots != 0)
             {
-                // Per-instance override carried by the tile. The deep ring only
-                // pays once the Q loop is long enough to amortise the unroll:
-                // gfx1250 nomask d128, depth 3 vs 2, is +19.4% at seqlen_q 1024
-                // and +9.5% at 2048, but -15.3% at 8192 and -23.2% at 32768.
-                // seqlen_q is a runtime value, so the choice is made by
-                // dispatching to a separate instance rather than here.
+                // Per-instance override carried by the tile. The deep ring
+                // only pays while the Q loop is short enough that the unroll is
+                // amortised; past that it loses. seqlen_q is a runtime value,
+                // so the choice is made by dispatching to a separate instance
+                // rather than here.
                 return Problem::kQDOSlots;
             }
             else

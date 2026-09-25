@@ -621,14 +621,6 @@ CK_TILE_HOST_DEVICE constexpr auto slice_distribution_from_x(
                 constexpr auto found_y_index     = container_find(src_y_dims, uniformed_h_index);
                 constexpr auto y_to_h_dim_end    = src_y_prefix_sum[id + 1];
 
-                // A dim taken whole is not sliced at all, and the split above
-                // lands on h dim 0 for it -- so requiring that dim to be a Y dim
-                // rules out distributions whose outermost h dim is a P dim (a
-                // warp index, say) even though nothing is being cut there. The
-                // rest of this body is a no-op in that case: sliced_h_lens comes
-                // back as h_len, the y lengths are rewritten to the values they
-                // already held, and y_origin is zero because x_slice_begins is.
-                // found_y_index is read by nothing but this assert.
                 constexpr bool dim_taken_whole =
                     (x_slice_lengths[id] == container_reduce(h_len, multiplies<>{}, number<1>{}));
                 static_assert(dim_taken_whole ||

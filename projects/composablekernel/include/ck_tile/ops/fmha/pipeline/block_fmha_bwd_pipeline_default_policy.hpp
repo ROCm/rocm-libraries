@@ -20,10 +20,6 @@
 
 namespace ck_tile {
 
-// Route (b): store dS in an M-contiguous LDS box and transpose on the read, so
-// the 128 sub-dword ds_store_b16 collapse to ds_store_b128.  See
-// ken_claude/HANDOFF_B_dS_store_b128.md.
-
 struct BlockFmhaBwdPipelineDefaultPolicy
 {
     template <index_t ndim>
@@ -1690,24 +1686,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     CK_TILE_DEVICE static constexpr void PTFromGemm0CToGemm1A(PTOutTensor& pt_out,
                                                               const PInTensor& p_in)
     {
-        // The gfx125 fast path below is only valid when the gemm0-C and gemm1-A
-        // iteration spaces coincide, i.e. MIterPerWarp == KIterPerWarp == 1
-        // (kN0 == MWarp*16 and kKn == WarpGemm::kK). Outside that it silently
-        // produces wrong results -- there is no assert. The general path already
-        // handles both cases: with a single iteration its static_ford degenerates
-        // to exactly the same whole-buffer copy.
 #if defined(__gfx125__)
-        // gfx1250: gemm0's C and gemm1's A hold the same per-lane element count
-        // but are cut into different fragments -- C into MWarp x NWarp tiles of
-        // WarpGemm::kM x kN (8 bf16 per lane), A into 16 x 32 tiles (16 per lane,
-        // i.e. two C fragments stacked along P's row direction).  A whole-buffer
-        // copy therefore only transposes when there is one fragment each way;
-        // beyond that it pairs the wrong C fragments together: measured correct
-        // at MIterPerWarp == 1 and exactly 50% wrong at MIterPerWarp == 2.
-        //
-        //     A(am, ak) half h   <-   C(m = ak*2 + h, n = am)
-        //
-        // which degenerates to the identity when AM == 1, so no special case.
         {
             using BG_C = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
             using BG_A = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
@@ -1730,10 +1709,6 @@ struct BlockFmhaBwdPipelineDefaultPolicy
 
             constexpr index_t kChunk = WG_C::kM * WG_C::kN / get_warp_size();
 
-            // AM == 1 makes the permutation the identity.  Keep the whole-buffer
-            // copy for that case: the element-wise form is semantically the same
-            // but the compiler does not fold it away, and it cost 26% on the
-            // shipping bn0=64 tile when it was used unconditionally.
             if constexpr(AM == 1)
             {
                 pt_out.get_thread_buffer() = p_in.get_thread_buffer();
@@ -1813,24 +1788,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     CK_TILE_DEVICE static constexpr void SGradTFromGemm2CToGemm3A(SGradTOutTensor& dst_out,
                                                                   const SGradInTensor& ds_in)
     {
-        // The gfx125 fast path below is only valid when the gemm0-C and gemm1-A
-        // iteration spaces coincide, i.e. MIterPerWarp == KIterPerWarp == 1
-        // (kN0 == MWarp*16 and kKn == WarpGemm::kK). Outside that it silently
-        // produces wrong results -- there is no assert. The general path already
-        // handles both cases: with a single iteration its static_ford degenerates
-        // to exactly the same whole-buffer copy.
 #if defined(__gfx125__)
-        // gfx1250: gemm0's C and gemm1's A hold the same per-lane element count
-        // but are cut into different fragments -- C into MWarp x NWarp tiles of
-        // WarpGemm::kM x kN (8 bf16 per lane), A into 16 x 32 tiles (16 per lane,
-        // i.e. two C fragments stacked along P's row direction).  A whole-buffer
-        // copy therefore only transposes when there is one fragment each way;
-        // beyond that it pairs the wrong C fragments together: measured correct
-        // at MIterPerWarp == 1 and exactly 50% wrong at MIterPerWarp == 2.
-        //
-        //     A(am, ak) half h   <-   C(m = ak*2 + h, n = am)
-        //
-        // which degenerates to the identity when AM == 1, so no special case.
         {
             using BG_C = remove_cvref_t<decltype(GetOGradVBlockGemm<Problem>())>;
             using BG_A = remove_cvref_t<decltype(GetSGradTQTBlockGemm<Problem>())>;
@@ -1853,10 +1811,6 @@ struct BlockFmhaBwdPipelineDefaultPolicy
 
             constexpr index_t kChunk = WG_C::kM * WG_C::kN / get_warp_size();
 
-            // AM == 1 makes the permutation the identity.  Keep the whole-buffer
-            // copy for that case: the element-wise form is semantically the same
-            // but the compiler does not fold it away, and it cost 26% on the
-            // shipping bn0=64 tile when it was used unconditionally.
             if constexpr(AM == 1)
             {
                 dst_out.get_thread_buffer() = ds_in.get_thread_buffer();
@@ -2111,18 +2065,6 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         {
         }
 
-        // Rewritten <0> for the TDM architecture.
-        //
-        // The original GemmStagedScheduler<0> asks for
-        //   Q_VMEM_READ + OGrad_VMEM_READ + LSE_VMEM_READ + D_VMEM_READ = 18
-        // VMEM-read slots.  Q and OGrad no longer arrive by VMEM read at all --
-        // they are DMA'd straight into LDS by TDM (load_tile_tdm), which emits
-        // no buffer_load.  Measured in the built kernel: the whole hot loop has
-        // 8 buffer_load, and those are LSE/D.  So 16 of the 18 groups can never
-        // be filled.
-        //
-        // This version asks only for what exists: the two scalar loads up
-        // front, then an even MFMA / DS-read interleave over Gemm0's 32 wmma.
         CK_TILE_DEVICE static constexpr void GemmStagedScheduler0Tdm()
         {
             constexpr index_t VMEM_READ_INST = LSE_VMEM_READ + D_VMEM_READ;

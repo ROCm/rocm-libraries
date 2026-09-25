@@ -6,16 +6,6 @@
 
 #include "ck_tile/core/utility/debug.hpp"
 
-#ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS
-#define CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS 1
-#endif
-// Which operands use the padded row-major (TDM) LDS layout instead of the
-// XOR-swizzled one: bit0 K, bit1 V, bit2 Q, bit3 dO.
-#ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK
-#define CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK 15
-#endif
-// Row padding in elements for the TDM layout. 0 isolates the question of
-// whether the swizzle removal or the padding itself is what breaks the readers.
 #ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_ELEMS
 #define CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_ELEMS 8
 #endif
@@ -246,22 +236,6 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
 
     // As load_lds requires contiguous LDS write, we need to transform the distribution of DRAM for
     // reading
-    template <typename T, typename TensorView>
-    CK_TILE_HOST_DEVICE static constexpr auto TransformXDramTensorView(const TensorView& naive_view)
-    {
-        if constexpr(std::is_same_v<TensorView, ck_tile::null_tensor_view>)
-        {
-            return naive_view;
-        }
-        else
-        {
-            const auto transformed_desc =
-                TransformXDramDescriptor<T>(naive_view.get_tensor_descriptor());
-            return tensor_view<typename TensorView::buffer_view,
-                               remove_cvref_t<decltype(transformed_desc)>,
-                               TensorView::DstInMemOp>{naive_view.buf_, transformed_desc};
-        }
-    }
     template <typename T, typename... TD_TS>
     CK_TILE_HOST_DEVICE static constexpr auto
     TransformXDramDescriptor(const tensor_descriptor<TD_TS...>& from_desc)
@@ -303,42 +277,6 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
             make_tuple(sequence<0>{}, sequence<1>{}));
     }
 
-    template <typename Problem, typename T, index_t RowsPerBlock, index_t ColsPerBlock>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeXDramTileDistribution()
-    {
-        constexpr index_t kBlockSize = Problem::kBlockSize;
-        constexpr index_t kWarps     = kBlockSize / get_warp_size();
-
-        constexpr index_t K3       = GetAlignmentK<Problem>();            // 8
-        constexpr index_t K2       = WarpAlignmentBytes / sizeof(T) / K3; // 8
-        constexpr index_t K_remain = ColsPerBlock / K2 / K3;
-        constexpr index_t K1       = min(kWarps, K_remain);
-        constexpr index_t K0       = K_remain / K1;
-        static_assert((K0 * K1 * K2 * K3 == ColsPerBlock) &&
-                          K2 * K3 * sizeof(T) == WarpAlignmentBytes,
-                      "ColsPerBlock notdivisible");
-
-        constexpr index_t N2 = get_warp_size() / K2; // 8
-        constexpr index_t N1 = max(1, kWarps / K1);
-        constexpr index_t N0 = RowsPerBlock / N1 / N2;
-        static_assert((N0 * N1 * N2 == RowsPerBlock) && (K1 * N1 == kWarps) &&
-                          (K2 * N2 == get_warp_size()),
-                      "RowsPerBlock not divisible");
-
-        return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<N0, N1, N2>, sequence<K0, K1, K2, K3>>,
-                                       tuple<sequence<2, 1>, sequence<1, 2>>, // K1 N1, N2 K2
-                                       tuple<sequence<1, 1>, sequence<2, 2>>,
-                                       sequence<1, 2, 2>, // N0 K0 K3
-                                       sequence<0, 0, 3>>{});
-    }
-
-    // TDM moves a contiguous 2D box, and tdm_load_to_lds takes the box dims from
-    // the DRAM window distribution (reversed ys_to_d lengths). The trload
-    // distribution hands each lane a strided (K0, N, K1, K2) pattern, which is
-    // not a box. This is the tile-major shape ldsacc feeds TDM: each warp owns
-    // Rows/warpNum whole rows.
     template <typename Problem, index_t Rows, index_t Cols>
     CK_TILE_HOST_DEVICE static constexpr auto MakeTdmDramTileDistribution()
     {
@@ -358,57 +296,33 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
-        if constexpr(((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 0) & 1) != 0)
-            return MakeTdmDramTileDistribution<Problem, Problem::BlockFmhaShape::kN0, Problem::BlockFmhaShape::kQKHeaddim>();
-        else
-        {
-        return MakeXDramTileDistribution<Problem,
-                                         typename Problem::KDataType,
-                                         Problem::BlockFmhaShape::kN0,
-                                         Problem::BlockFmhaShape::kQKHeaddim>();
-        }
+        return MakeTdmDramTileDistribution<Problem,
+                                           Problem::BlockFmhaShape::kN0,
+                                           Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVDramTileDistribution()
     {
-        if constexpr(((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 1) & 1) != 0)
-            return MakeTdmDramTileDistribution<Problem, Problem::BlockFmhaShape::kN0, Problem::BlockFmhaShape::kVHeaddim>();
-        else
-        {
-        return MakeXDramTileDistribution<Problem,
-                                         typename Problem::VDataType,
-                                         Problem::BlockFmhaShape::kN0,
-                                         Problem::BlockFmhaShape::kVHeaddim>();
-        }
+        return MakeTdmDramTileDistribution<Problem,
+                                           Problem::BlockFmhaShape::kN0,
+                                           Problem::BlockFmhaShape::kVHeaddim>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQDramTileDistribution()
     {
-        if constexpr(((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 2) & 1) != 0)
-            return MakeTdmDramTileDistribution<Problem, Problem::BlockFmhaShape::kM0, Problem::BlockFmhaShape::kQKHeaddim>();
-        else
-        {
-        return MakeXDramTileDistribution<Problem,
-                                         typename Problem::QDataType,
-                                         Problem::BlockFmhaShape::kM0,
-                                         Problem::BlockFmhaShape::kQKHeaddim>();
-        }
+        return MakeTdmDramTileDistribution<Problem,
+                                           Problem::BlockFmhaShape::kM0,
+                                           Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeOGradDramTileDistribution()
     {
-        if constexpr(((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 3) & 1) != 0)
-            return MakeTdmDramTileDistribution<Problem, Problem::BlockFmhaShape::kM0, Problem::BlockFmhaShape::kVHeaddim>();
-        else
-        {
-        return MakeXDramTileDistribution<Problem,
-                                         typename Problem::OGradDataType,
-                                         Problem::BlockFmhaShape::kM0,
-                                         Problem::BlockFmhaShape::kVHeaddim>();
-        }
+        return MakeTdmDramTileDistribution<Problem,
+                                           Problem::BlockFmhaShape::kM0,
+                                           Problem::BlockFmhaShape::kVHeaddim>();
     }
 
     template <typename Problem>
@@ -578,19 +492,8 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
         return output;
     }
 
-    // Padding appended to every LDS row, in elements. TDM writes a contiguous
-    // box and the descriptor below reads it back; the two MUST agree, and
-    // nothing checks them against each other.
     static constexpr index_t kTdmLdsPad = CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_ELEMS;
 
-    // TDM-compatible LDS layout: plain row-major with a padded row stride.
-    //
-    // The default policy uses two DIFFERENT descriptors over the same buffer --
-    // a [K0, MN, KPack] write view and an XOR-swizzled [K0, MN, K1, K2] read
-    // view -- which agree only because the DRAM distribution makes a lane-linear
-    // write land where the swizzled read expects. TDM writes a CONTIGUOUS BOX,
-    // so that agreement does not survive. Use one layout for both sides and let
-    // TDMConfig::pad_config, not an XOR swizzle, keep the banks apart.
     template <typename T, index_t MNPerBlock, index_t KPerBlock>
     CK_TILE_HOST_DEVICE static constexpr auto MakeXLdsTdmBlockDescriptor()
     {
@@ -602,10 +505,6 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
             number<1>{});
     }
 
-    // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
-    // (log2 of the dwords written between pads - 1). One row is exactly one
-    // interval, so each row gets kTdmLdsPad elements appended, matching the
-    // stride above.
     template <typename T, index_t KPerBlock>
     CK_TILE_HOST_DEVICE static constexpr auto GetTdmPaddingConfig()
     {
@@ -629,83 +528,33 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
             number<true>{}, number<pad_dwords - 1>{}, number<log2_floor(row_dwords) - 1>{});
     }
 
-    template <typename T, index_t MNPerBlock, index_t KPerBlock>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeXLdsSwizzledWriteDescriptor()
-    {
-        constexpr index_t KPack = WarpAlignmentBytes / sizeof(T);
-        constexpr auto desc_0   = make_naive_tensor_descriptor_packed(
-            make_tuple(number<KPerBlock / KPack>{}, number<MNPerBlock>{}, number<KPack>{}));
-        return transform_tensor_descriptor(
-            desc_0,
-            make_tuple(make_pass_through_transform(number<MNPerBlock>{}),
-                       make_merge_transform_v3_division_mod(
-                           make_tuple(number<KPerBlock / KPack>{}, number<KPack>{}))),
-            make_tuple(sequence<1>{}, sequence<0, 2>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-    }
-
-    template <typename T, index_t MNPerBlock, index_t KPerBlock>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeXLdsSwizzledReadDescriptor()
-    {
-        const auto Dwordx4Bytes = 16;
-        const auto K2           = Dwordx4Bytes / sizeof(T);
-        const auto K1           = WarpAlignmentBytes / Dwordx4Bytes;
-        const auto K0           = KPerBlock / (K1 * K2);
-
-        constexpr auto desc_0 = make_naive_tensor_descriptor_packed(
-            make_tuple(number<K0>{}, number<MNPerBlock>{}, number<K1>{}, number<K2>{}));
-        constexpr auto desc_1 = transform_tensor_descriptor(
-            desc_0,
-            make_tuple(make_pass_through_transform(number<K0>{}),
-                       make_xor_transform(make_tuple(number<MNPerBlock>{}, number<K1>{})),
-                       make_pass_through_transform(number<K2>{})),
-            make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}),
-            make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}));
-        return transform_tensor_descriptor(
-            desc_1,
-            make_tuple(make_pass_through_transform(number<MNPerBlock>{}),
-                       make_merge_transform_v3_division_mod(
-                           make_tuple(number<K0>{}, number<K1>{}, number<K2>{}))),
-            make_tuple(sequence<1>{}, sequence<0, 2, 3>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-    }
-
-    // Padded is per-operand so the layout can be bisected one tensor at a time.
-    template <typename T, index_t MNPerBlock, index_t KPerBlock, bool Padded = true>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeXLdsWriteBlockDescriptor()
-    {
-        if constexpr(Padded)
-            return MakeXLdsTdmBlockDescriptor<T, MNPerBlock, KPerBlock>();
-        else
-            return MakeXLdsSwizzledWriteDescriptor<T, MNPerBlock, KPerBlock>();
-    }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsWriteBlockDescriptor()
     {
-        return MakeXLdsWriteBlockDescriptor<typename Problem::KDataType,
+        return MakeXLdsTdmBlockDescriptor<typename Problem::KDataType,
                                             Problem::BlockFmhaShape::kN0,
-                                            Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 0) & 1) != 0>();
+                                            Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsWriteBlockDescriptor()
     {
-        return MakeXLdsWriteBlockDescriptor<typename Problem::VDataType,
+        return MakeXLdsTdmBlockDescriptor<typename Problem::VDataType,
                                             Problem::BlockFmhaShape::kN0,
-                                            Problem::BlockFmhaShape::kVHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 1) & 1) != 0>();
+                                            Problem::BlockFmhaShape::kVHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsWriteBlockDescriptor()
     {
-        return MakeXLdsWriteBlockDescriptor<typename Problem::QDataType,
+        return MakeXLdsTdmBlockDescriptor<typename Problem::QDataType,
                                             Problem::BlockFmhaShape::kM0,
-                                            Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 2) & 1) != 0>();
+                                            Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeOGradLdsWriteBlockDescriptor()
     {
-        return MakeXLdsWriteBlockDescriptor<typename Problem::OGradDataType,
+        return MakeXLdsTdmBlockDescriptor<typename Problem::OGradDataType,
                                             Problem::BlockFmhaShape::kM0,
-                                            Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 3) & 1) != 0>();
+                                            Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeBiasLdsBlockDescriptor()
@@ -788,41 +637,33 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
             top_dims);
     }
 
-    template <typename T, index_t MNPerBlock, index_t KPerBlock, bool Padded = true>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeXLdsReadBlockDescriptor()
-    {
-        if constexpr(Padded)
-            return MakeXLdsTdmBlockDescriptor<T, MNPerBlock, KPerBlock>();
-        else
-            return MakeXLdsSwizzledReadDescriptor<T, MNPerBlock, KPerBlock>();
-    }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsReadBlockDescriptor()
     {
-        return MakeXLdsReadBlockDescriptor<typename Problem::KDataType,
+        return MakeXLdsTdmBlockDescriptor<typename Problem::KDataType,
                                            Problem::BlockFmhaShape::kN0,
-                                           Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 0) & 1) != 0>();
+                                           Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsReadBlockDescriptor()
     {
-        return MakeXLdsReadBlockDescriptor<typename Problem::VDataType,
+        return MakeXLdsTdmBlockDescriptor<typename Problem::VDataType,
                                            Problem::BlockFmhaShape::kN0,
-                                           Problem::BlockFmhaShape::kVHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 1) & 1) != 0>();
+                                           Problem::BlockFmhaShape::kVHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsReadBlockDescriptor()
     {
-        return MakeXLdsReadBlockDescriptor<typename Problem::QDataType,
+        return MakeXLdsTdmBlockDescriptor<typename Problem::QDataType,
                                            Problem::BlockFmhaShape::kM0,
-                                           Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 2) & 1) != 0>();
+                                           Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeOGradLdsReadBlockDescriptor()
     {
-        return MakeXLdsReadBlockDescriptor<typename Problem::OGradDataType,
+        return MakeXLdsTdmBlockDescriptor<typename Problem::OGradDataType,
                                            Problem::BlockFmhaShape::kM0,
-                                           Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 3) & 1) != 0>();
+                                           Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     template <typename Problem>
@@ -1114,28 +955,29 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
     // trailing row carries no pad. TDM, however, applies pad_config after EVERY
     // row including the last, so it writes kTdmLdsPad elements past that bound
     // and clobbers whatever operand follows. Reserve the trailing pad too.
-    template <typename T, index_t MNPerBlock, index_t KPerBlock, bool Padded>
+    template <typename T, index_t MNPerBlock, index_t KPerBlock>
     CK_TILE_HOST_DEVICE static constexpr index_t GetPaddedSmemSize()
     {
         constexpr index_t base =
-            sizeof(T) * MakeXLdsWriteBlockDescriptor<T, MNPerBlock, KPerBlock, Padded>()
+            sizeof(T) * MakeXLdsTdmBlockDescriptor<T, MNPerBlock, KPerBlock>()
                             .get_element_space_size();
-        if constexpr(Padded)
-            return base + sizeof(T) * kTdmLdsPad;
-        else
-            return base;
+        return base + sizeof(T) * kTdmLdsPad;
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeQ()
     {
-        return GetPaddedSmemSize<typename Problem::QDataType, Problem::BlockFmhaShape::kM0, Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 2) & 1) != 0>();
+        return GetPaddedSmemSize<typename Problem::QDataType,
+                                 Problem::BlockFmhaShape::kM0,
+                                 Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeK()
     {
-        return GetPaddedSmemSize<typename Problem::KDataType, Problem::BlockFmhaShape::kN0, Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 0) & 1) != 0>();
+        return GetPaddedSmemSize<typename Problem::KDataType,
+                                 Problem::BlockFmhaShape::kN0,
+                                 Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     template <typename Problem>
@@ -1156,13 +998,17 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeV()
     {
-        return GetPaddedSmemSize<typename Problem::VDataType, Problem::BlockFmhaShape::kN0, Problem::BlockFmhaShape::kVHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 1) & 1) != 0>();
+        return GetPaddedSmemSize<typename Problem::VDataType,
+                                 Problem::BlockFmhaShape::kN0,
+                                 Problem::BlockFmhaShape::kVHeaddim>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeOGrad()
     {
-        return GetPaddedSmemSize<typename Problem::OGradDataType, Problem::BlockFmhaShape::kM0, Problem::BlockFmhaShape::kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 3) & 1) != 0>();
+        return GetPaddedSmemSize<typename Problem::OGradDataType,
+                                 Problem::BlockFmhaShape::kM0,
+                                 Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     template <typename Problem>

@@ -3,6 +3,26 @@
 
 #pragma once
 
+// These sit above the includes on purpose: the bwd pipelines read
+// CK_TILE_FMHA_BWD_MASK_TILE_PAIRING to form kBodyIsPaired, and they are pulled
+// in by the pipeline selector below. Defining it afterwards would leave the
+// pipeline with an undeclared identifier.
+#ifndef CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
+#define CK_TILE_FMHA_BWD_MASK_TILE_PAIRING 1
+#endif
+
+#ifndef CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV
+#define CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV 2
+#endif
+
+#ifndef CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD
+#define CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD 160
+#endif
+
+#ifndef CK_TILE_FMHA_BWD_TDM_DKDV_STORE
+#define CK_TILE_FMHA_BWD_TDM_DKDV_STORE 1
+#endif
+
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
@@ -28,60 +48,8 @@
 // dK[seqlen_k, hdim_q] = dS'^T[seqlen_k, seqlen_q] @ Q^T[hdim_q, seqlen_q] * Scale[1]
 // dQ[seqlen_q, hdim_q] = dS'[seqlen_q, seqlen_k] @ K^T[hdim_q, seqlen_k] * Scale[1]
 
-// Hand the dQ_acc descriptor the compile-time head dim instead of the runtime
-// kargs.hdim_q, so the atomic row walk folds into MUBUF immediate offsets.
-//
-// On its own this LOSES (+1.1% nomask, +4.9% causal): it removes the address
-// VALU that was covering the TDM transfer, so `s_wait_tensorcnt` stall nearly
-// doubles (7,914 -> 13,974 in ATT) even though `s_wait_xcnt` drops
-// (6,574 -> 4,953) because fewer address registers rotate. Paired with
-// CK_TILE_FMHA_BWD_QDO_SLOTS=3, which restores the TDM cover from the other
-// side, the xcnt saving survives and the pair is a net win. Measured together;
-// do not enable one without the other.
-//
-// Gated to unmasked instances at the use site -- masked instances keep
-// QDO_SLOTS_MASKED=2 (deepening their ring is +34%), so for them this is pure
-// loss of cover.
-#ifndef CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE
-#define CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE 1
-#endif
-
-// Mirror tile pairing halves the causal grid to balance the triangular load.
-// That wins only while the halved grid still occupies enough of the machine.
-// Measured on gfx1250 (256 CUs) over 16 (seqlen, batch, nhead) points: below
-// the threshold disabling pairing is -17..-35%, above it pairing is worth
-// +11..+36%, and the flip tracks the *workgroup count*, not the sequence
-// length -- the same seqlen reverses when batch*nhead changes. Enable pairing
-// only when the paired grid exceeds CUs/this. This is the job-count condition
-// the persistent path already applies via tile_n_interleave.
-#ifndef CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV
-#define CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV 2
-#endif
-
-// Upper bound on the same gate, in kv tiles per head -- NOT in workgroups.
-//
-// Pairing binds {x, n-1-x} into one workgroup, so the variable that matters is
-// n = jobs_per_head, the resolution of the causal triangle. batch and nhead
-// carry no imbalance of their own (every head has the identical triangle), and
-// folding them into the test misreads shapes badly: at d128 causal,
-// paired_wg 2048 with jobs_per_head 32 wants pairing (+13%) while paired_wg
-// 2048 with jobs_per_head 256 does not (-9%) -- same workgroup count, same
-// grid, opposite verdict.
-//
-// Measured gain from *disabling* pairing by jobs_per_head:
-//   32 (s=4096) +13..+33%   128 (s=16384) ~0%   192 (s=24576) -4.2%
-//   256 (s=32768) -12.1%
-// Monotone, crossing zero between 128 and 192, so stop pairing above 160.
-#ifndef CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD
-#define CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD 160
-#endif
 namespace ck_tile {
 
-// The dQ static stride is only profitable next to a deep Q/dO ring (see the
-// macro comment above): measured alone it is +0.8..+4.1% at every seqlen, but
-// it adds -3.0..-3.4% on top of ring depth 3. Pipelines that expose their
-// resolved depth therefore opt out of the fold when they run the shallow ring;
-// those that do not expose it never reach the fold (QrQtrDor returns first).
 template <typename P, typename = void>
 struct fmha_bwd_qdo_depth
 {
@@ -517,6 +485,8 @@ struct FmhaBwdDQDKDVKernel
     static constexpr ck_tile::index_t kBlockPerCu = FmhaPipeline::kBlockPerCu;
     static constexpr bool kUseQrQtrDorPipeline =
         ck_tile::fmha_bwd_qr_qtr_dor_pipeline<FmhaPipeline>::value;
+    static constexpr bool kUseTdmDecodePipeline =
+        ck_tile::fmha_bwd_tdm_decode_pipeline<FmhaPipeline>::value;
     static_assert(!kUseQrQtrDorPipeline || !std::is_same_v<QGradEpiloguePipeline_, void>,
                   "QrQtrDorPipeline needs QGradEpiloguePipeline");
 
@@ -553,25 +523,27 @@ struct FmhaBwdDQDKDVKernel
 #if defined(__gfx950__)
     static constexpr bool kIsAvailable = true;
 #elif defined(__gfx125__)
-    // gfx1250 has ds_load_tr but no async global->LDS, so only the QrQtrDor
-    // decode pipeline is ported out of the trload family.
-    static constexpr bool kIsAvailable = !kUseTrLoad || kUseQrQtrDorPipeline;
+    // gfx1250 has ds_load_tr but no async global->LDS, so the only member of the
+    // trload family ported to it is the TDM decode pipeline. The plain QrQtrDor
+    // one still issues async_load_tile and does not build here, so an instance
+    // that reaches it on gfx12 is a codegen mistake rather than a slow path.
+    static constexpr bool kIsAvailable = !kUseTrLoad || kUseTdmDecodePipeline;
 #else
     static constexpr bool kIsAvailable = !kUseTrLoad;
 #endif
+    // Writing dK/dV out through LDS + TDM needs the tensor store, which only
+    // gfx12 has -- amd_tdm_store compiles to nothing elsewhere, so every other
+    // target has to keep the plain epilogues or it would store no gradient at
+    // all. The macro only selects between the two on a target that has TDM.
+#if defined(__gfx125__)
+    static constexpr bool kUseTdmDKDVStore = CK_TILE_FMHA_BWD_TDM_DKDV_STORE;
+#else
+    static constexpr bool kUseTdmDKDVStore = false;
+#endif
+
     static constexpr bool kUsePersistent = kIsDeterministic && !kUseQrQtrDorPipeline;
     using WorkspaceManager = FmhaBwdWorkspaceManager<AccDataType, kIsGroupMode, kIsDeterministic>;
 
-    // Under a causal mask the cost of a kv tile falls off linearly with its
-    // index, so a one-tile-per-workgroup grid is badly load imbalanced. Halve
-    // the grid and give each workgroup the mirror pair {x, n-1-x} -- one
-    // expensive tile and one cheap one. This is what aiter does
-    // (mha_bwd.cu: `if(mt == 1 || mt == 2) gdx = (gdx + 1) / 2;` plus a 2-trip
-    // loop in the kernel), and unlike the persistent path's tile_n_interleave
-    // it does not depend on the job count exceeding 2x the CU count.
-    //
-    // Batch mode only: group mode has a per-batch tile count, so n is not a
-    // launch-time constant.
     static constexpr bool kMaskTilePairing =
 #if CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
         kHasMask && !kUsePersistent && !kUseQrQtrDorPipeline && !kIsGroupMode;
@@ -1330,11 +1302,20 @@ struct FmhaBwdDQDKDVKernel
         }
     }
 
+    // tdm_store_2d_pair stages both accumulators in LDS before the TDM store, in
+    // the same buffer the pipeline uses. Counted unconditionally so the size
+    // stays the same in the host and device passes; it is well under the
+    // pipeline's own footprint for every shape that is built.
+    static constexpr ck_tile::index_t kTdmDKDVStageBytes =
+        static_cast<ck_tile::index_t>(sizeof(typename KGradEpiloguePipeline::ODataType)) *
+        FmhaPipeline::kN0 * (FmhaPipeline::kQKHeaddim + FmhaPipeline::kVHeaddim);
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         return ck_tile::max(FmhaPipeline::GetSmemSize(),
                             KGradEpiloguePipeline::GetSmemSize(),
-                            VGradEpiloguePipeline::GetSmemSize());
+                            VGradEpiloguePipeline::GetSmemSize(),
+                            kTdmDKDVStageBytes);
     }
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
@@ -1775,26 +1756,12 @@ struct FmhaBwdDQDKDVKernel
             // Non-deterministic paths also use 'atomic_add' (kUseKSplit=false).
             constexpr auto DstInMemOp = conditional_expr<(kUseKSplit && !kUsePersistent)>(
                 memory_operation_enum::set, memory_operation_enum::atomic_add);
-            // The dQ atomics walk rows by this stride. As a runtime index_t it
-            // forces every atomic to materialize its own address, which at high
-            // register pressure degenerates into a serial recurrence through one
-            // register and costs the s_clause grouping. With !kPadHeadDimQ,
-            // hdim_q is exactly kQKHeaddim, so handing the descriptor the
-            // compile-time value lets the walk fold into MUBUF immediate offsets.
             const auto stride_dq_acc = [&]() {
                 if constexpr(kUseQrQtrDorPipeline)
                     return kargs.stride_dq;
-#if CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE
-                // Unmasked instances only. Folding the stride away removes the
-                // address VALU that was covering the TDM transfer, which only
-                // pays if the Q/dO ring is deepened to cover it instead
-                // (QDO_SLOTS=3). Masked instances keep QDO_SLOTS_MASKED=2 --
-                // deepening their ring is +34% -- so there the fold is a pure
-                // loss of TDM cover: +4.9% causal measured 2026-09-15.
                 else if constexpr(!kPadHeadDimQ && !kHasMask &&
                                   fmha_bwd_qdo_depth<FmhaPipeline>::value > 2)
                     return number<FmhaPipeline::kQKHeaddim>{};
-#endif
                 else
                     return kargs.hdim_q;
             }();
@@ -2054,24 +2021,25 @@ struct FmhaBwdDQDKDVKernel
             }
 #endif
 
-#if CK_TILE_FMHA_BWD_TDM_DKDV_STORE
-            // dK/dV go out through LDS + TDM stores instead of per-thread buffer
-            // stores. Reuses the pipeline's smem, which already dominates
-            // GetSmemSize(); dK and dV get separate staging buffers so both
-            // transfers can be in flight.
-            static_assert(std::is_same_v<typename KGradEpiloguePipeline::ODataType,
-                                         typename VGradEpiloguePipeline::ODataType>,
-                          "TDM dK/dV store assumes a single output type");
-            tdm_store_2d_pair<typename KGradEpiloguePipeline::ODataType,
-                              kBlockSize,
-                              FmhaPipeline::kN0,
-                              FmhaPipeline::kQKHeaddim,
-                              FmhaPipeline::kVHeaddim>(
-                dk_dram_window, dk_acc_tile, dv_dram_window, dv_acc_tile, smem_ptr);
-#else
-            KGradEpiloguePipeline{}(dk_dram_window, dk_acc_tile, nullptr);
-            VGradEpiloguePipeline{}(dv_dram_window, dv_acc_tile, nullptr);
-#endif
+            if constexpr(kUseTdmDKDVStore)
+            {
+                static_assert(std::is_same_v<typename KGradEpiloguePipeline::ODataType,
+                                             typename VGradEpiloguePipeline::ODataType>,
+                              "TDM dK/dV store assumes a single output type");
+                static_assert(kTdmDKDVStageBytes <= GetSmemSize(),
+                              "TDM dK/dV staging does not fit the kernel's LDS budget");
+                tdm_store_2d_pair<typename KGradEpiloguePipeline::ODataType,
+                                  kBlockSize,
+                                  FmhaPipeline::kN0,
+                                  FmhaPipeline::kQKHeaddim,
+                                  FmhaPipeline::kVHeaddim>(
+                    dk_dram_window, dk_acc_tile, dv_dram_window, dv_acc_tile, smem_ptr);
+            }
+            else
+            {
+                KGradEpiloguePipeline{}(dk_dram_window, dk_acc_tile, nullptr);
+                VGradEpiloguePipeline{}(dv_dram_window, dv_acc_tile, nullptr);
+            }
         }
         else
         {

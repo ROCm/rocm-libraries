@@ -104,7 +104,8 @@ using fmha_bwd_pipeline_problem_{F_idx} = ck_tile::BlockFmhaBwdPipelineProblem<
     fmha_dropout_{F_idx},
     {F_trload},
     fmha_bwd_trait_{F_idx},
-    {F_ldsacc}>;
+    {F_tdm_kr_ktr},
+    {F_tdm_decode}>;
 
 using fmha_bwd_pipeline_{F_idx} = ck_tile::BlockFmhaBwdDQDKDVPipeline<fmha_bwd_pipeline_problem_{F_idx}>;
 
@@ -324,36 +325,16 @@ class FmhaBwdDQDKDVTileSize:
     F_wk1: int  # warp size along k in gemm1/gemm3
     F_occupancy: int  # occupancy
     max_seq_q: int = 0
-    # Dispatch bounds only. max_seq_q also switches to the QrQtrDor pipeline,
-    # which is reachable only behind tr_load.
     dispatch_max_seq_q: int = 0
     dispatch_max_seq_k: int = 0
-    # Smallest batch*nhead this tile may be dispatched for. The QrQtrDor
-    # pipeline loops over kv instead of spanning it in the grid, so batch*nhead
-    # is the whole grid; below this many workgroups the CUs sit idle.
     dispatch_min_grid: int = 0
-    # Emit the masked variants of this tile. Opt-in per tile: the masked
-    # QrQtrDor path is only worth generating where its dispatch has been
-    # measured, and the gfx950 decode tiles have not been.
     allow_mask: bool = False
-    # Emit only the unmasked variants of this tile -- the inverse of
-    # allow_mask. For a geometry that wins on nomask and loses on causal:
-    # measured on gfx1250 bf16, kM0=64/kN0=128 at hdim 32/64 is 19.7-42.8%
-    # faster than the shipped kM0=32/kN0=64 on every nomask shape, but loses on
-    # causal (hdim 64 on all three, hdim 32 at seqlen_q 32768). Masked falls
-    # through to the next tile, which is the shipped one.
-    # Hold the dK/dV accumulators in LDS rather than registers. Frees
-    # kN0*headdim/kBlockSize VGPRs per accumulator, which is what gets gfx1250
-    # back to 2 waves/SIMD at headdim >= 128.
-    lds_acc: bool = False
-    # Emit this tile only for masked instances. Inverse of the nomask_only that
-    # the LdsAcc switch retired; the decode tile needs it because QrQtrDor wins
-    # on nomask short-q and loses badly on causal short-q.
+    tdm_kr_ktr: bool = False
     mask_only: bool = False
-    # Q/dO ring depth for this instance; 0 defers to CK_TILE_FMHA_BWD_QDO_SLOTS.
-    # Only meaningful on unmasked instances -- masked ones resolve to
-    # CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED first.
     qdo_slots: int = 0
+    # Decode tile whose global->LDS traffic goes through TDM. gfx12 only; the
+    # gfx950 decode tiles leave this off and keep the original pipeline.
+    tdm_decode: bool = False
 
     @property
     def name(self) -> str:
@@ -365,10 +346,9 @@ class FmhaBwdDQDKDVTileSize:
             + (f"_qdo{self.qdo_slots}" if self.qdo_slots else "")
             + (f"_dmaxk{self.dispatch_max_seq_k}" if self.dispatch_max_seq_k else "")
             + (f"_dmingrid{self.dispatch_min_grid}" if self.dispatch_min_grid else "")
-            + ("_ldsacc" if self.lds_acc else "")
+            + ("_tdm" if self.tdm_kr_ktr else "")
         )
 
-    # Largest seqlen_q this tile may be dispatched for, 0 meaning unbounded.
     @property
     def seq_q_limit(self) -> int:
         return self.max_seq_q or self.dispatch_max_seq_q
@@ -434,7 +414,8 @@ class FmhaBwdDQDKDVKernel:
             F_mode=MODE_MAP[self.F_mode],
             F_deterministic=BOOL_MAP[self.F_deterministic],
             F_trload=BOOL_MAP[self.F_trload],
-            F_ldsacc=BOOL_MAP["t" if self.F_tile.lds_acc else "f"],
+            F_tdm_kr_ktr=BOOL_MAP["t" if self.F_tile.tdm_kr_ktr else "f"],
+            F_tdm_decode=BOOL_MAP["t" if self.F_tile.tdm_decode else "f"],
             F_maxq=self.F_tile.max_seq_q,
             F_tagq=self.F_tile.seq_q_limit,
         )
@@ -595,59 +576,21 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         if tr_load == "t":
             if dtype not in ["fp16", "bf16"]:
                 return []
-            # Decode tile, ported from gfx950. max_seq_q swaps the loop axis:
-            # the whole q sequence fits one M tile, so the Q loop disappears and
-            # K/V stream instead. At seqlen_q <= 32 the regular pipeline runs a
-            # single Q iteration per workgroup, leaving its prologue/epilogue
-            # unamortised (measured 84.7% of wave time outside the WMMA window).
-            #
-            # Wider than the gfx950 decode tile: ds_load_tr16_b128 hands each
-            # lane 8 bf16, so the transposed reads need warp tile k=32, hence
-            # bk4=32 and bn0>=bk4.
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
-                FmhaBwdDQDKDVTileSize( 32,  32,  64,  32,  64,  32,  32,   64,   64,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  2, 32, dispatch_min_grid=768, allow_mask=True),
-                # hdim 32 cannot use the trload decode path: WarpAlignmentBytes=128
-                # forces K2*K3 = 64 bf16 elements per warp row segment, and hdim 32
-                # only has 32 -- K_remain underflows to 0 in MakeXDramTileDistribution.
-                FmhaBwdDQDKDVTileSize( 32,  32, 128,  32, 128,  32,  32,  128,  128,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  1, 32, dispatch_min_grid=768, allow_mask=True, mask_only=True),
-                # hdim 256 decode spills: 32 threads cannot hold Q/Q^T/dO at that
-                # headdim (1024 VGPRs capped, ~2.4 KB scratch), and it measured
-                # -55% on nomask. Needs the multi-warp rework first.
+                FmhaBwdDQDKDVTileSize( 32,  32,  64,  32,  64,  32,  32,   64,   64,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  2, 32, dispatch_min_grid=768, allow_mask=True, tdm_decode=True),
+                FmhaBwdDQDKDVTileSize( 32,  32, 128,  32, 128,  32,  32,  128,  128,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  1, 32, dispatch_min_grid=768, allow_mask=True, mask_only=True, tdm_decode=True),
             ]  # fmt: skip
         if dtype in ["fp16", "bf16"]:
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
-                FmhaBwdDQDKDVTileSize( 64, 128,  32,  64,  32,  64,  32,   32,   32,  1, 4, 1,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
-                FmhaBwdDQDKDVTileSize( 64, 128,  64,  64,  64,  64,  32,   64,   64,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
+                FmhaBwdDQDKDVTileSize( 64, 128,  32,  64,  32,  64,  32,   32,   32,  1, 4, 1,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True),
+                FmhaBwdDQDKDVTileSize( 64, 128,  64,  64,  64,  64,  32,   64,   64,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True),
                 #FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  64,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
-                # headdim >= 128: the two fp32 dK/dV accumulators are 64 VGPRs
-                # each here and drop occupancy from 2 waves/SIMD to 1 (measured
-                # 377 VGPRs / occ 2 / 226 TFLOPS at hdim 64 versus 597 / occ 1 /
-                # 120 TFLOPS at hdim 128). Holding them in LDS -- which is 89%
-                # idle -- gives back 420 VGPRs / occ 2 / zero spill for +1.3%
-                # instructions. hdim 32/64 already reach occupancy 2, so they
-                # keep the register accumulators and pay no LDS traffic.
-                # Ring depth 2 below seqlen_q 2048, depth 3 above. The bound
-                # used to be 4096, which put seqlen_q 4096 on depth 2 and cost
-                # it 1.6% of throughput (492.5 -> 500.2 TFLOPS to move it to
-                # depth 3). Lowering the bound rather than deleting it: at 2048
-                # depth 2 is still ahead by 5.1%, measured on this base with
-                # separated ranges, so the crossover sits between the two.
-                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True, qdo_slots=2, dispatch_max_seq_q=2048),
-                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
-                # A short q sequence leaves most of the 64-row M tile idle, and
-                # a 128-wide N tile is not paid for either: at seqlen_q <= 32
-                # this is the fastest tile at every seqlen_k measured from 64 to
-                # 1024 -- 12.7% at 532, and still 3.8-8.7% where seqlen_k sits on
-                # a multiple of 128 and N-tile quantisation predicts a tie. It is
-                # also the only headdim 128 tile that fits two workgroups.
-                # Its seqlen_q bound puts the whole q sequence in one M tile, so
-                # the Q loop runs once and the deep ring unrolls it for nothing:
-                # depth 3 costs 17,632 bytes of LDS, 11 VGPRs and 920 bytes of
-                # scratch here against depth 2.
-                FmhaBwdDQDKDVTileSize( 32,  64, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, dispatch_max_seq_q=32, qdo_slots=2, lds_acc=True),
-                FmhaBwdDQDKDVTileSize( 32,  64, 256,  32, 256,  32, 32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
+                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True, qdo_slots=2, dispatch_max_seq_q=2048),
+                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True),
+                FmhaBwdDQDKDVTileSize( 32,  64, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True, dispatch_max_seq_q=32, qdo_slots=2),
+                FmhaBwdDQDKDVTileSize( 32,  64, 256,  32, 256,  32, 32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, tdm_kr_ktr=True),
             ]  # fmt: skip
         return []
 
@@ -1112,7 +1055,6 @@ class FmhaBwdApiPool:
 
     @staticmethod
     def max_seq_q_sort_key(trait):
-        # Narrower bounds first; unbounded (0) sorts last as the fallback.
         return (
             trait.tile.seq_q_limit or 1000000,
             trait.tile.dispatch_max_seq_k or 1000000,
@@ -1132,9 +1074,6 @@ class FmhaBwdApiPool:
             per_dtypes = ""
             for i_dtype, (dtype, pool_by_dtype) in enumerate(pool_by_arch.items()):
                 per_hdim_case = ""
-                # Ascending hdim: hdim_cond emits `hdim_q <= N`, so a smaller
-                # hdim also satisfies every larger bound and the first matching
-                # branch wins. Insertion order does not guarantee this.
                 for i_hdim, (hdim, pool_by_hdim) in enumerate(sorted(pool_by_dtype.items())):
                     traits = sorted(pool_by_hdim, key=self.max_seq_q_sort_key)
                     inners = self._api_inners(traits)

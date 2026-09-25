@@ -90,7 +90,7 @@ struct TdmEpilogue
     template <typename LdsTile, typename InLdsWindow>
     CK_TILE_DEVICE void cast_lds_tile(LdsTile& lds_tile, InLdsWindow& in_lds_window)
     {
-        const auto c_warptile_in_tensor_casted = cast_tile<ODataType>(lds_tile);
+        const auto c_warptile_in_tensor_casted = cast_tile_pk<ODataType>(lds_tile);
 
         store_tile(in_lds_window, c_warptile_in_tensor_casted);
     }
@@ -160,11 +160,6 @@ struct TdmEpilogue
 
 namespace impl {
 
-// Row-major kM x kN staging descriptor, and the wave-linear read distribution a
-// TDM descriptor can be derived from. Same shape as the ones TdmEpilogue builds
-// inline above; that copy is deliberately left alone because TdmEpilogue has
-// many users (grouped convolution codegen, the GEMM and MX-GEMM tests) that
-// cannot be exercised from here.
 template <index_t kBlockSize, index_t kMPerBlock, index_t kNPerBlock>
 CK_TILE_DEVICE constexpr auto tdm_wave_linear_distr()
 {
@@ -195,25 +190,6 @@ CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
 
 } // namespace impl
 
-// Write **two** accumulator tiles back to global memory through LDS and TDM
-// stores, sharing a single barrier. Used by fmha bwd for dK and dV, where it
-// replaces the default epilogue's per-thread buffer stores and removes the
-// waterfall-guarded store loop entirely.
-//
-// This cannot be expressed as a TdmEpilogue/Default2DEpilogue instantiation:
-// the kernel invokes an epilogue once per output tensor, whereas the whole
-// point here is to cast both tiles and then issue both transfers, so that they
-// are in flight together behind one barrier.
-//
-// The two tiles get **separate** staging buffers on purpose. Sharing one makes
-// the second cast wait on the first TDM store draining (tensorcnt 0).
-//
-// Measured caveat: on its own this is a loss at causal fmha bwd (-1.65%); it
-// only pays with expert scheduling mode enabled (+0.98%), because the barriers
-// the TDM path needs are what that mode lets the compiler schedule around.
-//
-// Requires kMPerBlock * (kNPerBlockA + kNPerBlockB) * sizeof(ODataType) bytes at
-// p_smem, and that no other wave still needs its previous contents.
 template <typename ODataType,
           index_t kBlockSize,
           index_t kMPerBlock,
@@ -257,11 +233,10 @@ CK_TILE_DEVICE void tdm_store_2d_pair(ADramWindow& a_dram_window,
 
     TDMConfig tdm_config;
 
-    // Drain any TDM store still using this smem, and barrier before overwriting.
     s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
 
-    store_tile(a_in, cast_tile<ODataType>(a_acc_tile));
-    store_tile(b_in, cast_tile<ODataType>(b_acc_tile));
+    store_tile(a_in, cast_tile_pk<ODataType>(a_acc_tile));
+    store_tile(b_in, cast_tile_pk<ODataType>(b_acc_tile));
     block_sync_lds();
 
     store_tile_tdm(tdm_config, a_dram_window, a_out);

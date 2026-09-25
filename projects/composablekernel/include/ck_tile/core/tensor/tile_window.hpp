@@ -34,19 +34,6 @@ struct is_right_pad_transform<right_pad<L, R, S>> : std::true_type
 {
 };
 
-// TDM programs its hardware out-of-bounds extent from the tensor descriptor.
-// pad_tensor_view widens that descriptor, and handing the widened length to the
-// engine makes it DMA real neighbouring memory into the padded region instead of
-// leaving zeros there -- silently corrupting any reduction over the padded axis
-// (measured: every multiple-of-8 head dim below the tile head dim in fmha bwd).
-// right_pad retains the true extent in low_length_, so recover it here.
-//
-// pad_tensor_view appends exactly one 1->1 transform per top dimension, so those
-// occupy the last NDim slots of the chain (anything the underlying naive view
-// contributed, e.g. an embed, comes first). Each candidate is accepted only if
-// its upper length matches that dimension's length; otherwise, and for any chain
-// shorter than NDim, we return get_lengths() unchanged -- preserving the previous
-// behaviour for descriptors this cannot analyse.
 template <typename TensorDesc>
 CK_TILE_HOST_DEVICE constexpr auto tdm_real_lengths(const TensorDesc& desc)
 {
@@ -80,7 +67,6 @@ CK_TILE_HOST_DEVICE constexpr auto tdm_real_lengths(const TensorDesc& desc)
 }
 
 } // namespace detail
-
 
 /**
  * @brief This class provides tile (windowed) view and access to the device memory.

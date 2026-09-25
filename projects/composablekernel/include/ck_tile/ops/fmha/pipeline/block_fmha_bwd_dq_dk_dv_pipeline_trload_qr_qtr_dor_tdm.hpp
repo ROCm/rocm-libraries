@@ -9,29 +9,15 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_trload_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
-// Use TDM for the global->LDS moves instead of staging through registers.
-// DEFAULT 0 -- PRODUCES WRONG RESULTS AS WRITTEN (valid:n at hdim 64 and 128).
-// The same LDS buffer is viewed through two descriptors: the write side
-// (MakeXLdsWriteBlockDescriptor, [K0, MN, KPack], no swizzle) and the read side
-// (MakeXLdsReadBlockDescriptor, [K0, MN, K1, K2] with an XOR swizzle). They agree
-// only because the DRAM distribution makes a lane-linear write land where the
-// swizzled read expects. TDM writes a CONTIGUOUS BOX instead, so that agreement
-// breaks. Porting TDM needs both descriptors replaced by a padded row-major pair
-// with TDMConfig::pad_config carrying the row stride -- what the ldsacc policy
-// does (see GetLdsPaddingConfigK). It is worth doing: with the swap in place the
-// kernel drops 14-16 VGPRs and runs 79-105%% faster on nomask.
-// gfx12 has no async global->LDS path, so the base pipeline does
-// store_tile(lds, load_tile(dram)); gfx1250 has TDM, which does it directly.
-#ifndef CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS
-#define CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS 1
-#endif
-
 namespace ck_tile {
 
 template <typename Problem, typename Policy = BlockFmhaBwdPipelineTrLoadTdmPolicy>
 struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
 {
     static constexpr auto is_qr_qtr_dor_pipeline = true;
+    // Distinguishes this pipeline from the plain QrQtrDor one, which has no
+    // gfx12 form; see kIsAvailable in fmha_bwd_kernel.hpp.
+    static constexpr auto is_tdm_decode_pipeline = true;
 
     using QDataType             = remove_cvref_t<typename Problem::QDataType>;
     using KDataType             = remove_cvref_t<typename Problem::KDataType>;
@@ -100,13 +86,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
         return Policy::template GetSmemSize<Problem>();
     }
 
-    // gfx12 has no async global->LDS path. The dram view and the LDS write
-    // descriptor are a matched pair (TransformXDramDescriptor /
-    // MakeXLdsWriteBlockDescriptor), so staging through registers lands the
-    // data where the lane-linear async write would have.
-    // Build the TDM padding config for one operand. The LDS descriptor
-    // (MakeXLdsTdmBlockDescriptor) appends kTdmLdsPad elements to every row;
-    // this tells TDM to leave exactly the same gap as it writes the box.
     template <typename T, index_t KPerBlock>
     CK_TILE_DEVICE static TDMConfig make_tdm_config()
     {
@@ -118,65 +97,32 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
         return c;
     }
 
-    // UseTdm is per operand so TDM can be enabled only where the padded LDS
-    // layout is correct for that tensor (see CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK).
-    // gfx12 has no async global->LDS path, so the non-TDM leg stages through
-    // registers; the dram view and the LDS write descriptor are a matched pair,
-    // so that lands the data where the lane-linear async write would have.
-    // TransformXDramDescriptor reshapes the global view to pair with the
-    // lane-linear LDS write descriptor. TDM does not use that pairing: it reads
-    // a plain 2D box straight out of the naive view (ldsacc passes
-    // get_bottom_tensor_view() unwrapped). Applying the transform under TDM
-    // makes every global address wrong.
-    template <typename T, bool UseTdm, typename View>
-    CK_TILE_DEVICE static auto tdm_aware_dram_view(const View& v)
-    {
-        if constexpr(UseTdm)
-            return v;
-        else
-            return Policy::template TransformXDramTensorView<T>(v);
-    }
-
-    template <typename TdmT, index_t TdmK, bool UseTdm, typename LdsWindow, typename DramWindow>
+    template <typename TdmT, index_t TdmK, typename LdsWindow, typename DramWindow>
     CK_TILE_DEVICE static void load_block_to_lds(LdsWindow&& lds_window,
                                                  const DramWindow& dram_window)
     {
 #if defined(__gfx12__)
-        if constexpr(UseTdm)
-            load_tile_tdm(make_tdm_config<TdmT, TdmK>(), lds_window, dram_window);
-        else
-            store_tile(lds_window, load_tile(dram_window));
+        load_tile_tdm(make_tdm_config<TdmT, TdmK>(), lds_window, dram_window);
 #else
         async_load_tile(lds_window, dram_window);
 #endif
     }
 
-    // Wait for load_block_to_lds to land: vmcnt on gfx9 (async writes LDS
-    // directly), an LDS fence on gfx12 (the store_tile leg).
     CK_TILE_DEVICE static void wait_block_to_lds()
     {
-#if CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS && defined(__gfx12__)
-        // TDM commits on TENSORcnt, not on the LDS or vector-memory counters,
-        // so block_sync_lds alone would not fence it.
+#if defined(__gfx12__)
+        // TDM commits on TENSORcnt, which block_sync_lds alone does not fence.
         s_wait_tensorcnt_barrier<0>();
-        block_sync_lds();
-#elif defined(__gfx12__)
         block_sync_lds();
 #else
         s_waitcnt</*vmcnt=*/0>();
 #endif
     }
 
-    // gfx12 splits the GFX9 unified counter, so the single builtin does not port.
     CK_TILE_DEVICE static void wait_all_mem()
     {
 #if defined(__gfx12__)
-#if CK_TILE_FMHA_BWD_TRLOAD_TDM_LOADS
-        // TDM commits on TENSORcnt, which neither vmcnt nor the LDS fence
-        // covers. Q and dO are moved by TDM and then read through wait_all_mem,
-        // so without this they are read while still in flight.
         s_wait_tensorcnt_barrier<0>();
-#endif
         s_waitcnt</*vmcnt=*/0>();
         block_sync_lds();
 #else
@@ -319,8 +265,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
 
         // K, HBM ->LDS ->Reg
         auto k_dram_window =
-            make_tile_window(tdm_aware_dram_view<KDataType, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 0) & 1) != 0>(
-                                 k_dram_block_window_tmp.get_bottom_tensor_view()),
+            make_tile_window(k_dram_block_window_tmp.get_bottom_tensor_view(),
                              k_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_kv_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem>());
@@ -333,8 +278,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
         //------------------------------------------------------------------
         // V, HBM ->LDS ->Reg
         auto v_dram_window =
-            make_tile_window(tdm_aware_dram_view<VDataType, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 1) & 1) != 0>(
-                                 v_dram_block_window_tmp.get_bottom_tensor_view()),
+            make_tile_window(v_dram_block_window_tmp.get_bottom_tensor_view(),
                              v_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_kv_start, 0},
                              Policy::template MakeVDramTileDistribution<Problem>());
@@ -373,8 +317,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
         //---------------------------- Loop Load in ----------------------------//
         // Q: HBM -->LDS
         auto q_dram_window =
-            make_tile_window(tdm_aware_dram_view<QDataType, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 2) & 1) != 0>(
-                                 q_dram_block_window_tmp.get_bottom_tensor_view()),
+            make_tile_window(q_dram_block_window_tmp.get_bottom_tensor_view(),
                              q_dram_block_window_tmp.get_window_lengths(),
                              {0, 0},
                              Policy::template MakeQDramTileDistribution<Problem>());
@@ -400,8 +343,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
         // dO: HBM ->LDS ---load--> Reg
         // dOT:          \-loadtr-> Reg
         auto do_dram_window =
-            make_tile_window(tdm_aware_dram_view<OGradDataType, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 3) & 1) != 0>(
-                                 do_dram_block_window_tmp.get_bottom_tensor_view()),
+            make_tile_window(do_dram_block_window_tmp.get_bottom_tensor_view(),
                              do_dram_block_window_tmp.get_window_lengths(),
                              {0, 0},
                              Policy::template MakeOGradDramTileDistribution<Problem>());
@@ -553,8 +495,8 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
         decltype(load_tile(lse_dram_window)) lse_block_tile;
         decltype(load_tile(d_dram_window)) d_block_tile;
 
-        load_block_to_lds<QDataType, kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 2) & 1) != 0>(q_lds_write_window, q_dram_window);
-        load_block_to_lds<OGradDataType, kVHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 3) & 1) != 0>(do_lds_write_window, do_dram_window);
+        load_block_to_lds<QDataType, kQKHeaddim>(q_lds_write_window, q_dram_window);
+        load_block_to_lds<OGradDataType, kVHeaddim>(do_lds_write_window, do_dram_window);
         wait_all_mem();
         load_tile_transpose(qt_reg_tensor, qt_lds_read_window);
         q_reg_tensor = load_tile(q_lds_read_window);
@@ -586,9 +528,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
 
             if constexpr(is_epilogue)
             {
-                load_block_to_lds<KDataType, kQKHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 0) & 1) != 0>(k_lds_write_window, k_dram_window);
+                load_block_to_lds<KDataType, kQKHeaddim>(k_lds_write_window, k_dram_window);
                 move_tile_window(k_dram_window, {kN0, 0});
-                load_block_to_lds<VDataType, kVHeaddim, ((CK_TILE_FMHA_BWD_TRLOAD_TDM_PAD_MASK >> 1) & 1) != 0>(v_lds_write_window, v_dram_window);
+                load_block_to_lds<VDataType, kVHeaddim>(v_lds_write_window, v_dram_window);
                 move_tile_window(v_dram_window, {kN0, 0});
                 wait_block_to_lds();
                 k_reg_tensor = load_tile(k_lds_read_window);
@@ -677,10 +619,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
                         0, seqlen_kv_step, p, randval_dram_window);
                     if constexpr(FmhaDropout::IsStoreRandval)
                     {
-                        // Run leaves the window one M block on, the step the regular
-                        // pipeline wants. Here kv is the loop axis instead, so undo
-                        // that and step N. The window origin already accounts for the
-                        // swap -- MakeRandvalDramWindow above is called with IsFwd.
                         move_tile_window(randval_dram_window, {-kM0, kN0});
                     }
                 }
@@ -695,7 +633,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
                     }
                     else
                     {
-                        return cast_tile<GemmDataType>(p);
+                        return cast_tile_pk<GemmDataType>(p);
                     }
                 }();
 
@@ -741,7 +679,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
                         }
                         else
                         {
-                            return cast_tile<BiasGradDataType>(ds);
+                            return cast_tile_pk<BiasGradDataType>(ds);
                         }
                     }();
                     store_tile(bias_lds_write_window, dbias);
@@ -759,7 +697,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
             if constexpr(is_epilogue)
             {
                 // STAGE 6, SGrad^T@Q^T Gemm3
-                const auto ds_gemm  = cast_tile<GemmDataType>(ds);
+                const auto ds_gemm  = cast_tile_pk<GemmDataType>(ds);
                 auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
                     Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
                 dst_reg_tensor.get_thread_buffer() = ds_gemm.get_thread_buffer();
@@ -876,7 +814,17 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM
     }
 };
 
-// fmha_bwd_qr_qtr_dor_pipeline lives in the non-TDM header; this pipeline sets the
-// same is_qr_qtr_dor_pipeline member, so the trait already matches it.
+// SFINAE test for the is_tdm_decode_pipeline member, in the same shape as
+// fmha_bwd_qr_qtr_dor_pipeline. Only the TDM decode pipeline sets it.
+template <typename, typename = void>
+struct fmha_bwd_tdm_decode_pipeline : std::false_type
+{
+};
+
+template <typename T>
+struct fmha_bwd_tdm_decode_pipeline<T, std::void_t<decltype(T::is_tdm_decode_pipeline)>>
+    : std::bool_constant<T::is_tdm_decode_pipeline>
+{
+};
 
 } // namespace ck_tile

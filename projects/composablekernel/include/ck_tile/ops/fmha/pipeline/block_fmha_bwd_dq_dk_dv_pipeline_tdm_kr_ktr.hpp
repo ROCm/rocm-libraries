@@ -7,28 +7,18 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_dropout.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_default_policy.hpp"
-#include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_ldsacc_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
 namespace ck_tile {
 
-#ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT
-#define CK_TILE_FMHA_BWD_V_NONRESIDENT 1
-#endif
-
-// kM0 floor for the V-in-LDS choice above. The kM0 >= 64 gate it defaults to is
-// inherited from kDVInReg, whose comment justifies it for the dV accumulator --
-// V itself has never been measured below kM0 64. Set to 0 to put V in LDS on
-// the kM0 16/32 tiles too.
+// Thresholds for kVNonResident (V in LDS rather than registers). V in registers
+// costs kN0 * kVHeaddim / kBlockSize VGPRs, so the headdim floor is what
+// separates d=128 (too expensive) from d=32/64; under a mask d=64 can afford it
+// too, hence the separate nomask floor. 0 disables a floor.
 #ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0
 #define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0 64
 #endif
-
-// headdim floors for the same choice. V in registers costs
-// kN0 * kVHeaddim / kBlockSize VGPRs, so the kM0 gate alone cannot separate
-// d=128 (128 regs, ~16 of 1024 free) from d=32/64 (32/64 regs, 614/444 free).
-// Measured on gfx1250: d=32 wants V resident under both masks (+1.5..3.4%),
-// d=64 only under a mask (+3.6..6.0% causal, -2.2..2.9% nomask), d=128 neither.
 #ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM
 #define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM 128
 #endif
@@ -36,189 +26,43 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM_NOMASK 64
 #endif
 
-// Sink the next iteration's Q/LSE loads past gemm_4, so their live ranges do
-// not span it. dO/D are already loaded after gemm_4; Q/LSE were the odd ones
-// out. Safe: gemm_4 touches neither, and nothing between gemm_4 and the dO/D
-// loads writes LDS or barriers, so they sit in the same validity window the
-// dO/D loads already rely on.
-#ifndef CK_TILE_FMHA_BWD_SINK_TDM_WAIT
-#define CK_TILE_FMHA_BWD_SINK_TDM_WAIT 1
-#endif
-
 // 0 = keep the hand-written scheduler prescriptions, 1 = drop them where the
-// loop body holds a single Q tile, 2 = drop them always. See schedgate.py.
-//
-// Mode 1 existed because a doubled (mirror-tile-paired) body measured 1.4-3.2%
-// worse without the prescriptions. That no longer reproduces: on this base the
-// paired bodies are 9.4-14.5% FASTER dropped, with the unpaired instances flat
-// either way as an internal control. Mode 1 is kept so the comparison can be
-// re-run, but it is no longer the default.
+// loop body holds a single Q tile, 2 = drop them always. Mode 1 is retained
+// only so the single-vs-doubled-body comparison can be re-run.
 #ifndef CK_TILE_FMHA_BWD_SCHED_DROP_MODE
 #define CK_TILE_FMHA_BWD_SCHED_DROP_MODE 2
 #endif
 
-// Bitmask of GemmStagedScheduler prescriptions to KEEP even when
-// CK_TILE_FMHA_BWD_SCHED_DROP_MODE would drop them; bit N selects scheduler N.
-// Dropping all of them is right for the shipped V-in-LDS config, but with V
-// register-resident the <4> prescription is what stops the 64 dQ atomic
-// addresses collapsing into a serial recurrence through one register (60
-// add->lshl pairs, s_clause 0, +135 s_wait_alu). This lets that one come back
-// without paying for the rest.
-#ifndef CK_TILE_FMHA_BWD_SCHED_KEEP_MASK
-#define CK_TILE_FMHA_BWD_SCHED_KEEP_MASK 0
-#endif
-
-// Keep only dV in registers, leave dK in LDS. Halves the extra register cost
-// versus the fully register-resident pipeline (128 VGPR instead of 256).
-#ifndef CK_TILE_FMHA_BWD_DV_IN_REG
-#define CK_TILE_FMHA_BWD_DV_IN_REG 1
-#endif
-
-// kM0 floor for the dV-in-registers choice above. The kM0 >= 64 gate it
-// defaults to ties dV-in-reg to evicting V to LDS as a package, and the package
-// was only measured as a package. Set to 0 to keep dV in registers on the
-// kM0 16/32 tiles as well, so the kM0 and the V-placement variables can be
-// separated.
+// kM0 floor for keeping dV in registers. The dV accumulator is kN0 x headdim
+// and does not shrink with kM0, so the smaller the tile the more dV LDS round
+// trips the same work does -- hence a floor rather than always-on.
+//
+// headdim 256 is the exception: its only tile is kM0 32, and under a mask that
+// instance spills hard with the accumulator in LDS. Keeping dV in registers
+// there costs VGPRs but cuts the spill slots, so the floor drops for it alone.
+// See kDVInRegMinM0 below.
 #ifndef CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0
 #define CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0 64
 #endif
-
-// ABLATION ONLY -- PRODUCES WRONG RESULTS. Drops the D (row-sum of dO*O) TDM
-// transfer from every tile, taking the per-wave issue count from 4 to 3. D is
-// still read out of whatever stale LDS the slot happens to hold, so the numbers
-// are garbage; this exists purely to put an upper bound on what removing one of
-// the four transfers is worth before building the real thing.
-//
-// The real change is not a deletion: aiter covers all four streams with three
-// transfers per wave by specialising the scalar load across waves (waves 0/1
-// carry LSE, waves 2/3 carry D -- see the s_bfe of ttmp8 feeding the
-// s_cmp_gt_i32 s2, 1 that selects ptr_lse vs ptr_d in the disassembly). This
-// ablation measures the ceiling of that idea, not the idea itself.
-#ifndef CK_TILE_FMHA_BWD_ABLATE_DROP_D
-#define CK_TILE_FMHA_BWD_ABLATE_DROP_D 0
+#ifndef CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0_HDIM256
+#define CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0_HDIM256 32
 #endif
 
-// ABLATION ONLY -- PRODUCES WRONG RESULTS FOR CAUSAL. Forces the per-pixel mask
-// check off, so the edge-tile `set_tile_if` never runs and the compiler can drop
-// the masked path out of the body entirely.
+// Same algorithm as BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP, moved onto TDM for
+// the global->LDS transfers and ds_load_tr for the transposed reads.
 //
-// The per-pixel mask is already gated on mask.IsEdgeTile(), so a correct tile
-// specialisation (report item P3) could at best make the non-edge body look like
-// this one: no predicate evaluation, and no masked code competing for registers
-// or schedule slots. This measures that ceiling. It is not itself a candidate
-// implementation -- it simply computes the wrong answer on the diagonal.
-#ifndef CK_TILE_FMHA_BWD_ABLATE_NO_MASK
-#define CK_TILE_FMHA_BWD_ABLATE_NO_MASK 0
-#endif
-
-// ABLATION ONLY. The opposite probe: run the per-pixel mask on *every* tile
-// instead of just the diagonal ones. Results stay correct -- masking a fully
-// valid tile is a no-op -- so this one can be validated.
-//
-// Together with the control and ABLATE_NO_MASK this separates the three things
-// the mask costs: (always - control) is the marginal cost of executing
-// set_tile_if on a tile; the control already pays that on the ~6% of tiles that
-// are edge tiles; whatever of (control - no_mask) remains is the price of merely
-// having the masked code sitting in the body. Only that last part is
-// recoverable by a correct tile specialisation.
-#ifndef CK_TILE_FMHA_BWD_ABLATE_ALL_MASK
-#define CK_TILE_FMHA_BWD_ABLATE_ALL_MASK 0
-#endif
-
-// Split the Q-tile loop into an edge-tile prefix and a mask-free remainder,
-// instead of asking mask.IsEdgeTile() on every tile of a single shared body.
-//
-// For a non-local mask the edge tiles really are a prefix: IsEdgeTile reduces to
-// (k_origin + kN0) > min(seqlen_q_step + x, x_total), and the right-hand side
-// only grows as the loop walks Q down, so the predicate flips true->false once
-// and never back. Local/band masks can have edge tiles at both ends, so they
-// keep the old single-loop form.
-//
-// The point is not the saved predicate -- that is a couple of scalar ops. It is
-// that the mask-free instantiation of the body no longer carries the
-// set_tile_if block, so it stops competing for registers and schedule slots on
-// the ~94% of tiles that never needed it.
-// MEASURED A LOSS -- default off. Emitting the body twice costs far more than
-// the mask code it removes: mask1 0.446 -> 0.712 ms (59% worse), and even mask0,
-// whose predicate is loop-invariant so only the mask-free loop ever runs, lost
-// 8% (0.699 -> 0.756 ms). Both arms validate. Kept because the measurement is
-// the useful part: this kernel is bound by code size / register lifetime far
-// more tightly than by the ~5.5% the mask work itself is worth.
-#ifndef CK_TILE_FMHA_BWD_SPLIT_EDGE_TILES
-#define CK_TILE_FMHA_BWD_SPLIT_EDGE_TILES 0
-#endif
-
-// Keep one body, but stop asking the mask which tiles are edge tiles. The edge
-// tiles form a leading run and a trailing run (IsEdgeTile is
-// top_right_edge || bottom_left_edge; the first only goes true->false down the Q
-// loop, the second only false->true), so both run lengths can be found once per
-// workgroup with two short scalar scans, and the per-tile question becomes two
-// integer compares on the loop counter.
-//
-// Unlike SPLIT_EDGE_TILES this emits no extra copy of the body, so it isolates
-// what the predicate evaluation itself costs, with none of the code-size
-// penalty that sank the split.
-#ifndef CK_TILE_FMHA_BWD_HOIST_EDGE_TEST
-#define CK_TILE_FMHA_BWD_HOIST_EDGE_TEST 0
-#endif
-
-// Skip the -inf guard on the row LSE. A fully masked-out row carries
-// LSE = -inf, and feeding that into exp2(scale*s - row_lse) would give NaN, so
-// the guard maps it to 0. But a row only reaches -inf if it has no valid key at
-// all, which cannot happen for bottom-right causal with seqlen_q == seqlen_k --
-// every query row sees at least itself. Where that holds the guard is pure
-// overhead. Validate before trusting this on any other shape.
-#ifndef CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE
-#define CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE 0
-#endif
-
-
-// PROBE: drop the remaining hand-written GemmStagedScheduler prescriptions
-// (<0>, <3>, <4>) and/or the sched_barrier that follows each, the same way A2
-// did for <1>/<2>.  Bit N of the mask selects scheduler N.
-
-
-// PROBE: fence the softmax/dropout stage from the operand prefetch that follows
-// it. The hot-loop VGPR peak is a ~1000-line band where the scheduler has
-// hoisted the next gemm's ds_load_tr fragments into the dropout stage; this
-// measures what that overlap costs in registers.
-
-
-// A2: merge the gemm_1 / gemm_2 scheduling regions -- drop the sched_barrier
-// between them AND both hand-written GemmStagedScheduler prescriptions.
-// Both halves are required; doing either alone is a loss (see HANDOFF_A2).
-
-
-// PROBE: keep ONLY dV in registers, leave dK in LDS. Halves the extra register
-// cost versus the fully register-resident pipeline (128 VGPR instead of 256).
-// PROBE: sink the next iteration's Q/LSE loads past gemm_4, so their live
-// ranges do not span it.  dO/D are already loaded after gemm_4; Q/LSE were the
-// odd ones out.  Safe: gemm_4 touches neither, and nothing between gemm_4 and
-// the dO/D loads writes LDS or barriers, so they sit in the same validity
-// window the dO/D loads already rely on.
-
-
-// Same algorithm as BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP, with the dK and dV
-// accumulators held in LDS instead of registers.
-//
-// The two fp32 accumulators are kN0*headdim floats each. Kept in registers they
-// are live across the whole Q loop, which on gfx1250 (wave32) costs
-// kN0*headdim/kBlockSize VGPRs apiece -- 64 each at kN0=64, headdim=128. That is
-// what takes the kernel from 2 waves/SIMD to 1: measured 377 VGPRs / occupancy 2
-// at headdim 64 (226 TFLOPS) versus 597 VGPRs / occupancy 1 at headdim 128
-// (120 TFLOPS), against a forward pipeline reaching 369 TFLOPS on the same part.
-//
-// Here the running sums live in LDS, which is otherwise 89% idle (36 KiB of the
-// 320 KiB a gfx1250 workgroup may take), and each accumulation becomes
-// load -> gemm -> store so the register tile is live only around its own gemm.
-// The trade is extra LDS traffic once per Q tile; whether that pays has to be
-// measured on hardware.
+// An accumulator is kN0*headdim floats, live across the whole Q loop, costing
+// kN0*headdim/kBlockSize VGPRs -- enough at headdim 128 to drop the kernel from
+// 2 waves/SIMD to 1. dK therefore lives in LDS (otherwise mostly idle) and each
+// accumulation becomes load -> gemm -> store, so its register tile is live only
+// around its own gemm. dV stays in registers above the kM0 floor, paid for by
+// evicting V to LDS; see kDVInReg / kVNonResident.
 //
 // No LDS atomics are needed: gemm_1/gemm_3 distribute C with MWarp warps
 // splitting M (=kN0) disjointly and NWarp=1, so every LDS element has exactly
 // one owning thread and a plain read-modify-write is race free.
-template <typename Problem, typename Policy = BlockFmhaBwdPipelineLdsAccPolicy>
-struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
+template <typename Problem, typename Policy = BlockFmhaBwdPipelineTdmPolicy>
+struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 {
     using QDataType             = remove_cvref_t<typename Problem::QDataType>;
     using KDataType             = remove_cvref_t<typename Problem::KDataType>;
@@ -249,14 +93,14 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     // stride paired with it -- the fold only pays alongside the deep ring.
     static constexpr index_t kQDOSlotsResolved = Policy::template GetQDOSlots<Problem>();
 
-    // Holding dV in registers, and evicting V to pay for it, only wins at
-    // kM0 = 64. The dV accumulator is kN0 x headdim and does not shrink with
-    // kM0, so at kM0 = 32 the same work does twice the dV LDS round trips --
-    // measured -8.2% on d=256 causal, whose tile is kM0=32.
-    static constexpr bool kDVInReg =
-        CK_TILE_FMHA_BWD_DV_IN_REG && (kM0 >= CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0);
+    // dV in registers and V evicted to LDS are gated on kM0 separately, so
+    // between the two floors dV is register resident while V still is too.
+    static constexpr index_t kDVInRegMinM0 =
+        (BlockFmhaShape::kVHeaddim >= 256 ? CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0_HDIM256
+                                          : CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0);
+    static constexpr bool kDVInReg = (kM0 >= kDVInRegMinM0);
     static constexpr bool kVNonResident =
-        CK_TILE_FMHA_BWD_V_NONRESIDENT && (kM0 >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0) &&
+        (kM0 >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0) &&
         (BlockFmhaShape::kVHeaddim >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM ||
          (!FmhaMask::IsMasking &&
           BlockFmhaShape::kVHeaddim >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_HDIM_NOMASK));
@@ -277,13 +121,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
     static constexpr bool kUseTrLoad       = Problem::kUseTrLoad;
 
-    // Mirror tile pairing inlines two bodies into the function, and the machine
-    // scheduler's clustering heuristics go the wrong way in a doubled region:
-    // dropping the hand-written prescriptions is +14.9..+28.2% wherever the
-    // body holds one Q tile and -1.4..-3.2% where it holds two. So the
-    // discriminator is whether pairing fires, not whether the instance is
-    // masked -- group mode never pairs, and its causal instances measure
-    // +15.65% with the drop.
+    // Mirror tile pairing inlines two bodies into the function; the machine
+    // scheduler's clustering heuristics go the wrong way in a doubled region,
+    // so whether pairing fires -- not whether the instance is masked -- decides
+    // if the hand-written prescriptions are worth keeping.
     //
     // Mirrors kMaskTilePairing in fmha_bwd_kernel.hpp. Two of its terms
     // simplify here: kUseQrQtrDorPipeline is false by construction in this
@@ -313,14 +154,13 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         kPadHeadDimV ? kPadHeadDimV : Policy::template GetAlignmentVGrad<Problem>();
     static constexpr index_t kAlignmentBias = 1;
 
-    static constexpr const char* name = "ldsacc_kr_ktr_vr";
+    static constexpr const char* name = "tdm_kr_ktr";
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         return Policy::template GetSmemSize<Problem>();
     }
 
-#if CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD
     // Fold the gemm_4 accumulator so one dQ atomic covers one whole cache line.
     //
     // The wmma C fragment hands a wave two rows 8 apart, 16 columns each, so a
@@ -382,7 +222,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         return dq_out;
     }
-#endif
 
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
@@ -490,30 +329,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         const auto num_total_loop =
             amd_wave_read_first_lane(integer_divide_ceil(seqlen_q_end - seqlen_q_start, kM0));
-
-        // Leading and trailing edge-tile run lengths, for HOIST_EDGE_TEST. Both
-        // scans stop at the first tile that is not an edge tile, so they are a
-        // couple of scalar iterations in the shapes that matter.
-#if CK_TILE_FMHA_BWD_HOIST_EDGE_TEST
-        index_t n_edge_head       = 0;
-        index_t n_edge_tail_start = num_total_loop;
-        {
-            auto tile_is_edge = [&](index_t i) {
-                return mask.IsEdgeTile(seqlen_q_start + i * kM0,
-                                       k_origin.at(number<0>{}),
-                                       number<kM0>{},
-                                       number<kN0>{});
-            };
-            while(n_edge_head < num_total_loop && tile_is_edge(n_edge_head))
-            {
-                n_edge_head += 1;
-            }
-            while(n_edge_tail_start > n_edge_head && tile_is_edge(n_edge_tail_start - 1))
-            {
-                n_edge_tail_start -= 1;
-            }
-        }
-#endif
 
         // check early exit if no work to do.
         // __builtin_expect is load-bearing: omitting it causes incorrect AGPR allocation in
@@ -912,11 +727,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 return make_tile_window(d_lds_views.at(j), make_tuple(number<kM0>{}), {0});
             },
             number<kQDOSlots>{});
-#if CK_TILE_FMHA_BWD_ABLATE_DROP_D
-        // The ablation drops every use of these; keep the definition so the
-        // rest of the slot plumbing is untouched between the two arms.
-        (void)d_lds_write_windows;
-#endif
 
         auto d_lds_read_windows = generate_tuple(
             [&](auto j) {
@@ -988,11 +798,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         //
         // At the wait, tiles up to i + kIssueAhead have been issued and tile
         // i + 1 must have landed, so kQDOSlots - 2 tiles may still be in flight
-        // -- 4 transfers each, because CK splits LSE and D where aiter shares a
-        // descriptor. kQDOSlots == 2 gives a wait of 0, i.e. the full drain this
-        // loop used to do; kQDOSlots == 4 gives 8 and never drains.
+        // -- 4 transfers each (Q, dO, LSE, D). kQDOSlots == 2 gives a wait of 0,
+        // i.e. the full drain this loop used to do; 4 gives 8 and never drains.
         constexpr index_t kIssueAhead  = kQDOSlots == 1 ? 1 : kQDOSlots - 1;
-        constexpr index_t kTdmPerTile  = CK_TILE_FMHA_BWD_ABLATE_DROP_D ? 3 : 4;
+        constexpr index_t kTdmPerTile  = 4;
         constexpr index_t kTdmWaitCnt  = kQDOSlots >= 2 ? kTdmPerTile * (kQDOSlots - 2) : 0;
 
         // Advance the DRAM windows only while a real tile remains. Past the end
@@ -1017,9 +826,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             load_tile_tdm(tdm_config_q, q_lds_windows.at(j), q_dram_window);
             load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
             load_tile_tdm(tdm_config_do, do_lds_windows.at(j), do_dram_window);
-#if !CK_TILE_FMHA_BWD_ABLATE_DROP_D
             load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
-#endif
             advance_qdo_windows(tile + 1);
         };
 
@@ -1056,10 +863,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         {
             clear_tile(dv_acc);
         }
-        // Each accumulator is zeroed in LDS only if it actually lives there.
-        // (These two were previously joined under an `#if 0 / #else`, which made
-        // the pair unconditional -- so a register-resident arm still paid for a
-        // dead zero-store of the accumulator it had just hoisted out.)
+        // Each accumulator is zeroed in LDS only if it actually lives there; a
+        // register-resident one was already cleared above.
         if constexpr(!kDVInReg)
         {
             auto dv_zero = decltype(gemm_1.MakeCBlockTile()){};
@@ -1074,8 +879,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // Written as a conditional chain rather than a pointer that walks the
         // tuple: taking the address of a tuple element makes the windows
         // addressable, which stops them being scrubbed into registers and puts
-        // every descriptor back in scratch. Measured 13-18% on causal, which is
-        // the configuration that leans on this path.
+        // every descriptor back in scratch.
         auto pick_slot = [&](auto& tup, index_t j) -> auto& {
             if constexpr(kQDOSlots == 1)
             {
@@ -1085,10 +889,9 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             else if constexpr(kQDOSlots == 2)
             {
                 // Two slots is what the loop always had, and a single ternary
-                // on two named windows is what it compiled to. Anything
-                // cleverer here costs: a chain over three or four windows makes
-                // all of them addressable and puts their descriptors back in
-                // scratch, which measured -14 to -37% across the sweep.
+                // on two named windows is what it compiled to. A chain over
+                // three or four windows would make all of them addressable and
+                // put their descriptors back in scratch.
                 return j == 0 ? tup.at(number<0>{}) : tup.at(number<1>{});
             }
             else
@@ -1144,7 +947,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             auto dot_reg_tensor = load_tile_transpose(dot_rd_cur);
 
-            if constexpr(!kDropStagedSched || (CK_TILE_FMHA_BWD_SCHED_KEEP_MASK & (1 << 0)))
+            if constexpr(!kDropStagedSched)
             {
                 HotLoopScheduler::template GemmStagedScheduler<0>();
                 __builtin_amdgcn_sched_barrier(0);
@@ -1191,18 +994,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             if constexpr(decltype(kEdge)::value)
             {
-#if CK_TILE_FMHA_BWD_HOIST_EDGE_TEST
-                bool need_perpixel_check =
-                    (i_total_loops < n_edge_head) || (i_total_loops >= n_edge_tail_start);
-#else
                 bool need_perpixel_check = mask.IsEdgeTile(
                     seqlen_q_step, k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
-#endif
-#if CK_TILE_FMHA_BWD_ABLATE_NO_MASK
-                need_perpixel_check = false;
-#elif CK_TILE_FMHA_BWD_ABLATE_ALL_MASK
-                need_perpixel_check = FmhaMask::IsMasking;
-#endif
                 if(need_perpixel_check)
                 {
                     set_tile_if(s_acc, -numeric<AccDataType>::infinity(), [&](auto tile_idx) {
@@ -1217,16 +1010,12 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              FmhaMask::IsMasking)
                 {
-#if CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE
-                    return raw_lse;
-#else
                     // A fully masked row has raw_lse == -inf; only finiteness
                     // matters, not the value. Every s_acc in such a row is -inf,
                     // so any finite row_lse gives exp2(-inf) == 0. The sentinel
                     // must stay finite after the log2e scaling below, which
                     // rules out -FLT_MAX. One v_max replaces a compare+select.
                     return max(raw_lse, type_convert<LSEDataType>(-1e30f));
-#endif
                 }
                 else
                 {
@@ -1269,7 +1058,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 }
                 else
                 {
-                    return cast_tile<GemmDataType>(p);
+                    return cast_tile_pk<GemmDataType>(p);
                 }
             }();
 
@@ -1311,10 +1100,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             }
 
             issue_next_tile();
-#if !CK_TILE_FMHA_BWD_SINK_TDM_WAIT
-            // same as the prologue: Q/dO are on TENSORcnt now
-            s_wait_tensorcnt_barrier<kTdmWaitCnt>();
-#endif
 
             __builtin_amdgcn_sched_barrier(0);
             // STAGE 5, P^T(PGrad^T - D)
@@ -1344,7 +1129,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                     }
                     else
                     {
-                        return cast_tile<BiasGradDataType>(ds);
+                        return cast_tile_pk<BiasGradDataType>(ds);
                     }
                 }();
                 store_tile(bias_lds_write_window, dbias);
@@ -1359,7 +1144,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             }
 
             // STAGE 6, SGrad^T@Q^T Gemm3
-            const auto ds_gemm = cast_tile<GemmDataType>(ds);
+            const auto ds_gemm = cast_tile_pk<GemmDataType>(ds);
 
             Policy::template SGradTFromGemm2CToGemm3A<Problem>(dst_reg_tensor, ds_gemm);
 
@@ -1374,18 +1159,16 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             block_sync_lds();
 
-#if CK_TILE_FMHA_BWD_SINK_TDM_WAIT
             // Release tile i+1 only. kQDOSlots - 2 tiles stay in flight, which
             // is the whole point of the depth: at kQDOSlots == 2 this is a full
             // drain and the transfer has had one iteration's compute to hide
             // behind; at 4 it has had three.
             s_wait_tensorcnt_barrier<kTdmWaitCnt>();
-#endif
             auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
             q_reg_tensor = load_tile(q_rd_dst);
             lse          = load_tile(lse_rd_dst);
 
-            if constexpr(!kDropStagedSched || (CK_TILE_FMHA_BWD_SCHED_KEEP_MASK & (1 << 3)))
+            if constexpr(!kDropStagedSched)
             {
                 HotLoopScheduler::template GemmStagedScheduler<3>();
                 __builtin_amdgcn_sched_barrier(0);
@@ -1409,7 +1192,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             do_reg_tensor = load_tile(do_rd_dst);
             d             = load_tile(d_rd_dst);
 
-            if constexpr(!kDropStagedSched || (CK_TILE_FMHA_BWD_SCHED_KEEP_MASK & (1 << 4)))
+            if constexpr(!kDropStagedSched)
             {
                 HotLoopScheduler::template GemmStagedScheduler<4>();
             }
@@ -1424,11 +1207,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             {
                 tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
             }
-#if CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD
             const auto dq_out = FoldQGradForAtomic(dq_acc);
-#else
-            const auto& dq_out = dq_acc;
-#endif
             if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
                          memory_operation_enum::set)
             {
@@ -1488,42 +1267,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             // false: read slot 0 and refill slot kB; true: the reverse.
             bool phase = false;
 
-            // How many leading tiles can be edge tiles. Walking IsEdgeTile until
-            // it turns false is exact for a non-local mask (it is monotone in
-            // seqlen_q_step) and costs a handful of scalar iterations once per
-            // workgroup -- typically 2 at kN0/kM0 = 2, and the walk stops at the
-            // first false. A local mask, or a K block hanging off the end of the
-            // key sequence, yields num_total_loop and the whole thing degrades
-            // to exactly the old single masked loop.
+            // Every tile is treated as a possible edge tile, so the loop below
+            // is one masked body over the whole Q range and mask.IsEdgeTile()
+            // decides per tile whether the per-pixel check runs.
             index_t n_edge_tiles = num_total_loop;
-#if CK_TILE_FMHA_BWD_SPLIT_EDGE_TILES
-            {
-                auto tile_is_edge = [&](index_t i) {
-                    return mask.IsEdgeTile(seqlen_q_start + i * kM0,
-                                           k_origin.at(number<0>{}),
-                                           number<kM0>{},
-                                           number<kN0>{});
-                };
-                // Edge tiles are a leading run plus a trailing run, never a hole
-                // in the middle: IsEdgeTile is top_right_edge || bottom_left_edge,
-                // top_right_edge only ever goes true->false as the loop walks Q
-                // down, and bottom_left_edge only ever goes false->true. So the
-                // front scan finds the whole leading run, and because the
-                // trailing term is monotone, testing the last tile alone decides
-                // whether a trailing run exists at all.
-                index_t probe = 0;
-                while(probe < num_total_loop && tile_is_edge(probe))
-                {
-                    probe += 1;
-                }
-                const bool has_trailing_edge =
-                    (num_total_loop > 0) && tile_is_edge(num_total_loop - 1);
-                // A trailing run would need a third loop to stay correct; not
-                // worth a third copy of the body, so those shapes keep the old
-                // fully-masked loop and the remainder below runs zero times.
-                n_edge_tiles = has_trailing_edge ? num_total_loop : probe;
-            }
-#endif
             const index_t n_edge_body =
                 min(n_edge_tiles, num_total_loop > 0 ? num_total_loop - 1 : 0);
 
@@ -1558,64 +1305,14 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                             tdm_config_do,
                             sec ? do_lds_windows.at(number<0>{}) : do_lds_windows.at(number<kB>{}),
                             do_dram_window);
-#if !CK_TILE_FMHA_BWD_ABLATE_DROP_D
                         load_tile_tdm(tdm_config_d,
                                       sec ? d_lds_write_windows.at(number<0>{})
                                           : d_lds_write_windows.at(number<kB>{}),
                                       d_dram_window);
-#endif
                         advance_qdo_windows(i_total_loops + kIssueAhead + 1);
                     });
                 phase = !phase;
             }
-#if CK_TILE_FMHA_BWD_SPLIT_EDGE_TILES
-            // Remainder: every tile from here down is fully inside the mask,
-            // so this instantiation of the body carries no set_tile_if at all.
-            // Guarded so that with the split off the second body is not emitted
-            // at all and the code stays byte-for-byte the old single-loop form,
-            // which is what makes the A/B honest.
-            while(i_total_loops < (num_total_loop - 1))
-            {
-                const bool sec = kTwoBox && phase;
-                hot_loop_body(
-                    bool_constant<false>{},
-                    sec ? q_lds_read_windows.at(number<kB>{}) : q_lds_read_windows.at(number<0>{}),
-                    sec ? qt_lds_read_windows.at(number<kB>{})
-                        : qt_lds_read_windows.at(number<0>{}),
-                    sec ? do_lds_read_windows.at(number<kB>{})
-                        : do_lds_read_windows.at(number<0>{}),
-                    sec ? dot_lds_read_windows.at(number<kB>{})
-                        : dot_lds_read_windows.at(number<0>{}),
-                    sec ? q_lds_read_windows.at(number<0>{}) : q_lds_read_windows.at(number<kB>{}),
-                    sec ? do_lds_read_windows.at(number<0>{})
-                        : do_lds_read_windows.at(number<kB>{}),
-                    sec ? lse_lds_read_windows.at(number<0>{})
-                        : lse_lds_read_windows.at(number<kB>{}),
-                    sec ? d_lds_read_windows.at(number<0>{}) : d_lds_read_windows.at(number<kB>{}),
-                    [&] {
-                        load_tile_tdm(
-                            tdm_config_q,
-                            sec ? q_lds_windows.at(number<0>{}) : q_lds_windows.at(number<kB>{}),
-                            q_dram_window);
-                        load_tile_tdm(tdm_config_lse,
-                                      sec ? lse_lds_write_windows.at(number<0>{})
-                                          : lse_lds_write_windows.at(number<kB>{}),
-                                      lse_dram_window);
-                        load_tile_tdm(
-                            tdm_config_do,
-                            sec ? do_lds_windows.at(number<0>{}) : do_lds_windows.at(number<kB>{}),
-                            do_dram_window);
-#if !CK_TILE_FMHA_BWD_ABLATE_DROP_D
-                        load_tile_tdm(tdm_config_d,
-                                      sec ? d_lds_write_windows.at(number<0>{})
-                                          : d_lds_write_windows.at(number<kB>{}),
-                                      d_dram_window);
-#endif
-                        advance_qdo_windows(i_total_loops + kIssueAhead + 1);
-                    });
-                phase = !phase;
-            }
-#endif
         }
         __builtin_amdgcn_sched_barrier(0);
 
@@ -1672,11 +1369,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         {
             bool need_perpixel_check = mask.IsEdgeTile(
                 seqlen_q_step, k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
-#if CK_TILE_FMHA_BWD_ABLATE_NO_MASK
-            need_perpixel_check = false;
-#elif CK_TILE_FMHA_BWD_ABLATE_ALL_MASK
-            need_perpixel_check = FmhaMask::IsMasking;
-#endif
             if(need_perpixel_check)
             {
                 set_tile_if(s_acc, -numeric<AccDataType>::infinity(), [&](auto tile_idx) {
@@ -1691,12 +1383,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                          FmhaMask::IsMasking)
             {
-#if CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE
-                return raw_lse;
-#else
                 // See the hot-loop copy: the sentinel only has to be finite.
                 return max(raw_lse, type_convert<LSEDataType>(-1e30f));
-#endif
             }
             else
             {
@@ -1739,7 +1427,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             }
             else
             {
-                return cast_tile<GemmDataType>(p);
+                return cast_tile_pk<GemmDataType>(p);
             }
         }();
 
@@ -1804,7 +1492,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 }
                 else
                 {
-                    return cast_tile<BiasGradDataType>(ds);
+                    return cast_tile_pk<BiasGradDataType>(ds);
                 }
             }();
             // Finish loading bias_s to reuse LDS.
@@ -1820,7 +1508,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         }
 
         // STAGE 6, SGrad^T@Q^T Gemm3
-        const auto ds_gemm = cast_tile<GemmDataType>(ds);
+        const auto ds_gemm = cast_tile_pk<GemmDataType>(ds);
 
         Policy::template SGradTFromGemm2CToGemm3A<Problem,
                                                   decltype(dst_reg_tensor),
@@ -1880,11 +1568,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dk_acc);
         }
 
-#if CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD
         const auto dq_out = FoldQGradForAtomic(dq_acc);
-#else
-        const auto& dq_out = dq_acc;
-#endif
         if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
                      memory_operation_enum::set)
         {
