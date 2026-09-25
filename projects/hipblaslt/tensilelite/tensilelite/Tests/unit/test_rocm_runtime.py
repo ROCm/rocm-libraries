@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import builtins
 import os
 import sys
 from pathlib import Path
@@ -158,6 +159,40 @@ def test_validate_distribution_reports_python_sdk_mismatch(tmp_path, monkeypatch
         "  selected by: active Python rocm_sdk_core\n"
         "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
     )
+
+
+def test_python_sdk_version_returns_none_when_core_package_is_absent(monkeypatch):
+    original_import = builtins.__import__
+
+    def import_without_core(name, *args, **kwargs):
+        if name == "rocm_sdk_core":
+            raise ModuleNotFoundError("No module named 'rocm_sdk_core'", name=name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.delitem(sys.modules, "rocm_sdk_core", raising=False)
+    monkeypatch.setattr(builtins, "__import__", import_without_core)
+
+    assert _rocm._python_sdk_version() is None
+
+
+def test_python_sdk_version_rejects_missing_core_dependency(monkeypatch):
+    original_import = builtins.__import__
+
+    def import_with_broken_core(name, *args, **kwargs):
+        if name == "rocm_sdk_core":
+            raise ModuleNotFoundError(
+                "No module named 'rocm_sdk_dependency'", name="rocm_sdk_dependency"
+            )
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.delitem(sys.modules, "rocm_sdk_core", raising=False)
+    monkeypatch.setattr(builtins, "__import__", import_with_broken_core)
+
+    with pytest.raises(
+        _rocm.TensileLiteRuntimeError,
+        match="active Python ROCm core package could not be imported",
+    ):
+        _rocm._python_sdk_version()
 
 def test_resolve_system_rocm_prefers_environment(tmp_path, monkeypatch):
     root = _root(tmp_path)
