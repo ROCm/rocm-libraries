@@ -95,7 +95,7 @@ geko/
 │   ├── bench.py        # Core benchmark execution
 │   ├── log.py          # hipBLASLt log file parsing
 │   └── utils.py        # Benchmark parsing utilities
-├── optim/              # Ductile/TensileLite tensilelite configuration and execution
+├── optim/              # Ductile/TensileLite configuration and execution
 │   ├── optim.py        # Optimization and result analysis
 │   └── utils.py        # Progress tracking and device management
 ├── search.py           # Dense search workflow (offline tuning)
@@ -585,7 +585,7 @@ my_optimization/
 
 ```bash
 HIPBLASLT_PATH="/path/to/rocm-libraries/projects/hipblaslt"
-LIBRARY_DIR="${HIPBLASLT_PATH}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/Equality/"
+LIBRARY_DIR="${HIPBLASLT_PATH}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/Equality/"
 
 ${HIPBLASLT_PATH}/tensilelite/tensilelite/bin/TensileMergeLibrary \
   --no_eff --force_merge True \
