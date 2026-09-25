@@ -16,14 +16,15 @@ python scripts/run_tensile_logic_check.py
 
 **Windows**: `python scripts\run_tensile_logic_check.py` (or use `py` if you have the launcher).
 
-That’s it. Use whatever type of Python you have (system, store, or a venv). If that Python is missing dependencies (e.g. joblib) and the project has a **`.venv`** in the repo root, the script will re-run itself with `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (Unix), so you don’t have to remember to activate.
+The selected Python must already provide the `tensilelite` and `rocisa`
+packages. The Python script does not inject checkout or build-tree paths and
+does not switch interpreters.
 
 ### One-time setup
 
-1. **Build once** so rocisa is present under `build/tensilelite/rocisa/` (nanobind `_rocisa` next to the `rocisa` package) or the legacy `build/tensilelite/rocisa/lib` layout.
-2. **Python deps** – either:
-   - Use the project **.venv**: `python -m venv .venv` then `.venv\Scripts\pip install -r tensilelite/requirements.txt` (Windows) or `.venv/bin/pip install -r tensilelite/requirements.txt` (Unix), or  
-   - Install into your current Python: `pip install -r tensilelite/requirements.txt`.
+From `projects/hipblaslt/tensilelite`, prepare the active environment with
+`invoke install --gpu-targets <gfx target>`. Alternatively, install compatible
+TensileLite and rocisa packages explicitly before invoking this script.
 
 ### Optional: check a single directory
 
@@ -46,4 +47,6 @@ The full tree (~2246 files) can take several minutes, so passing a subdirectory 
 
 ### run_tensile_logic_check.sh (Unix only)
 
-Thin wrapper that runs the script with `.venv/bin/python`, if it's present, and with `python3` otherwise. Use the `.py` script directly on Windows.
+Thin wrapper that selects `.venv/bin/python`, if present, and otherwise uses
+`python3`. The selected interpreter must satisfy the installed-package contract
+above. Use the `.py` script directly on Windows.
