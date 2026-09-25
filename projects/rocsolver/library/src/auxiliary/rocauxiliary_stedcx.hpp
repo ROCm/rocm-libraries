@@ -284,7 +284,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
                     "il:", il, "iu:", iu, "shiftC:", shiftC, "ldc:", ldc, "bc:", batch_count);
 
     // NOTE: only case evect = N and evect = I are implemented as this routine
-    // is only for internal use by syevdx. For performance reasons, The call to 
+    // is only for internal use by syevdx. For performance reasons, The call to
     // stedc always computes the vectors even if evect = N.
 
     // quick return
@@ -297,7 +297,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
-    rocblas_int bcblocks = 1;//std::min(65536, batch_count);
+    rocblas_int bcblocks = std::min(65536, batch_count);
 
     // info = 0
     ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
@@ -308,7 +308,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
         if(evect != rocblas_evect_none)
         {
             /** TODO: reset_batch_info should be modified to work with any grid configuration and
-                    not with batch_count hardwired to the grid dimension. **/ 
+                    not with batch_count hardwired to the grid dimension. **/
             ROCSOLVER_LAUNCH_KERNEL(reset_batch_info<T>, dim3(1, batch_count), dim3(1, 1), 0,
                                     stream, C, strideC, n, 1);
         }
