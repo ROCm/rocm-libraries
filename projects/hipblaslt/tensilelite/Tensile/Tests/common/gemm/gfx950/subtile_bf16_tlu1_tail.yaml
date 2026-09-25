@@ -76,8 +76,8 @@ BenchmarkProblems:
   #
   # Isolates the parity gate: M and N (128) are multiples of every MacroTile in
   # the fork up to 128, so numLine == MT-1 there and the only thing varying is
-  # K_rem's parity.  MT160x160 is the exception -- one workgroup covers the whole
-  # problem and numLine clamps to 127 via min(numToEnd, MT).
+  # K_rem's parity.  MT160x160 and MT320x320 are the exceptions -- one workgroup
+  # covers the whole problem and numLine clamps to 127 via min(numToEnd, MT).
   ########################################
   -
     - # ProblemType
@@ -112,13 +112,20 @@ BenchmarkProblems:
           # the register-file limit, which is where an off-by-one in the tail's
           # flat tile-id layout would show up.
           #
-          # MT160x160 (wave group [1,1]) rather than MT320x320 (wave group
-          # [2,2]): same 100 tiles per wave, but it is reachable at BOTH DepthU.
+          # Both wave groupings of 10x10 are here because they differ in the one
+          # thing the tail loop cares about besides tile count -- whether waves
+          # share an LDS strip:
+          #
+          #   MT160x160, wg [1,1]  single wave, reachable at BOTH DepthU.
+          #   MT320x320, wg [2,2]  multi-wave strip, DepthU 64 ONLY.
+          #
           # PGR=1 double-buffers LDS, so 320x320 at DepthU 128 wants
           # 2*(320*128*2 + 320*128*2) = 327680 B against a 163840 B cap and is
-          # correctly rejected; 160x160 at DepthU 128 comes to 163840 B, landing
-          # exactly on the cap.
-          - [16, 16, 32, 1,  1, 10, 10,  1, 1] # MT 160x160
+          # correctly rejected -- that row contributes 8 results, not 16.  Both
+          # 160x160 at DepthU 128 and 320x320 at DepthU 64 come to 163840 B,
+          # landing exactly on the cap.
+          - [16, 16, 32, 1,  1, 10, 10,  1, 1] # MT 160x160, single wave
+          - [16, 16, 32, 1,  1, 10, 10,  2, 2] # MT 320x320, multi-wave strip
 
         - DepthU: [64, 128]
         - PrefetchGlobalRead: [1]
