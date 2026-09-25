@@ -34,9 +34,9 @@ namespace stinkytofu {
 /// Named region used as the "main loop" feature source.
 inline constexpr std::string_view kMainLoopGroupName = "loopWithPrefetch";
 
-/// CDNA5 scheduling-policy default / heuristic cap for dsReadPerWmma.
-/// Keep aligned with kGfx1250Config.dsReadPerWmma in CDNA5.hpp (not HWModel).
-inline constexpr int kStaticDefaultDsReadPerWmma = 3;
+/// CDNA5 scheduling-policy default / heuristic cap for dsReadPerCap.
+/// Keep aligned with kGfx1250Config.dsReadPerCap in CDNA5.hpp (not HWModel).
+inline constexpr int kStaticDefaultDsReadPerCap = 3;
 /// Historical ModuleOptions / InsertClusterBarrierPass default.
 inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
 
@@ -76,11 +76,11 @@ struct SchedulingFeatures {
 
 struct ResolvedSchedulingKnobs {
     int dsReadThrottleLatency = 0;
-    int dsReadPerWmma = kStaticDefaultDsReadPerWmma;
+    int dsReadPerCap = kStaticDefaultDsReadPerCap;
     int clusterBarrierRule3SignalLeadCycles = kStaticDefaultClusterBarrierRule3SignalLeadCycles;
 
     SchedulingKnobSource dsReadThrottleLatencySource = SchedulingKnobSource::StaticDefault;
-    SchedulingKnobSource dsReadPerWmmaSource = SchedulingKnobSource::StaticDefault;
+    SchedulingKnobSource dsReadPerCapSource = SchedulingKnobSource::StaticDefault;
     SchedulingKnobSource clusterBarrierRule3SignalLeadCyclesSource =
         SchedulingKnobSource::StaticDefault;
 };
@@ -88,7 +88,7 @@ struct ResolvedSchedulingKnobs {
 /// Per-knob user overrides. nullopt = unset (eligible for policy / static).
 struct SchedulingKnobOverrides {
     std::optional<int> dsReadThrottleLatency;
-    std::optional<int> dsReadPerWmma;
+    std::optional<int> dsReadPerCap;
     std::optional<int> clusterBarrierRule3SignalLeadCycles;
 };
 
@@ -116,7 +116,7 @@ STINKYTOFU_EXPORT SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyA
 
 /// Build overrides from ModuleOptions sentinels:
 ///   DsReadThrottleLatency <= 0                    → unset
-///   DsReadPerWmma < 0                             → unset
+///   DsReadPerCap < 0                             → unset
 ///   ClusterBarrierRule3SignalLeadCycles < 0       → unset
 STINKYTOFU_EXPORT SchedulingKnobOverrides
 schedulingKnobOverridesFromModuleOptions(const StinkyAsmModule::ModuleOptions& opts);

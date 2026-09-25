@@ -144,14 +144,14 @@ namespace rocwmma
                               "MaxVectorWidth must be a multiple of VWStride_Y");
             };
 
-            ROCWMMA_DEVICE constexpr static inline auto strideCounts()
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strideCounts()
             {
                 return make_vector(Traits::BlockDimSegs, // BlockDim Segments
                                    Traits::BlockKSegs, // BlockK Segments
                                    Traits::VWSegs); // VW Segments
             }
 
-            ROCWMMA_DEVICE constexpr static inline auto strides()
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strides()
             {
                 return make_vector(make_coord2d(Traits::BlockDimStride_X, Traits::BlockDimStride_Y),
                                    make_coord2d(Traits::BlockKStride_X, Traits::BlockKStride_Y),
@@ -319,14 +319,14 @@ namespace rocwmma
                               "MaxVectorWidth must be a multiple of VWStride_X");
             };
 
-            ROCWMMA_DEVICE constexpr static inline auto strideCounts()
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strideCounts()
             {
                 return make_vector(Traits::BlockDimSegs, // BlockDim Segments
                                    Traits::BlockKSegs, // BlockK Segments
                                    Traits::VWSegs); // VW Segments
             }
 
-            ROCWMMA_DEVICE constexpr static inline auto strides()
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strides()
             {
                 return make_vector(make_coord2d(Traits::BlockDimStride_X, Traits::BlockDimStride_Y),
                                    make_coord2d(Traits::BlockKStride_X, Traits::BlockKStride_Y),
@@ -403,12 +403,12 @@ namespace rocwmma
                 static_assert(BlockDim % MmaDim == 0, "BlockDim must be a multiple of MmaDim");
             };
 
-            ROCWMMA_DEVICE constexpr static inline auto strideCounts()
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strideCounts()
             {
                 return make_vector(Traits::SplitKSegs, Traits::BlockKSegs, Traits::VWSegs);
             }
 
-            ROCWMMA_DEVICE constexpr static inline auto strides()
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strides()
             {
                 return make_vector(make_coord2d(Traits::SplitKStride_X, Traits::SplitKStride_Y),
                                    make_coord2d(Traits::BlockKStride_X, Traits::BlockKStride_Y),
@@ -475,14 +475,14 @@ namespace rocwmma
                 static_assert(BlockDim % MmaDim == 0, "BlockDim must be a multiple of MmaDim");
             };
 
-            ROCWMMA_DEVICE constexpr static inline auto strideCounts()
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strideCounts()
             {
                 return make_vector(Traits::SplitKSegs, // WaveKSegs Segments
                                    Traits::BlockKSegs, // BlockK Segments
                                    Traits::VWSegs); // VW Segments
             }
 
-            ROCWMMA_DEVICE constexpr static inline auto strides()
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strides()
             {
                 return make_vector(make_coord2d(Traits::SplitKStride_X, Traits::SplitKStride_Y),
                                    make_coord2d(Traits::BlockKStride_X, Traits::BlockKStride_Y),
