@@ -178,9 +178,19 @@ namespace
         std::string m_previous;
     };
 
-    // Budget used by the tests: small enough that the affordable shapes below
-    // genuinely split into several chunks.
-    constexpr size_t c_budget = 4096;
+    // The two budgets exercise disjoint regimes, so the numerical battery runs
+    // under both:
+    //
+    //   c_budget       small enough that the affordable shapes split into many
+    //                  chunks, exercising the host chunk loop and the
+    //                  batch_offset arithmetic. chunk_size stays well under the
+    //                  grid ceiling, so the kernel never sweeps.
+    //   c_sweep_budget large enough to hold every batch in one chunk, making
+    //                  chunk_size exceed what gridDim.z can address, which is
+    //                  the only way to reach the kernel's grid-stride sweep with
+    //                  a non-empty triangle.
+    constexpr size_t c_budget       = 4096;
+    constexpr size_t c_sweep_budget = size_t(16) * 1024 * 1024;
 
     // Port of rocblas_syrk_herk_chunk_size. Kept deliberately literal so a change
     // to the production rule shows up here as a test failure rather than silently
@@ -484,8 +494,19 @@ namespace
             {
                 EXPECT_EQ(reported, rounded(chunked_workspace_bytes<T>(c.n, c.bc)))
                     << "n=" << c.n << " batch_count=" << c.bc;
-                EXPECT_LE(reported, rounded(c_budget))
-                    << "workspace exceeds the byte budget at n=" << c.n << " batch_count=" << c.bc;
+                // The budget is only honoured while a single batch fits in
+                // it. Past that the chunk clamps to one batch and the
+                // allocation is that batch, budget or not.
+                const size_t per_batch = tri_n(c.n) * sizeof(T);
+                if(per_batch <= c_budget)
+                    EXPECT_LE(reported, rounded(c_budget))
+                        << "workspace exceeds the byte budget at n=" << c.n
+                        << " batch_count=" << c.bc;
+                else
+                    EXPECT_EQ(reported, rounded(per_batch))
+                        << "a single batch exceeds the budget, so the chunk must be "
+                           "exactly one batch, at n="
+                        << c.n << " batch_count=" << c.bc;
                 EXPECT_LE(reported, rounded(tri_n(c.n) * sizeof(T) * size_t(c.bc)))
                     << "chunking must never ask for more than the unchunked size";
             }
@@ -753,11 +774,11 @@ namespace
     }
 
     template <typename T, op_kind K, typename ApiFunc>
-    static void run_strided_numerical(ApiFunc api, rocblas_int batch_count)
+    static void run_strided_numerical(ApiFunc api, rocblas_int batch_count, size_t budget)
     {
         using S = scalar_t<T, K>;
 
-        scoped_workspace_budget budget_guard(c_budget);
+        scoped_workspace_budget budget_guard(budget);
 
         rocblas_local_handle handle;
         // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
@@ -816,11 +837,11 @@ namespace
     }
 
     template <typename T, op_kind K, typename ApiFunc>
-    static void run_batched_numerical(ApiFunc api, rocblas_int batch_count)
+    static void run_batched_numerical(ApiFunc api, rocblas_int batch_count, size_t budget)
     {
         using S = scalar_t<T, K>;
 
-        scoped_workspace_budget budget_guard(c_budget);
+        scoped_workspace_budget budget_guard(budget);
 
         rocblas_local_handle handle;
         // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
@@ -896,8 +917,14 @@ namespace
         // which is the only shape where both indices are simultaneously non-trivial.
         for(rocblas_int bc : {65536, 131070})
         {
-            run_strided_numerical<T, K>(strided_api, bc);
-            run_batched_numerical<T, K>(batched_api, bc);
+            // c_budget splits into many chunks; c_sweep_budget keeps it to one
+            // chunk too large for gridDim.z, which is the only way the kernel's
+            // grid-stride sweep runs over a non-empty triangle.
+            for(size_t budget : {c_budget, c_sweep_budget})
+            {
+                run_strided_numerical<T, K>(strided_api, bc, budget);
+                run_batched_numerical<T, K>(batched_api, bc, budget);
+            }
         }
     }
 
