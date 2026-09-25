@@ -332,6 +332,8 @@ ctest --test-dir build/release -L standard
 
 **Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 
+A known error in an upstream library is handled differently: rather than excluding the test, the report is **suppressed** so the test still runs. `__asan_default_suppressions()` in `test_sdk/src/AsanDefaultSuppressions.cpp` returns the patterns and is compiled into each test executable, so it needs no suppressions file and survives relocation of an installed tree. The list is fixed at compile time — seeing the errors it hides needs an edit there and a rebuild, and a user-supplied `ASAN_OPTIONS` suppressions file adds to it rather than replacing it. When auditing which tests ASAN holds back, read that list as well as grepping for `SKIP_IF_ASAN()`.
+
 **Current status:**
 
 - **Linux** - the ASAN test suite runs cleanly; all tests that are problematic under ASAN have been skipped, so a green run is expected.
