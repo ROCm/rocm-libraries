@@ -155,7 +155,7 @@ Three ways to validate:
 3. **Build-time** (off by default):
 
    Set the YAML toggle `GlobalParameters.ValidateMetadata: True` in your
-   benchmark configuration, or pass `--validate-metadata` to `Tensile`. With
+   benchmark configuration, or pass `--validate-metadata` to `tensilelite run`. With
    the flag on, `buildAssemblyCodeObjectFiles` validates every kernel that
    participates in the build and prints `Tensile::WARNING: ...` for any
    missing or invalid `custom.config` while letting the build proceed.

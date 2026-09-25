@@ -347,10 +347,10 @@ broader hardware coverage than PR or nightly CI provides. See
 
 ### Build-Time Validation of Library Logic
 
-**What it does, briefly.** `TensileLogic --check-all` validates the library logic YAML before any of
+**What it does, briefly.** `tensilelite logic --check-all` validates the library logic YAML before any of
 it is compiled: chip IDs, matrix instructions, work-group shapes, the XCC work-group mapping, and
 custom kernel declarations, one file at a time. It reads YAML only, needs no GPU, and runs as a CMake
-build step ahead of `TensileCreateLibrary` rather than as a test, so a failure stops the build with no
+build step ahead of `tensilelite create-library` rather than as a test, so a failure stops the build with no
 check name and no test report. It is the only mechanism in the component that validates tuning data
 rather than code, and it exists because of one specific incident that cost about three months before
 this validator — which had already existed, unused, for over a year — was finally wired in.
@@ -560,7 +560,7 @@ the C++ build and test.
 | Validation area | Required before merge | Owner | Responsibility |
 | --- | --- | --- | --- |
 | Build (Linux and Windows) | Yes | CI / DevOps + TheRock | Maintain jobs, runners, and pipeline health |
-| Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
+| Library logic validation (`tensilelite logic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched and the PR targets `develop` | Component team | Asserted by the gating `preliminary` job. Review every golden diff; never bulk-regenerate |
@@ -586,7 +586,7 @@ required-check list, in this repository, is tracked as a gap.
 
 **Trusted gate.** A failure here is a real problem with the change.
 
-- Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
+- Build on both platforms, which includes the `tensilelite logic --check-all` library logic validation
 - Client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows)
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12
 - The Math CI sensitive-word scan, the job named `static-analysis`
@@ -637,18 +637,15 @@ about "what do we currently know is broken" has to check all eight.
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
-| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/tensilelite/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` in [`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/source_only/test_PlaceholderMerge.py) | Source-checkout logic-corpus consistency checks, whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The source-only test is intentionally excluded from installed artifacts and can run only from a checkout that includes the logic corpus |
 
 This last mechanism is a different shape from the other seven: it is not quarantining a *known* bug
 at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
-quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
-this precondition checks for never exists by design (see
-[CI visibility and gating](#ci-visibility-and-gating)), so the tests behind it (2 in
-`test_PlaceholderMerge.py`, 1 in `test_GpuRevisionTarget.py`) cannot execute for real in that lane,
-ever, independent of whether the underlying data is correct. [PR #7716](https://github.com/ROCm/rocm-libraries/pull/7716)
-narrowed the marker from a module-wide xfail (which was false-XPASSing 3 unrelated tests) to just
-the 2 tests that need the corpus; it fixed the XPASS problem it was solving but left this shape
-intact.
+quarantine list for a more permanent reason. In TheRock CI's installed-artifact
+layout, the corpus this precondition checks for never exists by design (see
+[CI visibility and gating](#ci-visibility-and-gating)). The source-only test is
+therefore excluded while checkout-based CI can still exercise its three
+corpus-dependent assertions.
 
 **The distinction that matters is the last column.** Format is cosmetic; what separates a healthy
 suppression from rot is whether the mechanism can tell you the underlying bug got fixed. That sorts
@@ -669,7 +666,7 @@ those few lines.
 The two YAML quarantine files each have half of what the other needs. The client list has the better
 prose discipline: named entries, a ROCm ticket, a root-cause explanation, and a note to remove the
 entry so the case re-activates as an enforced gate. But it is all in comments, so no tool can act on
-it, and the excluded case never runs again. The TensileLogic list has the weaker narrative and the
+it, and the excluded case never runs again. The `tensilelite logic` list has the weaker narrative and the
 better structure: a real `ticket:` field, keys chosen so they survive library re-tuning, and a check
 that re-validates every entry on each run and reports the ones that no longer reproduce.
 
