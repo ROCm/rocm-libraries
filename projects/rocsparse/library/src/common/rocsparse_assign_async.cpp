@@ -24,48 +24,38 @@
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
-#include "rocsparse_grid.hpp"
 #include "rocsparse_indextype_utils.hpp"
 
 namespace rocsparse
 {
-    template <typename T>
-    ROCSPARSE_KERNEL(32)
+    static constexpr uint32_t assign_blocksize = 256;
+
+    // Fixed upper bound on the grid; the kernels grid-stride over n.
+    static constexpr int64_t assign_max_blocks = 1024;
+
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
     void assign_kernel(int64_t n, T* dest, T value)
     {
-        if(hipThreadIdx_x == 0)
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; i < n;
+            i += stride)
         {
-            for(int64_t batch_index = hipBlockIdx_y; batch_index < n; batch_index += hipGridDim_y)
-            {
-                dest[batch_index] = value;
-            }
+            dest[i] = value;
         }
     }
 
-    template <typename T>
-    ROCSPARSE_KERNEL(32)
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
     void assign_device_kernel(int64_t n, T* dest, const T* value)
     {
-        if(hipThreadIdx_x == 0)
+        const T       v      = value[0];
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; i < n;
+            i += stride)
         {
-            for(int64_t batch_index = hipBlockIdx_y; batch_index < n; batch_index += hipGridDim_y)
-            {
-                dest[batch_index] = value[0];
-            }
+            dest[i] = v;
         }
-    }
-
-    // assign_async takes no handle, so it reads the grid.y limit that
-    // handle->properties.maxGridSize[1] holds from the current device instead.
-    static rocsparse_status assign_grid_size_y(int64_t n, uint32_t& grid_size_y)
-    {
-        int device;
-        int max_grid_size_y;
-        RETURN_IF_HIP_ERROR(hipGetDevice(&device));
-        RETURN_IF_HIP_ERROR(
-            hipDeviceGetAttribute(&max_grid_size_y, hipDeviceAttributeMaxGridDimY, device));
-        grid_size_y = rocsparse::clamp_grid_extent(n, max_grid_size_y);
-        return rocsparse_status_success;
     }
 }
 
@@ -73,20 +63,45 @@ template <typename T>
 rocsparse_status
     rocsparse::assign_device_async(int64_t n, T* dest, const T* value, hipStream_t stream)
 {
-    uint32_t grid_size_y;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_grid_size_y(n, grid_size_y));
+    if(n <= 0)
+    {
+        return rocsparse_status_success;
+    }
+
+    const int64_t nblocks
+        = std::min((n - 1) / rocsparse::assign_blocksize + 1, rocsparse::assign_max_blocks);
+
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        rocsparse::assign_device_kernel, dim3(1, grid_size_y), dim3(32), 0, stream, n, dest, value);
+        (rocsparse::assign_device_kernel<rocsparse::assign_blocksize>),
+        dim3(nblocks),
+        dim3(rocsparse::assign_blocksize),
+        0,
+        stream,
+        n,
+        dest,
+        value);
     return rocsparse_status_success;
 }
 
 template <typename T>
 rocsparse_status rocsparse::assign_async(int64_t n, T* dest, T value, hipStream_t stream)
 {
-    uint32_t grid_size_y;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_grid_size_y(n, grid_size_y));
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        rocsparse::assign_kernel, dim3(1, grid_size_y), dim3(32), 0, stream, n, dest, value);
+    if(n <= 0)
+    {
+        return rocsparse_status_success;
+    }
+
+    const int64_t nblocks
+        = std::min((n - 1) / rocsparse::assign_blocksize + 1, rocsparse::assign_max_blocks);
+
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::assign_kernel<rocsparse::assign_blocksize>),
+                                       dim3(nblocks),
+                                       dim3(rocsparse::assign_blocksize),
+                                       0,
+                                       stream,
+                                       n,
+                                       dest,
+                                       value);
     return rocsparse_status_success;
 }
 
