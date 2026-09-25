@@ -8,6 +8,7 @@ missing it passes every runtime-shaped check and fails only at pack time.
 """
 
 import json
+import re
 
 import pytest
 from codegen.config_loader import ConfigError, load_config
@@ -135,6 +136,33 @@ class TestPackagedFragments:
             "unlowered rocke descriptor installs a copy the runtime loader rejects"
         )
         assert "hkp_pack" in text and "authored subpath" in text.lower()
+
+    def test_census_fragment_registers_the_suite_this_run_writes(
+        self, generator, gfx950_attention_dense_config, tmp_path
+    ):
+        """The call is spliced verbatim, so its suite must be one this run actually
+        wrote: a census whose gtest filter matches nothing runs zero cases and reports
+        success.
+
+        Every assertion reads the comment-stripped payload rather than the raw
+        fragment, because the prose around the call names the same keywords and would
+        otherwise satisfy a check the emitted call had stopped meeting."""
+        written = generator.render(gfx950_attention_dense_config, tmp_path)
+        _text, payload = self._payload(tmp_path, "cmake_test_sources.txt")
+        spliced = "\n".join(payload)
+        # The census binary and the ordinary unit binary are not interchangeable:
+        # naming the unit target puts package-census state on every ordinary run.
+        assert (
+            "hkp_register_census_tests(TARGET hip_kernel_provider_census_tests"
+            in spliced
+        ), f"the census call does not name the census target:\n{spliced}"
+        assert "PACK_NAME product" in spliced
+        suite = re.search(r"^\s*SUITES (\w+)$", spliced, re.MULTILINE)
+        assert suite, f"the census call names no single suite:\n{spliced}"
+        assert re.search(
+            r"^\s*\)$", spliced, re.MULTILINE
+        ), f"the census call is never closed, so the splice would not parse:\n{spliced}"
+        assert f"tests/{suite.group(1)}.cpp" in written
 
     def test_direct_load_fragment_splices_nothing_either(
         self, generator, scale_add_config, tmp_path
