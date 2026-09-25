@@ -46,9 +46,7 @@ def test_production_modules_do_not_import_the_legacy_tensile_package():
 def test_unit_modules_do_not_import_the_legacy_tensile_package():
     """Canonical unit tests must exercise the package name shipped by the wheel."""
     unit_root = _PACKAGE_ROOT / "Tests/unit"
-    unit_modules = (
-        path for path in unit_root.rglob("*.py") if path.name != "test_namespace_bridge.py"
-    )
+    unit_modules = unit_root.rglob("*.py")
     assert _legacy_imports(unit_modules) == []
 
 
@@ -59,3 +57,11 @@ def test_installed_artifacts_exclude_source_only_tests():
     )[0]
 
     assert 'PATTERN "source_only" EXCLUDE' in package_install
+
+
+def test_legacy_namespace_bridge_files_are_absent():
+    project_root = _PACKAGE_ROOT.parent
+
+    assert not (project_root / "Tensile/__init__.py").exists()
+    assert not (_PACKAGE_ROOT / "_namespace_bridge.py").exists()
+    assert not (_PACKAGE_ROOT / "Tests/unit/test_namespace_bridge.py").exists()
