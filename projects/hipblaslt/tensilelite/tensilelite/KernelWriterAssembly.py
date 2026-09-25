@@ -54,7 +54,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
   SCmpKGeU32, SCmpKGtU32, SCmpKLGU32, SCmpLeI32, SCmpLeU32, SCmpLgU32, SCmpLtU32, SCmpLtI32, \
-  SEndpgm, SFf1B32, SGetRegB32, SFlbitI32B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
+  SEndpgm, SFf1B32, SWaitTensorcnt, SGetRegB32, SFlbitI32B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
   SLShiftRightB64, SLoadB32, SLoadB64, SMFMAInstruction, SMemLoadInstruction, SMaxI32, SMaxU32, SMinI32, \
   SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
@@ -15333,20 +15333,24 @@ class KernelWriterAssembly(KernelWriter):
   def storeRemapTensorStoreKernel(self, kernel):
     """Does this kernel flush ANY storeRemap round with tensor_store_from_lds?
 
-    storeRemapUseTensorStore adds the per-batch `edge` test on top of this. The LDS layout
-    has to be decided per KERNEL, not per batch, because the edge fallback reads back the
-    same staging tile -- hence this split.
+    Decided from `kernel` ALONE. It must not consult self.states.bpeCexternal:
+    globalWriteElements re-points that at bpeCinternal while it emits the GSU branch, so a
+    predicate reading it answers differently depending on WHEN it is called. storeRemapLdsPad
+    is derived from this, and the LDS row stride has to be one fixed value for the whole
+    kernel -- the staging write, the address setup and the DMA all index the same tile. When
+    this leaked, one storeRemapComputeStoreVgprs emission used stride MT0+pad while the
+    staging used MT0, so every LDS row past the first was displaced.
+
+    The bpeCexternal test belongs in storeRemapUseTensorStore, which chooses the flush per
+    call; only the LAYOUT must be kernel-wide.
     """
     if not kernel["StoreRemapVectorWidth"]:
       return False
     # StoreRemapTensorStore: -1 auto, 0 off, 1 forced. A forced 1 that cannot be honoured is
-    # rejected in Solution.py for the statically-decidable conditions, so reaching here with 1
-    # and failing a check means a codegen-time condition (the GSU f32 workspace) -- fall back
-    # rather than emit a DMA that would store the wrong element size.
+    # rejected in Solution.py for the statically-decidable conditions.
     if kernel.get("StoreRemapTensorStore", -1) == 0:
       return False
     return (self.states.asmCaps.get("HasTDM", False)
-            and self.states.bpeCexternal == self.states.bpeCexternalGSU1
             and kernel["BufferStore"]
             and kernel["WavefrontSize"] == 32
             and kernel["MatrixInstN"] % kernel["MIWaveGroup"][0] == 0)
@@ -15354,12 +15358,21 @@ class KernelWriterAssembly(KernelWriter):
   def storeRemapLdsPad(self, kernel):
     """Row pad of the storeRemap LDS tile, in elements.
 
-    Normally max(StoreRemapVectorWidth, MIOutputVectorWidth) to spread ds_read banks. Zero
-    when the round is flushed by tensor_store_from_lds: the DMA walks the tile as a plain
-    tile_dim0 x tile_dim1 image and does NOT honour the descriptor's padding field on the
-    store path, so a padded tile is read with the wrong row stride -- LDS row 0 lands at
-    offset 0 either way and is correct, every row past it is displaced by the pad. The DMA
-    replaces the ds_read the pad existed for, so dropping it costs nothing on that path.
+    max(StoreRemapVectorWidth, MIOutputVectorWidth) normally, to spread ds_read banks; 0 when
+    the round is flushed by tensor_store_from_lds.
+
+    The DMA does not honour the descriptor's padding field on the STORE path, unlike the load
+    path which uses the same field and encoding successfully for the main loop. Measured, not
+    assumed: keeping the pad and describing it via setPadding fails on every non-edge shape
+    tried (MT32x32, MT64x128, MT128x256, one and four waves), while flattening passes on all
+    of them. The mechanism behind that asymmetry is not known.
+
+    Flattening is safe for correctness: the pad exists to spread banks for the ds_read that
+    the DMA replaces. The edge fallback in these kernels does lose it and may pay some bank
+    conflicts -- a perf trade, not a correctness one.
+
+    Whatever this returns must be constant for the whole kernel, which is why it keys off
+    storeRemapTensorStoreKernel (kernel-only) rather than anything codegen mutates.
     """
     if self.storeRemapTensorStoreKernel(kernel):
       return 0
@@ -15369,15 +15382,19 @@ class KernelWriterAssembly(KernelWriter):
     """Can this storeRemap flush be a tensor_store_from_lds instead of ds_load + buffer_store?
 
     Exactly storeRemapTensorStoreKernel plus the per-batch edge test -- deliberately NOT a
-    second copy of those conditions. The two must agree: storeRemapLdsPad flattens the LDS
-    tile for any kernel storeRemapTensorStoreKernel accepts, so a flush that disagreed would
-    read a padded tile as contiguous (or vice versa) and corrupt every row past the first.
+    second copy of those conditions.
 
     Edge batches fall back because they need the per-element bounds masking the DMA does not
-    do here; the tile they read back is the same flattened one, which is fine -- the pad only
-    ever existed to spread ds_read banks.
+    do here; they read back the same tile the DMA would have.
+
+    The bpeCexternal test lives here rather than in storeRemapTensorStoreKernel because it is
+    a property of WHICH BRANCH is being emitted, not of the kernel: the GSU branch re-points
+    bpeCexternal at the f32 workspace and must use ds_read + buffer_store. Keeping it out of
+    the kernel-level predicate is what makes the LDS pad constant across both branches.
     """
-    return (not edge) and self.storeRemapTensorStoreKernel(kernel)
+    return ((not edge)
+            and self.states.bpeCexternal == self.states.bpeCexternalGSU1
+            and self.storeRemapTensorStoreKernel(kernel))
 
   def storeRemapAddStoreTensorStore(self, kernel):
     """Flush one storeRemap LDS round to D with a single per-wave tensor_store_from_lds.
@@ -15403,7 +15420,7 @@ class KernelWriterAssembly(KernelWriter):
 
     bpe         = self.states.bpeCexternal
     mt0         = kernel["MacroTile0"]
-    ldsPad      = self.storeRemapLdsPad(kernel)   # 0 on this path -- see storeRemapLdsPad
+    ldsPad      = self.storeRemapLdsPad(kernel)
     rowsPerWave = kernel["MatrixInstN"] // kernel["MIWaveGroup"][0]
     ldsRowBytes = (mt0 + ldsPad) * bpe
     packedD1    = kernel["PackedC1IndicesX"]
@@ -15429,9 +15446,9 @@ class KernelWriterAssembly(KernelWriter):
       g0 = descRes.idx + 8
       module.add(tdm.initOperands(g0, g1))
       module.add(tdm.setDataType(kernel["ProblemType"]["DestDataType"], g1))
-      # ldsPad is 0 on this path, so this emits nothing (setPadding no-ops on a zero pad).
-      # Kept as the call rather than a bare 0,0 so it starts describing the pad again if
-      # storeRemapLdsPad ever stops flattening it.
+      # ldsPad is 0 on this path (see storeRemapLdsPad), so this emits nothing. Kept as the
+      # call rather than a bare 0,0 so it describes the pad again if the store-path padding
+      # field is ever made to work.
       module.add(tdm.setPadding(g1, mt0 * bpe, ldsPad * bpe))
       with self.allocTmpSgpr(2, tag="storeRemapTensorStoreAddr") as addrRes:
         tmp = addrRes.idx
@@ -15482,6 +15499,17 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAddU64(dst=sgpr(g0 + 2, 2), src0=sgpr(g0 + 2, 2), src1=sgpr(off, 2),
                              comment="global_addr += wgM + waveN"))
       module.add(tdm.issueStore(g0, g1))
+      # Drain the DMA before this scope frees the descriptor sgprs and before the caller stages
+      # the NEXT round into the same LDS tile. The whole-MT TensorStore epilogue documents that
+      # it needs no wait because its store is the last op before s_endpgm; this flush runs once
+      # per round in a loop, so that precondition does not hold here.
+      #
+      # This is hygiene, not the fix for any observed miscompare -- with ScheduleIterAlg 4 the
+      # scheduler relocates it away from the DMA anyway (it only stays put at SIA 0), and the
+      # corruption that looked like a race turned out to be the stale bpeCexternal predicate
+      # described on storeRemapTensorStoreKernel.
+      module.add(SWaitTensorcnt(tensorcnt=0,
+                                comment="storeRemap: drain tensor_store before reusing LDS/descriptor"))
 
     return module, 1
 
