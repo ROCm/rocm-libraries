@@ -1705,6 +1705,10 @@ namespace TensileLite
         {
             args.template append<void const*>("scaleA", inputs.scaleA);
             args.template append<void const*>("scaleB", inputs.scaleB);
+            // Asymmetric w4a16 zero-points. One user-facing pointer still: the
+            // library derives this from scaleA + the scale-region size.
+            if(problemType.scaleZeroPointA)
+                args.template append<void const*>("scaleZeroA", inputs.scaleZeroA);
         }
         if(problemType.useScaleCD) //kernel input data
         {

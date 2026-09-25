@@ -3155,6 +3155,129 @@ namespace TensileLite
                 }
             };
 
+            // w4a16 group scaling. Contractions.py emits these two predicates
+            // only when UseScaleAB == "Block", so ordinary solutions are
+            // unaffected.
+            struct ScaleBlockSizeA
+                : public Predicate_CRTP<ScaleBlockSizeA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                ScaleBlockSizeA() = default;
+                ScaleBlockSizeA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ScaleBlockSizeA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.scaleBlockSizeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.scaleBlockSizeA(), "==", "sol", value);
+                }
+            };
+
+            struct Int4EncodingA : public Predicate_CRTP<Int4EncodingA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                // Serialized as the ProblemType string ("Signed",
+                // "UnsignedBias8") so the logic files
+                // stay readable.
+                std::string value;
+
+                Int4EncodingA() = default;
+                Int4EncodingA(std::string value)
+                    : value(std::move(value))
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "Int4EncodingA";
+                }
+
+                static std::string toString(ContractionProblemGemm::Int4Encoding e)
+                {
+                    switch(e)
+                    {
+                    case ContractionProblemGemm::Int4Encoding::UnsignedBias8:
+                        return "UnsignedBias8";
+                    default:
+                        return "Signed";
+                    }
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return toString(problem.int4EncodingA()) == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        toString(problem.int4EncodingA()),
+                                        "==",
+                                        "sol",
+                                        value);
+                }
+            };
+
+            struct ScaleZeroPointA
+                : public Predicate_CRTP<ScaleZeroPointA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                ScaleZeroPointA() = default;
+                ScaleZeroPointA(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ScaleZeroPointA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.scaleZeroPointA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.scaleZeroPointA(), "==", "sol", value);
+                }
+            };
+
             struct DataTypeMXSA
                 : public Predicate_CRTP<DataTypeMXSA, ContractionProblemGemm>
             {

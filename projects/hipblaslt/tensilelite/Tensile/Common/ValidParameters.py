@@ -630,6 +630,10 @@ validParameters = { # we need to make sure this matches develop
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
     "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
+    # Optional maps from contraction dimension index to a size constraint.
+    # Useful for custom kernels specialized to a vector or a restricted K.
+    "AssertSizeEqual": -1,
+    "AssertSizeGreaterThan": -1,
     # Kernel generator will assume that the FreeIndex[0] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[0] is usually letter "I"

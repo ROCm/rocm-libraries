@@ -370,6 +370,10 @@ namespace TensileLite
             MXSA          = 15,
             MXSB          = 16,
             GATE_RESIDUAL = 17,
+            // w4a16 asymmetric: packed signed int4 zero-points, one per K-group,
+            // on the same [M][ceil(K/G)] grid as SCALEA. Two per byte over the
+            // flattened index. See setScaleBlockSizeA.
+            SCALEZEROA    = 18,
             TENSOR_COUNT
         };
 
@@ -797,6 +801,104 @@ namespace TensileLite
             m_useScaleAB = useScaleAB;
         }
 
+        /// w4a16 group scaling (useScaleAB == "Block"): one scale per `blockSize`
+        /// consecutive K elements of a row of A. Shapes the ordinary SCALEA
+        /// tensor as a dense [rows][kGroups] with the group dimension innermost,
+        /// so the scale travels as the ordinary scaleA pointer.
+        ///
+        /// `rows` is A's free size (M) and `kGroups` is ceil(K / blockSize); both
+        /// are passed in because this is called after the A tensor exists but
+        /// its index layout differs between the library and client callers.
+        void setScaleBlockSizeA(int              blockSize,
+                                rocisa::DataType scaleType,
+                                size_t           rows,
+                                size_t           kGroups,
+                                bool             zeroPoint = false)
+        {
+            m_scaleBlockSizeA  = blockSize;
+            m_scaleZeroPointA  = blockSize ? zeroPoint : false;
+            if(blockSize)
+            {
+                m_scaleAType = scaleType;
+                m_tensors[ContractionProblemGemm::TENSOR::SCALEA]
+                    = {"scaleA", scaleType, {kGroups, rows}, {1, kGroups}};
+
+                if(zeroPoint)
+                {
+                    // Asymmetric: one signed int4 zero-point per group, in the
+                    // same [M][ceil(K/G)] row-major order as the scales, but
+                    // packed two per byte along *M* rather than along K:
+                    //   byte   = (m/2)*kGroups + g
+                    //   nibble = m & 1
+                    // i.e. one byte holds rows 2r and 2r+1 of the same K-group.
+                    //
+                    // Pairing along M rather than along the flattened index is
+                    // what keeps the K walk free of parity bookkeeping: a
+                    // thread's nibble is fixed by its row for the whole loop, and
+                    // one K iteration advances the SRD by exactly groupsPerIter
+                    // bytes for any group size. Pairing along K instead would
+                    // make an odd DepthU/G advance half a byte per row and flip
+                    // every thread's nibble -- neither expressible in a uniform
+                    // SRD increment.
+                    //
+                    // Packing along M also matches how AWQ/GPTQ store qzeros
+                    // natively (packed along the output dim).
+                    size_t zeroBytes = CeilDivide<size_t>(rows, 2) * kGroups;
+                    m_tensors[ContractionProblemGemm::TENSOR::SCALEZEROA]
+                        = {"scaleZeroA", rocisa::DataType::Int8, {zeroBytes}, {1}};
+                }
+            }
+        }
+
+        /// How the int4 weights in A are encoded. The element value is always
+        /// (q - z); only q's storage differs. Mirrors ProblemType's
+        /// "Int4EncodingA".
+        enum class Int4Encoding : int
+        {
+            /// Two's-complement int4 in [-8, 7], nibbles in K order.
+            Signed = 0,
+            /// Unsigned int4 in [0, 15] with an implicit zero-point of 8 when
+            /// there is no zero-point tensor; nibbles in K order. This is the
+            /// GPTQ / compressed-tensors checkpoint encoding.
+            UnsignedBias8 = 1,
+        };
+
+        void setInt4EncodingA(Int4Encoding encoding)
+        {
+            m_int4EncodingA = encoding;
+        }
+
+        Int4Encoding int4EncodingA() const
+        {
+            return m_int4EncodingA;
+        }
+
+        /// True when A's nibbles are unsigned with an implicit zero-point of 8.
+        bool int4UnsignedA() const
+        {
+            return m_int4EncodingA != Int4Encoding::Signed;
+        }
+
+        int scaleBlockSizeA() const
+        {
+            return m_scaleBlockSizeA;
+        }
+
+        bool scaleZeroPointA() const
+        {
+            return m_scaleZeroPointA;
+        }
+
+        rocisa::DataType scaleTypeA() const
+        {
+            return m_scaleAType;
+        }
+
+        TensorDescriptor const& scaleZeroATensor() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::SCALEZEROA];
+        }
+
         void setUseScaleCD(bool useScaleCD)
         {
             m_useScaleCD = useScaleCD;
@@ -933,6 +1035,11 @@ namespace TensileLite
 
         void setScaleA(rocisa::DataType type, size_t length)
         {
+            // In "Block" mode setScaleBlockSizeA already shaped SCALEA as the
+            // [M][ceil(K/G)] group-scale tensor; do not overwrite it with a
+            // scalar/vector descriptor.
+            if(m_useScaleAB == "Block")
+                return;
             m_scaleAType = type;
             if(type != rocisa::DataType::None && !m_useScaleAB.empty())
             {
@@ -1352,6 +1459,10 @@ namespace TensileLite
         {
             return m_dOps;
         }
+        TensorDescriptor const& scaleATensor() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::SCALEA];
+        }
         TensorDescriptor const& mxsa() const
         {
             return m_tensors[ContractionProblemGemm::TENSOR::MXSA];
@@ -1540,6 +1651,9 @@ namespace TensileLite
         std::string      m_useScaleAB              = "";
         bool             m_useScaleCD              = false;
         int              m_useScaleAlphaVec        = 0;
+        int              m_scaleBlockSizeA         = 0;
+        bool             m_scaleZeroPointA         = false;
+        Int4Encoding     m_int4EncodingA           = Int4Encoding::Signed;
         ActivationType   m_activationType          = ActivationType::None;
         bool             m_activationNoGuard       = false;
         int              m_sparse                  = 0;
@@ -1685,6 +1799,7 @@ namespace TensileLite
         void const* scaleC        = nullptr;
         void const* scaleD        = nullptr;
         void const* scaleAlphaVec = nullptr;
+        void const* scaleZeroA    = nullptr;
         void const* mxsa          = nullptr;
         void const* mxsb          = nullptr;
 

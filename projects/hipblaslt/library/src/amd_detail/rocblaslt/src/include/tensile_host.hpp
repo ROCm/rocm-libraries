@@ -252,6 +252,9 @@ inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
         return rocisa::DataType::BFloat6;
     case HIP_R_4F_E2M1:
         return rocisa::DataType::Float4;
+    // w4a16 weights: signed int4, two elements per byte.
+    case HIP_R_4I:
+        return rocisa::DataType::Int4;
     default:
         assert(!"hipDataType_to_tensile_type: non-supported type");
         return rocisa::DataType::None;

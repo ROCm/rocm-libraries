@@ -523,6 +523,13 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
 
+    // Assigned after construction, like streamKFlags: it is a solution
+    // predicate, so every path that searches for a solution (the heuristic,
+    // getAllAlgos, isAlgoSupported) needs it, not just the launch path in
+    // rocblaslt_mat.cpp. Leaving it at the default would silently match the
+    // Signed kernel for an unsigned-encoded problem.
+    problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+
     if(scaleAlphaVec)
     {
         // Fill owned storage with "1" for the compute type, and repoint alpha into it.
@@ -1249,6 +1256,30 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
                         break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_64;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_128;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_ZP;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_ZP_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_64_ZP;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_ZP_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_128_ZP;
+                        break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
                         matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Scalar;
                         break;
@@ -1517,6 +1548,24 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT:
+                if(sizeof(int32_t) <= sizeInBytes)
+                {
+                    int32_t requested = 0;
+                    memcpy(&requested, buf, sizeof(int32_t));
+                    if(requested < 0 || requested >= HIPBLASLT_INT4_ENCODING_END_EXT)
+                    {
+                        log_error(__func__, "invalid int4_encoding_a value", requested);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matmulDesc->int4_encoding_a_ext = requested;
+                }
+                else
+                {
+                    log_error(__func__, "invalid int4_encoding_a buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             case ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT:
                 if(sizeof(int32_t) <= sizeInBytes)
                 {
@@ -1706,6 +1755,36 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                             == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_64)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_128)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_ZP)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_64_ZP)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_ZP_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_128_ZP)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_ZP_EXT;
                     }
                     else if(matmulDesc->scaleAType
                             == RocblasltContractionProblem::ScalingFormat::Scalar)
@@ -1913,6 +1992,16 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 memcpy(buf, &matmulDesc->fused_epilogue, sizeof(matmulDesc->fused_epilogue));
                 break;
 #endif
+            case ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid int4_encoding_a buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->int4_encoding_a_ext, sizeof(int32_t));
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;

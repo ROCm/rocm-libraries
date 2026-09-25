@@ -129,6 +129,10 @@ namespace hipblaslt_ext
         hipblasComputeType_t type_compute; //!< The compute datatype.
         hipblasLtOrder_t     order_a; //!< The A martix data layout order
         hipblasLtOrder_t     order_b; //!< The B martix data layout order
+        //! hipblasLtInt4Encoding_t for A on the w4a16 path. Must stay last and
+        //! mirror RocGemmProblemTypeV2: the two are reinterpret_cast onto each
+        //! other (see rocblaslt_gemm_create_cpp / groupedgemm below).
+        int32_t int4_encoding_a = 0;
     };
 
     GemmProblemType::GemmProblemType()
@@ -231,6 +235,19 @@ namespace hipblaslt_ext
         pimpl->order_b = order;
     }
 
+    void GemmProblemType::setInt4EncodingA(hipblasLtInt4Encoding_t encoding)
+    {
+        // Same range check the C API applies to
+        // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT.
+        if(static_cast<int>(encoding) < 0 || encoding >= HIPBLASLT_INT4_ENCODING_END_EXT)
+        {
+            std::cerr << "Unsupported int4 encoding for A matrix: "
+                      << static_cast<int>(encoding) << std::endl;
+            throw std::invalid_argument("Unsupported int4 encoding for A matrix");
+        }
+        pimpl->int4_encoding_a = static_cast<int32_t>(encoding);
+    }
+
     hipblasOperation_t GemmProblemType::getOpA() const
     {
         return pimpl->op_a;
@@ -274,6 +291,11 @@ namespace hipblaslt_ext
     hipblasLtOrder_t GemmProblemType::getOrderB() const
     {
         return pimpl->order_b;
+    }
+
+    hipblasLtInt4Encoding_t GemmProblemType::getInt4EncodingA() const
+    {
+        return static_cast<hipblasLtInt4Encoding_t>(pimpl->int4_encoding_a);
     }
 
     class GemmEpilogue::GemmEpilogueImpl
@@ -363,6 +385,18 @@ namespace hipblaslt_ext
                 return RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3;
             case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
                 return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_64;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_128;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32_ZP;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_ZP_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_64_ZP;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_ZP_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_128_ZP;
             default:
                 std::cerr << "Unsupported scaling type for " << which
                           << " matrix: " << static_cast<int>(s) << std::endl;
@@ -394,6 +428,18 @@ namespace hipblaslt_ext
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
             case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_32:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_64:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_128:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_ZP_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_ZP_EXT;
             default:
                 std::cerr << "Unsupported scaling type for " << which
                           << " matrix: " << static_cast<int>(f) << std::endl;

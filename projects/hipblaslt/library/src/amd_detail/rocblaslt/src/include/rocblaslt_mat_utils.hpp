@@ -445,6 +445,49 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
         }
     }
 
+    // w4a16: int4 A and a block A-scale only make sense together.
+    {
+        const bool int4A = (matA->type == HIP_R_4I);
+        bool       blockScaleA;
+        switch(matmul_descr->scaleAType)
+        {
+        case RocblasltContractionProblem::ScalingFormat::Block_32:
+        case RocblasltContractionProblem::ScalingFormat::Block_64:
+        case RocblasltContractionProblem::ScalingFormat::Block_128:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+            blockScaleA = true;
+            break;
+        default:
+            blockScaleA = false;
+            break;
+        }
+        if(int4A != blockScaleA)
+        {
+            log_error(__func__,
+                      "w4a16 requires HIP_R_4I matrix A together with a "
+                      "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,64,128}[_ZP]_EXT A scale mode; "
+                      "got a_type=",
+                      static_cast<int>(matA->type),
+                      " scaleAType=",
+                      rocblaslt_scaling_format_to_string(matmul_descr->scaleAType));
+            return rocblaslt_status_invalid_value;
+        }
+        if(int4A && matmul_descr->scaleA == nullptr)
+        {
+            log_error(__func__, "w4a16 requires a non-null A scale pointer");
+            return rocblaslt_status_invalid_pointer;
+        }
+        // The scale tensor has no batch dimension.
+        if(int4A && num_batches_a > 1)
+        {
+            log_error(__func__, "w4a16 does not support batch_count > 1 yet (got ",
+                      num_batches_a, ")");
+            return rocblaslt_status_not_implemented;
+        }
+    }
+
     auto matmul_status = validateMatmulArgs(m,
                                             n,
                                             k,

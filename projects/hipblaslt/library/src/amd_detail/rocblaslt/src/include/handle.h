@@ -363,6 +363,11 @@ struct _rocblaslt_matmul_desc
     // See hipblaslt.h for the guarantee.
     int32_t uniform_summation_order = 0;
 
+    // Encoding of the int4 weights in A on the w4a16 block-scale path.
+    // Mirrors HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT; values come from
+    // hipblasLtInt4Encoding_t, 0 (signed two's complement) by default.
+    int32_t int4_encoding_a_ext = 0;
+
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
@@ -405,6 +410,7 @@ struct _rocblaslt_matmul_desc
         this->sm_count_target         = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->uniform_summation_order = src.uniform_summation_order;
+        this->int4_encoding_a_ext     = src.int4_encoding_a_ext;
         this->bias_stride             = src.bias_stride;
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;

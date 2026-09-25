@@ -2838,6 +2838,65 @@ Tests:
   norm_check: 1
   gpu_arch: '950'
 
+# w4a16: int4 weights in A, one 16-bit scale per K group of a row, optionally
+# with a packed int4 zero-point. Only gfx1151 ships kernels for this, and only
+# TN with lda == K and K a multiple of both the group size and 8; anything else
+# is skipped by testing_matmul rather than failing.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    # Symmetric, one entry per group size.
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1006, scale_type: f32_r}
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1007, scale_type: f32_r}
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1008, scale_type: f32_r}
+    # Asymmetric: the zero-point region and the ragged last row pair.
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1009, scale_type: f32_r}
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1010, scale_type: f32_r}
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, scale_type: f32_r}
+    # Unsigned weights selected by the descriptor encoding attribute.
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 1, scale_type: f32_r}
+    # fp16 activations, which carry an fp16 scale.
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1008, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 1, scale_type: f32_r}
+  matrix_size:
+    - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+    # Odd M exercises the ragged last row pair of the zero-point packing.
+    - { M:  65, N:  64, K:  512, lda:  512, ldb:  512, ldc:  65, ldd:  65 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
+# The same problems over the C++ ext API. use_ext_setproblem 0 takes the matmul
+# descriptor (api_method mix), 1 builds the problem from GemmProblemType /
+# GemmEpilogue (api_method cpp) -- only the latter reads setInt4EncodingA and
+# the w4a16 scale modes out of the ext structs, so without it a cpp-path
+# regression looks like "NO solution found" and nothing catches it.
+- name: matmul_w4a16_ext
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1008, scale_type: f32_r}
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 1, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 1, scale_type: f32_r}
+  matrix_size:
+    - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+  use_ext: [1]
+  use_ext_setproblem: [0, 1]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
 - name: matmul_mx_all_kernels
   category: nightly
   function:

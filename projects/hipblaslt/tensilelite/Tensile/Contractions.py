@@ -72,7 +72,8 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A',
+                 'scaleBlockSizeA', 'scaleZeroPointA', 'int4EncodingA']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -261,6 +262,11 @@ class ProblemType:
         rv.useScaleAB = ""
         if 'UseScaleAB' in d:
             rv.useScaleAB = d['UseScaleAB']
+        # w4a16 group scale (UseScaleAB="Block"): K-group size and scale element
+        # type. Zero / compute type when the mode is off.
+        rv.scaleBlockSizeA = d.get('ScaleBlockSizeA', 0)
+        rv.scaleZeroPointA = bool(d.get('ScaleZeroPointA', False))
+        rv.int4EncodingA = d.get('Int4EncodingA', 'Signed')
         rv.useScaleCD = False
         if 'UseScaleCD' in d:
             rv.useScaleCD = d['UseScaleCD']
@@ -420,6 +426,10 @@ class ProblemType:
             predicates.append(ProblemPredicate("StridedBatched", value=self.stridedBatched))
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
             predicates.append(ProblemPredicate("UseScaleAB", value=self.useScaleAB))
+            if self.useScaleAB == "Block":
+                predicates.append(ProblemPredicate("ScaleBlockSizeA", value=self.scaleBlockSizeA))
+                predicates.append(ProblemPredicate("ScaleZeroPointA", value=self.scaleZeroPointA))
+                predicates.append(ProblemPredicate("Int4EncodingA", value=self.int4EncodingA))
             predicates.append(ProblemPredicate("UseScaleCD", value=self.useScaleCD))
             predicates.append(ProblemPredicate("UseScaleAlphaVec", value=self.useScaleAlphaVec))
             predicates.append(ProblemPredicate("Sparse", value=self.sparse))
@@ -440,8 +450,7 @@ class ProblemType:
 
 def extractDimPredicate(cls, key, value, predicateName):
     """
-    Extract the predicate for AssertStrideEqual*
-    Value is a dictionary
+    Extract dimension-indexed predicates from an assertion dictionary.
     """
     predicates = []
     for pos,val in value.items():
@@ -487,6 +496,11 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+
+        if key == "AssertSizeEqual":
+            return extractDimPredicate(cls, key, value, "SizeEqual")
+        if key == "AssertSizeGreaterThan":
+            return extractDimPredicate(cls, key, value, "SizeGreaterThan")
 
         if key.endswith('Multiple'):
             if value == 1:
