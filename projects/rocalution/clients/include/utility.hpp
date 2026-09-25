@@ -369,6 +369,7 @@ public:
     int ordering       = 1;
     int cycle          = 0;
     int rebuildnumeric = 0;
+    int max_levels     = 0;
 
     unsigned int format;
 
@@ -406,6 +407,7 @@ public:
         this->ordering       = rhs.ordering;
         this->cycle          = rhs.cycle;
         this->rebuildnumeric = rhs.rebuildnumeric;
+        this->max_levels     = rhs.max_levels;
 
         this->coarsening_strategy = rhs.coarsening_strategy;
 

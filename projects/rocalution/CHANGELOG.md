@@ -2,6 +2,12 @@
 
 Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
+## (Unreleased) rocALUTION
+
+### Added
+* Added `BaseAMG::SetMaxLevels()` to limit the number of levels of an AMG hierarchy. Combined with passing another AMG solver as the coarse grid solver, this allows hybrid hierarchies such as unsmoothed aggregation on the finest levels followed by Ruge-Stueben AMG on the coarser levels.
+* Added the `cg-uaamg-rsamg` sample demonstrating a hybrid unsmoothed aggregation / Ruge-Stueben AMG preconditioner.
+
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 
 ### Added
