@@ -110,7 +110,7 @@ inline auto scan_impl(void*               temporary_storage,
                         = (limited_size + items_per_block - 1) / items_per_block;
 
                     using scan_state_type
-                        = detail::lookback_scan_state<AccType,
+                        = detail::lookback_scan_state_impl<AccType,
                                                       use_sleepy_scan,
                                                       params.lookback_scan_state_alignment>;
                     scan_state_type scan_state;
