@@ -1,13 +1,14 @@
-hipCCL bundles rocPRIM, hipCUB, and rocThrust under a single unified package
-(legacy layout - see ../README.md). Each component retains its own original
-license below.
+hipCCL bundles rocPRIM, hipCUB, and rocThrust (and, in future, libhipcxx, in the
+hipccl3 layout) under a single unified package. Each component retains its own
+original license below. Shared by both the hipccl2 (legacy) and hipccl3
+(unified) layouts - see ../README.md.
 
 NOTE: this combined file is a first-pass, best-effort aggregation for the
 unified packaging work - it has NOT been reviewed by legal/license
 compliance. Treat CPACK_RPM_PACKAGE_LICENSE's "MIT and BSD and ASL 2.0"
-expression (set in the root CMakeLists.txt) the same way: a reasonable-looking
-placeholder, not a verified authoritative declaration. Get this checked before
-any real release.
+expression (set in each layout's root CMakeLists.txt) the same way: a
+reasonable-looking placeholder, not a verified authoritative declaration. Get
+this checked before any real release.
 
 ================================================================================
 rocPRIM license (MIT)

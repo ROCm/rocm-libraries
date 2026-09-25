@@ -29,10 +29,15 @@ for details.
 
 Both currently pin rocPRIM/hipCUB/rocThrust to the same commit (tip of
 `rocm-libraries`' `develop` as of this writing); `hipccl3` additionally
-includes libhipcxx, pinned to `ROCm/libhipcxx@5ac455d737937ba2dfd1a4e85ad13f19a775f692`
-(`amd-develop`). `hipccl3`'s rocPRIM/hipCUB/rocThrust copies are expected to
-be merged forward to align with upstream CCCL 3.0 at a later time; libhipcxx
-was brought in as a starting point for that same effort.
+includes libhipcxx as a **git submodule** (see `.gitmodules`), pointed at
+`ROCm/libhipcxx`'s `amd-develop` branch and pinned to whatever commit was the
+tip of that branch when the submodule was added. `hipccl3`'s rocPRIM/hipCUB/
+rocThrust copies are expected to be merged forward to align with upstream
+CCCL 3.0 at a later time; libhipcxx was brought in as a starting point for
+that same effort. `HIPCCL_BUILD_LIBHIPCXX` (default `OFF`) builds it as a
+consumable `libhipcxx::libhipcxx` target within the superbuild - see the
+NOT YET DONE note in [Known gaps](#known-gaps) for what that does and doesn't
+cover yet.
 
 The original `projects/rocprim`, `projects/hipcub`, `projects/rocthrust`
 directories are untouched and remain fully functional - this is additive, not
@@ -43,6 +48,30 @@ those paths) is a separate, later step.
 preserved commit history (via `git filter-repo`), not just a flat snapshot -
 `git log`/`git blame` at their new paths show the same history they had at
 `projects/rocprim` etc., no `--follow` flag required.
+
+## CMake deduplication
+
+`hipccl2` and `hipccl3` share the parts of their CMake infrastructure that
+don't differ between the two layouts, rather than each carrying its own copy:
+
+- **[`cmake/modules/`](cmake/modules/)** - `add_subdirectory_with_message.cmake`
+  and `fetch_rocm_cmake.cmake`, byte-identical between the two layouts.
+- **[`cmake/package/hipccl-config.cmake.in`](cmake/package/hipccl-config.cmake.in)**
+  - the `find_package(hipccl)` config template (see
+  [Unified CMake package config](#unified-cmake-package-config-find_packagehipccl)
+  below); only differed by comment wording between the two copies.
+- **[`LICENSE`](LICENSE)** - the aggregated MIT + BSD-3-Clause + Apache-2.0
+  license text (see [License aggregation](#unified-packaging-make-package--cpack)
+  below); likewise only differed by comment wording.
+
+Both `hipccl2/CMakeLists.txt` and `hipccl3/CMakeLists.txt` reference these via
+a `../` relative path (e.g. `${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules`),
+so this is transparent to anything downstream - it doesn't change install
+paths, package contents, or `find_package(hipccl)` behavior, just where the
+CMake source files themselves live. Anything that's actually
+layout-specific (e.g. `hipccl3`'s handful of otherwise-unused legacy
+`cmake/modules/` and `cmake/toolchains/` files) stays put in its own layout's
+folder, not shared.
 
 ## hipccl3: unified build, versioning, and packaging
 
@@ -141,10 +170,11 @@ Standalone builds of rocPRIM/hipCUB/rocThrust **outside hipccl3** (i.e.
 `hipccl2`'s copies) are completely unaffected - none of this touches those
 files at all.
 
-**License aggregation:** `hipccl3/LICENSE` combines rocPRIM's MIT license,
-hipCUB's BSD-3-Clause license, and rocThrust's Apache-2.0 license into one
-file with clear per-component sections, and `CPACK_RPM_PACKAGE_LICENSE` is set
-to `"MIT and BSD and ASL 2.0"`. **Both are best-effort placeholders, not
+**License aggregation:** `LICENSE` (shared by `hipccl2` and `hipccl3` - see
+[CMake deduplication](#cmake-deduplication) above) combines rocPRIM's MIT license, hipCUB's BSD-3-Clause license, and
+rocThrust's Apache-2.0 license into one file with clear per-component
+sections, and `CPACK_RPM_PACKAGE_LICENSE` is set to
+`"MIT and BSD and ASL 2.0"`. **Both are best-effort placeholders, not
 verified legal/compliance declarations** - get them reviewed before treating
 this as more than a starting point.
 
@@ -166,8 +196,9 @@ names, no shared global state), so `find_package(rocprim)`,
 standalone, with or without hipccl3.
 
 The new `hipccl-config.cmake` (template at
-`hipccl3/cmake/package/hipccl-config.cmake.in`) sits alongside those and adds
-a unified entry point:
+`cmake/package/hipccl-config.cmake.in`, shared with `hipccl2` - see
+[CMake duplication](#cmake-deduplication) below) sits alongside those and
+adds a unified entry point:
 
 ```cmake
 find_package(hipccl REQUIRED)                       # all three components

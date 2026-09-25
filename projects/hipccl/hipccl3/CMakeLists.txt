@@ -31,7 +31,10 @@ set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended 
 
 project(hipccl VERSION ${HIPCCL_VERSION} LANGUAGES CXX)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
+# NOTE: shared with hipccl2 - these helper modules, the hipccl-config.cmake.in
+# template below, and LICENSE are deduplicated at projects/hipccl/, not
+# duplicated per-layout.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
 
 include(GNUInstallDirs)
 include(add_subdirectory_with_message)
@@ -110,14 +113,6 @@ if(HIPCCL_BUILD_HIPCUB)
     )
 endif()
 
-if(HIPCCL_BUILD_ROCTHRUST)
-    add_subdirectory_with_message(
-        COMPONENT rocthrust
-        PREFIX_PATH .
-        EXPECT_TARGET rocthrust
-    )
-endif()
-
 if(HIPCCL_BUILD_LIBHIPCXX)
     # NOTE(hipccl3): libhipcxx is a git submodule (see ../.gitmodules) - an
     # uninitialized submodule leaves this directory present but empty, which
@@ -137,10 +132,23 @@ if(HIPCCL_BUILD_LIBHIPCXX)
         )
     endif()
 
+    # NOTE(hipccl3): must come before rocthrust - rocThrust's own
+    # cmake/Dependencies.cmake looks for an already-nested
+    # libhipcxx::libhipcxx target (falling back to find_package() only if
+    # one doesn't exist yet), so libhipcxx needs to already be add_subdirectory()'d
+    # by the time rocthrust's CMakeLists.txt runs.
     add_subdirectory_with_message(
         COMPONENT libhipcxx
         PREFIX_PATH .
         EXPECT_TARGET libhipcxx::libhipcxx
+    )
+endif()
+
+if(HIPCCL_BUILD_ROCTHRUST)
+    add_subdirectory_with_message(
+        COMPONENT rocthrust
+        PREFIX_PATH .
+        EXPECT_TARGET rocthrust
     )
 endif()
 
@@ -184,7 +192,7 @@ rocm_package_add_dependencies(SHARED_DEPENDS "hip-runtime-amd >= ${HIP_RUNTIME_M
 rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
 rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
 
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
@@ -217,7 +225,7 @@ include(CMakePackageConfigHelpers)
 set(HIPCCL_PACKAGE_CONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/hipccl")
 
 configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/package/hipccl-config.cmake.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/package/hipccl-config.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config.cmake"
     INSTALL_DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
 )

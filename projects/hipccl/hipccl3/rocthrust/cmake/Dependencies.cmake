@@ -300,9 +300,19 @@ endif()
 
 # Search for libhipcxx if requested (default: ON)
 if(${ROCTHRUST_USE_LIBHIPCXX})
-  find_package(libhipcxx)
-  if (NOT TARGET libhipcxx::libhipcxx)
-    message(STATUS "libhipcxx installation not found. Using deprecated rocThrust fallback implementation.  Please switch to using libhipcxx.")
+  # NOTE(hipccl3): if libhipcxx::libhipcxx already exists in this build (e.g.
+  # the unified hipccl3 superbuild, which runs add_subdirectory(libhipcxx)
+  # before rocthrust when HIPCCL_BUILD_LIBHIPCXX is ON), reuse it directly
+  # instead of calling find_package() - which only looks for an *installed*
+  # libhipcxx package on disk, has no idea a nested copy was just
+  # add_subdirectory()'d in the same configure, and would otherwise print a
+  # spurious "Could not find a package configuration file" warning even
+  # though the target is right there.
+  if(NOT TARGET libhipcxx::libhipcxx)
+    find_package(libhipcxx)
+    if (NOT TARGET libhipcxx::libhipcxx)
+      message(STATUS "libhipcxx installation not found. Using deprecated rocThrust fallback implementation.  Please switch to using libhipcxx.")
+    endif()
   endif()
 endif()
 

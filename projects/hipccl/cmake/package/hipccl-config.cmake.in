@@ -1,8 +1,8 @@
 # hipccl-config.cmake
 #
-# NOTE(hipccl3): mirrors NVIDIA CCCL's find_package(CCCL COMPONENTS [Thrust]
-# [CUB] [libcudacxx]) entry point. This does NOT redefine rocprim/hipcub/
-# rocthrust's targets - it delegates to each component's own already-existing
+# Mirrors NVIDIA CCCL's find_package(CCCL COMPONENTS [Thrust] [CUB]
+# [libcudacxx]) entry point. This does NOT redefine rocprim/hipcub/rocthrust's
+# targets - it delegates to each component's own already-existing
 # <component>-config.cmake (installed alongside this file, one directory up,
 # by each sub-project's own rocm_export_targets() call) via
 # find_dependency(), then exposes a combined hipccl::hipccl INTERFACE target
@@ -15,8 +15,9 @@
 #   find_package(hipccl)                          # all components
 #   find_package(hipccl COMPONENTS rocprim hipcub) # just these two
 #
-# libhipcxx is not yet a supported component - see HIPCCL_BUILD_LIBHIPCXX in
-# the root CMakeLists.txt.
+# libhipcxx is not yet a supported component here (whether built via the
+# hipccl3 layout's submodule or otherwise) - see HIPCCL_BUILD_LIBHIPCXX in
+# hipccl3's root CMakeLists.txt.
 
 @PACKAGE_INIT@
 
@@ -66,9 +67,9 @@ if(NOT hipccl_FOUND AND hipccl_FIND_REQUIRED)
 endif()
 
 # --- Combined convenience target ---
-# NOTE(hipccl3): only created once all three real components have been
-# found/requested together - mirrors CCCL::CCCL, which similarly aggregates
-# CCCL::Thrust/CCCL::CUB/CCCL::libcudacxx.
+# Only created once all three real components have been found/requested
+# together - mirrors CCCL::CCCL, which similarly aggregates CCCL::Thrust/
+# CCCL::CUB/CCCL::libcudacxx.
 if(hipccl_rocprim_FOUND AND hipccl_hipcub_FOUND AND hipccl_rocthrust_FOUND
    AND NOT TARGET hipccl::hipccl)
   add_library(hipccl::hipccl INTERFACE IMPORTED)
