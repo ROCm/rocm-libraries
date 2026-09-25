@@ -1,7 +1,7 @@
 ################################################################################
 # Characterization tests for tensilelite.run — helper layer.
 #
-# ADD-ONLY. tensilelite/Tensile.py's executeStepsInConfig / Tensile() are the top-level
+# ADD-ONLY. run.py's executeStepsInConfig / main() are the top-level
 # build+benchmark orchestrators (BenchmarkProblems / ClientWriter / LibraryLogic
 # + GPU), out of scope here. This suite pins the pure / stubbable helpers:
 # addCommonArguments, argUpdatedGlobalParameters, get_gpu_max_frequency_smi,

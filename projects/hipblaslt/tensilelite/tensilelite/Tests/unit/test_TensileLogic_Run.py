@@ -512,7 +512,7 @@ class TestMain:
         """main should exit 1 immediately on corpus-invariant violations,
         without loading known-bugs or running the (expensive) per-solution
         ParallelMap2 loop -- these are unconditional hard failures with no
-        known-bugs escape hatch (see logic.ValidCorpusConsistency's docstring)."""
+        known-bugs escape hatch (see logic.valid_corpus_consistency's docstring)."""
         from tensilelite.logic.run import main
 
         with patch('tensilelite.logic.run.ParallelMap2') as mock_parallel_map, \

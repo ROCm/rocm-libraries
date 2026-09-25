@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurface characterization: OpenCL platform selection in
-``tensilelite/Tensile.py``'s ``argUpdatedGlobalParameters``.
+``tensilelite/run.py``'s ``argUpdatedGlobalParameters``.
 
 This file used to pin the ``if args.platform:`` branch, which stored
 ``rv["Platform"] = args.platform`` from the ``-p / --platform`` CLI flag.  That
