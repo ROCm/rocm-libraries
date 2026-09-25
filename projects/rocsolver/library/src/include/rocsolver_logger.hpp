@@ -32,6 +32,7 @@
 #include <fmt/ranges.h>
 #include <forward_list>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <tuple>
@@ -127,21 +128,18 @@ ROCSOLVER_BEGIN_NAMESPACE
         auto const max_z_grid = 64 * 1024;                                                          \
         bool const isvalid_grid = (1 <= grid_.x) && (grid_.x <= max_x_grid) && (1 <= grid_.y)       \
             && (grid_.y <= max_y_grid) && (1 <= grid_.z) && (grid_.z <= max_z_grid);                \
-        if(!isvalid_grid)                                                                           \
-        {                                                                                           \
-            std::cerr << "grid( " << grid_.x << " , " << grid_.y << " , " << grid_.z << " )"        \
-                      << std::endl;                                                                 \
-        }                                                                                           \
-        assert(isvalid_grid);                                                                       \
         bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
             && (block_.y <= 1024) && (1 <= block_.z) && (block_.z <= 1024)                          \
             && ((block_.x * block_.y * block_.z) <= 1024);                                          \
-        if(!isvalid_block)                                                                          \
+        bool const isvalid_config = (isvalid_grid && isvalid_block);                                \
+        if(!isvalid_config)                                                                         \
         {                                                                                           \
+            std::cerr << "grid( " << grid_.x << " , " << grid_.y << " , " << grid_.z << " )"        \
+                      << std::endl;                                                                 \
             std::cerr << "block( " << block_.x << " , " << block_.y << " , " << block_.z << " ) "   \
                       << std::endl;                                                                 \
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;                                  \
         }                                                                                           \
-        assert(isvalid_block);                                                                      \
         hipLaunchKernelGGL((name), grid_, block_, __VA_ARGS__);                                     \
         auto const status = hipGetLastError();                                                      \
         if(status != hipSuccess)                                                                    \
