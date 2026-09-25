@@ -85,19 +85,29 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [256, 64, 1, 64]
-            - Exact: [1024, 64, 1, 1024]
-            - Exact: [256, 256, 1, 256]
-            - Exact: [512, 512, 1, 512]
-            - Exact: [4096, 4096, 1, 4096]
-            - Exact: [8192, 8192, 1, 8192]
-            - Exact: [2048, 16384, 1, 2048]
-            - Exact: [11264, 16384, 1, 2048]
-            - Exact: [22016, 16384, 1, 4096]
-            - Exact: [44032, 16384, 1, 8192]
+          # Small — fully memory-bound; Origami grid selection most visible
+          - Exact: [512,  512,  1, 128]
+          - Exact: [512,  512,  1, 256]
+          - Exact: [1024, 1024, 1, 128]
+          - Exact: [1024, 1024, 1, 256]
+          # Medium compute
+          - Exact: [2048, 2048, 1, 256]
+          - Exact: [4096, 4096, 1, 256]
+          # Tall/skinny (projection layers)
+          - Exact: [4096, 512,  1, 256]
+          - Exact: [512,  4096, 1, 256]
+          - Exact: [8192, 256,  1, 128]
+          - Exact: [256,  8192, 1, 128]
+          # Edge: M,N not multiple of largest macro tile (512)
+          - Exact: [352,  352,  1, 128]
+          - Exact: [480,  480,  1, 128]
+          - Exact: [768,  768,  1, 128]
+          # Non-power-of-2 M,N — exercises tail-loop paths
+          - Range: [[160, 160, 480], [160, 160, 480], [1], [128]]
+          - Range: [[17,  32,  113], [17,  32,  113], [1], [128]]
 
 LibraryLogic:
-  ScheduleName: "alphavec2_sweep_mxfp8_k1"
-  DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
+  ScheduleName: "epilogues_mxfp8_k2"
+  DeviceNames: ["Device 75a0"]
   ArchitectureName: "gfx950"
   LibraryType: "Prediction"
