@@ -101,6 +101,14 @@ def test_version_uses_the_package_version(monkeypatch, capsys):
     assert capsys.readouterr().out == "1.2.3+rocm4.5.6\n"
 
 
+def test_version_is_not_the_generator_compatibility_version(monkeypatch, capsys):
+    monkeypatch.setattr(tensilelite, "GENERATOR_VERSION", "9.9.9")
+    monkeypatch.setattr(tensilelite, "__version__", "1.2.3+rocm4.5.6")
+
+    assert cli.main(["--version"]) == 0
+    assert "9.9.9" not in capsys.readouterr().out
+
+
 def test_version_rejects_additional_arguments():
     with pytest.raises(SystemExit, match="2"):
         cli.main(["--version", "unexpected"])

@@ -26,5 +26,6 @@ def test_tensilelite_utility_header_uses_a_distinct_include_path():
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/client/include>"
         not in clients_cmake
     )
+    assert "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>" not in clients_cmake
     assert '#include "utility.hpp"' in utility_source
     assert '#include "include/Utility.hpp"' in utility_source

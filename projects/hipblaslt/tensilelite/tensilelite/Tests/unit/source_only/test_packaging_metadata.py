@@ -65,11 +65,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
         ).decode("utf-8")
 
-    component_version = re.search(
-        r'^__version__ = "([^"]+)"$',
-        (_PROJECT_ROOT / "tensilelite/__init__.py").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    ).group(1)
+    component_version = (_PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
     version = re.search(r"^Version: (.+)$", metadata, re.MULTILINE).group(1)
     # A source build is a development build: labelled with the commit when git
     # knows it, unlabelled otherwise. It never claims a ROCm release.
@@ -96,6 +92,18 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
         "TensileBenchmarkCluster": "tensilelite.benchmark_cluster:main",
         "TensileRetuneLibrary": "tensilelite.retune_library:main",
     }
+
+
+def test_client_version_metadata_is_scoped_and_checked_exactly():
+    top_cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+    tests_cmake = (_PROJECT_ROOT / "tests/CMakeLists.txt").read_text(encoding="utf-8")
+
+    version_block = top_cmake.split(
+        'if(TENSILELITE_ENABLE_CLIENT)\n    set(_tensilelite_source_root', 1
+    )[1].split("\nendif()", 1)[0]
+    assert "TENSILELITE_DISTRIBUTION_VERSION" in version_block
+    assert "HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT" not in top_cmake
+    assert 'PASS_REGULAR_EXPRESSION "^${_tensilelite_version_regex}$"' in tests_cmake
 
 
 def test_removed_source_autobuild_option_is_not_referenced():
