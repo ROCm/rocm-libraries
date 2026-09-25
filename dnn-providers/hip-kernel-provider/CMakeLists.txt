@@ -428,10 +428,13 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
-    # rocKE's installed Python CTest entries invoke a bare `python`, which the
-    # runtime image does not provide, so they cannot run from an installed tree.
-    # The installed C++ entries and the rocke Python frontend are unaffected.
-    set(ROCKE_INSTALL_PYTHON_TESTS OFF)
+    # TheRock's test setup activates a virtual environment and installs the
+    # staged rocKE wheels before invoking CTest, so the focused installed Python
+    # checks can resolve both `python` and the rocKE packages. Defer the full
+    # platform pytest suite until the pinned TheRock supplies rocKE's NumPy and
+    # ml_dtypes component requirements.
+    set(ROCKE_INSTALL_PYTHON_TESTS ON)
+    set(ROCKE_INSTALL_PLATFORM_PYTEST OFF)
 
     add_subdirectory(rocke)
 else()
