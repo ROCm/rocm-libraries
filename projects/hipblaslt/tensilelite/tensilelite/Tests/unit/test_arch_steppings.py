@@ -3454,10 +3454,11 @@ def test_helper_cache_store_is_unchanged_for_ordinary_archs(tmp_path, monkeypatc
 # =========================================================================== #
 # The helper-kernel generators' auto-detect path.
 #
-# AMaxGenerator/SoftmaxGenerator/LayerNormGenerator take the architecture from
+# amax_generator/softmax_generator/layer_norm_generator take the architecture from
 # --arch; when it is missing they fall back to asking the device. That branch
 # lives in `if __name__ == '__main__'`, so it is only reachable by running the
-# script, which is why these spawn one rather than importing it.
+# module as a script, which is why these spawn one (`python -m`, the way the
+# device-library build runs them) rather than importing it.
 # =========================================================================== #
 _TENSILELITE = Path(__file__).resolve().parents[3]
 
@@ -3491,7 +3492,7 @@ def _rocmShimReporting(tmp_path, arch):
 
 
 @pytest.mark.parametrize(
-    "generator", ["AMaxGenerator.py", "SoftmaxGenerator.py", "LayerNormGenerator.py"]
+    "generator", ["amax_generator", "softmax_generator", "layer_norm_generator"]
 )
 @pytest.mark.parametrize("reported", [GFX1250, GFX1250_STRICT])
 def test_the_generators_build_for_the_architecture_the_device_reported(
@@ -3501,7 +3502,6 @@ def test_the_generators_build_for_the_architecture_the_device_reported(
     would build gfx1250 on either and hand the strict device code it rejects.
     The gfx1250 case is the regression fence: naming the architecture must not
     change what an ordinary architecture builds."""
-    script = _TENSILELITE / generator
     out = tmp_path / "kernel.s"
     env = dict(
         os.environ,
@@ -3510,7 +3510,7 @@ def test_the_generators_build_for_the_architecture_the_device_reported(
     )
 
     result = subprocess.run(
-        [sys.executable, str(script), "--arch", "", "-o", str(out)],
+        [sys.executable, "-m", f"tensilelite._extops.{generator}", "--arch", "", "-o", str(out)],
         env=env,
         capture_output=True,
         text=True,

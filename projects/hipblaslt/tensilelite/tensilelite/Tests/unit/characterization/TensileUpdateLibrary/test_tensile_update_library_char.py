@@ -21,7 +21,7 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Characterization test for TensileUpdateLibrary.py.
+"""Characterization test for update_library.py.
 
 Pins actual behavior of TensileUpdateLibrary main execution with minimal
 library logic YAML fixtures. Executes uncovered lines [25-165] in module.
@@ -160,7 +160,7 @@ class TestTensileUpdateLibraryMain:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        # Call UpdateLogic directly - executes lines 41-111 of TensileUpdateLibrary.py
+        # Call UpdateLogic directly - executes lines 41-111 of update_library.py
         exception_raised = False
         exception_type = None
         try:

@@ -53,7 +53,7 @@ from .known_bugs import (
     load_bundled_known_bugs,
 )
 from .valid_chip_id import _validateChipId
-from .ValidCorpusConsistency import check_corpus_invariants, report_corpus_invariant_violations
+from .valid_corpus_consistency import check_corpus_invariants, report_corpus_invariant_violations
 from .valid_matrix_instruction import _validateMatrixInstruction
 from .valid_work_group import _validateWorkGroup
 from .valid_work_group_mapping_xcc import _validateWorkGroupMappingXCC, reset_reported_failures
