@@ -22,7 +22,7 @@ extern "C" {
  *
  * Accepts (matching Python `_QDTYPE_ALIAS`):
  *   "i8", "int8"                  -> rocke_i8()
- *   "fp8e4m3", "fp8", "fp8_e4m3"  -> rocke_fp8e4m3()
+ *   "fp8e4m3", "fp8", "fp8_e4m3", "e4m3" -> rocke_fp8e4m3()
  *   "bf8e5m2", "bf8", "fp8_e5m2"  -> rocke_bf8e5m2()
  *   "fp4", "fp4e2m1"              -> rocke_fp4e2m1()
  *   "fp6", "fp6e2m3"              -> rocke_fp6e2m3()

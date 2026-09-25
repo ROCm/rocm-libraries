@@ -11,11 +11,12 @@
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--no-both] [--only SUBSTR] [--build-root DIR]
+#       [--no-both] [--only SUBSTR] [--build-root DIR] [--config CONFIG]
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -86,7 +87,75 @@ def relative_path_guard() -> int:
     return 0
 
 
-def differential_pytest_pass() -> int:
+def ctest_tests(
+    build_root: Path, config: str, pattern: str | None = None
+) -> list[dict]:
+    command = [
+        "ctest",
+        "--test-dir",
+        str(build_root),
+        "-C",
+        config,
+        "--show-only=json-v1",
+    ]
+    if pattern:
+        command += ["-R", pattern]
+    listing = subprocess.run(command, check=True, capture_output=True, text=True)
+    return json.loads(listing.stdout)["tests"]
+
+
+def ctest_ready(build_root: Path, config: str) -> bool:
+    if not (build_root / "CTestTestfile.cmake").is_file():
+        print("\n== ctest: SKIPPED (no configured test build) ==")
+        return False
+    commands = [test.get("command", []) for test in ctest_tests(build_root, config)]
+    if any(command and Path(command[0]).is_file() for command in commands):
+        return True
+    print(f"\n== ctest: SKIPPED (no built registered tests for {config}) ==")
+    return False
+
+
+def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
+    """Build the configured suite and supply native parity to both pytest passes."""
+    env = dict(os.environ)
+    executable = env.get("ROCKE_STORAGE_TEST")
+    if (build_root / "CMakeCache.txt").is_file():
+        subprocess.run(
+            [
+                "cmake",
+                "--build",
+                str(build_root),
+                "--config",
+                config,
+            ],
+            check=True,
+        )
+        if not executable:
+            tests = ctest_tests(build_root, config, "^rocke_storage$")
+            commands = [
+                test.get("command", [])
+                for test in tests
+                if test["name"] == "rocke_storage"
+            ]
+            if len(commands) != 1 or not commands[0]:
+                raise ValueError(
+                    "CTest did not resolve the built rocke_storage executable"
+                )
+            executable = commands[0][0]
+    if executable:
+        path = Path(executable).resolve()
+        if not path.is_file():
+            raise ValueError(f"native storage test executable does not exist: {path}")
+        env["ROCKE_STORAGE_TEST"] = str(path)
+        print(f"\n== native storage parity: {path} ==")
+    else:
+        print(
+            "\n== native storage parity: SKIPPED (no configured build or ROCKE_STORAGE_TEST) =="
+        )
+    return env
+
+
+def differential_pytest_pass(env: dict[str, str]) -> int:
     """Re-run pytest with ``ROCKE_BACKEND=both`` (the cross-engine gate).
 
     The default pass exercises one engine per assertion, so two engines that
@@ -110,6 +179,7 @@ def differential_pytest_pass() -> int:
         [sys.executable, "-c", "import rocke_engine"],
         capture_output=True,
         cwd=str(TESTS),
+        env=env,
     )
     if probe.returncode != 0:
         print(
@@ -133,7 +203,7 @@ def differential_pytest_pass() -> int:
             "either compared byte-for-byte or fails; remaining skips are "
             "environmental (torch / GPU)"
         )
-    env = dict(os.environ, ROCKE_BACKEND="both")
+    env = dict(env, ROCKE_BACKEND="both")
     return subprocess.run(
         [sys.executable, "-m", "pytest", str(TESTS), "-rs"], cwd=str(TESTS), env=env
     ).returncode
@@ -157,6 +227,9 @@ def main() -> int:
     ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
     )
+    ap.add_argument(
+        "--config", default="Release", help="native test build/CTest configuration"
+    )
     args = ap.parse_args()
 
     status = 0
@@ -177,30 +250,32 @@ def main() -> int:
         status |= subprocess.run(gate).returncode
 
     if not args.no_pytest:
+        try:
+            pytest_env = native_pytest_env(Path(args.build_root).resolve(), args.config)
+        except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+            print(f"native storage parity setup failed: {exc}", file=sys.stderr)
+            return 1
         print("\n== pytest ==")
         status |= subprocess.run(
-            [sys.executable, "-m", "pytest", str(TESTS)], cwd=str(TESTS)
+            [sys.executable, "-m", "pytest", str(TESTS)], cwd=str(TESTS), env=pytest_env
         ).returncode
 
     if not args.no_pytest and not args.no_both:
-        status |= differential_pytest_pass()
+        status |= differential_pytest_pass(pytest_env)
 
     build_root = Path(args.build_root)
-    # Only ctest when the CTest-registered binaries were actually built (the
-    # byte-identity gate builds just `rocke_core`, so a gate-only build dir has the
-    # registration file but no test executables -> running ctest there would
-    # spuriously fail). Gate on the registered tests only; `rocke_smoke` is an
-    # optional build-only target (not an add_test target) so it is not a signal.
-    test_bins = [
-        build_root / "tests" / b
-        for b in ("rocke_ir_serialize_roundtrip", "rocke_tiled_attention_2d_reentrancy")
-    ]
-    if (build_root / "CTestTestfile.cmake").exists() and any(
-        b.exists() for b in test_bins
-    ):
+    # Run the entire registered suite once any executable is built; partial
+    # builds must expose their missing tests rather than silently lose coverage.
+    try:
+        ready = ctest_ready(build_root, args.config)
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        print(f"CTest discovery failed: {exc}", file=sys.stderr)
+        return 1
+    if ready:
         print("\n== ctest ==")
         status |= subprocess.run(
-            ["ctest", "--output-on-failure", "--no-tests=ignore"], cwd=str(build_root)
+            ["ctest", "-C", args.config, "--output-on-failure", "--no-tests=ignore"],
+            cwd=str(build_root),
         ).returncode
 
     print("\nRESULT:", "GREEN" if status == 0 else "RED")

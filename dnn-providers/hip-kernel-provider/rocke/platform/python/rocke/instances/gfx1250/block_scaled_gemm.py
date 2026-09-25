@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from ...core.dtypes import normalize_dtype
+from ...core.dtypes import dtype_info, normalize_dtype
 from ...core.arch import ArchTarget
 from ...core.arch.wmma_scale import gfx1250_scaled_wmma
 from ...core.ir import (
@@ -28,7 +28,7 @@ from ...core.ir import (
     VectorType,
 )
 from ...helpers.mma_io import load_matrix_fragment, pack_fragment_bits, storage_ir_type
-from ...core.storage import TensorStorage
+from ...core.storage import BitPacking
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
 _LOWBIT_FORMATS = {
@@ -361,28 +361,26 @@ def build_block_scaled_gemm(
     n0 = ir.mul(ir.block_id_x(), c16)
     a_row = ir.add(m0, frag)  # this lane's A row
     b_row = ir.add(n0, frag)  # this lane's B row (= output col n)
-    a_storage = TensorStorage(spec.dtype_a, (spec.M, spec.K), alignment_bytes=16)
-    b_storage = TensorStorage(spec.dtype_b, (spec.N, spec.K), alignment_bytes=16)
+    a_packing = BitPacking(dtype_info(spec.dtype_a).encoded_bits)
+    b_packing = BitPacking(dtype_info(spec.dtype_b).encoded_bits)
 
-    def _row_stride(storage):
+    def _row_stride(packing):
         # All current pointer types use their natural byte size; low-bit inputs
         # use an explicit byte carrier. A/B storage contracts stay independent.
-        if storage.info.encoded_bits >= 8:
+        if packing.element_bits >= 8:
             return cK
-        values, packed_bytes = storage.packing.group(8)
+        values, packed_bytes = packing.group(8)
         groups = ir.div(cK, ir.const_i32(values))
         return (
             groups if packed_bytes == 1 else ir.mul(groups, ir.const_i32(packed_bytes))
         )
 
-    a_stride = _row_stride(a_storage)
-    b_stride = (
-        a_stride if a_storage.packing == b_storage.packing else _row_stride(b_storage)
-    )
+    a_stride = _row_stride(a_packing)
+    b_stride = a_stride if a_packing == b_packing else _row_stride(b_packing)
     a_base = ir.mul(a_row, a_stride)
     b_base = ir.mul(b_row, b_stride)
 
-    def _load_frag(ptr, base, storage_ty, k0, storage, operand):
+    def _load_frag(ptr, base, storage_ty, k0, dtype, operand):
         if not native_scale:
             off0 = ir.add(ir.add(base, ir.const_i32(k0)), half_k)
             off1 = ir.add(off0, ir.const_i32(16))
@@ -396,8 +394,10 @@ def build_block_scaled_gemm(
             base,
             half,
             k0,
-            storage=storage,
+            dtype=dtype,
             layout=scale_op.matrix_layout(operand),
+            # K is a multiple of 128, so every packed row is 16-byte aligned.
+            alignment_bytes=16,
         )
 
     def _pack_strided_scales(ptr, call_idx, *, for_b):
@@ -425,8 +425,8 @@ def build_block_scaled_gemm(
         acc = ir.zero_vec_f32(_ACC)
         for step in range(spec.K // _WMMA_SCALE_K):
             k0 = step * _WMMA_SCALE_K
-            a_frag = _load_frag(A, a_base, a_ty, k0, a_storage, "a")
-            b_frag = _load_frag(B, b_base, b_ty, k0, b_storage, "b")
+            a_frag = _load_frag(A, a_base, a_ty, k0, spec.dtype_a, "a")
+            b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b, "b")
             a_scale = _pack_strided_scales(AScale, step, for_b=False)
             b_scale = _pack_strided_scales(BScale, step, for_b=True)
             acc = ir.mma(op_id, a_frag, b_frag, acc, a_scale, b_scale)
@@ -448,8 +448,8 @@ def build_block_scaled_gemm(
         acc = ir.zero_vec_f32(_ACC)
         for step in range(steps_per_group):
             k0 = kg * spec.block_k + step * _WMMA_K
-            a_frag = _load_frag(A, a_base, a_ty, k0, a_storage, "a")
-            b_frag = _load_frag(B, b_base, b_ty, k0, b_storage, "b")
+            a_frag = _load_frag(A, a_base, a_ty, k0, spec.dtype_a, "a")
+            b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b, "b")
             acc = ir.mma(op_id, a_frag, b_frag, acc)
 
         # b_scale[kg, n] (col = n0 + frag), shared across this lane's 8 slots.

@@ -11,17 +11,6 @@ from ..dtypes import dtype_info
 from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
 
 
-@dataclass(frozen=True)
-class ScaleAssociation:
-    """Number of source K elements sharing one scale."""
-
-    block_k: int
-
-    def __post_init__(self) -> None:
-        if self.block_k <= 0:
-            raise ValueError("scale block_k must be positive")
-
-
 def scaled_matrix_layout(dtype: str, abi_words: int) -> MatrixFragmentLayout:
     """gfx1250 scaled operand layout, independent of atom availability.
 
@@ -51,30 +40,26 @@ class ScalePacking:
     block_k: int
 
     def __post_init__(self) -> None:
-        self.association
-        self.fragment
-
-    @property
-    def association(self) -> ScaleAssociation:
-        return ScaleAssociation(self.block_k)
+        if self.block_k <= 0:
+            raise ValueError("scale block_k must be positive")
+        if not isinstance(self.count, int) or self.count not in (1, 2, 4, 8):
+            raise ValueError("carrier_bits must be 8, 16, 32, or 64")
 
     @property
     def packing(self) -> BitPacking:
-        return BitPacking(dtype_info("e8m0").encoded_bits)
+        return BitPacking(self.element_bits)
 
     @property
     def fragment(self) -> FragmentPacking:
-        return FragmentPacking(
-            self.packing, self.count, self.count * self.packing.element_bits, 1
-        )
+        return FragmentPacking(self.packing, self.count, self.word_bits, 1)
 
     @property
     def element_bits(self) -> int:
-        return self.packing.element_bits
+        return 8
 
     @property
     def word_bits(self) -> int:
-        return self.fragment.carrier_bits
+        return self.count * self.element_bits
 
     @property
     def llvm_type(self) -> str:

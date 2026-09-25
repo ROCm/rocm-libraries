@@ -1047,10 +1047,10 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
         {
             rocke_strbuf_append(out, ROCKE_HIP_PROLOGUE);
             rocke_strbuf_append_char(out, '\n');
-            for(int j = 0; j < kernel->num_params; ++j)
-                h_extra_vector_type(&lw, kernel->params[j]->type, out);
-            h_extra_vector_region(&lw, kernel->body, out);
         }
+        for(int j = 0; j < kernel->num_params; ++j)
+            h_extra_vector_type(&lw, kernel->params[j]->type, out);
+        h_extra_vector_region(&lw, kernel->body, out);
         /* head */
         rocke_strbuf_appendf(out,
                              "extern \"C\" __global__ __launch_bounds__(%d)\n"

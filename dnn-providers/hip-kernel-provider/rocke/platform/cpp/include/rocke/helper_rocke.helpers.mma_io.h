@@ -8,6 +8,7 @@
 #ifndef ROCKE_HELPER_MMA_IO_H
 #define ROCKE_HELPER_MMA_IO_H
 
+#include "rocke/dtypes.h"
 #include "rocke/ir.h"
 #include "rocke/storage.h"
 
@@ -16,18 +17,23 @@ extern "C" {
 #endif
 
 const rocke_type_t* rocke_storage_ir_type(const char* dtype);
+/* row_base is in pointer storage units. alignment_bytes is guaranteed at that
+ * row address, before k0 and lane/chunk offsets. Caller owns tensor indexing,
+ * allocation bounds (including empty/partial rows), and lane_group validity. */
 rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                                             rocke_value_t* ptr,
                                             rocke_value_t* row_base,
                                             rocke_value_t* lane_group,
                                             uint64_t k0,
-                                            const rocke_tensor_storage_t* storage,
+                                            const char* dtype,
                                             const rocke_matrix_fragment_layout_t* layout,
-                                            const rocke_type_t* carrier_type);
+                                            const rocke_type_t* carrier_type,
+                                            int alignment_bytes);
 
 /* Callback returns a canonical unsigned pattern in an integer carrier.
  * ctx and output pointer array are borrowed for the duration of this call. */
 typedef rocke_value_t* (*rocke_load_bits_fn)(rocke_ir_builder_t* b, int index, void* ctx);
+/* Encoded fields are at most 32 bits; i64 carriers support eight-byte scales. */
 rocke_status_t rocke_h_pack_fragment_bits(rocke_ir_builder_t* b,
                                           rocke_load_bits_fn load_bits,
                                           void* ctx,

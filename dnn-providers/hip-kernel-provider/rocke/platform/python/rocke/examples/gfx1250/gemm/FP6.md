@@ -22,13 +22,13 @@ E2M3 has exponent bias 1; E3M2 has bias 3.
 A lane with half index `h = lane // 16` consumes K ranges
 `[32*h, 32*h+32)` and `[64+32*h, 96+32*h)` for each atom. Each range occupies
 24 bytes. The resulting twelve i32 words are padded with four zero words for
-the sixteen-word compiler builtin interface. A/B use independent storage descriptors with the same dense format.
+the sixteen-word compiler builtin interface. A/B row strides use the same dense packing contract.
 
-The builder uses [`TensorStorage`](../../../core/storage.py),
+The builder uses [`BitPacking`](../../../core/storage.py),
 [`ScaledWmmaOp.matrix_layout`](../../../core/arch/wmma_scale.py), and
 [`load_matrix_fragment`](../../../helpers/mma_io.py). Dense six-bit packing
-places sixteen elements across three i32 words. The shared loader derives
-alignment and assembles each 24-byte chunk from 16-byte and 8-byte loads.
+places sixteen elements across three i32 words. The builder supplies row bases and their proven 16-byte alignment.
+The shared loader adjusts alignment for chunk offsets and assembles each 24-byte chunk from 16-byte and 8-byte loads.
 Numerical encoders and the independent reference decoder remain separate from
 these unsigned bit-pattern operations.
 

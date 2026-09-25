@@ -493,9 +493,9 @@ class _Lowerer:
             raise ValueError(
                 "global_load_vN: alignment must be a positive power of two"
             )
-        if align < byte_count:
-            # A vector-pointer dereference would promise natural alignment.
-            # Copy the payload using only the alignment guaranteed by the IR.
+        if align < byte_count or byte_count & (byte_count - 1):
+            # Non-power-of-two vector objects include padding. Copy only the
+            # payload, using only the alignment guaranteed by the IR.
             self._emit(
                 f"{prefix}{vec} {_name(op.result)}; "
                 f"__builtin_memcpy(&{_name(op.result)}, "
@@ -1839,6 +1839,14 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
+        byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
+        if byte_count & (byte_count - 1):
+            # Clang rounds vector object sizes up; LDS payloads have no padding.
+            self._emit(
+                f"{prefix}{n} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, &{storage}[{idx_str}], {byte_count});"
+            )
+            return
         self._emit(
             f"{prefix}{n} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{n}*>(&{storage}[{idx_str}]);"
@@ -2505,9 +2513,9 @@ def lower_kernel_to_hip(
     The output is:
     1. The :data:`HIP_PROLOGUE` (typedefs + ``<hip/hip_runtime.h>``
     include + AMDGPU vector typedefs). Disable with
-    ``include_prologue=False`` when you want only the body text
-    (e.g. for embedding into a larger TU that already has these
-    typedefs).
+    ``include_prologue=False`` for embedding into a larger TU that already
+    has the shared prologue. Required per-kernel vector typedefs are still
+    emitted.
     2. The kernel's ``__global__`` signature, derived from
     :attr:`KernelDef.params`. Pointer params get ``__restrict__``;
     ``__launch_bounds__`` is taken from
@@ -2560,7 +2568,7 @@ def lower_kernel_to_hip(
     parts: List[str] = []
     if include_prologue:
         parts.append(HIP_PROLOGUE)
-        parts.extend(_extra_vector_declarations(kernel))
+    parts.extend(_extra_vector_declarations(kernel))
     parts.append(head)
     if smem_block:
         parts.append(smem_block)

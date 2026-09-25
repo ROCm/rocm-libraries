@@ -24,27 +24,22 @@ typedef struct rocke_scale_packing
     int block_k;
 } rocke_scale_packing_t;
 
-typedef struct rocke_scale_association
-{
-    int block_k;
-} rocke_scale_association_t;
-
-static inline rocke_scale_association_t rocke_scale_association(const rocke_scale_packing_t* p)
+static inline int rocke_scale_word_bits(const rocke_scale_packing_t* p)
 {
     if(p->block_k <= 0)
         ckc::raise_status(ROCKE_ERR_VALUE, "scale block_k must be positive");
-    return {p->block_k};
+    if(p->count != 1 && p->count != 2 && p->count != 4 && p->count != 8)
+        ckc::raise_status(ROCKE_ERR_VALUE, "carrier_bits must be 8, 16, 32, or 64");
+    return p->count * 8;
 }
 
 static inline rocke_fragment_packing_t rocke_scale_fragment(const rocke_scale_packing_t* p)
 {
+    const int word_bits = rocke_scale_word_bits(p);
     rocke_bit_packing_t bits;
     rocke_fragment_packing_t result;
-    rocke_scale_association(p);
-    if(p->count != 1 && p->count != 2 && p->count != 4 && p->count != 8)
-        ckc::raise_status(ROCKE_ERR_VALUE, "carrier_bits must be 8, 16, 32, or 64");
-    if(!rocke_bit_packing_init(&bits, rocke_dtype_info("e8m0")->encoded_bits, 0)
-       || !rocke_fragment_packing_init(&result, &bits, p->count, p->count * 8, 1))
+    if(!rocke_bit_packing_init(&bits, 8, 0)
+       || !rocke_fragment_packing_init(&result, &bits, p->count, word_bits, 1))
         ckc::raise_status(ROCKE_ERR_VALUE, "invalid scale packing");
     return result;
 }
@@ -158,11 +153,6 @@ static inline const rocke_mma_op_t* rocke_gfx1250_scaled_wmma_from_op(const rock
 {
     const char* op_id = rocke_attr_get_str(&op->attrs, "op_id");
     return rocke_gfx1250_scaled_wmma(op_id ? op_id : op->name);
-}
-
-static inline int rocke_scale_word_bits(const rocke_scale_packing_t* packing)
-{
-    return rocke_scale_fragment(packing).carrier_bits;
 }
 
 #endif /* ROCKE_WMMA_SCALE_INTERNAL_H */

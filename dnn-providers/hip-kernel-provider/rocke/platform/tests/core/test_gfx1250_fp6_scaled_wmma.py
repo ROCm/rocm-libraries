@@ -133,6 +133,9 @@ def test_all_native_matrix_pairs(a, b, mode):
         with pytest.raises(error_type, match="requires llvm23"):
             lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor=flavor)
     if a in ("fp6", "bf6"):
+        # Two 24-byte chunks per operand per K=128 step, with no overread.
+        assert llvm.count("load <4 x i32>") == 8
+        assert llvm.count("load <2 x i32>") == 8
         assert block_scaled_gemm_signature(spec)[0]["type"] == "ptr<i8, global>"
 
 
@@ -205,7 +208,7 @@ def test_fp6_atom_storage_contract(dtype, block_k):
         assert layout.chunk_elements == 32 and layout.chunk_bytes == 24
         assert layout.fragment.live_carriers == 12
         assert layout.fragment.padding_bits == 128
-        assert contract.scale_packing(operand).association.block_k == block_k
+        assert contract.scale_packing(operand).block_k == block_k
         # Literal bit-stream oracle, independent of the shared packer.
         patterns = list(range(64))
         expected = sum(value << (6 * i) for i, value in enumerate(patterns))
