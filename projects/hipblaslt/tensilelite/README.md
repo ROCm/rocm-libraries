@@ -162,6 +162,7 @@ The optional affected-tests hook is installed with:
 ```bash
 TENSILELITE_ROCM_VERSION="$(<"${ROCM_PATH:-/opt/rocm}/.info/version")" uv sync
 invoke build-client --gpu-targets gfx942
+invoke configure-client --build-dir build_tmp
 uv run invoke precommit-install
 ```
 
