@@ -220,11 +220,20 @@ def test_compiler_asan_and_save_temps(fixed_version):
 
 def test_compiler_windows_branch(fixed_version, monkeypatch):
     monkeypatch.setattr(C, "os_name", "nt")
-    monkeypatch.setenv("ROCM_PATH", "C:/rocm")
-    comp = C.Compiler(Path("/x/clang++.exe"), build_id_kind="sha1")
+    monkeypatch.setenv("ROCM_PATH", "C:/ambient")
+    comp = C.Compiler("C:/rocm/bin/clang++.exe", build_id_kind="sha1")
     assert "-fms-extensions" in comp.default_args
     assert "-fPIC" in comp.default_args
     assert "--rocm-path=C:/rocm" in comp.default_args
+
+
+def test_compiler_windows_python_sdk_does_not_borrow_rocm_path(fixed_version, monkeypatch):
+    monkeypatch.setattr(C, "os_name", "nt")
+    monkeypatch.setenv("ROCM_PATH", "C:/ambient")
+
+    comp = C.Compiler(Path("C:/venv/Scripts/clang++.exe"), build_id_kind="sha1")
+
+    assert not any(str(arg).startswith("--rocm-path=") for arg in comp.default_args)
 
 
 def test_compiler_call_builds_arch_flags(fixed_version, captured_invoke):

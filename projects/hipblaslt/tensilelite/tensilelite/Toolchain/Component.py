@@ -255,12 +255,13 @@ class Compiler(Component):
         if save_temps:
             self.default_args.append("--save-temps")
         if os_name == "nt":                                                    # should we use fPIIC on all arches?
+            compiler_path = Path(compiler_path)
             self.default_args.extend(["-fms-extensions", "-fms-compatibility", "-fPIC", "-Wno-deprecated-declarations"])
-            # amdclang++ on Windows does not read ROCM_PATH from the environment;
-            # it requires --rocm-path on the command line to locate HIP headers.
-            rocm_path = environ.get("ROCM_PATH", "")
-            if rocm_path:
-                self.default_args.append(f"--rocm-path={rocm_path}")
+            # A conventional Windows ROCm compiler needs its own SDK root on
+            # the command line. Python-SDK trampolines live under Scripts and
+            # must not borrow an unrelated ambient ROCM_PATH.
+            if compiler_path.parent.name.lower() == "bin":
+                self.default_args.append(f"--rocm-path={compiler_path.parent.parent}")
 
 
     def __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str):

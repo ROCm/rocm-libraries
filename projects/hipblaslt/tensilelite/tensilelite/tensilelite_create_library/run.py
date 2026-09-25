@@ -203,8 +203,9 @@ def _verify_stinky_asm_comment_vs_elf_text(s_path: Path, o_path: Path, kernel_ba
     """After assembling ``s_path`` → ``o_path``, verify Stinky vs ELF ``.text``.
 
     Call only when ``_stinky_asm_verify_wanted(isa)`` is True. Uses ``verify_stinky_comment_vs_elf_text``
-    (``readelf`` / ``llvm-readelf``; ``ROCM_PATH``, ``LLVM_BIN``, or ``PATH``). Forwards messages
-    through ``_stinky_out``. Exits via ``printExit`` on mismatch (1) or tool/readelf error (2).
+    (``readelf`` / ``llvm-readelf`` from the selected ROCm installation). Forwards
+    messages through ``_stinky_out``. Exits via ``printExit`` on mismatch (1) or
+    tool/readelf error (2).
 
     Args:
         s_path: Path to the generated ``.s`` file.
