@@ -165,6 +165,8 @@ jobs:
         if: ${{ steps.fetch.outputs.artifact_ready == 'true' && inputs.run_hipblaslt }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
+          # StreamKMultiStream.ConcurrentStreamsDoNotDeadlock fails without it.
+          HSA_HOTSWAP_DISABLE: "1"
         run: |
           set -o pipefail  # a failing test must propagate through `| tee`, not be masked
           mkdir -p test_results
@@ -175,25 +177,12 @@ jobs:
           echo "Using: $HIPBLASLT_TEST"
           export HIPBLASLT_TEST_TIMEOUT=3600
           export HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250"
-          # Isolate the concurrent-streams StreamK test (hotswap off) when the filter
-          # selects it; the rest runs normally. Drop once the StreamK deadlock is fixed.
-          DL='StreamKMultiStream.ConcurrentStreamsDoNotDeadlock'
-          USER_FILTER=()
-          [ -n "$GTEST_FILTER_ARG" ] && USER_FILTER=(--gtest_filter="$GTEST_FILTER_ARG")
-          rc=0
-          if "$HIPBLASLT_TEST" --gtest_list_tests "${USER_FILTER[@]}" 2>/dev/null | grep -q 'ConcurrentStreamsDoNotDeadlock'; then
-            if   [[ "$GTEST_FILTER_ARG" == *-* ]]; then REST="${GTEST_FILTER_ARG}:*${DL}*"
-            elif [ -n "$GTEST_FILTER_ARG" ];       then REST="${GTEST_FILTER_ARG}-*${DL}*"
-            else                                        REST="-*${DL}*"; fi
-            HSA_HOTSWAP_DISABLE=1 "$HIPBLASLT_TEST" --gtest_filter="*${DL}*" 2>&1 \
-              | tee    test_results/hipblaslt_test.log || rc=1
-            "$HIPBLASLT_TEST" --gtest_filter="$REST" 2>&1 \
-              | tee -a test_results/hipblaslt_test.log || rc=1
-          else
-            "$HIPBLASLT_TEST" "${USER_FILTER[@]}" 2>&1 \
-              | tee    test_results/hipblaslt_test.log || rc=1
-          fi
-          exit $rc
+          FILTER=()
+          [ -n "$GTEST_FILTER_ARG" ] && FILTER=(--gtest_filter="$GTEST_FILTER_ARG")
+          # Drop every device-info banner line (specs + PCI chip ID) from console + log.
+          scrub() { sed -u -E '/Query[[:space:]]+device/d; /Device[[:space:]]+ID[[:space:]]+[0-9]/d; /PCI[[:space:]]+Chip[[:space:]]+ID/d; /GB[[:space:]]+memory/d; /SCLK|MCLK/d; /compute[[:space:]]+capability/d; /maxGridDimX/d; /sharedMemPerBlock/d; /maxThreadsPerBlock/d; /warpSize/d'; }
+          # Full suite in one pass.
+          "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 | scrub | tee test_results/hipblaslt_test.log
 
       - name: Run TensileLite common tests
         timeout-minutes: 240
