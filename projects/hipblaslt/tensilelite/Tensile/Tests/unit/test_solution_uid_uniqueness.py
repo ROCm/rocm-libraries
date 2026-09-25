@@ -5,14 +5,47 @@
 
 from __future__ import annotations
 
+import importlib.util
 import multiprocessing as mp
 import os
 from pathlib import Path
+from types import ModuleType
 from typing import Dict, List, Tuple
 
 import pytest
 
-from Tensile.Common.SolutionIdGen import decode_solution_uid, encode_solution_uid
+
+def _load_solution_id_gen() -> ModuleType:
+    """Load SolutionIdGen without importing ``Tensile.Common``.
+
+    The ``library-uniqueness`` tox env skips installing Tensile and rocisa.
+    ``from Tensile.Common.SolutionIdGen import ...`` still executes
+    ``Tensile.Common.__init__``, which imports rocisa.
+
+    Args:
+        None.
+
+    Returns:
+        The loaded ``SolutionIdGen`` module.
+
+    Raises:
+        FileNotFoundError: If ``SolutionIdGen.py`` is missing.
+        ImportError: If the module spec or loader cannot be created.
+    """
+    module_path = Path(__file__).resolve().parents[2] / "Common" / "SolutionIdGen.py"
+    if not module_path.is_file():
+        raise FileNotFoundError(f"SolutionIdGen.py not found: {module_path}")
+    spec = importlib.util.spec_from_file_location("tensile_solution_id_gen", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load SolutionIdGen from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_solution_id_gen = _load_solution_id_gen()
+decode_solution_uid = _solution_id_gen.decode_solution_uid
+encode_solution_uid = _solution_id_gen.encode_solution_uid
 
 pytestmark = pytest.mark.unit
 
