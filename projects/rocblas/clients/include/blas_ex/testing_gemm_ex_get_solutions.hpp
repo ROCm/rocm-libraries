@@ -26,13 +26,14 @@
 #include "testing_common.hpp"
 
 // Largest absolute element magnitude in a host matrix, used to scale the
-// per-solution numeric tolerance to the result magnitude.
+// per-solution numeric tolerance to the result magnitude. rocblas_abs handles
+// real, half, bfloat16 and complex element types (returning a real magnitude).
 template <typename T>
 double max_abs_element(const host_matrix<T>& mat)
 {
     double max_abs = 0.0;
     for(size_t i = 0; i < mat.size(); i++)
-        max_abs = std::max(max_abs, std::abs(double(mat.data()[i])));
+        max_abs = std::max(max_abs, double(rocblas_abs(mat.data()[i])));
     return max_abs;
 }
 
