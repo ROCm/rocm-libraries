@@ -6,22 +6,12 @@
 #
 ################################################################################
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 
-# Load KnownBugs.py without importing TensileLogic/__init__.py (avoids rocisa in CI).
-def _known_bugs_mod():
-    kb_path = Path(__file__).resolve().parents[2] / "TensileLogic" / "KnownBugs.py"
-    spec = importlib.util.spec_from_file_location("KnownBugs_under_test", kb_path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from Tensile.TensileLogic import KnownBugs as _kb
 
-
-_kb = _known_bugs_mod()
 is_known_bug = _kb.is_known_bug
 load_bundled_known_bugs = _kb.load_bundled_known_bugs
 load_known_bugs = _kb.load_known_bugs
