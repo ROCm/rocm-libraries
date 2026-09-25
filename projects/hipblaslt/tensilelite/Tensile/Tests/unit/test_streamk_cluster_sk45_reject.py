@@ -2,19 +2,18 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Unit test: StreamK dynamic (SK4) / hybrid (SK5) modes reject ClusterDim.
+# Unit test: StreamK dynamic-queue and hybrid assignments reject ClusterDim.
 #
-# WG-cluster support is StreamK==3-only (the [C,1] barrier reduction and the DP
-# cooperative B-multicast are both SK3 features). There is no cluster-load /
-# reduction implementation for the dynamic (SK4) or hybrid (SK5) work-queue
-# modes, so Solution.assignDerivedParameters rejects StreamK in {4,5} with
+# WG-cluster support requires StaticGrid assignment. There is no cluster-load /
+# reduction implementation for DynamicWorkQueue or Hybrid assignment,
+# so Solution.assignDerivedParameters rejects either assignment with
 # ClusterDim != [1,1] outright (rather than emitting an unusable cluster kernel
 # whose decoded cluster WG-id no feature consumes).
 #
 # These tests drive the real config -> Solution derivation path and assert:
-#   * SK4/SK5 + ClusterDim != [1,1] -> 0 derived solutions (the reject fires); and
+#   * queue/hybrid + ClusterDim != [1,1] -> 0 derived solutions; and
 #   * the SAME config with ClusterDim = [1,1] still derives solutions, proving
-#     the differentiator is the cluster (not some unrelated SK4/SK5 reject).
+#     the differentiator is the cluster.
 #
 # Usage:
 #   pytest test_streamk_cluster_sk45_reject.py -v
@@ -31,8 +30,8 @@ pytestmark = pytest.mark.unit
 _DESIGNED = os.path.join(
     os.path.dirname(__file__), "characterization",
     "_codegen", "data", "test_data", "_designed", "gfx1250")
-# A known-good gfx1250 StreamK=3 + ClusterDim config; we only re-fork StreamK
-# (and, for the control, ClusterDim) on top of it.
+# A known-good gfx1250 persistent DataParallel/StaticGrid cluster config.
+# Override both policy dimensions and, for the control, ClusterDim.
 _BASE = os.path.join(_DESIGNED, "streamk_cluster_coop_load.yaml")
 
 _ARCH = "gfx1250"
@@ -65,31 +64,29 @@ def _derive_states(cfg_path):
     return derive_states(cfg_path, arch=_ARCH, limit_solutions=8)
 
 
-# The _BASE config is StreamK=3 + ClusterDim + StreamKForceDPOnly=1. Both are
-# SK3-only concepts, so when we re-fork StreamK to 4/5 we also clear
-# StreamKForceDPOnly (=0) to isolate the ClusterDim as the sole reject
-# differentiator (otherwise SK4/5 + FDPO=1 would itself be rejected, confounding
-# the control below).
-@pytest.mark.parametrize("sk", [4, 5])
-def test_sk45_cluster_rejected(tmp_path, sk):
+# Select StreamK explicitly so the inherited DataParallel policy cannot cause
+# an unrelated rejection before the cluster guard is reached.
+@pytest.mark.parametrize("assignment", ["DynamicWorkQueue", "Hybrid"])
+def test_sk45_cluster_rejected(tmp_path, assignment):
     """StreamK dynamic/hybrid + ClusterDim != [1,1] derives no solutions."""
-    cfg = _write_variant(tmp_path, f"sk{sk}_cluster.yaml",
-                         {"StreamK": [sk], "StreamKForceDPOnly": [0]})
+    cfg = _write_variant(tmp_path, f"{assignment}_cluster.yaml",
+                         {"TileProcessingStrategy": ["StreamK"],
+                          "WorkAssignment": [assignment]})
     assert _derive_states(cfg) == [], (
-        f"StreamK={sk} with ClusterDim != [1,1] must be rejected "
-        "(cluster support is SK3-only)")
+        f"StreamK/{assignment} with ClusterDim != [1,1] must be rejected "
+        "(cluster support requires StaticGrid)")
 
 
-@pytest.mark.parametrize("sk", [4, 5])
-def test_sk45_without_cluster_still_valid(tmp_path, sk):
+@pytest.mark.parametrize("assignment", ["DynamicWorkQueue", "Hybrid"])
+def test_sk45_without_cluster_still_valid(tmp_path, assignment):
     """Control: the same config with ClusterDim=[1,1] still derives solutions,
-    so the reject above is caused by the cluster, not an unrelated SK4/SK5
+    so the reject above is caused by the cluster, not an unrelated policy
     constraint."""
-    cfg = _write_variant(tmp_path, f"sk{sk}_nocluster.yaml",
-                         {"StreamK": [sk], "ClusterDim": [[1, 1]],
-                          "StreamKForceDPOnly": [0]})
+    cfg = _write_variant(tmp_path, f"{assignment}_nocluster.yaml",
+                         {"TileProcessingStrategy": ["StreamK"],
+                          "WorkAssignment": [assignment], "ClusterDim": [[1, 1]]})
     assert _derive_states(cfg), (
-        f"StreamK={sk} without ClusterDim should still derive solutions")
+        f"StreamK/{assignment} without ClusterDim should still derive solutions")
 
 
 if __name__ == "__main__":

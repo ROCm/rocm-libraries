@@ -1031,7 +1031,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelBatchedWorkspaceIsNotBatchScaled)
 
     // Hold the grid fixed to test the fit boundary itself: without this
     // override the grid selector can choose a smaller split that still fits.
-    env.device.skFixedGrid = d.finalGrid;
+    env.device.persistentFixedGrid = d.finalGrid;
     problem.setWorkspaceSize(expected - 1);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), 0u);
     const auto starved = solution.computeStreamKDecisions(problem, env.device);
@@ -1092,7 +1092,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspacePreservesAuxiliaryAllocations
             problem.setAmaxD(rocisa::DataType::Float, true);
             problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
             const size_t tiles = 2 * batch;
-            env.device.skFixedGrid = tiles * 4;
+            env.device.persistentFixedGrid = tiles * 4;
             const auto decisions = solution.computeStreamKDecisions(problem, env.device);
             ASSERT_EQ(decisions.reduction, origami::reduction_t::parallel);
             ASSERT_EQ(decisions.finalGrid, tiles * 4);
@@ -1137,7 +1137,7 @@ TEST(StreamKLaunchSummaryTest, GsuWorkspacePreservesCustomMetadata)
     problem.setUseGradient(true);
     problem.setBias(rocisa::DataType::Float, 128, 0, true, ContractionProblemGemm::TENSOR::A);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-    env.device.skFixedGrid = 8 * 4;
+    env.device.persistentFixedGrid = 8 * 4;
     ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::tree);
 
     // Handwritten kernels use custom metadata; generated kernels use sizeMapping.
