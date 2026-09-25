@@ -319,26 +319,6 @@
 #define CK_TILE_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM 1
 #endif
 
-// Convert and store f32 -> bf16/fp16 tiles a pair at a time instead of
-// element-wise; see impl::cast_tile_pk_f32_to_16bit.
-#ifndef CK_TILE_USE_PK_F32_TO_16BIT_TILE_CAST
-#define CK_TILE_USE_PK_F32_TO_16BIT_TILE_CAST 1
-#endif
-
-// Write fmha bwd dK/dV back through LDS + TDM stores rather than the default
-// epilogue's per-thread buffer stores; see ck_tile::tdm_store_2d_pair. Worth
-// 5.4% on gfx1250; what it wins is descriptor count, not bandwidth.
-#ifndef CK_TILE_FMHA_BWD_TDM_DKDV_STORE
-#define CK_TILE_FMHA_BWD_TDM_DKDV_STORE 1
-#endif
-
-// Under a causal mask, halve the fmha bwd grid and give each workgroup the
-// mirror tile pair {x, n-1-x} so expensive and cheap tiles are balanced.
-// Batch mode only; see kMaskTilePairing for the rest of the gating.
-#ifndef CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
-#define CK_TILE_FMHA_BWD_MASK_TILE_PAIRING 1
-#endif
-
 #ifndef CK_TILE_USE_SUBDWORD_TILE_CAST
 #define CK_TILE_USE_SUBDWORD_TILE_CAST 0
 #endif
