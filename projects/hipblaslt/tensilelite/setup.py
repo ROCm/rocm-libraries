@@ -36,14 +36,16 @@ class BuildEggInfo(egg_info):
             egg_base.mkdir(parents=True, exist_ok=True)
             self.egg_base = str(egg_base)
         super().finalize_options()
+
+
 def _build_rocm_version() -> str:
     """
     Return the ROCm identity encoded in the TensileLite wheel.
 
     CMake and Invoke pass ``TENSILELITE_ROCM_VERSION`` as the authoritative
     selected build identity, including TheRock's package identity.
-    Tox needs a narrow bootstrap fallback while it installs the package,
-    so it reads the selected ``ROCM_PATH/.info/version``.
+    Tox supplies a narrow ``0.0.0`` bootstrap identity while it installs the
+    editable package before a real runtime is selected.
     Other direct ``setup.py`` calls fail rather than silently tag a wheel
     from an ambient ROCm installation.
     """
