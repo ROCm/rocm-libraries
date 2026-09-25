@@ -8,6 +8,8 @@
 ``assignGlobalParameters`` (config merge + env + version + hipcc-probe branches),
 and ``setupRestoreClocks``. The process-global dict is isolated per test."""
 
+from pathlib import Path
+
 import pytest
 
 import tensilelite.Common.GlobalParameters as GP
@@ -37,10 +39,12 @@ def _stub_hipcc(monkeypatch, output="HIP version 6.2.0\n", raise_exc=None):
         return type("R", (), {"stdout": output.encode()})()
 
     monkeypatch.setattr(GP.subprocess, "run", fake_run)
-    # Stub rocm-smi discovery so the test is independent of the host's rocm-smi
-    # (and so a fake ROCmPath doesn't trip the real locateExe). The OSError arm
-    # is covered separately in test_assign_..._locateexe_oserror_raises.
-    monkeypatch.setattr(GP, "locateExe", lambda d, n: f"{d}/{n}")
+    monkeypatch.setattr(
+        GP._runtime,
+        "executable_search_paths",
+        lambda: [Path("/selected/rocm/bin")],
+    )
+    monkeypatch.setattr(GP, "isExe", lambda path: True)
 
 
 def test_assign_global_parameters_basic(isolate_globals, isa_info_map, monkeypatch):
@@ -81,13 +85,13 @@ def test_assign_global_parameters_incompatible_version_exits(isolate_globals, is
         GP.assignGlobalParameters({"MinimumRequiredVersion": "999.0.0"}, isa_info_map)
 
 
-def test_assign_global_parameters_locateexe_oserror_nonfatal(isolate_globals, isa_info_map, monkeypatch):
-    # amd-smi not found (non-Windows) -> the except OSError arm is non-fatal:
-    # it warns and leaves AMDSMIPath unset (None) instead of re-raising, so the
-    # build/logic steps still run in environments that do not ship amd-smi.
+def test_assign_global_parameters_missing_selected_amdsmi_is_nonfatal(
+    isolate_globals, isa_info_map, monkeypatch
+):
+    # amd-smi not found in the selected runtime is non-fatal: it warns and
+    # leaves AMDSMIPath unset so build/logic steps can continue.
     _stub_hipcc(monkeypatch)
-    monkeypatch.setattr(GP, "locateExe",
-                        lambda d, n: (_ for _ in ()).throw(OSError("Failed to locate amd-smi")))
+    monkeypatch.setattr(GP._runtime, "executable_search_paths", lambda: [])
     monkeypatch.setattr(GP.os, "name", "posix")
     GP.assignGlobalParameters({}, isa_info_map)
     assert GP.globalParameters["AMDSMIPath"] is None
