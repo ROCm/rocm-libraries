@@ -316,6 +316,14 @@ inline std::map<std::string, int>
     rv["v_dual_fmac_f32"] = tryAssembler(
         isaVersion, assemblerPath, "v_dual_fmac_f32 v0, v1, v2 :: v_dual_fmac_f32 v3, v4, v5", isDebug, true);
 
+    // VOPD dual-issue dot2-accumulate, the fp16 counterpart of the above.
+    rv["v_dual_dot2acc_f32_f16"] = tryAssembler(isaVersion,
+                                                assemblerPath,
+                                                "v_dual_dot2acc_f32_f16 v0, v1, v2 :: "
+                                                "v_dual_dot2acc_f32_f16 v3, v4, v5",
+                                                isDebug,
+                                                true);
+
     rv["v_fma_f64"] = tryAssembler(
         isaVersion, assemblerPath, "v_fma_f64 v[20:21], v[22:23], v[24:25], v[20:21]", isDebug);
 
@@ -329,6 +337,9 @@ inline std::map<std::string, int>
     rv["HasBF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug);
 
     rv["HasPkF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_pk_f16_f32 v0, v1, v2", isDebug);
+
+    rv["HasPkBF16CVT"]
+        = tryAssembler(isaVersion, assemblerPath, "v_cvt_pk_bf16_f32 v0, v1, v2", isDebug);
 
     rv["Hascvtfp8_f16"] = tryAssembler(isaVersion,
                                        assemblerPath,

@@ -10,6 +10,15 @@
 #ifndef W4A16_LOAD_WIDTH
 #define W4A16_LOAD_WIDTH 8
 #endif
+#ifndef W4A16_UNROLL
+#define W4A16_UNROLL 4
+#endif
+#ifndef W4A16_ACCUMULATORS
+#define W4A16_ACCUMULATORS 1
+#endif
+#ifndef W4A16_NATIVE_PERMUTE
+#define W4A16_NATIVE_PERMUTE 0
+#endif
 #ifndef W4A16_KERNEL_NAME
 #define W4A16_KERNEL_NAME Custom_W4A16_Decode_G128_UnsignedBias8_gfx1151
 #endif
@@ -19,6 +28,28 @@
 // by 256. Each wave reduces one row; consecutive lanes read consecutive chunks of packed weights.
 namespace
 {
+    static_assert(W4A16_ACCUMULATORS == 1 || W4A16_ACCUMULATORS == 4,
+                  "decode supports one or four accumulation chains");
+#if W4A16_NATIVE_PERMUTE
+    using NativeHalf2 = _Float16 __attribute__((ext_vector_type(2)));
+
+    __device__ float dot2(unsigned a, unsigned b, float c)
+    {
+        return __builtin_amdgcn_fdot2(__builtin_bit_cast(NativeHalf2, a),
+                                     __builtin_bit_cast(NativeHalf2, b), c, false);
+    }
+
+    __device__ unsigned dequantize(unsigned q, unsigned z, unsigned scale)
+    {
+        // Keep the exact lift subtraction separate from the FP16 rounding
+        // in the scale multiply, while letting the compiler schedule both.
+        #pragma clang fp contract(off)
+        NativeHalf2 result = __builtin_bit_cast(NativeHalf2, q)
+                             + __builtin_bit_cast(NativeHalf2, z);
+        result *= __builtin_bit_cast(NativeHalf2, scale);
+        return __builtin_bit_cast(unsigned, result);
+    }
+#else
     __device__ float dot2(unsigned a, unsigned b, float c)
     {
         asm("v_dot2_f32_f16 %0, %1, %2, %0" : "+v"(c) : "v"(a), "v"(b));
@@ -35,6 +66,8 @@ namespace
         return result;
     }
 
+#endif
+
     template<unsigned Width>
     __device__ float accumulate(const unsigned* __restrict__ a,
                                 const half* __restrict__ b,
@@ -42,12 +75,12 @@ namespace
                                 const unsigned char* __restrict__ zeroA,
                                 unsigned row, unsigned lane, unsigned k, unsigned lda)
     {
-        float sum = 0;
+        float sums[W4A16_ACCUMULATORS] = {};
         constexpr unsigned chunk = 256 * Width;
         const unsigned offset = (row % (k / 256)) * 256;
         // Distribute simultaneous reads across memory channels even when lda is a
         // power of two. The wrap changes traversal order, not the packed layout.
-        #pragma unroll 4
+        #pragma unroll W4A16_UNROLL
         for(unsigned iter = 0; iter < k / chunk; ++iter)
         {
             unsigned kk = iter * chunk + lane * (8 * Width) + offset;
@@ -75,15 +108,26 @@ namespace
                               >> ((row % 2) * 4)) & 15;
                 z |= z << 16;
 #endif
+                // Independent chains hide dot-product latency without moving
+                // scaling past the required FP16 dequantization rounding.
+                float& sum = sums[j % W4A16_ACCUMULATORS];
                 unsigned q = packed[j];
                 const uint4 packedActivation = *reinterpret_cast<const uint4*>(b + kk + j * 8);
                 // Sequential nibbles pair K offsets (0,4), (1,5), (2,6), (3,7)
                 // in the dequantizer below. Match the activation pairs to them.
+#if W4A16_NATIVE_PERMUTE
+                const uint4 activation = {
+                    __builtin_amdgcn_perm(packedActivation.z, packedActivation.x, 0x05040100),
+                    __builtin_amdgcn_perm(packedActivation.z, packedActivation.x, 0x07060302),
+                    __builtin_amdgcn_perm(packedActivation.w, packedActivation.y, 0x05040100),
+                    __builtin_amdgcn_perm(packedActivation.w, packedActivation.y, 0x07060302)};
+#else
                 const uint4 activation = {
                     (packedActivation.x & 0xffff) | (packedActivation.z << 16),
                     (packedActivation.x >> 16) | (packedActivation.z & 0xffff0000),
                     (packedActivation.y & 0xffff) | (packedActivation.w << 16),
                     (packedActivation.y >> 16) | (packedActivation.w & 0xffff0000)};
+#endif
 
                 // Extract pairs across the two halves of each packed dword.
                 // The integer lifts/subtractions are exact; scaling rounds to fp16
@@ -103,7 +147,10 @@ namespace
                 sum = dot2(p3, activation.w, sum);
             }
         }
-        return sum;
+        if constexpr(W4A16_ACCUMULATORS == 4)
+            return (sums[0] + sums[1]) + (sums[2] + sums[3]);
+        else
+            return sums[0];
     }
 }
 

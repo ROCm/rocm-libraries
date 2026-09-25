@@ -34,6 +34,19 @@ namespace TensileLite
 {
     namespace Client
     {
+        /// Parse --int4-encoding-a. Rejects unknown names rather than silently
+        /// falling back, so a typo cannot quietly benchmark the wrong kernel.
+        static ContractionProblemGemm::Int4Encoding parseInt4Encoding(std::string const& name)
+        {
+            using Enc = ContractionProblemGemm::Int4Encoding;
+            if(name == "Signed")
+                return Enc::Signed;
+            if(name == "UnsignedBias8")
+                return Enc::UnsignedBias8;
+            throw std::runtime_error("Unknown int4-encoding-a '" + name
+                                     + "' (expected Signed or UnsignedBias8)");
+        }
+
         ClientProblemFactory::ClientProblemFactory(po::variables_map const& args)
             : m_problemSizes(args["problem-size"].as<std::vector<std::vector<size_t>>>())
             , m_stridedBatched(args["strided-batched"].as<bool>())
@@ -57,6 +70,10 @@ namespace TensileLite
             , m_f32XdlMathOp(rocisa::DataType::Float)
             , m_activationComputeType(rocisa::DataType::Float)
             , m_useUserArgs(false)
+            , m_scaleBlockSizeA(args["scale-a-block"].as<int>())
+            , m_scaleTypeA(args["scale-a-type"].as<rocisa::DataType>())
+            , m_scaleZeroPointA(args["scale-a-zero-point"].as<bool>())
+            , m_int4EncodingA(parseInt4Encoding(args["int4-encoding-a"].as<std::string>()))
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
             , m_padMXScaleTensorFreeDim(false)
@@ -523,6 +540,20 @@ namespace TensileLite
                             rv.back().setF32XdlMathOp(m_f32XdlMathOp);
                             rv.back().setActivationComputeType(m_activationComputeType);
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
+                            if(m_scaleBlockSizeA)
+                            {
+                                // Dense [M][ceil(K/G)], group dimension innermost.
+                                // Must come after setUseScaleAB so the "Block"
+                                // guard in setScaleA is already in effect.
+                                rv.back().setScaleBlockSizeA(
+                                    m_scaleBlockSizeA,
+                                    m_scaleTypeA,
+                                    rv.back().a().sizes()[rv.back().freeIndicesA()[0].i],
+                                    CeilDivide<size_t>(rv.back().boundSize(0),
+                                                       (size_t)m_scaleBlockSizeA),
+                                    m_scaleZeroPointA);
+                                rv.back().setInt4EncodingA(m_int4EncodingA);
+                            }
                             if(m_mxBlockA)
                             {
                                 rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim);

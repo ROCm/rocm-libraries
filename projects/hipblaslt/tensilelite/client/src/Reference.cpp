@@ -134,6 +134,40 @@ namespace TensileLite
             return std::fabs(v);
         }
 
+        // w4a16 group scale. Unlike an MX scale this is an ordinary signed
+        // float, so it must NOT go through mxScaleElementAsFloat's fabs().
+        inline float blockScaleElementAsFloat(rocisa::DataType type,
+                                              void const*      base,
+                                              size_t           index)
+        {
+            switch(type)
+            {
+            case rocisa::DataType::BFloat16:
+                return static_cast<float>(static_cast<BFloat16 const*>(base)[index]);
+            case rocisa::DataType::Float:
+                return static_cast<float const*>(base)[index];
+            case rocisa::DataType::Half:
+                return static_cast<float>(static_cast<Half const*>(base)[index]);
+            default:
+                throw std::runtime_error(
+                    concatenate("Reference block scale: unsupported element type ",
+                                static_cast<int>(type)));
+            }
+        }
+
+        // w4a16 asymmetric zero-point: two rows per byte, with nibble index
+        // e = 2*((m/2)*kGroups + g) + (m&1) (see setScaleBlockSizeA).
+        inline int blockZeroPointElement(void const* base, size_t e, bool isUnsigned)
+        {
+            uint8_t byte   = static_cast<uint8_t const*>(base)[e / 2];
+            uint8_t nibble = (e & 1) ? (byte >> 4) : (byte & 0xF);
+            // Read z in the same domain as the weights: raw [0,15] for the
+            // UnsignedBias8 encoding, two's complement for Signed.
+            if(isUnsigned)
+                return static_cast<int>(nibble);
+            return static_cast<int>(nibble ^ 0x8) - 8;
+        }
+
         // Round each element through the narrower compute-input type. This
         // matches what the slow-path validator does in getElement<>() at the
         // MAC site when storage type is wider than the MAC input type (e.g.
@@ -561,6 +595,9 @@ namespace TensileLite
             case rocisa::DataType::ComplexFloat:
             case rocisa::DataType::ComplexDouble:
             case rocisa::DataType::Int8x4:
+            // int4 is a packed A/B storage type only; these helpers read and
+            // write individual scalar elements, which int4 never is here.
+            case rocisa::DataType::Int4:
             case rocisa::DataType::Count:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
@@ -675,6 +712,9 @@ namespace TensileLite
             case rocisa::DataType::ComplexDouble:
             case rocisa::DataType::Int8x4:
             case rocisa::DataType::Int64:
+            // int4 is a packed A/B storage type only; these helpers read and
+            // write individual scalar elements, which int4 never is here.
+            case rocisa::DataType::Int4:
             case rocisa::DataType::Count:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
@@ -728,6 +768,9 @@ namespace TensileLite
                 throw std::runtime_error("Not supported yet.");
             }
             break;
+            // int4 is a packed A/B storage type only; these helpers read and
+            // write individual scalar elements, which int4 never is here.
+            case rocisa::DataType::Int4:
             case rocisa::DataType::Count:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
@@ -1002,7 +1045,12 @@ namespace TensileLite
         template <typename Accumulator,
                   typename MathOpAccum,
                   typename Type,
-                  typename ComputeInputType>
+                  typename ComputeInputType,
+                  // Int4x2 is available on Windows too (it is plain storage, not
+                  // a HIP type) and has its own packed overload, so it must be
+                  // excluded here or the call would be ambiguous -- and if this
+                  // overload won, it would read a whole byte as one element.
+                  std::enable_if_t<!std::is_same<Int4x2, Type>::value, bool> = true>
         inline Accumulator getElement(ContractionProblemGemm const& problem,
                                       Type const*                   ptr,
                                       const size_t                  idx,
@@ -1023,6 +1071,8 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
                                        && !std::is_same<Float4x2, Type>::value
 #endif // #ifdef TENSILE_USE_FP4
+                                       // w4a16 int4 has its own packed overload
+                                       && !std::is_same<Int4x2, Type>::value
                                    ,
                                    bool>
                   = true>
@@ -1095,6 +1145,38 @@ namespace TensileLite
             return static_cast<Accumulator>(ptr[packIdx].getElement(elemIdx));
         }
 #endif // !_WIN32 && (TENSILE_USE_FP6 || TENSILE_USE_BF6 || TENSILE_USE_FP4)
+
+        /// Both supported encodings pack consecutive elements into low/high nibbles.
+        inline void blockDequantNibbleAddr(size_t idx, size_t& byteIdx, size_t& nibbleIdx)
+        {
+            byteIdx = idx / 2;
+            nibbleIdx = idx % 2;
+        }
+
+        // w4a16 weights: two int4 per byte. The per-K-group scale is NOT
+        // applied here -- it is constant across a group, so the accumulation
+        // loop applies it once per group (exactly like the MX scale).
+        template <typename Accumulator,
+                  typename MathOpAccum,
+                  typename Type,
+                  typename ComputeInputType,
+                  std::enable_if_t<std::is_same<Int4x2, Type>::value, bool> = true>
+        inline Accumulator getElement(ContractionProblemGemm const& problem,
+                                      Type const*                   ptr,
+                                      const size_t                  idx,
+                                      void const*                   scalePtr,
+                                      const bool                    conjugate)
+        {
+            size_t packIdx, elemIdx;
+            blockDequantNibbleAddr(idx, packIdx, elemIdx);
+
+            // UnsignedBias8 returns the raw nibble; its implicit
+            // zero-point of 8 is applied by the caller alongside any per-group
+            // zero-point, so that both land in one subtraction.
+            if(problem.int4UnsignedA())
+                return static_cast<Accumulator>(ptr[packIdx].getNibble(elemIdx));
+            return static_cast<Accumulator>(ptr[packIdx].getElement(elemIdx));
+        }
 
         template <typename Inputs,
                   typename Accumulator,
@@ -1204,6 +1286,11 @@ namespace TensileLite
             if(isMXFP4Problem(problem) && problem.a().dataType() != problem.b().dataType())
                 return rejectFast("mixed_mxfp4_input_types");
 #endif
+
+            // w4a16 group scaling has no fast-path implementation; the slow
+            // path applies the scale per K-group in its accumulation loop.
+            if(problem.scaleBlockSizeA() > 0)
+                return rejectFast("block_scale_a_not_supported_on_fast_path");
 
             if(mxBlockA > 0 || mxBlockB > 0)
             {
@@ -2035,10 +2122,58 @@ namespace TensileLite
                             = problem.mxBlockB() ? mxsb.strides()[boundIndices[0].b] : 0;
 
                         // innermost bound calculation:
+                        // The w4a16 group scale is constant across ScaleBlockSizeA
+                        // consecutive K elements, exactly like an MX block scale,
+                        // so it blocks the loop the same way and is applied once
+                        // per block below.
                         size_t innerMXLoop = std::max<size_t>(
-                            std::max<size_t>(problem.mxBlockA(), problem.mxBlockB()), 1);
+                            std::max<size_t>(problem.mxBlockA(), problem.mxBlockB()),
+                            std::max<size_t>(problem.scaleBlockSizeA(), 1));
                         for(size_t i = 0; i < boundSize[0]; i += innerMXLoop)
                         {
+                            // w4a16 asymmetric. The scale is constant over the
+                            // block and still factors out below, but the
+                            // zero-point does not: (a-z)*s*b summed over j is
+                            // s*sum((a-z)*b), so the subtraction has to happen
+                            // per element, before the product. Doing it that way
+                            // is also exact -- a and z are both small integers --
+                            // whereas factoring it out as
+                            // s*sum(a*b) - s*z*sum(b) would subtract two large
+                            // nearly-equal terms.
+                            // if constexpr: this whole path only type-checks
+                            // for a packed int4 A (getElement has no overload for
+                            // e.g. Int8x4), and w4a16 is the only user.
+                            Accumulator zAcc(0);
+                            bool        useZeroPoint = false;
+                            if constexpr(std::is_same<Int4x2, typename Inputs::AType>::value)
+                            {
+                              // UnsignedBias8 always subtracts something:
+                              // their implicit zero-point of 8 when there is no
+                              // zero-point tensor, or the stored z when there is.
+                              if(problem.int4UnsignedA())
+                              {
+                                zAcc         = static_cast<Accumulator>(8);
+                                useZeroPoint = true;
+                              }
+                              if(problem.scaleZeroPointA() && inputs.scaleZeroA)
+                              {
+                                useZeroPoint = true;
+                                size_t kGroup
+                                    = (boundIndices[0].aMirror ? (boundSize[0] - i - 1) : i)
+                                      / problem.scaleBlockSizeA();
+                                // [M][kGroups] row-major, packed two per byte
+                                // along M: byte = (m/2)*kGroups + g, nibble =
+                                // m & 1 (see setScaleBlockSizeA). Fold that back
+                                // into the flattened nibble index the accessor
+                                // takes.
+                                size_t m       = aCoord[freeIndicesA[0].i];
+                                size_t kGroups = problem.scaleATensor().sizes()[0];
+                                size_t e = 2 * ((m / 2) * kGroups + kGroup) + (m & 1);
+                                zAcc = static_cast<Accumulator>(blockZeroPointElement(
+                                    inputs.scaleZeroA, e, problem.int4UnsignedA()));
+                              }
+                            }
+
                             Accumulator val(0);
                             for(size_t j = 0; j < innerMXLoop; j++)
                             {
@@ -2050,6 +2185,25 @@ namespace TensileLite
 
                                 size_t aIdx = aIndex + (aI * aStride);
                                 size_t bIdx = bIndex + (bI * bStride);
+                                if constexpr(std::is_same<Int4x2,
+                                                            typename Inputs::AType>::value)
+                                {
+                                  if(useZeroPoint)
+                                  {
+                                    auto aVal = getElement<Accumulator,
+                                                           MathOpAccum,
+                                                           typename Inputs::AType,
+                                                           typename Inputs::ComputeInputTypeA>(
+                                        problem, aPtr, aIdx, inputs.scaleA, aConjugate);
+                                    auto bVal = getElement<Accumulator,
+                                                           MathOpAccum,
+                                                           typename Inputs::BType,
+                                                           typename Inputs::ComputeInputTypeB>(
+                                        problem, bPtr, bIdx, inputs.scaleB, bConjugate);
+                                    val += multiply<Accumulator>(aVal - zAcc, bVal);
+                                    continue;
+                                  }
+                                }
                                 val += multiply<Inputs,
                                                 Accumulator,
                                                 MathOpAccum,
@@ -2087,6 +2241,24 @@ namespace TensileLite
                                 mxScale        = multiply<float>(
                                     mxScale,
                                     mxScaleElementAsFloat(problem.mxTypeB(), mxsbBase, mxsbIdx));
+                            }
+
+                            // w4a16 group scale: SCALEA is dense [M][ceil(K/G)]
+                            // with the group dimension innermost, so the index is
+                            // aRow * kGroups + k/G.
+                            if(problem.scaleBlockSizeA() && inputs.scaleA)
+                            {
+                                size_t kGroup
+                                    = (boundIndices[0].aMirror ? (boundSize[0] - i - 1) : i)
+                                      / problem.scaleBlockSizeA();
+                                size_t scaleIdx
+                                    = aCoord[freeIndicesA[0].i]
+                                          * problem.scaleATensor().sizes()[0]
+                                      + kGroup;
+                                mxScale = multiply<float>(
+                                    mxScale,
+                                    blockScaleElementAsFloat(
+                                        problem.scaleTypeA(), inputs.scaleA, scaleIdx));
                             }
                             value += multiply<Accumulator>(val, mxScale);
                         }
@@ -2474,6 +2646,30 @@ namespace TensileLite
             case TypedGemm_I8_H_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_I8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#ifdef TENSILE_USE_BF16
+            // w4a16: int4 A dequantized to bf16 with a per-K-group scale.
+            case TypedGemm_I4B_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_I4B_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_I4B_S_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_I4B_S_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif // TENSILE_USE_BF16
+            // w4a16 with fp16 activations.
+            case TypedGemm_I4H_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_I4H_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_I4H_S_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_I4H_S_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
 #ifdef TENSILE_USE_BF16

@@ -25,7 +25,8 @@
 from rocisa.code import Module
 from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
-from rocisa.instruction import SSetPrior, VDot2F32F16, VDot2CF32F16
+from rocisa.instruction import SSetPrior, VDot2F32F16, VDot2CF32F16, \
+    VDualDot2AccF32F16
 
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
@@ -47,6 +48,13 @@ class FMA_F16_HPA_DOT2(MAC):
         module.addComment(self.commentHeader())
 
         vars = {}
+
+        # VOPD pairs two dot2-accumulates into one issue slot. Only the
+        # accumulate form has a dual encoding, so this path ignores the
+        # non-accumulating v_dot2_f32_f16 even where it exists.
+        if kernel["UseDualFMAC"]:
+            return self._callVopd(module, tPA, tPB, m, innerUnroll,
+                                  kernel["ThreadTile0"], kernel["ThreadTile1"])
 
         if writer.states.asmCaps["v_dot2_f32_f16"]:
             instruction = VDot2F32F16
@@ -86,6 +94,42 @@ class FMA_F16_HPA_DOT2(MAC):
         module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
 
         return module
+
+    def _callVopd(self, module, tPA, tPB, m, innerUnroll, TT0, TT1):
+        # Same 2x2 block-diagonal pairing as the f32 VOPD path: partition the
+        # ThreadTile into 2x2 blocks and emit the two diagonals,
+        #   (i,j)+(i+1,j+1)  and  (i+1,j)+(i,j+1)
+        # which satisfy the VOPD constraints (the two destinations differ in
+        # parity, and the sources fall on different VGPR banks) for an even x
+        # even ThreadTile. SolutionStructs restricts UseDualFMAC to that, but
+        # any leftover odd dimension falls back to single-issue below.
+        def cell(block0, block1, iui):
+            blockA = block0 if tPA["tileIdx"] == 0 else block1
+            blockB = block1 if tPB["tileIdx"] != 0 else block0
+            return (vgpr("ValuC+%d" % (block0 + block1 * TT0)),
+                    vgpr("ValuA_X%d_I%d+%d" % (m, iui, blockA)),
+                    vgpr("ValuB_X%d_I%d+%d" % (m, iui, blockB)))
+
+        for iui in range(0, innerUnroll):
+            paired = [[False] * TT1 for _ in range(TT0)]
+            for j in range(0, TT1 - 1, 2):
+                for i in range(0, TT0 - 1, 2):
+                    for (i0, j0), (i1, j1) in (((i, j), (i + 1, j + 1)),
+                                               ((i + 1, j), (i, j + 1))):
+                        cX, aX, bX = cell(i0, j0, iui)
+                        cY, aY, bY = cell(i1, j1, iui)
+                        module.add(VDualDot2AccF32F16(dstX=cX, src0X=aX, src1X=bX,
+                                                      dstY=cY, src0Y=aY, src1Y=bY,
+                                                      comment="VOPD dual-issue dot2"))
+                        paired[i0][j0] = paired[i1][j1] = True
+            for block1 in range(TT1):
+                for block0 in range(TT0):
+                    if not paired[block0][block1]:
+                        c, a, b = cell(block0, block1, iui)
+                        module.add(VDot2CF32F16(dst=c, src0=a, src1=b))
+
+        return module
+
 
 class FMA_F16_HPA_MAD_MIX(MAC):
     asmCaps = lambda caps: caps['v_mad_mix_f32'] or caps['v_fma_mix_f32']

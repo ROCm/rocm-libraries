@@ -80,6 +80,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
+from .Validators.BlockDequant import validateBlockDequantCombination
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -977,7 +978,8 @@ class Solution(collections.abc.Mapping):
     state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) \
       and state["ProblemType"]["HighPrecisionAccumulate"] \
       and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
-      or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
+      or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())) \
+      or (state["ISA"][0] == 11 and state["ProblemType"]["DataType"].isHalf()))
     # Custom dot2 kernels can use wave reductions on other architectures
     # that implement the instruction, independently of the generated MAC path.
     if (state.get("CustomKernelName") and state["WaveSplitK"]
@@ -1126,13 +1128,20 @@ class Solution(collections.abc.Mapping):
     _isXF32 = ("F32XdlMathOp" in state["ProblemType"]
                 and not state["ProblemType"]["F32XdlMathOp"].isSingle()
                 and state["ProblemType"]["DataType"].isSingle())
+    # dot2 kernels pair with v_dual_dot2acc_f32_f16 instead, which is the same
+    # VOPD encoding and the same 2x2 pairing; only the opcode and the operand
+    # type differ. Each needs its own capability and its own data type.
+    _dualCap = "v_dual_dot2acc_f32_f16" if state.get("UseDotInstruction", False) \
+               else "v_dual_fmac_f32"
+    _dualTypeOk = state["ProblemType"]["DataType"].isHalf() \
+        if state.get("UseDotInstruction", False) \
+        else (state["ProblemType"]["DataType"].isSingle() and not _isXF32)
     if state.get("UseDualFMAC", False) and (
         state["KernelLanguage"] != "Assembly"
         or EnableMatrixInstruction
-        or not state["ProblemType"]["DataType"].isSingle()
-        or _isXF32
+        or not _dualTypeOk
         or (state["ThreadTile0"] % 2) or (state["ThreadTile1"] % 2)
-        or not isaInfoMap[state["ISA"]].asmCaps.get("v_dual_fmac_f32", False)):
+        or not isaInfoMap[state["ISA"]].asmCaps.get(_dualCap, False)):
       state["UseDualFMAC"] = False
 
     # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
@@ -6831,8 +6840,17 @@ class Solution(collections.abc.Mapping):
     elif not (state.get("CustomKernelName") and state["WaveSplitK"]): # generated mac
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
       # Restrict GRVW/VW combos so shift-ptr logic will work
+      # The restriction above is only there to keep shift-ptr working. Block
+      # dequantization decouples the two widths outright -- A's global read
+      # feeds the dequantize, which writes LDS at its own width -- and with
+      # TLUA false the tile cannot be partial in A's vector direction anyway,
+      # so the path this guards is unreachable. B has no such conversion.
+      dequantDecouplesA = state["ProblemType"]["UseScaleAB"] == "Block" \
+          and state["ProblemType"]["ScaleBlockSizeA"] != 0 \
+          and state["GuaranteeNoPartialA"]
       if state["GlobalReadVectorWidthA"] > 1 \
-          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"]:
+          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"] \
+          and not dequantDecouplesA:
           reject(state, printRejectionReason, "GlobalReadVectorWidthA %u must be == VectorWidthA %u or == 1" % \
                   (state["GlobalReadVectorWidthA"], state["VectorWidthA"]))
       if state["GlobalReadVectorWidthB"] > 1 \
@@ -6889,6 +6907,11 @@ class Solution(collections.abc.Mapping):
               state["_VectorStore"] = 0
             else:
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
+
+    # w4a16 in-kernel dequantization (UseScaleAB="Block"). Runs here because it
+    # reads DepthU / GlobalReadVectorWidthA / UnrollMajorLDSA, all derived above.
+    if not validateBlockDequantCombination(state, printRejectionReason):
+      return
 
     state["AssignedDerivedParameters"] = True
 

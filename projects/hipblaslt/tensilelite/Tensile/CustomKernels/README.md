@@ -165,9 +165,9 @@ The `..._I4B_...` / `..._I4H_...` kernels are the w4a16 prototype: int4
 weights in A, bf16 or fp16 activations in B, and one 16-bit scale (optionally
 plus a packed int4 zero-point) per K group of a row of A. They are referenced
 from `library/.../Logic/asm_full/gfx1151/FreeSize/gfx1151_Cijk_Alik_Bljk_I4*.yaml`
-and are the only way to reach that path: the in-kernel dequantize is not part of
-TensileLite's code generator, so these are checked in as assembly rather than
-generated at build time.
+as pre-tuned choices. TensileLite also generates this path from ordinary
+solutions with `UseScaleAB: Block`; see `scripts/generate_q27b_w4a16.py` for
+reproducing the Q27B prefill configurations without custom assembly.
 
 The name encodes the configuration: `SABB<G><scale type>[ZP][U8]`, where `G`
 is the K-group size, the scale type is `B` (bf16) or `H` (fp16), `ZP` marks the
@@ -179,3 +179,25 @@ Each `.s` overrides `LocalReadVectorWidth{A,B}` back to `-1` in its
 `assignDerivedParameters`, and `calLRVW` only tolerates
 `LocalReadVectorWidthA < MIInputPerThread` on the auto path; fed back its own
 derived value it rejects the solution.
+
+## Q27B group-32 unsigned decode
+
+The Q27B Equality grid selects three decode schedules. The K=5120 shapes use
+`Custom_W4A16_Decode_G32_W4_UnsignedBias8_gfx1151`. K=17408 uses the `_U1_A4`
+variant, with an unroll factor of one and four independent dot-product
+accumulators. K=6144 uses `_NativePerm`, with compiler-native packed FP16
+arithmetic and byte permutations for the activation pairs. All three round
+scaled weights to FP16 before the FP32 dot products and use the same universal
+argument layout.
+
+Regenerate the two additional kernels from the `tensilelite/` directory with
+the ROCm compiler on PATH:
+
+```sh
+python Tensile/CustomKernels/Source/generate_w4a16_decode.py --group-size 32 --load-width 4 --unroll 1 --accumulators 4
+python Tensile/CustomKernels/Source/generate_w4a16_decode.py --group-size 32 --load-width 4 --native-permute
+```
+
+Compare the complete Equality library with `hipblaslt-bench --rotating 512
+--adaptive --use_gpu_timer`; numerical validation should also cover odd M,
+padded row strides, and K values that take the scalar-load fallback.
