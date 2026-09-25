@@ -128,7 +128,7 @@ DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, const DsLoadDrainInputs
         .latency = in.latency > 0 ? in.latency : hw.lds.readDrainLatency,
         .throughput = in.dsThroughput > 0 ? in.dsThroughput : hw.lds.dsLoadDefaultThroughput,
         .maxDrain = in.dsMaxDrain > 0 ? in.dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
-        .issueCycles = dsIssueCyclesForWaves(hw, in.isaIssueCycles, numWaves),
+        .issueSpacing = dsIssueCyclesForWaves(hw, in.isaIssueCycles, numWaves),
     };
 }
 
@@ -140,7 +140,7 @@ int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoad
     const int targetLatency = loads.back().latency;
     // Last load's own (already wave-sharing-adjusted) issue cost, matching
     // targetLatency above -- see makeDsLoadDrainEntry.
-    const int issueSpacing = loads.back().issueCycles;
+    const int issueSpacing = loads.back().issueSpacing;
 
     // Cap with the largest maxDrain among the whole burst, not just the last
     // load.

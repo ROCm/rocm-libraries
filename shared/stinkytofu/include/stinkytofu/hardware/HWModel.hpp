@@ -162,11 +162,13 @@ struct DsLoadDrainEntry {
     int latency = 0;
     int throughput = 0;
     int maxDrain = 0;
-    /// Real per-load issue cost: already passed through dsIssueCyclesForWaves
-    /// at construction (see makeDsLoadDrainEntry), not the bare ISA number.
-    /// Computed once here so no consumer can read this field and forget to
-    /// apply the wave-sharing multiplier.
-    int issueCycles = 0;
+    /// Real per-load issue spacing: already passed through
+    /// dsIssueCyclesForWaves at construction (see makeDsLoadDrainEntry), not
+    /// the bare ISA number (DsLoadDrainInputs::isaIssueCycles). Named
+    /// differently from that raw field, and computed once here, so no
+    /// consumer can read this and forget to apply the wave-sharing
+    /// multiplier.
+    int issueSpacing = 0;
 };
 
 /// Named inputs to makeDsLoadDrainEntry. All fields are ints, so a positional
@@ -195,7 +197,7 @@ STINKYTOFU_EXPORT DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw,
 
 /// Homogeneous-burst drain estimate. \p issueSpacing is the real per-load
 /// issue cost (see dsIssueCyclesForWaves) -- already wave-sharing-adjusted,
-/// typically the issueCycles field of a DsLoadDrainEntry built by
+/// typically the issueSpacing field of a DsLoadDrainEntry built by
 /// makeDsLoadDrainEntry, not a bare ISA number or raw numWaves.
 int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
                                int dsLoadThroughput, int maxDrainLatency, int issueSpacing);
@@ -208,7 +210,7 @@ int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int t
 /// - total load count
 /// - issue throughput as the count-weighted average of per-load throughputs
 /// - issue spacing from the last load's own (already wave-sharing-adjusted)
-///   issueCycles
+///   issueSpacing
 int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads);
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple

@@ -218,10 +218,10 @@ TEST_F(CDNA5ReadyQueueTest, DynamicDrainUsesExperimentalTypeSpecificMaximum) {
         hw, {.latency = kLoadLatency, .isaIssueCycles = 1, .numWaves = kNumWaves});
     EXPECT_EQ(fallback.throughput, 4);
     EXPECT_EQ(fallback.maxDrain, 120);
-    EXPECT_EQ(fallback.issueCycles, kIssueSpacing);
+    EXPECT_EQ(fallback.issueSpacing, kIssueSpacing);
     EXPECT_EQ(
         computeDynamicDrainLatency(hw, kLoadsBeyondMaximum, fallback.latency, fallback.throughput,
-                                   fallback.maxDrain, fallback.issueCycles),
+                                   fallback.maxDrain, fallback.issueSpacing),
         120);
 }
 
