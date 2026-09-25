@@ -1,0 +1,233 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# BF16 NN subtile GEMM -- TAIL LOOP correctness, with emphasis on ODD K.
+#
+# subtile_bf16_tlu1.yaml already reaches the tail loop: its K = 96 / 160 leave a
+# 32-element remainder at DepthU 64 and 128.  What it never reaches is the tail
+# loop's bf16 BOUNDARY FIXUP.  tailLoopBoundaryDtlLoadAB opens with
+#
+#     s_and_b32     sN, s[sgprLoopCounterL], 0x1   // K_rem & 1
+#     s_cbranch_scc0 label_tailBoundarySkipAB      // K_rem even -> skip
+#
+# and every K in every subtile_*.yaml is a multiple of 32, so that branch is
+# always taken and the ~44 instructions behind it have never executed.
+#
+# Why odd K is the interesting case.  B is TLU=0, so one buffer_load_dwordx4
+# covers 8 consecutive K elements.  Buffer out-of-bounds is enforced at DWORD
+# granularity and a dword holds TWO bf16, so a load straddling the K boundary
+# gets the trailing VALID element zeroed along with the invalid one.  The SRD
+# clamp and MaskK both handle everything PAST the boundary; neither can restore a
+# value hardware already destroyed.  That is what the fixup re-fetches, with a
+# single EXEC-gated 16-bit direct-to-LDS load.  When K_rem is even the boundary
+# falls on a dword edge and no valid element shares a dword with an invalid one,
+# hence the parity gate.
+#
+# A is TLU=1 and is ineligible by construction: one GR load covers M rows at a
+# single K, so no load spans a K boundary.  An NN kernel therefore reaches
+# tailLoopBoundaryDtlLoadAB with only B eligible -- the mixed pair that the
+# upstream both-eligible assertion forbids.
+#
+# Sizes are lifted from the two non-subtile BBS NN tests that already cover this
+# ground and are blocked from the subtile path only by UseSubtileImpl defaulting
+# to False:
+#
+#   common/gemm/ulsgro1.yaml      group 1 -- K = 127 / 128 / 129 / 576 / 640 with
+#                                 M/N edges at 127 / 128 / 129.
+#   common/gemm/gfx950/lds_tr.yaml group 0 -- large ragged K = 1000 / 1032 / 1037
+#                                 / 1064 / 1096 / 2053 at 512x512 and 519x519.
+#
+# Solution parameters come from subtile_bf16_tlu1.yaml unchanged; only
+# MatrixInstruction is trimmed, to one shape per strip regime plus one alternate
+# wave grouping, to keep the odd-K size matrix affordable.
+#
+# DataInitType A/B/C = 3 (Random) is required, not cosmetic.  With InitMode::One
+# every permutation of A yields the same dot product, so a single element zeroed
+# at the K boundary -- exactly the failure this test exists for -- would validate
+# clean.  Random is position-dependent, so it shows up with probability ~1.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  PrintSolutionRejectionReason: True
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  DataInitTypeBias: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # Odd K, tile-aligned M/N.
+  #
+  # Isolates the parity gate: M and N are multiples of every MacroTile in the
+  # fork, so numLine == MT-1 and the only thing varying is K_rem's parity.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 1,  2, 2]   # MT  64x32,  1 strip
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]   # MT  64x64,  waves share a strip
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT 128x128, 2 strips
+          # Same MT128x128, all four waves stacked along M.  The fixup ends in a
+          # v_cmp_eq_u32 / s_ff1 / v_readlane search for the lane whose vaddr
+          # matches sTarget, so which lane owns the boundary element is a
+          # function of the wave grouping, not just the MacroTile.  [2,2] above
+          # is also the grouping least likely to make stackM exceed
+          # localMMATileGrid[0]; [4,1] is the one that does.  From lds_tr.yaml.
+          - [16, 16, 32, 1,  1, 2, 8,  4, 1]   # MT 128x128, MIWaveGroup [4,1]
+
+        - DepthU: [64, 128]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - UseSubtileImpl: [True]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LocalReadVectorWidth: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # --- controls: the coverage subtile_bf16_tlu1.yaml already has ------
+          - Exact: [128, 128, 1, 128]   # no tail at either DepthU
+          - Exact: [128, 128, 1, 160]   # EVEN tail both DepthU -> fixup skipped
+          # --- odd K: K_rem odd at both DepthU -> fixup EXECUTES --------------
+          - Exact: [128, 128, 1,  63]   # rem 63 (DU64) / 63 (DU128)
+          - Exact: [128, 128, 1,  65]   # rem  1 (DU64) / 65 (DU128)
+          - Exact: [128, 128, 1, 127]   # rem 63 / 127  -- from ulsgro1
+          - Exact: [128, 128, 1, 129]   # rem  1 /   1  -- from ulsgro1
+          # --- odd K that is also not a multiple of GlobalReadVectorWidth -----
+          - Exact: [128, 128, 1, 577]   # 576 + 1; ulsgro1's 576 made odd
+          - Exact: [128, 128, 1, 641]   # 640 + 1; ulsgro1's 640 made odd
+
+  ########################################
+  # Odd K crossed with M/N edges.
+  #
+  # The fixup targets the LAST VALID line of the tile:
+  #   numLine = min(Size - WG*MT, MT) - 1
+  # which only differs from MT-1 when N is not a multiple of MacroTile1.  These
+  # sizes are the ones that make that clamp do work.  M edges come along for the
+  # ride to cover the TLU=1 operand's own partial-tile path.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 1,  2, 2]   # MT  64x32
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT 128x128
+
+        - DepthU: [64, 128]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - UseSubtileImpl: [True]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LocalReadVectorWidth: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 120, 1, 127]   # N edge inside one MT1=128 tile
+          - Exact: [128, 136, 1, 127]   # N edge spilling into a second tile
+          - Exact: [120, 128, 1, 127]   # M edge
+          - Exact: [120, 120, 1, 129]   # both edges, other odd K
+          - Exact: [128, 129, 1, 129]   # N edge of 1 -- numLine = 0
+          - Exact: [129, 129, 1, 129]   # from ulsgro1
+
+  ########################################
+  # Large ragged K, from lds_tr.yaml group 0.
+  #
+  # Same shape of remainder, but reached after many full DepthU iterations, so
+  # the loop counter and the SRD have been stepped a long way before the tail
+  # runs.  1037 and 2053 are the odd ones.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT 128x128
+
+        - DepthU: [64, 128]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - UseSubtileImpl: [True]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LocalReadVectorWidth: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1000]  # even rem -- from lds_tr
+          - Exact: [512, 512, 1, 1032]  # even rem -- from lds_tr
+          - Exact: [512, 512, 1, 1037]  # ODD rem  -- from lds_tr (519x519 there)
+          - Exact: [512, 512, 1, 2053]  # ODD rem  -- from lds_tr
