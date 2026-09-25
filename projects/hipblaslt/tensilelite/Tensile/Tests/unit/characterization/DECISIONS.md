@@ -599,8 +599,9 @@ shared coverage lane.
 **ADR:** [`adr/0020-reject-zero-width-mx-local-reads.md`](adr/0020-reject-zero-width-mx-local-reads.md)
 
 **Decision:** Reject a WMMA_V3 in-memory-swizzled MX solution during derivation
-when an M-major local read is narrower than one scale block. Remove three tests
-that counted code reached only before the previous code-generation exception.
+when `MatrixInstK // MXBlock` is non-positive or an M-major local read is
+narrower than one scale block. Remove three tests that counted code reached only
+before the previous code-generation exception.
 
 ## D39 — Select config problem groups explicitly
 
