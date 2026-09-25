@@ -1,6 +1,6 @@
 include(GpuArch)
 
-hipconv_add_arch_lib(cdna5 TARGETS gfx1250)
+hipconv_add_arch_lib(cdna5 TARGETS gfx1250 gfx1250-strict)
 hipconv_autoshard(ARCH         cdna5
                   NAMESPACE    direct
                   KERNEL_CLASS Direct_F16_ConvKernel

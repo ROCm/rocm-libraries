@@ -7,18 +7,19 @@
 #
 # gfx1250 kernels are authored in Python (there is no cpp/instances/gfx1250/),
 # so no instance-builder family in this gate exercises the gfx1250 *lowerer*.
-# That left the six places Gfx1250Backend diverges from its Gfx12RdnaBackend
+# That left the target-specific places Gfx1250Backend diverges from its Gfx12RdnaBackend
 # parent covered only by the ROCKE_BACKEND=both pytest lane, and invisible to
 # check_byte_identity.py -- the tree's stated definition-of-done. This family
 # closes that: one config per divergence, built from the smallest kernel that
 # reaches it, byte-compared against gfx1250_lowering_emit.c.
 #
-# The gfx950 twins are deliberately included. Four of the six divergences are a
+# The gfx950 twins are deliberately included. Several divergences are a
 # *choice between two encodings*, so a lowering that ignored the backend and
 # always picked the gfx1250 form would still pass a gfx1250-only family. Pairing
 # each with its gfx950 counterpart pins both sides of the choice.
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
+from rocke.core.arch import ArchTarget
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
@@ -68,6 +69,56 @@ def _wmma_k64(a_kind, b_kind):
     def build(b: IRBuilder) -> None:
         tid, c_ptr, a, bb, c = _frag_operands(b, I32, 8)
         d = b.mma(f"wmma_gfx1250_f32_16x16x64_{a_kind}_{b_kind}", a, bb, c)
+        b.global_store(c_ptr, tid, d)
+        b.ret()
+
+    return build
+
+
+def _wmma_scaled(a_kind, b_kind, scale_mode):
+    """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
+    scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
+    block_k = 16 if scale_mode == "scale16" else 32
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=a_kind,
+        b_dtype=b_kind,
+        c_dtype="fp32",
+        scales=("e8m0", "e8m0", block_k),
+        m=16,
+        n=16,
+        k=128,
+    )
+    assert atom is not None
+    op_id = atom.op_id
+
+    def build(b: IRBuilder) -> None:
+        a_ptr = b.param(
+            "A", PtrType(I32, "global"), noalias=True, readonly=True, align=16
+        )
+        b_ptr = b.param(
+            "B", PtrType(I32, "global"), noalias=True, readonly=True, align=16
+        )
+        c_ptr = b.param("C", PtrType(F32, "global"), noalias=True, align=16)
+        scale_ptr = b.param(
+            "scale",
+            PtrType(scale_ty, "global"),
+            noalias=True,
+            readonly=True,
+            align=16,
+        )
+        tid = b.thread_id_x()
+        a_lo = b.global_load_vN(a_ptr, tid, dtype=I32, n=8)
+        eight = b.const_i32(8)
+        hi_idx = b.add(tid, eight)
+        a_hi = b.global_load_vN(a_ptr, hi_idx, dtype=I32, n=8)
+        a = b.vec_concat(a_lo, a_hi)
+        b_lo = b.global_load_vN(b_ptr, tid, dtype=I32, n=8)
+        b_hi = b.global_load_vN(b_ptr, hi_idx, dtype=I32, n=8)
+        bb = b.vec_concat(b_lo, b_hi)
+        c = b.global_load_vN(c_ptr, tid, dtype=F32, n=8)
+        scale = b.global_load(scale_ptr, tid, dtype=scale_ty)
+        d = b.mma(op_id, a, bb, c, scale, scale)
         b.global_store(c_ptr, tid, d)
         b.ret()
 
@@ -197,6 +248,8 @@ CONFIGS = [
     (_wmma_k64("fp8", "bf8"), "gfx1250"),
     (_wmma_k64("bf8", "fp8"), "gfx1250"),
     (_wmma_k64("bf8", "bf8"), "gfx1250"),
+    (_wmma_scaled("fp8", "fp8", "scale"), "gfx1250"),
+    (_wmma_scaled("fp8", "fp8", "scale16"), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
     (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),
@@ -212,6 +265,40 @@ CONFIGS = [
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
 ]
+
+
+# Homogeneous BF8 belongs to the eight-bit example contract.
+CONFIGS.extend(
+    (_wmma_scaled("bf8", "bf8", mode), "gfx1250") for mode in ("scale", "scale16")
+)
+
+
+def _scale_coordinates(block_k):
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype="fp8",
+        b_dtype="fp8",
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+        scales=("e8m0", "e8m0", block_k),
+    )
+
+    def build(b):
+        out = b.param("coords", PtrType(I32, "global"), noalias=True, align=16)
+        lane = b.thread_id_x()
+        for layout in (atom.a_scale_layout(), atom.b_scale_layout()):
+            for slot in range(layout.frag_len):
+                x, y = layout.coord(b, lane, slot)
+                b.global_store(out, lane, x)
+                b.global_store(out, lane, y)
+        b.ret()
+
+    return build
+
+
+CONFIGS.extend((_scale_coordinates(block), "gfx1250") for block in (32, 16))
 
 
 def _spec(idx: int):

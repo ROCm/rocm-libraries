@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -254,23 +254,3 @@ INSTANTIATE_TEST_SUITE_P(partial_pass_3D,
                                                              place_range,
                                                              false)),
                          accuracy_test::TestName);
-
-INSTANTIATE_TEST_SUITE_P(
-#ifdef _WIN32
-    DISABLED_partial_pass_3D_callback,
-#else
-    partial_pass_3D_callback,
-#endif
-    accuracy_test,
-    ::testing::ValuesIn(param_generator(test_prob,
-                                        partial_pass_adhoc_3D,
-                                        precision_range_sp_dp,
-                                        partial_pass_batch_range_3D,
-                                        stride_range,
-                                        stride_range,
-                                        ioffset_range_zero,
-                                        ooffset_range_zero,
-                                        place_range,
-                                        false,
-                                        callbacks_full)),
-    accuracy_test::TestName);

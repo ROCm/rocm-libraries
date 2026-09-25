@@ -1586,6 +1586,23 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+            case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+                // Stored as a non-owning handle. The stage-level validation lives in the
+                // hipBLASLt C-API layer, which is where the descriptor's contents are visible.
+                if(sizeof(const hipblasLtFusedEpilogueDescriptor*) <= sizeInBytes)
+                {
+                    const hipblasLtFusedEpilogueDescriptor* fused = nullptr;
+                    memcpy(&fused, buf, sizeof(fused));
+                    matmulDesc->fused_epilogue = fused;
+                }
+                else
+                {
+                    log_error(__func__, "invalid fused_epilogue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+#endif
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -1963,6 +1980,18 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 memcpy(buf, &matmulDesc->uniform_summation_order, sizeof(int32_t));
                 break;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+            case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(const hipblasLtFusedEpilogueDescriptor*);
+                if(sizeInBytes < sizeof(const hipblasLtFusedEpilogueDescriptor*))
+                {
+                    log_error(__func__, "invalid fused_epilogue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->fused_epilogue, sizeof(matmulDesc->fused_epilogue));
+                break;
+#endif
             case ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT:
                 if(sizeWritten)
                     *sizeWritten = sizeof(int32_t);

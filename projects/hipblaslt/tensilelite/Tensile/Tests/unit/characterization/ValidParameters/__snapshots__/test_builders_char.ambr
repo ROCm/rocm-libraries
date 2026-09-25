@@ -1378,7 +1378,7 @@
     'ClusterLocalRead',
     'CompactLoopStore',
     'ConvertAfterDS',
-    'CustomKernelName',
+    'CustomKernel',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1452,6 +1452,7 @@
     'NonVolatileC',
     'NonVolatileD',
     'NonVolatileE',
+    'NonVolatileGate',
     'NonVolatileMXSA',
     'NonVolatileMXSB',
     'NonVolatileMetadata',
@@ -1463,8 +1464,11 @@
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
+    'PrefetchGlobalReadA',
+    'PrefetchGlobalReadB',
     'PrefetchLocalRead',
     'PreloadKernArgs',
+    'ReuseAcrossPersistent',
     'SFCWGM',
     'ScheduleGROverBarrier',
     'ScheduleGlobalRead',
@@ -1489,6 +1493,7 @@
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
+    'TDMFuse',
     'TDMInst',
     'TDMIterateMode',
     'TDMLoadWaveSync',
@@ -1501,6 +1506,7 @@
     'TemporalHintC',
     'TemporalHintD',
     'TemporalHintE',
+    'TemporalHintGate',
     'TemporalHintMXSA',
     'TemporalHintMXSB',
     'TemporalHintMetadata',
@@ -1603,7 +1609,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertFree1ElementMultiple': dict({
@@ -1612,7 +1618,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertSizeEqual': dict({
@@ -1690,7 +1696,7 @@
       'len': 2,
       'type': 'list',
     }),
-    'CustomKernelName': dict({
+    'CustomKernel': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -2344,6 +2350,14 @@
       'len': 2,
       'type': 'list',
     }),
+    'NonVolatileGate': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'NonVolatileMXSA': dict({
       'head': list([
         0,
@@ -2438,6 +2452,24 @@
       'len': 17,
       'type': 'list',
     }),
+    'PrefetchGlobalReadA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 18,
+      'type': 'list',
+    }),
+    'PrefetchGlobalReadB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 18,
+      'type': 'list',
+    }),
     'PrefetchLocalRead': dict({
       'head': list([
         0,
@@ -2451,6 +2483,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ReuseAcrossPersistent': dict({
+      'head': list([
+        0,
+        1,
       ]),
       'len': 2,
       'type': 'list',
@@ -2651,6 +2691,15 @@
       'len': 2,
       'type': 'list',
     }),
+    'TDMFuse': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
     'TDMInst': dict({
       'head': list([
         0,
@@ -2748,6 +2797,15 @@
       'type': 'list',
     }),
     'TemporalHintE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintGate': dict({
       'head': list([
         0,
         1,

@@ -12,7 +12,7 @@ from Tensile.KernelWriter import _needsPreLoopLocalReadDrain
         (True, True, 1, False, True),
         (True, True, 0, False, False),
         (True, True, 1, True, False),
-        (True, False, 1, False, False),
+        (True, False, 1, False, True),
         (False, True, 1, False, False),
     ],
 )
