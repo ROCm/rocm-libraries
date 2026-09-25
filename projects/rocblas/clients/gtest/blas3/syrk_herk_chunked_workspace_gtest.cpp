@@ -55,6 +55,7 @@
 #include "rocblas.hpp"
 #include "rocblas_test.hpp"
 #include <algorithm>
+#include <limits>
 #include <type_traits>
 #include <vector>
 
@@ -789,35 +790,22 @@ namespace
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
 
-        // Two A buffers, selected by which chunk a batch falls in. Pointing every
-        // batch at one buffer would leave the A-side chunk advance untestable,
-        // since dropping it would then change nothing. Alternating by batch
-        // parity does not work either: chunk sizes here are even, so a batch and
-        // the one a chunk away share a parity and the advance is still
-        // invisible. Keyed on the chunk index, omitting the advance feeds chunk
-        // 0's A to every chunk, which the probes on later chunks catch.
-        std::vector<T> h_A(a_elems * 2);
-        std::fill(h_A.begin(), h_A.begin() + a_elems, a_value<T>(1));
-        std::fill(h_A.begin() + a_elems, h_A.end(), a_value<T>(2));
-
-        const rocblas_int chunk    = model_chunk<T>(n, batch_count);
-        auto              scale_of = [chunk](rocblas_int b) { return ((b / chunk) % 2) ? 2 : 1; };
+        // One A buffer shared by every batch. This shape runs in a single chunk,
+        // so there is no A-side advance to observe; the multi-chunk battery
+        // covers that with two buffers.
+        std::vector<T> h_A(a_elems, a_value<T>(1));
 
         host_batch_vector<T> h_C(c_elems, 1, batch_count);
         ASSERT_EQ(h_C.memcheck(), hipSuccess);
         for(rocblas_int b = 0; b < batch_count; ++b)
             seed_c_block(h_C[b], n, b);
 
-        device_vector<T> dA(a_elems * 2);
+        device_vector<T> dA(a_elems);
         ASSERT_EQ(dA.memcheck(), hipSuccess);
-        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * 2 * sizeof(T), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * sizeof(T), hipMemcpyHostToDevice),
                   hipSuccess);
 
-        std::vector<T*> a_ptrs(size_t(batch_count), nullptr);
-        for(rocblas_int b = 0; b < batch_count; ++b)
-            a_ptrs[size_t(b)] = (T*)dA + (scale_of(b) == 2 ? a_elems : 0);
-
-        aliased_ptr_array<T> dA_ptrs(a_ptrs);
+        aliased_ptr_array<T> dA_ptrs((T*)dA, batch_count);
         ASSERT_TRUE(dA_ptrs.valid()) << "failed to allocate A pointer array";
 
         device_batch_vector<T> dC(c_elems, 1, batch_count);
@@ -846,7 +834,7 @@ namespace
         ASSERT_EQ(h_result.transfer_from(dC), hipSuccess);
 
         for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
-            check_c_block<T, K>(h_result[b], n, k, b, scale_of(b));
+            check_c_block<T, K>(h_result[b], n, k, b, 1);
     }
 
     template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
@@ -922,6 +910,234 @@ namespace
     }
 
     // -----------------------------------------------------------------------
+    // Multi-chunk battery (nightly)
+    //
+    // The batteries above all run in a single chunk: a split needs the
+    // unchunked workspace to exceed the budget, and C is about twice that, so
+    // the smallest shape that splits costs a few GB.  Without this the host
+    // chunk loop is never entered more than once and batch_off, the A and C
+    // pointer advances and the local-to-absolute batch mapping are covered only
+    // by the size-query arithmetic -- which is exactly the code the original
+    // defect was in.
+    //
+    // Memory is kept to C plus one workspace by building a single n x n block on
+    // the host and patching only the one element that has to differ per batch.
+    // -----------------------------------------------------------------------
+
+    // n is under every gemm-only threshold (the lowest is 1600) so the path is
+    // selected, while being large enough that the triangle per batch is big and
+    // the batch count needed to overflow the budget stays small.
+    constexpr rocblas_int c_multichunk_n = 512;
+
+    // Enough batches for a second chunk with a substantial number of live slots,
+    // rather than the degenerate one-batch tail.
+    template <typename T>
+    static rocblas_int multichunk_batch_count()
+    {
+        const rocblas_int chunk
+            = model_chunk<T>(c_multichunk_n, std::numeric_limits<rocblas_int>::max());
+        return chunk + chunk / 2;
+    }
+
+    // Seeds one n x n block: real diagonal, zero strictly-lower (the GEMM
+    // overwrites it), constant strictly-upper.  The per-batch distinct value is
+    // patched into (0,1) afterwards so the bulk of the block can be shared.
+    template <typename T>
+    static void fill_template_block(std::vector<T>& block, rocblas_int n)
+    {
+        block.assign(size_t(n) * size_t(n), make_val<T>(0.0, 0.0));
+        for(rocblas_int col = 0; col < n; ++col)
+            for(rocblas_int row = 0; row < n; ++row)
+            {
+                T& e = block[size_t(row) + size_t(col) * size_t(n)];
+                if(row == col)
+                    e = diag_seed<T>();
+                else if(row < col)
+                    e = expected_upper<T>(0); // patched per batch at (0,1)
+            }
+    }
+
+    template <typename T, op_kind K, typename ApiFunc>
+    static void run_multichunk_strided(ApiFunc api)
+    {
+        using S = scalar_t<T, K>;
+
+        rocblas_local_handle handle;
+        const rocblas_int    n = c_multichunk_n, k = c_k;
+        const rocblas_int    batch_count = multichunk_batch_count<T>();
+        const rocblas_int    chunk       = model_chunk<T>(n, batch_count);
+
+        ASSERT_LT(chunk, batch_count) << "shape does not split; the battery would test nothing";
+
+        const size_t a_elems = size_t(n) * size_t(k);
+        const size_t c_elems = size_t(n) * size_t(n);
+
+        std::vector<T> h_A(a_elems, a_value<T>(1));
+        std::vector<T> block;
+        fill_template_block(block, n);
+
+        device_vector<T> dA(a_elems);
+        device_vector<T> dC(c_elems * size_t(batch_count));
+        ASSERT_EQ(dA.memcheck(), hipSuccess);
+        ASSERT_EQ(dC.memcheck(), hipSuccess);
+        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * sizeof(T), hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        for(rocblas_int b = 0; b < batch_count; ++b)
+        {
+            ASSERT_EQ(hipMemcpy((T*)dC + size_t(b) * c_elems,
+                                block.data(),
+                                c_elems * sizeof(T),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
+
+            const T upper = expected_upper<T>(b);
+            ASSERT_EQ(hipMemcpy((T*)dC + size_t(b) * c_elems + size_t(n), // (0,1)
+                                &upper,
+                                sizeof(T),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
+        }
+
+        const S alpha = S(1);
+        const S beta  = S(1);
+
+        ASSERT_EQ(api(handle,
+                      rocblas_fill_lower,
+                      rocblas_operation_none,
+                      n,
+                      k,
+                      &alpha,
+                      (T*)dA,
+                      n,
+                      0, // stride_A = 0: alias A across batches
+                      &beta,
+                      (T*)dC,
+                      n,
+                      rocblas_stride(n) * n,
+                      batch_count),
+                  rocblas_status_success);
+
+        // Only the corner of each probed batch is read back, so the check costs
+        // four elements per probe rather than a full mirror of C.
+        for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
+        {
+            T corner[4];
+            for(int i = 0; i < 4; ++i)
+            {
+                const size_t off = size_t(b) * c_elems + size_t(i % 2) + size_t(i / 2) * size_t(n);
+                ASSERT_EQ(hipMemcpy(&corner[i], (T*)dC + off, sizeof(T), hipMemcpyDeviceToHost),
+                          hipSuccess);
+            }
+
+            const T g = gemm_term<T, K>(k, 1);
+            expect_val_eq(corner[0], expected_diag<T, K>(k, 1), "C[0,0] diagonal", b);
+            expect_val_eq(corner[1], g, "C[1,0] lower (GEMM result)", b);
+            expect_val_eq(corner[3], expected_diag<T, K>(k, 1), "C[1,1] diagonal", b);
+            expect_val_eq(corner[2], expected_upper<T>(b), "C[0,1] (upper preserved)", b);
+        }
+    }
+
+    // Batched form of the multi-chunk battery.  This is the only place the
+    // A-side chunk advance is observable: A is read-only, so a test that points
+    // every batch at one buffer cannot tell whether the launcher advanced the
+    // pointer array. Two buffers keyed on chunk index can -- dropping the
+    // advance feeds chunk 0's A to every chunk, which the chunk-1 probe catches.
+    // Keying on batch parity would not work, because the chunk sizes here are
+    // even and a batch one chunk away shares its parity.
+    template <typename T, op_kind K, typename ApiFunc>
+    static void run_multichunk_batched(ApiFunc api)
+    {
+        using S = scalar_t<T, K>;
+
+        rocblas_local_handle handle;
+        const rocblas_int    n = c_multichunk_n, k = c_k;
+        const rocblas_int    batch_count = multichunk_batch_count<T>();
+        const rocblas_int    chunk       = model_chunk<T>(n, batch_count);
+
+        ASSERT_LT(chunk, batch_count) << "shape does not split; the battery would test nothing";
+
+        const size_t a_elems = size_t(n) * size_t(k);
+        const size_t c_elems = size_t(n) * size_t(n);
+
+        auto scale_of = [chunk](rocblas_int b) { return ((b / chunk) % 2) ? 2 : 1; };
+
+        std::vector<T> h_A(a_elems * 2);
+        std::fill(h_A.begin(), h_A.begin() + a_elems, a_value<T>(1));
+        std::fill(h_A.begin() + a_elems, h_A.end(), a_value<T>(2));
+
+        std::vector<T> block;
+        fill_template_block(block, n);
+
+        device_vector<T> dA(a_elems * 2);
+        device_vector<T> dC(c_elems * size_t(batch_count));
+        ASSERT_EQ(dA.memcheck(), hipSuccess);
+        ASSERT_EQ(dC.memcheck(), hipSuccess);
+        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * 2 * sizeof(T), hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        std::vector<T*> a_ptrs(size_t(batch_count), nullptr);
+        std::vector<T*> c_ptrs(size_t(batch_count), nullptr);
+        for(rocblas_int b = 0; b < batch_count; ++b)
+        {
+            a_ptrs[size_t(b)] = (T*)dA + (scale_of(b) == 2 ? a_elems : 0);
+            c_ptrs[size_t(b)] = (T*)dC + size_t(b) * c_elems;
+
+            ASSERT_EQ(
+                hipMemcpy(
+                    c_ptrs[size_t(b)], block.data(), c_elems * sizeof(T), hipMemcpyHostToDevice),
+                hipSuccess);
+
+            const T upper = expected_upper<T>(b);
+            ASSERT_EQ(hipMemcpy(c_ptrs[size_t(b)] + size_t(n), // (0,1)
+                                &upper,
+                                sizeof(T),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
+        }
+
+        aliased_ptr_array<T> dA_ptrs(a_ptrs);
+        aliased_ptr_array<T> dC_ptrs(c_ptrs);
+        ASSERT_TRUE(dA_ptrs.valid()) << "failed to allocate A pointer array";
+        ASSERT_TRUE(dC_ptrs.valid()) << "failed to allocate C pointer array";
+
+        const S alpha = S(1);
+        const S beta  = S(1);
+
+        ASSERT_EQ(api(handle,
+                      rocblas_fill_lower,
+                      rocblas_operation_none,
+                      n,
+                      k,
+                      &alpha,
+                      dA_ptrs.ptr_on_device(),
+                      n,
+                      &beta,
+                      dC_ptrs.ptr_on_device(),
+                      n,
+                      batch_count),
+                  rocblas_status_success);
+
+        for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
+        {
+            T corner[4];
+            for(int i = 0; i < 4; ++i)
+            {
+                const size_t off = size_t(b) * c_elems + size_t(i % 2) + size_t(i / 2) * size_t(n);
+                ASSERT_EQ(hipMemcpy(&corner[i], (T*)dC + off, sizeof(T), hipMemcpyDeviceToHost),
+                          hipSuccess);
+            }
+
+            const int scale = scale_of(b);
+            const T   g     = gemm_term<T, K>(k, scale);
+            expect_val_eq(corner[0], expected_diag<T, K>(k, scale), "C[0,0] diagonal", b);
+            expect_val_eq(corner[1], g, "C[1,0] lower (GEMM result)", b);
+            expect_val_eq(corner[3], expected_diag<T, K>(k, scale), "C[1,1] diagonal", b);
+            expect_val_eq(corner[2], expected_upper<T>(b), "C[0,1] (upper preserved)", b);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Instantiate the battery for every type/operation syrk and herk provide.
     // -----------------------------------------------------------------------
 
@@ -967,6 +1183,31 @@ namespace
                             op_kind::herk,
                             rocblas_zherk_strided_batched,
                             rocblas_zherk_batched)
+
+    // Nightly only: these allocate a few GB, which is the price of a genuine
+    // chunk split at the shipped budget. float syrk and double-complex herk are
+    // the extremes of element width and cover both alpha/beta conventions; the
+    // chunk indexing under test does not vary with type.
+    TEST(syrk_herk_chunked_workspace_multichunk_nightly, ssyrk_strided)
+    {
+        run_multichunk_strided<float, op_kind::syrk>(rocblas_ssyrk_strided_batched);
+    }
+
+    TEST(syrk_herk_chunked_workspace_multichunk_nightly, zherk_strided)
+    {
+        run_multichunk_strided<rocblas_double_complex, op_kind::herk>(
+            rocblas_zherk_strided_batched);
+    }
+
+    TEST(syrk_herk_chunked_workspace_multichunk_nightly, ssyrk_batched)
+    {
+        run_multichunk_batched<float, op_kind::syrk>(rocblas_ssyrk_batched);
+    }
+
+    TEST(syrk_herk_chunked_workspace_multichunk_nightly, zherk_batched)
+    {
+        run_multichunk_batched<rocblas_double_complex, op_kind::herk>(rocblas_zherk_batched);
+    }
 
 #undef SYRK_HERK_CHUNKED_TESTS
 
