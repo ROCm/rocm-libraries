@@ -85,12 +85,7 @@ void launchKernelForElements(hipFunction_t function,
         throw std::runtime_error("total elements must be positive");
     }
 
-    if(totalElements > (std::numeric_limits<int64_t>::max() - blockSize))
-    {
-        throw std::runtime_error("total elements is too large and will overflow");
-    }
-
-    const int64_t gridSize = (totalElements + blockSize - 1) / blockSize;
+    const int64_t gridSize = ((totalElements - 1) / blockSize) + 1;
     launchKernel1d(function, gridSize, blockSize, argsPtr, argsSize);
 }
 
