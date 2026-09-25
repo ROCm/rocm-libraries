@@ -52,24 +52,26 @@ endfunction()
 
 ## Disable FMA for tensor sources that require precise math behavior.
 function(add_fma_property)
-    set_source_files_properties(tensor/rppt_tensor_audio_augmentations.cpp
-                                tensor/rppt_tensor_statistical_operations.cpp
-                                tensor/cpu/kernel/non_silent_region_detection.cpp
-                                tensor/cpu/kernel/to_decibels.cpp
-                                tensor/cpu/kernel/pre_emphasis_filter.cpp
-                                tensor/cpu/kernel/down_mixing.cpp
-                                tensor/cpu/kernel/spectrogram.cpp
-                                tensor/cpu/kernel/slice.cpp
-                                tensor/cpu/kernel/resample.cpp
-                                tensor/cpu/kernel/mel_filter_bank.cpp
-                                tensor/cpu/kernel/tensor_sum.cpp
-                                tensor/cpu/kernel/tensor_min.cpp
-                                tensor/cpu/kernel/tensor_max.cpp
-                                tensor/cpu/kernel/tensor_mean.cpp
-                                tensor/cpu/kernel/tensor_stddev.cpp
-                                tensor/cpu/kernel/normalize.cpp
-                                tensor/cpu/kernel/threshold.cpp
-                                PROPERTIES COMPILE_FLAGS -mno-fma)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+        set_source_files_properties(tensor/rppt_tensor_audio_augmentations.cpp
+                                    tensor/rppt_tensor_statistical_operations.cpp
+                                    tensor/cpu/kernel/non_silent_region_detection.cpp
+                                    tensor/cpu/kernel/to_decibels.cpp
+                                    tensor/cpu/kernel/pre_emphasis_filter.cpp
+                                    tensor/cpu/kernel/down_mixing.cpp
+                                    tensor/cpu/kernel/spectrogram.cpp
+                                    tensor/cpu/kernel/slice.cpp
+                                    tensor/cpu/kernel/resample.cpp
+                                    tensor/cpu/kernel/mel_filter_bank.cpp
+                                    tensor/cpu/kernel/tensor_sum.cpp
+                                    tensor/cpu/kernel/tensor_min.cpp
+                                    tensor/cpu/kernel/tensor_max.cpp
+                                    tensor/cpu/kernel/tensor_mean.cpp
+                                    tensor/cpu/kernel/tensor_stddev.cpp
+                                    tensor/cpu/kernel/normalize.cpp
+                                    tensor/cpu/kernel/threshold.cpp
+                                    PROPERTIES COMPILE_FLAGS -mno-fma)
+    endif()
 endfunction()
 
 set(CPPFILES "handle_api.cpp" "handle_host.cpp")
