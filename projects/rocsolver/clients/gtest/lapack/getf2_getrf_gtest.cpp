@@ -77,6 +77,11 @@ const vector<int> large_n_size_range = {
     45, 64, 520, 1024, 2000,
 };
 
+// for weekly_lapack tests
+const vector<vector<int>> large_batch_size_range = {{3, 3, 0}, {1025, 1025, 0}};
+
+const vector<int> large_batch_n_size_range = {4};
+
 Arguments getrf_setup_arguments(getrf_tuple tup)
 {
     vector<int> matrix_size = std::get<0>(tup);
@@ -122,7 +127,7 @@ protected:
     }
 };
 
-template <bool BLOCKED, typename I>
+template <bool BLOCKED, typename I, int BATCH_COUNT = 3>
 class GETF2_GETRF_NPVT : public ::TestWithParam<getrf_tuple>
 {
 protected:
@@ -139,7 +144,7 @@ protected:
         if(arg.peek<rocblas_int>("m") == 0 && arg.peek<rocblas_int>("n") == 0)
             testing_getf2_getrf_npvt_bad_arg<BATCHED, STRIDED, BLOCKED, T, I>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         if(arg.singular == 1)
             testing_getf2_getrf_npvt<BATCHED, STRIDED, BLOCKED, T, I>(arg);
 
@@ -177,6 +182,43 @@ class GETF2_NPVT_64 : public GETF2_GETRF_NPVT<false, int64_t>
 };
 
 class GETRF_NPVT_64 : public GETF2_GETRF_NPVT<true, int64_t>
+{
+};
+
+// large batch
+
+// TODO, increase BCOUNT to 65537 (64*1024+1)
+int constexpr BCOUNT = 64;
+
+class GETF2_LARGE_BATCH : public GETF2_GETRF<false, rocblas_int, BCOUNT>
+{
+};
+
+class GETRF_LARGE_BATCH : public GETF2_GETRF<true, rocblas_int, BCOUNT>
+{
+};
+
+class GETF2_LARGE_BATCH_NPVT : public GETF2_GETRF_NPVT<false, rocblas_int, BCOUNT>
+{
+};
+
+class GETRF_LARGE_BATCH_NPVT : public GETF2_GETRF_NPVT<true, rocblas_int, BCOUNT>
+{
+};
+
+class GETF2_LARGE_BATCH_64 : public GETF2_GETRF<false, int64_t, BCOUNT>
+{
+};
+
+class GETRF_LARGE_BATCH_64 : public GETF2_GETRF<true, int64_t, BCOUNT>
+{
+};
+
+class GETF2_LARGE_BATCH_NPVT_64 : public GETF2_GETRF_NPVT<false, int64_t, BCOUNT>
+{
+};
+
+class GETRF_LARGE_BATCH_NPVT_64 : public GETF2_GETRF_NPVT<true, int64_t, BCOUNT>
 {
 };
 
@@ -502,6 +544,165 @@ TEST_P(GETRF_64, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+TEST_P(GETF2_LARGE_BATCH_NPVT, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETF2_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETF2_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETRF_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETRF_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
 // strided_batched cases
 TEST_P(GETF2_NPVT, strided_batched__float)
 {
@@ -663,6 +864,166 @@ TEST_P(GETRF_64, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+TEST_P(GETF2_LARGE_BATCH_NPVT, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETF2_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETF2_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETRF_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETRF_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_NPVT_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_NPVT_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETF2_LARGE_BATCH_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRF_LARGE_BATCH_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GETF2_NPVT,
                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(large_n_size_range)));
@@ -726,3 +1087,45 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GETRF_64,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(n_size_range)));
+
+// instantiate large batch
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GETF2_LARGE_BATCH_NPVT,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(large_batch_n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GETRF_LARGE_BATCH_NPVT,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(large_batch_n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GETF2_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(large_batch_n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GETRF_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(large_batch_n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GETF2_LARGE_BATCH_NPVT_64,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(large_batch_n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GETRF_LARGE_BATCH_NPVT_64,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(large_batch_n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GETF2_LARGE_BATCH_64,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(large_batch_n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GETRF_LARGE_BATCH_64,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(large_batch_n_size_range)));

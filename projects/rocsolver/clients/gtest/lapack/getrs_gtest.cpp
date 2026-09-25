@@ -76,6 +76,7 @@ const vector<vector<int>> large_matrix_sizeB_range = {
     {100, 0}, {150, 0}, {200, 1}, {524, 2}, {1000, 2},
 };
 
+// for weekly_lapack tests
 const vector<vector<int>> large_batch_sizeA_range = {{7, 7, 7}};
 const vector<vector<int>> large_batch_sizeB_range = {{7, 0}, {7, 1}, {7, 2}};
 
@@ -370,12 +371,12 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GETRS_64,
                          Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack,
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                          GETRS_LARGE_BATCH,
                          Combine(ValuesIn(large_batch_sizeA_range),
                                  ValuesIn(large_batch_sizeB_range)));
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack,
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                          GETRS_LARGE_BATCH_64,
                          Combine(ValuesIn(large_batch_sizeA_range),
                                  ValuesIn(large_batch_sizeB_range)));
