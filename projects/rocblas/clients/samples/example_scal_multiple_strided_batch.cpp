@@ -23,6 +23,7 @@
 #include "client_utility.hpp"
 #include "host_alloc.hpp"
 #include "rocblas_vector.hpp"
+#include "singletons.hpp"
 
 #include <cstdio>
 #include <cstdlib>
