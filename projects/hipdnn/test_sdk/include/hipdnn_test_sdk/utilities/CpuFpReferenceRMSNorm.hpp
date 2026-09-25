@@ -4,13 +4,16 @@
 #pragma once
 
 #include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <functional>
+#include <iterator>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -39,8 +42,9 @@ class CpuFpReferenceRMSNorm
         if(reductionStart == rank)
         {
             // Validator should have rejected this; defensive guard for direct callers.
-            throw std::runtime_error("RMSNorm: scale has no trailing dims matching input — no "
-                                     "normalized axes can be derived.");
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "scale has no trailing dims matching input — no "
+                                       "normalized axes can be derived.");
         }
 
         // Leading dims: [0, reductionStart) — batch + leading dims preserved through
@@ -49,6 +53,15 @@ class CpuFpReferenceRMSNorm
         const auto splitOffset = static_cast<std::ptrdiff_t>(reductionStart);
         leadingDims.assign(xDims.begin(), xDims.begin() + splitOffset);
         reductionDims.assign(xDims.begin() + splitOffset, xDims.end());
+    }
+
+    // invRms keeps the leading dims of x and collapses the reduction dims to 1.
+    static std::vector<int64_t> invRmsShape(const std::vector<int64_t>& xDims,
+                                            size_t reductionStart)
+    {
+        std::vector<int64_t> dims = xDims;
+        std::fill(dims.begin() + static_cast<std::ptrdiff_t>(reductionStart), dims.end(), 1);
+        return dims;
     }
 
 public:
@@ -87,43 +100,31 @@ public:
 
         if(xDims.size() < 2)
         {
-            throw std::runtime_error("RMSNorm forward requires at least 2D input tensor (batch and "
-                                     "at least one feature dim).");
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "forward requires at least 2D input tensor (batch and "
+                                       "at least one feature dim).");
         }
         if(scaleDims.size() != xDims.size())
         {
-            throw std::runtime_error("RMSNorm forward requires scale rank to equal input rank.");
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "forward requires scale rank to equal input rank.");
         }
-        if(y.dims().size() != xDims.size())
+        if(y.dims() != xDims)
         {
-            throw std::runtime_error("RMSNorm forward requires y rank to equal input rank.");
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "forward requires y to have the same shape as x.");
         }
-        // invRms and bias are indexed against their own strides at a reductionStart offset,
-        // so a short stride vector is read past its end. TensorBase::getIndex used to catch a
-        // rank mismatch on every access; indexing flat offsets skips it.
-        if(invRms != nullptr && invRms->dims().size() != xDims.size())
+        if(bias != nullptr && bias->dims() != scaleDims)
         {
-            throw std::runtime_error("RMSNorm forward requires invRms rank to equal input rank.");
-        }
-        if(bias != nullptr && bias->dims().size() != xDims.size())
-        {
-            throw std::runtime_error("RMSNorm forward requires bias rank to equal input rank.");
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "forward requires bias to have the same shape as scale.");
         }
 
-        // The kernel below addresses memory through hoisted base pointers and flat offset
-        // tables, which assumes a dense layout; a ragged tensor rebases each batch at its
-        // own offset and would silently read/write the wrong element.
         hipdnn_test_sdk::detail::validateNoRaggedTensor(x, PREFIX, "x");
         hipdnn_test_sdk::detail::validateNoRaggedTensor(scale, PREFIX, "scale");
         hipdnn_test_sdk::detail::validateNoRaggedTensor(y, PREFIX, "y");
-        if(invRms != nullptr)
-        {
-            hipdnn_test_sdk::detail::validateNoRaggedTensor(*invRms, PREFIX, "invRms");
-        }
-        if(bias != nullptr)
-        {
-            hipdnn_test_sdk::detail::validateNoRaggedTensor(*bias, PREFIX, "bias");
-        }
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(invRms, PREFIX, "invRms");
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(bias, PREFIX, "bias");
 
         // Compute leading and reduction dims based on input and scale shapes
         std::vector<int64_t> leadingDims;
@@ -131,15 +132,20 @@ public:
         computeLeadingAndReductionDims(xDims, scaleDims, leadingDims, reductionDims);
         const auto reductionStart = leadingDims.size();
 
+        if(invRms != nullptr && invRms->dims() != invRmsShape(xDims, reductionStart))
+        {
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "forward requires invRms to have the input shape with "
+                                       "the normalized dims set to 1.");
+        }
+
         const auto reductionCount = std::accumulate(
             reductionDims.begin(), reductionDims.end(), int64_t{1}, std::multiplies<>{});
         const auto reductionCountCompute = static_cast<ComputeDataType>(reductionCount);
         const auto epsilonCompute = static_cast<ComputeDataType>(epsilon);
 
-        // Raw pointers are hoisted once, outside the parallel functor. The inner loops
-        // never call getHostValue/setHostValue: each of those costs a virtual memory()
-        // call plus a stride reduction over a freshly allocated index vector, which
-        // dominates runtime on allocators without a per-thread cache (the Windows heap).
+        // Tensors are addressed through hoisted base pointers and strides, which the checks
+        // above have restricted to the dense layout.
         const XDataType* xBase = x.memory().hostData();
         const ScaleDataType* scaleBase = scale.memory().hostData();
         YDataType* yBase = y.memory().hostData();
@@ -149,6 +155,7 @@ public:
         const auto& xStrides = x.strides();
         const auto& yStrides = y.strides();
         const auto& scaleStrides = scale.strides();
+        const int64_t* invRmsStrides = (invRms != nullptr) ? invRms->strides().data() : nullptr;
 
         // Reduction-region offset tables: one flat offset per reduction position, built
         // once and shared by every leading position. scale/bias need only this table -
@@ -209,7 +216,7 @@ public:
                 const auto xNorm = xVal * invRmsValue;
                 ComputeDataType yVal
                     = static_cast<ComputeDataType>(scaleBase[scaleRedOffsets[i]]) * xNorm;
-                if(bias != nullptr)
+                if(biasBase != nullptr)
                 {
                     yVal += static_cast<ComputeDataType>(biasBase[biasRedOffsets[i]]);
                 }
@@ -219,10 +226,10 @@ public:
             // invRms keeps the leading dims and collapses the reduction dims to 1, so its
             // offset has only a leading component - no reduction-walk table needed.
             // Running example: invRms[n, c, 0, 0].
-            if(invRms != nullptr)
+            if(invRmsBase != nullptr)
             {
                 const int64_t invRmsOffset = hipdnn_test_sdk::detail::flatOffset(
-                    leadingIdx.data(), invRms->strides().data(), reductionStart);
+                    leadingIdx.data(), invRmsStrides, reductionStart);
                 invRmsBase[invRmsOffset] = static_cast<ComputeDataType>(invRmsValue);
             }
         };
@@ -256,44 +263,34 @@ public:
 
         if(xDims.size() < 2)
         {
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "backward requires at least 2D input tensor (batch and "
+                                       "at least one feature dim).");
+        }
+        if(scaleDims.size() != xDims.size())
+        {
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "backward requires scale rank to equal input rank.");
+        }
+        if(dy.dims() != xDims || dx.dims() != xDims)
+        {
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "backward requires dy and dx to have the same shape as x.");
+        }
+        if(dscale.dims() != scaleDims || (dbias != nullptr && dbias->dims() != scaleDims))
+        {
             throw std::runtime_error(
-                "RMSNorm backward requires at least 2D input tensor (batch and "
-                "at least one feature dim).");
+                std::string(PREFIX)
+                + "backward requires dscale and dbias to have the same shape as scale.");
         }
 
-        if(dy.dims().size() != xDims.size() || scaleDims.size() != xDims.size()
-           || invRms.dims().size() != xDims.size())
-        {
-            throw std::runtime_error("RMSNorm backward requires dy, scale, and invRms to all have "
-                                     "the same rank as input.");
-        }
-
-        // dx, dscale and dbias are indexed against their own strides at a reductionStart
-        // offset, so a short stride vector is read past its end. TensorBase::getIndex used to
-        // catch a rank mismatch on every access; indexing flat offsets skips it.
-        if(dx.dims().size() != xDims.size() || dscale.dims().size() != xDims.size())
-        {
-            throw std::runtime_error(
-                "RMSNorm backward requires dx and dscale to have the same rank as input.");
-        }
-        if(dbias != nullptr && dbias->dims().size() != xDims.size())
-        {
-            throw std::runtime_error("RMSNorm backward requires dbias rank to equal input rank.");
-        }
-
-        // The kernel below addresses memory through hoisted base pointers and flat offset
-        // tables, which assumes a dense layout; a ragged tensor rebases each batch at its
-        // own offset and would silently read/write the wrong element.
         hipdnn_test_sdk::detail::validateNoRaggedTensor(dy, PREFIX, "dy");
         hipdnn_test_sdk::detail::validateNoRaggedTensor(x, PREFIX, "x");
         hipdnn_test_sdk::detail::validateNoRaggedTensor(scale, PREFIX, "scale");
         hipdnn_test_sdk::detail::validateNoRaggedTensor(invRms, PREFIX, "invRms");
         hipdnn_test_sdk::detail::validateNoRaggedTensor(dx, PREFIX, "dx");
         hipdnn_test_sdk::detail::validateNoRaggedTensor(dscale, PREFIX, "dscale");
-        if(dbias != nullptr)
-        {
-            hipdnn_test_sdk::detail::validateNoRaggedTensor(*dbias, PREFIX, "dbias");
-        }
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(dbias, PREFIX, "dbias");
 
         // Compute leading and reduction dims based on input and scale shapes
         std::vector<int64_t> leadingDims;
@@ -301,11 +298,18 @@ public:
         computeLeadingAndReductionDims(xDims, scaleDims, leadingDims, reductionDims);
         const auto reductionStart = leadingDims.size();
 
+        if(invRms.dims() != invRmsShape(xDims, reductionStart))
+        {
+            throw std::runtime_error(std::string(PREFIX)
+                                     + "backward requires invRms to have the input shape with "
+                                       "the normalized dims set to 1.");
+        }
+
         const auto reductionCount = std::accumulate(
             reductionDims.begin(), reductionDims.end(), int64_t{1}, std::multiplies<>{});
         const auto reductionCountCompute = static_cast<ComputeDataType>(reductionCount);
 
-        // Raw pointers and strides are hoisted once; see forward() for why.
+        // Tensors are addressed through hoisted base pointers and strides; see forward().
         const DyDataType* dyBase = dy.memory().hostData();
         const XDataType* xBase = x.memory().hostData();
         const ScaleDataType* scaleBase = scale.memory().hostData();
@@ -320,6 +324,7 @@ public:
         const auto& invRmsStrides = invRms.strides();
         const auto& dxStrides = dx.strides();
         const auto& dscaleStrides = dscale.strides();
+        const int64_t* dbiasStrides = (dbias != nullptr) ? dbias->strides().data() : nullptr;
 
         // Leading-region offset tables: one flat offset per leading position, built once
         // and shared by every reduction position walked in this functor. Roles are
@@ -366,10 +371,10 @@ public:
             const int64_t dscaleOffset = hipdnn_test_sdk::detail::flatOffset(
                 redIdx.data(), dscaleStrides.data() + reductionStart, reductionDims.size());
             dscaleBase[dscaleOffset] = static_cast<ScaleDataType>(sumDScale);
-            if(dbias != nullptr)
+            if(dbiasBase != nullptr)
             {
                 const int64_t dbiasOffset = hipdnn_test_sdk::detail::flatOffset(
-                    redIdx.data(), dbias->strides().data() + reductionStart, reductionDims.size());
+                    redIdx.data(), dbiasStrides + reductionStart, reductionDims.size());
                 dbiasBase[dbiasOffset] = static_cast<ScaleDataType>(sumDBias);
             }
         };

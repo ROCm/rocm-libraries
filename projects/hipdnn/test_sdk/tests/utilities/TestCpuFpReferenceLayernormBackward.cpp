@@ -1737,22 +1737,17 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop5DNormalizeLast2)
 // Whole-tensor normalization with recomputed statistics
 // ============================================================================
 
-// The intersection of two paths that are each covered separately elsewhere: an empty
-// batch index space (every dimension is normalized, so the scalar-batch padding runs)
-// and absent mean/rstd (so bprop recomputes them with Welford and stores them in the
-// tmpMean/tmpRstd scratch, indexed through batchStrides).
-//
-// batchStrides is generated from batchDims before that padding, so it is empty here
-// while the walk is one index deep. Reducing the padded index against it used to read
-// past the end of the vector - a segfault, not a quiet misread. The resize that keeps
-// the two the same length is what this pins.
+// The intersection of two paths that are each covered separately elsewhere: a
+// whole-tensor normalization (every dimension is normalized, so the batch walk is a single
+// position indexed by no dimension) and absent mean/rstd (so bprop recomputes the
+// statistics with Welford and carries them from pass 1 to pass 2 itself).
 //
 // The recomputed statistics have to agree with supplied ones, so the two paths are run
 // against each other rather than against hand-computed values.
-TEST(TestCpuFpReferenceLayernormFp32, BpropWholeTensorNormalizationRecomputesStats)
+TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropWholeTensorNormalizationRecomputesStats)
 {
     // Rank-1 input with a rank-2 scale: normalizedDimCount covers every input dimension,
-    // which is what leaves the batch index space empty.
+    // which leaves no batch dimension.
     const std::vector<int64_t> ioDims{4};
     const std::vector<int64_t> paramDims{1, 4};
     constexpr int64_t NORMALIZED_DIM_COUNT = 1;
