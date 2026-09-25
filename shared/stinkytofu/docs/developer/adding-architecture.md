@@ -321,5 +321,5 @@ tensilelite reaches stinkytofu through `rocisa`. Two switches drive it:
 ```bash
 export PYTHONPATH=/path/to/shared/stinkytofu/build/lib:$PYTHONPATH
 export ROCISA_BACKEND=stinkytofu
-./Tensile/bin/Tensile config.yaml ./out    # config.yaml uses ScheduleIterAlg: 4
+../../projects/hipblaslt/tensilelite/tensilelite/bin/Tensile config.yaml ./out    # config.yaml uses ScheduleIterAlg: 4
 ```
