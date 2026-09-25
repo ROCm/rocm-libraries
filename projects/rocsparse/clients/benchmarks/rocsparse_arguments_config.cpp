@@ -342,7 +342,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      "              coo2csr, ell2csr, hyb2csr, dense2csr, dense2coo, prune_dense2csr, prune_dense2csr_by_percentage, dense2csc\n"
      "              csr2dense, csc2dense, coo2dense, bsr2csr, gebsr2csr, gebsr2gebsr, csr2csr_compress, prune_csr2csr, prune_csr2csr_by_percentage\n"
      "              sparse_to_dense_coo, sparse_to_dense_csr, sparse_to_dense_csc, dense_to_sparse_coo, dense_to_sparse_csr, dense_to_sparse_csc, sparse_to_sparse, extract\n"
-     "  Sorting: cscsort, csrsort, coosort\n"
+     "  Sorting: cscsort, csrsort, coosort, spsort_coo\n"
      "  Misc: identity, inverse_permutation, nnz\n"
      "  Util: check_matrix_csr, check_matrix_csc, check_matrix_coo, check_matrix_gebsr, check_matrix_gebsc, check_matrix_ell, check_matrix_hyb")
 
