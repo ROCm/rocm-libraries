@@ -154,6 +154,13 @@ question — a KNOB; sweep it, and re-sweep the neighbouring knobs when you chan
 invert).** *For example, on one GEMM it won (~+8%), tied, AND lost (~−5%) at different configs of that same
 kernel.*
 
+**Scheduling is a KNOB too — the driver owns the placement.** Two issue-order levers, both bit-exact and
+off by default: `Tiling(mac_prio=0..3)` (the driver raises `s_setprio` after the FIRST matrix atom of a
+cluster and drops after the last; a single-atom cluster emits nothing) and the `sched_group_barrier`
+cadence (`InstrClass` + `derive_sched_group_counts` in `scheduling.py`). They reorder ISSUE, not the
+math — treat them like any other knob: SWEEP and MEASURE per arch/shape (the wins to date are
+gfx90a-shaped), never derive the placement. SOT: `docs/tiling_api_surface.md` §5d.
+
 **C de-interleave is INTRA-LANE:** gathering a lane's M-contiguous C values into an aligned register quad is
 register-moves-only **even when the values come from different atoms** (non-adjacent registers). Non-adjacent
 registers ≠ different lanes; it is cross-lane ONLY if the target re-owns lanes. Decide with

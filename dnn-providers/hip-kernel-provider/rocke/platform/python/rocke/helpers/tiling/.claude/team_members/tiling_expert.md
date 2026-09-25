@@ -123,6 +123,11 @@ outcome.
   at a small shape before trusting any of its timings**, and put every validity guard in the builder that all
   paths share, never in one caller. Guard ordering matters: the guards whose absence yields a WRONG ANSWER
   rather than an exception must come first, ahead of anything that can raise for another reason.
+- **Instruction scheduling is a perf knob, not a default.** `Tiling(mac_prio=0..3)` (wave `s_setprio`,
+  driver-placed after the first matrix atom) and the `sched_group_barrier` cadence (`InstrClass` +
+  `derive_sched_group_counts`, `scheduling.py`) are bit-exact issue-order levers — off by default,
+  MEASURED not derived, arch-shaped. Put them in the **Knobs** table and sweep; never carry a placement
+  forward as derived. SOT: `docs/tiling_api_surface.md` §5d.
 
 ### Unknown algorithms — LEARN and PERSIST (your standing duty)
 You are open to **any** algorithm, not just GEMM. When the problem is one we haven't tiled before:
