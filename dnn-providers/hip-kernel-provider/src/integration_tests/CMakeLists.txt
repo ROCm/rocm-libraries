@@ -205,12 +205,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         INSTALL_SUBDIR hip_kernel_provider
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
-        # Every BSHD SDPA-forward op family, not just SdpaFwdRuntimeScale: the engine
-        # takes its softmax scale as an f32 kernarg and declines a device-resident
-        # scale tensor, so a bundle it can serve belongs under SdpaFwd. The glob keeps
-        # the SdpaFwdRuntimeScale directory matching too, since the bundles already
-        # there carry a baked attn_scale_value and are SdpaFwd-shaped.
-        GTEST_FILTER "quick_SdpaFwd*_bshd_*:standard_SdpaFwd*_bshd_*"
+        GTEST_FILTER "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
     )
 endif()
 

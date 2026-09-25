@@ -4,7 +4,7 @@
 # hip-kernel-provider hipkernel:Gfx950AttentionDense external integration test categories.
 #
 # Pinned to hipkernel:Gfx950AttentionDense via --test-engine. Matches BSHD bundles
-# under integration-test-bundles/{quick,standard}/SdpaFwd*/bshd/.
+# under integration-test-bundles/{quick,standard}/SdpaFwd/bshd/.
 # The harness skips any case the engine does not service.
 
 _common_excludes: &common_excludes
