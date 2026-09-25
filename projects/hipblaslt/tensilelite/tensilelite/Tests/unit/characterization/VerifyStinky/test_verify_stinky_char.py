@@ -88,41 +88,42 @@ class TestParseDotTextSize:
 class TestFindReadelf:
     """Test readelf executable location."""
 
-    def test_find_readelf_via_path(self, tmp_path, monkeypatch):
-        # Create a fake readelf in a temp directory and put it on PATH
+    def test_find_readelf_in_selected_executable_path(self, tmp_path, monkeypatch):
         readelf = tmp_path / "llvm-readelf"
         readelf.write_text("#!/bin/sh\necho fake")
         os.chmod(readelf, 0o755)
-        monkeypatch.setenv("PATH", str(tmp_path))
-        # Clear ROCM_PATH and LLVM_BIN so it falls back to PATH
-        monkeypatch.delenv("ROCM_PATH", raising=False)
-        monkeypatch.delenv("LLVM_BIN", raising=False)
+        monkeypatch.setattr(verify_stinky, "executable_search_paths", lambda: [tmp_path])
+
         result = verify_stinky._find_readelf()
+
         assert result is not None and len(result) == 1
         assert "llvm-readelf" in result[0]
 
-    def test_find_readelf_rocm_path_first(self, tmp_path, monkeypatch):
-        # ROCM_PATH should be tried first
-        rocm_bin = tmp_path / "rocm" / "bin"
-        rocm_bin.mkdir(parents=True)
-        readelf = rocm_bin / "llvm-readelf"
+    def test_find_readelf_uses_selected_path_order(self, tmp_path, monkeypatch):
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
+        readelf = second / "llvm-readelf"
         readelf.write_text("#!/bin/sh\necho rocm")
         os.chmod(readelf, 0o755)
-        monkeypatch.setenv("ROCM_PATH", str(rocm_bin.parent))
-        monkeypatch.delenv("LLVM_BIN", raising=False)
+        monkeypatch.setattr(
+            verify_stinky, "executable_search_paths", lambda: [first, second]
+        )
+
         result = verify_stinky._find_readelf()
+
         assert result is not None
         assert str(readelf) in result[0]
 
     def test_find_readelf_not_found_returns_none(self, monkeypatch):
-        # Clear all paths
-        monkeypatch.delenv("ROCM_PATH", raising=False)
-        monkeypatch.delenv("LLVM_BIN", raising=False)
-        monkeypatch.setenv("PATH", "/nonexistent/path")
-        result = verify_stinky._find_readelf()
-        # This may or may not be None depending on system, but we're testing the logic
-        # Just verify it returns a list or None
-        assert result is None or isinstance(result, list)
+        monkeypatch.setattr(
+            verify_stinky,
+            "executable_search_paths",
+            lambda: [Path("/nonexistent/path")],
+        )
+
+        assert verify_stinky._find_readelf() is None
 
 
 class TestReadelfSectionHeaders:
