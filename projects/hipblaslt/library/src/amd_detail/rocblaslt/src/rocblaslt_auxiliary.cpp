@@ -391,6 +391,12 @@ bool problem_override_from_file_cpp(
                             success = true;
                             log_info(__func__, "Use the fallback fp32 solution");
                         }
+                        else
+                        {
+                            // Later entries and default selection run on this
+                            // same problem.
+                            problem->setF32XdlMathOp(rocisa::DataType::XFloat32);
+                        }
                     }
                 }
 

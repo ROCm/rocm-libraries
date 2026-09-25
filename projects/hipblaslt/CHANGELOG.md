@@ -68,6 +68,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Fixed out-of-bounds stores in subtile GEMM kernels on gfx950 and gfx1250 when the `M` dimension does not evenly fill the macro tile (for example `M=8` with a 32-row tile).
 * When a tuning file held several entries for one problem and the first could not be used, the later entries were never used either. The replay loop reused a single vector across entries and always read element `[0]`, so each later entry was checked against the first entry's solution instead of its own.
 * Solution index `0` in a tuning file was rejected outright, despite being a valid index that is present in the shipped logic.
+* An XF32 problem on the C++ extension API could fall back to FP32 kernels. When a tuning file entry failed both the XF32 check and its FP32 fallback check, the problem was left in FP32 mode for the remaining entries and for default kernel selection.
 * `*returnAlgoCount` was read uninitialised when an override satisfied a single-algo request, and then used to scan one element past the end of the caller's array.
 * A tuning file that yielded no usable rows was re-read and re-parsed on every heuristic query instead of once.
 * `GemmInstance::getSolutionName()` in `hipblaslt_ext` crashed for a RocRoller solution. It looked the encoded RocRoller index up in the Tensile library and dereferenced the null result. It now returns the RocRoller short name, as `hipblaslt_ext::getSolutionNameFromAlgo()` already did.

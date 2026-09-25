@@ -272,19 +272,26 @@ namespace
         return ok;
     }
 
-    /** The same heuristic query through the C++ extension API. */
-    bool extHeuristicIndex(int* selectedIndex)
+    /**
+     * The heuristic query through the C++ extension API, for the same shape
+     * with every matrix of `type`.
+     */
+    bool extHeuristicIndex(int*                 selectedIndex,
+                           hipDataType          type    = HIP_R_16F,
+                           hipblasComputeType_t compute = HIPBLAS_COMPUTE_32F)
     {
         hipblasLtHandle_t handle = nullptr;
         if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
             return false;
 
+        const size_t elementBytes = type == HIP_R_32F ? sizeof(float) : sizeof(uint16_t);
+
         void* dA = nullptr;
         void* dB = nullptr;
         void* dC = nullptr;
-        bool  ok = hipMalloc(&dA, kM * kK * sizeof(uint16_t)) == hipSuccess
-                  && hipMalloc(&dB, kK * kN * sizeof(uint16_t)) == hipSuccess
-                  && hipMalloc(&dC, kM * kN * sizeof(uint16_t)) == hipSuccess;
+        bool  ok = hipMalloc(&dA, kM * kK * elementBytes) == hipSuccess
+                  && hipMalloc(&dB, kK * kN * elementBytes) == hipSuccess
+                  && hipMalloc(&dC, kM * kN * elementBytes) == hipSuccess;
 
         if(ok)
         {
@@ -294,14 +301,8 @@ namespace
             hipblaslt_ext::GemmPreference pref;
             pref.setMaxWorkspaceBytes(kWorkspaceBytes);
 
-            hipblaslt_ext::Gemm gemm(handle,
-                                     HIPBLAS_OP_N,
-                                     HIPBLAS_OP_N,
-                                     HIP_R_16F,
-                                     HIP_R_16F,
-                                     HIP_R_16F,
-                                     HIP_R_16F,
-                                     HIPBLAS_COMPUTE_32F);
+            hipblaslt_ext::Gemm gemm(
+                handle, HIPBLAS_OP_N, HIPBLAS_OP_N, type, type, type, type, compute);
 
             hipblaslt_ext::GemmEpilogue epilogue;
             hipblaslt_ext::GemmInputs   inputs;
@@ -331,6 +332,8 @@ namespace
     {
         int                        index = -1;
         std::optional<std::string> kernelName;
+        // a_type, b_type, c_type and compute_type, in the file's spelling.
+        std::string types = "f16_r,f16_r,f16_r,f32_r";
     };
 
     /**
@@ -354,8 +357,7 @@ namespace
                 out << ",kernel_name";
             out << "\n";
 
-            out << "N,N,1," << kM << "," << kN << "," << kK << ",f16_r,f16_r,f16_r,f32_r,"
-                << row.index;
+            out << "N,N,1," << kM << "," << kN << "," << kK << "," << row.types << "," << row.index;
             if(row.kernelName)
                 out << "," << *row.kernelName;
             out << "\n";
@@ -542,6 +544,32 @@ namespace
         int selected = -1;
         ASSERT_TRUE(extHeuristicIndex(&selected));
         EXPECT_EQ(selected, recorded.index);
+    }
+
+    // An XF32 problem whose entry cannot run, as XF32 or as the FP32 fallback,
+    // is still XF32 when default selection takes over.
+    TEST_F(TuningCache, ExtApiXf32ProblemStaysXf32AfterAnUnusableEntry)
+    {
+        if(!haveSolutions(1))
+            GTEST_SKIP() << "the heuristic offers no solution for this problem";
+
+        int xf32Default = -1;
+        int fp32Default = -1;
+        ASSERT_TRUE(extHeuristicIndex(&xf32Default, HIP_R_32F, HIPBLAS_COMPUTE_32F_FAST_TF32));
+        ASSERT_TRUE(extHeuristicIndex(&fp32Default, HIP_R_32F, HIPBLAS_COMPUTE_32F));
+        if(xf32Default == fp32Default)
+            GTEST_SKIP() << "default selection picks the same solution for XF32 and FP32";
+
+        // An fp16 solution: its index still names its kernel, so it passes the
+        // name check, but an fp32 problem cannot run it.
+        const auto& fp16 = m_identities[0];
+        writeTuningFile(
+            m_path, m_stamp, {{fp16.index, fp16.kernelName, "f32_r,f32_r,f32_r,xf32_r"}});
+        useTuningFile();
+
+        int selected = -1;
+        ASSERT_TRUE(extHeuristicIndex(&selected, HIP_R_32F, HIPBLAS_COMPUTE_32F_FAST_TF32));
+        EXPECT_EQ(selected, xf32Default);
     }
 
     // When the file satisfies a single-algo request, the heuristic's own search
