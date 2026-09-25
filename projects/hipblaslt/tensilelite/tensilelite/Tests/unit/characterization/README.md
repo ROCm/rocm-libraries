@@ -262,7 +262,7 @@ An opt-in local **pre-commit hook** runs the unit + characterization tests affec
 
      ```bash
      pytest <node-id> --snapshot-update
-     # e.g. tensilelite/Tests/unit/characterization/DataType/test_datatype_char.py::test_foo
+     # e.g. tensilelite/Tests/unit/characterization/DataType/test_constructor_char.py::test_init_from_enum
      ```
 
      Read every changed line in the `.ambr` diff and explain the behavior change in your PR description. If the change pins or flips a known-wrong behavior, record a new ADR under `adr/` (or supersede the existing one). A golden diff is a reviewed behavior change, not a chore.

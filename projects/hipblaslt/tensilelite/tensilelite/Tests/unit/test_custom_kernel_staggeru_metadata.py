@@ -51,8 +51,8 @@ from tensilelite.CustomKernels import (
     getCustomKernelContents,
     readCustomKernelConfig,
 )
-from Tensile.Components.TDMFuse import tdmWavePartition
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.TDMFuse import tdmWavePartition
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from rocisa.code import Module
 
 
