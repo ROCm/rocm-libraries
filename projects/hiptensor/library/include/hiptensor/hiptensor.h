@@ -251,7 +251,9 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @brief Creates an operation descriptor for tensor permutation.
 //!
 //! @details Tensor modes can appear in any order. However, the following restrictions apply:
-//!   - \f$A\f$ and \f$B\f$ must carry exactly the same modes, differing only in their order. Reusing an input along a mode it doesn't carry would require broadcasting, which isn't supported and is rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`.
+//!   - \f$A\f$ must carry a subset of \f$B\f$'s modes, in any order. Where \f$A\f$ lacks one of \f$B\f$'s modes it is broadcast along that mode, meaning the same element of \f$A\f$ is reused for every index along it.
+//!   - A mode present in \f$A\f$ but absent from \f$B\f$ would imply reduction, which isn't supported and is rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`.
+//!   - A mode shared by \f$A\f$ and \f$B\f$ must have the same extent in both, otherwise the operation is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
 //!   - Each mode can appear at most once in each tensor.
 //!
 //! @param[in] handle Opaque handle containing the hipTENSOR library context.
@@ -450,8 +452,9 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t hand
 //! @brief Creates an operation descriptor for elementwise binary operations.
 //!
 //! @details Tensor modes can appear in any order. However, the following restrictions apply:
-//!   - \f$A\f$ and \f$C\f$ must each carry exactly the same modes as the output tensor \f$D\f$, differing only in their order. An input holding a subset of \f$D\f$'s modes would have to be broadcast along the modes it lacks, which isn't supported and is rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`.
-//!   - Modes present in an input but absent from \f$D\f$ would imply contraction, which is handled by hiptensorContraction or hiptensorReduction.
+//!   - \f$A\f$ and \f$C\f$ must each carry a subset of the output tensor \f$D\f$'s modes, in any order. Where an input lacks one of \f$D\f$'s modes it is broadcast along that mode, meaning the same element of that input is reused for every index along it.
+//!   - Modes present in an input but absent from \f$D\f$ would imply contraction, which is handled by hiptensorContraction or hiptensorReduction, and are rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`.
+//!   - A mode shared by an input and \f$D\f$ must have the same extent in both, otherwise the operation is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
 //!   - Each mode can appear at most once in each tensor.
 //!
 //! @param[in] handle Opaque handle containing hipTensor's library context.
@@ -522,8 +525,9 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hipte
 //! @brief Creates an operation descriptor for elementwise trinary operations.
 //!
 //! @details Tensor modes can appear in any order. However, the following restrictions apply:
-//!   - \f$A\f$, \f$B\f$, and \f$C\f$ must each carry exactly the same modes as the output tensor \f$D\f$, differing only in their order. An input holding a subset of \f$D\f$'s modes would have to be broadcast along the modes it lacks, which isn't supported and is rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`.
-//!   - Modes present in an input but absent from \f$D\f$ would imply contraction, which is handled by hiptensorContraction or hiptensorReduction.
+//!   - \f$A\f$, \f$B\f$, and \f$C\f$ must each carry a subset of the output tensor \f$D\f$'s modes, in any order. Where an input lacks one of \f$D\f$'s modes it is broadcast along that mode, meaning the same element of that input is reused for every index along it.
+//!   - Modes present in an input but absent from \f$D\f$ would imply contraction, which is handled by hiptensorContraction or hiptensorReduction, and are rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`.
+//!   - A mode shared by an input and \f$D\f$ must have the same extent in both, otherwise the operation is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
 //!   - Each mode can appear at most once in each tensor.
 //!
 //! @param[in] handle Opaque handle containing hipTensor's library context.
@@ -545,7 +549,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hipte
 //! @retval HIPTENSOR_STATUS_SUCCESS When the operation completes successfully.
 //! @retval HIPTENSOR_STATUS_NOT_INITIALIZED When the handle isn't initialized.
 //! @retval HIPTENSOR_STATUS_INVALID_VALUE When input data is invalid (typically user error).
-//! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When an input tensor doesn't carry the same modes as D.
+//! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When an input tensor carries a mode that D doesn't carry.
 //! @retval HIPTENSOR_STATUS_ARCH_MISMATCH When the device isn't ready or the target architecture isn't supported.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorCreateElementwiseTrinary(const hiptensorHandle_t            handle,
@@ -571,8 +575,8 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! \f[ D_{\Pi^C(i_0,i_1,...,i_n)} = \Phi_{ABC}(\Phi_{AB}(\alpha \Psi_A(A_{\Pi^A(i_0,i_1,...,i_n)}), \beta \Psi_B(B_{\Pi^B(i_0,i_1,...,i_n)})), \gamma \Psi_C(C_{\Pi^C(i_0,i_1,...,i_n)})) \f]
 //!
 //! Tensor modes can appear in any order, providing flexibility. However, the following restrictions apply:
-//!   - \f$A\f$, \f$B\f$, and \f$C\f$ must each carry exactly the same modes as the output tensor \f$D\f$, differing only in their order. An input holding a subset of \f$D\f$'s modes would have to be broadcast along the modes it lacks, which isn't supported; `hiptensorCreateElementwiseTrinary` rejects such an operation with `HIPTENSOR_STATUS_NOT_SUPPORTED`.
-//!   - Modes present in \f$A\f$ or \f$B\f$ but absent from \f$D\f$ would imply contraction, which is handled by hiptensorContraction or hiptensorReduction.
+//!   - \f$A\f$, \f$B\f$, and \f$C\f$ must each carry a subset of the output tensor \f$D\f$'s modes, in any order. Where an input lacks one of \f$D\f$'s modes it is broadcast along that mode, meaning the same element of that input is reused for every index along it.
+//!   - Modes present in \f$A\f$ or \f$B\f$ but absent from \f$D\f$ would imply contraction, which is handled by hiptensorContraction or hiptensorReduction; `hiptensorCreateElementwiseTrinary` rejects such an operation with `HIPTENSOR_STATUS_NOT_SUPPORTED`.
 //!   - Each mode can appear at most once in each tensor.
 //!
 //! @param[in] handle Opaque handle containing hipTensor's library context.

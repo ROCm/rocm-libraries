@@ -1400,10 +1400,10 @@ void testing_extract_coarse_mapping()
     int map[3];
 
     // Call the ExtractCoarseMapping method
-    EXPECT_NO_THROW(vec.ExtractCoarseMapping(0, 5, index, 3, &size, map));
+    EXPECT_NO_THROW(vec.ExtractCoarseMapping(0, 3, index, 5, &size, map));
 
     // Validate the extracted mapping
-    EXPECT_EQ(size, 5);
+    EXPECT_EQ(size, 3);
     EXPECT_EQ(map[0], 0);
 }
 

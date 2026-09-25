@@ -40,11 +40,14 @@ enum-to-int conversion) deterministically. The version token is normalised to
 from types import SimpleNamespace
 
 import pytest
+import contextlib
 
 from Tensile import __version__
 import Tensile.LibraryIO as L
 
 pytestmark = pytest.mark.unit
+from Tensile.Common.GlobalParameters import globalParameters
+import Tensile.Common.TimingInstrumentation as _TI
 
 
 def _norm(text):
@@ -207,3 +210,73 @@ def test_write_solutions_cache_shifted(tmp_path, snapshot):
     ps = _problem_sizes(ranges=[[16, 16, 1, 16], [32, 32, 1, 32]], exacts=[[1, 2, 3, 4]])
     L.writeSolutions(str(p), ps, None, None, [], cache=True)
     assert _norm(p.read_text()) == snapshot
+
+
+def test_write_solutions_cache_forwards_bias_header(tmp_path):
+    path = tmp_path / "solutions.yaml"
+    _seed_file(path)
+    L.writeSolutions(str(path), None, _bias_args([0, 4]), None, [], cache=True)
+    text = path.read_text()
+    assert "BiasTypeArgs: [[0, 4]]" in text
+    assert "- SolutionIndex: 0" in text
+
+
+def test_write_solutions_cache_forwards_activation_header(tmp_path):
+    path = tmp_path / "solutions.yaml"
+    _seed_file(path)
+    L.writeSolutions(
+        str(path), None, None, _activation_args(["relu", "gelu"]), [], cache=True
+    )
+    text = path.read_text()
+    assert "ActivationArgs:" in text
+    assert "Enum: relu" in text
+    assert "Enum: gelu" in text
+    assert "- SolutionIndex: 0" in text
+
+
+@contextlib.contextmanager
+def _timing_categories():
+    previous = globalParameters.get("TimingInstrumentation", False)
+    globalParameters["TimingInstrumentation"] = True
+    _TI._timing_buffer.clear()
+    try:
+        yield _TI._timing_buffer
+    finally:
+        globalParameters["TimingInstrumentation"] = previous
+        _TI._timing_buffer.clear()
+
+
+@pytest.mark.parametrize(
+    "cache,expected",
+    [
+        (False, [
+            "python_wsol_prepare_nocache",
+            "python_wsol_prepare",
+            "python_wsol_header",
+            "python_wsol_dump",
+        ]),
+        (True, [
+            "python_wsol_prepare_cache",
+            "python_wsol_prepare",
+            "python_wsol_header",
+        ]),
+    ],
+    ids=["full-write", "cache-rewrite"],
+)
+def test_write_solutions_timing_categories(tmp_path, cache, expected):
+    path = tmp_path / "solutions.yaml"
+    problem_sizes = None
+    solutions = []
+    if cache:
+        _seed_file(path)
+    else:
+        problem_sizes = _problem_sizes(ranges=[[16, 16, 1, 16]], exacts=[])
+        solutions = [_FakeSolution(0)]
+
+    with _timing_categories() as buffer:
+        L.writeSolutions(
+            str(path), problem_sizes, None, None, solutions, cache=cache
+        )
+        categories = [category for category, _ in buffer]
+
+    assert categories == expected

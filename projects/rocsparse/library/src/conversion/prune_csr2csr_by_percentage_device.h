@@ -30,12 +30,17 @@ namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void abs_kernel(int64_t nnz_A, const T* csr_val_A, T* output)
+    void abs_kernel(int64_t nnz_A, const T* __restrict__ csr_val_A, T* __restrict__ output)
     {
-        const int64_t gid_x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-        const int64_t gid_y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+        // Cast before each multiply: hipBlockDim_x, hipBlockIdx_x and
+        // hipGridDim_x are unsigned int, so the products wrap at 2^32 and the
+        // int64_t destination cannot recover the lost high bits. The launch
+        // already caps grid_x at 2147483647 and spills the remainder onto
+        // grid_y, so a 256-thread block reaches that wrap at 2^32 elements.
+        const int64_t gid_x = static_cast<int64_t>(hipBlockDim_x) * hipBlockIdx_x + hipThreadIdx_x;
+        const int64_t gid_y = static_cast<int64_t>(hipBlockDim_y) * hipBlockIdx_y + hipThreadIdx_y;
 
-        const int64_t grid_dim_x = hipGridDim_x * hipBlockDim_x;
+        const int64_t grid_dim_x = static_cast<int64_t>(hipGridDim_x) * hipBlockDim_x;
 
         // Map a 2D HIP grid to a 1D index
         const int64_t gid = grid_dim_x * gid_y + gid_x;

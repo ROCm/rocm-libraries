@@ -609,6 +609,44 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
 
+        if state.get('ReuseAcrossPersistent', 0):
+            # A lives in VGPRs for the whole persistent loop, so the kernel is only
+            # correct for problems where every tile a workgroup visits reads the
+            # same A, and where K is a whole number of resident k-tiles.
+            #   M == MacroTile0     - one M-tile only, and no masked store in M. A
+            #                         half-filled tile would take the edge path,
+            #                         which v0 does not budget registers for.
+            #   N % MacroTile1 == 0 - no edge tile in N either.
+            #
+            # K is a range, not a point. The loop shell owns every resident k-tile
+            # and leaves as soon as the counter runs out, so any K from the floor up
+            # to the count the kernel holds works and the k-tiles above it simply go
+            # unused. K must still land on a k-tile boundary, because a section's
+            # registers are picked by a codegen-time k-tile number.
+            #
+            # The floor is one k-tile, and the reason is the loop-entry guard: it
+            # skips the loop when the counter reaches zero, and the InitCIterWmma
+            # clone that zeroes C lives inside the loop, so at zero k-tiles C would
+            # never be initialised. One is enough even at PrefetchGlobalRead 2 --
+            # the pre-loop prefetch skips its second stage when the counter is 1
+            # (label_skipPGR2_1), so nothing is fetched past this K, and the single
+            # section computes and then leaves through its own early exit. The
+            # toPGR1 escape that carries this case in a non-RAP kernel is not needed
+            # here: it exists to hand the work to the NGLL drain, which RAP does not
+            # emit because its sections do the work themselves.
+            #
+            # SizeGreaterThan and SizeLessThan are strict, hence the -1 and +1.
+            kIdx = state['ProblemType']['NumIndicesC']
+            kTiles = state['_RAPNumResidentKTiles']
+            floorTiles = 1
+            rv += [cls('SizeEqual', index=0, value=state['MacroTile0'])]
+            rv += [cls('SizeMultiple', index=1, value=state['MacroTile1'])]
+            rv += [cls('SizeMultiple', index=kIdx, value=state['DepthU'])]
+            rv += [cls('SizeGreaterThan', index=kIdx,
+                       value=floorTiles * state['DepthU'] - 1)]
+            rv += [cls('SizeLessThan', index=kIdx,
+                       value=kTiles * state['DepthU'] + 1)]
+
         return rv
 
     @classmethod
@@ -619,6 +657,33 @@ class ProblemPredicate(Properties.Predicate):
 
         predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPreds
         return cls.And(predicates)
+
+class CustomKernel:
+    StateKeys = ['name',
+                 'args',
+                 'macrotile',
+                 'threads',
+                 'grid',
+                 'workspaceType',
+                 'workspaceSizePerElemC',
+                 'workspaceSizePerElemBias',
+                 'generated']
+
+    @classmethod
+    def FromOriginalState(cls, d):
+        return cls(name=d['name'],
+                   args=d['args'],
+                   macrotile=d['macrotile'],
+                   threads=d['threads'],
+                   grid=d['grid'],
+                   workspaceType=d.get('workspaceType', 'None'),
+                   workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
+                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
+                   generated=d.get('generated', False))
+
+    def __init__(self, **kwargs):
+        for (key, value) in list(kwargs.items()):
+            setattr(self, key, value)
 
 class SizeMapping:
     StateKeys = ['waveNum',
@@ -649,7 +714,6 @@ class SizeMapping:
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
                  'activationFused',
-                 'CustomKernelName',
                  'workGroupMappingXCC',
                  'workGroupMappingXCCGroup',
                  'globalSplitUCoalesced',
@@ -660,6 +724,9 @@ class SizeMapping:
                  'synchronizerSizePerWG',
                  'nonTemporalA',
                  'nonTemporalB',
+                 'temporalHintA',
+                 'temporalHintB',
+                 'hasTemporalHint',
                  'adaptiveGemmNTAB',
                  'customMainLoopScheduling',
                  'useSubtileImpl',
@@ -744,7 +811,6 @@ class SizeMapping:
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
                    activationFused          = d['ActivationFused'],
-                   CustomKernelName         = d['CustomKernelName'],
                    workGroupMappingXCC      = d['WorkGroupMappingXCC'],
                    workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
                    globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
@@ -755,6 +821,9 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
+                   temporalHintA            = d.get('TemporalHintA', 0),
+                   temporalHintB            = d.get('TemporalHintB', 0),
+                   hasTemporalHint          = bool(d.get('_HasTemporalHint', False)),
                    adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
                    customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
                    useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
@@ -772,7 +841,7 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
-                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
                    clusterDim               = d['ClusterDim']
                    )
     @classmethod
@@ -817,17 +886,18 @@ class InternalArgsSupport:
 class Solution:
     StateKeys = ['name',
                  'kernelName',
-                'problemType',
-                'hardwarePredicate',
-                'problemPredicate',
-                'taskPredicate',
-                'sizeMapping',
-                'internalArgsSupport',
-                'debugKernel',
-                'libraryLogicIndex',
-                'index',
-                'ideals',
-                'linearModel']
+                 'problemType',
+                 'hardwarePredicate',
+                 'problemPredicate',
+                 'taskPredicate',
+                 'sizeMapping',
+                 'customKernel',
+                 'internalArgsSupport',
+                 'debugKernel',
+                 'libraryLogicIndex',
+                 'index',
+                 'ideals',
+                 'linearModel']
     HiddenKeys = ['originalSolution']
 
     @classmethod
@@ -897,6 +967,10 @@ class Solution:
         rv.libraryLogicIndex = int(info.get("SolutionIndex", -1))
 
         rv.sizeMapping = SizeMapping.FromOriginalState(d)
+        if 'CustomKernel' in d:
+            rv.customKernel = CustomKernel.FromOriginalState(d['CustomKernel'])
+        else:
+            rv.customKernel = {}
 
         rv.internalArgsSupport = InternalArgsSupport.FromOriginalState(d)
 
@@ -945,6 +1019,7 @@ class Solution:
         self.problemPredicate = ProblemPredicate('TruePred')
         self.taskPredicate = TaskPredicate('TruePred')
         self.sizeMapping = None
+        self.customKernel = None
         self.debugKernel = False
         self.libraryLogicIndex = {}
         self.index = None

@@ -316,15 +316,11 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
     }
     case rocsparse_format_csc:
     {
-#if defined(ROCSPARSE_WITH_CSC_TRSV) || defined(ROCSPARSE_WITH_CSC_TRSM)
         _rocsparse_mat_descr   descr_csr;
         _rocsparse_spmat_descr mat_csr;
         rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
         trm = info->get(rocsparse::cscsv_operation_to_csr(trans), descr_csr.fill_mode);
         break;
-#else
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#endif
     }
     default:
     {

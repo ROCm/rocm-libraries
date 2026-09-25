@@ -959,7 +959,8 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
                                            "fp32",
                                            spec->warp_tile_m,
                                            spec->warp_tile_n,
-                                           spec->warp_tile_k);
+                                           spec->warp_tile_k,
+                                           nullptr);
     }
     if(op == NULL)
     {

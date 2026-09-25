@@ -16,7 +16,7 @@ Infer options from the user request:
 - **Preset**: default `hipdnn-providers`
 - **Clean rebuild**: remove the build directory before configuring only when the user asks for a clean build and the active host policy permits deletion
 - **ROCm path**: optional `ROCM_PATH=<path>` override; Linux defaults to `/opt/rocm`. On Windows, when omitted it is derived from the wheel venv (`<venv>/Lib/site-packages/_rocm_sdk_devel`, venv default `D:/develop/latest_wheels`)
-- **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`. Clang is a prerequisite and is not provisioned; install it via `scripts/windows/windows_build_setup.ps1` if missing
+- **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`. Clang is a prerequisite and is not provisioned; install it via `projects/hipdnn/scripts/windows/windows_build_setup.ps1` (repo-relative) if missing
 - **GPU targets**: optional `GPU_TARGETS=<arch>` override; Windows wheel setup defaults to `gfx1151`
 - **Wheel SHA**: optional Windows `SHA=<commit>` to install pinned S3 staging wheels instead of nightlies
 - **Provision mode**: Windows `--provision auto|always|never`; default `auto` provisions (creates the venv and pip-installs the ROCm SDK wheels) only when the SDK is missing, `always` forces a fresh wheel pull, `never` validates existing paths only
@@ -38,6 +38,9 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
 | `hipdnn-samples` | hipDNN, supported providers, integration tests, samples |
 
 ## Workflow
+
+Placeholder used in the command blocks below: `<rocm-bin>` — the ROCm `bin` directory,
+on Windows the wheel venv's `_rocm_sdk_devel/bin`.
 
 1. Determine the repository root:
    ```bash
@@ -65,6 +68,47 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    ```
    Add `-DROCM_PATH=<path>` when a ROCm path is resolved or provided. On Windows also add `-DCMAKE_PROGRAM_PATH=<clang-path>` and `-DGPU_TARGETS=<arch>`.
 
+   **Generic-kernel-ingestor / rocKE builds** need flags no preset sets:
+
+   | Flag | Default | Needed when |
+   |---|---|---|
+   | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
+   | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
+   | `ENABLE_ASM_SDPA_ENGINE` | ON | Controls the incumbent ASM engine; disabling it is not proof that the intended new engine serves a graph. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | **Required ON whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON.** The coupling is unconditional: the provider's top-level check inspects no source kind and no descriptor root, so it also fires for HIP-only and embedded-source bundles and when no rocKE KDP exists anywhere. Ingestor ON with this OFF is a fatal configure error, not a degraded build. |
+   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | the in-tree `.../kernel_ingestor_engine/descriptors` | `CACHE PATH` naming the authored tree production packaging compiles from. Packaging requires at least one non-hidden `*.kdp.json`; with none it is dormant. The default root is also dormant when no KDP declares any selected packaging architecture. Dormancy removes any stale product tree and is not an error. Set but not a directory is fatal. |
+   | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`; this locates a package, not a compiler interpreter. |
+   | `Python3_EXECUTABLE` | system | Explicit environment for packaging dependencies such as `msgpack` and `zstandard`; production compilation retains its selected hermetic wheel interpreter. |
+
+   These flags only do anything on a preset that actually builds hip-kernel-provider. The
+   default `hipdnn-providers` preset does **not** include it; the presets that do are
+   `hipdnn-providers-all`, `hip-kernel-provider`, `hipdnn-dev-all` and
+   `miopen-hipdnn-dev-all`.
+
+   **There is no per-producer production switch.** Producer selection is per-UKD on
+   `kernel_source.kind`, so one source root feeds every producer and the descriptors
+   under the root decide what gets built. rocKE is resolved once for *every* root, test
+   roots included, so an unresolvable comgr is fatal at configure even in a hip-only
+   build; `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` names an explicit `libamd_comgr` where a
+   System32 copy would otherwise shadow the ROCm one.
+
+   For an ingestor create/extend task,
+   [the ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) owns the full sequence.
+   Early device/workspace feasibility has no installation requirement; installed probing
+   follows build and installation. Build production packaging as well as provider,
+   validator and applicable tests; a plugin build alone does not show that current
+   descriptors were packed.
+
+   Declarations travel in UKD `provenance.specialization_contract`. Only the producing
+   compiler writes `provenance.effective_spec`, distinct from authored `provenance.spec`;
+   generic generation is toolchain-free. No packaging `--profile`, CMake `PROFILES` or
+   external root manifest is part of this interface. Read the packaging reference at
+   `dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`, resolved against
+   the `<repo-root>` from step 1 rather than this skill's own directory — an installed
+   skill is copied without the tree above it. A build is not compiler-agreement,
+   native-registration or numerical evidence by itself; the RUNBOOK requires those
+   observations against the final installation.
+
 7. Build with output redirected to a log:
    ```bash
    cmake --build <build-dir> > <log> 2>&1
@@ -91,7 +135,7 @@ Summarize:
 
 ## Notes
 
-- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and `tools/dnn-benchmarking/setup.ps1`. Keep the two in sync.
+- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is available for interactive users.
 - `comgr_stage.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` app-local and emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present (it shadows PATH and is why the app-local copy is needed).
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.
