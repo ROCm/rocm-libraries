@@ -44,7 +44,7 @@ from .SolutionStructs import ProblemSizes
 from .Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 
-def createLibraryForBenchmark(logicPath, libraryPath, currentPath, gfxName):
+def createLibraryForBenchmark(logicPath, libraryPath, gfxName):
     """
     takes the path of existing logic files as input and adds the summation
     model for each of the solutions. This is used in the Tile Aware Metirc
@@ -125,7 +125,7 @@ def GenerateSummations(userArgs):
             rawLogic
 
         copyfile(logicFileName, localLogicFilePath)
-        createLibraryForBenchmark(localLogicPath, libPath, currentPath, gfxName)
+        createLibraryForBenchmark(localLogicPath, libPath, gfxName)
 
         exactList = []
 

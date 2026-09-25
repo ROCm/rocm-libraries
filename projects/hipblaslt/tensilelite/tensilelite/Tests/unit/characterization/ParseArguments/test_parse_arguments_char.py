@@ -53,11 +53,7 @@ def test_defaults(monkeypatch):
     assert a["EnableGemmA2AFusion"] is False
     assert a["GenSolTable"] is True
 
-def test_explicit_input_takes_precedence(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog", "/real", "/realout", "HIP"])
-    a = PA.parseArguments(["/fake", "/fakeout", "HSA"])
-    assert a["RuntimeLanguage"] == "HSA"
-    assert a["LogicPath"] == "/fake"
+
 def test_explicit_input_takes_precedence(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "/real", "/realout", "HIP"])
     a = PA.parseArguments(["/fake", "/fakeout", "HSA"])
