@@ -4,7 +4,7 @@
 """Regression checks for TensileLite's distributable package metadata."""
 
 import configparser
-import shutil
+import runpy
 import subprocess
 import sys
 import tomllib
@@ -16,24 +16,13 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_STAGER = _PROJECT_ROOT / "scripts/stage_release_source.py"
 
 
 def _isolated_source(tmp_path):
-    return Path(
-        shutil.copytree(
-            _PROJECT_ROOT,
-            tmp_path / "source",
-            ignore=shutil.ignore_patterns(
-                ".pytest_cache",
-                ".tox",
-                "__pycache__",
-                "*.egg-info",
-                "build",
-                "build_tmp",
-                "build-adaptor",
-            ),
-        )
-    )
+    destination = tmp_path / "source"
+    runpy.run_path(str(_STAGER))["stage_source"](_PROJECT_ROOT, destination)
+    return destination
 
 
 def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatch):

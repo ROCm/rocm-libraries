@@ -12,13 +12,23 @@ import shutil
 
 
 _IGNORED_NAMES = {
+    ".agents",
+    ".codex",
+    ".coverage",
     ".git",
+    ".mypy_cache",
     ".pytest_cache",
+    ".ruff_cache",
     ".tox",
+    ".venv",
     "__pycache__",
+    "_skbuild",
     "build",
     "build-adaptor",
     "build_tmp",
+    "dist",
+    "htmlcov",
+    "mutants",
 }
 
 
