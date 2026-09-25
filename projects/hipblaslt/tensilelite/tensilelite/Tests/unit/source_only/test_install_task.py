@@ -14,7 +14,7 @@ import tasks
 
 pytestmark = pytest.mark.unit
 
-_SOURCE_ROOT = Path(__file__).resolve().parents[3]
+_SOURCE_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_invoke_install_is_a_discoverable_developer_workflow():
@@ -35,6 +35,38 @@ def test_install_binds_the_actual_cmake_client_output(tmp_path):
     executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
     expected = tmp_path / "build/tensilelite/client" / executable
     assert tasks._built_client_path(tmp_path / "build") == expected
+
+
+def test_rocisa_install_uses_the_invoking_python_and_selected_rocm(
+    tmp_path, monkeypatch
+):
+    commands = []
+
+    class Context:
+        def run(self, command, **kwargs):
+            commands.append((shlex.split(command), kwargs))
+
+    monkeypatch.setattr(tasks.shutil, "which", lambda name: None)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path / "other-rocm"))
+
+    rocm_root = tmp_path / "rocm"
+    source = tmp_path / "rocisa"
+    source.mkdir()
+    tasks._pip_install_rocisa(
+        Context(),
+        rocisa_dir=source,
+        rocm_path=str(rocm_root),
+    )
+
+    assert len(commands) == 1
+    command, kwargs = commands[0]
+    assert command[:4] == [
+        str(Path(sys.executable).absolute()),
+        "-m",
+        "pip",
+        "install",
+    ]
+    assert f"-DROCM_PATH={rocm_root}" in kwargs["env"]["CMAKE_ARGS"].split()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")

@@ -53,6 +53,14 @@ def test_resolve_rocm_root_prefers_environment(tmp_path, monkeypatch):
     assert _rocm.resolve_rocm_root() == root.resolve()
 
 
+def test_windows_sdk_root_rejects_empty_output(monkeypatch):
+    result = type("Result", (), {"stdout": "\n"})()
+    monkeypatch.setattr(_rocm.subprocess, "run", lambda *args, **kwargs: result)
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="empty Windows ROCm SDK root"):
+        _rocm._windows_sdk_root()
+
+
 def test_runtime_reports_external_rocisa_import_failure(monkeypatch):
     def fail_import(name):
         assert name == "rocisa"
