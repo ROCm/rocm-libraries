@@ -1,6 +1,9 @@
 # TensileLite absolute-to-relative import investigation
 
-Status: investigated against `develop` on 2026-09-15, then implemented as the local `users/alvasile/AIHPBLAS-3989-namespace-split/*` stack based on local `develop` at `b607a8ae0cfda0a27a0f6a1446cb3043a88c22c4`. The stack has not been pushed.
+Status: historical investigation snapshot. The
+`users/alvasile/AIHPBLAS-3989-namespace-split/*` stack described below was
+subsequently created; the recorded commit identifiers and branch state describe
+the original 2026-09-15 analysis, not the current stack.
 
 ## Conclusion
 
