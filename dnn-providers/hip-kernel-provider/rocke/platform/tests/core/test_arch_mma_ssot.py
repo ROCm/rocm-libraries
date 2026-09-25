@@ -223,10 +223,10 @@ def test_e5m2_is_not_a_scale_dtype_alias(dtype, field):
 def test_scaled_catalog_identity_and_backend_contract():
     catalog = ArchTarget.from_gfx("gfx1250").mma
     rows = [row for row in catalog.ops if row.family == "wmma_scaled"]
-    assert len(rows) == 4
-    assert len({row.op_id for row in rows}) == 4
+    assert len(rows) == 6
+    assert len({row.op_id for row in rows}) == 6
     for row in rows:
-        dtype = {"fp8e4m3": "fp8", "bf8e5m2": "bf8"}[row.a_dtype]
+        dtype = {"fp8e4m3": "fp8", "bf8e5m2": "bf8", "fp4e2m1": "fp4"}[row.a_dtype]
         assert row.op_id == (
             f"wmma_gfx1250_f32_16x16x128_{dtype}_{dtype}"
             f"_scale_e8m0_e8m0_k{row.scale_block_k}"
@@ -236,9 +236,8 @@ def test_scaled_catalog_identity_and_backend_contract():
         assert isinstance(row.scale_block_k, MmaScaleBlockK)
         packing = gfx1250_scaled_wmma(row.op_id)
         assert packing.atom is row
-        assert packing.matrix_formats == (
-            (0, 0) if row.a_dtype == "fp8e4m3" else (1, 1)
-        )
+        selector = {"fp8e4m3": 0, "bf8e5m2": 1, "fp4e2m1": 4}[row.a_dtype]
+        assert packing.matrix_formats == (selector, selector)
         assert packing.scales.count * packing.scales.block_k == row.k
         assert packing.matrix_llvm_types == ("<16 x i32>", "<16 x i32>")
     for family in ("wmma_scale", "wmma_scale16"):

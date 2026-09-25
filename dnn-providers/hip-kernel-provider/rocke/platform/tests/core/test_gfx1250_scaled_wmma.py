@@ -271,8 +271,8 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
 
     def test_native_block_scaled_gemm_uses_packed_e8m0_in_instruction(self):
         for matrix_path, block_k, scale_ty, fragment_load, load_count in (
-            ("wmma_scale", 32, "i32", "load <16 x i8>", 8),
-            ("wmma_scale16", 16, "i64", "load <16 x i8>", 8),
+            ("wmma_scale", 32, "i32", "load <4 x i32>", 8),
+            ("wmma_scale16", 16, "i64", "load <4 x i32>", 8),
         ):
             with self.subTest(matrix_path=matrix_path):
                 spec = BlockScaledGemmSpec(
