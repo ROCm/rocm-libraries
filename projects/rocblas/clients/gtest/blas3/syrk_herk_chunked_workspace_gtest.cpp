@@ -1012,7 +1012,8 @@ namespace
     // the real part, so every element differs for real types as well as complex
     // and the triangle readback detects a packing that permutes slots, not just
     // one that skips them.  The base keeps these clear of expected_upper's range
-    // (at most 4097); the largest value at n=512 is 623775, exact in float.
+    // (at most 4097); the largest strictly-upper value at n=512 is 622751,
+    // exact in float.
     template <typename T>
     static T upper_seed(rocblas_int row, rocblas_int col)
     {
