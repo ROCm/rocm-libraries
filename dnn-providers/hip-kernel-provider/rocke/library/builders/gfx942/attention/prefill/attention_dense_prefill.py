@@ -44,7 +44,9 @@ from here rather than keeping a second, drifting resolver.
 
 NOTE: ``--sw`` (sliding window) now builds a supported spec (KV-loop prune + window
 mask); only the degenerate shape whose last query block's window starts past
-``seqlen_kv`` is rejected (zero-trip KV loop -> NaN). ``--persistent`` is NOT a
+``seqlen_kv`` is rejected (zero-trip KV loop -> NaN). ``--use-sinks`` adds random
+per-head sink logits and checks against a manual sink reference; it combines with
+``--sw``. ``--persistent`` is NOT a
 deferred mode either: the persistent grid ships and dispatch turns it on
 automatically for large-Sq prefill. ``--bn`` must divide the 256-row query tile and
 keep ``K_lds+V_lds`` inside the 64 KB gfx942 LDS -- ``--bn 128`` exceeds it at D128
@@ -55,6 +57,7 @@ Usage:
     python attention_dense_prefill.py --dtype fp16 --d 64
     python attention_dense_prefill.py --persistent off   # force the default grid
     python attention_dense_prefill.py --wpe 2            # override the shipped wpe
+    python attention_dense_prefill.py --use-sinks        # attention sinks
 """
 import argparse
 import dataclasses
@@ -186,6 +189,14 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
         help="sliding_window (0=off; multiple of block_n). Supported: KV-loop "
         "prune + window mask.",
     )
+    # A request property rather than a tuning override: it goes through dispatch
+    # like sliding_window does in dense_request.
+    ap.add_argument(
+        "--use-sinks",
+        dest="use_sinks",
+        action="store_true",
+        help="enable attention sinks (one [Hq] logit per query head)",
+    )
 
 
 def dense_request(
@@ -206,7 +217,8 @@ def dense_request(
     Shape comes from the caller; the three persistent knobs come from the CLI when
     explicitly passed and otherwise keep the request defaults, so dispatch applies
     its own gfx942 normalization to them. ``sliding_window`` is a request property
-    (0 = full causal), so dispatch ships the SWA-pruned spec.
+    (0 = full causal), so dispatch ships the SWA-pruned spec. ``--use-sinks`` is
+    one too, read from ``args``.
     """
     req_kwargs = {}
     if getattr(args, "persistent", None) is not None:
@@ -227,6 +239,7 @@ def dense_request(
         mask_type=1 if causal else 0,
         dtype=str(dtype).lower(),
         sliding_window=int(sliding_window),
+        use_sinks=bool(getattr(args, "use_sinks", False)),
         # Opt-in selector: this is the candidate whose spec we are measuring.
         algorithm="attention_dense",
         spec_id="gfx942_attention_dense",
@@ -340,6 +353,69 @@ def _launch_config(spec: Gfx942AttentionDenseSpec, stream) -> LaunchConfig:
     )
 
 
+# --------------------------------------------------------------------------- #
+# inputs + fp32 reference (shared with the live benchmark)
+# --------------------------------------------------------------------------- #
+def make_sinks(spec: Gfx942AttentionDenseSpec, device="cuda"):
+    """Per-query-head sink logits ([Hq], q dtype) when ``spec.use_sinks``, else None."""
+    if not spec.use_sinks:
+        return None
+    return torch.randn(
+        spec.num_query_heads, dtype=_TORCH_DT[spec.dtype], device=device
+    ).contiguous()
+
+
+def dense_reference(q, k, v, spec: Gfx942AttentionDenseSpec, sinks=None):
+    """fp32 reference [B, Sq, Hq, D] for ``spec`` (causal / full / SWA, GQA).
+
+    Without sinks this is torch SDPA. With sinks SDPA cannot append the sink
+    column, so it is ``softmax(concat([QK*scale, sink]))[..., :-1] @ V``, chunked
+    over queries so the fp32 score matrix stays near 1 GiB at large Sq (softmax
+    runs along keys, so query rows are independent and chunking is exact).
+    """
+    B, Sq, Hq, D = q.shape
+    Skv = k.shape[1]
+    dev = q.device
+    rep = Hq // k.shape[2]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
+    vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
+    W = spec.sliding_window
+    ki = torch.arange(Skv, device=dev).view(1, -1)
+
+    if sinks is None:
+        if spec.causal and W > 0:
+            qi = torch.arange(Sq, device=dev).view(-1, 1)
+            allowed = (ki <= qi) & (ki > qi - W)
+            ref = torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, attn_mask=allowed
+            )
+        else:
+            ref = torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, is_causal=spec.causal
+            )
+        return ref.transpose(1, 2)
+
+    scale = 1.0 / math.sqrt(D)
+    sink_col = sinks.float().view(1, Hq, 1, 1)
+    q_blk = max(1, min(Sq, (1 << 30) // max(1, B * Hq * (Skv + 1) * 4)))
+    ref = torch.empty_like(qh)
+    for q0 in range(0, Sq, q_blk):
+        q1 = min(q0 + q_blk, Sq)
+        attn = torch.einsum("bhqd,bhkd->bhqk", qh[:, :, q0:q1], kh) * scale
+        qi = torch.arange(q0, q1, device=dev).view(-1, 1)
+        mask = torch.zeros(q1 - q0, Skv, dtype=torch.bool, device=dev)
+        if spec.causal:
+            mask |= ki > qi
+        if W > 0:
+            mask |= ki <= qi - W
+        attn.masked_fill_(mask.view(1, 1, q1 - q0, Skv), float("-inf"))
+        attn = torch.cat([attn, sink_col.expand(B, Hq, q1 - q0, 1)], dim=-1)
+        attn = torch.softmax(attn, dim=-1)[..., :-1]
+        ref[:, :, q0:q1] = torch.einsum("bhqk,bhkd->bhqd", attn, vh)
+    return ref.transpose(1, 2)
+
+
 def run(
     spec: Gfx942AttentionDenseSpec,
     *,
@@ -358,6 +434,7 @@ def run(
     v = (torch.randn(B, Skv, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
     out = torch.zeros(B, Sq, Hq, D, dtype=dt, device=dev)
     scale = 1.0 / math.sqrt(D)
+    sinks = make_sinks(spec, dev)
 
     launcher = _make_launcher(spec)
     stream = torch.cuda.current_stream().cuda_stream
@@ -370,6 +447,9 @@ def run(
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
         vals["seqlen_kv"] = int(spec.seqlen_kv)
+    if spec.use_sinks:
+        # Last param, after the shape params (attention_dense_signature order).
+        vals["sink_ptr"] = sinks
 
     def call():
         launcher(vals, config=cfg)
@@ -379,22 +459,7 @@ def run(
 
     err = float("nan")
     if check:
-        qh = q.transpose(1, 2).float()
-        rep = Hq // Hkv
-        kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
-        vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
-        W = spec.sliding_window
-        if spec.causal and W > 0:
-            qi = torch.arange(Sq, device=dev).view(-1, 1)
-            ki = torch.arange(Skv, device=dev).view(1, -1)
-            allowed = (ki <= qi) & (ki > qi - W)
-            ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, attn_mask=allowed
-            ).transpose(1, 2)
-        else:
-            ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, is_causal=spec.causal
-            ).transpose(1, 2)
+        ref = dense_reference(q, k, v, spec, sinks)
         err = (out.float() - ref).abs().max().item()
 
     for _ in range(warmup):

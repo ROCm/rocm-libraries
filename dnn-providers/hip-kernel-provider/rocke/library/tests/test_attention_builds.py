@@ -3145,7 +3145,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         emitted body actually reads. Both arms are covered: the runtime-shape path
         (q/k/v/o + scale + the three i32 shape args) and the baked persistent path,
         whose body declares no shape params, so an extra kernarg there would be
-        read as garbage.
+        read as garbage. Each arm is also checked with ``use_sinks``, which appends
+        ``sink_ptr``.
         """
         from rocke.core.ir import PtrType
         from rocke.helpers.spec import ptr_type_str
@@ -3171,8 +3172,17 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         self.assertTrue(rt.runtime_shape)
         baked = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
         self.assertFalse(baked.runtime_shape)
+        rt_sinks = self._spec(**self._BASE_KWARGS, use_sinks=True)
+        baked_sinks = self._spec(
+            **self._BASE_KWARGS, persistent=True, num_persistent=64, use_sinks=True
+        )
 
-        for arm, spec in (("runtime-shape", rt), ("baked", baked)):
+        for arm, spec in (
+            ("runtime-shape", rt),
+            ("baked", baked),
+            ("runtime-shape+sinks", rt_sinks),
+            ("baked+sinks", baked_sinks),
+        ):
             with self.subTest(arm=arm):
                 params = build_attention_dense(spec, arch="gfx942").params
                 sig = attention_dense_signature(spec)
@@ -3199,6 +3209,12 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             ["batch", "seqlen_q", "seqlen_kv"],
             "runtime-shape gfx942 ABI is not the baked ABI plus the three shape args",
         )
+        # Sinks append exactly one kernarg, last, on both arms.
+        for plain, with_sinks in ((rt, rt_sinks), (baked, baked_sinks)):
+            self.assertEqual(
+                [a["name"] for a in attention_dense_signature(with_sinks)],
+                [a["name"] for a in attention_dense_signature(plain)] + ["sink_ptr"],
+            )
 
 
 # ---------------------------------------------------------------------

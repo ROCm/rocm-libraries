@@ -913,8 +913,9 @@ def supports_attention_dense(
     In scope for this port: gfx942, bf16/fp16, D64/D128, MHA/GQA including
     non-power-of-2 groups, causal or full, the default grid AND the P4 persistent
     grid-stride variant, ``block_n`` dividing the ``block_m`` query tile, within the
-    LDS budget and 32-bit addressing, and sliding-window (KV-loop prune + window mask).
-    varlen / ragged / sinks are later follow-ups (rejected below).
+    LDS budget and 32-bit addressing, sliding-window (KV-loop prune + window mask), and
+    attention sinks (alone or with sliding-window). varlen / ragged are later
+    follow-ups (rejected below).
     """
     if arch != "gfx942":
         return False, f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
@@ -960,8 +961,8 @@ def supports_attention_dense(
         return False, "gfx942 attention_dense: ragged not yet supported"
     # sliding_window is supported (KV-loop prune + window mask); the shared spec
     # __post_init__ re-run above enforces its constraints (W % block_n, causal).
-    if spec.use_sinks:
-        return False, "gfx942 attention_dense: sinks not yet supported"
+    # use_sinks is supported (m/l seed per work item); __post_init__ rejects it with
+    # paged/varlen.
 
     # --- gfx942-private sweep knobs. Validated here rather than only in the builder
     # because the module contract is support() => build(): a knob that only the
@@ -1220,6 +1221,12 @@ def _build_attention_dense_single_buffer(
         seqlen_kv_p = b.param("seqlen_kv", I32)
     else:
         batch_p = seqlen_q_p = seqlen_kv_p = None
+    # Per-query-head sink logits [Hq], after the shape params (the gfx950 ABI order).
+    # Declared only when use_sinks, so the non-sink ABI and IR are unchanged.
+    if spec.use_sinks:
+        sinks = b.param(
+            "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     tid = b.thread_id_x()
@@ -1680,8 +1687,18 @@ def _build_attention_dense_single_buffer(
             )
 
         # ---- online-softmax main loop (non-pipelined, single buffer) ----
-        m0 = neg_inf
-        l0 = b.const_f32(0.0)
+        if spec.use_sinks:
+            # The sink is a virtual key with logit sink[hq] and zero value: seed the
+            # running max with it (log2 domain) and the denominator with exp2(0) = 1.
+            # Seeded once per work item before the loop, never inside the doubled
+            # 32x32x8 K steps. The loop's l_i*alpha rescales the seed on every tile,
+            # including the first, so no tile-0 fix-up is needed.
+            sink_h = b.global_load(sinks, hq, dtype, align=2)
+            m0 = b.fmul(b.cast_to_f32(sink_h), b.const_f32(LOG2E))
+            l0 = b.const_f32(1.0)
+        else:
+            m0 = neg_inf
+            l0 = b.const_f32(0.0)
         o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
         iter_args = [("m", m0), ("l", l0)] + [
             (f"o{dt}", o0[dt]) for dt in range(D_TILES)
@@ -1950,7 +1967,8 @@ def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:
 
 def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature: q/k/v/o pointers + f32 scale, plus batch/seqlen_q/seqlen_kv as
-    i32 when the body takes the shape at runtime (``spec.runtime_shape``).
+    i32 when the body takes the shape at runtime (``spec.runtime_shape``), plus a
+    ``sink_ptr`` ([Hq], q dtype) last when ``spec.use_sinks``.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -1979,6 +1997,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
             .scalar("seqlen_q", "i32")
             .scalar("seqlen_kv", "i32")
         )
+    if spec.use_sinks:
+        # Mirrors the sink_ptr param declared after the shape params.
+        sig = sig.ptr("sink_ptr", spec.dtype)
     return sig.build()
 
 
@@ -1997,10 +2018,13 @@ def run_attention_dense_torch(
     arch: str = "gfx942",
     cu_seqlens_q=None,
     cu_seqlens_kv=None,
+    sinks=None,
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
     ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)).
+    ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
+    ``spec.use_sinks``.
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
     torch-free at import time. Serves both the default and the P4 persistent grid
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
@@ -2013,8 +2037,8 @@ def run_attention_dense_torch(
     name tokens. The persistent path keeps its fully-baked per-shape identity.
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
-    ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a
-    caller error rather than a silently-ignored argument."""
+    ABI never carries cu_seqlens; passing ``cu_seqlens_*`` is a caller error rather
+    than a silently-ignored argument."""
     spec = _as_gfx942_spec(spec)
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
@@ -2024,6 +2048,21 @@ def run_attention_dense_torch(
             "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "
             "is rejected by supports_attention_dense); the ABI has no cu_seqlens args"
         )
+    if not spec.use_sinks and sinks is not None:
+        raise ValueError("sinks provided but spec.use_sinks is False")
+    if spec.use_sinks:
+        if sinks is None:
+            raise ValueError("spec.use_sinks=True requires sinks that are not None")
+        if sinks.shape != (spec.num_query_heads,):
+            raise ValueError(
+                f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
+            )
+        if sinks.dtype != q.dtype:
+            raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
+        if not sinks.is_contiguous():
+            raise ValueError("sinks must be contiguous")
+        if not sinks.is_cuda:
+            raise ValueError("sinks must be a CUDA tensor")
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -2051,6 +2090,8 @@ def run_attention_dense_torch(
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
         vals["seqlen_kv"] = int(spec.seqlen_kv)
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
     launcher(
         vals,
         config=LaunchConfig(

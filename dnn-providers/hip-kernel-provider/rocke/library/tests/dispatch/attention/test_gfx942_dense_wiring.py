@@ -134,12 +134,15 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             ok, _ = _candidate().admits(_req(sliding_window=64))
             self.assertTrue(ok)
 
-    def test_rejects_sinks(self):
+    def test_admits_sinks(self):
         with _Gfx942Arch():
             ok, why = _candidate().admits(_req(use_sinks=True))
-            self.assertFalse(ok)
-            self.assertIn("capability", why)
-            self.assertIn("sinks", why)
+            self.assertTrue(ok, why)
+
+    def test_admits_sliding_window_with_sinks(self):
+        with _Gfx942Arch():
+            ok, why = _candidate().admits(_req(sliding_window=128, use_sinks=True))
+            self.assertTrue(ok, why)
 
     def test_rejects_ragged_sequence_length(self):
         """_dense_spec sets ragged=True for any non-256-multiple self-attention
@@ -231,6 +234,160 @@ class TestGfx942SlidingWindow(unittest.TestCase):
             ok, why = _candidate().admits(_req(sliding_window=128, mask_type=0))
             self.assertFalse(ok)
             self.assertNotIn("capability", why)
+
+
+class TestGfx942Sinks(unittest.TestCase):
+    """Sinks pass-through, capability and selected-path tests, alone and with SWA."""
+
+    def test_sinks_off_by_default(self):
+        with _Gfx942Arch():
+            self.assertFalse(_dense_spec(_req()).use_sinks)
+
+    def test_sinks_pass_through_to_spec(self):
+        with _Gfx942Arch():
+            self.assertTrue(_dense_spec(_req(use_sinks=True)).use_sinks)
+
+    def test_sinks_in_supports_features(self):
+        self.assertIn("sinks", _candidate().capability.supports_features)
+
+    def test_swa_sink_both_flags_pass_through(self):
+        with _Gfx942Arch():
+            spec = _dense_spec(_req(sliding_window=256, use_sinks=True))
+            self.assertEqual(spec.sliding_window, 256)
+            self.assertTrue(spec.use_sinks)
+
+    def test_dispatch_selects_dense_not_pipe_or_unified(self):
+        """dense_pipe and unified_2d also support sinks on gfx942, so admitting is not
+        enough: the dispatched candidate and kernel must be this dense arm, for both
+        the default and the persistent grid, with and without SWA."""
+        cases = (
+            dict(use_sinks=True, dense_persistent="off"),
+            dict(use_sinks=True, dense_persistent="on"),
+            dict(use_sinks=True, sliding_window=128, dense_persistent="off"),
+            dict(use_sinks=True, sliding_window=128, dense_persistent="on"),
+        )
+        with _Gfx942Arch():
+            for kw in cases:
+                with self.subTest(**kw):
+                    req = _req(**kw)
+                    r = dispatch_attention(req)
+                    self.assertEqual(r.candidate.name, _NAME)
+                    kname = r.spec.kernel_name_override
+                    self.assertIn("sinks", kname)
+                    if kw.get("sliding_window"):
+                        self.assertIn("swa128", kname)
+                    self.assertEqual(
+                        kname,
+                        build_attention_dense(_dense_spec(req), arch="gfx942").name,
+                    )
+
+    def test_auto_sinks_request_does_not_select_dense(self):
+        """Opt-in still holds for sink requests."""
+        with _Gfx942Arch():
+            r = dispatch_attention(_req(use_sinks=True, algorithm="auto"))
+            self.assertNotEqual(r.candidate.name, _NAME)
+
+
+class TestGfx942SinksValidation(unittest.TestCase):
+    """run_attention_dense_torch validates ``sinks`` before compiling anything, so
+    these run on CPU with duck-typed stand-ins for the tensors."""
+
+    def _run(self, *, use_sinks, sinks):
+        from types import SimpleNamespace
+
+        from kernels.gfx942.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+            use_sinks=use_sinks,
+        )
+        qshape = (1, 512, 8, 64)
+        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
+        kv = SimpleNamespace(shape=qshape)
+        with self.assertRaises(ValueError) as cm:
+            run_attention_dense_torch(
+                spec=spec, q=q, k=kv, v=kv, out=q, scale=0.125, sinks=sinks
+            )
+        return str(cm.exception)
+
+    @staticmethod
+    def _sinks(shape=(8,), dtype="bfloat16", contiguous=True, cuda=True):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            shape=shape,
+            dtype=dtype,
+            is_contiguous=lambda: contiguous,
+            is_cuda=cuda,
+        )
+
+    def test_sinks_rejected_when_use_sinks_false(self):
+        msg = self._run(use_sinks=False, sinks=self._sinks())
+        self.assertIn("sinks provided but spec.use_sinks is False", msg)
+
+    def test_sinks_required_when_use_sinks_true(self):
+        msg = self._run(use_sinks=True, sinks=None)
+        self.assertIn("spec.use_sinks=True requires sinks", msg)
+
+    def test_sinks_wrong_shape_rejected(self):
+        msg = self._run(use_sinks=True, sinks=self._sinks(shape=(16,)))
+        self.assertIn("sinks must have shape (8,), got (16,)", msg)
+
+    def test_sinks_wrong_dtype_rejected(self):
+        msg = self._run(use_sinks=True, sinks=self._sinks(dtype="float16"))
+        self.assertIn("must match q dtype", msg)
+
+    def test_sinks_non_contiguous_rejected(self):
+        msg = self._run(use_sinks=True, sinks=self._sinks(contiguous=False))
+        self.assertIn("sinks must be contiguous", msg)
+
+    def test_sinks_cpu_tensor_rejected(self):
+        msg = self._run(use_sinks=True, sinks=self._sinks(cuda=False))
+        self.assertEqual(msg, "sinks must be a CUDA tensor")
+
+    def test_valid_sinks_pass_validation_and_reach_compile(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx942.attention_dense as ad
+
+        spec = ad.AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        q = SimpleNamespace(shape=(1, 256, 16, 128), dtype="bfloat16")
+        kv = SimpleNamespace(shape=(1, 256, 4, 128))
+        sentinel = RuntimeError("reached-compile")
+
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as cm:
+                ad.run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=kv,
+                    v=kv,
+                    out=q,
+                    scale=0.125,
+                    sinks=self._sinks(shape=(16,)),
+                )
+        self.assertIs(cm.exception, sentinel)
 
 
 if __name__ == "__main__":

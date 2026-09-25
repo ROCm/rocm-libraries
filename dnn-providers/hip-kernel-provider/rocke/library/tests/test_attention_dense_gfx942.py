@@ -192,7 +192,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "paged",
         "block_size",
         "num_kv_blocks",
-        "use_sinks",
     }
 )
 
@@ -234,7 +233,7 @@ _SPEC_PERTURBATIONS = {
     "interleave": (True, False),
     "persist_decode": ("qb_major", "hkv_major"),
     "lazy_rescale": (False, True),
-    "use_sinks": (),  # unbuildable (not yet supported)
+    "use_sinks": (True,),
 }
 
 # The gfx942-private half of the same table: fields Gfx942AttentionDenseSpec adds on
@@ -461,10 +460,10 @@ def test_supports_rejects_non_gfx942():
     [
         # persistent and sliding_window are NOT here anymore -- both are supported
         # (persistent P4; sliding_window via start_tile prune + window mask). See
-        # the persistent build/decode tests and the SWA coverage below.
+        # the persistent build/decode tests and the SWA coverage below. use_sinks
+        # is supported too; see the sink tests below.
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
-        (dict(use_sinks=True), "sinks"),
     ],
 )
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
@@ -512,6 +511,88 @@ def test_supports_accepts_sliding_window_in_range():
         _spec(seqlen_q=2048, seqlen_kv=2048, sliding_window=128), arch="gfx942"
     )
     assert ok, why
+
+
+def test_supports_accepts_sinks_alone_and_with_sliding_window():
+    for kw in (dict(), dict(sliding_window=128), dict(persistent=True)):
+        ok, why = supports_attention_dense(_spec(use_sinks=True, **kw), arch="gfx942")
+        assert ok, f"{kw}: {why}"
+
+
+def test_supports_still_rejects_empty_window_with_sinks():
+    """Sinks would turn the empty-window NaN into a 0 output, but the zero-trip KV
+    loop is still out of scope, so the guard must hold with sinks on too."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128, use_sinks=True),
+        arch="gfx942",
+    )
+    assert not ok and "sliding_window" in why
+
+
+def _sink_seed_sites(kernel):
+    """(region ops, index of the sink load, index of the KV loop) for every region
+    holding a load from ``sink_ptr``, plus the total sink-load count."""
+    sites, n_loads = [], 0
+
+    def visit(ops):
+        nonlocal n_loads
+        loads = [
+            i
+            for i, o in enumerate(ops)
+            if o.name == "memref.global_load_typed"
+            and str(o.operands[0]) == "%sink_ptr"
+        ]
+        n_loads += len(loads)
+        kv = [
+            i
+            for i, o in enumerate(ops)
+            if o.name == "scf.for" and o.attrs.get("iv") == "%kt"
+        ]
+        for i in loads:
+            sites.append((ops, i, kv))
+        for o in ops:
+            for region in getattr(o, "regions", ()):
+                visit(region.ops)
+
+    visit(kernel.body.ops)
+    return sites, n_loads
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(),
+        dict(head_size=64, dtype="fp16"),
+        dict(sliding_window=128),
+        dict(persistent=True, persist_decode="qb_major"),
+        dict(persistent=True, persist_decode="hkv_major"),
+    ],
+    ids=["d128_bf16", "d64_fp16", "swa128", "persist_qbmaj", "persist_hkvmaj"],
+)
+def test_sink_seed_is_loaded_once_before_the_kv_loop(kw):
+    """The sink seeds m/l exactly once per work item: one ``sink_ptr`` load, in the
+    same region as the KV loop and before it. A load inside the KV loop (or inside
+    the doubled 32x32x8 K steps it contains) would re-seed per tile and is the
+    failure mode this guards. On the persistent grid the region is the grid-stride
+    body, so ``hq`` is the per-work-item head."""
+    kernel = build_attention_dense(_spec(use_sinks=True, **kw), arch="gfx942")
+    sites, n_loads = _sink_seed_sites(kernel)
+    assert n_loads == 1, f"expected one sink load, got {n_loads}"
+    ops, i_load, kv = sites[0]
+    assert len(kv) == 1, "sink load is not in the KV loop's region"
+    assert i_load < kv[0], "sink load must precede the KV loop"
+    # The loop-carried m/l inits are the seeds, not -inf / 0.
+    loop = ops[kv[0]]
+    m_init, l_init = (str(x) for x in loop.operands[3:5])
+    seeded = {str(r) for o in ops[i_load : kv[0]] for r in getattr(o, "results", ())}
+    assert m_init in seeded, f"m init {m_init} is not derived from the sink load"
+    assert l_init in seeded, f"l init {l_init} is not the sink's 1.0"
+
+
+def test_no_sinks_emits_no_sink_param_or_load():
+    kernel = build_attention_dense(_spec(), arch="gfx942")
+    assert "sink_ptr" not in [p.name for p in kernel.params]
+    assert _sink_seed_sites(kernel)[1] == 0
 
 
 def test_supports_rejects_over_budget_lds():
