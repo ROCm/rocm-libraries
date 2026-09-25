@@ -131,7 +131,25 @@ def _pip_install_rocisa(c, rocisa_dir=None, shared=True, rocm_path=None):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)
     env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
-    c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
+    c.run(
+        shlex.join(
+            [
+                str(pathlib.Path(sys.executable).absolute()),
+                "-m",
+                "pip",
+                "install",
+                "--no-build-isolation",
+                "-e",
+                str(src),
+            ]
+        ),
+        env=env,
+    )
+
+
+def _pip():
+    """Invoke pip through the active interpreter."""
+    return shlex.join([str(pathlib.Path(sys.executable).absolute()), "-m", "pip"])
 
 
 def _want_stinkytofu(stinkytofu, targets=None):
@@ -202,7 +220,7 @@ def _pip_install_stinkytofu(c, force=False):
     force_flag = "--force-reinstall --no-deps " if force else ""
     print("Building and installing the standalone stinkytofu Python binding "
           "(rocisa stinkytofu backend)...")
-    c.run(f"pip install {force_flag}{shlex.quote(str(src))}", env=env)
+    c.run(f"{_pip()} install {force_flag}{shlex.quote(str(src))}", env=env)
     _pip_install_adaptor(c)
 
 
@@ -223,7 +241,7 @@ def _pip_install_adaptor(c):
         )
         return
     print("Installing rocisa_stinkytofu_adaptor (rocisa stinkytofu backend)...")
-    c.run(f"pip install --no-deps --disable-pip-version-check {shlex.quote(str(src))}")
+    c.run(f"{_pip()} install --no-deps --disable-pip-version-check {shlex.quote(str(src))}")
 
 
 @task(
