@@ -136,11 +136,15 @@ class GETRS_64 : public GETRS_BASE<int64_t>
 {
 };
 
-class GETRS_LARGE_BATCH : public GETRS_BASE<rocblas_int, 65537>
+// large batch
+
+int constexpr BCOUNT = 65537; /* 65537 = 64*1024 + 1 */
+
+class GETRS_LARGE_BATCH : public GETRS_BASE<rocblas_int, BCOUNT>
 {
 };
 
-class GETRS_LARGE_BATCH_64 : public GETRS_BASE<rocblas_int, 65537>
+class GETRS_LARGE_BATCH_64 : public GETRS_BASE<int64_t, BCOUNT>
 {
 };
 
