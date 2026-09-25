@@ -108,7 +108,7 @@ Use the `users/<github-username>/<branch-name>` branch convention and base PRs o
 
 3. **ClientWriter** (`tensilelite/ClientWriter.py`): Wraps the selected kernels in a C++ library and generates the benchmark client. Output: `4_LibraryClient/`.
 
-Entry point: `tensilelite/bin/Tensile` → `tensilelite/tensilelite.py:tensilelite()` → `executeStepsInConfig()`.
+Entry point: `python -m tensilelite run` → `tensilelite/tensilelite.py:tensilelite()` → `executeStepsInConfig()`.
 
 ### Key Python Modules
 
