@@ -13,7 +13,7 @@ Benchmarking enumerates every registered combo via
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Sequence, Tuple
 
@@ -36,6 +36,7 @@ from .common import (
     _parse_attention_mask_type,
     _problem,
     _request_errors,
+    _resolve_dense_waves_per_eu,
     _selector_matches,
 )
 
@@ -229,10 +230,9 @@ def _ragged_self_attention(
 
 def _wide_dma_eligible(req: AttentionRequest, spec) -> bool:
     mask_type = _parse_attention_mask_type(req.mask_type)
-    moving_bottom_right = (
-        mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL
-        and int(req.seqlen_q) != int(req.seqlen_k)
-    )
+    moving_bottom_right = mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
+        req.seqlen_q
+    ) != int(req.seqlen_k)
     return (
         bool(spec.persistent)
         and int(req.hdim_q) == 128
@@ -312,6 +312,7 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
         dtype=req.dtype.lower(),
         block_m=bm,
         block_n=bn,
+        waves_per_eu=_resolve_dense_waves_per_eu(req, 2),
         lds_v_row_pad=int(layout["lds_v_row_pad"]),
         persistent=variant.persistent,
         num_persistent=int(req.dense_num_persistent),
@@ -428,6 +429,20 @@ def _make_gfx950_attention_dense_candidate(
 
         return bind_dense_attention_torch(request, spec, tensors, **kwargs)
 
+    def sweep(req: OperatorRequest):
+        if not candidate.admits(req)[0]:
+            return ()
+        spec = select(req)
+        assert isinstance(req, AttentionRequest)
+        if int(req.dense_waves_per_eu) != 0:
+            return (spec,)
+        from .tuning_common import dense_waves_per_eu_sweep_values
+
+        return tuple(
+            replace(spec, waves_per_eu=waves_per_eu)
+            for waves_per_eu in dense_waves_per_eu_sweep_values(spec.waves_per_eu)
+        )
+
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
@@ -449,7 +464,7 @@ def _make_gfx950_attention_dense_candidate(
         signature=signature,
         grid=grid,
         block=block,
-        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        sweep_space=sweep,
         build=build,
         bind_torch=bind_torch,
     )

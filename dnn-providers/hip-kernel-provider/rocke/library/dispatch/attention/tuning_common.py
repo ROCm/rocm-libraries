@@ -410,6 +410,18 @@ _PROD_INTERLEAVE = {
 }
 _PROD_WAVES_2D: Tuple[Optional[int], ...] = (None, 2, 4)
 
+
+def dense_waves_per_eu_sweep_values(default: int) -> Tuple[int, ...]:
+    """Dense WPE axis for the active sweep level, with shipped policy first."""
+    axis = _PROD_WAVES_2D if _SWEEP_LEVEL.get() == "production" else _SWEEP_WAVES
+    values = []
+    for value in axis:
+        resolved = int(default if value is None else value)
+        if resolved not in values:
+            values.append(resolved)
+    return tuple(values)
+
+
 # Kernel-documented constraints its ``__post_init__`` does not enforce.
 # Softmax interleave and sched_barrier steer the scheduler in opposite
 # directions; interleave is only emitted on the transposed-32x32 body and the

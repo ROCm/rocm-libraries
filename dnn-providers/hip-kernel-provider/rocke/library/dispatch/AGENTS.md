@@ -22,13 +22,13 @@ kernel module builds that kernel's own spec here, tuning included:
 wide-DMA, and `gfx942.py::_dense_spec` resolves those plus `waves_per_eu`. Those specs
 are consumed only by their own builder and never enter the C++ parity identity. One
 rule governs the exception: **any value the kernel bakes into its `kernel_name` must
-be resolved from the kernel's own policy function**, not pinned here — `gfx942.py`
-calls `kernels.gfx942.attention_dense._tuned_waves_per_eu` for exactly that reason.
-A number pinned in the factory drifts away from the policy: the name tag comes from
-the spec while the body is built from the policy's value, so the symbol advertises a
-knob the binary does not have. In-process that is a misleading symbol plus redundant
-cache entries; under AOT packaging, where the symbol *is* the identity, it serves the
-wrong HSACO.
+be resolved into the concrete spec before build**. The default must come from the
+kernel's policy function; an explicit request/sweep override may replace it only
+when the body, symbol, and cache all read that same spec field. `gfx942.py` calls
+`kernels.gfx942.attention_dense._tuned_waves_per_eu` for the default, then applies
+the shared `dense_waves_per_eu` override. The gfx942 symbol always carries WPE;
+gfx950 appends it when non-default. This keeps the emitted attribute and identity
+in lockstep for runtime caches and AOT packaging.
 
 The launcher cache itself is keyed by `attention_dense_cache_key`, not by the symbol
 name, so the name is not a backstop for this — on the gfx950 runtime-shape path the
@@ -101,7 +101,8 @@ Wide-DMA variants do not admit SWA or sinks; `dispatch_attention` uses
 policy (default tile, persist once `nqb*Hq*B >= num_persistent`, wide DMA on
 aligned causal D128) rather than always picking the production name. Pin
 `dense_tile` / `dense_persistent` / `dense_wide_lds_dma` on `AttentionRequest`
-to filter. `registered_attention_combos(req)` is the multi-engine bench
+to filter, and `dense_waves_per_eu=1..8` to override the shipped WPE policy.
+`registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
 candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only
 unified path labels are omitted.
@@ -283,6 +284,10 @@ roughly 16M legal knob settings, so `full` is consumed by sampling:
 `tuning_sample` / `seed` (default 256, 0 walks the full stream). Sampling is a
 random walk uniform at each knob decision, not uniform over the whole legal
 set. `production` ignores `tuning_sample`.
+
+Dense candidates share the level context but own a small WPE axis: production
+walks the shipped policy plus WPE 2 and 4; full walks WPE 1 through 4. An
+explicit `dense_waves_per_eu` pin collapses either level to that one value.
 
 Every consumer takes `sweep_level` plus `candidate_prefix` / `tuning_id_prefix`:
 `run_sweep` (exposed as `--sweep-level` / `--sweep-tuning-sample` /

@@ -53,6 +53,7 @@ def _args(**kw):
         kv_block_size=16,
         sliding_window=0,
         num_cus=0,
+        dense_waves_per_eu=0,
         causal=True,
         candidate_prefix="attention_gfx950_dense",
         tuning_id_prefix="",
@@ -193,6 +194,14 @@ class TestComboSweepLifecycle(unittest.TestCase):
             result,
         )
         self.assertEqual(argv[argv.index("--benchmark-iterations") + 1], "7")
+
+    def test_dense_wpe_reaches_request_and_isolated_child(self):
+        args = _args(dense_waves_per_eu=3)
+        req = next(sweep._requests(args))
+        self.assertEqual(req.dense_waves_per_eu, 3)
+        result = SimpleNamespace(candidate=SimpleNamespace(name="candidate"))
+        argv = sweep._child_argv(args, req, result)
+        self.assertEqual(argv[argv.index("--dense-waves-per-eu") + 1], "3")
 
     def test_invalid_host_validation_does_not_isolate_or_init_torch(self):
         req = _req(algorithm="attention_dense")

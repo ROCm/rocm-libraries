@@ -20,6 +20,7 @@ from dispatch.attention import (
     AttentionRequest,
     attention_candidates,
     dense_spec_for_request as routed_dense_spec_for_request,
+    registered_attention_combos,
 )
 from dispatch.attention.gfx950 import dense_spec_for_request
 from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
@@ -29,6 +30,7 @@ from kernels.gfx950.attention_dense import (
     GFX950_DENSE_LAYOUTS,
     Gfx950AttentionDenseSpec,
     attention_dense_grid,
+    build_attention_dense,
     supports_attention_dense,
 )
 
@@ -70,6 +72,51 @@ class TestDenseSpecArchRouter(unittest.TestCase):
     def test_rejects_arch_without_dense_factory(self):
         with self.assertRaisesRegex(ValueError, "no spec factory"):
             routed_dense_spec_for_request(_gfx950_dense_req(arch="gfx1250"))
+
+
+class TestDenseWavesPerEuWiring(unittest.TestCase):
+    def test_default_policy_and_explicit_override(self):
+        default = dense_spec_for_request(_gfx950_dense_req())
+        overridden = dense_spec_for_request(_gfx950_dense_req(dense_waves_per_eu=4))
+        self.assertEqual(default.waves_per_eu, 2)
+        self.assertEqual(overridden.waves_per_eu, 4)
+        self.assertNotIn("wpe", default.kernel_name())
+        self.assertIn("wpe4", overridden.kernel_name())
+        self.assertNotEqual(default.kernel_name(), overridden.kernel_name())
+        self.assertEqual(
+            build_attention_dense(overridden, arch="gfx950").attrs["waves_per_eu"],
+            4,
+        )
+
+    def test_invalid_override_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "dense_waves_per_eu"):
+            dense_spec_for_request(_gfx950_dense_req(dense_waves_per_eu=9))
+
+    def _swept_waves(self, level: str, *, pin: int = 0) -> set[int]:
+        req = _gfx950_dense_req(
+            hdim_q=128,
+            hdim_v=128,
+            dense_persistent="off",
+            dense_tile="default",
+            dense_wide_lds_dma="off",
+            dense_waves_per_eu=pin,
+        )
+        return {
+            spec.waves_per_eu
+            for _candidate, spec in registered_attention_combos(
+                req,
+                candidate_prefix="attention_gfx950_dense_grid_default",
+                sweep_level=level,
+            )
+        }
+
+    def test_production_and_full_sweeps_expand_wpe(self):
+        self.assertEqual(self._swept_waves("production"), {2, 4})
+        self.assertEqual(self._swept_waves("full"), {1, 2, 3, 4})
+
+    def test_explicit_override_pins_sweep(self):
+        self.assertEqual(self._swept_waves("production", pin=3), {3})
+        self.assertEqual(self._swept_waves("full", pin=3), {3})
 
 
 class TestDenseGqaPairWiring(unittest.TestCase):

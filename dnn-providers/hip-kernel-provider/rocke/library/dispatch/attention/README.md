@@ -105,6 +105,12 @@ legal specs per candidate.
 `candidate_prefix` / `tuning_id_prefix` narrow either walk. Production
 `algorithm="auto"` selection does not see these candidates.
 
+Dense candidates also expand `waves_per_eu`: production walks the shipped
+policy plus WPE 2 and 4, while full walks WPE 1 through 4. Set
+`AttentionRequest.dense_waves_per_eu` (or the combo sweep CLI's
+`--dense-waves-per-eu`) to 1..8 to pin one value; 0 keeps policy selection for
+normal dispatch and enables sweep expansion.
+
 ## Capability versus support
 
 `Capability` is declarative and queryable without constructing a kernel spec.

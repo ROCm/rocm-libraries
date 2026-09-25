@@ -29,6 +29,7 @@ from dispatch.attention import (
     AttentionRequest,
     attention_candidates,
     dispatch_attention,
+    registered_attention_combos,
 )
 
 # gfx942's own spec factory. NOT the package-level ``dense_spec_for_request``,
@@ -254,6 +255,44 @@ class TestGfx942DensePersistent(unittest.TestCase):
             ok, why = _candidate().admits(req)
             self.assertTrue(ok, why)
             self.assertTrue(_dense_spec(req).persistent)
+
+
+class TestGfx942DenseWavesPerEu(unittest.TestCase):
+    def test_shipped_policy_and_explicit_override(self):
+        self.assertEqual(_dense_spec(_req()).waves_per_eu, 2)
+        self.assertEqual(
+            _dense_spec(_req(hdim_q=64, hdim_v=64)).waves_per_eu,
+            4,
+        )
+        overridden = _dense_spec(_req(dense_waves_per_eu=3))
+        self.assertEqual(overridden.waves_per_eu, 3)
+        self.assertIn("wpe3", overridden.kernel_name())
+        self.assertEqual(
+            build_attention_dense(overridden, arch="gfx942").attrs["waves_per_eu"],
+            3,
+        )
+
+    def test_invalid_override_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "dense_waves_per_eu"):
+            _dense_spec(_req(dense_waves_per_eu=9))
+
+    def _swept_waves(self, level: str, *, pin: int = 0) -> set[int]:
+        return {
+            spec.waves_per_eu
+            for _candidate, spec in registered_attention_combos(
+                _req(dense_waves_per_eu=pin),
+                candidate_prefix=_NAME,
+                sweep_level=level,
+            )
+        }
+
+    def test_production_and_full_sweeps_expand_wpe(self):
+        self.assertEqual(self._swept_waves("production"), {2, 4})
+        self.assertEqual(self._swept_waves("full"), {1, 2, 3, 4})
+
+    def test_explicit_override_pins_sweep(self):
+        self.assertEqual(self._swept_waves("production", pin=3), {3})
+        self.assertEqual(self._swept_waves("full", pin=3), {3})
 
 
 class TestGfx942DenseSpecIdentity(unittest.TestCase):

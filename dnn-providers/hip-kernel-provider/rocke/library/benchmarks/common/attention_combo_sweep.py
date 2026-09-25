@@ -84,6 +84,7 @@ def _requests(args):
                     kv_block_size=args.kv_block_size,
                     sliding_window=args.sliding_window,
                     num_cus=args.num_cus,
+                    dense_waves_per_eu=int(getattr(args, "dense_waves_per_eu", 0) or 0),
                 )
 
 
@@ -370,6 +371,7 @@ def _resolve_pinned(args):
 
 def _row_skeleton(req, candidate, spec, index: int) -> dict:
     row = _shape_fields(req)
+    kernel_spec = getattr(spec, "kernel_spec", spec)
     row.update(
         index=index,
         candidate=candidate.name,
@@ -378,6 +380,7 @@ def _row_skeleton(req, candidate, spec, index: int) -> dict:
         tuning_id=getattr(spec, "tuning_id", ""),
         kernel_name=_kernel_name(spec),
         kind=_spec_kind(spec),
+        waves_per_eu=getattr(kernel_spec, "waves_per_eu", None),
     )
     return row
 
@@ -497,6 +500,8 @@ def _child_argv(args, req, result) -> list:
         str(args.sliding_window),
         "--num-cus",
         str(args.num_cus),
+        "--dense-waves-per-eu",
+        str(getattr(args, "dense_waves_per_eu", 0)),
         "--warmup",
         str(args.warmup),
         "--iters",
@@ -794,6 +799,12 @@ def main() -> int:
     ap.add_argument("--kv-block-size", type=int, default=16)
     ap.add_argument("--sliding-window", type=int, default=0)
     ap.add_argument("--num-cus", type=int, default=0)
+    ap.add_argument(
+        "--dense-waves-per-eu",
+        type=int,
+        default=0,
+        help="dense-kernel WPE pin: 0 keeps policy/sweep expansion; 1..8 pins it",
+    )
     ap.add_argument("--causal", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--candidate-prefix", default="")
     ap.add_argument("--tuning-id-prefix", default="")
@@ -871,6 +882,8 @@ def main() -> int:
     args = ap.parse_args()
     if args.benchmark_iterations < 1:
         ap.error("--benchmark-iterations must be >= 1")
+    if not 0 <= args.dense_waves_per_eu <= 8:
+        ap.error("--dense-waves-per-eu must be 0 (auto) or in [1, 8]")
     if args.arch is None:
         args.arch = _default_arch()
     if args.list_only:

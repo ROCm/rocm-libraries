@@ -136,6 +136,9 @@ class AttentionRequest(OperatorRequest):
     #     supports only qb-major/hkv-major ordering. ---
     dense_persistent: str = "auto"  # "auto" | "on" | "off"
     dense_num_persistent: int = 256
+    # 0 keeps the architecture's shipped policy; 1..8 pins the emitted
+    # amdgpu-waves-per-eu attribute. Dense sweeps expand an unpinned request.
+    dense_waves_per_eu: int = 0
     # Common: auto/qb_major/hkv_major; gfx950 also supports gqa_pair variants.
     dense_persist_decode: str = "auto"
     # gfx950 dense variant pins. ``auto`` does not filter that axis; the
@@ -184,6 +187,19 @@ class AttentionRequest(OperatorRequest):
         if bool(self.use_fp8):
             active.add("fp8")
         return frozenset(active)
+
+
+def _resolve_dense_waves_per_eu(req: AttentionRequest, default: int) -> int:
+    """Resolve the dense WPE request without changing the shipped default policy."""
+    value = int(req.dense_waves_per_eu)
+    if value == 0:
+        value = int(default)
+    if not 1 <= value <= 8:
+        raise ValueError(
+            "dense_waves_per_eu must be 0 (auto) or in [1, 8], "
+            f"got {req.dense_waves_per_eu}"
+        )
+    return value
 
 
 ATTENTION_DIM_VOCABULARY = (
