@@ -401,15 +401,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // predecessor BB (see BBScheduleState::dsReadResiduals). Not collapsed to a
     // count/worst-case pair -- see InFlightQueue::seed(vector<int>).
     std::vector<int> crossBBDsReadResiduals_;
-    // Re-enabled: previously measured ~4.7% real regression on mxf8_tn_medium
-    // (real gfx1250 hardware, reproduced twice), bisected to this seeding call.
-    // Root cause: seed() used to collapse every carried credit to one
-    // worst-case residual, which could stall dsReadInflight_'s throttle pacing
-    // (globalReadInflight_ has no such pacing, hence no regression there).
-    // Fixed by carrying each credit's own residual instead (see
-    // crossBBDsReadResiduals_ / InFlightQueue::seed(vector<int>)) -- pending
-    // hardware re-validation against mxf8_tn_medium.
-    static constexpr bool kEnableDsReadCrossBBCarry = true;
 
     // Rule (4) ds_load issue cap (dagFeatures.dsReadPerCap), as a sliding
     // window on the real timeline: depth = the ceiling N, entry lifetime = the
@@ -2232,8 +2223,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     // has the prior iteration's tail draining -- each credit keeps its own
     // remaining drain latency (see crossBBDsReadResiduals_) rather than
     // collapsing to one worst-case value.
-    // kEnableDsReadCrossBBCarry: temporarily disabled, see its declaration.
-    if (kEnableDsReadCrossBBCarry && dsReadQueueDepth() > 0 && !crossBBDsReadResiduals_.empty())
+    if (dsReadQueueDepth() > 0 && !crossBBDsReadResiduals_.empty())
         dsReadInflight_.seed(crossBBDsReadResiduals_);
 }
 
