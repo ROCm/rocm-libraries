@@ -30,9 +30,11 @@
 // budget, so a problem already under the budget runs in a single pass, and the
 // launcher reuses the one buffer for every chunk otherwise.
 //
-// The batteries below override that budget (see scoped_workspace_budget): at
-// the shipped value every shape a test can afford fits in one chunk, which
-// would leave the multi-chunk path unreachable.
+// Splitting a problem into several chunks requires its unchunked workspace to
+// exceed the budget, and C is about twice that, so the cheapest shape that
+// splits costs a few GB.  The pre_checkin batteries therefore all run in a
+// single chunk; the nightly battery at the end pays that cost and is the only
+// place the host chunk loop iterates.
 //
 // Scope: int32 strided-batched and batched (pointer-array) syrk/herk, over
 // every type the two operations instantiate -- s/d/c/z syrk and c/z herk.
@@ -423,9 +425,9 @@ namespace
             {32, c_gemm_stride + 1},
             {32, 65536},
             {32, 131070},
-            {2, 131070}, // smallest triangle: many batches fit one chunk
-            {256, 100000}, // one triangle already exceeds the test budget
-            {1024, 50000}, // triangle is megabytes; the chunk clamps to one batch
+            {2, 131070}, // smallest triangle: the budget never binds
+            {256, 100000}, // budget binds: tens of chunks
+            {1024, 50000}, // budget binds hard: hundreds of chunks
         };
 
         for(const auto& c : cases)
@@ -440,7 +442,11 @@ namespace
                     << "n=" << c.n << " batch_count=" << c.bc;
                 // The budget is only honoured while a single batch fits in
                 // it. Past that the chunk clamps to one batch and the
-                // allocation is that batch, budget or not.
+                // allocation is that batch, budget or not.  That branch
+                // cannot be reached at the shipped budget, since
+                // rocblas_use_only_gemm caps n below 4000 and so caps a
+                // triangle at about 122MB; it is asserted anyway so the
+                // rule stays right if the budget is ever lowered.
                 const size_t per_batch = tri_n(c.n) * sizeof(T);
                 if(per_batch <= c_budget)
                     EXPECT_LE(reported, rounded(c_budget))
@@ -625,9 +631,10 @@ namespace
     // advance the C pointer, because every batch would look alike; distinct
     // per-batch values make a wrong batch index observable.
     //
-    // For herk the imaginary part of the diagonal is defined to be zero, so
-    // the diagonal seeds are real; the upper triangle carries a non-zero
-    // imaginary part for the complex types.
+    // The complex diagonal is seeded with a non-zero imaginary part, which herk
+    // must discard (its output diagonal is real by definition) and syrk must
+    // keep.  The strictly-upper seed also carries one, so preserving it is a
+    // check on the full value rather than just its real part.
     // -----------------------------------------------------------------------
 
     template <typename T>
@@ -866,7 +873,14 @@ namespace
         const rocblas_int batch_count = 65536;
 
         std::vector<T> h_A(size_t(k), a_value<T>(1));
-        std::vector<T> h_C(size_t(batch_count), diag_seed<T>());
+        // Distinct per batch, so a wrong batch index is visible here too. n=1
+        // means the whole matrix is the diagonal, and herk discards the
+        // imaginary part of that, so the variation has to be in the real part.
+        auto n1_seed = [](rocblas_int b) { return make_val<T>(double(1 + (b % 4096)), 0.0); };
+
+        std::vector<T> h_C(size_t(batch_count), make_val<T>(0.0, 0.0));
+        for(rocblas_int b = 0; b < batch_count; ++b)
+            h_C[size_t(b)] = n1_seed(b);
 
         // Braces, not parens: device_vector<T> dA(size_t(k)) declares a function.
         device_vector<T> dA{size_t(k)};
@@ -904,9 +918,14 @@ namespace
                 h_result.data(), (T*)dC, size_t(batch_count) * sizeof(T), hipMemcpyDeviceToHost),
             hipSuccess);
 
-        const T want = expected_diag<T, K>(k, 1);
+        // alpha = beta = 1, so each batch is its own seed plus the GEMM term.
+        const T g = gemm_term<T, K>(k, 1);
         for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
+        {
+            const T want = make_val<T>(double(re_of(g)) + double(re_of(n1_seed(b))),
+                                       K == op_kind::herk ? 0.0 : double(im_of(g)));
             expect_val_eq(h_result[b], want, "C[0,0]", b);
+        }
     }
 
     // -----------------------------------------------------------------------

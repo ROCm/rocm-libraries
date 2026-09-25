@@ -112,7 +112,7 @@ rocblas_status rocblas_internal_syrk_herk_template(rocblas_handle    handle,
         //
         // The chunk matches rocblas_internal_gemm_64's own batch-loop stride rather
         // than the copy kernel's larger gridDim.z ceiling, so a full chunk lowers to
-        // exactly one GEMM launch instead of a 65520-batch launch plus a 15-batch
+        // GEMM launches that are all full, instead of a 65520-batch launch plus a 15-batch
         // remainder.  Only the final partial chunk is short.
         // Computed once: the workspace was sized for exactly this many batches,
         // so it must not vary across iterations.
