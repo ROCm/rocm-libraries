@@ -896,11 +896,13 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
 endif()
 
 # Build the hermetic tensilelite release wheel from refreshed build metadata.
-if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
-        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+if(_tensilelite_needs_canonical_wheel)
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     include(cmake/TensileLiteWheel.cmake)
     hipblaslt_add_tensilelite_release_wheel("${_tensilelite_src}")
+    if(TARGET tensilelite-python-build-environment)
+        add_dependencies(tensilelite-python-build-environment tensilelite-canonical-release-wheel)
+    endif()
     if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
         add_custom_target(tensilelite-release-wheels-all ALL DEPENDS tensilelite-build-release-wheels)
     endif()
