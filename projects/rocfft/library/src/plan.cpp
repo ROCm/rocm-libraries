@@ -686,8 +686,14 @@ rocfft_location_t rocfft_plan_description_t::get_current_location() const
     return current_loc;
 }
 
-static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planData)
+// Populate a NodeMetaData's Bluestein strides/distances from its own
+// parameters.  Called from BuildSingleDevicePlan; idempotent so the
+// solution-map fallback recursion can safely re-invoke it.
+static void set_bluestein_strides(NodeMetaData& planData)
 {
+    planData.inStrideBlue.clear();
+    planData.outStrideBlue.clear();
+
     std::array<size_t, 3> inStridesBlue  = {0, 0, 0};
     std::array<size_t, 3> outStridesBlue = {0, 0, 0};
     std::array<size_t, 3> lengthsBlue    = {0, 0, 0};
@@ -696,14 +702,15 @@ static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planD
 
     function_pool pool{planData.deviceProp};
 
-    const auto precision     = plan->precision;
-    const auto transformType = plan->transformType;
-    const auto rank          = plan->desc.rank();
-    const auto fftLength     = plan->get_user_facing_lengths();
-    const auto placement     = plan->placement;
-    const auto dimension     = planData.dimension;
+    const auto  precision     = planData.precision;
+    const auto  transformType = planData.rootTransformType;
+    const auto  dimension     = planData.dimension;
+    const auto  placement     = planData.placement;
+    const auto& fftLength     = transformType == rocfft_transform_type_real_inverse
+                                    ? planData.outputLength
+                                    : planData.length;
 
-    assert(rank == dimension);
+    assert(dimension >= 1 && dimension <= lengthsBlue.size());
 
     lengthsBlue[0] = NodeFactory::SupportedLength(pool, precision, fftLength[0])
                          ? fftLength[0]
@@ -722,7 +729,7 @@ static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planD
         // real-to-complex in-place
         size_t dist = 2 * (1 + (lengthsBlue[0]) / 2);
 
-        for(size_t i = 1; i < rank; i++)
+        for(size_t i = 1; i < dimension; i++)
         {
             inStridesBlue[i] = dist;
             dist *= lengthsBlue[i];
@@ -735,7 +742,7 @@ static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planD
         // complex-to-real
         size_t dist = 1 + (lengthsBlue[0]) / 2;
 
-        for(size_t i = 1; i < rank; i++)
+        for(size_t i = 1; i < dimension; i++)
         {
             inStridesBlue[i] = dist;
             dist *= lengthsBlue[i];
@@ -746,10 +753,10 @@ static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planD
     else
     {
         // Set the inStrides to deal with contiguous data
-        for(size_t i = 1; i < rank; i++)
+        for(size_t i = 1; i < dimension; i++)
             inStridesBlue[i] = lengthsBlue[i - 1] * inStridesBlue[i - 1];
 
-        inDistBlue = lengthsBlue[rank - 1] * inStridesBlue[rank - 1];
+        inDistBlue = lengthsBlue[dimension - 1] * inStridesBlue[dimension - 1];
     }
 
     // =================================
@@ -763,7 +770,7 @@ static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planD
         // real-to-complex in-place
         size_t dist = 2 * (1 + (lengthsBlue[0]) / 2);
 
-        for(size_t i = 1; i < rank; i++)
+        for(size_t i = 1; i < dimension; i++)
         {
             outStridesBlue[i] = dist;
             dist *= lengthsBlue[i];
@@ -776,7 +783,7 @@ static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planD
         // complex-to-real
         size_t dist = 1 + (lengthsBlue[0]) / 2;
 
-        for(size_t i = 1; i < rank; i++)
+        for(size_t i = 1; i < dimension; i++)
         {
             outStridesBlue[i] = dist;
             dist *= lengthsBlue[i];
@@ -787,10 +794,10 @@ static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planD
     else
     {
         // Set the inStrides to deal with contiguous data
-        for(size_t i = 1; i < rank; i++)
+        for(size_t i = 1; i < dimension; i++)
             outStridesBlue[i] = lengthsBlue[i - 1] * outStridesBlue[i - 1];
 
-        outDistBlue = lengthsBlue[rank - 1] * outStridesBlue[rank - 1];
+        outDistBlue = lengthsBlue[dimension - 1] * outStridesBlue[dimension - 1];
     }
 
     for(size_t i = 0; i < dimension; i++)
@@ -950,7 +957,6 @@ NodeMetaData
     root_plan.oDist        = root_plan_output_layout->distance();
 
     root_plan.deviceProp = get_curr_device_prop();
-    set_bluestein_strides(this, root_plan);
 
     return root_plan;
 }
@@ -1698,7 +1704,10 @@ std::unique_ptr<ExecPlan>
     try
     {
         execPlan.deviceProp = rootPlanData.deviceProp;
-        execPlan.rootPlan   = NodeFactory::CreateExplicitNode(rootPlanData, nullptr);
+        // Single source of truth for Bluestein strides: all single-device
+        // (sub)plan builders reach the node factory through here.
+        set_bluestein_strides(rootPlanData);
+        execPlan.rootPlan = NodeFactory::CreateExplicitNode(rootPlanData, nullptr);
 
         // If we are doing tuning initializing now, we shouldn't apply any solution,
         // since we are trying enumerating solutions now
@@ -2367,14 +2376,14 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
             rocfft_scoped_device dev(item_loc.device);
             rootPlanData.deviceProp = get_curr_device_prop();
         }
-        auto singlePlan       = BuildSingleDevicePlan(rootPlanData,
+        rootPlanData.input_buffer  = fft_operations.input.buffers[i];
+        rootPlanData.output_buffer = fft_operations.output.buffers[i];
+        // partOfMultiPlan == true sets ExecPlan::mgpuPlan and allocates its stream/event.
+        auto singlePlan = BuildSingleDevicePlan(rootPlanData,
                                                 item_loc,
                                                 fft_operations.get_load_ops(),
                                                 fft_operations.get_store_ops(),
                                                 true);
-        singlePlan->mgpuPlan  = true;
-        singlePlan->inputPtr  = fft_operations.input.buffers[i];
-        singlePlan->outputPtr = fft_operations.output.buffers[i];
 
         auto transformItem = AddMultiPlanItem(std::move(singlePlan), item_dependencies);
         multiPlan[transformItem]->group = fft_operations.get_group();
@@ -2425,14 +2434,15 @@ size_t rocfft_plan_t::C2CBrickOneDimension(size_t                         dimIdx
     transformLengths.pop_back();
     transformStride.pop_back();
 
-    rootPlanData.dimension = 1;
-    rootPlanData.length    = transformLengths;
-    rootPlanData.inStride  = transformStride;
-    rootPlanData.outStride = transformStride;
-    rootPlanData.direction = transformType == rocfft_transform_type_complex_forward
+    rootPlanData.dimension    = 1;
+    rootPlanData.length       = transformLengths;
+    rootPlanData.outputLength = transformLengths;
+    rootPlanData.inStride     = transformStride;
+    rootPlanData.outStride    = transformStride;
+    rootPlanData.direction    = transformType == rocfft_transform_type_complex_forward
                                      || transformType == rocfft_transform_type_real_forward
-                                 ? -1
-                                 : 1;
+                                    ? -1
+                                    : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
     rootPlanData.precision         = precision;
