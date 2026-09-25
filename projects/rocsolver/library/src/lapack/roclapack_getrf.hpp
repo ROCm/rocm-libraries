@@ -221,31 +221,29 @@ ROCSOLVER_KERNEL void getrf_row_permutate(const I n,
         if(j >= offset)
             j += blk;
 
+        // batch instance
+        T* A = load_ptr_batch(AA, id, shiftA, strideA);
+        I* piv = pividx + id * stridePI;
+
+        // shared mem for temporary values
+        extern __shared__ double lmem[];
+        T* temp = reinterpret_cast<T*>(lmem);
+
         if(j < n)
         {
-            // batch instance
-            T* A = load_ptr_batch(AA, id, shiftA, strideA);
-            I* piv = pividx + id * stridePI;
-
-            // shared mem for temporary values
-            extern __shared__ double lmem[];
-            T* temp = reinterpret_cast<T*>(lmem);
-
             // do permutations in parallel (each tx perform a row swap)
             I idx1 = piv[tx];
             I idx2 = piv[idx1];
             temp[tx + ty * bdx] = A[idx1 * inca + j * lda];
             A[idx1 * inca + j * lda] = A[idx2 * inca + j * lda];
-            __syncthreads();
+        }
+        __syncthreads();
 
+        if(j < n)
+        {
             // copy temp results back to A
             A[tx * inca + j * lda] = temp[tx + ty * bdx];
         }
-
-        // --------------------------------------------
-        // synchronize to make sure lmem[] is available
-        // for next batch entry
-        // --------------------------------------------
         __syncthreads();
     } // end for id
 }
