@@ -2873,9 +2873,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
     spec.kernel_name()`` in ``run_attention_dense_torch`` trips on the second
     shape served from the cache. The name assertion below covers that.
 
-    The control uses ``persistent`` rather than ``sliding_window``: gfx942
-    rejects sliding_window in ``supports_attention_dense``, so a swa spec never
-    reaches the builder at all and could not lower for the comparison.
+    The baked-shape control below uses ``persistent`` to leave the runtime path;
+    ``sliding_window`` is the other off-path spec on gfx942 now that
+    ``supports_attention_dense`` admits it.
     """
 
     # fp16 is arbitrary here -- every dtype takes the same runtime-shape cut now
@@ -3019,9 +3019,10 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         Without it, a builder that ignored batch/seqlen_q/seqlen_kv entirely --
         emitting one kernel that is wrong everywhere -- would satisfy the guard
-        above vacuously. ``persistent`` is the only way off the runtime path on
-        gfx942; ragged/varlen/paged/swa are rejected by
-        ``supports_attention_dense`` and never reach the builder.
+        above vacuously. ``persistent`` and ``sliding_window`` are the two specs
+        off the runtime path on gfx942 (``runtime_shape`` excludes both); this
+        control uses ``persistent``. ``ragged``/``varlen``/``paged`` are rejected
+        by ``supports_attention_dense`` and never reach the builder.
         """
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key

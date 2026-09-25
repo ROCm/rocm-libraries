@@ -189,7 +189,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
     {
         "varlen",
         "ragged",
-        "sliding_window",
         "paged",
         "block_size",
         "num_kv_blocks",
@@ -220,7 +219,7 @@ _SPEC_PERTURBATIONS = {
     "head_size": (64, 128),
     "causal": (False, True),
     "dtype": ("bf16", "fp16"),
-    "sliding_window": (),  # unbuildable -- see _UNBUILDABLE_SPEC_FIELDS
+    "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
     "varlen": (),  # unbuildable
     "paged": (),  # unbuildable (not yet supported)
@@ -460,11 +459,11 @@ def test_supports_rejects_non_gfx942():
 @pytest.mark.parametrize(
     "kw,marker",
     [
-        # persistent is NOT here anymore -- it is supported (P4). See the persistent
-        # build/decode tests below.
+        # persistent and sliding_window are NOT here anymore -- both are supported
+        # (persistent P4; sliding_window via start_tile prune + window mask). See
+        # the persistent build/decode tests and the SWA coverage below.
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
-        (dict(sliding_window=64), "sliding_window"),
         (dict(use_sinks=True), "sinks"),
     ],
 )
@@ -495,6 +494,24 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
         _spec(block_n=512, seqlen_kv=2048), arch="gfx942"
     )
     assert not ok and "block_n" in why
+
+
+def test_supports_rejects_sliding_window_past_seqlen_kv():
+    """SWA + causal where the last query block's window starts past seqlen_kv:
+    start_tile >= n_up -> zero-trip KV loop -> l == 0 -> rcp(0) -> NaN. Same class
+    as the block_n zero-trip guards above."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128), arch="gfx942"
+    )
+    assert not ok and "sliding_window" in why
+
+
+def test_supports_accepts_sliding_window_in_range():
+    """SWA + causal where the window stays within seqlen_kv is accepted."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=2048, seqlen_kv=2048, sliding_window=128), arch="gfx942"
+    )
+    assert ok, why
 
 
 def test_supports_rejects_over_budget_lds():
@@ -672,7 +689,10 @@ _CONTRACT_GRID = [
     dict(persistent=True, num_persistent=228),
     dict(varlen=True),
     dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),
-    dict(sliding_window=64),
+    dict(sliding_window=64),  # accepted: SWA on the default grid
+    dict(
+        sliding_window=128, persistent=True, num_persistent=304
+    ),  # accepted: SWA persistent
     dict(batch=4),
     dict(batch=64, seqlen_q=16384, seqlen_kv=16384, num_kv_heads=8),
     dict(waves_per_eu=4),
