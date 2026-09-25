@@ -35,6 +35,7 @@ test_categories:
     test_paths:
       - "rocisa_tests"
       - "tensilelite/Tests/unit"
+      - "compat/tests"
     exclude_markers:
       - "gpu"
     pytest_args:
@@ -49,6 +50,7 @@ test_categories:
     test_paths:
       - "rocisa_tests"
       - "tensilelite/Tests/unit"
+      - "compat/tests"
     exclude_markers:
       - "gpu"
     pytest_args:
@@ -63,6 +65,7 @@ test_categories:
     test_paths:
       - "rocisa_tests"
       - "tensilelite/Tests/unit"
+      - "compat/tests"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
@@ -75,6 +78,7 @@ test_categories:
     test_paths:
       - "rocisa_tests"
       - "tensilelite/Tests/unit"
+      - "compat/tests"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
