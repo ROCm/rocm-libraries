@@ -24,6 +24,7 @@ path to read the request from standard input.
 - Read [model-contract.md](model-contract.md) for access, result, diagnostic, and
   serialization semantics.
 - Read [gfx90a.md](gfx90a.md) for the initial `gfx90a` profile scope.
+- Read [gfx942.md](gfx942.md) for the explicit `gfx942` profile scope.
 - Read [comparison.md](comparison.md) before comparing target profiles.
 - Read [validation-boundaries.md](validation-boundaries.md) before describing what
   a prediction proves.
