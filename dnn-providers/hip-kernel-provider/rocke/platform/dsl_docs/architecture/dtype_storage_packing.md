@@ -86,6 +86,14 @@ origin alignment, carrier capacity, and static i32 displacement limits. It
 reduces the supplied alignment for chunk spacing and K origin. A 24-byte FP6
 chunk becomes 16-byte and 8-byte loads without reading past the chunk.
 
+The existing `global_load_vN` and `smem_load_vN` builders also accept contiguous
+96-bit payloads: twelve byte elements, six 16-bit elements, or three 32-bit
+elements of their supported types. These loads default to element alignment;
+HIP copies exactly twelve bytes, excluding vector-object padding. A single
+96-bit machine instruction depends on target and alignment. This does not
+change the fragment loader's chunk selection. FP6 transpose loads are deferred
+until tensor-descriptor integration defines their lane/layout contract.
+
 Tensor shape, strides, row selection, and allocation bounds belong to the
 caller. This helper always loads a complete fragment: the caller must guard
 empty or partial rows and provide a valid lane group. It is not a bounds-checked

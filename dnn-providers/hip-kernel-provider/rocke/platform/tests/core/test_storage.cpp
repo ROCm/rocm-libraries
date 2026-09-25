@@ -40,15 +40,45 @@ static int emit(const char* dtype, bool hip)
                 : strcmp(dtype, "bf16_padded") == 0 ? "bf16"
                                                     : "fp6";
     bool patterns = strncmp(dtype, "pack_", 5) == 0;
-    const auto* unit = patterns ? rocke_i8() : rocke_storage_ir_type(dtype);
+    const bool load96 = strncmp(dtype, "load96_", 7) == 0;
+    const auto* unit = load96     ? (strcmp(dtype, "load96_i8") == 0    ? rocke_i8()
+                                     : strcmp(dtype, "load96_f16") == 0 ? rocke_f16()
+                                                                        : rocke_i32())
+                       : patterns ? rocke_i8()
+                                  : rocke_storage_ir_type(dtype);
     CHECK(unit);
     const bool typed = strcmp(dtype, "f16") == 0 || strcmp(dtype, "bf16") == 0;
-    const auto* carrier = typed ? unit : rocke_i32();
+    const auto* carrier = (typed || load96) ? unit : rocke_i32();
     if(strcmp(dtype, "pack_scale_bytes_i64") == 0)
         carrier = rocke_i64();
     auto* a = rocke_b_param(&b, "A", rocke_ptr_type(&b, unit, "global"), NULL);
     auto* o = rocke_b_param(&b, "O", rocke_ptr_type(&b, carrier, "global"), NULL);
-    if(patterns)
+    if(load96)
+    {
+        const int n = unit == rocke_i8() ? 12 : unit == rocke_f16() ? 6 : 3;
+        auto* one = rocke_b_const_i32(&b, 1);
+        auto* value = rocke_b_global_load_vN(&b, a, one, unit, n, 0);
+        int shape[] = {n + 1};
+        auto* smem = rocke_b_smem_alloc(&b, unit, shape, 1, "payload");
+        for(int j = 0; j < n; ++j)
+        {
+            rocke_value_t* indices[] = {rocke_b_const_i32(&b, j + 1)};
+            auto* element = rocke_b_vec_extract(&b, value, j);
+            rocke_b_smem_store_vN(&b, smem, indices, 1, element, 1);
+        }
+        rocke_b_s_barrier_bare(&b);
+        value = rocke_b_smem_load_vN(&b, smem, &one, 1, unit, n);
+        auto* aligned = rocke_b_global_load_vN(&b, a, rocke_b_const_i32(&b, 0), unit, n, 16);
+        rocke_value_t* vectors[] = {value, aligned};
+        for(int k = 0; k < 2; ++k)
+            for(int j = 0; j < n; ++j)
+            {
+                auto* index = rocke_b_const_i32(&b, k * n + j);
+                auto* element = rocke_b_vec_extract(&b, vectors[k], j);
+                rocke_b_global_store(&b, o, index, element, 12 / n);
+            }
+    }
+    else if(patterns)
     {
         int bits = strcmp(dtype, "pack_fp6_cross_word") == 0 ? 6 : 8;
         int count = bits == 6 ? 16 : (strcmp(dtype, "pack_scale_bytes_i64") == 0 ? 8 : 4);

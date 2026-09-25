@@ -493,9 +493,9 @@ class _Lowerer:
             raise ValueError(
                 "global_load_vN: alignment must be a positive power of two"
             )
-        if align < byte_count:
-            # A vector-pointer dereference would promise natural alignment.
-            # Copy the payload using only the alignment guaranteed by the IR.
+        if align < byte_count or byte_count & (byte_count - 1):
+            # Non-power-of-two vector objects include padding. Copy only the
+            # payload, using only the alignment guaranteed by the IR.
             self._emit(
                 f"{prefix}{vec} {_name(op.result)}; "
                 f"__builtin_memcpy(&{_name(op.result)}, "
@@ -1839,6 +1839,14 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
+        byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
+        if byte_count & (byte_count - 1):
+            # Clang rounds vector object sizes up; LDS payloads have no padding.
+            self._emit(
+                f"{prefix}{n} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, &{storage}[{idx_str}], {byte_count});"
+            )
+            return
         self._emit(
             f"{prefix}{n} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{n}*>(&{storage}[{idx_str}]);"

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from rocke.core.arch.wmma_scale import scaled_matrix_layout
-from rocke.core.ir import FP8E4M3, I8, I32, I64, IRBuilder, PtrType, VectorType
+from rocke.core.ir import F16, FP8E4M3, I8, I32, I64, IRBuilder, PtrType, VectorType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -28,6 +28,9 @@ from rocke.helpers.mma_io import (
 
 
 CASES = [
+    "load96_i8",
+    "load96_f16",
+    "load96_i32",
     "fp4",
     "fp6",
     "fp6_padded",
@@ -47,6 +50,28 @@ CASES = [
 
 def build_transport(dtype):
     b = IRBuilder("transport")
+    if dtype.startswith("load96_"):
+        unit, n = {
+            "load96_i8": (I8, 12),
+            "load96_f16": (F16, 6),
+            "load96_i32": (I32, 3),
+        }[dtype]
+        a = b.param("A", PtrType(unit, "global"))
+        o = b.param("O", PtrType(unit, "global"))
+        one = b.const_i32(1)
+        value = b.global_load_vN(a, one, unit, n)
+        smem = b.smem_alloc(unit, (n + 1,), name_hint="payload")
+        for j in range(n):
+            b.smem_store_vN(smem, [b.const_i32(j + 1)], b.vec_extract(value, j), 1)
+        b.s_barrier_bare()
+        value = b.smem_load_vN(smem, one, dtype=unit, n=n)
+        aligned = b.global_load_vN(a, b.const_i32(0), unit, n, align=16)
+        for k, vector in enumerate((value, aligned)):
+            for j in range(n):
+                b.global_store(
+                    o, b.const_i32(k * n + j), b.vec_extract(vector, j), align=12 // n
+                )
+        return b.kernel
     padded = dtype.endswith("_padded")
     dtype = dtype.removesuffix("_padded")
     patterns = dtype.startswith("pack_")
@@ -317,3 +342,40 @@ def test_reject_wide_encoded_fields_before_emission():
     with pytest.raises(ValueError, match="encoded fields of at most 32 bits"):
         pack_fragment_bits(b, lambda j: b.const_i64(1 << 35), fragment)
     assert len(b.kernel.body.ops) == before
+
+
+@pytest.mark.parametrize("dtype", ["load96_i8", "load96_f16", "load96_i32"])
+def test_96bit_loads_copy_exact_payload(dtype):
+    """Offset and over-aligned global loads plus an LDS tail must not read padding."""
+    kernel = build_transport(dtype)
+    llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
+    n, elem, alignment = {
+        "load96_i8": (12, "i8", 1),
+        "load96_f16": (6, "half", 2),
+        "load96_i32": (3, "i32", 4),
+    }[dtype]
+    for space in (1, 3):
+        assert re.search(
+            rf"load <{n} x {elem}>, ptr addrspace\({space}\).*align {alignment}\b", llvm
+        )
+    hip = lower_kernel_to_hip(kernel, arch="gfx1250")
+    assert len(re.findall(r"__builtin_memcpy\([^\n]*, 12\);", hip)) == 3
+    if not shutil.which("hipcc"):
+        pytest.skip("hipcc not in PATH")
+    from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
+
+    compiled = emit_device_llvm_ir_via_hipcc(kernel, arch="gfx950", extra_flags=["-O0"])
+    # Clang's vector object is 16 bytes; the source copy must remain 12 bytes.
+    compiled = compiled.split("define protected amdgpu_kernel void @transport(", 1)[
+        1
+    ].split("\n}", 1)[0]
+    source_copies = re.findall(
+        r"@llvm\.memcpy[^\n]*?\([^,]+,\s*ptr[^,]*\balign (\d+) [^,]+,\s*i64 (\d+)",
+        compiled,
+    )
+    assert len(source_copies) == 3
+    for (actual_align, size), max_align in zip(
+        source_copies, (alignment, alignment, 16)
+    ):
+        assert int(size) == 12
+        assert int(actual_align) <= max_align
