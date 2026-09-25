@@ -609,12 +609,9 @@ because it gates: its unit-tree stage runs with no marker filter, so a stale gol
 check. The two coverage lanes assert them as well and cannot block a merge, though the CPU-only
 GitHub Actions lane is fast enough that it is usually where a stale golden surfaces first.
 
-TheRock's installed-artifact lane is the exception. It does not install syrupy, so the suite's
-`conftest.py` detects the missing plugin and skips the snapshot-using tests cleanly rather than
-erroring the whole run. The tests are still collected, which is why that lane's log reads as though
-characterization ran. Nothing is lost, because those goldens were asserted in the source lanes before
-the artifact was built, but a reader scanning that run will see skips and should know they are
-deliberate.
+TheRock's installed-artifact lane installs the shared test requirements, including syrupy. Partial
+categories pass `--snapshot-warn-unused`, so every selected snapshot is asserted while snapshots
+outside that category are reported as warnings instead of failures.
 
 Three adjacent lanes run none of these tests, despite their names:
 `Component CI: rocISA` only tests a `pip install` of the rocisa package; Math CI's `codecov` job is
@@ -730,16 +727,12 @@ the library-logic build-time validation; hipBLASLt's C++ client and library road
 
 ### Near term, cheap and unblocking
 
-1. **Make the installed-artifact lane's snapshot behavior deliberate.** Either ship syrupy with the
-   installed test tree so the goldens are checked there too, or state in the lane that snapshot
-   coverage is intentionally left to the source lanes. Today it is a silent skip that reads like an
-   accident.
-2. **Make the test suite resolve its own toolchain.** Characterization tests locate `amdclang++`
+1. **Make the test suite resolve its own toolchain.** Characterization tests locate `amdclang++`
    through a bare `shutil.which`, so whether they pass depends on how the surrounding lane happened
    to order `PATH`. The same tests then behave differently in different lanes for reasons that have
    nothing to do with the code under test. Resolving the toolchain inside the tox environment removes
    a recurring source of false failures.
-3. **Enforce `--strict-known-bugs` in its own lane** (AIHPBLAS-4196). The detection already exists;
+2. **Enforce `--strict-known-bugs` in its own lane** (AIHPBLAS-4196). The detection already exists;
    what is missing is a job that fails on a stale entry. A dedicated GitHub Actions job is the right
    home for it, because the flag cannot be turned on inside the build without failing local developer
    builds. Worth extending to orphaned entries, which are silently ignored today.
@@ -792,7 +785,6 @@ the note there: an empty cell means the gap is real and acknowledged but not yet
 | As of the Aug-26 2026 reorder, `unit` runs before `common` in `preliminary`, so an unrelated unit-test failure on one architecture prevents `common` from running at all that PR. This already let a StreamK register-pool bug ([#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in [#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) merge with no `common`-stage signal, two days after the reorder landed | High | High if hit | On gfx942, TheRock's `tensilelite-common` runs `common` as its own job, so a unit failure there no longer hides it; the other architectures still depend on `preliminary`'s ordering | AIHPBLAS-4431 |
 | `Tests/common` (real codegen, build, execution) runs in TheRock only on gfx90a/gfx942/gfx950/gfx120X, and only gfx942 on the pull-request path. gfx1250 and any family whose configs declare no `skip-gfxNNNN` for it (gfx1103, gfx115X) get none (see [Pre-submit / CI Gates](#pre-submit--ci-gates)) | Medium | High if hit | Math CI's `preliminary` runs it per PR on `gfx90a`/`gfx942`/`gfx950`/`gfx12`; TheRock's `tensilelite-common` adds installed-artifact coverage on the same families | [#12491](https://github.com/ROCm/rocm-libraries/issues/12491) |
 | The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation |  |
-| The installed-artifact lane silently skips the snapshot tests, since syrupy is not in the installed tree | Low | Low | The goldens are enforced upstream; the skip is stated in `conftest.py` but reads like an accident |  |
 | Math CI's `preliminary` job appears to skip the `tensilelite/Tests/unit` suite entirely on YAML-only diffs, running only numeric/solution-correctness checks instead. Of the three logic-corpus consistency checks, this leaves only the chip-ID-arch-lock check uncovered on that path; sibling-`DeviceNames` and the gfx1250v0-overlay shape run unconditionally via `TensileLogic --check-all` regardless | Medium | Medium | `TensileLogic --check-all` covers two of the three checks regardless of this gap; Math CI's own suite still covers the chip-ID-arch-lock check whenever it runs |  |
 | The `_needs_logic_dir` xfail (see [../TESTING.md#known-bugs-and-expected-failures](../TESTING.md#known-bugs-and-expected-failures)) is unconditional in TheRock CI, so the pytest-only logic-corpus checks gated on it never execute there. Only the chip-ID-arch-lock check is actually exposed to this; the other two run unconditionally via `TensileLogic --check-all` regardless | Low | Medium | `TensileLogic --check-all` covers two of the three checks regardless; Math CI's pytest suite can still catch a chip-ID-arch-lock violation when it runs | |
 | For gfx1250 specifically, TheRock's `amdgpu_family_matrix.py` has an empty `test-runs-on` for the `gfx125x` family (`gfx125X-dcgpu`, build-only, no runner wired up), so the whole Test stage — including the pytest copies of the logic-corpus consistency checks under `tensilelite/Tests/unit` — is skipped outright. Sibling-`DeviceNames` and the gfx1250v0-overlay shape still get build-time coverage there via `TensileLogic --check-all`; only the chip-ID-arch-lock check has no gfx1250 coverage at all | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the empty `test-runs-on` | |
