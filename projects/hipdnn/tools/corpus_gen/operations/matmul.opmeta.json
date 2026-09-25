@@ -20,6 +20,22 @@
         "fp16",
         "bf16"
       ]
+    },
+    "a_layout": {
+      "type": "enum",
+      "values": [
+        "row",
+        "col"
+      ],
+      "description": "Memory order of A."
+    },
+    "b_layout": {
+      "type": "enum",
+      "values": [
+        "row",
+        "col"
+      ],
+      "description": "Memory order of B."
     }
   },
   "stratification_axis": "arithmetic_intensity",
@@ -71,8 +87,33 @@
       },
       {
         "name": "aStrides",
-        "kind": "strides_of",
-        "of": "aDims"
+        "kind": "expr",
+        "value": [
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.a_layout",
+                  "col"
+                ]
+              },
+              1,
+              "$q.K"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.a_layout",
+                  "col"
+                ]
+              },
+              "$q.M",
+              1
+            ]
+          }
+        ]
       },
       {
         "name": "bDims",
@@ -84,8 +125,33 @@
       },
       {
         "name": "bStrides",
-        "kind": "strides_of",
-        "of": "bDims"
+        "kind": "expr",
+        "value": [
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.b_layout",
+                  "col"
+                ]
+              },
+              1,
+              "$q.N"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.b_layout",
+                  "col"
+                ]
+              },
+              "$q.K",
+              1
+            ]
+          }
+        ]
       },
       {
         "name": "cDims",
@@ -104,8 +170,19 @@
         "name": "dataType",
         "kind": "dtype_of",
         "source": "$q.dtype"
+      },
+      {
+        "name": "computeDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "intermediateDataType",
+        "kind": "constant",
+        "constant": "float"
       }
-    ]
+    ],
+    "// types": "Operands carry the declared dtype; accumulation is fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hipBLASLt refuses ('Matmul node compute data type must be float')."
   },
   "archetypes": [
     {

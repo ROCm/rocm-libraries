@@ -20,6 +20,15 @@
         "fp16",
         "bf16"
       ]
+    },
+    "rank": {
+      "type": "enum",
+      "values": [
+        "3",
+        "4",
+        "5"
+      ],
+      "description": "How many dimensions x is spelled with: [batch, seq_len, hidden_dim] padded with trailing unit dimensions. The same problem either way; engines whose kernels take only 4-D or 5-D tensors (HIP_MLOPS) serve only the padded spellings."
     }
   },
   "stratification_axis": "working_set",
@@ -78,8 +87,24 @@
         "name": "dataType",
         "kind": "dtype_of",
         "source": "$q.dtype"
+      },
+      {
+        "name": "computeDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "intermediateDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "rank",
+        "kind": "direct",
+        "source": "$q.rank"
       }
-    ]
+    ],
+    "// types": "Operands carry the declared dtype; statistics accumulate in fp32. Left to default, compute follows io, and hip-kernel-provider's Layernorm plan builder refuses any node whose compute_data_type is not fp32."
   },
   "archetypes": [
     {

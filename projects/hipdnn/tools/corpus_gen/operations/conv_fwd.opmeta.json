@@ -81,6 +81,43 @@
         "int8"
       ],
       "description": "Element type of x, w and y. The list is the subset of the backend's eighteen convertible types that a convolution is actually run in: the float types, the fp8 pairs including the FNUZ spellings AMD hardware uses, and int8 for quantized inference. Types reached only through block scaling (fp4, fp6, int4) are declared on the quantize operations that produce them, not here."
+    },
+    "spatial": {
+      "type": "enum",
+      "values": [
+        "3d",
+        "2d"
+      ],
+      "description": "2-D ([N, C, H, W]) or 3-D ([N, C, D, H, W]) convolution."
+    },
+    "D": {
+      "type": "int64",
+      "description": "Input depth; 1 and absent from the tensors for 2-D."
+    },
+    "T": {
+      "type": "int64",
+      "description": "Filter depth; 1 and absent for 2-D."
+    },
+    "pad_d": {
+      "type": "int64",
+      "range": [
+        0,
+        null
+      ]
+    },
+    "stride_d": {
+      "type": "int64"
+    },
+    "dilation_d": {
+      "type": "int64"
+    },
+    "layout": {
+      "type": "enum",
+      "values": [
+        "channels_first",
+        "channels_last"
+      ],
+      "description": "NCHW/NCDHW (filter KCRS) or NHWC/NDHWC (filter KRSC) memory order."
     }
   },
   "stratification_axis": "arithmetic_intensity",
@@ -180,14 +217,148 @@
         "value": [
           "$q.N",
           "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": "$q.D"
+          },
           "$q.H",
           "$q.W"
         ]
       },
       {
         "name": "xStrides",
-        "kind": "strides_of",
-        "of": "xDims"
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.C",
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      "$q.D",
+                      1
+                    ]
+                  }
+                ]
+              },
+              {
+                "*": [
+                  "$q.H",
+                  "$q.W"
+                ]
+              }
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              1,
+              {
+                "*": [
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      "$q.D",
+                      1
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.H",
+                      "$q.W"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": {
+              "if": [
+                {
+                  "==": [
+                    "$q.layout",
+                    "channels_last"
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "*": [
+                        "$q.H",
+                        "$q.W"
+                      ]
+                    },
+                    "$q.C"
+                  ]
+                },
+                {
+                  "*": [
+                    "$q.H",
+                    "$q.W"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              {
+                "*": [
+                  "$q.W",
+                  "$q.C"
+                ]
+              },
+              "$q.W"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              "$q.C",
+              1
+            ]
+          }
+        ]
       },
       {
         "name": "wDims",
@@ -200,14 +371,168 @@
               "$q.groups"
             ]
           },
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": "$q.T"
+          },
           "$q.R",
           "$q.S"
         ]
       },
       {
         "name": "wStrides",
-        "kind": "strides_of",
-        "of": "wDims"
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  {
+                    "/": [
+                      "$q.C",
+                      "$q.groups"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      "$q.T",
+                      1
+                    ]
+                  }
+                ]
+              },
+              {
+                "*": [
+                  "$q.R",
+                  "$q.S"
+                ]
+              }
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              1,
+              {
+                "*": [
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      "$q.T",
+                      1
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.R",
+                      "$q.S"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": {
+              "if": [
+                {
+                  "==": [
+                    "$q.layout",
+                    "channels_last"
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "*": [
+                        "$q.R",
+                        "$q.S"
+                      ]
+                    },
+                    {
+                      "/": [
+                        "$q.C",
+                        "$q.groups"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "*": [
+                    "$q.R",
+                    "$q.S"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              {
+                "*": [
+                  "$q.S",
+                  {
+                    "/": [
+                      "$q.C",
+                      "$q.groups"
+                    ]
+                  }
+                ]
+              },
+              "$q.S"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              {
+                "/": [
+                  "$q.C",
+                  "$q.groups"
+                ]
+              },
+              1
+            ]
+          }
+        ]
       },
       {
         "name": "yDims",
@@ -215,6 +540,55 @@
         "value": [
           "$q.N",
           "$q.K",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": {
+              "+": [
+                {
+                  "/": [
+                    {
+                      "-": [
+                        {
+                          "-": [
+                            {
+                              "+": [
+                                "$q.D",
+                                {
+                                  "*": [
+                                    2,
+                                    "$q.pad_d"
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "*": [
+                                "$q.dilation_d",
+                                {
+                                  "-": [
+                                    "$q.T",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        1
+                      ]
+                    },
+                    "$q.stride_d"
+                  ]
+                },
+                1
+              ]
+            }
+          },
           {
             "+": [
               {
@@ -301,13 +675,627 @@
       },
       {
         "name": "yStrides",
-        "kind": "strides_of",
-        "of": "yDims"
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.K",
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      {
+                        "+": [
+                          {
+                            "/": [
+                              {
+                                "-": [
+                                  {
+                                    "-": [
+                                      {
+                                        "+": [
+                                          "$q.D",
+                                          {
+                                            "*": [
+                                              2,
+                                              "$q.pad_d"
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "*": [
+                                          "$q.dilation_d",
+                                          {
+                                            "-": [
+                                              "$q.T",
+                                              1
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  1
+                                ]
+                              },
+                              "$q.stride_d"
+                            ]
+                          },
+                          1
+                        ]
+                      },
+                      1
+                    ]
+                  }
+                ]
+              },
+              {
+                "*": [
+                  {
+                    "+": [
+                      {
+                        "/": [
+                          {
+                            "-": [
+                              {
+                                "-": [
+                                  {
+                                    "+": [
+                                      "$q.H",
+                                      {
+                                        "*": [
+                                          2,
+                                          "$q.pad_h"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.dilation_h",
+                                      {
+                                        "-": [
+                                          "$q.R",
+                                          1
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              1
+                            ]
+                          },
+                          "$q.stride_h"
+                        ]
+                      },
+                      1
+                    ]
+                  },
+                  {
+                    "+": [
+                      {
+                        "/": [
+                          {
+                            "-": [
+                              {
+                                "-": [
+                                  {
+                                    "+": [
+                                      "$q.W",
+                                      {
+                                        "*": [
+                                          2,
+                                          "$q.pad_w"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.dilation_w",
+                                      {
+                                        "-": [
+                                          "$q.S",
+                                          1
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              1
+                            ]
+                          },
+                          "$q.stride_w"
+                        ]
+                      },
+                      1
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              1,
+              {
+                "*": [
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      {
+                        "+": [
+                          {
+                            "/": [
+                              {
+                                "-": [
+                                  {
+                                    "-": [
+                                      {
+                                        "+": [
+                                          "$q.D",
+                                          {
+                                            "*": [
+                                              2,
+                                              "$q.pad_d"
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "*": [
+                                          "$q.dilation_d",
+                                          {
+                                            "-": [
+                                              "$q.T",
+                                              1
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  1
+                                ]
+                              },
+                              "$q.stride_d"
+                            ]
+                          },
+                          1
+                        ]
+                      },
+                      1
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "+": [
+                          {
+                            "/": [
+                              {
+                                "-": [
+                                  {
+                                    "-": [
+                                      {
+                                        "+": [
+                                          "$q.H",
+                                          {
+                                            "*": [
+                                              2,
+                                              "$q.pad_h"
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "*": [
+                                          "$q.dilation_h",
+                                          {
+                                            "-": [
+                                              "$q.R",
+                                              1
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  1
+                                ]
+                              },
+                              "$q.stride_h"
+                            ]
+                          },
+                          1
+                        ]
+                      },
+                      {
+                        "+": [
+                          {
+                            "/": [
+                              {
+                                "-": [
+                                  {
+                                    "-": [
+                                      {
+                                        "+": [
+                                          "$q.W",
+                                          {
+                                            "*": [
+                                              2,
+                                              "$q.pad_w"
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "*": [
+                                          "$q.dilation_w",
+                                          {
+                                            "-": [
+                                              "$q.S",
+                                              1
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  1
+                                ]
+                              },
+                              "$q.stride_w"
+                            ]
+                          },
+                          1
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": {
+              "if": [
+                {
+                  "==": [
+                    "$q.layout",
+                    "channels_last"
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "*": [
+                        {
+                          "+": [
+                            {
+                              "/": [
+                                {
+                                  "-": [
+                                    {
+                                      "-": [
+                                        {
+                                          "+": [
+                                            "$q.H",
+                                            {
+                                              "*": [
+                                                2,
+                                                "$q.pad_h"
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "*": [
+                                            "$q.dilation_h",
+                                            {
+                                              "-": [
+                                                "$q.R",
+                                                1
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    1
+                                  ]
+                                },
+                                "$q.stride_h"
+                              ]
+                            },
+                            1
+                          ]
+                        },
+                        {
+                          "+": [
+                            {
+                              "/": [
+                                {
+                                  "-": [
+                                    {
+                                      "-": [
+                                        {
+                                          "+": [
+                                            "$q.W",
+                                            {
+                                              "*": [
+                                                2,
+                                                "$q.pad_w"
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "*": [
+                                            "$q.dilation_w",
+                                            {
+                                              "-": [
+                                                "$q.S",
+                                                1
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    1
+                                  ]
+                                },
+                                "$q.stride_w"
+                              ]
+                            },
+                            1
+                          ]
+                        }
+                      ]
+                    },
+                    "$q.K"
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "+": [
+                        {
+                          "/": [
+                            {
+                              "-": [
+                                {
+                                  "-": [
+                                    {
+                                      "+": [
+                                        "$q.H",
+                                        {
+                                          "*": [
+                                            2,
+                                            "$q.pad_h"
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "*": [
+                                        "$q.dilation_h",
+                                        {
+                                          "-": [
+                                            "$q.R",
+                                            1
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                1
+                              ]
+                            },
+                            "$q.stride_h"
+                          ]
+                        },
+                        1
+                      ]
+                    },
+                    {
+                      "+": [
+                        {
+                          "/": [
+                            {
+                              "-": [
+                                {
+                                  "-": [
+                                    {
+                                      "+": [
+                                        "$q.W",
+                                        {
+                                          "*": [
+                                            2,
+                                            "$q.pad_w"
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "*": [
+                                        "$q.dilation_w",
+                                        {
+                                          "-": [
+                                            "$q.S",
+                                            1
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                1
+                              ]
+                            },
+                            "$q.stride_w"
+                          ]
+                        },
+                        1
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              {
+                "*": [
+                  {
+                    "+": [
+                      {
+                        "/": [
+                          {
+                            "-": [
+                              {
+                                "-": [
+                                  {
+                                    "+": [
+                                      "$q.W",
+                                      {
+                                        "*": [
+                                          2,
+                                          "$q.pad_w"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.dilation_w",
+                                      {
+                                        "-": [
+                                          "$q.S",
+                                          1
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              1
+                            ]
+                          },
+                          "$q.stride_w"
+                        ]
+                      },
+                      1
+                    ]
+                  },
+                  "$q.K"
+                ]
+              },
+              {
+                "+": [
+                  {
+                    "/": [
+                      {
+                        "-": [
+                          {
+                            "-": [
+                              {
+                                "+": [
+                                  "$q.W",
+                                  {
+                                    "*": [
+                                      2,
+                                      "$q.pad_w"
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.dilation_w",
+                                  {
+                                    "-": [
+                                      "$q.S",
+                                      1
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          1
+                        ]
+                      },
+                      "$q.stride_w"
+                    ]
+                  },
+                  1
+                ]
+              }
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              "$q.K",
+              1
+            ]
+          }
+        ]
       },
       {
         "name": "prePadding",
         "kind": "expr",
         "value": [
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": "$q.pad_d"
+          },
           "$q.pad_h",
           "$q.pad_w"
         ]
@@ -316,6 +1304,15 @@
         "name": "postPadding",
         "kind": "expr",
         "value": [
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": "$q.pad_d"
+          },
           "$q.pad_h",
           "$q.pad_w"
         ]
@@ -324,6 +1321,15 @@
         "name": "convStrides",
         "kind": "expr",
         "value": [
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": "$q.stride_d"
+          },
           "$q.stride_h",
           "$q.stride_w"
         ]
@@ -332,6 +1338,15 @@
         "name": "convDilation",
         "kind": "expr",
         "value": [
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": "$q.dilation_d"
+          },
           "$q.dilation_h",
           "$q.dilation_w"
         ]
@@ -444,6 +1459,81 @@
         "$q.groups",
         "$q.C"
       ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.spatial",
+            "3d"
+          ]
+        },
+        {
+          "and": [
+            {
+              "==": [
+                "$q.D",
+                1
+              ]
+            },
+            {
+              "==": [
+                "$q.T",
+                1
+              ]
+            },
+            {
+              "==": [
+                "$q.pad_d",
+                0
+              ]
+            },
+            {
+              "==": [
+                "$q.stride_d",
+                1
+              ]
+            },
+            {
+              "==": [
+                "$q.dilation_d",
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "<=": [
+        {
+          "+": [
+            {
+              "*": [
+                "$q.dilation_d",
+                {
+                  "-": [
+                    "$q.T",
+                    1
+                  ]
+                }
+              ]
+            },
+            1
+          ]
+        },
+        {
+          "+": [
+            "$q.D",
+            {
+              "*": [
+                2,
+                "$q.pad_d"
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "archetypes": [
@@ -498,6 +1588,21 @@
           "$q.dilation_h"
         ],
         "groups": [
+          1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
           1
         ]
       }
@@ -567,6 +1672,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -627,6 +1747,21 @@
           "$q.dilation_h"
         ],
         "groups": [
+          1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
           1
         ]
       }
@@ -693,6 +1828,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -757,6 +1907,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -820,6 +1985,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -880,6 +2060,21 @@
           "$q.dilation_h"
         ],
         "groups": [
+          1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
           1
         ]
       }
@@ -947,6 +2142,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1007,6 +2217,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1066,6 +2291,21 @@
           "$q.dilation_h"
         ],
         "groups": [
+          1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
           1
         ]
       }
@@ -1133,6 +2373,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1193,6 +2448,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1249,6 +2519,21 @@
           "$q.dilation_h"
         ],
         "groups": [
+          1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
           1
         ]
       }
@@ -1307,6 +2592,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1363,6 +2663,21 @@
           "$q.dilation_h"
         ],
         "groups": [
+          1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
           1
         ]
       }
@@ -1422,6 +2737,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1478,6 +2808,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1533,6 +2878,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1587,6 +2947,21 @@
           "$q.dilation_h"
         ],
         "groups": [
+          1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
           1
         ]
       }
@@ -1651,6 +3026,21 @@
         ],
         "groups": [
           1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1709,6 +3099,21 @@
           "$q.dilation_h"
         ],
         "groups": [
+          1
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
           1
         ]
       }
@@ -1775,6 +3180,21 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1836,6 +3256,21 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1897,6 +3332,21 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
         ]
       }
     },
@@ -1956,6 +3406,159 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "video_3x3x3",
+      "note": "a 3-D (video) convolution stage: 3x3x3 filter, same padding, short clip depth",
+      "values": {
+        "N": [
+          1,
+          4,
+          8
+        ],
+        "C": [
+          64,
+          128,
+          256
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          1
+        ],
+        "D": [
+          8,
+          16
+        ],
+        "H": [
+          28,
+          56
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "T": [
+          3
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          3
+        ],
+        "pad_d": [
+          1
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          1
+        ],
+        "stride_d": [
+          1
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "volumetric_3x3x3_down",
+      "note": "a 3-D (medical imaging) encoder downsample: 3x3x3, stride 2",
+      "values": {
+        "N": [
+          1,
+          2
+        ],
+        "C": [
+          32,
+          64,
+          128
+        ],
+        "K": [
+          64,
+          128,
+          256
+        ],
+        "groups": [
+          1
+        ],
+        "D": [
+          32,
+          64
+        ],
+        "H": [
+          "$q.D"
+        ],
+        "W": [
+          "$q.D"
+        ],
+        "T": [
+          3
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          3
+        ],
+        "pad_d": [
+          1
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          1
+        ],
+        "stride_d": [
+          2
+        ],
+        "stride_h": [
+          2
+        ],
+        "stride_w": [
+          2
+        ],
+        "dilation_d": [
+          1
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          1
         ]
       }
     }
@@ -2024,5 +3627,6 @@
   },
   "// archetypes": "Correlated tuples from real networks (RFC 0019.13 \u00a712.2). Realism is a joint fact: C=3 is a real convolution beside K=64, a 7x7 filter and a 224x224 image, and meaningless beside K=905. Each archetype fixes one coherent geometry -- filter size, dilation and padding together -- and varies stride inside it, because padding is chosen to suit the filter and dilation while stride is chosen independently of both. Between them these cover stride 1/2/4/16, padding 0 through 5, dilation 1 through 4, and group counts from 1 through depthwise.",
   "// neighbourhood": "How a draw may drift and stay a layer. R, S, stride, padding and dilation are all deliberately absent: they form one coupled geometry, and moving any of them alone breaks the pairing the archetypes exist to record -- a 7x7 that drifts to 3x3 while pad stays 3, or a 16x16 patch projection whose stride falls to 1, is valid and is in no network. Coverage of those axes comes from declaring more geometries, not from perturbing one. W repeats the 1 ratio because most images are square and a uniform draw over {1, 1.33, 2} would say otherwise.",
-  "// mixture": "Anchors alone memorise a handful of shapes; the wide net alone put 0.04% of ten thousand draws anywhere near a real layer. The exploration share is \u00a75.4's floor -- an engine still has to answer for problems nobody wrote down."
+  "// mixture": "Anchors alone memorise a handful of shapes; the wide net alone put 0.04% of ten thousand draws anywhere near a real layer. The exploration share is \u00a75.4's floor -- an engine still has to answer for problems nobody wrote down.",
+  "// spatial": "spatial and layout are axes of the problem: 3-D problems add a depth to every tensor and to the geometry, and channels_last stores activations NHWC/NDHWC and the filter KRSC. 2-D problems pin every depth parameter to its identity."
 }

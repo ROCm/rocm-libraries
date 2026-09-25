@@ -21,6 +21,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <string>
 
 namespace hipdnn_corpus_gen
@@ -334,6 +336,13 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
                              {"stride_w", int64_t{2}},
                              {"dilation_h", int64_t{1}},
                              {"dilation_w", int64_t{1}},
+                             {"spatial", std::string("2d")},
+                             {"layout", std::string("channels_first")},
+                             {"D", int64_t{1}},
+                             {"T", int64_t{1}},
+                             {"pad_d", int64_t{0}},
+                             {"stride_d", int64_t{1}},
+                             {"dilation_d", int64_t{1}},
                              {"dtype", std::string("fp16")}};
 
     const auto built = buildGraphFor(*parsed.metadata, conv1);
@@ -378,7 +387,14 @@ TEST(TestGraphBuilderRegistry, TheShippedMetadataCoversEveryDeclaredDtype)
                            {"stride_h", int64_t{1}},
                            {"stride_w", int64_t{1}},
                            {"dilation_h", int64_t{1}},
-                           {"dilation_w", int64_t{1}}};
+                           {"dilation_w", int64_t{1}},
+                           {"spatial", std::string("2d")},
+                           {"layout", std::string("channels_first")},
+                           {"D", int64_t{1}},
+                           {"T", int64_t{1}},
+                           {"pad_d", int64_t{0}},
+                           {"stride_d", int64_t{1}},
+                           {"dilation_d", int64_t{1}}};
         point["dtype"] = value;
 
         const auto built = buildGraphFor(*parsed.metadata, point);
@@ -410,6 +426,13 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionAdmitsARealLayer)
                                     {"stride_w", int64_t{1}},
                                     {"dilation_h", int64_t{1}},
                                     {"dilation_w", int64_t{1}},
+                                    {"spatial", std::string("2d")},
+                                    {"layout", std::string("channels_first")},
+                                    {"D", int64_t{1}},
+                                    {"T", int64_t{1}},
+                                    {"pad_d", int64_t{0}},
+                                    {"stride_d", int64_t{1}},
+                                    {"dilation_d", int64_t{1}},
                                     {"dtype", std::string("fp16")}};
 
     EXPECT_TRUE(detail::satisfiesConstraints(*parsed.metadata, resnetLayer3))
@@ -586,6 +609,294 @@ TEST(TestGraphBuilderRegistry, ADeclaredDtypeReachesTheGraphHeaderAndEveryTensor
                 << ": graph compute_data_type does not follow the declaration";
         }
     }
+}
+
+namespace
+{
+
+/// SDPA declared with a causal-anchor axis, which is the only argument these three tests are
+/// about. The geometry is deliberately Sq < Sk, because that is the only regime where the two
+/// anchors mask different triangles and so the only regime where getting this wrong is a
+/// different problem rather than the same one spelled twice.
+OperationMetadata sdpaAlignmentMetadata()
+{
+    return load(R"({
+      "schema_version": "1.0",
+      "operation": "sdpa_fwd",
+      "parameters": {
+        "alignment": { "type": "enum", "values": ["top_left", "bottom_right"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": {
+        "function": "sdpaForward",
+        "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+        "arguments": [
+          { "name": "qDims", "kind": "constant", "constant": [1, 4, 128, 64] },
+          { "name": "qStrides", "kind": "strides_of", "of": "qDims" },
+          { "name": "kDims", "kind": "constant", "constant": [1, 4, 4096, 64] },
+          { "name": "kStrides", "kind": "strides_of", "of": "kDims" },
+          { "name": "vDims", "kind": "constant", "constant": [1, 4, 4096, 64] },
+          { "name": "vStrides", "kind": "strides_of", "of": "vDims" },
+          { "name": "oDims", "kind": "constant", "constant": [1, 4, 128, 64] },
+          { "name": "oStrides", "kind": "strides_of", "of": "oDims" },
+          { "name": "causalMask", "kind": "constant", "constant": true },
+          { "name": "dataType", "kind": "constant", "constant": "bf16" },
+          { "name": "diagonalAlignment", "kind": "direct", "source": "$q.alignment" }
+        ]
+      }
+    })");
+}
+
+/// The anchor as the graph records it, read back from the SDPA node.
+std::optional<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>
+    recordedAlignment(const GraphBytes& bytes)
+{
+    const auto* graph = asGraph(bytes);
+    if(graph == nullptr || graph->nodes() == nullptr)
+    {
+        return std::nullopt;
+    }
+    for(const auto* node : *graph->nodes())
+    {
+        const auto* attributes = node->attributes_as_SdpaAttributes();
+        if(attributes != nullptr)
+        {
+            return attributes->diagonal_alignment();
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+TEST(TestGraphBuilderRegistry, TheCausalAnchorFollowsTheDeclarationNotTheSchemaDefault)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+    for(const auto& [declared, expected] :
+        std::vector<std::pair<std::string, DiagonalAlignment>>{
+            {"top_left", DiagonalAlignment::TOP_LEFT},
+            {"bottom_right", DiagonalAlignment::BOTTOM_RIGHT}})
+    {
+        const auto built = buildGraphFor(sdpaAlignmentMetadata(), ProblemPoint{{"alignment", declared}});
+
+        ASSERT_TRUE(built.ok()) << declared << ": " << built.error;
+        const auto recorded = recordedAlignment(built.bytes);
+        ASSERT_TRUE(recorded.has_value()) << declared << ": no SDPA node in the graph";
+        EXPECT_EQ(*recorded, expected) << declared;
+    }
+}
+
+TEST(TestGraphBuilderRegistry, AnUndeclaredAnchorIsRefusedRatherThanReadAsTopLeft)
+{
+    // The reason this is not a default: at Sq < Sk the two anchors are different work, so a
+    // spelling nobody defined, read as TOP_LEFT, would build, benchmark and record a corpus of
+    // the wrong problem with no line anywhere saying so.
+    const auto built
+        = buildGraphFor(sdpaAlignmentMetadata(), ProblemPoint{{"alignment", std::string("middle")}});
+
+    EXPECT_FALSE(built.ok());
+    EXPECT_NE(built.error.find("diagonalAlignment"), std::string::npos) << built.error;
+}
+
+TEST(TestGraphBuilderRegistry, ADeclarationThatNeverHeardOfTheAnchorStillBuildsWhatItAlwaysBuilt)
+{
+    // TOP_LEFT is the schema default, so an unset argument must write the bytes a declaration
+    // predating this axis wrote -- otherwise every corpus id in flight would move.
+    auto metadata  = sdpaAlignmentMetadata();
+    auto& arguments = metadata.graphBuilder.arguments;
+    arguments.erase(std::remove_if(arguments.begin(),
+                                   arguments.end(),
+                                   [](const BuilderArgument& argument) {
+                                       return argument.name == "diagonalAlignment";
+                                   }),
+                    arguments.end());
+
+    const auto without = buildGraphFor(metadata, ProblemPoint{});
+    ASSERT_TRUE(without.ok()) << without.error;
+
+    const auto with = buildGraphFor(sdpaAlignmentMetadata(),
+                                    ProblemPoint{{"alignment", std::string("top_left")}});
+    ASSERT_TRUE(with.ok()) << with.error;
+
+    EXPECT_EQ(without.bytes, with.bytes);
+}
+
+TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccept)
+{
+    // Three properties no device-free check would notice and each of which, on hardware,
+    // empties a live-engine corpus completely -- found that way, one at a time:
+    //  - fp32 compute: hip-kernel-provider's SdpaFwdPlanBuilder refuses any other
+    //    ("Compute data type must be FLOAT"), and the ingestor engines decline at graph_match;
+    //  - BSHD strides: rocKE's dense kernels take no stride kernargs, so its matcher declines
+    //    the row-major BHSD layout `strides_of` would give;
+    //  - an explicit attn_scale_value: rocKE requires one rather than guessing.
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good()) << "sdpa_fwd.opmeta.json is not where the build says it is";
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    // GQA and Sq != Sk, so a stride that used the wrong head count or sequence length shows.
+    const ProblemPoint point{{"batch", int64_t{2}},
+                             {"heads", int64_t{8}},
+                             {"heads_kv", int64_t{2}},
+                             {"seqlen_q", int64_t{16}},
+                             {"seqlen_k", int64_t{32}},
+                             {"head_dim", int64_t{64}},
+                             {"is_causal", false},
+                             {"alignment", std::string("top_left")},
+                             {"generate_stats", false},
+                             {"dtype", std::string("fp16")}};
+    const auto built = buildGraphFor(*parsed.metadata, point);
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* graph = asGraph(built.bytes);
+    ASSERT_NE(graph, nullptr);
+
+    EXPECT_EQ(graph->io_data_type(), DataType::HALF);
+    EXPECT_EQ(graph->compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(graph->intermediate_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(graph->nodes(), nullptr);
+    ASSERT_EQ(graph->nodes()->size(), 1U);
+    const auto* node = graph->nodes()->Get(0);
+    EXPECT_EQ(node->compute_data_type(), DataType::FLOAT);
+    const auto* attributes = node->attributes_as_SdpaAttributes();
+    ASSERT_NE(attributes, nullptr);
+    ASSERT_TRUE(attributes->attn_scale_value().has_value());
+    EXPECT_FLOAT_EQ(attributes->attn_scale_value().value(), 0.125F); // 1/sqrt(64)
+
+    // (B, H, S, D) dims, token-major: [S*H*D, D, H*D, 1].
+    const std::map<std::string, std::vector<int64_t>> expected{
+        {"q", {16 * 8 * 64, 64, 8 * 64, 1}},
+        {"k", {32 * 2 * 64, 64, 2 * 64, 1}},
+        {"v", {32 * 2 * 64, 64, 2 * 64, 1}},
+        {"o", {16 * 8 * 64, 64, 8 * 64, 1}}};
+    size_t seen = 0;
+    for(const auto* tensor : *graph->tensors())
+    {
+        const auto found = expected.find(tensor->name()->str());
+        if(found == expected.end())
+        {
+            continue;
+        }
+        ++seen;
+        const std::vector<int64_t> strides(tensor->strides()->begin(), tensor->strides()->end());
+        EXPECT_EQ(strides, found->second) << tensor->name()->str();
+    }
+    EXPECT_EQ(seen, expected.size());
+}
+
+TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDeprecatedFlag)
+{
+    // Providers give causal_mask precedence over the bounds and read it as top-left whatever
+    // diagonal_alignment says, so a bottom-right problem built with the flag is top-left -- and
+    // AITER on gfx942, whose causal kernels are all bottom-right, declined every one.
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    for(const auto& [anchor, expected] :
+        std::vector<std::pair<std::string, DiagonalAlignment>>{
+            {"top_left", DiagonalAlignment::TOP_LEFT},
+            {"bottom_right", DiagonalAlignment::BOTTOM_RIGHT}})
+    {
+        const ProblemPoint point{{"batch", int64_t{1}},
+                                 {"heads", int64_t{8}},
+                                 {"heads_kv", int64_t{8}},
+                                 {"seqlen_q", int64_t{16}},
+                                 {"seqlen_k", int64_t{32}},
+                                 {"head_dim", int64_t{128}},
+                                 {"is_causal", true},
+                                 {"alignment", anchor},
+                                 {"generate_stats", false},
+                                 {"dtype", std::string("bf16")}};
+        const auto built = buildGraphFor(*parsed.metadata, point);
+        ASSERT_TRUE(built.ok()) << anchor << ": " << built.error;
+        const auto* attributes
+            = asGraph(built.bytes)->nodes()->Get(0)->attributes_as_SdpaAttributes();
+        ASSERT_NE(attributes, nullptr);
+        EXPECT_FALSE(attributes->causal_mask()) << anchor;
+        EXPECT_FALSE(attributes->causal_mask_bottom_right()) << anchor;
+        EXPECT_FALSE(attributes->left_bound().has_value()) << anchor;
+        ASSERT_TRUE(attributes->right_bound().has_value()) << anchor;
+        EXPECT_EQ(attributes->right_bound().value(), 0) << anchor;
+        EXPECT_EQ(attributes->diagonal_alignment(), expected) << anchor;
+    }
+}
+
+TEST(TestGraphBuilderRegistry, AShippedUnaryActivationLeavesItsParametersUnset)
+{
+    // A present relu_upper_clip makes ReLU a clamp: written as 0 by default, every "ReLU" in
+    // the corpus was a clamp to [0, 0], which MIOpen accepts and computes as such.
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/pointwise_unary.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    const ProblemPoint relu{{"D0", int64_t{2}},
+                            {"D1", int64_t{64}},
+                            {"D2", int64_t{8}},
+                            {"D3", int64_t{8}},
+                            {"mode", std::string("RELU_FWD")},
+                            {"dtype", std::string("fp16")}};
+    const auto built = buildGraphFor(*parsed.metadata, relu);
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* attributes = asGraph(built.bytes)->nodes()->Get(0)->attributes_as_PointwiseAttributes();
+    ASSERT_NE(attributes, nullptr);
+    EXPECT_EQ(attributes->operation(), PointwiseMode::RELU_FWD);
+    EXPECT_FALSE(attributes->relu_lower_clip().has_value());
+    EXPECT_FALSE(attributes->relu_upper_clip().has_value());
+    EXPECT_FALSE(attributes->relu_lower_clip_slope().has_value());
+    EXPECT_FALSE(attributes->in_1_tensor_uid().has_value()) << "a unary node has one input";
+}
+
+TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
+{
+    // generate_stats without a stats tensor is a graph no engine can run; with the flag the
+    // statistics tensor is part of the graph and named by the node.
+    std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    const ProblemPoint point{{"batch", int64_t{2}},
+                             {"heads", int64_t{8}},
+                             {"heads_kv", int64_t{8}},
+                             {"seqlen_q", int64_t{64}},
+                             {"seqlen_k", int64_t{64}},
+                             {"head_dim", int64_t{128}},
+                             {"is_causal", false},
+                             {"alignment", std::string("top_left")},
+                             {"generate_stats", true},
+                             {"dtype", std::string("bf16")}};
+    const auto built = buildGraphFor(*parsed.metadata, point);
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* graph = asGraph(built.bytes);
+    const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
+    ASSERT_NE(attributes, nullptr);
+    ASSERT_TRUE(attributes->generate_stats().has_value());
+    EXPECT_TRUE(attributes->generate_stats().value());
+    ASSERT_TRUE(attributes->stats_tensor_uid().has_value());
+    bool found = false;
+    for(const auto* tensor : *graph->tensors())
+    {
+        if(tensor->uid() == attributes->stats_tensor_uid().value())
+        {
+            found = true;
+            EXPECT_EQ(tensor->data_type(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+            EXPECT_EQ(std::vector<int64_t>(tensor->dims()->begin(), tensor->dims()->end()),
+                      (std::vector<int64_t>{2, 8, 64, 1}));
+        }
+    }
+    EXPECT_TRUE(found) << "the node names a stats tensor the graph does not carry";
 }
 
 } // namespace hipdnn_corpus_gen

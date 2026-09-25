@@ -73,6 +73,9 @@ struct BuilderCase
     /// activations are, an MoE token offset is an index, and a block-scale factor has its own
     /// declared scaleDataType, which is the entire point of quantization.
     std::set<std::string> foreignTypes;
+
+    /// Nodes the graph holds: one for every builder but a fusion.
+    size_t nodes = 1;
 };
 
 nlohmann::json declarationFor(const BuilderCase& builder)
@@ -136,11 +139,39 @@ std::vector<BuilderCase> everyBuilder()
         {"convolutionForward", {"x", "w", "y"}, convGeometry(), 3, {}},
         {"convolutionBackwardData", {"dy", "w", "dx"}, convGeometry(), 3, {}},
         {"convolutionBackwardWeights", {"x", "dy", "dw"}, convGeometry(), 3, {}},
+        {"convolutionBiasActivation",
+         {"x", "w", "bias", "y"},
+         [] {
+             auto extra = convGeometry();
+             extra.push_back(scalar("mode", "RELU_FWD"));
+             return extra;
+         }(),
+         6,
+         {"conv_out", "bias_out"},
+         3},
         {"matmul", {"a", "b", "c"}, {}, 3, {}},
+        {"matmulEpilogue",
+         {"a", "b", "c", "bias"},
+         {scalar("epilogue", "bias_activation"), scalar("mode", "RELU_FWD")},
+         6,
+         {"matmul_out", "bias_out"},
+         3},
+        {"blockScaledMatmul",
+         {"a", "aScale", "b", "bScale", "c"},
+         {scalar("scaleDataType", "fp8_e8m0"), scalar("outputDataType", "fp16"),
+          nlohmann::json{{"name", "blockSize"}, {"kind", "constant"}, {"constant", 32}}},
+         7,
+         {"aScale", "bScale", "c", "a_dequantized", "b_dequantized"},
+         3},
         {"pointwiseBinary",
          {},
          {ints("dims", {2, 4}), ints("strides", {4, 1}), scalar("mode", "ADD")},
          3,
+         {}},
+        {"pointwiseUnary",
+         {},
+         {ints("dims", {2, 4}), ints("strides", {4, 1}), scalar("mode", "RELU_FWD")},
+         2,
          {}},
         {"reduction",
          {"in", "out"},
@@ -171,6 +202,12 @@ std::vector<BuilderCase> everyBuilder()
          7,
          {"epsilon"}},
         {"batchnormInference", {"x", "mean", "invVariance", "scale", "bias", "y"}, {}, 6, {}},
+        {"batchnormInferenceActivationBackward",
+         {"x", "mean", "invVariance", "scale", "bias", "dy", "dx", "dscale", "dbias"},
+         {scalar("mode", "RELU_BWD")},
+         11,
+         {"bn_out", "dy_bn"},
+         3},
         {"batchnormBackward", {"dy", "x", "scale", "dx", "dscale", "dbias"}, {}, 6, {}},
         {"resampleForward",
          {"x", "y"},
@@ -236,7 +273,8 @@ TEST(TestEveryGraphBuilder, EveryBuilderBuildsAReadableGraph)
         EXPECT_EQ(graph->tensors()->size(), builder.tensors)
             << builder.function << " wrote a different number of tensors than it declares";
         ASSERT_NE(graph->nodes(), nullptr);
-        EXPECT_EQ(graph->nodes()->size(), 1U) << builder.function << " is not a single-node graph";
+        EXPECT_EQ(graph->nodes()->size(), builder.nodes)
+            << builder.function << " built the wrong number of nodes";
     }
 }
 

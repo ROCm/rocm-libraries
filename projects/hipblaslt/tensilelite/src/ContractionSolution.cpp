@@ -5472,8 +5472,11 @@ namespace TensileLite
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
-                    size_t splitk         = skGrid / tiles;
-                    size_t idealWorkspace = requiredWorkspaceSizeGsu(problem, hardware, splitk);
+                    // The resolved grid already includes the batch count. Reuse
+                    // the split-reduction sizing rules for bias, amaxD and custom
+                    // metadata, but do not multiply the partial tiles by batch again.
+                    size_t idealWorkspace
+                        = requiredWorkspaceSizeForSplitTiles(problem, skGrid / tiles, skGrid);
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
                 }
@@ -5504,11 +5507,18 @@ namespace TensileLite
                                                          Hardware const& hardware,
                                                          size_t          gsu) const
     {
+        const size_t batch = problem.d().sizes()[2];
+        const size_t tiles = problem.getNumTiles(sizeMapping, gsu) * batch;
+        return requiredWorkspaceSizeForSplitTiles(problem, gsu, tiles);
+    }
+
+    size_t ContractionSolution::requiredWorkspaceSizeForSplitTiles(Problem const& problem,
+                                                                  size_t         gsu,
+                                                                  size_t         tiles) const
+    {
         size_t size = 0;
 
         size_t gsuMultiplier = gsu > 1 ? gsu : 0;
-        size_t batch         = problem.d().sizes()[2];
-        size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
         size_t tileSize      = 0;
         size_t workspaceSizePerElemBias = 0;
         bool inferWorkspaceSizeForCustom = !problem.groupedGemm()

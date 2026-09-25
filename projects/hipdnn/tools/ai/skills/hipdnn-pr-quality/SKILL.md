@@ -169,6 +169,10 @@ authoritative source is reachable, flag the point for human verification rather 
 A public-API change that silently diverges from the equivalent cuDNN behavior is a finding unless the
 divergence is explicit, documented, and intentional.
 
+Shim files adapted from cudnn-frontend must carry the "Portions derived from NVIDIA cuDNN frontend"
+header with the upstream NVIDIA copyright notice. A change to `CUDNN_FRONTEND_*_VERSION` must also
+update `frontend/THIRD_PARTY_LICENSES.md`; a missing header or stale notice file is a finding.
+
 ### Adds — serialization compatibility (`schema/fbs`)
 
 A `.fbs` schema change must keep backward/forward compatibility (field ordering/IDs, defaults) or

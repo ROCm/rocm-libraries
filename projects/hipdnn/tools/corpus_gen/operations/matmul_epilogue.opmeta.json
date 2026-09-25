@@ -1,0 +1,447 @@
+{
+  "schema_version": "1.0",
+  "operation": "matmul_epilogue",
+  "display_name": "Matmul with Epilogue",
+  "description": "C = activation(A x B + bias): a matmul followed by a per-column bias add, an activation, or both, as one graph. The matmul problem space is matmul's.",
+  "parameters": {
+    "M": {
+      "type": "int64"
+    },
+    "N": {
+      "type": "int64"
+    },
+    "K": {
+      "type": "int64"
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "fp32",
+        "fp16",
+        "bf16"
+      ]
+    },
+    "a_layout": {
+      "type": "enum",
+      "values": [
+        "row",
+        "col"
+      ],
+      "description": "Memory order of A."
+    },
+    "b_layout": {
+      "type": "enum",
+      "values": [
+        "row",
+        "col"
+      ],
+      "description": "Memory order of B."
+    },
+    "epilogue": {
+      "type": "enum",
+      "values": [
+        "bias_activation",
+        "bias",
+        "activation"
+      ],
+      "description": "What follows the matmul."
+    },
+    "mode": {
+      "type": "enum",
+      "values": [
+        "RELU_FWD",
+        "GELU_FWD",
+        "GELU_APPROX_TANH_FWD",
+        "SWISH_FWD",
+        "SIGMOID_FWD",
+        "TANH_FWD",
+        "ELU_FWD"
+      ],
+      "description": "The activation, when the epilogue has one; a FlatBuffers PointwiseMode enumerator name with its parameters unset."
+    }
+  },
+  "stratification_axis": "arithmetic_intensity",
+  "regimes": {
+    "m": {
+      "parameter": "M",
+      "buckets": [
+        1,
+        8,
+        32,
+        128,
+        1024,
+        4096,
+        8192
+      ]
+    },
+    "n": {
+      "parameter": "N",
+      "buckets": [
+        1024,
+        4096,
+        8192,
+        11008,
+        28672
+      ]
+    },
+    "k": {
+      "parameter": "K",
+      "buckets": [
+        256,
+        1024,
+        4096,
+        8192,
+        11008
+      ]
+    }
+  },
+  "graph_builder": {
+    "function": "matmulEpilogue",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "aDims",
+        "kind": "expr",
+        "value": [
+          "$q.M",
+          "$q.K"
+        ]
+      },
+      {
+        "name": "aStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.a_layout",
+                  "col"
+                ]
+              },
+              1,
+              "$q.K"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.a_layout",
+                  "col"
+                ]
+              },
+              "$q.M",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "bDims",
+        "kind": "expr",
+        "value": [
+          "$q.K",
+          "$q.N"
+        ]
+      },
+      {
+        "name": "bStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.b_layout",
+                  "col"
+                ]
+              },
+              1,
+              "$q.N"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.b_layout",
+                  "col"
+                ]
+              },
+              "$q.K",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "cDims",
+        "kind": "expr",
+        "value": [
+          "$q.M",
+          "$q.N"
+        ]
+      },
+      {
+        "name": "cStrides",
+        "kind": "strides_of",
+        "of": "cDims"
+      },
+      {
+        "name": "biasDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.N"
+        ]
+      },
+      {
+        "name": "biasStrides",
+        "kind": "strides_of",
+        "of": "biasDims"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      },
+      {
+        "name": "computeDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "intermediateDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "epilogue",
+        "kind": "direct",
+        "source": "$q.epilogue"
+      },
+      {
+        "name": "mode",
+        "kind": "direct",
+        "source": "$q.mode"
+      }
+    ],
+    "// types": "Operands, bias and result carry the declared dtype; the matmul's output and the biased intermediate are fp32, and every node computes in fp32 -- hipBLASLt's epilogue contract."
+  },
+  "archetypes": [
+    {
+      "name": "llama3_8b_projection",
+      "note": "the attention and MLP projections; tokens on M, model width on N and K",
+      "values": {
+        "M": [
+          512,
+          1024,
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "N": [
+          4096,
+          14336
+        ],
+        "K": [
+          4096
+        ]
+      }
+    },
+    {
+      "name": "llama3_8b_mlp_down",
+      "values": {
+        "M": [
+          512,
+          1024,
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "N": [
+          4096
+        ],
+        "K": [
+          14336
+        ]
+      }
+    },
+    {
+      "name": "llama3_70b_projection",
+      "values": {
+        "M": [
+          512,
+          1024,
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "N": [
+          8192,
+          28672
+        ],
+        "K": [
+          8192
+        ]
+      }
+    },
+    {
+      "name": "gpt3_175b_projection",
+      "values": {
+        "M": [
+          512,
+          1024,
+          2048,
+          4096
+        ],
+        "N": [
+          12288,
+          49152
+        ],
+        "K": [
+          12288
+        ]
+      }
+    },
+    {
+      "name": "bert_base_projection",
+      "values": {
+        "M": [
+          1024,
+          4096,
+          16384
+        ],
+        "N": [
+          768,
+          3072
+        ],
+        "K": [
+          768
+        ]
+      }
+    },
+    {
+      "name": "decode_gemv",
+      "note": "batch-1 decode: a tall-skinny GEMM, memory bound and a different kernel entirely",
+      "values": {
+        "M": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32
+        ],
+        "N": [
+          4096,
+          8192,
+          14336
+        ],
+        "K": [
+          4096,
+          8192
+        ]
+      }
+    },
+    {
+      "name": "vit_projection",
+      "values": {
+        "M": [
+          1576,
+          4616,
+          18464
+        ],
+        "N": [
+          768,
+          3072
+        ],
+        "K": [
+          768
+        ]
+      }
+    },
+    {
+      "name": "square_benchmark",
+      "note": "the classic square case; not a workload but the shape every library is tuned on",
+      "values": {
+        "M": [
+          1024,
+          2048,
+          4096,
+          8192
+        ],
+        "N": [
+          "$q.M"
+        ],
+        "K": [
+          "$q.M"
+        ]
+      }
+    }
+  ],
+  "neighbourhood": {
+    "M": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        0.75,
+        1,
+        1.5,
+        2
+      ]
+    },
+    "N": {
+      "kind": "multiple",
+      "of": 128,
+      "steps": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ]
+    },
+    "K": {
+      "kind": "multiple",
+      "of": 128,
+      "steps": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ]
+    }
+  },
+  "mixture": {
+    "archetypes": 0.2,
+    "neighbourhood": 0.6,
+    "exploration": 0.2
+  },
+  "// archetypes": "Transformer projection shapes, where nearly all production GEMM time goes. M carries tokens and moves with batch and sequence length; N and K are model widths and take a few architecture-fixed values, which is why they are perturbed by whole 128-element multiples rather than scaled.",
+  "// mixture": "Same shares as conv_fwd; see the note there.",
+  "constraints": [
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.epilogue",
+            "bias"
+          ]
+        },
+        {
+          "==": [
+            "$q.mode",
+            "RELU_FWD"
+          ]
+        }
+      ]
+    }
+  ],
+  "// constraints": "An epilogue with no activation ignores mode, so it is pinned to one value rather than repeating the same graph under every mode."
+}

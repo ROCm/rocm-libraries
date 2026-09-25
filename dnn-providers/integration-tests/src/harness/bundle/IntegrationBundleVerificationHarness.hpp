@@ -265,6 +265,9 @@ private:
     {
         RefStatus status;
         std::string message;
+        /// Where the reference left its outputs, and so where they are compared. Only
+        /// meaningful when `status == RAN`.
+        ValidationSite site = ValidationSite::HOST;
     };
 
     enum class EngineStatus
@@ -306,13 +309,17 @@ private:
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
 
+    // Golden data is loaded on the host, so under --validator auto it is compared there.
     VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
-    VerificationOutcome compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
+    VerificationOutcome
+        compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site);
 
-    // Resolves tolerances, runs bundle::compareOutputs(), and turns each mismatch it
-    // returns into one failure. The comparison itself owns no gtest state.
+    // Resolves tolerances, runs bundle::compareOutputs() at `site` — or wherever
+    // policy.validator overrides it to — and turns each mismatch it returns into one
+    // failure. The comparison itself owns no gtest state.
     VerificationOutcome compareAgainst(OutputTensors& engineOutputs,
-                                       const ExpectedTensorLookup& expectedFor);
+                                       const ExpectedTensorLookup& expectedFor,
+                                       ValidationSite site);
 
     // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
     // carries no message because compareAgainst() has already put one failure per

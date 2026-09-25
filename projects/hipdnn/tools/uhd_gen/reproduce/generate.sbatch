@@ -7,7 +7,7 @@
 #SBATCH --output=%x-%j.log
 #
 # Generate layer-2 (sort_kernel_catalog) and layer-1 (predict_engine) heuristics
-# for one engine against a STAGED corpus -- `corpus_build`'s output, not a corpus the
+# for one engine against a STAGED corpus -- `hipdnn_corpus_gen`'s output, not a corpus the
 # generator proposes for itself.
 #
 # Ordering is load-bearing (uhd_gen README, "Engine-level immediate predictions"): L2 is
@@ -211,11 +211,33 @@ step "corpus shard $SHARD of $SHARDS"
 PROBLEMS="$OUT/problems"
 mkdir -p "$PROBLEMS"
 python3 - "$GRAPHS" "$PROBLEMS" "$SHARDS" "$SHARD" <<'PYEOF'
-import pathlib, shutil, sys
+import json, pathlib, shutil, sys
 source, target, shards, shard = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
-graphs = sorted((source / "graphs").glob("*.json")) or sorted(source.glob("*.json"))
-# Interleaved, not contiguous: the corpus is sorted by name, which sorts by regime, so a
-# contiguous block would hand one shard every decode problem and another every prefill one.
+
+# Manifest row order first, filename sort only as a fallback. The manifest is already
+# regime-spread by the assembler's `select`, so sharding on it needs no assumption about
+# names; the old sort worked only because the names happened to sort by regime, which is an
+# undocumented dependency on a naming scheme that has since changed.
+manifest = source / "manifest.json"
+graphs = []
+if manifest.is_file():
+    document = json.load(open(manifest))
+    rows = document["graphs"] if isinstance(document, dict) else document
+    for row in rows:
+        named = pathlib.Path(row.get("file", ""))
+        path = named if named.is_absolute() else source / named
+        if path.is_file():
+            graphs.append(path)
+if not graphs:
+    for pattern in ("*.fb", "*.json"):
+        found = sorted((source / "graphs").glob(pattern)) or sorted(source.glob(pattern))
+        # manifest.json sits beside the graphs and is not one of them.
+        graphs = [p for p in found if not p.name.startswith("manifest")]
+        if graphs:
+            break
+
+# Interleaved, not contiguous: a contiguous block of a regime-spread order would hand one
+# shard every decode problem and another every prefill one.
 mine = graphs[shard::shards]
 for path in mine:
     shutil.copy2(path, target / path.name)
@@ -229,7 +251,8 @@ step "what this engine admits"
 # admitted graph, so the admitted count -- not the corpus size -- sets the wall clock.
 ADMITTED=0
 CENSUS_START=$(date +%s)
-for problem in "$PROBLEMS"/*.json; do
+for problem in "$PROBLEMS"/*.json "$PROBLEMS"/*.fb; do
+    [ -e "$problem" ] || continue
     if "$BENCH" --graph "$problem" --plugin-dir "$PLUGIN_DIR" --engine-id "$ENGINE_ID" \
         --describe-engine-prediction > /dev/null 2>&1; then
         ADMITTED=$((ADMITTED + 1))
@@ -237,7 +260,7 @@ for problem in "$PROBLEMS"/*.json; do
         mv "$problem" "$OUT/declined-$(basename "$problem")" 2>/dev/null
     fi
 done
-mkdir -p "$OUT/declined"; mv "$OUT"/declined-*.json "$OUT/declined/" 2>/dev/null
+mkdir -p "$OUT/declined"; mv "$OUT"/declined-* "$OUT/declined/" 2>/dev/null
 echo "admitted $ADMITTED of $COUNT in $(( $(date +%s) - CENSUS_START ))s"
 [ "$ADMITTED" -gt 0 ] || { echo "FATAL: the engine serves none of this shard"; exit 1; }
 
@@ -290,7 +313,7 @@ for dir in l1 l2; do
     cp "$OUT/$dir.stdout" "$OUT/$dir.stderr" "$KEEP/" 2>/dev/null
 done
 cp "$OUT/engines.log" "$KEEP/" 2>/dev/null
-ls "$OUT/declined" 2>/dev/null | sed 's/\.json$//' > "$KEEP/declined.txt"
+ls "$OUT/declined" 2>/dev/null | sed -E 's/\.(json|fb)$//' > "$KEEP/declined.txt"
 echo "  admitted=$ADMITTED declined=$(wc -l < "$KEEP/declined.txt") -> $KEEP"
 du -sh "$KEEP" 2>/dev/null
 

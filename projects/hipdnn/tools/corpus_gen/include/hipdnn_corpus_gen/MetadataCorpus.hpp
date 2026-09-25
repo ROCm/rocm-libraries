@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_corpus_gen/DeclaredOracle.hpp>
 #include <hipdnn_corpus_gen/GraphBuilderRegistry.hpp>
 #include <hipdnn_corpus_gen/GraphSize.hpp>
 #include <hipdnn_corpus_gen/OperationDirectory.hpp>
@@ -11,6 +12,7 @@
 #include <hipdnn_frontend.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -47,83 +49,83 @@ struct MetadataOperationCorpus
     std::string firstBuildError;
 };
 
+/// Where an engine query's time goes. Applicability is a yes/no question and should be cheap;
+/// these say which stage is not.
+struct OracleTiming
+{
+    int64_t queries = 0;
+    double buildSeconds = 0.0; ///< declaration -> graph bytes
+    double loadSeconds = 0.0; ///< frontend deserialize + build_operation_graph
+    double askSeconds = 0.0; ///< get_ranked_engine_ids
+};
+
 /// @brief An oracle that asks @p engineId about the graph @p metadata builds for a point.
 ///
 /// The one place a declaration meets a live engine. Everything upstream is data; everything
 /// downstream is a measurement.
 ///
-/// @p maxBytes is the benchmarking ceiling (see GraphSize.hpp): a problem whose tensors do not
-/// fit cannot be timed, so it cannot enter a corpus at any budget.
+/// @p handle must be a live handle; pass `nullptr` to @ref makeCorpusOracle instead, which is
+/// the branch that names no engine.
+///
+/// The declared half -- does it build, does it fit @p maxBytes -- is @ref buildAdmissible, not
+/// a copy of it, so this oracle and the device-free @ref makeDeclaredOracle cannot drift into
+/// disagreeing about what a declaration can express.
 inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
                                         int64_t engineId,
                                         const OperationMetadata& metadata,
                                         int64_t* buildFailures = nullptr,
                                         std::string* firstBuildError = nullptr,
-                                        int64_t maxBytes = 0)
+                                        int64_t maxBytes = 0,
+                                        OracleTiming* timing = nullptr)
 {
-    return [handle, engineId, &metadata, buildFailures, firstBuildError, maxBytes](
-               const ProblemPoint& point) -> bool {
-        const auto built = buildGraphFor(metadata, point);
-        if(!built.ok())
+    const BuildTally tally{buildFailures, firstBuildError};
+    return [handle, engineId, &metadata, tally, maxBytes, timing](const ProblemPoint& point) -> bool {
+        using Clock = std::chrono::steady_clock;
+        auto mark = Clock::now();
+        const auto lap = [&mark](double OracleTiming::*stage, OracleTiming* into) {
+            const auto now = Clock::now();
+            if(into != nullptr)
+            {
+                into->*stage += std::chrono::duration<double>(now - mark).count();
+            }
+            mark = now;
+        };
+        if(timing != nullptr)
         {
-            // Distinguished from an engine refusal on purpose. A declaration that cannot build
-            // is broken for every point, and would otherwise read as an engine that serves
-            // almost nothing -- the search would report a tiny region in good faith.
-            if(buildFailures != nullptr)
-            {
-                ++*buildFailures;
-            }
-            if(firstBuildError != nullptr && firstBuildError->empty())
-            {
-                *firstBuildError = built.error;
-            }
-            return false;
+            ++timing->queries;
         }
-
-        if(maxBytes > 0 && graphBytes(built.bytes) > maxBytes)
+        const auto built = buildAdmissible(metadata, point, maxBytes, tally);
+        lap(&OracleTiming::buildSeconds, timing);
+        if(!built.has_value())
         {
-            // Not a refusal by the engine and not a broken declaration: a problem too large to
-            // benchmark. Silent, because it is neither party's fault and counting it would
-            // drown the counts that mean something.
             return false;
         }
 
         try
         {
             hipdnn_frontend::graph::Graph graph;
-            const auto restored = graph.deserialize(handle, built.bytes);
+            const auto restored = graph.deserialize(handle, *built);
             if(!restored.is_good())
             {
                 // Distinct from an engine refusal for the same reason a build failure is: a
                 // graph the frontend will not read is broken for every point, and folding it
                 // into "declined" reports an engine that serves nothing.
-                if(buildFailures != nullptr)
-                {
-                    ++*buildFailures;
-                }
-                if(firstBuildError != nullptr && firstBuildError->empty())
-                {
-                    *firstBuildError = "deserialize: " + restored.get_message();
-                }
+                tally.note("deserialize: " + restored.get_message());
                 return false;
             }
 
             const auto finalized = graph.build_operation_graph(handle);
+            lap(&OracleTiming::loadSeconds, timing);
             if(!finalized.is_good())
             {
-                if(buildFailures != nullptr)
-                {
-                    ++*buildFailures;
-                }
-                if(firstBuildError != nullptr && firstBuildError->empty())
-                {
-                    *firstBuildError = "build_operation_graph: " + finalized.get_message();
-                }
+                tally.note("build_operation_graph: " + finalized.get_message());
                 return false;
             }
 
             std::vector<int64_t> applicable;
-            if(!graph.get_ranked_engine_ids(applicable).is_good())
+            const auto asked = graph.get_ranked_engine_ids(applicable);
+            lap(&OracleTiming::askSeconds, timing);
+            if(!asked.is_good())
             {
                 return false;
             }
@@ -136,16 +138,48 @@ inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
     };
 }
 
+/// @brief The oracle for a run, which may or may not have named an engine.
+///
+/// A null @p handle is the no-engine case, not an error: the corpus is then every point the
+/// declaration can express and benchmark. That is what a deterministic engine needs measured,
+/// and it is produced without a device -- so naming an engine narrows a corpus rather than
+/// enabling one.
+inline ProblemOracle makeCorpusOracle(hipdnnHandle_t handle,
+                                      int64_t engineId,
+                                      const OperationMetadata& metadata,
+                                      int64_t* buildFailures = nullptr,
+                                      std::string* firstBuildError = nullptr,
+                                      int64_t maxBytes = 0,
+                                      OracleTiming* timing = nullptr)
+{
+    if(handle == nullptr)
+    {
+        return makeDeclaredOracle(metadata, buildFailures, firstBuildError, maxBytes);
+    }
+    return makeMetadataOracle(handle, engineId, metadata, buildFailures, firstBuildError,
+                              maxBytes, timing);
+}
+
 /// @brief Generates the problem corpus for @p engineId across every declared operation.
 ///
 /// This is requirement 3: not one problem, but the range, produced without anyone writing a
 /// problem down. An operation the engine declines contributes nothing and says so.
+///
+/// @p handle may be null; see @ref makeCorpusOracle.
+///
+/// @p keep, when set, is asked about a point before the engine is: a point it refuses never
+/// costs an oracle call, and never counts toward a combination's target. Applied afterwards
+/// instead, a filter spends the search on points it then discards and the corpus comes back
+/// short by exactly the filtered fraction. It receives the operation's name alongside the point.
+using CorpusFilter = std::function<bool(const std::string&, const ProblemPoint&)>;
+
 inline std::vector<MetadataOperationCorpus>
     generateCorpus(hipdnnHandle_t handle,
                    int64_t engineId,
                    const MetadataSet& declarations,
                    const ExplorationRequest& request,
-                   int64_t maxBytes = 0)
+                   int64_t maxBytes = 0,
+                   const CorpusFilter& keep = {})
 {
     std::vector<MetadataOperationCorpus> results;
 
@@ -155,14 +189,19 @@ inline std::vector<MetadataOperationCorpus>
         result.metadataPath = entry.first;
         result.operation = entry.second.operation;
 
-        const auto oracle = makeMetadataOracle(handle,
-                                               engineId,
-                                               entry.second,
-                                               &result.buildFailures,
-                                               &result.firstBuildError,
-                                               maxBytes);
+        const auto oracle = makeCorpusOracle(handle,
+                                             engineId,
+                                             entry.second,
+                                             &result.buildFailures,
+                                             &result.firstBuildError,
+                                             maxBytes);
 
-        result.corpus = exploreProblemSpace(entry.second, request, oracle);
+        const auto& operation = entry.second.operation;
+        const ProblemOracle admits = [&](const ProblemPoint& point) {
+            return (!keep || keep(operation, point)) && oracle(point);
+        };
+
+        result.corpus = exploreProblemSpace(entry.second, request, admits);
         results.push_back(std::move(result));
     }
     return results;

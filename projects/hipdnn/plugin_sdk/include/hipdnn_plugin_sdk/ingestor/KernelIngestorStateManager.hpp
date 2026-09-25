@@ -880,13 +880,13 @@ private:
                     continue;
                 }
 
-                // Copied, not rebuilt: every field was settled at construction, and the
-                // kernel matcher below reads the definition without mutating it.
-                KernelDefinition definition = precomputed;
-
-                if(kernelLevelMatchersPass(pack, context, catalog.bound, definition))
+                // Matched in place and copied only when admitted: every field was settled at
+                // construction and the matchers take it by const reference. Copying first cost
+                // one full KernelDefinition per kernel per query -- nearly all of an
+                // applicability check's time, since almost every kernel is then rejected.
+                if(kernelLevelMatchersPass(pack, context, catalog.bound, precomputed))
                 {
-                    catalog.entries.push_back(std::move(definition));
+                    catalog.entries.push_back(precomputed);
                     ++admitted;
                 }
             }

@@ -1,0 +1,9 @@
+{
+  "// engines": "What shape generation knows about an engine's coverage that the engine cannot yet state (see EngineCoverage.hpp). coverage \"pack\": the engine serves exactly its pack's shapes, so --kdp-root is required and no search is run. An engine not listed here is searched.",
+  "engines": {
+    "hipkernel:Gfx942AttentionDense": {
+      "coverage": "pack",
+      "reason": "Every shape field is baked into each rocKE binary (Gfx942AttentionDenseNative.cpp, 'Every shape field is baked into the emitted binary'), and kernel_match requires equality on dtype, head_size, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, batch and causal. Checked on gfx942: of 100 pack shapes each changed in one field, the engine served exactly those that were themselves pack shapes."
+    }
+  }
+}

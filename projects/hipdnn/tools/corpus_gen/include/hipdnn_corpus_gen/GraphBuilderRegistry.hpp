@@ -159,6 +159,35 @@ inline std::string enumName(const ArgumentResolution& resolved, const char* name
     return declared == nullptr ? std::string{} : *declared;
 }
 
+/// Reads the causal diagonal's anchor, by name. Absent is TOP_LEFT -- the schema's default, so
+/// a declaration that never heard of this argument writes the graph it always wrote.
+///
+/// A spelling nobody defined is nullopt rather than TOP_LEFT, for the reason dataTypeFor
+/// declines: the two anchors mask different triangles whenever seqlen_q < seqlen_k, so a typo
+/// silently read as TOP_LEFT would build, benchmark and record a corpus of the wrong problem --
+/// and the engines that serve only the other anchor would be absent from the comparison with no
+/// line anywhere saying so.
+inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>
+    diagonalAlignment(const ArgumentResolution& resolved, const char* name)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+    const auto declared = enumName(resolved, name);
+    if(declared.empty())
+    {
+        return DiagonalAlignment::TOP_LEFT;
+    }
+    if(declared == "top_left")
+    {
+        return DiagonalAlignment::TOP_LEFT;
+    }
+    if(declared == "bottom_right")
+    {
+        return DiagonalAlignment::BOTTOM_RIGHT;
+    }
+    return std::nullopt;
+}
+
 /// Builds a tensor spec from a resolved dims/strides pair.
 /// @brief Assembles one tensor role from `<role>Dims`, `<role>Strides` and an element type.
 ///
@@ -183,7 +212,17 @@ inline std::optional<builders::TensorSpec>
     spec.name = role;
     spec.dims = *d;
     spec.strides = *st;
-    spec.dataType = type;
+    // `<role>DataType`, when declared, overrides the operation's dtype for this one tensor:
+    // saved statistics such as RMSnorm's inverse RMS are fp32 whatever the activations are.
+    spec.dataType = dtype(resolved, (role + "DataType").c_str()).value_or(type);
+    // A declared `rank` spells the problem with trailing unit dimensions, as the forward norm
+    // adapters do; see padToDeclaredRank. Row-major, since a padded tensor has no other layout.
+    const auto declared = enumName(resolved, "rank");
+    if(!declared.empty() && spec.dims.size() < static_cast<size_t>(std::stoll(declared)))
+    {
+        spec.dims.resize(static_cast<size_t>(std::stoll(declared)), 1);
+        spec.strides = rowMajorStrides(spec.dims);
+    }
     return spec;
 }
 
@@ -217,6 +256,77 @@ inline builders::TensorSpec tensorFrom(int64_t uid,
     spec.strides = strides;
     spec.dataType = type;
     return spec;
+}
+
+
+/// A norm's scale/bias shape for @p x: x's rank, 1 everywhere but the trailing (normalized)
+/// dimension. The frontend reads which dimensions are normalized off where scale is not 1.
+inline std::vector<int64_t> normAffineDims(const std::vector<int64_t>& x)
+{
+    std::vector<int64_t> dims(x.size(), 1);
+    if(!dims.empty())
+    {
+        dims.back() = x.back();
+    }
+    return dims;
+}
+
+/// A norm's epsilon: a pass-by-value fp32 scalar, which the frontend requires it to be.
+inline builders::TensorSpec normEpsilon(int64_t uid)
+{
+    auto spec = tensorFrom(
+        uid, "epsilon", {1}, {1}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    spec.scalarValue = 1e-5F;
+    return spec;
+}
+
+/// One batchnorm tensor. The activations (x, y and their gradients) carry the declared dtype;
+/// the per-channel statistics and affine tensors carry `statsDataType` when declared, because
+/// both MIOpen and HIP_MLOPS take them only in fp32 whatever the activations are. Epsilon is
+/// a pass-by-value scalar.
+inline std::optional<builders::TensorSpec>
+    batchnormRole(const ArgumentResolution& resolved,
+                  int64_t uid,
+                  const std::string& role,
+                  hipdnn_flatbuffers_sdk::data_objects::DataType io)
+{
+    if(role == "epsilon")
+    {
+        return normEpsilon(uid);
+    }
+    const bool activation = role == "x" || role == "y" || role == "dy" || role == "dx";
+    return tensorRole(
+        resolved, uid, role, activation ? io : dtype(resolved, "statsDataType").value_or(io));
+}
+
+/// @p dims padded with trailing unit dimensions to the declared `rank`, when one is declared.
+/// The same problem in a different spelling: a norm over the trailing dimension of
+/// [b, s, h] is the norm over h of [b, s, h, 1]. Engines whose kernels take only 4-D or 5-D
+/// tensors (HIP_MLOPS) serve the second spelling and refuse the first.
+inline std::vector<int64_t> padToDeclaredRank(const ArgumentResolution& resolved,
+                                              std::vector<int64_t> dims)
+{
+    const auto declared = enumName(resolved, "rank");
+    if(!declared.empty())
+    {
+        const auto rank = static_cast<size_t>(std::stoll(declared));
+        while(dims.size() < rank)
+        {
+            dims.push_back(1);
+        }
+    }
+    return dims;
+}
+
+/// How many trailing dimensions a norm normalizes over once padded to the declared rank: the
+/// declared count plus every unit dimension the padding appended, which sit inside the
+/// normalized span. Left at the declared count, the graph contradicts its own scale shape.
+inline int64_t paddedNormalizedDimCount(const ArgumentResolution& resolved,
+                                        size_t declaredRank,
+                                        int64_t declaredCount)
+{
+    const auto padded = padToDeclaredRank(resolved, std::vector<int64_t>(declaredRank, 1));
+    return declaredCount + static_cast<int64_t>(padded.size() - declaredRank);
 }
 
 /// Reads a resolved argument as a floating-point scalar; absent reads as @p fallback.
@@ -256,6 +366,69 @@ inline int64_t integer(const ArgumentResolution& resolved, const char* name, int
     }
     return fallback;
 }
+
+/// A pointwise node's mode (by FlatBuffers enumerator name) and its activation scalars.
+inline bool pointwiseModeAndScalars(const ArgumentResolution& resolved,
+                                    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode& mode,
+                                    builders::PointwiseScalars& scalars,
+                                    std::string& error)
+{
+    const auto declared = enumName(resolved, "mode");
+    if(!declared.empty())
+    {
+        const auto* names = hipdnn_flatbuffers_sdk::data_objects::EnumNamesPointwiseMode();
+        bool matched = false;
+        for(size_t i = 0; names[i] != nullptr; ++i)
+        {
+            if(declared == names[i])
+            {
+                mode = static_cast<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode>(i);
+                matched = true;
+            }
+        }
+        if(!matched)
+        {
+            error = "unknown pointwise mode '" + declared + "'";
+            return false;
+        }
+    }
+    // Only what the declaration states; an absent argument leaves the field null, as the
+    // schema intends.
+    const auto optional = [&resolved](const char* name) -> flatbuffers::Optional<float> {
+        if(resolved.find(name) == nullptr)
+        {
+            return flatbuffers::nullopt;
+        }
+        return static_cast<float>(scalar(resolved, name));
+    };
+    scalars.reluLowerClip = optional("reluLowerClip");
+    scalars.reluUpperClip = optional("reluUpperClip");
+    scalars.reluLowerClipSlope = optional("reluLowerClipSlope");
+    scalars.swishBeta = optional("swishBeta");
+    scalars.eluAlpha = optional("eluAlpha");
+    scalars.softplusBeta = optional("softplusBeta");
+    return true;
+}
+
+/// The activation a fused graph ends with, when `fusion` declares one: read from `mode` like any
+/// pointwise node. nullopt when `fusion` is absent or "none".
+inline std::optional<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode>
+    fusedActivation(const ArgumentResolution& resolved, std::string& error)
+{
+    const auto fusion = enumName(resolved, "fusion");
+    if(fusion.empty() || fusion == "none")
+    {
+        return std::nullopt;
+    }
+    auto mode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD;
+    builders::PointwiseScalars unused;
+    if(!pointwiseModeAndScalars(resolved, mode, unused, error))
+    {
+        return std::nullopt;
+    }
+    return mode;
+}
+
 
 /// Resolves a declared enumerator name against a FlatBuffers EnumNames table.
 ///
@@ -335,6 +508,55 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                      ""};
          }},
 
+        {"convolutionBiasActivation",
+         [](const ArgumentResolution& resolved) -> BuildResult {
+             const auto* x = detail::dims(resolved, "xDims");
+             const auto* xs = detail::dims(resolved, "xStrides");
+             const auto* w = detail::dims(resolved, "wDims");
+             const auto* ws = detail::dims(resolved, "wStrides");
+             const auto* y = detail::dims(resolved, "yDims");
+             const auto* ys = detail::dims(resolved, "yStrides");
+             const auto* pre = detail::dims(resolved, "prePadding");
+             const auto* post = detail::dims(resolved, "postPadding");
+             const auto* stride = detail::dims(resolved, "convStrides");
+             const auto* dil = detail::dims(resolved, "convDilation");
+             const auto type = detail::dtype(resolved, "dataType");
+             if(x == nullptr || xs == nullptr || w == nullptr || ws == nullptr || y == nullptr
+                || ys == nullptr || pre == nullptr || post == nullptr || stride == nullptr
+                || dil == nullptr || !type.has_value())
+             {
+                 return {{}, "convolutionBiasActivation needs the convolutionForward arguments"};
+             }
+             auto activation = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD;
+             builders::PointwiseScalars unused;
+             std::string error;
+             if(!detail::pointwiseModeAndScalars(resolved, activation, unused, error))
+             {
+                 return {{}, error};
+             }
+             // `fusion` names the graph's shape: conv -> bias -> activation, or conv ->
+             // activation. Only the first reads the bias tensor.
+             std::optional<builders::TensorSpec> bias;
+             if(detail::enumName(resolved, "fusion") != "activation")
+             {
+                 bias = detail::tensorRole(resolved, 3, "bias", *type);
+                 if(!bias.has_value())
+                 {
+                     return {{}, "convolutionBiasActivation with a bias needs biasDims/Strides"};
+                 }
+             }
+             return {builders::convolutionBiasActivation(
+                         detail::tensorFrom(1, "x", *x, *xs, *type),
+                         detail::tensorFrom(2, "w", *w, *ws, *type),
+                         bias,
+                         detail::tensorFrom(4, "y", *y, *ys, *type),
+                         builders::ConvGeometry{*pre, *post, *stride, *dil,
+                             hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION},
+                         activation,
+                         detail::graphTypesFrom(resolved, *type)),
+                     ""};
+         }},
+
 
         {"sdpaForward",
          [](const ArgumentResolution& resolved) -> BuildResult {
@@ -353,6 +575,11 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  return {{}, "sdpaForward needs qDims/qStrides, kDims/kStrides, vDims/vStrides, "
                              "oDims/oStrides, dataType"};
              }
+             const auto alignment = detail::diagonalAlignment(resolved, "diagonalAlignment");
+             if(!alignment.has_value())
+             {
+                 return {{}, "sdpaForward: diagonalAlignment must be top_left or bottom_right"};
+             }
              builders::SdpaOptions options;
              options.causalMask = detail::flag(resolved, "causalMask");
              options.paddingMask = detail::flag(resolved, "paddingMask");
@@ -363,12 +590,16 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  = static_cast<float>(detail::scalar(resolved, "dropoutProbability"));
              options.leftBound = detail::integer(resolved, "leftBound", -1);
              options.rightBound = detail::integer(resolved, "rightBound", -1);
+             options.diagonalAlignment = *alignment;
              return {builders::sdpaForward(detail::tensorFrom(1, "q", *q, *qs, *type),
                                            detail::tensorFrom(2, "k", *k, *ks, *type),
                                            detail::tensorFrom(3, "v", *v, *vs, *type),
                                            detail::tensorFrom(4, "o", *o, *os, *type),
                                            options,
-                                           detail::graphTypesFrom(resolved, *type)),
+                                           detail::graphTypesFrom(resolved, *type),
+                                           options.generateStats
+                                               ? detail::tensorRole(resolved, 5, "stats", *type)
+                                               : std::nullopt),
                      ""};
          }},
 
@@ -468,10 +699,22 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "unknown padding mode"};
              }
+             // `index` = "yes" adds max pooling's index output, int32 and shaped like y.
+             std::optional<builders::TensorSpec> index;
+             if(detail::enumName(resolved, "index") == "yes")
+             {
+                 index = detail::tensorRole(
+                     resolved, 3, "index", hipdnn_flatbuffers_sdk::data_objects::DataType::INT32);
+                 if(!index)
+                 {
+                     return {{}, "resampleForward with an index needs indexDims/Strides"};
+                 }
+             }
              return {builders::resampleForward(detail::tensorFrom(1, "x", *x, *xs, *type),
                                                detail::tensorFrom(2, "y", *y, *ys, *type),
                                                geometry,
-                                               detail::graphTypesFrom(resolved, *type)),
+                                               detail::graphTypesFrom(resolved, *type),
+                                               index),
                      ""};
          }},
 
@@ -504,6 +747,12 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  = static_cast<float>(detail::scalar(resolved, "dropoutProbability"));
              options.leftBound = detail::integer(resolved, "leftBound", -1);
              options.rightBound = detail::integer(resolved, "rightBound", -1);
+             const auto alignment = detail::diagonalAlignment(resolved, "diagonalAlignment");
+             if(!alignment.has_value())
+             {
+                 return {{}, "sdpaBackward: diagonalAlignment must be top_left or bottom_right"};
+             }
+             options.diagonalAlignment = *alignment;
              return {builders::sdpaBackward(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8],
                                             options, detail::graphTypesFrom(resolved, *type)),
                      ""};
@@ -529,7 +778,10 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  t.push_back(*one);
              }
              return {builders::layernormBackward(t[0], t[1], t[2], t[3], t[4], t[5],
-                                                 detail::integer(resolved, "normalizedDimCount", 1),
+                                                 detail::paddedNormalizedDimCount(
+                                                     resolved,
+                                                     detail::dims(resolved, "xDims")->size(),
+                                                     detail::integer(resolved, "normalizedDimCount", 1)),
                                                  detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},
@@ -570,7 +822,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one = detail::batchnormRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
                      return {{}, std::string("batchnormForwardTraining needs ") + roles[i]
@@ -578,8 +830,38 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  }
                  t.push_back(*one);
              }
+             std::string error;
+             const auto activation = detail::fusedActivation(resolved, error);
+             if(!error.empty())
+             {
+                 return {{}, error};
+             }
+             // Running statistics, when declared: four per-channel stats tensors and a
+             // pass-by-value momentum.
+             std::optional<builders::BatchnormRunningStats> running;
+             if(detail::enumName(resolved, "runningStats") == "yes")
+             {
+                 const auto stat = [&](int64_t uid, const char* role) {
+                     return detail::batchnormRole(resolved, uid, role, *type);
+                 };
+                 const auto pm = stat(8, "prevRunningMean");
+                 const auto pv = stat(9, "prevRunningVariance");
+                 const auto nm = stat(11, "nextRunningMean");
+                 const auto nv = stat(12, "nextRunningVariance");
+                 if(!pm || !pv || !nm || !nv)
+                 {
+                     return {{}, "batchnormForwardTraining with running statistics needs "
+                                 "prev/nextRunningMean and prev/nextRunningVariance Dims/Strides"};
+                 }
+                 auto momentum = detail::normEpsilon(10);
+                 momentum.name = "momentum";
+                 momentum.scalarValue = 0.1F;
+                 running = builders::BatchnormRunningStats{*pm, *pv, momentum, *nm, *nv};
+             }
              return {builders::batchnormForwardTraining(t[0], t[1], t[2], t[3], t[4], t[5], t[6],
-                                                        detail::graphTypesFrom(resolved, *type)),
+                                                        detail::graphTypesFrom(resolved, *type),
+                                                        running,
+                                                        activation),
                      ""};
          }},
 
@@ -595,7 +877,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one = detail::batchnormRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
                      return {{},
@@ -603,8 +885,49 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  }
                  t.push_back(*one);
              }
+             std::string error;
+             const auto activation = detail::fusedActivation(resolved, error);
+             if(!error.empty())
+             {
+                 return {{}, error};
+             }
              return {builders::batchnormInference(t[0], t[1], t[2], t[3], t[4], t[5],
-                                                  detail::graphTypesFrom(resolved, *type)),
+                                                  detail::graphTypesFrom(resolved, *type),
+                                                  activation),
+                     ""};
+         }},
+
+        {"batchnormInferenceActivationBackward",
+         [](const ArgumentResolution& resolved) -> BuildResult {
+             const auto type = detail::dtype(resolved, "dataType");
+             if(!type.has_value())
+             {
+                 return {{}, "batchnormInferenceActivationBackward needs dataType"};
+             }
+             const std::vector<std::string> roles = {"x",  "mean", "invVariance", "scale", "bias",
+                                                     "dy", "dx",   "dscale",      "dbias"};
+             std::vector<builders::TensorSpec> t;
+             for(size_t i = 0; i < roles.size(); ++i)
+             {
+                 auto one = detail::batchnormRole(
+                     resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 if(!one.has_value())
+                 {
+                     return {{}, "batchnormInferenceActivationBackward needs " + roles[i]
+                                     + "Dims/Strides"};
+                 }
+                 t.push_back(*one);
+             }
+             auto mode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD;
+             builders::PointwiseScalars unused;
+             std::string error;
+             if(!detail::pointwiseModeAndScalars(resolved, mode, unused, error))
+             {
+                 return {{}, error};
+             }
+             return {builders::batchnormInferenceActivationBackward(
+                         t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], mode,
+                         detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},
 
@@ -619,7 +942,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              std::vector<builders::TensorSpec> t;
              for(size_t i = 0; i < roles.size(); ++i)
              {
-                 auto one = detail::tensorRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
+                 auto one = detail::batchnormRole(resolved, static_cast<int64_t>(i) + 1, roles[i], *type);
                  if(!one.has_value())
                  {
                      return {{},
@@ -664,8 +987,18 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "unknown resample or padding mode"};
              }
+             std::optional<builders::TensorSpec> index;
+             if(detail::enumName(resolved, "index") == "yes")
+             {
+                 index = detail::tensorRole(
+                     resolved, 3, "index", hipdnn_flatbuffers_sdk::data_objects::DataType::INT32);
+                 if(!index)
+                 {
+                     return {{}, "resampleBackward with an index needs indexDims/Strides"};
+                 }
+             }
              return {builders::resampleBackward(*dy, *dx, geometry,
-                                                detail::graphTypesFrom(resolved, *type)),
+                                                detail::graphTypesFrom(resolved, *type), index),
                      ""};
          }},
 
@@ -814,6 +1147,76 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                      ""};
          }},
 
+        {"matmulEpilogue",
+         [](const ArgumentResolution& resolved) -> BuildResult {
+             const auto type = detail::dtype(resolved, "dataType");
+             if(!type.has_value())
+             {
+                 return {{}, "matmulEpilogue needs dataType"};
+             }
+             const auto a = detail::tensorRole(resolved, 1, "a", *type);
+             const auto b = detail::tensorRole(resolved, 2, "b", *type);
+             const auto c = detail::tensorRole(resolved, 3, "c", *type);
+             if(!a || !b || !c)
+             {
+                 return {{}, "matmulEpilogue needs a, b, c Dims/Strides"};
+             }
+             // `epilogue` names what follows the matmul: bias, activation, or bias_activation.
+             const auto epilogue = detail::enumName(resolved, "epilogue");
+             std::optional<builders::TensorSpec> bias;
+             std::optional<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode> activation;
+             if(epilogue != "activation")
+             {
+                 bias = detail::tensorRole(resolved, 4, "bias", *type);
+                 if(!bias)
+                 {
+                     return {{}, "matmulEpilogue with a bias needs biasDims/Strides"};
+                 }
+             }
+             if(epilogue != "bias")
+             {
+                 auto mode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD;
+                 builders::PointwiseScalars unused;
+                 std::string error;
+                 if(!detail::pointwiseModeAndScalars(resolved, mode, unused, error))
+                 {
+                     return {{}, error};
+                 }
+                 activation = mode;
+             }
+             return {builders::matmulEpilogue(*a, *b, bias, activation, *c,
+                                              detail::graphTypesFrom(resolved, *type)),
+                     ""};
+         }},
+
+        {"blockScaledMatmul",
+         [](const ArgumentResolution& resolved) -> BuildResult {
+             // The operands carry the declared MX dtype, the scales `scaleDataType`, and the
+             // result `outputDataType`; each is a separate declared fact.
+             const auto type = detail::dtype(resolved, "dataType");
+             const auto scaleType = detail::dtype(resolved, "scaleDataType");
+             const auto outType = detail::dtype(resolved, "outputDataType");
+             const auto block = detail::integer(resolved, "blockSize", 0);
+             if(!type.has_value() || !scaleType.has_value() || !outType.has_value() || block <= 0)
+             {
+                 return {{}, "blockScaledMatmul needs dataType, scaleDataType, outputDataType, "
+                             "blockSize"};
+             }
+             const auto a = detail::tensorRole(resolved, 1, "a", *type);
+             const auto aScale = detail::tensorRole(resolved, 2, "aScale", *scaleType);
+             const auto b = detail::tensorRole(resolved, 3, "b", *type);
+             const auto bScale = detail::tensorRole(resolved, 4, "bScale", *scaleType);
+             const auto c = detail::tensorRole(resolved, 5, "c", *outType);
+             if(!a || !aScale || !b || !bScale || !c)
+             {
+                 return {{}, "blockScaledMatmul needs a, aScale, b, bScale, c Dims/Strides"};
+             }
+             return {builders::blockScaledMatmul(*a, *aScale, *b, *bScale, *c,
+                                                 {static_cast<int32_t>(block)},
+                                                 detail::graphTypesFrom(resolved, *type)),
+                     ""};
+         }},
+
         {"pointwiseBinary",
          [](const ArgumentResolution& resolved) -> BuildResult {
              const auto* d = detail::dims(resolved, "dims");
@@ -824,43 +1227,42 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  return {{}, "pointwiseBinary needs dims, strides, mode, dataType"};
              }
              auto mode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD;
-             const auto declared = detail::enumName(resolved, "mode");
-             if(!declared.empty())
-             {
-                 const auto* names
-                     = hipdnn_flatbuffers_sdk::data_objects::EnumNamesPointwiseMode();
-                 bool matched = false;
-                 for(size_t i = 0; names[i] != nullptr; ++i)
-                 {
-                     if(declared == names[i])
-                     {
-                         mode = static_cast<
-                             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode>(i);
-                         matched = true;
-                     }
-                 }
-                 if(!matched)
-                 {
-                     return {{}, "unknown pointwise mode '" + declared + "'"};
-                 }
-             }
              builders::PointwiseScalars scalars;
-             scalars.reluLowerClip
-                 = static_cast<float>(detail::scalar(resolved, "reluLowerClip"));
-             scalars.reluUpperClip
-                 = static_cast<float>(detail::scalar(resolved, "reluUpperClip"));
-             scalars.reluLowerClipSlope
-                 = static_cast<float>(detail::scalar(resolved, "reluLowerClipSlope"));
-             scalars.swishBeta = static_cast<float>(detail::scalar(resolved, "swishBeta"));
-             scalars.eluAlpha = static_cast<float>(detail::scalar(resolved, "eluAlpha"));
-             scalars.softplusBeta
-                 = static_cast<float>(detail::scalar(resolved, "softplusBeta"));
+             std::string error;
+             if(!detail::pointwiseModeAndScalars(resolved, mode, scalars, error))
+             {
+                 return {{}, error};
+             }
              return {builders::pointwiseBinary(detail::tensorFrom(1, "in_0", *d, *st, *type),
                                                detail::tensorFrom(2, "in_1", *d, *st, *type),
                                                detail::tensorFrom(3, "out_0", *d, *st, *type),
                                                mode,
                                                scalars,
                                                detail::graphTypesFrom(resolved, *type)),
+                     ""};
+         }},
+
+        {"pointwiseUnary",
+         [](const ArgumentResolution& resolved) -> BuildResult {
+             const auto* d = detail::dims(resolved, "dims");
+             const auto* st = detail::dims(resolved, "strides");
+             const auto type = detail::dtype(resolved, "dataType");
+             if(d == nullptr || st == nullptr || !type.has_value())
+             {
+                 return {{}, "pointwiseUnary needs dims, strides, mode, dataType"};
+             }
+             auto mode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY;
+             builders::PointwiseScalars scalars;
+             std::string error;
+             if(!detail::pointwiseModeAndScalars(resolved, mode, scalars, error))
+             {
+                 return {{}, error};
+             }
+             return {builders::pointwiseUnary(detail::tensorFrom(1, "in_0", *d, *st, *type),
+                                              detail::tensorFrom(2, "out_0", *d, *st, *type),
+                                              mode,
+                                              scalars,
+                                              detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},
 
@@ -873,18 +1275,19 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "layernormForward needs dims, strides, dataType"};
              }
-             // Scale and bias span the normalized trailing dimension; epsilon is a scalar.
-             const std::vector<int64_t> perChannel{d->back()};
-             const std::vector<int64_t> unitStride{1};
-             const std::vector<int64_t> scalar{1};
+             // Scale and bias have x's rank, 1 everywhere but the normalized trailing
+             // dimension -- the frontend's convention, which reads the normalized dims off
+             // where scale is not 1. Epsilon is a pass-by-value scalar.
+             const auto x = detail::padToDeclaredRank(resolved, *d);
+             const auto xStrides = x.size() == d->size() ? *st : detail::rowMajorStrides(x);
+             const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
              return {builders::layernormForward(
-                         detail::tensorFrom(1, "x", *d, *st, *type),
-                         detail::tensorFrom(2, "scale", perChannel, unitStride, *type),
-                         detail::tensorFrom(3, "bias", perChannel, unitStride, *type),
-                         detail::tensorFrom(4, "epsilon", scalar, unitStride,
-                                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT),
-                         detail::tensorFrom(5, "y", *d, *st, *type),
-                         /*normalizedDimCount=*/1,
+                         detail::tensorFrom(1, "x", x, xStrides, *type),
+                         detail::tensorFrom(2, "scale", affine, detail::rowMajorStrides(affine), *type),
+                         detail::tensorFrom(3, "bias", affine, detail::rowMajorStrides(affine), *type),
+                         detail::normEpsilon(4),
+                         detail::tensorFrom(5, "y", x, xStrides, *type),
+                         detail::paddedNormalizedDimCount(resolved, d->size(), 1),
                          hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
                          detail::graphTypesFrom(resolved, *type)),
                      ""};
@@ -899,15 +1302,14 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "rmsNormForward needs dims, strides, dataType"};
              }
-             const std::vector<int64_t> perChannel{d->back()};
-             const std::vector<int64_t> unitStride{1};
-             const std::vector<int64_t> scalar{1};
+             const auto x = detail::padToDeclaredRank(resolved, *d);
+             const auto xStrides = x.size() == d->size() ? *st : detail::rowMajorStrides(x);
+             const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
              return {builders::rmsNormForward(
-                         detail::tensorFrom(1, "x", *d, *st, *type),
-                         detail::tensorFrom(2, "scale", perChannel, unitStride, *type),
-                         detail::tensorFrom(3, "epsilon", scalar, unitStride,
-                                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT),
-                         detail::tensorFrom(4, "y", *d, *st, *type),
+                         detail::tensorFrom(1, "x", x, xStrides, *type),
+                         detail::tensorFrom(2, "scale", affine, detail::rowMajorStrides(affine), *type),
+                         detail::normEpsilon(3),
+                         detail::tensorFrom(4, "y", x, xStrides, *type),
                          hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
                          detail::graphTypesFrom(resolved, *type)),
                      ""};
