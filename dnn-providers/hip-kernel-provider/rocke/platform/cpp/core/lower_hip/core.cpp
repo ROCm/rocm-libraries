@@ -9,7 +9,7 @@
  *     (rocke_h_dispatch), keyed by opcode,
  *   - emission + indent utilities (rocke_h_emit / rocke_h_emitf / rocke_h_emit_smem_decl
  *     / rocke_h_push_indent / rocke_h_pop_indent),
- *   - the sticky error / liveness channel (rocke_h_fail / rocke_h_live),
+ *   - exception-based errors and the NULL guard (rocke_h_fail / rocke_h_live),
  *   - naming / type mapping (rocke_h_name / rocke_h_type_to_hip / rocke_h_hip_scalar /
  *     rocke_h_vec_prefix),
  *   - float literal formatting (rocke_h_f32_literal),
@@ -406,8 +406,8 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
     return rocke_h_vec_prefix(ir_scalar_name, full_map);
 }
 
-/* Python _type_to_hip(t). Returns arena-owned string; "" + sticky error on an
- * unmappable type (KeyError parity). */
+/* Python _type_to_hip(t). Returns an arena-owned string; throws on an unmappable
+ * HIP type (KeyError parity), including logical types without direct HIP lowering. */
 const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 {
     if(!t)
