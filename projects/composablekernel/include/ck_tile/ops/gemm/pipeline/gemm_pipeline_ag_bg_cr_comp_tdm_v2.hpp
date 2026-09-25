@@ -211,7 +211,6 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
             constexpr bool is_a_col_major =
                 std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
-            constexpr bool is_b_row_major = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
 
             static_assert(is_a_col_major
                               ? (KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
@@ -219,11 +218,7 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                               : (MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
                                  KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1{}]),
                           "A block window has incorrect lengths for defined ALayout!");
-            static_assert(is_b_row_major
-                              ? (KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}])
-                              : (NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}]),
+            static_assert(Base::template IsValidBDramWindow<BDramBlockWindowTmp>(),
                           "B block window has incorrect lengths for defined BLayout!");
 
             ////////////// global window & register /////////////////
@@ -261,12 +256,12 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             constexpr ADramTileWindowStep a_dram_tile_window_step =
                 is_a_col_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
             constexpr BDramTileWindowStep b_dram_tile_window_step =
-                is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+                Base::template GetBDramTileWindowStep<BDramTileWindowStep>();
 
             constexpr ADramTileWindowStep a_dram_tile_window_step_stride =
                 is_a_col_major ? make_array(KPerBlock * 2, 0) : make_array(0, KPerBlock * 2);
             constexpr BDramTileWindowStep b_dram_tile_window_step_stride =
-                is_b_row_major ? make_array(KPerBlock * 2, 0) : make_array(0, KPerBlock * 2);
+                Base::template GetBDramTileWindowStep<BDramTileWindowStep, 2>();
 
             using ALdsTile =
                 decltype(make_static_distributed_tensor<ADataType>(a_lds_load_tile_distr));
@@ -807,7 +802,6 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
             constexpr bool is_a_col_major =
                 std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
-            constexpr bool is_b_row_major = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
 
             static_assert(is_a_col_major
                               ? (KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
@@ -815,11 +809,7 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                               : (MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
                                  KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1{}]),
                           "A block window has incorrect lengths for defined ALayout!");
-            static_assert(is_b_row_major
-                              ? (KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}])
-                              : (NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}]),
+            static_assert(Base::template IsValidBDramWindow<BDramBlockWindowTmp>(),
                           "B block window has incorrect lengths for defined BLayout!");
 
             ////////////// global window & register /////////////////
@@ -854,12 +844,12 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             constexpr ADramTileWindowStep a_dram_tile_window_step =
                 is_a_col_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
             constexpr BDramTileWindowStep b_dram_tile_window_step =
-                is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+                Base::template GetBDramTileWindowStep<BDramTileWindowStep>();
 
             constexpr ADramTileWindowStep a_dram_tile_window_step_stride =
                 is_a_col_major ? make_array(KPerBlock * 2, 0) : make_array(0, KPerBlock * 2);
             constexpr BDramTileWindowStep b_dram_tile_window_step_stride =
-                is_b_row_major ? make_array(KPerBlock * 2, 0) : make_array(0, KPerBlock * 2);
+                Base::template GetBDramTileWindowStep<BDramTileWindowStep, 2>();
 
             using ALdsTile =
                 decltype(make_static_distributed_tensor<ADataType>(a_lds_load_tile_distr));

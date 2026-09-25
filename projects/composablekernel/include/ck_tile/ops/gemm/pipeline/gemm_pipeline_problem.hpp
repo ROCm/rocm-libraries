@@ -10,6 +10,18 @@
 
 namespace ck_tile {
 
+template <typename T>
+using has_preshuffle_type = decltype(T::Preshuffle);
+
+// B arrives weight-preshuffled (shuffle_b_v0) and is staged through LDS
+template <typename Problem>
+inline constexpr bool is_b_preshuffle_v = [] {
+    if constexpr(is_detected<has_preshuffle_type, Problem>{})
+        return static_cast<bool>(Problem::Preshuffle);
+    else
+        return false;
+}();
+
 template <typename AsDataType_,
           typename BsDataType_,
           typename EDataType_,

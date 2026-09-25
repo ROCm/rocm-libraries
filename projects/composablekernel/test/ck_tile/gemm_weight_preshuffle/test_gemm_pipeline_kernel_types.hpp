@@ -28,6 +28,13 @@ using WeightPreshuffleV2 =
 using WeightPreshuffleTDM =
     ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::WeightPreshuffleTDM>;
 
+using Intrawave = ck_tile::integral_constant<ck_tile::GemmPipelineScheduler,
+                                             ck_tile::GemmPipelineScheduler::Intrawave>;
+
+using CompTDMV1 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV1>;
+using CompTDMV2 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV2>;
+using CompAsync = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsync>;
+
 // clang-format off
 
 using KernelTypesWeightPreshuffleAsync = ::testing::Types<
@@ -61,6 +68,29 @@ using KernelTypesWeightPreshuffleTDM = ::testing::Types<
      std::tuple<    Row,     Col,     Row,       F8,        BF8,         F32,       F16,             Default,        WeightPreshuffleTDM>,
      std::tuple<    Row,     Col,     Row,       F8,        I4,          F32,       F16,             Default,        WeightPreshuffleTDM>
 #endif     
+     >;
+
+template <typename Pipeline>
+using KernelTypesWeightPreshuffleComp = ::testing::Types<
+     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,             Intrawave,      Pipeline>,
+     std::tuple<    Row,     Col,     Row,       BF16,      BF16,        F32,       BF16,            Intrawave,      Pipeline>
+#if !CK_TILE_USE_WMMA || CK_TILE_USE_OCP_FP8
+     ,
+     std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,             Intrawave,      Pipeline>,
+     std::tuple<    Row,     Col,     Row,       F8,        BF8,         F32,       F16,             Intrawave,      Pipeline>
+#endif
+     >;
+
+using KernelTypesWeightPreshuffleCompTDMV1 = KernelTypesWeightPreshuffleComp<CompTDMV1>;
+using KernelTypesWeightPreshuffleCompTDMV2 = KernelTypesWeightPreshuffleComp<CompTDMV2>;
+// comp_async fp8 x fp8 is wrong on gfx1250 with or without preshuffled B; keep fp8 x bf8 only
+using KernelTypesWeightPreshuffleCompAsync = ::testing::Types<
+     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,             Intrawave,      CompAsync>,
+     std::tuple<    Row,     Col,     Row,       BF16,      BF16,        F32,       BF16,            Intrawave,      CompAsync>
+#if !CK_TILE_USE_WMMA || CK_TILE_USE_OCP_FP8
+     ,
+     std::tuple<    Row,     Col,     Row,       F8,        BF8,         F32,       F16,             Intrawave,      CompAsync>
+#endif
      >;
 
 // clang-format on

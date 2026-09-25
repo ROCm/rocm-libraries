@@ -58,105 +58,58 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
     using LdsBDataType = typename Problem::BDataType;
 
     static constexpr index_t VecByteSize = 16;
-    // currently implement basic situation: the tile is divided into same parts
+    // currently implement basic situation: the tile is divided into same parts.
+    // Rows are split across the loading waves; for wave specialized policy, only one wave per
+    // workgroup will load A / B matrix from DRAM to LDS
+    template <typename Problem, index_t Rows, index_t Cols>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeWarpSplitDramTileDistribution()
+    {
+        constexpr index_t warpNum = WaveSpecialized ? 1 : (Problem::kBlockSize / get_warp_size());
+        static_assert(Rows % warpNum == 0, "tile rows should be divided by warpNum");
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<warpNum, Rows / warpNum>, sequence<Cols>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<1, 2>,
+                                       sequence<1, 0>>{},
+            bool_constant<true>{});
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
     {
-        constexpr index_t BlockSize = Problem::kBlockSize;
-        // for wave specialized policy, only one wave per workgroup will load A / B matrix from DRAM
-        // to LDS
-        constexpr index_t warpNum = WaveSpecialized ? 1 : (BlockSize / get_warp_size());
-
         constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-
         using ALayout =
             remove_cvref_t<std::tuple_element_t<number<0>{}, problem_as_layout_t<Problem>>>;
-
-        // Tile : MPerBlock X KPerBlock
         if constexpr(std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>)
-        {
-            if constexpr(!WaveSpecialized)
-            {
-                static_assert(MPerBlock % warpNum == 0, "MPerBlock should be divided by warpNum");
-            }
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<>,
-                    tuple<sequence<warpNum, MPerBlock / warpNum>, sequence<KPerBlock>>,
-                    tuple<sequence<1>>,
-                    tuple<sequence<0>>,
-                    sequence<1, 2>,
-                    sequence<1, 0>>{},
-                bool_constant<true>{});
-        }
-        // Tile : KPerBlock * MPerBlock
+            return MakeWarpSplitDramTileDistribution<Problem, MPerBlock, KPerBlock>();
         else
-        {
-            if constexpr(!WaveSpecialized)
-            {
-                static_assert(KPerBlock % warpNum == 0, "KPerBlock should be divided by warpNum");
-            }
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<>,
-                    tuple<sequence<warpNum, KPerBlock / warpNum>, sequence<MPerBlock>>,
-                    tuple<sequence<1>>,
-                    tuple<sequence<0>>,
-                    sequence<1, 2>,
-                    sequence<1, 0>>{},
-                bool_constant<true>{});
-        }
+            return MakeWarpSplitDramTileDistribution<Problem, KPerBlock, MPerBlock>();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTileDistribution()
     {
-        constexpr index_t BlockSize = Problem::kBlockSize;
-        // for wave specialized policy, only one wave per workgroup will load A / B matrix from DRAM
-        // to LDS
-        constexpr index_t warpNum = WaveSpecialized ? 1 : (BlockSize / get_warp_size());
-
         constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-
         using BLayout =
             remove_cvref_t<std::tuple_element_t<number<0>{}, problem_bs_layout_t<Problem>>>;
-
-        // Tile : KPerBlock X NPerBlock
         if constexpr(std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>)
-        {
-            if constexpr(!WaveSpecialized)
-            {
-                static_assert(KPerBlock % warpNum == 0, "KPerBlock should be divided by warpNum");
-            }
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<>,
-                    tuple<sequence<warpNum, KPerBlock / warpNum>, sequence<NPerBlock>>,
-                    tuple<sequence<1>>,
-                    tuple<sequence<0>>,
-                    sequence<1, 2>,
-                    sequence<1, 0>>{},
-                bool_constant<true>{});
-        }
-        // Tile : NPerBlock * KPerBlock
+            return MakeWarpSplitDramTileDistribution<Problem, KPerBlock, NPerBlock>();
         else
-        {
-            if constexpr(!WaveSpecialized)
-            {
-                static_assert(NPerBlock % warpNum == 0, "NPerBlock should be divided by warpNum");
-            }
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<>,
-                    tuple<sequence<warpNum, NPerBlock / warpNum>, sequence<KPerBlock>>,
-                    tuple<sequence<1>>,
-                    tuple<sequence<0>>,
-                    sequence<1, 2>,
-                    sequence<1, 0>>{},
-                bool_constant<true>{});
-        }
+            return MakeWarpSplitDramTileDistribution<Problem, NPerBlock, KPerBlock>();
+    }
+
+    // preshuffled B: flat (NPerBlock / WarpTileN, KPerBlock * WarpTileN) tile
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBPreshuffleDramTileDistribution()
+    {
+        constexpr index_t WTN = Problem::BlockGemmShape::WarpTile::at(number<1>{});
+        return MakeWarpSplitDramTileDistribution<Problem,
+                                                 Problem::BlockGemmShape::kN / WTN,
+                                                 Problem::BlockGemmShape::kK * WTN>();
     }
 
     template <typename Problem>
@@ -222,7 +175,11 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
-        if constexpr(Base::template is_b_load_tr<Problem>)
+        if constexpr(is_b_preshuffle_v<Problem>)
+        {
+            return Base::template MakeBPreshuffleLdsBlockDescriptor<Problem>();
+        }
+        else if constexpr(Base::template is_b_load_tr<Problem>)
         {
             return Base::template MakeBLdsBlockDescriptorForTrLoad<Problem>();
         }

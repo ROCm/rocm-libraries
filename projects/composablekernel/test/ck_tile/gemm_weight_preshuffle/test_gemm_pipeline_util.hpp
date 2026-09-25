@@ -37,7 +37,10 @@ auto calculate_rtol_atol(const ck_tile::index_t K,
 enum struct GemmPipelineType
 {
     WeightPreshuffleV2,
-    WeightPreshuffleTDM
+    WeightPreshuffleTDM,
+    CompTDMV1,
+    CompTDMV2,
+    CompAsync
 };
 
 template <GemmPipelineType PT, typename Problem>
@@ -59,6 +62,33 @@ struct GemmPipelineTypeSelector<GemmPipelineType::WeightPreshuffleTDM, Problem>
     using pipeline      = ck_tile::WeightPreshufflePipelineAGmemBGmemCRegTDM<Problem>;
 
     static constexpr auto GetName() { return "GemmPipelineAgBgCrWeightPreshuffleTDM"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMV1, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMV1<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV1"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMV2, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMV2<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV2"; }
+};
+
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompAsync, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsync<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsync<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsync"; }
 };
 
 template <typename Datatype>

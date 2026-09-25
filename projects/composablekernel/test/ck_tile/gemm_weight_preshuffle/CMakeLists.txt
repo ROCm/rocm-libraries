@@ -24,7 +24,7 @@ function(add_wp_test TEST_CLASS_NAME KERNEL_TYPES TEST_SUFFIX)
         @ONLY
     )
     add_gtest_executable(test_ck_tile_gemm_pipeline_${TEST_SUFFIX} ${GENERATED_FILE})
-    target_compile_options(test_ck_tile_gemm_pipeline_${TEST_SUFFIX} PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+    target_compile_options(test_ck_tile_gemm_pipeline_${TEST_SUFFIX} PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS} ${ARGN})
     target_include_directories(test_ck_tile_gemm_pipeline_${TEST_SUFFIX} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
 endfunction()
@@ -54,5 +54,21 @@ if(GPU_TARGETS MATCHES "gfx125")
         TestCkTileGemmPipelineWeightPreshuffleTDM
         KernelTypesWeightPreshuffleTDM
         wp_tdm
+    )
+    add_wp_test(
+        TestCkTileGemmPipelineWeightPreshuffleCompTDMV1
+        KernelTypesWeightPreshuffleCompTDMV1
+        wp_comp_tdm_v1
+    )
+    add_wp_test(
+        TestCkTileGemmPipelineWeightPreshuffleCompTDMV2
+        KernelTypesWeightPreshuffleCompTDMV2
+        wp_comp_tdm_v2
+    )
+    add_wp_test(
+        TestCkTileGemmPipelineWeightPreshuffleCompAsync
+        KernelTypesWeightPreshuffleCompAsync
+        wp_comp_async
+        -mllvm -enable-noalias-to-md-conversion=0
     )
 endif()

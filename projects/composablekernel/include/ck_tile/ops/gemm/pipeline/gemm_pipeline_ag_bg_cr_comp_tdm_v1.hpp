@@ -333,7 +333,7 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
             constexpr ADramTileWindowStep a_dram_tile_window_step =
                 IsAColMajor ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
             constexpr BDramTileWindowStep b_dram_tile_window_step =
-                IsBRowMajor ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+                Base::template GetBDramTileWindowStep<BDramTileWindowStep>();
 
             constexpr auto ALdsTileDistr = decltype(make_static_tile_distribution(
                 BlockGemm::MakeABlockDistributionEncode())){};
@@ -681,7 +681,7 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
             constexpr ADramTileWindowStep a_dram_tile_window_step =
                 IsAColMajor ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
             constexpr BDramTileWindowStep b_dram_tile_window_step =
-                IsBRowMajor ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+                Base::template GetBDramTileWindowStep<BDramTileWindowStep>();
 
             constexpr index_t ScaleSize = Problem::ScaleBlockSize;
             // scale32: 4 e8m0 bytes packed per int32_t; scale16: 8 per int64_t
@@ -1153,11 +1153,7 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                               : (MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
                                  KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1{}]),
                           "A block window has incorrect lengths for defined ALayout!");
-            static_assert(is_b_row_major
-                              ? (KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}])
-                              : (NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}]),
+            static_assert(Base::template IsValidBDramWindow<BDramBlockWindowTmp>(),
                           "B block window has incorrect lengths for defined BLayout!");
 
             auto&& [a_lds_block_views, b_lds_block_views] =
@@ -1306,11 +1302,7 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                               : (MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
                                  KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1{}]),
                           "A block window has incorrect lengths for defined ALayout!");
-            static_assert(is_b_row_major
-                              ? (KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}])
-                              : (NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}]),
+            static_assert(Base::template IsValidBDramWindow<BDramBlockWindowTmp>(),
                           "B block window has incorrect lengths for defined BLayout!");
 
             auto&& [a_lds_block_views, b_lds_block_views] =

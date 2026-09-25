@@ -323,7 +323,6 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
 
             constexpr bool is_a_col_major =
                 std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
-            constexpr bool is_b_row_major = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
 
             static_assert(is_a_col_major
                               ? (KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
@@ -331,11 +330,7 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                               : (MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
                                  KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1{}]),
                           "A block window has incorrect lengths for defined ALayout!");
-            static_assert(is_b_row_major
-                              ? (KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}])
-                              : (NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                                 KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}]),
+            static_assert(Base::template IsValidBDramWindow<BDramBlockWindowTmp>(),
                           "B block window has incorrect lengths for defined BLayout!");
 
             ////////////// global window & register /////////////////
@@ -354,9 +349,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 [&](auto idx) {
                     return make_tile_window(
                         b_dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(),
-                        make_tuple(number<NPerBlock>{}, number<KPerBlock>{}),
+                        Base::GetBCopyTileLengths(),
                         b_dram_block_window_tmp[number<idx>{}].get_window_origin(),
-                        Policy::template MakeBDramTileDistribution<Problem>());
+                        Base::MakeBCopyDramTileDistribution());
                 },
                 number<BsLayout::size()>{});
 
@@ -374,7 +369,7 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 [&](auto idx) {
                     return make_tile_window(Policy::template MakeAsyncLoadBDramWindow<Problem>(
                                                 b_tile_windows[number<idx>{}]),
-                                            Policy::template MakeBDramTileDistribution<Problem>());
+                                            Base::MakeBCopyDramTileDistribution());
                 },
                 number<BsLayout::size()>{});
 
@@ -404,9 +399,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
 
             auto a_copy_lds_window1 = make_tile_window(a_lds_block1, a_lds_shape, {0, 0});
 
-            auto b_copy_lds_window0 = make_tile_window(b_lds_block0, b_lds_shape, {0, 0});
+            auto b_copy_lds_window0 = Base::MakeBCopyLdsWindow(b_lds_block0);
 
-            auto b_copy_lds_window1 = make_tile_window(b_lds_block1, b_lds_shape, {0, 0});
+            auto b_copy_lds_window1 = Base::MakeBCopyLdsWindow(b_lds_block1);
 
             // initialize DRAM window steps, used to advance the DRAM windows
             using ADramTileWindowStep = typename ADramBlockWindowTmp::BottomTensorIndex;
@@ -415,7 +410,7 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             constexpr ADramTileWindowStep a_dram_tile_window_step =
                 is_a_col_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
             constexpr BDramTileWindowStep b_dram_tile_window_step =
-                is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+                Base::template GetBDramTileWindowStep<BDramTileWindowStep>();
 
             using ScaleATileType = decltype(load_tile(scale_a_dram_window));
             using ScaleBTileType = decltype(load_tile(scale_b_dram_window));

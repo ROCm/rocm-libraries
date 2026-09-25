@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 
 namespace ck_tile {
 
@@ -57,8 +58,56 @@ struct GemmPipelineAgBgCrImplBase
     static constexpr index_t KPerBlock = BlockGemmShape::kK;
 
     // Delegate to Policy's single definition to avoid duplication
-    static constexpr bool is_a_load_tr = Policy::template is_a_load_tr<Problem>;
-    static constexpr bool is_b_load_tr = Policy::template is_b_load_tr<Problem>;
+    static constexpr bool is_a_load_tr    = Policy::template is_a_load_tr<Problem>;
+    static constexpr bool is_b_load_tr    = Policy::template is_b_load_tr<Problem>;
+    static constexpr bool is_b_preshuffle = is_b_preshuffle_v<Problem>;
+    static constexpr bool is_b_row_major  = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
+
+    // Preshuffled B (shuffle_b_v0) is copied as the flat (N / WTN, K * WTN) block tile; the
+    // kernel only hands over the per-warp flat window, so its lengths are not checked.
+    template <typename BDramBlockWindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr bool IsValidBDramWindow()
+    {
+        constexpr auto lengths = BDramBlockWindowTmp{}.get_window_lengths();
+        if constexpr(is_b_preshuffle)
+            return true;
+        else if constexpr(is_b_row_major)
+            return KPerBlock == lengths[number<0>{}] && NPerBlock == lengths[number<1>{}];
+        else
+            return NPerBlock == lengths[number<0>{}] && KPerBlock == lengths[number<1>{}];
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto GetBCopyTileLengths()
+    {
+        constexpr index_t WTN = BlockGemmShape::WarpTile::at(number<1>{});
+        // the flat row of one warp tile must be WTK * WTN wide (gfx125 splits it for WTN > 16)
+        static_assert(!is_b_preshuffle || BlockGemmShape::flatKPerWarp ==
+                                              BlockGemmShape::WarpTile::at(number<2>{}) * WTN,
+                      "preshuffled B through LDS needs flatKPerWarp == WTK * WTN");
+        if constexpr(is_b_preshuffle)
+            return make_tuple(number<NPerBlock / WTN>{}, number<KPerBlock * WTN>{});
+        else if constexpr(is_b_row_major)
+            return make_tuple(number<KPerBlock>{}, number<NPerBlock>{});
+        else
+            return make_tuple(number<NPerBlock>{}, number<KPerBlock>{});
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBCopyDramTileDistribution()
+    {
+        if constexpr(is_b_preshuffle)
+            return Policy::template MakeBPreshuffleDramTileDistribution<Problem>();
+        else
+            return Policy::template MakeBDramTileDistribution<Problem>();
+    }
+
+    // DRAM window step advancing B by KBlocks block tiles along K
+    template <typename Step, index_t KBlocks = 1>
+    CK_TILE_HOST_DEVICE static constexpr Step GetBDramTileWindowStep()
+    {
+        constexpr index_t k_step =
+            KPerBlock * KBlocks * (is_b_preshuffle ? BlockGemmShape::WarpTile::at(number<1>{}) : 1);
+        return (is_b_row_major && !is_b_preshuffle) ? make_array(k_step, 0) : make_array(0, k_step);
+    }
 
     CK_TILE_HOST_DEVICE static constexpr auto TransposeC() { return Problem::TransposeC; }
 
@@ -317,19 +366,15 @@ struct GemmPipelineAgBgCrImplBase
     CK_TILE_DEVICE constexpr auto CopyBDramWindow(const DramBlockWindowTmp& dram_block_window_tmp,
                                                   const array<index_t, 2>& offset = {0, 0}) const
     {
-        constexpr bool is_row_major = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
-
-        using YPerTile = std::conditional_t<is_row_major, number<KPerBlock>, number<NPerBlock>>;
-        using XPerTile = std::conditional_t<is_row_major, number<NPerBlock>, number<KPerBlock>>;
-        // A DRAM tile window for load
+        // B DRAM tile window for load
         auto a_copy_dram_window = generate_tuple(
             [&](auto idx) {
                 return make_tile_window(Policy::template MakeBDramTensorView<Problem>(
                                             dram_block_window_tmp[number<idx>{}]),
-                                        make_tuple(YPerTile{}, XPerTile{}),
+                                        GetBCopyTileLengths(),
                                         dram_block_window_tmp[number<idx>{}].get_window_origin() +
                                             offset,
-                                        Policy::template MakeBDramTileDistribution<Problem>());
+                                        MakeBCopyDramTileDistribution());
             },
             number<DramBlockWindowTmp::size()>{});
         return std::move(a_copy_dram_window);
@@ -341,16 +386,12 @@ struct GemmPipelineAgBgCrImplBase
     CK_TILE_DEVICE constexpr auto CopyBDramWindow(const DramBlockWindowTmp& dram_block_window_tmp,
                                                   const array<index_t, 2>& offset = {0, 0}) const
     {
-        constexpr bool is_row_major = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
-
-        using YPerTile = std::conditional_t<is_row_major, number<KPerBlock>, number<NPerBlock>>;
-        using XPerTile = std::conditional_t<is_row_major, number<NPerBlock>, number<KPerBlock>>;
-        // A DRAM tile window for load
+        // B DRAM tile window for load
         auto a_copy_dram_window =
             make_tile_window(Policy::template MakeBDramTensorView<Problem>(dram_block_window_tmp),
-                             make_tuple(YPerTile{}, XPerTile{}),
+                             GetBCopyTileLengths(),
                              dram_block_window_tmp.get_window_origin() + offset,
-                             Policy::template MakeBDramTileDistribution<Problem>());
+                             MakeBCopyDramTileDistribution());
 
         return std::move(a_copy_dram_window);
     }
@@ -451,18 +492,30 @@ struct GemmPipelineAgBgCrImplBase
         return make_tuple(std::move(a_copy_dram_window), std::move(a_lds_windows));
     }
 
+    // LDS window B is copied into; preshuffled B uses the flat view of the same LDS buffer
+    template <typename BLdsTensorView>
+    CK_TILE_DEVICE static constexpr auto MakeBCopyLdsWindow(const BLdsTensorView& b_lds_block_view)
+    {
+        if constexpr(is_b_preshuffle)
+            return make_tile_window(
+                make_tensor_view<address_space_enum::lds>(
+                    b_lds_block_view.get_buffer_view().p_data_,
+                    Policy::template MakeBPreshuffleLdsCopyDescriptor<Problem>()),
+                GetBCopyTileLengths(),
+                {0, 0});
+        else if constexpr(is_b_load_tr)
+            return make_tile_window(
+                b_lds_block_view, make_tuple(number<KPerBlock>{}, number<NPerBlock>{}), {0, 0});
+        else
+            return make_tile_window(
+                b_lds_block_view, make_tuple(number<NPerBlock>{}, number<KPerBlock>{}), {0, 0});
+    }
+
     template <typename BLdsTensorView, typename BLdsLoadTileDistr>
     CK_TILE_DEVICE constexpr auto MakeBLdsWindows(const BLdsTensorView& b_lds_block_view,
                                                   const BLdsLoadTileDistr&) const
     {
-        auto b_lds_shape = []() {
-            if constexpr(is_b_load_tr)
-                return make_tuple(number<KPerBlock>{}, number<NPerBlock>{});
-            else
-                return make_tuple(number<NPerBlock>{}, number<KPerBlock>{});
-        }();
-
-        auto b_copy_lds_window = make_tile_window(b_lds_block_view, b_lds_shape, {0, 0});
+        auto b_copy_lds_window = MakeBCopyLdsWindow(b_lds_block_view);
 
         auto b_lds_load_tile_distr = []() {
             if constexpr(is_b_load_tr)

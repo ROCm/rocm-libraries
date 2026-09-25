@@ -7,6 +7,7 @@
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_universal_gemm_as_bs_cr.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
@@ -714,6 +715,82 @@ struct UniversalGemmBasePolicy
         }
     }
 
+    // Weight-preshuffled B (host shuffle_b_v0 layout) staged through LDS.
+    // Global memory holds B as flat rows of (K * WarpTileN) elements, one row per WarpTileN
+    // columns of N; inside a row the WarpTileN columns are interleaved in chunks of
+    // ItemsPerAccess along K. The copy view keeps that flat (N / WarpTileN, K * WarpTileN)
+    // shape so DRAM->LDS stays a straight copy, while the block gemm reads LDS through the
+    // logical (N, K) view.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBPreshuffleItemsPerAccess()
+    {
+        using BDataType              = remove_cvref_t<typename Problem::BDataType>;
+        using WarpTile               = typename Problem::BlockGemmShape::WarpTile;
+        constexpr index_t PackedSize = numeric_traits<BDataType>::PackedSize;
+        static_assert(std::is_same_v<BDataType, remove_cvref_t<BLdsDataType_<Problem>>>,
+                      "preshuffled B does not support a cast before the LDS write");
+        return min(static_cast<index_t>(16 / sizeof(BDataType)) * PackedSize,
+                   static_cast<index_t>(WarpTile::at(I2) * WarpTile::at(I1) / get_warp_size()));
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBPreshuffleLdsBlockDescriptor()
+    {
+        static_assert(!is_b_load_tr<Problem>, "preshuffled B is read without transpose loads");
+        constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
+        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
+        constexpr index_t WTN       = Problem::BlockGemmShape::WarpTile::at(I1);
+        constexpr index_t IPA       = GetBPreshuffleItemsPerAccess<Problem>();
+
+        constexpr auto desc = make_naive_tensor_descriptor(
+            make_tuple(
+                number<NPerBlock / WTN>{}, number<WTN>{}, number<KPerBlock / IPA>{}, number<IPA>{}),
+            make_tuple(number<KPerBlock * WTN>{}, number<IPA>{}, number<WTN * IPA>{}, number<1>{}),
+            number<IPA>{},
+            number<1>{});
+
+        return transform_tensor_descriptor(
+            desc,
+            make_tuple(make_merge_transform_v3_division_mod(
+                           make_tuple(number<NPerBlock / WTN>{}, number<WTN>{})),
+                       make_merge_transform_v3_division_mod(
+                           make_tuple(number<KPerBlock / IPA>{}, number<IPA>{}))),
+            make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBPreshuffleLdsCopyDescriptor()
+    {
+        using BDataType              = remove_cvref_t<typename Problem::BDataType>;
+        constexpr index_t NPerBlock  = Problem::BlockGemmShape::kN;
+        constexpr index_t KPerBlock  = Problem::BlockGemmShape::kK;
+        constexpr index_t WTN        = Problem::BlockGemmShape::WarpTile::at(I1);
+        constexpr index_t PackedSize = numeric_traits<BDataType>::PackedSize;
+
+        return make_naive_tensor_descriptor(
+            make_tuple(number<NPerBlock / WTN>{}, number<KPerBlock * WTN>{}),
+            make_tuple(number<KPerBlock * WTN>{}, number<1>{}),
+            number<16 / sizeof(BDataType) * PackedSize>{},
+            number<1>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBPreshuffleDramTileDistribution()
+    {
+        using BDataType              = remove_cvref_t<typename Problem::BDataType>;
+        constexpr index_t WTN        = Problem::BlockGemmShape::WarpTile::at(I1);
+        constexpr index_t PackedSize = numeric_traits<BDataType>::PackedSize;
+        using TileEncodingPattern =
+            tile_distribution_encoding_pattern_2d<Problem::kBlockSize,
+                                                  Problem::BlockGemmShape::kN / WTN,
+                                                  Problem::BlockGemmShape::kK * WTN,
+                                                  16 / sizeof(BDataType) * PackedSize,
+                                                  getBTileAccessPattern(),
+                                                  Problem::NumWaveGroups>;
+        return TileEncodingPattern::make_2d_static_tile_distribution();
+    }
+
     // =====================================================
     // Main entry point: dispatches based on architecture
     // =====================================================
@@ -726,7 +803,10 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
-        return MakeBLdsBlockDescriptorImpl<Problem>(get_device_arch());
+        if constexpr(is_b_preshuffle_v<Problem>)
+            return MakeBPreshuffleLdsBlockDescriptor<Problem>();
+        else
+            return MakeBLdsBlockDescriptorImpl<Problem>(get_device_arch());
     }
 
     /**
@@ -1152,7 +1232,12 @@ struct UniversalGemmBasePolicy
 
         constexpr auto is_tr_load = IsA ? is_a_load_tr<Problem> : is_b_load_tr<Problem>;
         constexpr auto PackedSize = numeric_traits<DataType>::PackedSize;
-        if constexpr(is_tr_load)
+        // preshuffled B keeps the unpadded flat layout so DRAM->LDS stays a straight copy
+        if constexpr(!IsA && is_b_preshuffle_v<Problem>)
+        {
+            return make_tuple(number<false>{}, number<0>{}, number<0>{});
+        }
+        else if constexpr(is_tr_load)
         {
             constexpr index_t banks_per_mblk =
                 MNPerBlock * DataTypeSize / PackedSize / BytesPerDword;

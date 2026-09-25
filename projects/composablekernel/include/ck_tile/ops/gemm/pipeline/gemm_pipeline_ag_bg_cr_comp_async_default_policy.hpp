@@ -60,6 +60,10 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         !Base::template is_a_load_tr<Problem> && !Base::template is_b_load_tr<Problem> &&
         IsSupportedXorSwizzleDataType<Problem> && IsSupportedXorSwizzleAsyncWidth<Problem>;
 
+    // Preshuffled B is copied as a flat unswizzled tile; A keeps the swizzle
+    template <typename Problem>
+    static constexpr bool UseXorSwizzleB = UseXorSwizzle<Problem> && !is_b_preshuffle_v<Problem>;
+
     // Compute the number of LDS read accesses for A or B
     // IsLoadTr=true if ds_read_tr is used
     template <bool IsLoadTr, typename DataType, index_t ThreadElements, bool IsScale>
@@ -186,7 +190,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTileDistribution()
     {
-        if constexpr(UseXorSwizzle<Problem>)
+        if constexpr(UseXorSwizzleB<Problem>)
         {
             constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
             constexpr index_t KPack     = Base::template GetSmemPackB<Problem>();
@@ -351,7 +355,11 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
 #else
         constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        if constexpr(Base::template is_b_load_tr<Problem>)
+        if constexpr(is_b_preshuffle_v<Problem>)
+        {
+            return Base::template MakeBPreshuffleLdsBlockDescriptor<Problem>();
+        }
+        else if constexpr(Base::template is_b_load_tr<Problem>)
         {
             // TODO: better LDS descriptor for performance
             // This branch is reusing the logic from
@@ -365,7 +373,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
         else
         {
-            if constexpr(UseXorSwizzle<Problem>)
+            if constexpr(UseXorSwizzleB<Problem>)
             {
                 using WarpTile          = typename Problem::BlockGemmShape::WarpTile;
                 constexpr index_t KPack = Base::template GetSmemPackB<Problem>();
@@ -483,7 +491,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     template <typename Problem, typename Window>
     CK_TILE_DEVICE static constexpr auto MakeAsyncLoadBDramWindow(const Window& window)
     {
-        if constexpr(UseXorSwizzle<Problem>)
+        if constexpr(UseXorSwizzleB<Problem>)
         {
             constexpr index_t KPack = Base::template GetSmemPackB<Problem>();
             return MakeAsyncLoadABDramWindow<Problem, KPack, GetWGAttrNumAccess<Problem>()>(window);
