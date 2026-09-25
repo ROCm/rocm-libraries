@@ -97,9 +97,10 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
         const int load_step = word_loads ? 4 : 1;
         auto* lane_chunk = rocke_b_mul(b, lane_group, rocke_b_const_i32(b, chunk_units));
         auto* step_base = rocke_b_add(b, row_base, rocke_b_const_i32(b, origin_bytes / unit_bytes));
-        /* Collect loads before concatenation to preserve Python SSA numbering. */
+        /* Collect loads before concatenation to preserve Python SSA numbering.
+         * Each load consumes at least one storage unit, including padded slots. */
         rocke_value_t** chunks = (rocke_value_t**)rocke_arena_alloc(
-            &b->arena, size_t(packing.count) * sizeof(rocke_value_t*));
+            &b->arena, size_t(payload_bits / (8 * unit_bytes)) * sizeof(rocke_value_t*));
         if(!chunks)
             ckc::raise_status(ROCKE_ERR_OOM, "matrix fragment allocation failed");
         int num_chunks = 0;

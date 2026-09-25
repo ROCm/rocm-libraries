@@ -127,6 +127,8 @@ class MatrixFragmentLayout:
     """Contiguous K chunks interleaved between lane groups.
 
     The atom selects this mapping. Storage and carrier widths do not determine it.
+    This describes interleaved contiguous K chunks, not arbitrary matrix
+    distributions, transposed axes, or swizzled tensor addresses.
     """
 
     fragment: FragmentPacking

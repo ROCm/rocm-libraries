@@ -116,7 +116,9 @@ buffers; concurrent packed stores are not provided.
 
 `MatrixFragmentLayout` describes contiguous K chunks interleaved between lane
 groups. Coordinate mapping belongs to the atom-specific layout, not to the
-generic bit packer. `ScaledWmmaOp.matrix_layout(operand)` selects independent
+generic bit packer. This is a contiguous-K mapping, not a general matrix
+distribution or a description of transposed axes and swizzled tensor addresses.
+`ScaledWmmaOp.matrix_layout(operand)` selects independent
 A/B layouts. Existing `a_frag_len`/`b_frag_len` retain their ABI-vector meaning.
 
 The current gfx1250 scaled matrix layouts have 64 elements per lane and sixteen

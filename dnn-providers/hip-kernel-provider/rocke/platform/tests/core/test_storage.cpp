@@ -34,6 +34,9 @@ static int emit(const char* dtype, bool hip, bool include_prologue = true)
 {
     rocke_ir_builder_t b;
     CHECK(rocke_ir_builder_init(&b, "transport") == ROCKE_OK);
+    const bool padded_slots = strcmp(dtype, "fp4_slot40") == 0;
+    if(padded_slots)
+        dtype = "fp4";
     const bool padded = strstr(dtype, "_padded") != NULL;
     if(padded)
         dtype = strcmp(dtype, "f16_padded") == 0    ? "f16"
@@ -108,6 +111,15 @@ static int emit(const char* dtype, bool hip, bool include_prologue = true)
             layout = rocke_scaled_matrix_layout(dtype, 16);
         if(strcmp(dtype, "fp6") == 0 && padded)
             CHECK(rocke_matrix_fragment_layout_init(&layout, &layout.fragment, 16, 2, 16));
+        if(padded_slots)
+        {
+            // Four logical elements need eight loads (4 + 1 bytes per slot).
+            rocke_bit_packing_t packing;
+            rocke_fragment_packing_t fragment;
+            CHECK(rocke_bit_packing_init(&packing, 4, 40));
+            CHECK(rocke_fragment_packing_init(&fragment, &packing, 4, 32, 5));
+            CHECK(rocke_matrix_fragment_layout_init(&layout, &fragment, 1, 2, 16));
+        }
         auto* base = rocke_b_const_i32(&b, padded ? (typed ? 129 : 97) : 0);
         auto* thread = rocke_b_thread_id_x(&b);
         auto* lane = rocke_b_mod(&b, thread, rocke_b_const_i32(&b, 32));
@@ -281,6 +293,24 @@ int main(int argc, char** argv)
     }
     CHECK(test_fragment_inputs() == 0);
     CHECK(test_fragment_offset_bounds() == 0);
+    for(int count : {1, 2, 4, 8})
+    {
+        const rocke_scale_packing_t scales = {count, 32};
+        CHECK(rocke_scale_word_bits(&scales) == count * 8);
+        CHECK(rocke_scale_fragment(&scales).carrier_bits == count * 8);
+    }
+    for(const auto scales : {rocke_scale_packing_t{0, 32}, {-1, 32}, {3, 32}, {16, 32}, {4, 0}})
+    {
+        try
+        {
+            rocke_scale_word_bits(&scales);
+            CHECK(false);
+        }
+        catch(const ckc::Error& error)
+        {
+            CHECK(error.code() == ROCKE_ERR_VALUE);
+        }
+    }
     CHECK(rocke_dtype_info("e4m3") == rocke_dtype_info("fp8e4m3"));
     CHECK(rocke_dtype_to_ir_type("e4m3") == rocke_fp8e4m3());
     CHECK(rocke_storage_ir_type("e4m3") == rocke_fp8e4m3());

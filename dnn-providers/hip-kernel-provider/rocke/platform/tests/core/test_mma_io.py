@@ -32,6 +32,7 @@ CASES = [
     "load96_f16",
     "load96_i32",
     "fp4",
+    "fp4_slot40",
     "fp6",
     "fp6_padded",
     "bf6",
@@ -72,6 +73,9 @@ def build_transport(dtype):
                     o, b.const_i32(k * n + j), b.vec_extract(vector, j), align=12 // n
                 )
         return b.kernel
+    padded_slots = dtype == "fp4_slot40"
+    if padded_slots:
+        dtype = "fp4"
     padded = dtype.endswith("_padded")
     dtype = dtype.removesuffix("_padded")
     patterns = dtype.startswith("pack_")
@@ -100,6 +104,11 @@ def build_transport(dtype):
         )
         if dtype == "fp6" and padded:
             layout = MatrixFragmentLayout(layout.fragment, 16, 2, 16)
+        if padded_slots:
+            # Four logical elements need eight loads (4 + 1 bytes per slot).
+            layout = MatrixFragmentLayout(
+                FragmentPacking(BitPacking(4, 40), 4, 32, 5), 1, 2, 16
+            )
         base = b.const_i32((129 if typed else 97) if padded else 0)
         lane = b.mod(b.thread_id_x(), b.const_i32(32))
         group = b.div(lane, b.const_i32(16))

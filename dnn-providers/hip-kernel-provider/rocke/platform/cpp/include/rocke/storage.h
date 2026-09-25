@@ -31,6 +31,8 @@ typedef struct rocke_fragment_packing
     uint64_t carrier_count;
 } rocke_fragment_packing_t;
 
+/* Interleaved contiguous K chunks, not arbitrary matrix distributions,
+ * transposed axes, or swizzled tensor addresses. */
 typedef struct rocke_matrix_fragment_layout
 {
     rocke_fragment_packing_t fragment;

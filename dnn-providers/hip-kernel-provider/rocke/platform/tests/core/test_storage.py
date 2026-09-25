@@ -54,7 +54,8 @@ def test_matrix_payload_and_padding(dtype, live):
 
 
 @pytest.mark.parametrize(
-    "count,block_k,word", [(4, 32, 0x04030201), (8, 16, 0x0807060504030201)]
+    "count,block_k,word",
+    [(1, 32, 0x01), (2, 32, 0x0201), (4, 32, 0x04030201), (8, 16, 0x0807060504030201)],
 )
 def test_scales_use_common_bit_packing(count, block_k, word):
     scales = ScalePacking(count, block_k)
@@ -62,6 +63,15 @@ def test_scales_use_common_bit_packing(count, block_k, word):
     assert scales.fragment.pack(list(range(1, count + 1))) == (word,)
     assert scales.packing == BitPacking(8)
     assert scales.word_bits == count * 8
+    assert scales.llvm_type == f"i{count * 8}"
+
+
+@pytest.mark.parametrize(
+    "count,block_k", [(0, 32), (-1, 32), (3, 32), (16, 32), (4.0, 32), (4, 0)]
+)
+def test_invalid_scale_packing(count, block_k):
+    with pytest.raises(ValueError):
+        ScalePacking(count, block_k)
 
 
 def test_invalid_packing_and_overflow():
