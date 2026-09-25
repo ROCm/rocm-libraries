@@ -34,10 +34,6 @@ engine:
   name: hipkernel:Gfx950AttentionDense
   sdk_version: 1.0.0
   knobs:
-  - head_size
-  - num_query_heads
-  - num_kv_heads
-  - causal
   - block_m
   - block_n
   heuristic: native

@@ -1041,15 +1041,7 @@ TEST_F(TestGfx950AttentionDensePacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx950AttentionDensePacks, ExposesTheConfiguredKnobs)
 {
-    ASSERT_EQ(_set->engine.knobs.size(), 6U);
-    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "head_size"),
-              _set->engine.knobs.end());
-    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "num_query_heads"),
-              _set->engine.knobs.end());
-    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "num_kv_heads"),
-              _set->engine.knobs.end());
-    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "causal"),
-              _set->engine.knobs.end());
+    ASSERT_EQ(_set->engine.knobs.size(), 2U);
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "block_m"),
               _set->engine.knobs.end());
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "block_n"),
