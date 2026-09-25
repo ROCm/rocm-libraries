@@ -51,7 +51,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [256]
         - TDMInst: [3]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - TDMIterateMode: [0]
         - LDSTrInst: [False]
         - StaggerU: [0]

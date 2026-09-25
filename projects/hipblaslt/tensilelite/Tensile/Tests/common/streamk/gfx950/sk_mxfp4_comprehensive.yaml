@@ -23,7 +23,7 @@ GlobalParameters:
 BenchmarkProblems:
   #######################################
   # Comprehensive test combining multiple StreamK parameters
-  # StreamK + StreamKAtomic + StreamKFixupTreeReduction + StreamKXCCMapping
+  # StreamK + StreamKAtomic + StreamKFixupTreeReduction + PersistentXCCMapping
   # TN transpose only
   #######################################
   -
@@ -58,10 +58,11 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [false]
         - DirectToLds: [1]
-        - StreamK: [3, 4, 5]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid, DynamicWorkQueue, Hybrid]
         - StreamKAtomic: [0, 1]
         - StreamKFixupTreeReduction: [0, 1]
-        - StreamKXCCMapping: [0, 4]
+        - PersistentXCCMapping: [0, 4]
         - StaggerU: [0]
         - WavefrontSize: [64]
         - WorkGroupMapping: [1, 6]

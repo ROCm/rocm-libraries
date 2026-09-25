@@ -19,7 +19,7 @@ GlobalParameters:
   # StreamK=5 hybrid sub-paths, each problem replayed once per value:
   #   0 -> static work assignment
   #   1 -> dynamic work-queue path (exercises the global_atomic_inc_u32 queue fetch)
-  StreamKHybridMode: [0, 1]
+  HybridAssignmentPolicy: [Default, DynamicWorkQueue]
 
 BenchmarkProblems:
 
@@ -38,7 +38,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [1]
       ForkParameters:
-        - StreamK: [5]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [Hybrid]
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
         - DepthU: [ 64 ]
@@ -90,7 +91,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [1]
       ForkParameters:
-        - StreamK: [5]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [Hybrid]
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
         - DepthU: [ 32 ]
@@ -126,7 +128,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [1]
       ForkParameters:
-        - StreamK: [5]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [Hybrid]
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
         - DepthU: [ 32 ]

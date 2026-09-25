@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from config_harness import solutions_from_config
+from config_harness import _isolated_globals_with_isa, _toolchain_for, solutions_from_config
 from Tensile.BenchmarkStructs import _expandGroupedParameters, constructLazyForkPermutations
 from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.ExperimentalLibrary import (
@@ -19,7 +19,7 @@ from Tensile.ExperimentalLibrary import (
 
 pytestmark = pytest.mark.unit
 
-_FIXTURE = Path(__file__).parents[1] / "common/streamk/sk_sgemm_force_dp_only.yaml"
+_FIXTURE = Path(__file__).parents[1] / "common/streamk/data_parallel_static_sgemm.yaml"
 
 
 @pytest.fixture(autouse=True)
@@ -189,3 +189,61 @@ def test_nonpolicy_augmentation_preserves_groups():
     group["ForkParameters"].append({"Groups": deepcopy(groups)})
     augment_config(config, [("PrefetchGlobalRead", [1, 2])])
     assert next(entry["Groups"] for entry in group["ForkParameters"] if "Groups" in entry) == groups
+
+
+def _main_cli_policy_lines(tmp_path, yaml_globals, overrides):
+    from Tensile.ClientWriter import writeClientConfigIni
+    from Tensile.Contractions import ProblemType as ContractionProblemType
+    from Tensile.SolutionStructs import FactorDimArgs
+    from Tensile.SolutionStructs.Problem import ProblemSizesMockDummy, ProblemType
+    from Tensile.Tensile import Tensile
+
+    config = tmp_path / "input.yaml"
+    config.write_text(yaml.safe_dump({"GlobalParameters": dict(PrintLevel=0, **yaml_globals)}))
+    argv = [str(config), str(tmp_path / "output"), "--gpu-targets", "gfx942", "--cpu-only"]
+    if overrides:
+        argv.extend(["--global-parameters", *overrides])
+    with _isolated_globals_with_isa(_toolchain_for("gfx942")[1]):
+        # No benchmark steps are needed to exercise the real entry point's
+        # YAML/CLI precedence and the resulting client configuration.
+        Tensile(argv)
+        problem = ProblemType({"OperationType": "GEMM", "DataType": "s", "Batched": True}, False)
+        ini = tmp_path / "ClientParameters.ini"
+        writeClientConfigIni(
+            forBenchmark=True, problemSizes=ProblemSizesMockDummy(),
+            biasTypeArgs="", factorDimArgs=FactorDimArgs(problem, []),
+            activationArgs="", icacheFlushArgs="",
+            problemType=ContractionProblemType.FromOriginalState(problem.state),
+            sourceDir=str(tmp_path), codeObjectFiles=[], resultsFileName=str(tmp_path / "results.csv"),
+            parametersFilePath=str(ini), deviceId=0, gfxName="gfx942",
+            libraryFile=str(tmp_path / "TensileLibrary.dat"),
+        )
+    return [line for line in ini.read_text().splitlines()
+            if line.startswith(("streamk-hybrid-mode=", "hybrid-assignment-policy="))]
+
+
+@pytest.mark.parametrize("yaml_globals,overrides,expected", [
+    ({}, ["StreamKHybridMode=[1]"], ["DynamicWorkQueue"]),
+    ({}, ["HybridAssignmentPolicy=['DynamicWorkQueue']"], ["DynamicWorkQueue"]),
+    ({"HybridAssignmentPolicy": ["Auto"]}, ["StreamKHybridMode=1"], ["DynamicWorkQueue"]),
+    ({"StreamKHybridMode": [1]}, ["HybridAssignmentPolicy='Auto'"], ["Auto"]),
+    ({"HybridAssignmentPolicy": ["DynamicWorkQueue"]}, ["StreamKHybridMode=[0]"], []),
+    ({"StreamKHybridMode": [1]}, [], ["DynamicWorkQueue"]),
+    ({}, ["StreamKHybridMode=[0,1,2]",
+          "HybridAssignmentPolicy=['Default','DynamicWorkQueue','Auto']"],
+     ["Default", "DynamicWorkQueue", "Auto"]),
+    pytest.param({}, ["StreamKHybridMode=(1,)"], ["DynamicWorkQueue"], id="legacy-tuple"),
+    pytest.param({"StreamKHybridMode": [1]}, ["HybridAssignmentPolicy=('Default','Auto')"],
+                 ["Default", "Auto"], id="canonical-tuple-overrides-yaml"),
+])
+def test_main_cli_hybrid_policy_reaches_client_config(tmp_path, yaml_globals, overrides, expected):
+    assert _main_cli_policy_lines(tmp_path, yaml_globals, overrides) == [
+        "hybrid-assignment-policy=" + name for name in expected
+    ]
+
+
+def test_main_cli_rejects_conflicting_hybrid_aliases(tmp_path):
+    with pytest.raises(ValueError, match="Conflicting StreamKHybridMode and HybridAssignmentPolicy"):
+        _main_cli_policy_lines(tmp_path, {}, [
+            "StreamKHybridMode=[1]", "HybridAssignmentPolicy=['Auto']",
+        ])

@@ -82,7 +82,8 @@ BenchmarkProblems:
         # GSU=1 (base) vs GSU=2 (exercises graUnrollAssignment gsuOffset path)
         - GlobalSplitU: [1, 2]
         # StreamK=0 (standard) vs StreamK=3 (XCC StreamK)
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         # Required fixed parameters for gfx950 MX subtile path
         - DepthU: [256]
         - PrefetchGlobalRead: [2]

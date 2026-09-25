@@ -94,7 +94,8 @@ BenchmarkProblems:
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

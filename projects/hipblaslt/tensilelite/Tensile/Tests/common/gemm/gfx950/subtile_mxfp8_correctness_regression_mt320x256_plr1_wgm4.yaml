@@ -29,7 +29,7 @@
 #   DepthU:               [256]    → dataDU=128 auto-derived
 #   ScheduleIterAlg:      [3]
 #   DirectToLds:          [1]
-#   StreamK:              [3]
+#   TileProcessingStrategy: [StreamK]
 #   StaggerU:             [0]
 #   UseSubtileImpl:       [1]
 #   WorkGroupMapping:     [4]      → WGM4
@@ -135,7 +135,8 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
         - WorkGroupMapping: [4]

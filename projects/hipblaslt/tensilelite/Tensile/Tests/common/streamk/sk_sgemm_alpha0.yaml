@@ -65,8 +65,9 @@ BenchmarkProblems:
         # - VectorWidth: [1, 4] # 2?
         - VectorWidthA: [4]
         - VectorWidthB: [4]
-        - StreamK: [3]
-        # - StreamKXCCMapping: [0, 8]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        # - PersistentXCCMapping: [0, 8]
         # - StaggerU: [0, 32]
         # - StaggerU: [0]
         - ScheduleIterAlg: [3]

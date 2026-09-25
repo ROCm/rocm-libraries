@@ -10,7 +10,7 @@
 # StreamK family sweep:
 #   - StreamK: [3, 4, 5]  -- SK modes 3 (TwoTileDPFirst), 4 (Dynamic), 5 (Hybrid)
 #   - StreamKAtomic: [0, 1]  -- 1 requires SGEMM (f32) and triggers atomic SK path
-#   - StreamKXCCMapping: [0]  -- gfx942 XCC mapping; keep 0 to avoid XCC interactions
+#   - PersistentXCCMapping: [0]  -- gfx942 XCC mapping; keep 0 to avoid XCC interactions
 #
 # ProblemType: SGEMM NT (f32), Batched=True (StridedBatched requirement for SK)
 # Large K (1024) to make SK meaningful.
@@ -50,9 +50,10 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4, 4, 2, 2]
-        - StreamK: [3, 4, 5]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid, DynamicWorkQueue, Hybrid]
         - StreamKAtomic: [0, 1]
-        - StreamKXCCMapping: [0]
+        - PersistentXCCMapping: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
