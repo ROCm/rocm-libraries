@@ -328,6 +328,65 @@ namespace
         return ok;
     }
 
+    /** The heuristic query for a grouped GEMM of two copies of the problem. */
+    bool groupedHeuristicIndex(int* selectedIndex)
+    {
+        hipblasLtHandle_t handle = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+            return false;
+
+        void* dA = nullptr;
+        void* dB = nullptr;
+        void* dC = nullptr;
+        bool  ok = hipMalloc(&dA, kM * kK * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dB, kK * kN * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dC, kM * kN * sizeof(uint16_t)) == hipSuccess;
+
+        if(ok)
+        {
+            const float alpha = 1.0f;
+            const float beta  = 0.0f;
+
+            hipblaslt_ext::GemmPreference pref;
+            pref.setMaxWorkspaceBytes(kWorkspaceBytes);
+
+            hipblaslt_ext::GroupedGemm grouped(handle,
+                                               HIPBLAS_OP_N,
+                                               HIPBLAS_OP_N,
+                                               HIP_R_16F,
+                                               HIP_R_16F,
+                                               HIP_R_16F,
+                                               HIP_R_16F,
+                                               HIPBLAS_COMPUTE_32F);
+
+            std::vector<int64_t>                     m(2, kM), n(2, kN), k(2, kK), batch(2, 1);
+            std::vector<hipblaslt_ext::GemmEpilogue> epilogue(2);
+            std::vector<hipblaslt_ext::GemmInputs>   inputs(2);
+            for(auto& in : inputs)
+            {
+                in.setA(dA);
+                in.setB(dB);
+                in.setC(dC);
+                in.setD(dC);
+                in.setAlpha(&alpha);
+                in.setBeta(&beta);
+            }
+
+            std::vector<hipblasLtMatmulHeuristicResult_t> results;
+            ok = grouped.setProblem(m, n, k, batch, epilogue, inputs) == HIPBLAS_STATUS_SUCCESS
+                 && grouped.algoGetHeuristic(1, pref, results) == HIPBLAS_STATUS_SUCCESS
+                 && !results.empty();
+            if(ok)
+                *selectedIndex = hipblaslt_ext::getIndexFromAlgo(results[0].algo);
+        }
+
+        static_cast<void>(hipFree(dC));
+        static_cast<void>(hipFree(dB));
+        static_cast<void>(hipFree(dA));
+        hipblasLtDestroy(handle);
+        return ok;
+    }
+
     struct Row
     {
         int                        index = -1;
@@ -570,6 +629,25 @@ namespace
         int selected = -1;
         ASSERT_TRUE(extHeuristicIndex(&selected, HIP_R_32F, HIPBLAS_COMPUTE_32F_FAST_TF32));
         EXPECT_EQ(selected, xf32Default);
+    }
+
+    // Tuning file rows describe single GEMMs. A grouped GEMM whose groups match
+    // a row still uses default selection.
+    TEST_F(TuningCache, GroupedGemmUsesDefaultSelection)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        int defaultIndex = -1;
+        ASSERT_TRUE(groupedHeuristicIndex(&defaultIndex));
+
+        const auto& recorded = m_identities[1];
+        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        useTuningFile();
+
+        int selected = -1;
+        ASSERT_TRUE(groupedHeuristicIndex(&selected));
+        EXPECT_EQ(selected, defaultIndex);
     }
 
     // When the file satisfies a single-algo request, the heuristic's own search

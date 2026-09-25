@@ -327,6 +327,13 @@ bool problem_override_from_file_cpp(
     const std::string&                              file_path,
     size_t                                          max_workspace_bytes)
 {
+    // Rows describe single GEMMs, and TensileDataGemm2ProblemOverride reads
+    // gemmData as a TensileDataGemm.
+    if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+    {
+        log_info(__func__, "Grouped GEMM does not use the override file.");
+        return false;
+    }
 
     bool success = false;
     TensileLite::getContractionProblemsFromFile(file_path);
