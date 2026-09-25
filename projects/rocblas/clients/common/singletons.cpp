@@ -26,6 +26,8 @@
 #include "singletons.hpp"
 #include "rocblas_test.hpp"
 
+#include <cstdlib>
+
 // global for device memory padding see d_vector.hpp
 size_t g_DVEC_PAD = 4096;
 
@@ -50,7 +52,17 @@ void d_vector_report_failure(const std::string& message)
     ADD_FAILURE() << message;
     if(::testing::UnitTest::GetInstance()->current_test_info())
         return;
-#endif
+
     // No test to attribute it to, so print it rather than leave it in the ad-hoc results.
+    // That is rocblas-bench and rocblas-gemm-tune, for which a failed free has never been
+    // fatal: both compile with GOOGLE_TEST, so both already got the assertion form.
     rocblas_cerr << "rocBLAS client: " << message << std::endl;
+#else
+    // No Google Test anywhere in this binary, so this is a sample. Two of them build
+    // device containers, and before this function existed they reached the non-test form
+    // of CHECK_HIP_ERROR, which printed and exited. Keep that exit status, or a sample
+    // would report success after failing to free device memory.
+    rocblas_cerr << "rocBLAS client: " << message << std::endl;
+    exit(EXIT_FAILURE);
+#endif
 }

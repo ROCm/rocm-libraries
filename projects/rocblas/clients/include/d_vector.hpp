@@ -95,8 +95,10 @@ public:
         : m_size(s)
         , m_pad(std::min(g_DVEC_PAD, size_t(MEM_MAX_GUARD_PAD)))
         , m_guard_len(m_pad * sizeof(T))
-        // At least one element: hipMalloc(0) is undefined.
-        , m_bytes(((s ? s : 1) + m_pad * 2) * sizeof(T))
+        // Never zero: hipMalloc(0) hands back a null pointer, which every caller reads as
+        // a failed allocation. Only an empty vector with no pad reaches the clamp; any pad
+        // at all already makes the allocation non-empty.
+        , m_bytes(std::max(s + m_pad * 2, size_t(1)) * sizeof(T))
         , use_HMM(HMM)
     {
         // Filled on first construction whatever the pad currently is. Keying this off

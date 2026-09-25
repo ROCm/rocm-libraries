@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -454,6 +454,11 @@ void initialize_a_b_c(float*      ha,
 
 int main(int argc, char* argv[])
 {
+    // The device containers below belong to the test harness, which guards every device
+    // allocation with padding it later checks. This sample never checks it, so switch it
+    // off, as rocblas-bench and rocblas-gemm-tune do.
+    d_vector_set_pad_length(0);
+
     // initialize parameters with default values
     rocblas_operation trans_a = rocblas_operation_none;
     rocblas_operation trans_b = rocblas_operation_transpose;
