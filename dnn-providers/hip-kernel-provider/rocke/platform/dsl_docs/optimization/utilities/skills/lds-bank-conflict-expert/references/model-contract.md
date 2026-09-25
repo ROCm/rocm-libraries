@@ -3,8 +3,9 @@
 ## Request
 
 Call the production predictor with an exact target, opcode, wave size, and a
-sequence of access records. An access is the fundamental record because one lane
-may contribute multiple logical elements or vector fragments.
+sequence of access records for one instruction in one wave. Each lane may supply
+at most one active access, covering the opcode's full width. Submit separate
+requests for separate instructions or waves.
 
 Each access has:
 
@@ -16,7 +17,7 @@ Each access has:
 - optional integer coordinates whose axis names are supplied separately by the
   result contract.
 
-Use unique IDs even when multiple accesses share a lane or byte address. Preserve
+Use unique IDs even when multiple accesses share a byte address. Preserve
 inactive accesses when the caller needs them displayed; the predictor excludes
 them from collision grouping.
 
