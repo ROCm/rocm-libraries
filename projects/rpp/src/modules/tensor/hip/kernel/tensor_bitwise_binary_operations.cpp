@@ -419,8 +419,9 @@ __global__ void tensor_or_tensor_nd_hip_tensor(T* srcPtr1, T* srcPtr2, uint* src
 }
 
 template <typename T, typename Operation>
-__global__ void tensor_or_tensor_non_broadcast_nd_hip_tensor(T* src1Ptr, T* src2Ptr, uint* src1Dims,
-                                                             uint numDims, T* dstPtr, uint* strides,
+__global__ void tensor_or_tensor_non_broadcast_nd_hip_tensor(T* src1Ptr, T* src2Ptr,
+                                                             d_uint5_s src1Dims, uint numDims,
+                                                             T* dstPtr, d_uint5_s strides,
                                                              uint* roiTensor1, uint* roiTensor2,
                                                              Operation op) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
@@ -429,7 +430,7 @@ __global__ void tensor_or_tensor_non_broadcast_nd_hip_tensor(T* src1Ptr, T* src2
     using VectorType = typename BitwiseLoadStoreExecute<T>::VectorType;
 
     // Total number of elements per tensor (flattened length)
-    uint totalElements = *strides;
+    uint totalElements = strides.data[0];
 
     if (id_x >= totalElements) return;
 
@@ -444,11 +445,11 @@ __global__ void tensor_or_tensor_non_broadcast_nd_hip_tensor(T* src1Ptr, T* src2
         uint dstIdx = (id_z * totalElements);
         uint srcIdx1 = (id_z * totalElements);
         uint srcIdx2 = (id_z * totalElements);
-        uint* dimStrides = strides + 1;
+        const uint* dimStrides = strides.data + 1;
         uint coords[RPPT_MAX_DIMS];
 
         for (int i = 0; i < numDims; i++) {
-            coords[i] = (id_x / dimStrides[i]) % src1Dims[i];
+            coords[i] = (id_x / dimStrides[i]) % src1Dims.data[i];
             if (coords[i] >= length[i]) return;
         }
 
@@ -478,7 +479,7 @@ __global__ void tensor_or_tensor_non_broadcast_nd_hip_tensor(T* src1Ptr, T* src2
         uint srcBaseIdx2 = id_z * totalElements;
 
         // Strides for each dimension start at strides[1]
-        uint* dimStrides = strides + 1;
+        const uint* dimStrides = strides.data + 1;
 
         for (uint e = 0; e < remaining; e++) {
             uint flatIdx = static_cast<uint>(id_x) + e;
@@ -490,7 +491,7 @@ __global__ void tensor_or_tensor_non_broadcast_nd_hip_tensor(T* src1Ptr, T* src2
 
             // Compute coordinates and indices for this element
             for (int i = 0; i < numDims; i++) {
-                uint coord = (flatIdx / dimStrides[i]) % src1Dims[i];
+                uint coord = (flatIdx / dimStrides[i]) % src1Dims.data[i];
                 if (coord >= length[i]) {
                     skipElement = true;
                     break;
@@ -799,30 +800,19 @@ RppStatus hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
         int globalThreads_y = 1;
         int globalThreads_z = dstGenericDescPtr->dims[0];
 
-        // srcGenericDescPtr1/dstGenericDescPtr are caller-owned and may live in ordinary host
-        // memory, but the kernel dereferences dims/strides on-device. Stage the small arrays
-        // through the handle's scratch buffers (mirrors the broadcast path above) instead of
-        // passing host pointers directly into the kernel launch.
-        Rpp32u* dimsStagingHost = reinterpret_cast<Rpp32u*>(
-            handle.GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
-        Rpp32u* stridesStagingHost = dimsStagingHost + RPPT_MAX_DIMS;
-        memcpy(dimsStagingHost, srcGenericDescPtr1->dims + 1, numDims * sizeof(Rpp32u));
-        memcpy(stridesStagingHost, dstGenericDescPtr->strides, (numDims + 1) * sizeof(Rpp32u));
-
-        Rpp32u* dimsStagingDevice =
-            reinterpret_cast<Rpp32u*>(handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
-        Rpp32u* stridesStagingDevice = dimsStagingDevice + RPPT_MAX_DIMS;
-        RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(dimsStagingDevice, dimsStagingHost,
-                                               2 * RPPT_MAX_DIMS * sizeof(Rpp32u),
-                                               hipMemcpyHostToDevice, handle.GetStream()));
+        // Descriptors are caller-owned and may live in pageable host memory, so dims/strides
+        // are passed to the kernel by value rather than as pointers into the descriptor.
+        d_uint5_s srcDims = {}, dstStrides = {};
+        memcpy(srcDims.data, srcGenericDescPtr1->dims + 1, numDims * sizeof(Rpp32u));
+        memcpy(dstStrides.data, dstGenericDescPtr->strides, (numDims + 1) * sizeof(Rpp32u));
 
         hipLaunchKernelGGL(tensor_or_tensor_non_broadcast_nd_hip_tensor,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                           handle.GetStream(), srcPtr1, srcPtr2, dimsStagingDevice, numDims, dstPtr,
-                           stridesStagingDevice, roiTensor1, roiTensor2, op);
+                           handle.GetStream(), srcPtr1, srcPtr2, srcDims, numDims, dstPtr,
+                           dstStrides, roiTensor1, roiTensor2, op);
         HIP_CHECK_LAUNCH_RETURN();
     }
 
