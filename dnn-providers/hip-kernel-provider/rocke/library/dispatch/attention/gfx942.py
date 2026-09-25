@@ -29,9 +29,11 @@ from .common import (
     ATTENTION_FEATURES,
     UNIFIED_BLOCK_SIZES,
     UNIFIED_HEAD_SIZES,
+    AttentionMaskType,
     AttentionRequest,
     AttentionSpec,
     FAMILY,
+    _parse_attention_mask_type,
     _problem,
     _request_errors,
     _selector_matches,
@@ -118,10 +120,8 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            # ``_enable_gfx942_fp16_flash`` is the real narrowing; nothing here
-            # claims a feature it turns down. fp8 is the one exception -- this is
-            # an fp16-only flash path with no fp8 dequant kernel -- so it is
-            # dropped rather than left for the dtype gate to catch by accident.
+            # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
+            # unsupported, but the unified body already shifts causal masking.
             supports_features=ATTENTION_FEATURES - {"fp8"},
         ),
         _supports=support,
@@ -175,6 +175,11 @@ def _dense_spec(req: OperatorRequest):
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
         )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    mask_type = _parse_attention_mask_type(req.mask_type)
+    causal = mask_type != AttentionMaskType.NO_MASK
+    causal_bottom_right = (
+        mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and sq != sk
+    )
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
     bn = _DENSE_BLOCK_N
     head_size = int(req.hdim_q)
@@ -205,7 +210,8 @@ def _dense_spec(req: OperatorRequest):
         num_query_heads=int(req.nhead_q),
         num_kv_heads=int(req.nhead_k),
         head_size=head_size,
-        causal=(int(req.mask_type) != 0),
+        causal=causal,
+        causal_bottom_right=causal_bottom_right,
         dtype=dtype,
         block_m=bm,
         block_n=bn,
@@ -306,9 +312,10 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         capability=Capability(
             arches=("gfx942",),
             dtypes=("bf16", "fp16"),
-            # Dense: causal + sliding-window; no sinks yet. Causal is a mask, not a
-            # feature this path turns down. Head size stays out -- D64/D128 coverage
-            # is ``supports_attention_dense``'s call, and it reads the built spec
+            # Dense: causal + sliding-window; no sinks or moving bottom-right
+            # diagonal. The latter is a distinct request feature, absent here.
+            # Head size stays out -- D64/D128 coverage is
+            # ``supports_attention_dense``'s call, and it reads the built spec
             # (LDS budget, block_n divisibility), which a ShapeRange cannot.
             supports_features=frozenset({"causal", "sliding_window"}),
         ),

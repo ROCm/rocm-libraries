@@ -6,7 +6,7 @@
 #include "transpose_lds_layout.h"
 #include "memory.h"
 #include "types.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
