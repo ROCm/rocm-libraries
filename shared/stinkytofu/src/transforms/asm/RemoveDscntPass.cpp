@@ -75,12 +75,9 @@ constexpr int kDsProximityThreshold = 512;
 /// write.
 struct DsLoadEntry {
     int cycle = 0;
-    int latency = 0;
-    int throughput = 0;
-    int maxDrain = 0;
-    /// Real, wave-sharing-adjusted issue cost (see makeDsLoadDrainEntry) --
-    /// carried through to toDrainEntry() so it isn't silently dropped.
-    int issueCycles = 0;
+    /// The hardware drain-model facts, embedded rather than flattened so
+    /// toDrainEntry() can't silently drop a field on the way back out.
+    DsLoadDrainEntry drain;
     std::vector<StinkyRegister> dests;
 };
 
@@ -385,12 +382,9 @@ class RemoveDscntPass : public StinkyInstPass {
     /// Map an in-flight FIFO entry to a drain-model entry. Writes with no return
     /// latency fall back to the arch static figure.
     DsLoadDrainEntry toDrainEntry(const DsLoadEntry& entry) const {
-        const int latency =
-            entry.latency > 0 ? entry.latency : (hw_ ? hw_->lds.readDrainLatency : 0);
-        return {.latency = latency,
-                .throughput = entry.throughput,
-                .maxDrain = entry.maxDrain,
-                .issueCycles = entry.issueCycles};
+        DsLoadDrainEntry drain = entry.drain;
+        if (drain.latency <= 0) drain.latency = hw_ ? hw_->lds.readDrainLatency : 0;
+        return drain;
     }
 
     /// How many of the pre-activation LDS reads have returned by the time the
@@ -610,21 +604,13 @@ class RemoveDscntPass : public StinkyInstPass {
                            .isaIssueCycles = static_cast<int>(inst->issueCycles),
                            .numWaves = numWaves_});
                 if (isDSRead(*inst)) {
-                    inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
-                                                          .latency = drain.latency,
-                                                          .throughput = drain.throughput,
-                                                          .maxDrain = drain.maxDrain,
-                                                          .issueCycles = drain.issueCycles,
-                                                          .dests = inst->getDestRegs()});
+                    inFlightDsLoads.push_back(
+                        DsLoadEntry{.cycle = cycles, .drain = drain, .dests = inst->getDestRegs()});
                 } else {
                     // DS writes contribute to dscnt accounting but have no produced VGPR
                     // dest.
-                    inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
-                                                          .latency = drain.latency,
-                                                          .throughput = drain.throughput,
-                                                          .maxDrain = drain.maxDrain,
-                                                          .issueCycles = drain.issueCycles,
-                                                          .dests = {}});
+                    inFlightDsLoads.push_back(
+                        DsLoadEntry{.cycle = cycles, .drain = drain, .dests = {}});
                 }
                 ++dsLoadsSinceLastKeptDscnt;
             } else if (std::optional<int> keep =
