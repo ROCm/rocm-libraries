@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Unit tests for TensileUpdateLibrary.py
+Unit tests for update_library.py
 """
 
 import pytest

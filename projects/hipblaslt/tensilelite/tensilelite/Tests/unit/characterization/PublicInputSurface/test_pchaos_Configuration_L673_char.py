@@ -144,7 +144,7 @@ class TestEvaluateCallBranchFalse:
     def test_compare_never_enters_call_branch(self):
         """L673 FALSE: BenchmarkTaskSize > 0 -> Compare branch -> evaluates True.
 
-        This is a real production addConstraint string from TensileBenchmarkCluster.py:283.
+        This is a real production addConstraint string from benchmark_cluster.py:283.
         It never reaches L673.
         """
         ev = ExpressionEvaluator()

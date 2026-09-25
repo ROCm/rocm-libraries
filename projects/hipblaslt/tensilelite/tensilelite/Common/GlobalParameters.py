@@ -831,23 +831,23 @@ def _assertGlobalParametersAreValid(config, ignoreKeys):
 # entries in the globalParameters registry. _assertGlobalParametersAreValid
 # skips these silently. Shared with the corpus test so the two never diverge.
 _GLOBAL_PARAMETER_IGNORE_KEYS = [
-    # --- CLI / TensileCreateLibrary-level config consumed outside the
+    # --- CLI / tensilelite-create-library config consumed outside the
     #     globalParameters registry (each has its own argparse dest or
     #     direct arguments[...] reader) ---
-    "Architecture",       # build-arch list, read directly in Tensile.py
-    "PrintLevel",         # verbosity, read by setVerbosity in TensileCreateLibrary/Run.py
-    "Device",             # device id, read from config in Tensile.py
-    "UseCompression",     # code-object compression toggle, set in ParseArguments / read in Run.py
+    "Architecture",       # build-arch list, read directly in tensilelite.py
+    "PrintLevel",         # verbosity, read by setVerbosity in tensilelite_create_library/run.py
+    "Device",             # device id, read from config in tensilelite.py
+    "UseCompression",     # set in tensilelite_create_library/parse_arguments.py, read in run.py
     "CxxCompiler",        # --cxx-compiler arg, resolved in Toolchain layer, not a registry value
     "CCompiler",          # --c-compiler arg, resolved in Toolchain layer, not a registry value
     "OffloadBundler",     # --offload-bundler arg, resolved in Toolchain layer
     "Assembler",          # --assembler arg, resolved in Toolchain layer
-    "LogicPath",          # library-logic dir, read by TensileCreateLibrary/Run.py
-    "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
-    "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
-    "Experimental",       # --experimental logic-dir toggle in ParseArguments
-    "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
-    "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    "LogicPath",          # library-logic dir, read by tensilelite_create_library/run.py
+    "LogicFilter",        # logic-file glob, read by tensilelite_create_library/run.py
+    "OutputPath",         # positional output dir arg in tensilelite.py / retune_library.py
+    "Experimental",       # --experimental toggle in tensilelite_logic/parse_arguments.py
+    "EnableGemmA2AFusion", # toggle in tensilelite_create_library/parse_arguments.py
+    "GenSolTable",        # --gen-sol-table toggle in tensilelite_create_library/parse_arguments.py
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     tensilelite/Common/Types.py) directly from the raw config dict

@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Hermetic unit tests for ``tensilelite.tensilelite_logic.ValidCorpusConsistency``.
+"""Hermetic unit tests for ``tensilelite.tensilelite_logic.valid_corpus_consistency``.
 
 Everything here builds its own tiny corpus under ``tmp_path`` -- no dependency
 on the real ``Logic/asm_full`` checkout, unlike ``test_PlaceholderMerge.py`` /
@@ -48,9 +48,9 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def vcc(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    from tensilelite.tensilelite_logic import ValidCorpusConsistency
+    from tensilelite.tensilelite_logic import valid_corpus_consistency
 
-    return ValidCorpusConsistency
+    return valid_corpus_consistency
 
 
 def _all_yaml(root: Path):
@@ -429,7 +429,7 @@ def test_sibling_device_names_does_not_merge_chip_id_directory_variants(tmp_path
     # The real, checked-in gfx950 corpus: a chip-ID-specific directory
     # (gfx950_id75a3) sits alongside the default gfx950 tree, and both
     # declare *identical* ScheduleName/ArchitectureName headers (the header
-    # carries no chip-ID information at all -- ValidChipId.py's placement
+    # carries no chip-ID information at all -- valid_chip_id.py's placement
     # rules are what distinguish them). These must not be compared against
     # each other even though (schedule, arch, CUCount) alone would collide.
     _write_header_yaml(

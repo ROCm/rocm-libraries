@@ -632,7 +632,7 @@ about "what do we currently know is broken" has to check all eight.
 | --- | --- | --- | --- |
 | [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
 | `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
-| [`TensileLogic/known_bugs.yaml`](tensilelite/tensilelite/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
+| [`tensilelite_logic/known_bugs.yaml`](tensilelite/tensilelite/tensilelite_logic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
 | Filename-driven marks in `tensilelite/tensilelite/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **No**, and non-strict, so an expected failure that starts passing is silent |
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
