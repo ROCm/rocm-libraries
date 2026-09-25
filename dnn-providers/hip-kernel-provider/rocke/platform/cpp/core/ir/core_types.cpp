@@ -60,7 +60,6 @@ ROCKE_SCALAR_SINGLETON(rocke_fp4e2m1, ROCKE_SCALAR_FP4E2M1, "fp4e2m1")
 ROCKE_SCALAR_SINGLETON(rocke_fp6e2m3, ROCKE_SCALAR_FP6E2M3, "fp6e2m3")
 ROCKE_SCALAR_SINGLETON(rocke_fp6e3m2, ROCKE_SCALAR_FP6E3M2, "fp6e3m2")
 ROCKE_SCALAR_SINGLETON(rocke_e8m0, ROCKE_SCALAR_E8M0, "e8m0")
-ROCKE_SCALAR_SINGLETON(rocke_e4m3, ROCKE_SCALAR_E4M3, "e4m3")
 ROCKE_SCALAR_SINGLETON(rocke_e5m3, ROCKE_SCALAR_E5M3, "e5m3")
 
 #undef ROCKE_SCALAR_SINGLETON
@@ -85,7 +84,7 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return rocke_f16();
     if(strcmp(name, "f32") == 0)
         return rocke_f32();
-    if(strcmp(name, "fp8e4m3") == 0)
+    if(strcmp(name, "fp8e4m3") == 0 || strcmp(name, "e4m3") == 0)
         return rocke_fp8e4m3();
     if(strcmp(name, "bf8e5m2") == 0)
         return rocke_bf8e5m2();
@@ -97,8 +96,6 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return rocke_fp6e3m2();
     if(strcmp(name, "e8m0") == 0)
         return rocke_e8m0();
-    if(strcmp(name, "e4m3") == 0)
-        return rocke_e4m3();
     if(strcmp(name, "e5m3") == 0)
         return rocke_e5m3();
     return NULL;

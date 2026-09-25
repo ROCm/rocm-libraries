@@ -22,9 +22,9 @@ const rocke_type_t* rocke_quant_ir_type(const char* qdtype)
     {
         return rocke_dtype_to_ir_type("i8");
     }
-    /* `_canon` -> "fp8e4m3" : keys "fp8e4m3", "fp8", "fp8_e4m3". */
+    /* `_canon` -> "fp8e4m3" : keys "fp8e4m3", "fp8", "fp8_e4m3", "e4m3". */
     if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0
-       || strcmp(qdtype, "fp8_e4m3") == 0)
+       || strcmp(qdtype, "fp8_e4m3") == 0 || strcmp(qdtype, "e4m3") == 0)
     {
         return rocke_dtype_to_ir_type("fp8e4m3");
     }
@@ -55,16 +55,16 @@ const rocke_type_t* rocke_b_quant_ir_type(rocke_ir_builder_t* b, const char* qdt
     ty = rocke_quant_ir_type(qdtype);
     if(ty == NULL)
     {
-        /* Mirror the Python `_canon` ValueError, including the {qdtype!r}
+        /* Mirror the Python `quant_ir_type` ValueError, including the {qdtype!r}
          * single-quote repr for the (non-NULL) string case and the sorted
-         * key list `sorted(_QDTYPE_ALIAS)`. NULL is reported as "None" to
+         * key list `sorted(_QUANT_TYPE_ALIAS)`. NULL is reported as "None" to
          * match Python's repr(None). */
         return (const rocke_type_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
             "unsupported quant dtype %s%s%s; expected one of "
-            "['bf8', 'bf8e5m2', 'fp8', 'fp8_e4m3', 'fp8_e5m2', 'fp8e4m3', "
-            "'i8', 'int8']",
+            "['bf6', 'bf8', 'bf8e5m2', 'e4m3', 'fp4', 'fp4e2m1', 'fp6', 'fp6e2m3', "
+            "'fp6e3m2', 'fp8', 'fp8_e4m3', 'fp8_e5m2', 'fp8e4m3', 'i8', 'int8']",
             qdtype ? "'" : "",
             qdtype ? qdtype : "None",
             qdtype ? "'" : "");

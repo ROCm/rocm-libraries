@@ -13,8 +13,7 @@ const rocke_type_t* rocke_storage_ir_type(const char* dtype)
     const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
     if(!info)
         return NULL;
-    if(info->encoded_bits % 8 || strcmp(info->name, "e8m0") == 0 || strcmp(info->name, "e4m3") == 0
-       || strcmp(info->name, "e5m3") == 0)
+    if(info->encoded_bits % 8 || strcmp(info->name, "e8m0") == 0 || strcmp(info->name, "e5m3") == 0)
         return rocke_i8();
     return rocke_dtype_to_ir_type(info->name);
 }
@@ -35,16 +34,18 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                                             rocke_value_t* row_base,
                                             rocke_value_t* lane_group,
                                             uint64_t k0,
-                                            const rocke_tensor_storage_t* storage,
+                                            const char* dtype,
                                             const rocke_matrix_fragment_layout_t* layout,
-                                            const rocke_type_t* carrier_type)
+                                            const rocke_type_t* carrier_type,
+                                            int alignment_bytes)
 {
     return ckc::guard_builder(b, [&]() -> rocke_value_t* {
         if(!rocke_i_live(b))
             return NULL;
-        if(!storage || !storage->dtype || !layout || !carrier_type || !ptr || !row_base
-           || !lane_group)
+        if(!dtype || !layout || !carrier_type || !ptr || !row_base || !lane_group)
             ckc::raise_status(ROCKE_ERR_VALUE, "null matrix fragment argument");
+        if(alignment_bytes <= 0 || (alignment_bytes & (alignment_bytes - 1)))
+            ckc::raise_status(ROCKE_ERR_VALUE, "alignment_bytes must be a positive power of two");
         const auto& packing = layout->fragment;
         rocke_matrix_fragment_layout_t checked;
         if(!rocke_matrix_fragment_layout_init(&checked,
@@ -54,20 +55,15 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                                               layout->lanes_per_group)
            || !packing.count || packing.count > INT_MAX || packing.carrier_count > INT_MAX)
             ckc::raise_status(ROCKE_ERR_VALUE, "invalid matrix fragment chunk layout");
-        const rocke_type_t* unit_type = rocke_storage_ir_type(storage->dtype->name);
+        const rocke_type_t* unit_type = rocke_storage_ir_type(dtype);
         if(!unit_type || ptr->type->kind != ROCKE_TYPE_PTR
            || !rocke_type_eq(ptr->type->pointee, unit_type))
             ckc::raise_status(ROCKE_ERR_VALUE, "matrix pointer storage type mismatch");
         const uint64_t unit_bytes = rocke_dtype_info(unit_type->name)->encoded_bits / 8;
-        if(storage->packing.element_bits != packing.packing.element_bits
-           || storage->packing.slot_bits != packing.packing.slot_bits || storage->base_bit_offset)
-            ckc::raise_status(ROCKE_ERR_VALUE,
-                              "matrix fragment requires matching packing and a zero bit origin");
-        const uint64_t span = packing.count * layout->lane_groups;
-        if(k0 > storage->cols || span > storage->cols - k0)
-            ckc::raise_status(ROCKE_ERR_VALUE, "matrix fragment exceeds the packed row");
+        if(rocke_dtype_info(dtype)->encoded_bits != packing.packing.element_bits)
+            ckc::raise_status(ROCKE_ERR_VALUE, "matrix dtype and packing width mismatch");
         uint64_t origin_bits, chunk_bytes;
-        if(!rocke_bit_packing_offset(&storage->packing, k0, &origin_bits)
+        if(!rocke_bit_packing_offset(&packing.packing, k0, &origin_bits)
            || !rocke_bit_packing_bytes(&packing.packing, layout->chunk_elements, 0, &chunk_bytes)
            || origin_bits % (8 * unit_bytes) || chunk_bytes % unit_bytes)
             ckc::raise_status(ROCKE_ERR_VALUE,
@@ -86,15 +82,25 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                               "padded matrix fragments currently require i32 carriers");
         const uint64_t chunk_units = chunk_bytes / unit_bytes;
         const uint64_t origin_bytes = origin_bits / 8;
-        if(origin_bytes / unit_bytes > INT_MAX || chunk_units * layout->lane_groups > INT_MAX)
+        // Bound the last loaded unit without overflowing intermediate products.
+        if(origin_bytes / unit_bytes > INT_MAX
+           || chunk_units > uint64_t(INT_MAX) / layout->lane_groups
+           || packing.count / layout->chunk_elements
+                  > (uint64_t(INT_MAX) + 1 - origin_bytes / unit_bytes) / chunk_units
+                        / layout->lane_groups)
             ckc::raise_status(ROCKE_ERR_VALUE, "matrix fragment offset exceeds i32 range");
-        int alignment = gcd(gcd(storage->alignment_bytes, storage->row_stride_bytes),
-                            gcd(chunk_bytes, origin_bytes));
+        int alignment = gcd(alignment_bytes, gcd(chunk_bytes, origin_bytes));
+        // Use 2--4-word vectors; retain storage-element loads for a one-word tail.
+        const bool word_loads = unit_bytes == 1 && rocke_type_eq(carrier_type, rocke_i32())
+                                && chunk_bytes % 4 == 0 && chunk_bytes % 16 != 4;
+        const auto* load_type = word_loads ? rocke_i32() : unit_type;
+        const int load_step = word_loads ? 4 : 1;
         auto* lane_chunk = rocke_b_mul(b, lane_group, rocke_b_const_i32(b, chunk_units));
         auto* step_base = rocke_b_add(b, row_base, rocke_b_const_i32(b, origin_bytes / unit_bytes));
-        /* Collect loads before concatenation to preserve Python SSA numbering. */
+        /* Collect loads before concatenation to preserve Python SSA numbering.
+         * Each load consumes at least one storage unit, including padded slots. */
         rocke_value_t** chunks = (rocke_value_t**)rocke_arena_alloc(
-            &b->arena, size_t(packing.count) * sizeof(rocke_value_t*));
+            &b->arena, size_t(payload_bits / (8 * unit_bytes)) * sizeof(rocke_value_t*));
         if(!chunks)
             ckc::raise_status(ROCKE_ERR_OOM, "matrix fragment allocation failed");
         int num_chunks = 0;
@@ -112,16 +118,27 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                 int width = 1;
                 while(width < max_width && uint64_t(width * 2) <= remaining)
                     width *= 2;
+                if(word_loads)
+                    width = remaining / 4 < 4 ? int(remaining / 4) : 4;
                 auto* at
                     = consumed ? rocke_b_add(b, offset, rocke_b_const_i32(b, consumed)) : offset;
                 int load_align = gcd(alignment, consumed * unit_bytes);
+                // Form the byte address before loading words; preserve signed i32 offsets.
+                auto* load_ptr
+                    = word_loads ? rocke_b_global_ptr_add(b, ptr, rocke_b_sext(b, at, rocke_i64()))
+                                 : ptr;
+                auto* load_at = word_loads ? rocke_b_const_i32(b, 0) : at;
                 auto* value
-                    = width == 1 ? rocke_b_vector_splat(
-                                       b, rocke_b_global_load(b, ptr, at, unit_type, load_align), 1)
-                                 : rocke_b_global_load_vN(b, ptr, at, unit_type, width, load_align);
+                    = width == 1
+                          ? rocke_b_vector_splat(
+                                b,
+                                rocke_b_global_load(b, load_ptr, load_at, load_type, load_align),
+                                1)
+                          : rocke_b_global_load_vN(
+                                b, load_ptr, load_at, load_type, width, load_align);
                 chunks[num_chunks++] = value;
-                consumed += width;
-                remaining -= width;
+                consumed += width * load_step;
+                remaining -= width * load_step;
             }
         }
         auto* payload = chunks[0];
@@ -160,6 +177,9 @@ rocke_status_t rocke_h_pack_fragment_bits(rocke_ir_builder_t* b,
         if(f.carrier_bits != 32 && f.carrier_bits != 64)
             ckc::raise_status(ROCKE_ERR_VALUE,
                               "IR pattern packing currently requires i32 or i64 carriers");
+        if(f.packing.element_bits > 32)
+            ckc::raise_status(ROCKE_ERR_VALUE,
+                              "IR pattern packing supports encoded fields of at most 32 bits");
         const auto* word_type = f.carrier_bits == 64 ? rocke_i64() : rocke_i32();
         auto constant = [&](uint64_t value) {
             return f.carrier_bits == 64 ? rocke_b_const_i64(b, int64_t(value))

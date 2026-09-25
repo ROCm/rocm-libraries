@@ -25,6 +25,7 @@ _DTYPE_ALIASES = {
     "fp32": "fp32",
     "fp8": "fp8e4m3",
     "fp8e4m3": "fp8e4m3",
+    "e4m3": "fp8e4m3",
     "bf8": "bf8e5m2",
     "bf8e5m2": "bf8e5m2",
     "fp6": "fp6e2m3",
@@ -83,7 +84,6 @@ _DTYPE_INFO = {
                 ("fp6e3m2", 6),
                 ("fp4e2m1", 4),
                 ("e8m0", 8),
-                ("e4m3", 8),
                 ("e5m3", 8),
             ),
         ),
@@ -108,7 +108,7 @@ _DTYPE_INFO = {
 def dtype_info(name: str) -> DTypeInfo:
     """Resolve an encoding; recognition alone does not enable an operation.
 
-    Scale names remain distinct keys. In particular e5m3 is not bf8e5m2.
+    E4M3 shares the fp8e4m3 encoding; e5m3 remains distinct from bf8e5m2.
     Operand-role validation belongs to the selected atom.
     """
     key = normalize_dtype(name)

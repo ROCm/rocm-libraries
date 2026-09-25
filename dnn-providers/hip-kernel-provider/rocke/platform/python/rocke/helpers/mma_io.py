@@ -19,13 +19,13 @@ from ..core.ir import (
     VectorType,
     dtype_to_ir_type,
 )
-from ..core.storage import FragmentPacking, MatrixFragmentLayout, TensorStorage
+from ..core.storage import FragmentPacking, MatrixFragmentLayout
 
 
 def storage_ir_type(dtype: str) -> Type:
     """Addressable storage unit, distinct from the logical dtype resolver."""
     info = dtype_info(dtype)
-    if info.encoded_bits % 8 or info.name in ("e8m0", "e4m3", "e5m3"):
+    if info.encoded_bits % 8 or info.name in ("e8m0", "e5m3"):
         return I8
     return dtype_to_ir_type(info.name)
 
@@ -37,49 +37,60 @@ def load_matrix_fragment(
     lane_group: Value,
     k0: int,
     *,
-    storage: TensorStorage,
+    dtype: str,
     layout: MatrixFragmentLayout,
     carrier_type: Type = I32,
+    alignment_bytes: int = 1,
 ) -> Value:
-    """Load whole-byte chunks directly into the atom's carrier vector.
+    """Load complete chunks from a caller-selected row into carrier registers.
 
-    row_base counts pointer storage units. lane_group is derived from the atom's
-    lane mapping by the caller. Partial chunks and nonzero bit origins reject.
+    row_base counts pointer storage units; alignment_bytes is the guaranteed
+    alignment at that row address, before k0 and lane/chunk offsets. The caller
+    owns tensor indexing and allocation bounds, including empty/partial rows.
+    lane_group comes from the atom's lane mapping. k0 must address a whole
+    pointer unit. TensorDescriptor/TensorView integration is deferred.
     """
+    if alignment_bytes <= 0 or alignment_bytes & (alignment_bytes - 1):
+        raise ValueError("alignment_bytes must be a positive power of two")
     packing = layout.fragment
     if not (0 < packing.count <= 0x7FFFFFFF and packing.carrier_count <= 0x7FFFFFFF):
         raise ValueError("invalid matrix fragment chunk layout")
-    unit_type = storage_ir_type(storage.dtype)
+    unit_type = storage_ir_type(dtype)
     unit_bytes = dtype_info(unit_type.name).encoded_bits // 8
     if ptr.type.pointee != unit_type:
         raise ValueError("matrix pointer storage type mismatch")
-    if storage.packing != packing.packing or storage.base_bit_offset:
-        raise ValueError(
-            "matrix fragment requires matching packing and a zero bit origin"
-        )
-    span = layout.chunk_elements * layout.lane_groups * layout.chunks_per_lane
-    if k0 < 0 or k0 + span > storage.shape[1]:
-        raise ValueError("matrix fragment exceeds the packed row")
-    origin_bits = storage.packing.bit_offset(k0)
+    if dtype_info(dtype).encoded_bits != packing.packing.element_bits:
+        raise ValueError("matrix dtype and packing width mismatch")
+    origin_bits = packing.packing.bit_offset(k0)
     if origin_bits % (8 * unit_bytes) or layout.chunk_bytes % unit_bytes:
         raise ValueError("matrix fragment is not aligned to pointer storage units")
     if dtype_info(carrier_type.name).encoded_bits != packing.carrier_bits:
         raise ValueError("matrix carrier type width mismatch")
     if packing.payload_bits % packing.carrier_bits:
         raise ValueError("matrix fragment payload must occupy whole carriers")
+    padding = packing.carrier_count - packing.live_carriers
+    if padding and carrier_type != I32:
+        raise ValueError("padded matrix fragments currently require i32 carriers")
     chunk_units = layout.chunk_bytes // unit_bytes
     origin_bytes = origin_bits // 8
+    # Bound the last loaded unit across all chunks and lane groups, including k0.
     if (
         origin_bytes // unit_bytes > 0x7FFFFFFF
         or chunk_units * layout.lane_groups > 0x7FFFFFFF
+        or layout.chunks_per_lane
+        > (0x80000000 - origin_bytes // unit_bytes) // chunk_units // layout.lane_groups
     ):
         raise ValueError("matrix fragment offset exceeds i32 range")
-    alignment = gcd(
-        storage.alignment_bytes,
-        storage.row_stride_bytes,
-        layout.chunk_bytes,
-        origin_bytes,
+    alignment = gcd(alignment_bytes, layout.chunk_bytes, origin_bytes)
+    # Use 2--4-word vectors; retain storage-element loads for a one-word tail.
+    word_loads = (
+        unit_bytes == 1
+        and carrier_type == I32
+        and layout.chunk_bytes % 4 == 0
+        and layout.chunk_bytes % 16 != 4
     )
+    load_type = I32 if word_loads else unit_type
+    load_step = 4 if word_loads else 1
     lane_chunk = b.mul(lane_group, b.const_i32(chunk_units))
     step_base = b.add(row_base, b.const_i32(origin_bytes // unit_bytes))
     chunks = []
@@ -92,28 +103,34 @@ def load_matrix_fragment(
         consumed = 0
         max_width = 8 if unit_bytes == 4 else 16
         while remaining:
-            width = min(max_width, 1 << (remaining.bit_length() - 1))
+            width = (
+                min(4, remaining // 4)
+                if word_loads
+                else min(max_width, 1 << (remaining.bit_length() - 1))
+            )
             at = b.add(offset, b.const_i32(consumed)) if consumed else offset
             load_align = gcd(alignment, consumed * unit_bytes)
+            # Form the byte address before loading words; preserve signed i32 offsets.
+            load_ptr = b.global_ptr_add(ptr, b.sext(at, I64)) if word_loads else ptr
+            load_at = b.const_i32(0) if word_loads else at
             if width == 1:
                 value = b.vector_splat(
-                    b.global_load(ptr, at, unit_type, align=load_align), 1
+                    b.global_load(load_ptr, load_at, load_type, align=load_align), 1
                 )
             else:
-                value = b.global_load_vN(ptr, at, unit_type, width, align=load_align)
+                value = b.global_load_vN(
+                    load_ptr, load_at, load_type, width, align=load_align
+                )
             chunks.append(value)
-            consumed += width
-            remaining -= width
+            consumed += width * load_step
+            remaining -= width * load_step
     payload = chunks[0]
     for chunk in chunks[1:]:
         payload = b.vec_concat(payload, chunk)
     payload_type = VectorType(carrier_type, packing.live_carriers)
     if payload.type != payload_type:
         payload = b.bitcast(payload, payload_type)
-    padding = packing.carrier_count - packing.live_carriers
     if padding:
-        if carrier_type != I32:
-            raise ValueError("padded matrix fragments currently require i32 carriers")
         payload = b.vec_concat(payload, b.vector_splat(b.const_i32(0), padding))
     return payload
 
@@ -125,11 +142,16 @@ def pack_fragment_bits(
 ) -> list[Value]:
     """Pack unsigned encoded patterns into integer carriers, including split fields.
 
-    The loader must return canonical patterns with zero high bits. Tensor decoding
-    and numeric quantization are separate operations.
+    Encoded fields are at most 32 bits; i64 carriers support eight-byte scale
+    words. The loader must return canonical patterns with zero high bits. Tensor
+    decoding and numeric quantization are separate operations.
     """
     if fragment.carrier_bits not in (32, 64):
         raise ValueError("IR pattern packing currently requires i32 or i64 carriers")
+    if fragment.packing.element_bits > 32:
+        raise ValueError(
+            "IR pattern packing supports encoded fields of at most 32 bits"
+        )
     word_type = I64 if fragment.carrier_bits == 64 else I32
     constant = b.const_i64 if fragment.carrier_bits == 64 else b.const_i32
     words = [constant(0) for _ in range(fragment.carrier_count)]

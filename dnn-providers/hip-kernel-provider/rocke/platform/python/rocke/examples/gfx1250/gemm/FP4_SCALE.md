@@ -14,7 +14,10 @@ buffers of shapes `[M, K/2]` and `[N, K/2]`, computing `C = A @ B.T`.
 For byte `j`, bits 0–3 encode element `2*j`; bits 4–7 encode element `2*j+1`.
 The E2M1 positive codes 0–7 represent `0, 0.5, 1, 1.5, 2, 3, 4, 6`;
 bit 3 is the sign, including negative zero. Every nibble is a valid code.
-The pointer ABI is `i8`, with 16-byte-aligned matrix buffers.
+The pointer ABI is `i8`, with 16-byte-aligned matrix buffers. The builder uses
+[`BitPacking`](../../../core/storage.py) for row strides and passes row bases,
+dtypes, and alignment to the shared
+[`load_matrix_fragment`](../../../helpers/mma_io.py) helper.
 
 | Matrix path | K elements per scale | A/B scale operand |
 | --- | --- | --- |
@@ -41,7 +44,7 @@ for the builtin's sixteen-word argument. Both scale modes use this input map.
 Output slot `i` maps to row `8*h+i`, column `l % 16` within the output tile.
 
 M/N must be multiples of 16 and K a multiple of 128. Mixed operand formats,
-partial tiles, a logical FP4 IR type, and quantization conversions are outside
+partial tiles, scalar FP4 arithmetic, and quantization conversions are outside
 this path. The K loop is statically unrolled, as in the existing FP8 builder.
 
 ## Verification

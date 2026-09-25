@@ -175,60 +175,6 @@ bool rocke_fragment_pack(const rocke_fragment_packing_t* p,
     return true;
 }
 
-bool rocke_tensor_storage_init(rocke_tensor_storage_t* out,
-                               const char* dtype,
-                               uint64_t rows,
-                               uint64_t cols,
-                               uint64_t row_stride_bytes,
-                               int slot_bits,
-                               uint64_t base_bit_offset,
-                               uint64_t alignment_bytes)
-{
-    rocke_tensor_storage_t p = {};
-    p.dtype = rocke_dtype_info(dtype);
-    uint64_t row_bytes, bytes;
-    if(!out || !p.dtype || !alignment_bytes || (alignment_bytes & (alignment_bytes - 1))
-       || !rocke_bit_packing_init(&p.packing, p.dtype->encoded_bits, slot_bits)
-       || !rocke_bit_packing_bytes(&p.packing, cols, base_bit_offset, &row_bytes))
-        return false;
-    p.rows = rows;
-    p.cols = cols;
-    p.row_stride_bytes = row_stride_bytes == UINT64_MAX ? row_bytes : row_stride_bytes;
-    p.base_bit_offset = base_bit_offset;
-    p.alignment_bytes = alignment_bytes;
-    if(p.row_stride_bytes < row_bytes || !rocke_tensor_storage_bytes(&p, &bytes))
-        return false;
-    *out = p;
-    return true;
-}
-
-bool rocke_tensor_storage_bytes(const rocke_tensor_storage_t* p, uint64_t* bytes)
-{
-    if(!p || !bytes || !valid(&p->packing))
-        return false;
-    if(!p->rows || !p->cols)
-    {
-        *bytes = 0;
-        return true;
-    }
-    uint64_t row_bytes, prefix;
-    return rocke_bit_packing_bytes(&p->packing, p->cols, p->base_bit_offset, &row_bytes)
-           && mul(p->rows - 1, p->row_stride_bytes, &prefix) && add(prefix, row_bytes, bytes);
-}
-
-bool rocke_tensor_storage_address(
-    const rocke_tensor_storage_t* p, uint64_t row, uint64_t col, uint64_t* byte, int* shift)
-{
-    if(!p || !byte || !shift || row >= p->rows || col >= p->cols)
-        return false;
-    uint64_t bits, prefix;
-    if(!rocke_bit_packing_offset(&p->packing, col, &bits) || !add(bits, p->base_bit_offset, &bits)
-       || !mul(row, p->row_stride_bytes, &prefix) || !add(prefix, bits / 8, byte))
-        return false;
-    *shift = bits % 8;
-    return true;
-}
-
 bool rocke_matrix_fragment_layout_init(rocke_matrix_fragment_layout_t* out,
                                        const rocke_fragment_packing_t* fragment,
                                        int chunk_elements,

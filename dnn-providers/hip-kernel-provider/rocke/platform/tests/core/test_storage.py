@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Independent bit-stream fixtures and storage bounds for matrices and scales."""
+"""Independent bit-stream fixtures for matrices and scales."""
 
 import pytest
 
 from rocke.core.arch.wmma_scale import ScalePacking, scaled_matrix_layout
-from rocke.core.storage import BitPacking, FragmentPacking, TensorStorage
+from rocke.core.storage import BitPacking, FragmentPacking
 
 
 @pytest.mark.parametrize("bits", [4, 6, 8, 16, 32, 64])
@@ -23,6 +23,7 @@ def test_dense_patterns_against_integer_oracle(bits, offset):
 
 def test_fp6_crosses_words_without_per_word_padding():
     packing = BitPacking(6)
+    assert packing.pack([], bit_offset=7) == b""
     assert packing.group(8) == (4, 3)
     assert packing.group(32) == (16, 3)
     patterns = [0] * 16
@@ -53,31 +54,24 @@ def test_matrix_payload_and_padding(dtype, live):
 
 
 @pytest.mark.parametrize(
-    "count,block_k,word", [(4, 32, 0x04030201), (8, 16, 0x0807060504030201)]
+    "count,block_k,word",
+    [(1, 32, 0x01), (2, 32, 0x0201), (4, 32, 0x04030201), (8, 16, 0x0807060504030201)],
 )
 def test_scales_use_common_bit_packing(count, block_k, word):
     scales = ScalePacking(count, block_k)
-    assert scales.association.block_k == block_k
+    assert scales.block_k == block_k
     assert scales.fragment.pack(list(range(1, count + 1))) == (word,)
     assert scales.packing == BitPacking(8)
     assert scales.word_bits == count * 8
+    assert scales.llvm_type == f"i{count * 8}"
 
 
-def test_storage_rows_offsets_and_empty_views():
-    storage = TensorStorage("bf6", (3, 5), row_stride_bytes=8, base_bit_offset=3)
-    assert storage.dtype == "fp6e3m2"
-    assert storage.byte_size == 21
-    assert storage.address(2, 4) == (19, 3)
-    assert TensorStorage("fp4", (0, 5)).byte_size == 0
-    assert TensorStorage("fp4", (3, 0), base_bit_offset=7).byte_size == 0
-    assert BitPacking(6).pack([], bit_offset=7) == b""
-    assert TensorStorage("e8m0", (2, 8)).byte_size == 16
-    with pytest.raises(ValueError, match="out of bounds"):
-        storage.address(3, 0)
-    with pytest.raises(ValueError, match="row stride"):
-        TensorStorage("fp6", (3, 5), row_stride_bytes=3)
-    with pytest.raises(ValueError, match="power of two"):
-        TensorStorage("fp4", (1, 4), alignment_bytes=3)
+@pytest.mark.parametrize(
+    "count,block_k", [(0, 32), (-1, 32), (3, 32), (16, 32), (4.0, 32), (4, 0)]
+)
+def test_invalid_scale_packing(count, block_k):
+    with pytest.raises(ValueError):
+        ScalePacking(count, block_k)
 
 
 def test_invalid_packing_and_overflow():
@@ -88,7 +82,5 @@ def test_invalid_packing_and_overflow():
         FragmentPacking(BitPacking(6), 16, 32, 2)
     with pytest.raises(ValueError, match="uint64"):
         BitPacking(6).byte_size(1 << 63)
-    with pytest.raises(ValueError, match="uint64"):
-        TensorStorage("fp8", (1 << 63, 3))
     with pytest.raises(ValueError, match="fit"):
         BitPacking(6).pack([64])

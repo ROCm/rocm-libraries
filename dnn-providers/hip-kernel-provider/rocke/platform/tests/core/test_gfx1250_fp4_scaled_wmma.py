@@ -179,7 +179,7 @@ def test_fp4_catalog_signature_and_lowering(path, scale_type):
     )
     assert call.count("i32 4, <16 x i32>") == 2
     assert call.count(f", {scale_type} %") == 2
-    assert llvm.count("load <16 x i8>") == 4  # Two packed chunks per operand.
+    assert llvm.count("load <4 x i32>") == 4  # Two packed chunks per operand.
     hip = lower_kernel_to_hip(kernel, arch="gfx1250")
     assert f"__builtin_amdgcn_{path}_f32_16x16x128_f8f6f4(4," in hip
     for flavor in ("llvm20", "llvm22"):

@@ -335,6 +335,21 @@ static rocke_status_t _op_tile_smem_load_vN(rocke_h_lowerer_t* lw, const rocke_o
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 1);
     res = rocke_h_name(lw, op->results[0]);
+    const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+    if(byte_count & (byte_count - 1))
+    {
+        /* Clang pads vector objects; copy only the actual LDS payload. */
+        rocke_h_emitf(lw,
+                      "%s%lld %s; __builtin_memcpy(&%s, &%s[%s], %lld);",
+                      prefix,
+                      (long long)n,
+                      res,
+                      res,
+                      storage,
+                      idx_str,
+                      (long long)byte_count);
+        return lw->status;
+    }
     rocke_h_emitf(lw,
                   "%s%lld %s = *reinterpret_cast<const %s%lld*>(&%s[%s]);",
                   prefix,
@@ -536,9 +551,9 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     if(align <= 0 || (align & (align - 1)))
         return rocke_h_fail(
             lw, ROCKE_ERR_VALUE, "global_load_vN: alignment must be a positive power of two");
-    if(align < byte_count)
+    if(align < byte_count || (byte_count & (byte_count - 1)))
     {
-        /* Do not strengthen the IR's alignment through a vector-pointer cast. */
+        /* Copy only the payload, not vector padding, with the IR's alignment. */
         rocke_h_emitf(
             lw,
             "%s%lld %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s + %s, %lld), %lld);",
