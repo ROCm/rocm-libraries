@@ -92,6 +92,7 @@ option(ROCKE_BUILD_PYBIND "Build the rocke_engine Python extension module" OFF)
 option(ROCKE_INSTALL_PYTHON_PACKAGE "Install the rocke Python frontend" ON)
 option(ROCKE_INSTALL_TESTS "Install rocKE smoke test artifacts and CTest metadata" ON)
 option(ROCKE_INSTALL_PYTHON_TESTS "Install rocKE Python smoke/golden CI tests" ON)
+option(ROCKE_INSTALL_PLATFORM_PYTEST "Install the full rocKE platform pytest CTest entry" ON)
 option(ROCKE_INSTALL_STANDALONE_CTEST "Install standalone rocKE CTest metadata" ON)
 if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
   set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "" CACHE STRING
@@ -363,50 +364,19 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
-    # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
-    # directory (which contains the installed rocke package) so `import rocke`
-    # resolves without the source-tree sys.path shims. The staged library tree
-    # does not need to be listed here: tests/conftest.py probes for it and
-    # inserts it on sys.path, covering both the staged and checkout layouts.
-    #
-    # The installed CI environment intentionally provides only TheRock's common
-    # test requirements. Exclude suites requiring additional Python packages
-    # from the installed CTest invocation; normal source-tree pytest runs remain
-    # unaffected.
-    #
-    # TODO(AICK-2425): Re-enable the NumPy and ml_dtypes tests after rocKE's
-    # component requirements are staged and installed by TheRock.
-    set(_ROCKE_INSTALLED_PYTEST_EXCLUDE_RELPATHS
-        "tests/library"
-        "tests/core/test_gfx1250_mxfp8_example.py"
-        "tests/core/test_gfx1250_scaled_wmma_reference.py"
-        "tests/test_numeric_references.py"
-        "tests/instances/test_gfx1250_scaled_wmma_numeric.py")
-    set(_ROCKE_INSTALLED_PYTEST_EXCLUDES "")
-    foreach(_rocke_pytest_exclude ${_ROCKE_INSTALLED_PYTEST_EXCLUDE_RELPATHS})
-      string(APPEND _ROCKE_INSTALLED_PYTEST_EXCLUDES
-             " --ignore \"${ROCKE_TEST_CTEST_REL}${_rocke_pytest_exclude}\"")
-    endforeach()
-
-    # Keep the dependency-free tests in test_binding.py while temporarily
-    # deselecting the two classes whose binding/reference paths require NumPy.
-    set(_ROCKE_INSTALLED_PYTEST_FILTER
-        "not TestGemmBinding and not TestBf16Encoding")
-    if(WIN32)
-      # This POSIX symlink-resolution test exposes a separate path parsing issue
-      # on Windows. Quarantine only that test while retaining the rest of the
-      # cross-platform suite.
-      string(APPEND _ROCKE_INSTALLED_PYTEST_FILTER
-             " and not test_stale_comgr_demotion_fires_through_a_symlinked_root")
+    if(ROCKE_INSTALL_PLATFORM_PYTEST)
+      # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
+      # directory (which contains the installed rocke package) so `import rocke`
+      # resolves without the source-tree sys.path shims. The library tests have
+      # their own CTest entry below and must not be collected twice.
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -v --timeout=60)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=.\"\n"
+             "  TIMEOUT 300)\n")
     endif()
-
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\"${_ROCKE_INSTALLED_PYTEST_EXCLUDES} -k \"${_ROCKE_INSTALLED_PYTEST_FILTER}\" -v --timeout=60)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=.\"\n"
-           "  TIMEOUT 300)\n")
 
     # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
     # The test environment installs the platform wheel. PYTHONPATH puts the staged

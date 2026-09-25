@@ -429,9 +429,12 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
     # TheRock's test setup activates a virtual environment and installs the
-    # staged rocKE wheels before invoking CTest, so installed Python test entries
-    # can resolve both `python` and the rocKE packages.
+    # staged rocKE wheels before invoking CTest, so the focused installed Python
+    # checks can resolve both `python` and the rocKE packages. Defer the full
+    # platform pytest suite until the pinned TheRock supplies rocKE's NumPy and
+    # ml_dtypes component requirements.
     set(ROCKE_INSTALL_PYTHON_TESTS ON)
+    set(ROCKE_INSTALL_PLATFORM_PYTEST OFF)
 
     add_subdirectory(rocke)
 else()

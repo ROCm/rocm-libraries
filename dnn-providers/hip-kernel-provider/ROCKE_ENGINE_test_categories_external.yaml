@@ -31,7 +31,6 @@ test_categories:
       - "rocke_tiled_attention_2d_reentrancy"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
-      - "rocke_pytest"
       - "rocke_library_conv_pytest"
     labels:
       - "quick"
@@ -47,7 +46,6 @@ test_categories:
       - "rocke_tiled_attention_2d_reentrancy"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
-      - "rocke_pytest"
       - "rocke_library_conv_pytest"
     labels:
       - "ffm-full"
