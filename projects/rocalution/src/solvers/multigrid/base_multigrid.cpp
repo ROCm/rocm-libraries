@@ -71,6 +71,7 @@ namespace rocalution
         this->host_level_ = 0;
 
         this->kcycle_full_ = true;
+        this->kappa_       = 2;
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -192,6 +193,16 @@ namespace rocalution
         log_debug(this, "BaseMultiGrid::SetKcycleFull()", kcycle_full);
 
         this->kcycle_full_ = kcycle_full;
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
+    void BaseMultiGrid<OperatorType, VectorType, ValueType>::SetKappa(int kappa)
+    {
+        log_debug(this, "BaseMultiGrid::SetKappa()", kappa);
+
+        assert(kappa > 0);
+
+        this->kappa_ = kappa;
     }
 
     // LCOV_EXCL_START
@@ -724,12 +735,62 @@ namespace rocalution
     void BaseMultiGrid<OperatorType, VectorType, ValueType>::Vcycle_(const VectorType& rhs,
                                                                      VectorType*       x)
     {
-        log_debug(this, "BaseMultiGrid::Vcycle_()", " #*# begin", (const void*&)rhs, x);
+        // V-, F- and W-cycle are special cases of the kappa-cycle
+        int kappa;
+
+        switch(this->cycle_)
+        {
+        case Vcycle:
+        case Kcycle:
+            kappa = 1;
+            break;
+        case Wcycle:
+            kappa = this->levels_;
+            break;
+        case Fcycle:
+            kappa = 2;
+            break;
+        case Kappacycle:
+            kappa = this->kappa_;
+            break;
+        // LCOV_EXCL_START
+        default:
+            FATAL_ERROR(__FILE__, __LINE__);
+            break;
+            // LCOV_EXCL_STOP
+        }
+
+        // When this AMG is a preconditioner or if we are not on the finest level,
+        // we have to use a zero initial guess
+        this->Cycle_(rhs, x, kappa, this->is_precond_ || this->current_level_ != 0);
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
+    void BaseMultiGrid<OperatorType, VectorType, ValueType>::Cycle_(const VectorType& rhs,
+                                                                    VectorType*       x,
+                                                                    int               kappa,
+                                                                    bool zero_initial_guess)
+    {
+        log_debug(this,
+                  "BaseMultiGrid::Cycle_()",
+                  " #*# begin",
+                  (const void*&)rhs,
+                  x,
+                  kappa,
+                  zero_initial_guess);
 
         // Run coarse grid solver, if coarsest grid has been reached
         if(this->current_level_ == this->levels_ - 1)
         {
-            this->solver_coarse_->SolveZeroSol(rhs, x);
+            if(zero_initial_guess)
+            {
+                this->solver_coarse_->SolveZeroSol(rhs, x);
+            }
+            else
+            {
+                this->solver_coarse_->Solve(rhs, x);
+            }
+
             return;
         }
 
@@ -754,15 +815,12 @@ namespace rocalution
 
         // Pre-smoothing
         smoother->InitMaxIter(this->iter_pre_smooth_);
-        if(this->is_precond_ || this->current_level_ != 0)
+        if(zero_initial_guess)
         {
-            // When this AMG is a preconditioner or if we are not on the finest level,
-            // we have to use a zero initial guess
             smoother->SolveZeroSol(rhs, x);
         }
         else
         {
-            // For AMG as a solver, x cannot be zero
             smoother->Solve(rhs, x);
         }
 
@@ -818,35 +876,20 @@ namespace rocalution
 
         ++this->current_level_;
 
-        // Recursive call dependent on the
-        // cycle
-        switch(this->cycle_)
+        // Recursive call dependent on the cycle
+        if(this->cycle_ == Kcycle)
         {
-        // V-cycle
-        case 0:
-            this->Vcycle_(*rc, xc);
-            break;
-
-        // W-cycle
-        case 1:
-            this->Wcycle_(*rc, xc);
-            break;
-
-        // K-cycle
-        case 2:
             this->Kcycle_(*rc, xc);
-            break;
+        }
+        else
+        {
+            this->Cycle_(*rc, xc, kappa, true);
 
-        // LCOV_EXCL_START
-        // F-cycle
-        case 3:
-            this->Fcycle_(*rc, xc);
-            break;
-
-        default:
-            FATAL_ERROR(__FILE__, __LINE__);
-            break;
-            // LCOV_EXCL_STOP
+            // The second call continues from the correction of the first call
+            if(kappa > 1)
+            {
+                this->Cycle_(*rc, xc, kappa - 1, false);
+            }
         }
 
         --this->current_level_;
@@ -918,29 +961,8 @@ namespace rocalution
             this->res_norm_ = std::abs(this->Norm_(*r));
         }
 
-        log_debug(this, "BaseMultiGrid::Vcycle_()", " #*# end");
+        log_debug(this, "BaseMultiGrid::Cycle_()", " #*# end");
     }
-
-    template <class OperatorType, class VectorType, typename ValueType>
-    void BaseMultiGrid<OperatorType, VectorType, ValueType>::Wcycle_(const VectorType& rhs,
-                                                                     VectorType*       x)
-    {
-        // gamma = 2 hardcoded
-        for(int i = 0; i < 2; ++i)
-        {
-            this->Vcycle_(rhs, x);
-        }
-    }
-
-    // LCOV_EXCL_START
-    template <class OperatorType, class VectorType, typename ValueType>
-    void BaseMultiGrid<OperatorType, VectorType, ValueType>::Fcycle_(const VectorType& rhs,
-                                                                     VectorType*       x)
-    {
-        LOG_INFO("BaseMultiGrid:Fcycle_() not implemented yet");
-        FATAL_ERROR(__FILE__, __LINE__);
-    }
-    // LCOV_EXCL_STOP
 
     template <class OperatorType, class VectorType, typename ValueType>
     void BaseMultiGrid<OperatorType, VectorType, ValueType>::Kcycle_(const VectorType& rhs,

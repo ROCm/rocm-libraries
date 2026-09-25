@@ -33,10 +33,11 @@ namespace rocalution
 
     enum _cycle
     {
-        Vcycle = 0,
-        Wcycle = 1,
-        Kcycle = 2,
-        Fcycle = 3
+        Vcycle     = 0,
+        Wcycle     = 1,
+        Kcycle     = 2,
+        Fcycle     = 3,
+        Kappacycle = 4
     };
 
     /** \ingroup solver_module
@@ -108,6 +109,19 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetKcycleFull(bool kcycle_full);
 
+        /** \brief Set the cycle counter of the MultiGrid Kappacycle (default: 2)
+         *  \details Each level performs one recursive call with the same cycle counter
+         *  \f$\kappa\f$, followed by a second call with \f$\kappa-1\f$ if \f$\kappa>1\f$.
+         *  \f$\kappa=1\f$ is equivalent to the Vcycle, \f$\kappa=2\f$ to the Fcycle and
+         *  \f$\kappa\f$ greater or equal to the number of levels to the Wcycle. The number
+         *  of coarse level visits grows polynomially of degree \f$\kappa\f$ in the number
+         *  of levels, compared to exponentially for the Wcycle. Only used with
+         *  SetCycle(Kappacycle).
+         *  \cite Avnat2023
+         */
+        ROCALUTION_EXPORT
+        void SetKappa(int kappa);
+
         /** \brief Set the depth of the multigrid solver */
         ROCALUTION_EXPORT
         void InitLevels(int levels);
@@ -136,12 +150,10 @@ namespace rocalution
         /** \brief Prolongs a given coarse vector to a fine vector */
         void Prolong_(const VectorType& coarse, VectorType* fine);
 
-        /** \brief V-cycle */
+        /** \brief Perform one cycle of the selected type on the current level */
         void Vcycle_(const VectorType& rhs, VectorType* x);
-        /** \brief W-cycle */
-        void Wcycle_(const VectorType& rhs, VectorType* x);
-        /** \brief F-cycle */
-        void Fcycle_(const VectorType& rhs, VectorType* x);
+        /** \brief Kappa-cycle with cycle counter kappa on the current level */
+        void Cycle_(const VectorType& rhs, VectorType* x, int kappa, bool zero_initial_guess);
         /** \brief K-cycle */
         void Kcycle_(const VectorType& rhs, VectorType* x);
 
@@ -176,6 +188,8 @@ namespace rocalution
         unsigned int cycle_;
         /** \brief K-cycle type */
         bool kcycle_full_;
+        /** \brief Kappa-cycle counter */
+        int kappa_;
 
         /** \brief Residual norm */
         double res_norm_;

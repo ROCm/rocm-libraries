@@ -61,7 +61,7 @@ int main(int argc, char* argv[])
     e.MoveToAccelerator();
 
     // Read matrix from MTX file
-    mat.ReadFileMTX(std::string(argv[1]));
+    mat.ReadFileCSR(std::string(argv[1]));
 
     // Start time measurement
     double tick, tack, start, end;
@@ -91,6 +91,8 @@ int main(int argc, char* argv[])
     p.SetCoarseningStrategy(CoarseningStrategy::PMIS);
     p.SetInterpolationType(InterpolationType::ExtPI);
     p.SetCoarsestLevel(20);
+    p.SetKappa(6);
+    p.SetCycle(Kappacycle);
 
     // Limit operator complexity
     p.SetInterpolationFF1Limit(false);

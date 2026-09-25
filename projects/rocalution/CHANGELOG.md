@@ -4,8 +4,13 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 
 ## (Unreleased) rocALUTION 4.1.1
 
+### Added
+* Added the multigrid kappa-cycle (`SetCycle(Kappacycle)` with `SetKappa()`), a family of cycles between the V-cycle and the W-cycle.
+* Added the multigrid F-cycle (`SetCycle(Fcycle)`), which previously aborted as not implemented.
+
 ### Resolved issues
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
+* Fixed the multigrid W-cycle, which performed the same work twice on coarse levels and converged like a V-cycle.
 
 ## (Unreleased) rocALUTION 4.1.1
 
