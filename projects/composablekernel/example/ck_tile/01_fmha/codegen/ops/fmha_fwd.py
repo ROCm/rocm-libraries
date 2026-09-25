@@ -1455,6 +1455,39 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
         return pipelines
 
+# Measured bm0=64 -> bm0=128 crossover max_seqlen_q on gfx1250 (fp16/bf16), per
+# head dim (hdim_q, hdim_v). Each value is an independent benchmark result, not a
+# shared symbol: they all happen to be 128 under the current double-buffer pipeline
+# but must be re-benchmarked (not inherited) when a head dim is added or the pipeline
+# changes.
+GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
+    (32, 32): 128, (64, 64): 128, (96, 96): 128,
+    (128, 128): 128, (160, 160): 128, (192, 128): 128,
+}
+
+
+def _gfx125_qr_tdm_crossover_constraint(hdim):
+    return CppConstraint(
+        f"a.max_seqlen_q < {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[hdim]}"
+    )
+
+
+def _validate_qr_tdm_bm0_crossover_pairs(tile_dict):
+    # Dispatch matches the first tile whose constraint holds, so any non-final tile
+    # MUST carry a constraint; otherwise it is always-true and silently shadows every
+    # tile after it (e.g. a bm0=64 entry would hide its bm0=128 fallback). The shared
+    # bm0-monotonicity assert does not catch this, and it cannot live there because
+    # other factories legitimately gate non-final tiles by CU count instead of seqlen.
+    for (hdim, hdim_v), tiles in tile_dict.items():
+        for tile, next_tile in zip(tiles, tiles[1:]):
+            assert tile.F_constraint.bool_expr is not None, (
+                f"({hdim},{hdim_v}): bm0={tile.F_bm0} has no CppConstraint but is "
+                f"followed by bm0={next_tile.F_bm0} -- it would shadow every tile "
+                "after it in dispatch order"
+            )
+    return tile_dict
+
+
 class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     arch = ArchTrait("gfx125")
 
@@ -1469,29 +1502,29 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in cls._DT_FP16_BF16:
-            # Each entry lists a bm0=64 tile guarded by CppConstraint("a.max_seqlen_q
-            # < N") and a bm0=128 fallback: the dispatcher picks bm0=64 below N and
-            # bm0=128 at/above it. N is the measured bm0=64 -> bm0=128 crossover
-            # max_seqlen_q on gfx1250 (fp16/bf16) and must be re-benchmarked for each
-            # new head dim. All heads below were benchmarked at N=128 (bm0=64 wins
-            # at seqlen_q=64, bm0=128 wins at seqlen_q>=128) under the current
-            # double-buffer pipeline; do not assume a value inherited from a sibling.
-            return {
+            # Most entries pair a bm0=64 tile guarded by the per-dim crossover
+            # constraint (see GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q) with a bm0=128
+            # fallback: the dispatcher picks bm0=64 below the crossover max_seqlen_q
+            # and bm0=128 at/above it. (256,256) is the exception -- a single unguarded
+            # bm0=64 tile with no fallback. _validate_qr_tdm_bm0_crossover_pairs enforces
+            # that any non-final tile keeps a constraint so a bm0=64 entry can never
+            # silently shadow its bm0=128 fallback in dispatch order.
+            return _validate_qr_tdm_bm0_crossover_pairs({
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
+                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 32,  32))),
                               FmhaFwdTileSize(128,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
+                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 64,  64))),
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
+                ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 96,  96))),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
+                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
+                (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
                               FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 128")),
+                (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((192, 128))),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-            }  # fmt: skip
+            })  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
