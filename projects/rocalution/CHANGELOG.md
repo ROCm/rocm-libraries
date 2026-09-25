@@ -2,6 +2,11 @@
 
 Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
+## (Unreleased) rocALUTION 4.1.1
+
+### Resolved issues
+* Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
+
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 
 ### Added
