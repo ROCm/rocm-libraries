@@ -591,6 +591,7 @@ struct BatchedContractionKernel
     ///          sub-dimension), so consecutive non-unit sub-dimensions must satisfy
     ///          stride[i] == stride[j] * length[j]. When innermost_unit is true the fastest
     ///          non-unit sub-dimension must also have stride 1 (contiguous dimension).
+    ///          Non-unit sub-dimensions with a zero (broadcast) or negative stride are rejected.
     CK_TILE_HOST static bool IsTdmAffineCollapsible(const std::vector<index_t>& lengths,
                                                     const std::vector<index_t>& strides,
                                                     const index_t begin,
@@ -605,6 +606,10 @@ struct BatchedContractionKernel
                 continue;
             }
             const int64_t s = strides[i];
+            if(s <= 0)
+            {
+                return false;
+            }
             if(expected_stride < 0)
             {
                 if(innermost_unit && s != 1)

@@ -480,6 +480,21 @@ TYPED_TEST(TestCkTileBatchedContractionTdm, RejectNonUnitInnermostK)
     EXPECT_THROW(Kernel::MakeKernelArgs(args), std::invalid_argument);
 }
 
+// A zero (broadcast) stride on a non-unit M dim cannot be addressed by TDM and must be
+// rejected on the host.
+TYPED_TEST(TestCkTileBatchedContractionTdm, RejectZeroStrideMDim)
+{
+    using Kernel              = typename TestFixture::template Kernel<1, 2, 2, 2>;
+    const ck_tile::index_t M0 = 4, M1 = 32;
+    // [G, M0, M1, K0, K1] with A broadcast over M: both M strides are 0, which is affinely
+    // consistent (0 == 0 * M1) and must still be rejected.
+    const std::vector<ck_tile::index_t> a_strides = {128, 0, 0, 64, 1};
+    ContractionCase c{{2}, {M0, M1}, {2, 64}, {2, 64}, a_strides};
+    const auto args = make_host_args<typename TestFixture::DataType, TestFixture::Pipe, 1, 2, 2, 2>(
+        c, nullptr, nullptr, nullptr);
+    EXPECT_THROW(Kernel::MakeKernelArgs(args), std::invalid_argument);
+}
+
 // Host-only: with valid arguments, IsSupportedArguments is true exactly on gfx125x devices.
 TYPED_TEST(TestCkTileBatchedContractionTdm, SupportedOnlyOnGfx125)
 {

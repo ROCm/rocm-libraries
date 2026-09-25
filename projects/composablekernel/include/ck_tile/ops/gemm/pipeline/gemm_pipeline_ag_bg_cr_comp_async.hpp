@@ -534,8 +534,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 index_t i_global_read = amd_wave_read_first_lane(3);
                 // alternate ping: (read to register tile(1), use register tile(0) as gemm input)
                 //           pong: (read to register tile(0), use register tile(1) as gemm input)
-                do
-                {
+                // do_fetch selects at compile time whether the pong issues the next global
+                // prefetch, so the steady-state loop body has no branch around it.
+                auto hot_iter = [&](auto do_fetch) {
                     // ping
                     {
                         // read A(i-1), B(i-1) from LDS window(1) to pipeline registers(1)
@@ -571,11 +572,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                         // LDS window(0) contents are overwritten by global prefetch, need to sync
                         block_sync_lds();
                         // read A(i+1), B(i+1) from DRAM to LDS window(0)
-                        // and advance the DRAM windows; with an even num_loop (tail Two) the
-                        // last pong would fetch tile num_loop, past the K extent, so skip it.
-                        // With tail Three num_loop is odd and i+1 < num_loop always holds, so
-                        // the check is folded away and the hot loop stays a single block.
-                        if(TailNum == TailNumber::Three || i_global_read + 1 < num_loop)
+                        // and advance the DRAM windows; skipped on the last hot iteration
+                        // with an even num_loop, where it would fetch past the K extent
+                        if constexpr(decltype(do_fetch)::value)
                         {
                             Base::GlobalPrefetchAsync(a_copy_lds_window0,
                                                       a_async_tile_windows[number<0>{}],
@@ -594,8 +593,26 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                         // Load next scales after using current scales above
                         load_scales_from_dram(scale_a_tile_pong, scale_b_tile_pong);
                     }
-                    i_global_read += 2;
-                } while(i_global_read < num_loop);
+                };
+                if constexpr(TailNum == TailNumber::Three)
+                {
+                    // odd num_loop: i + 1 < num_loop holds on every hot iteration
+                    do
+                    {
+                        hot_iter(bool_constant<true>{});
+                        i_global_read += 2;
+                    } while(i_global_read < num_loop);
+                }
+                else
+                {
+                    // even num_loop: peel the last hot iteration, which has no pong prefetch
+                    while(i_global_read + 1 < num_loop)
+                    {
+                        hot_iter(bool_constant<true>{});
+                        i_global_read += 2;
+                    }
+                    hot_iter(bool_constant<false>{});
+                }
             }
 
             // 3 block gemms remaining

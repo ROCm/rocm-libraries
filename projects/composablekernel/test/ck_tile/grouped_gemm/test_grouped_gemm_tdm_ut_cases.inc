@@ -23,6 +23,20 @@ TYPED_TEST(TEST_CKTILE_GGEMM_TDM_SUITE_NAME, Basic)
     this->RunOnDevice(Ms, Ns, Ks, group_count);
 }
 
+// M and N that are not multiples of the 64x64 block tile: the kernel is built without M/N
+// padding, so the partial edge tiles rely on TDM clipping the A/B loads and the C store. M and N
+// stay multiples of 8 elements (row pitch 16 bytes for 16-bit types, 8 bytes for 8-bit types);
+// K is a multiple of 128.
+TYPED_TEST(TEST_CKTILE_GGEMM_TDM_SUITE_NAME, RaggedMN)
+{
+    const int group_count     = 4;
+    const std::vector<int> Ms = {8, 200, 72, 136};
+    const std::vector<int> Ns = {264, 40, 8, 1000};
+    const std::vector<int> Ks = {128, 256, 384, 128};
+
+    this->RunOnDevice(Ms, Ns, Ks, group_count);
+}
+
 // Long K loops exercise the TDM ping-pong LDS schedule. Every K is a multiple of the K block
 // tile; K = 1024 + K_Tile and 4096 + K_Tile give an odd number of K iterations for every dtype
 // (16-bit: 33 and 129, 8-bit: 9 and 33).
@@ -51,10 +65,8 @@ TYPED_TEST(TEST_CKTILE_GGEMM_TDM_SUITE_NAME, EmptyGroup)
 
 // K tails and K < K_Tile. K = 64 and 96 are below the 8-bit K_Tile (128), so they are a single
 // partial tile on 8-bit; K = 1056 has a tail on 8-bit only; K = 432 has a tail on every dtype
-// (16-bit K_Tile is 32). Disabled until the
-// same shapes are covered by the universal TDM GEMM suite, so a failure here can be attributed
-// to the pipeline rather than to the grouped kernel.
-TYPED_TEST(TEST_CKTILE_GGEMM_TDM_SUITE_NAME, DISABLED_KTail)
+// (16-bit K_Tile is 32).
+TYPED_TEST(TEST_CKTILE_GGEMM_TDM_SUITE_NAME, KTail)
 {
     const int group_count     = 4;
     const std::vector<int> Ms = {256, 128, 256, 192};
