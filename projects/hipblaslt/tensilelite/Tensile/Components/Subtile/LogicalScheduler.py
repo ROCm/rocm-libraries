@@ -5381,10 +5381,16 @@ class LogicalScheduler:
         from rocisa.code import Module
         from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
 
-        # Opt-in: this currently miscompares on two swapAB-swizzleA shapes
-        # (4096x32768x4096 and 4096x4096x32768) for a hazard not yet identified --
-        # it is neither the accumulator RAW nor the borrowed-operand WAR modelled
-        # above, both of which are already enforced.
+        # Reordering the drain is only safe where a store's address does not depend
+        # on how many stores ran before it. Elsewhere D is reached through the SrdD
+        # cursor, which the row advances walk forward in issue order, so moving a
+        # unit moves the rows it writes -- that was the miscompare this used to
+        # carry. Absolute row addressing removes the dependence, and it is scoped to
+        # block-scheduled tiles, so this follows the same scope.
+        # Still opt-in: absolute addressing, which this depends on, does not yet
+        # cover the bias store path -- see the note there.
+        if not self.config.blockSched:
+            return None
         if plsinDebugEnv("TENSILE_PLSIN_LAST_DRAIN_WEAVE", "0") == "0":
             return None
         flat = list(partModule.flatitems())
