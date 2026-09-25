@@ -131,6 +131,7 @@ def getRequiredParametersMin() -> set:
         'WorkQueueStealing',
         'PersistentXCCMapping',
         'StreamKFixupTreeReduction',
+        'StreamKClusterMulticast',
         'SuppressNoLoadLoop',
         'SwapGlobalReadOrder',
         'TailloopInNll',

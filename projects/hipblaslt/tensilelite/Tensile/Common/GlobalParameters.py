@@ -617,6 +617,7 @@ defaultBenchmarkCommonParameters = [
     {"TileProcessingStrategy": ["None"]},
     {"WorkAssignment": ["StaticGrid"]},
     {"StreamKAtomic": [0]},
+    {"StreamKClusterMulticast": [False]},
     {"WorkQueueStealing": [0]},
     {"PersistentXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
