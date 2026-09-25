@@ -76,7 +76,7 @@ BenchmarkProblems:
   #
   # Isolates the parity gate: M and N (128) are multiples of every MacroTile in
   # the fork up to 128, so numLine == MT-1 there and the only thing varying is
-  # K_rem's parity.  MT320x320 is the exception -- one workgroup covers the whole
+  # K_rem's parity.  MT160x160 is the exception -- one workgroup covers the whole
   # problem and numLine clamps to 127 via min(numToEnd, MT).
   ########################################
   -
@@ -106,19 +106,19 @@ BenchmarkProblems:
           # is also the grouping least likely to make stackM exceed
           # localMMATileGrid[0]; [4,1] is the one that does.  From lds_tr.yaml.
           - [16, 16, 32, 1,  1, 2, 8,  4, 1]   # MT 128x128, MIWaveGroup [4,1]
-          # Largest tile the bf16 TLU=1 stack can build.  Everything above is
-          # MIWT <= 4x4, so the tail loop's MFMA block and its VGPR-resident
-          # tile state stay small; 10x10 is 200 MFMAs in the tail and sits at
+          # Largest MIWaveTile the bf16 TLU=1 stack can build.  Everything above
+          # is MIWT <= 4x4, so the tail loop's MFMA block and its VGPR-resident
+          # tile state stay small; 10x10 puts 100 tiles on a wave and sits at
           # the register-file limit, which is where an off-by-one in the tail's
-          # flat tile-id layout would show up.  wg [2,2] is not a choice here --
-          # it is the only MT320x320 grouping that fits.
+          # flat tile-id layout would show up.
           #
-          # DepthU 64 ONLY.  The fork below offers 128 as well and it is
-          # correctly rejected: PGR=1 double-buffers LDS, so DepthU 128 wants
-          # 2*(320*128*2 + 320*128*2) = 327680 B against a 163840 B cap.
-          # DepthU 64 comes to 163840 B, landing exactly on the cap.  This row
-          # therefore contributes 8 results, not 16.
-          - [16, 16, 32, 1,  1, 10, 10,  2, 2] # MT 320x320
+          # MT160x160 (wave group [1,1]) rather than MT320x320 (wave group
+          # [2,2]): same 100 tiles per wave, but it is reachable at BOTH DepthU.
+          # PGR=1 double-buffers LDS, so 320x320 at DepthU 128 wants
+          # 2*(320*128*2 + 320*128*2) = 327680 B against a 163840 B cap and is
+          # correctly rejected; 160x160 at DepthU 128 comes to 163840 B, landing
+          # exactly on the cap.
+          - [16, 16, 32, 1,  1, 10, 10,  1, 1] # MT 160x160
 
         - DepthU: [64, 128]
         - PrefetchGlobalRead: [1]
