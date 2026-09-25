@@ -51,48 +51,6 @@ def solution_state():
     return dict(sol._state)
 
 
-# Real gfx950 Stream-K (static, StreamK: 3) solution, already vendored for the
-# BenchmarkProblems solution-pool tests (test_benchmarkProblems_solution_pool.py,
-# test_LibraryIO.py). Reused here, rather than patching a synthetic 'StreamK'
-# key onto the gfx942 fixture above, so the isStreamK branch in
-# CompoundPredicates() (Contractions.py) is exercised against a solution
-# state a real Stream-K kernel actually has, not a hand-edited one. Kept as
-# its own separate fixture chain (rather than sharing helpers with raw/
-# problem_type/solution_state above) so this addition cannot change the
-# behavior of the existing fixtures/tests.
-_STREAMK_FIXTURE = (
-    Path(__file__).parent.parent.parent / "test_data" / "solution_pool_gfx950.yaml"
-)
-
-
-@pytest.fixture(scope="module")
-def raw_streamk():
-    doc = _STREAMK_FIXTURE.read_text()
-    return yaml.load(doc, Loader=L.StrictTypeLoader)  # nosec B506
-
-
-@pytest.fixture
-def problem_type_streamk(raw_streamk):
-    return C.ProblemType.FromOriginalState(raw_streamk[4])
-
-
-@pytest.fixture(scope="module")
-def solution_state_streamk():
-    from Tensile.Common.Architectures import SUPPORTED_ISA
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap(SUPPORTED_ISA, cxx)
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    asm = makeAssemblyToolchain(cxx, bundler, "default").assembler
-    sol = L.parseLibraryLogicFile(
-        str(_STREAMK_FIXTURE), asm, False, False, False, iim, False
-    ).solutions[0]
-    return dict(sol._state)
-
-
 # --- index value classes ----------------------------------------------------
 
 def test_index_classes(snapshot):
@@ -141,18 +99,3 @@ def test_internal_args_support(solution_state):
 def test_problem_predicate_compound(problem_type, solution_state, snapshot):
     preds = C.ProblemPredicate.CompoundPredicates(solution_state, problem_type)
     assert {"count": len(preds), "tags": sorted({p.tag for p in preds})} == snapshot
-
-
-def test_problem_predicate_compound_streamk(problem_type_streamk, solution_state_streamk):
-    # test_problem_predicate_compound above never exercises
-    # CompoundPredicates()'s isStreamK branch (Contractions.py): the vendored
-    # gfx942 fixture's solution has no StreamK field. This drives the same
-    # call from a real Stream-K solution's derived state instead, which must
-    # skip the ordinary WorkgroupNumberCheck and attach
-    # StreamKWorkgroupNumberCheck in its place.
-    tags = {
-        p.tag
-        for p in C.ProblemPredicate.CompoundPredicates(solution_state_streamk, problem_type_streamk)
-    }
-    assert "StreamKWorkgroupNumberCheck" in tags
-    assert "WorkgroupNumberCheck" not in tags

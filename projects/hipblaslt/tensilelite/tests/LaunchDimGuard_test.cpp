@@ -11,13 +11,12 @@
 // to a 16-workgroup launch and left the other 16,777,216 workgroups' worth of D
 // holding whatever was there before, with no error raised.
 //
-// StreamKWorkgroupNumberCheck keeps dispatch away from the tuned Stream-K
-// solutions that reach that state, but it is a solution-selection filter and
-// cannot see every path to an oversized grid: skFixedGrid and skGridMultiplier
-// rewrite the grid after selection, the predicate's bound assumes 256 threads,
-// and the hand-written custom kernels carry no predicate of their own.
-// SolutionAdapter::launchKernel is the one place every launch passes through,
-// so that is where the refusal lives.
+// Solution selection cannot see every path to an oversized grid: LaunchLimits
+// exempts Stream-K, whose insufficient-workspace fallback still launches one
+// workgroup per output tile, and skFixedGrid / skGridMultiplier override the
+// grid after selection. SolutionAdapter::launchKernel is where Tensile's own
+// launches narrow the grid, so that is where the refusal lives. (rocblaslt's
+// rocRoller custom kernels launch directly and are not covered here.)
 //
 // These tests drive launchKernel directly with a synthetic KernelInvocation.
 // The check runs before the code object is looked up, so no kernel needs to

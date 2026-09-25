@@ -534,24 +534,13 @@ class ProblemPredicate(Properties.Predicate):
 
                 rv += [cls('SynchronizerSizeCheck', index=0, value=valuepredicates)]
 
-        isStreamK = ('StreamK' in state) and (state['StreamK'] > 0)
-        if state["InternalSupportParams"]["KernArgsVersion"] >= 1 and not isStreamK:
+        if state["InternalSupportParams"]["KernArgsVersion"] >= 1 and \
+                 not (('StreamK' in state) and (state['StreamK'] > 0)):
             valuepredicates = []
             valuepredicates.append(state["MacroTile0"])
             valuepredicates.append(state["MacroTile1"])
             valuepredicates.append(state["GlobalSplitU"])
             rv += [cls('WorkgroupNumberCheck', index=0, value=valuepredicates)]
-
-        if isStreamK:
-            # Stream-K's normal grid is CU-scaled, not tile-scaled, so it is
-            # exempt from WorkgroupNumberCheck above. But several launch-time
-            # fallbacks (workspace too small for the ideal partial-tile
-            # reduction, the tree-fixup 24-bit bounds guard, a fixed-grid
-            # debug override, ...) hand Stream-K a one-workgroup-per-tile grid
-            # instead, same shape as the tile-scaled grid WorkgroupNumberCheck
-            # already bounds. Bound that worst case too.
-            rv += [cls('StreamKWorkgroupNumberCheck',
-                      value=[state["MacroTile0"], state["MacroTile1"]])]
 
         if not problemType.aType.isInt8x4():
             # calculate the minimum supported free dimension size

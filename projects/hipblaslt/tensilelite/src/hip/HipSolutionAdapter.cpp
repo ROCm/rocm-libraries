@@ -524,12 +524,12 @@ namespace TensileLite
             // 16-workgroup launch and leaves the other 16,777,216 workgroups' worth
             // of D holding whatever was there before, with no error raised.
             //
-            // StreamKWorkgroupNumberCheck keeps dispatch away from the tuned
-            // Stream-K solutions that reach this, but it cannot see every path
-            // through here: skFixedGrid and skGridMultiplier rewrite the grid after
-            // selection, and the predicate's bound assumes 256 threads. Refusing
-            // the launch is what makes those remaining paths loud instead of
-            // silent.
+            // Solution selection does not rule this out for Stream-K: LaunchLimits
+            // exempts it, yet several Stream-K paths still size the grid at one
+            // workgroup per output tile (the insufficient-workspace fallback in
+            // resolveStreamKSettings(), K == 0, the data-parallel debug knob), and
+            // skFixedGrid / skGridMultiplier override it outright. Refusing the
+            // launch is what makes those paths loud instead of silent.
             //
             // This covers launches that go through SolutionAdapter, which is not
             // every launch in the library. rocblaslt's rocRoller custom kernels

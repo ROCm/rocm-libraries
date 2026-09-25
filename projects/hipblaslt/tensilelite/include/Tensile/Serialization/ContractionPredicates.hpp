@@ -96,7 +96,6 @@ namespace TensileLite
                          Predicates::Contraction::BufferLoadOffsetLimitCheck_Beta>(),
                      Base::template Pair<Predicates::Contraction::BufferStoreOffsetLimitCheck>(),
                      Base::template Pair<Predicates::Contraction::WorkgroupNumberCheck>(),
-                     Base::template Pair<Predicates::Contraction::StreamKWorkgroupNumberCheck>(),
                      Base::template Pair<Predicates::Contraction::PersistentKernelCheck>(),
                      Base::template Pair<Predicates::Contraction::GlobalSplitUCheckMinK>(),
                      Base::template Pair<Predicates::Contraction::CDStridesEqual>(),
@@ -362,12 +361,6 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::WorkgroupNumberCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::WorkgroupNumberCheck, IO>
-        {
-        };
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::StreamKWorkgroupNumberCheck, IO>
-            : public AutoMappingTraits<Predicates::Contraction::StreamKWorkgroupNumberCheck, IO>
         {
         };
 
