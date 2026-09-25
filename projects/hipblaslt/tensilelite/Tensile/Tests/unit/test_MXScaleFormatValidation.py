@@ -112,14 +112,25 @@ class TestMXLocalReadWidth:
             "VectorWidthA >= MatrixInstK // MXBlockA (4), got 1"
         )
 
-    def test_rejects_zero_mx_unit(self, capsys):
-        state = _local_read_state(mxBlockA=256)
+    @pytest.mark.parametrize("unrollMajorLDSA", [False, True], ids=["m-major", "k-major"])
+    def test_rejects_zero_mx_unit(self, capsys, unrollMajorLDSA):
+        state = _local_read_state(mxBlockA=256, unrollMajorLDSA=unrollMajorLDSA)
 
         assert _validateMXLocalReadWidth(state, _GFX1250_CAPS, True) is False
         assert state["Valid"] is False
         assert capsys.readouterr().out.strip() == (
-            "reject: M-major MX-scale local read for A requires "
+            "reject: MX-scale local read for A requires "
             "MatrixInstK >= MXBlockA (128 < 256)"
+        )
+
+    def test_rejects_zero_width_b_read(self, capsys):
+        state = _local_read_state(mxBlockA=0, mxBlockB=32, vectorWidthB=1)
+
+        assert _validateMXLocalReadWidth(state, _GFX1250_CAPS, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: M-major MX-scale local read for B requires "
+            "VectorWidthB >= MatrixInstK // MXBlockB (4), got 1"
         )
 
     @pytest.mark.parametrize(

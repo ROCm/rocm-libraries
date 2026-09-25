@@ -835,9 +835,7 @@ version = "5.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "cmake" },
-    { name = "filelock" },
     { name = "hip-python" },
-    { name = "invoke" },
     { name = "joblib" },
     { name = "msgpack" },
     { name = "nanobind" },
@@ -867,9 +865,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cmake" },
-    { name = "filelock" },
     { name = "hip-python" },
-    { name = "invoke" },
     { name = "joblib", specifier = ">=1.4.0" },
     { name = "msgpack" },
     { name = "nanobind" },

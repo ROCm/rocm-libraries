@@ -2,18 +2,10 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# gfx1250 MX-F4 NN-layout config that derives to a VALID solution with
-# UnrollMajorLDS{A,B}==0 and MXBlock{A,B}>0 (M-major LDS with per-32-K-block MX
-# scales). Unlike gfx950, gfx1250 does NOT force UseSubtileImpl for MX, so the
-# "No TLU=1 subtile geometry" reject (Solution.py) does not apply; NN layout ->
-# TLU both True -> TransposeLDS auto 0 -> UnrollMajorLDS{A,B}=0.
-#
-# This layout reaches the MX-scale VGPR-macro cold branch in
-# KernelWriterAssembly.py (the `if not kernel["UnrollMajorLDS*"]:` block) and
-# then LocalRead.localReadMX, where the M-major MX-scale local read is
-# unimplemented: one 0.25-register read covers fewer bytes than a single scale
-# unit (mxUnit) so tilePerRead floors to 0. localReadMX guards this with a
-# descriptive Exception; see test_mx_umlds0_char.py.
+# gfx1250 MX-F4 NN-layout config with M-major LDS and per-32-K-block MX scales.
+# NN layout makes UnrollMajorLDS{A,B} false, so one 0.25-register local read
+# covers fewer bytes than one MX scale unit. Solution derivation rejects this
+# unsupported layout before code generation.
 #
 # FP4 on gfx1250 with UnrollMajorLDS==False requires LDSTrInst (Solution.py),
 # so LDSTrInst=1 is set.

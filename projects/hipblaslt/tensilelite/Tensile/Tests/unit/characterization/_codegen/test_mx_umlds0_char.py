@@ -10,10 +10,11 @@ Target code:
   - Tensile/SolutionStructs/Solution.py validation of the local-read width.
 
 Background:
-  A gfx1250 MX-F4 NN-layout config derives to a VALID solution with
-  UnrollMajorLDS{A,B}==0 and MXBlock{A,B}>0. Unlike gfx950 (which rejects MX
-  TLU=1 subtile geometry pre-emit), gfx1250 admits this solution and emission
-  would otherwise reach the MX-scale VGPR-macro cold branch, then localReadMX.
+  Before this validation, a gfx1250 MX-F4 NN-layout config derived to a valid
+  solution with UnrollMajorLDS{A,B}==0 and MXBlock{A,B}>0. Unlike gfx950
+  (which rejects MX TLU=1 subtile geometry pre-emit), gfx1250 otherwise admits
+  this solution and emission would reach the MX-scale VGPR-macro cold branch,
+  then localReadMX.
 
   In that M-major layout a single 0.25-register local read spans fewer bytes
   than one MX scale unit (mxUnit = MatrixInstK // MXBlock = 128 // 32 = 4), so

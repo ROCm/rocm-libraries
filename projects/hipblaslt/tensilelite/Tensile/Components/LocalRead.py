@@ -620,15 +620,21 @@ class LocalReadMFMA(LocalRead):
         bpr              = 4 # bytes/register
 
         vectorWidth      = kernel["VectorWidth%s"%tc]
-        mxUnit: int      = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{mxTc}"]
+        mxBlock: int     = kernel["ProblemType"][f"MXBlock{mxTc}"]
+        mxUnit: int      = kernel["MatrixInstK"] // mxBlock
+        if mxUnit <= 0:
+            raise RuntimeError(
+                "localReadMX: invalid MX scale unit for tc=%s "
+                "(MatrixInstK=%s < MXBlock%s=%s => mxUnit=%s)"
+                % (tc, kernel["MatrixInstK"], mxTc, mxBlock, mxUnit))
         stridePerRead    = instruction.blockWidth * bpr
         tilePerRead      = stridePerRead // mxUnit
         if tilePerRead == 0:
             raise RuntimeError(
-                "localReadMX: unsupported M-major MX-scale local read for tc=%s "
+                "localReadMX: unsupported MX-scale local read for tc=%s "
                 "(blockWidth=%s stridePerRead=%s < mxUnit=%s => tilePerRead=0); "
-                "UnrollMajorLDS%s==0 with MXBlock%s>0 has no implemented scale layout"
-                % (tc, instruction.blockWidth, stridePerRead, mxUnit, mxTc, mxTc))
+                "MXBlock%s requires a scale layout with at least one tile per read"
+                % (tc, instruction.blockWidth, stridePerRead, mxUnit, mxTc))
         MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
                             kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
         tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps)

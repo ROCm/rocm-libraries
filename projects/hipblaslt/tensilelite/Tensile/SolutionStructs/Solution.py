@@ -191,12 +191,13 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
 
 
 def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
-  """Reject MX scale reads that are narrower than one scale block.
+  """Reject invalid MX scale units and undersized M-major local reads.
 
-  The WMMA_V3 in-memory-swizzle path reads one byte per MX scale. For an
-  M-major LDS layout, one local read spans ``VectorWidth`` scale bytes while an
-  MFMA input consumes ``MatrixInstK // MXBlock`` scales. A narrower read makes
-  ``LocalReadMFMA.localReadMX`` compute zero tiles per read.
+  The WMMA_V3 in-memory-swizzle path reads one byte per MX scale. Every MX
+  local-read layout requires a positive ``MatrixInstK // MXBlock`` scale unit.
+  For an M-major LDS layout, one local read spans ``VectorWidth`` scale bytes;
+  a narrower read makes ``LocalReadMFMA.localReadMX`` compute zero tiles per
+  read.
   """
   if not asmCaps.get("HasWMMA_V3", False) \
       or state["MXScaleFormat"] != "InMemorySwizzle":
@@ -204,18 +205,22 @@ def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
 
   for tc in ("A", "B"):
     mxBlock = state["ProblemType"][f"MXBlock{tc}"]
-    if not mxBlock or state[f"UnrollMajorLDS{tc}"]:
+    if not mxBlock:
       continue
 
     mxUnit = state["MatrixInstK"] // mxBlock
-    vectorWidth = state[f"VectorWidth{tc}"]
     if mxUnit <= 0:
       reject(
           state,
           printRejectionReason,
-          f"M-major MX-scale local read for {tc} requires "
+          f"MX-scale local read for {tc} requires "
           f"MatrixInstK >= MXBlock{tc} ({state['MatrixInstK']} < {mxBlock})")
       return False
+
+    if state[f"UnrollMajorLDS{tc}"]:
+      continue
+
+    vectorWidth = state[f"VectorWidth{tc}"]
     if vectorWidth < mxUnit:
       reject(
           state,
