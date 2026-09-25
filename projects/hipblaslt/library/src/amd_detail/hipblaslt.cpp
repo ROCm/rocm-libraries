@@ -82,8 +82,9 @@ bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHan
             return true;
     }
 
-    override.env_mode = false;
-
+    // A mismatch leaves override.env_mode set. Trust is decided per entry on
+    // both APIs: a row that records a kernel name is validated at replay, and a
+    // row without one is refused against the build stamp when the file loads.
     return false;
 }
 
@@ -1178,9 +1179,10 @@ try
         if(override_success)
             log_info(__func__, "HIPBLASLT_TUNING_OVERRIDE_FILE is the correct setting.");
         else
-            log_error(
-                __func__,
-                "The hipBLASLt git version and the override file git version are not the same.");
+            log_info(__func__,
+                     "The override file was produced by a different hipBLASLt build. Entries "
+                     "that record a kernel name are still validated individually; entries "
+                     "without one are skipped.");
     }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
