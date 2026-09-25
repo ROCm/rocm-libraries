@@ -9,6 +9,13 @@ if(NOT INST_TARGETS)
   return()
 endif()
 
+if(NOT WIN32 AND COMMAND check_cxx_compiler_flag)
+  set(CK_GFX12_ONLY_BUILD OFF)
+  if(GPU_TARGETS MATCHES "gfx12" AND NOT GPU_TARGETS MATCHES "gfx9|gfx10|gfx11")
+    set(CK_GFX12_ONLY_BUILD ON)
+  endif()
+endif()
+
 # validate user-specified fmha_fwd API list
 set(FMHA_FWD_KNOWN_APIS "fwd;fwd_splitkv;fwd_appendkv;pagedkv_prefill")
 set(FMHA_FWD_ENABLE_APIS "fwd" CACHE STRING
@@ -73,29 +80,17 @@ set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   --api ${FMHA_FWD_APIS}
   --optdim ${FMHA_FWD_OPTDIM}
 )
-# Dev knob: shrink the generated BWD instance set so an iteration is minutes
-# instead of the best part of an hour. The full set is ~670 translation units
-# and almost all of them are irrelevant when you are debugging one tile.
-#
-# Value is three fnmatch patterns joined by '@', one per BWD kernel:
-#   dot_do_o @ convert_dq @ dq_dk_dv
-# Empty (the default) generates everything, i.e. no behaviour change.
-#
-#   # bf16, batch mode, hdim 128 only -- ~20 TUs
-#   cmake -D FMHA_BWD_INSTANCE_FILTER=*_d128_bf16_batch*@*_d128_bf16_batch*@*_d128_bf16_batch* .
-#
-# A filtered build only dispatches the shapes it generated; other -d/-prec
-# values will report no kernel rather than run a wrong one.
-set(FMHA_BWD_INSTANCE_FILTER "" CACHE STRING
-  "fnmatch filter for generated FMHA BWD kernels: dot_do_o@convert_dq@dq_dk_dv. Empty = all.")
-
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api bwd
   --receipt 3
   --optdim 32,64,96,128,256
+  # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
 )
+set(FMHA_BWD_INSTANCE_FILTER "" CACHE STRING
+  "fnmatch filter for generated FMHA BWD kernels: dot_do_o@convert_dq@dq_dk_dv. Empty = all.")
+
 if(NOT FMHA_BWD_INSTANCE_FILTER STREQUAL "")
   # must go into COMMON_ARGS so --list_blobs and --output_dir stay in agreement
   list(APPEND FMHA_BWD_CODE_GEN_COMMON_ARGS --filter ${FMHA_BWD_INSTANCE_FILTER})
@@ -196,24 +191,20 @@ else()
 endif()
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -fgpu-flush-denormals-to-zero)
 
-# The gfx12-only build turns on expert scheduling mode globally (top-level
-# CMakeLists). The bwd kernel is faster WITHOUT it once the causal mirror
-# pairing is in: measured on gfx1250 @ 2272 MHz, best-of-5, 4-way interleaved
-# against the pre-pairing tree as an in-run anchor,
+# Post-RA scheduling is off library-wide (see the top-level CMakeLists, where it
+# was disabled in 2024 with no stated reason). Leaving it off costs real
+# performance on the gfx12 bwd kernel, so turn it back on there -- and only
+# there: no other CK operation, and no earlier architecture, was re-measured.
 #
-#              expert sched ON     expert sched OFF
-#   b2 h8  s4096 causal   1.458x            1.795x
-#   b4 h32 s4096 causal   1.025x            1.328x
-#   b8 h8  s1024 causal   1.321x            1.287x
-#   b2 h8  s4096 mask=0   1.046x            1.071x
-#
-# Three of four shapes prefer it off, by up to 37 points. Subtract it here
-# rather than at the top level so the fwd kernel -- which was never re-measured
-# without it -- keeps the flag. `=false` overrides the earlier `on` (verified:
-# the instruction stream is byte-identical to a build that never set it).
+# Expert scheduling mode is deliberately not enabled. The bwd kernel measured
+# faster without it once causal mirror tile pairing was in, and since nothing
+# turns it on globally any more there is no longer anything to subtract.
 if(CK_GFX12_ONLY_BUILD)
-  list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS
-    "SHELL: -mllvm -amdgpu-expert-scheduling-mode=false")
+  check_cxx_compiler_flag("-mllvm -enable-post-misched=1" HAS_ENABLE_POST_MISCHED_ON)
+  if(HAS_ENABLE_POST_MISCHED_ON)
+    message(STATUS "gfx12-only build: enabling post-RA scheduling for FMHA bwd")
+    list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS "SHELL: -mllvm -enable-post-misched=1")
+  endif()
 endif()
 
 # conditionally enable call to the fwd_splitkv API in fmha_fwd example and tests
