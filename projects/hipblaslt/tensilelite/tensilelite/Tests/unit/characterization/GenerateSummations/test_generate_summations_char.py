@@ -46,10 +46,9 @@ def test_create_library_for_benchmark_success():
         tmpdir = Path(tmpdir)
         logic_path = str(tmpdir / "logic")
         lib_path = str(tmpdir / "lib")
-        current_path = str(tmpdir / "work")
 
         with patch.object(M, "createLibrary") as mock_create:
-            M.createLibraryForBenchmark(logic_path, lib_path, current_path)
+            M.createLibraryForBenchmark(logic_path, lib_path)
 
             mock_create.assert_called_once()
             cmd = mock_create.call_args.args[0]
@@ -79,14 +78,11 @@ def test_create_library_for_benchmark_error_handling():
         tmpdir = Path(tmpdir)
         logic_path = str(tmpdir / "logic")
         lib_path = str(tmpdir / "lib")
-        current_path = str(tmpdir)
 
         for error in (RuntimeError("handler failed"), OSError("File not found"), SystemExit(1)):
-            with patch.object(M, "createLibrary", side_effect=error), patch.object(M, "printExit") as mock_exit:
-                M.createLibraryForBenchmark(logic_path, lib_path, current_path)
+            with (
+                patch.object(M, "createLibrary", side_effect=error),
+                patch.object(M, "printExit") as mock_exit,
+            ):
+                M.createLibraryForBenchmark(logic_path, lib_path)
                 mock_exit.assert_called_once()
-
-
-
-
-

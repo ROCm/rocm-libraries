@@ -333,31 +333,6 @@ class TestBuildTaskCommandLine:
     def test_the_revision_option_takes_no_letter(self):
         assert self._short_flags("--asic-revision") == ()
 
-    @_needs_tensilelite_tasks
-    def test_build_client_explicitly_skips_python_dependency_bundling(self, tmp_path):
-        """The focused client build must not expand into Python code generation."""
-
-        class RecordingContext:
-            def __init__(self):
-                self.commands = []
-
-            def run(self, command):
-                self.commands.append(command)
-
-        context = RecordingContext()
-        tensilelite_tasks.build_client.body(
-            context,
-            build_dir=str(tmp_path / "build"),
-            gpu_targets="gfx942",
-            build=False,
-        )
-
-        assert any(
-            "-DHIPBLASLT_BUNDLE_PYTHON_DEPS=OFF" in command
-            for command in context.commands
-        )
-
-
 # --------------------------------------------------------------------------- #
 # The shipped v0 logic tree. TensileCreateLibrary globs one tree and separates
 # the two revisions by ScheduleName alone: both declare ArchitectureName:

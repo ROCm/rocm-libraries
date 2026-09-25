@@ -268,8 +268,6 @@ def build_client(
             cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
         if enable_sdma:
             cmake_cmd.append("-DTENSILELITE_ENABLE_SDMA=ON")
-        cmake_cmd.append("-DHIPBLASLT_BUNDLE_PYTHON_DEPS=OFF")
-
         c.run(shlex.join(cmake_cmd))
 
     if build:

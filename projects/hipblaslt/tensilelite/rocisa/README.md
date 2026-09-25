@@ -16,16 +16,15 @@ This compiles the C++ extension and installs it into your active venv so that
 
 For compatibility, the editable install still rebuilds on rocisa's first
 import in each Python process by default, but an import performing a native
-build is discouraged. The recommended approach, available now, is to opt out
-explicitly:
+build is discouraged. Disable that behavior when installing the editable
+package:
 
 ```bash
-invoke rocisa --no-rebuild-on-import
+SKBUILD_EDITABLE_REBUILD=false invoke rocisa
 ```
 
 A future release will flip the default so rebuild-on-import is off by
-default; at that point, use `--rebuild-on-import` only when that automatic
-incremental rebuild is explicitly desired.
+default.
 
 > **Linux only.** The `invoke` dev workflow (`invoke rocisa`, `invoke build-client`)
 > is supported on Linux (a ROCm dev container) only: it uses `amdclang`, defaults to
