@@ -86,3 +86,10 @@ def test_create_library_for_benchmark_error_handling():
             ):
                 M.createLibraryForBenchmark(logic_path, lib_path)
                 mock_exit.assert_called_once()
+
+
+def test_main_parses_paths_and_returns_zero():
+    with patch.object(M, "GenerateSummations") as generate_summations:
+        assert M.main(["logic", "output"]) == 0
+
+    generate_summations.assert_called_once_with(["logic", "output"])

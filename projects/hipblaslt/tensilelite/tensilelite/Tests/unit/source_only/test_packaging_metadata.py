@@ -3,6 +3,7 @@
 
 """Regression checks for TensileLite's distributable package metadata."""
 
+import configparser
 import re
 import subprocess
 import sys
@@ -44,6 +45,9 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
         metadata = archive.read(
             next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
         ).decode("utf-8")
+        entry_points = archive.read(
+            next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
+        ).decode("utf-8")
 
     component_version = re.search(
         r'^__version__ = "([^"]+)"$',
@@ -52,6 +56,19 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     ).group(1)
     assert f"Version: {component_version}+rocm7.2.4" in metadata
     assert "Requires-Dist: rocisa" not in metadata
+
+    parsed_entry_points = configparser.ConfigParser()
+    parsed_entry_points.optionxform = str
+    parsed_entry_points.read_string(entry_points)
+    assert dict(parsed_entry_points["console_scripts"]) == {
+        "tensilelite": "tensilelite.cli:main",
+        "Tensile": "tensilelite.tensilelite:main",
+        "TensileCreateLibrary": "tensilelite.tensilelite_create_library:run",
+        "TensileVerifyStinkyElfText": "tensilelite.verify_stinky_comment_vs_elf_text:main",
+        "TensileGetPath": "tensilelite:PrintTensileRoot",
+        "TensileBenchmarkCluster": "tensilelite.benchmark_cluster:main",
+        "TensileRetuneLibrary": "tensilelite.retune_library:main",
+    }
 
 
 def test_uv_lock_matches_dynamic_package_metadata():
@@ -83,6 +100,30 @@ def test_standalone_rocisa_consumes_the_preinstalled_stinkytofu_package():
     assert "if(NOT TARGET stinkytofu::stinkytofu)" in cmake
     assert 'env["CMAKE_PREFIX_PATH"]' in tasks
     assert "pip install --no-build-isolation -e" in tasks
+
+
+def test_logic_filter_is_forwarded_to_validation_and_generation():
+    cmake = (_PROJECT_ROOT.parent / "cmake/hipblaslt_codegen.cmake").read_text(encoding="utf-8")
+
+    assert (
+        'list(APPEND _tensile_logic_args "--logic-filter=**/${_cdl_LOGIC_FILTER}.yaml")'
+        in cmake
+    )
+    assert 'list(APPEND _opts_list "--logic-filter=${_cdl_LOGIC_FILTER}")' in cmake
+
+
+def test_codegen_preflight_checks_the_package_command_modules():
+    cmake = (_PROJECT_ROOT.parent / "cmake/hipblaslt_codegen.cmake").read_text(encoding="utf-8")
+
+    for relative_path in (
+        "tensilelite/__main__.py",
+        "tensilelite/cli.py",
+        "tensilelite/tensilelite_logic/run.py",
+        "tensilelite/tensilelite_create_library/run.py",
+    ):
+        assert f'"${{_codegen_dir}}/{relative_path}"' in cmake
+    assert '"${_codegen_dir}/tensilelite/bin/TensileLogic"' not in cmake
+    assert '"${_codegen_dir}/tensilelite/tensilelite_create_library/__main__.py"' not in cmake
 
 
 def test_removed_source_autobuild_option_is_not_referenced():

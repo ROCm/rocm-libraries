@@ -22,9 +22,10 @@
 #
 ################################################################################
 
+import argparse
+import csv
 import os
 
-import pandas as pd
 import numpy as np
 import yaml
 import glob
@@ -144,12 +145,7 @@ def GenerateSummations(userArgs):
             kernelName=s["name"]
             libSolutionNames.append(kernelName)
 
-        working_data=pd.read_csv(dataFilePath).rename(str.strip,axis='columns')
-
-        index_keys = working_data.SizeL.unique()
-        solutionsDF = working_data.filter(like='Cij')
-
-        perf_max = solutionsDF.max().max().item()
+        index_keys, working_data, perf_max = _read_benchmark_data(dataFilePath)
 
         solutionIndex = 0
         for s_stateR, kernelName in zip(solutionStatesR, libSolutionNames):
@@ -184,3 +180,44 @@ def GenerateSummations(userArgs):
         finalLogic = os.path.join(outputFinal, logicFileBaseName)
 
         copyfile(localFinalLogic, finalLogic)
+
+
+def _read_benchmark_data(data_file_path):
+    def normalized_header(header):
+        value = header.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1].strip()
+        return value
+
+    with open(data_file_path, newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        if not reader.fieldnames:
+            raise ValueError(f"Benchmark CSV has no header: {data_file_path}")
+        headers = [normalized_header(header) for header in reader.fieldnames]
+        rows = [
+            {normalized_header(header): value for header, value in row.items()}
+            for row in reader
+        ]
+
+    columns = {
+        header: np.asarray([float(row[header]) for row in rows], dtype=float)
+        for header in headers
+    }
+    index_keys = np.asarray(list(dict.fromkeys(columns["SizeL"])), dtype=float)
+    cij_columns = [values for name, values in columns.items() if "Cij" in name]
+    if not cij_columns:
+        raise ValueError(f"Benchmark CSV has no Cij performance columns: {data_file_path}")
+    perf_max = float(np.nanmax(np.concatenate(cij_columns)))
+    return index_keys, columns, perf_max
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="tensilelite generate-summations",
+        description="Generate summation models for existing library logic.",
+    )
+    parser.add_argument("logic_path", help="directory containing input library logic")
+    parser.add_argument("output_path", help="directory for generated models and artifacts")
+    args = parser.parse_args(argv)
+    GenerateSummations([args.logic_path, args.output_path])
+    return 0

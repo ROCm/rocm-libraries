@@ -160,8 +160,10 @@ function(create_device_library)
     endif()
     set(_known_bugs_resource "${_codegen_dir}/tensilelite/tensilelite_logic/known_bugs.yaml")
     foreach(_required_path
-            "${_codegen_dir}/tensilelite/bin/TensileLogic"
-            "${_codegen_dir}/tensilelite/tensilelite_create_library/__main__.py"
+            "${_codegen_dir}/tensilelite/__main__.py"
+            "${_codegen_dir}/tensilelite/cli.py"
+            "${_codegen_dir}/tensilelite/tensilelite_logic/run.py"
+            "${_codegen_dir}/tensilelite/tensilelite_create_library/run.py"
             "${_known_bugs_resource}")
         if(NOT EXISTS "${_required_path}")
             message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
@@ -301,6 +303,9 @@ function(create_device_library)
         --use-bundled-known-bugs
         --check-all
     )
+    if(_cdl_LOGIC_FILTER)
+        list(APPEND _tensile_logic_args "--logic-filter=**/${_cdl_LOGIC_FILTER}.yaml")
+    endif()
     if(_cdl_REQUIRE_GFX1250V0_OVERLAY)
         list(APPEND _tensile_logic_args --require-gfx1250v0-overlay)
     endif()
