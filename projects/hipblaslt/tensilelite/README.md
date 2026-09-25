@@ -71,9 +71,8 @@ with `git commit --no-verify`. On a snapshot mismatch the hook prints a
 
 ### Build client with invoke and Run a Test (Default Path)
 
-This workflow uses `invoke` to build the C++ client into the default `build_tmp` directory.
-TensileLite will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
-is not specified.
+This workflow uses `invoke` to build the C++ client into the default `build_tmp`
+directory and bind it to the active editable installation.
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
@@ -86,6 +85,7 @@ invoke rocisa
 
 # build the C++ client to the default location
 invoke build-client
+invoke configure-client --build-dir build_tmp
 
 # override the default toolchain with a specific ROCm install
 invoke build-client \
@@ -94,7 +94,7 @@ invoke build-client \
   --export-compile-commands
 
 # run an individual test directly — no wrapper script needed
-tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-out
+python -m tensilelite run tensilelite/Tests/common/exception/<test>.yaml tensile-out
 ```
 
 ### Rebuilding after C++ changes
@@ -130,11 +130,11 @@ ImportError: rocisa C++ sources are newer than the built _rocisa.so — bindings
   Rebuild:  cmake --build <build_dir> --target _rocisa
 ```
 
-**3. Build with CMake (Custom Location) and Run Test with Path Flag**
+**3. Build with CMake (Custom Location) and Bind the Client**
 
-This workflow is for when you need to build the client in a location other than the default
-`build_tmp` directory. The `--prebuilt-client` flag is then used to specify this custom path when
-running a test. Be sure to pass the root directory of the hipblaslt project when configuring.
+This workflow is for when you need to build the client outside the default
+`build_tmp` directory. Bind that executable to the active installation before
+running a test. Be sure to pass the hipBLASLt project root when configuring.
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
@@ -148,9 +148,10 @@ cmake --preset tensilelite -S .. -B my-custom-build
 # build
 cmake --build my-custom-build --parallel
 
-# run a test directly
-tensilelite/bin/Tensile tensilelite/Tests/pre_checkin/<test>.yaml tensile-out \
-                           --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
+# bind the custom client and run a test
+python -m tensilelite_configure_client \
+  --client "$PWD/my-custom-build/tensilelite/client/tensilelite-client"
+python -m tensilelite run tensilelite/Tests/pre_checkin/<test>.yaml tensile-out
 ```
 
 **4. Build with tox (Custom Build Args)**
@@ -210,10 +211,11 @@ Assumptions:
 
 - Each problem directory contains a library directory with one co file corresponding to one architecture
 
-Install rocisa with `invoke rocisa`, then run the source entry point directly:
+Install rocisa with `invoke rocisa`, then run the package entry point directly:
 
 ```
-tensilelite/bin/Tensile <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
+python -m tensilelite run \
+  <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
 ```
 
 To build asm only:
