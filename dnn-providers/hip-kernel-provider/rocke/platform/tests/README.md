@@ -109,9 +109,9 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 
 ### Native storage parity in the standard runner
 
-`run_all.py --build-root <build>` builds the `rocke_storage` target in a configured
-build and obtains its executable path from CTest. Both pytest passes receive that
-path, so storage IR/HIP parity and serialization tests run automatically.
+`run_all.py --build-root <build>` builds all configured targets before pytest,
+then obtains the `rocke_storage` executable path from CTest. Both pytest passes
+receive that path, so storage IR/HIP parity and serialization tests run automatically.
 `--config` selects the native test configuration (default `Release`). A build or
 fixture-discovery failure stops the runner instead of silently skipping coverage.
 
