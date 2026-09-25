@@ -336,6 +336,10 @@ class GlobalWriteBatchWriter:
     self._subtileAllStoresEndLabel = None # end-of-all-stores label (N cbranch target)
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
     self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
+    # Absolute row addressing: the same deferral, carried as a row count rather
+    # than as an instruction. See _subtileStoreSoffset.
+    self._subtileAbsRowAddr = parentWriter.states.subtileAbsRowAddr
+    self._subtilePendingAbsRows = 0
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
     # Component B (PLSIN_STORE_HOIST_ADDR): the lane-adjusted dwordx4 base
     # (addrDVgpr + lane_group*8) is identical for every paired store that shares
@@ -1046,6 +1050,54 @@ class GlobalWriteBatchWriter:
     """Release scratch from _epilogScratchSgpr (no-op when non-CLS reused tmpSgpr)."""
     if self.kernel["CompactLoopStore"]:
       self.parentWriter.sgprPool.checkIn(sgprIdx)
+
+  def _subtileDeferRow(self, addrCalc):
+    """Take this element's row advance, as a count rather than as an s_add.
+
+    Returns True when the caller must not emit ``incrementToNextRow`` because
+    the row is being carried absolutely instead. Deferred to the same place the
+    instruction was, so the row a store lands on does not change.
+    """
+    if not self._subtileAbsRowAddr:
+      return False
+    self._subtilePendingAbsRows += addrCalc.rowInc
+    return True
+
+  def _subtileFlushRow(self):
+    """Apply the deferred row advance, where the s_add used to be emitted."""
+    if self._subtilePendingAbsRows:
+      self.parentWriter.states.subtileAbsRows += self._subtilePendingAbsRows
+      self._subtilePendingAbsRows = 0
+
+  def _subtileStoreSoffset(self, module):
+    """Address this store's row through soffset instead of the SrdD cursor.
+
+    SrdD is one cursor that the whole store walks, advanced by a relative
+    ``s_add_u32 s[SrdD], s[SrdD], stride`` once per row group. That makes a
+    store's address a function of how many stores ran before it, so the drain
+    can be spread out but never reordered -- which is what disabled the
+    last-partition weave, and what stands between a partition's store and its
+    own last k-subiter. See FINDINGS F25.
+
+    The row is uniform, so it fits soffset, which every one of these stores
+    leaves at 0. Recomputing it per store costs one s_mul against the row
+    increment's s_add/s_addc, and makes each store independent of the rest.
+
+    Returns the soffset operand, and the scratch to release once the store is
+    emitted (None when the caller should keep the cursor behaviour).
+    """
+    if not self._subtileAbsRowAddr:
+      return 0, None
+    rows = self.parentWriter.states.subtileAbsRows
+    if not rows:
+      return 0, None
+    packedC1 = self.kernel["PackedC1IndicesX"]
+    strideD1J = "StrideD%s" % self.parentWriter.states.indexChars[packedC1[0]]
+    bpe = self.parentWriter.states.bpeCexternal
+    sOff = self._epilogScratchSgpr(1)
+    module.add(SMulI32(dst=sgpr(sOff), src0=sgpr(strideD1J), src1=rows * bpe,
+                       comment=f"absolute D row offset ({rows} rows), not a cursor advance"))
+    return sgpr(sOff), sOff
 
   def _prolog(self, module: Module):
     module.addComment0("optSingleColVgpr=%u optSharedColVgpr=%u optSGPRUsage=%s optSrdIncForRow=%u factorDim=%u" % \
@@ -2107,6 +2159,7 @@ class GlobalWriteBatchWriter:
         if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
           _ngTarget.add(self._subtileNGroupSkipLabel)
           self._subtileNGroupSkipLabel = None
+          self._subtileFlushRow()
           if self._subtilePendingSrdDInc is not None:
             _ngTarget.add(self._subtilePendingSrdDInc)
             self._subtilePendingSrdDInc = None
@@ -2581,7 +2634,7 @@ class GlobalWriteBatchWriter:
           if self._plsinScalarStoreMode():
             # No pairing: this element's epilogue is done, so store it now. Every
             # element gets its own gap, doubling the store/MFMA interleave points.
-            if self.ss.optSrdIncForRow and addrCalc.rowInc:
+            if self.ss.optSrdIncForRow and addrCalc.rowInc and not self._subtileDeferRow(addrCalc):
               self._subtilePendingSrdDInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
             _weavePairIdx = None
             if self._weaveMode:
@@ -2716,7 +2769,7 @@ class GlobalWriteBatchWriter:
               self.storesIssued += 1
           else:
             # sba=0 element (even tt0): defer SRD row increment until after N-group label.
-            if self.ss.optSrdIncForRow and addrCalc.rowInc:
+            if self.ss.optSrdIncForRow and addrCalc.rowInc and not self._subtileDeferRow(addrCalc):
               self._subtilePendingSrdDInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
             partnerElementIdx = elementIdx + 1
             partnerExists = (partnerElementIdx < len(self.batchElements) and
@@ -3938,6 +3991,7 @@ class GlobalWriteBatchWriter:
       if self._subtileNGroupSkipLabel is not None:
         targetModule.add(self._subtileNGroupSkipLabel)
         self._subtileNGroupSkipLabel = None
+      self._subtileFlushRow()
       if self._subtilePendingSrdDInc is not None:
         targetModule.add(self._subtilePendingSrdDInc)
         self._subtilePendingSrdDInc = None
@@ -3994,6 +4048,7 @@ class GlobalWriteBatchWriter:
     if self._subtileNGroupSkipLabel is not None:
       targetModule.add(self._subtileNGroupSkipLabel)
       self._subtileNGroupSkipLabel = None
+    self._subtileFlushRow()
     if self._subtilePendingSrdDInc is not None:
       targetModule.add(self._subtilePendingSrdDInc)
       self._subtilePendingSrdDInc = None
@@ -4519,13 +4574,16 @@ class GlobalWriteBatchWriter:
     globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
     for vPack, vAddr, cols in ((cvt.vgprBf16Temp, cvt.vgprColAddrQ,  "0-7"),
                                (cvt.vgprColPackB, cvt.vgprColAddrR,    "8-15")):
+      _soff, _soffTmp = self._subtileStoreSoffset(module)
       module.add(BufferStoreB128(
         src=vgpr(vPack, 4),
         vaddr=vgpr(vAddr),
         saddr=sgpr("SrdD", 4),
-        soffset=0,
+        soffset=_soff,
         mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
         comment=f"128B-column store tt0={tt0}: columns {cols}, 8 lanes x 16B"))
+      if _soffTmp is not None:
+        self._epilogScratchFree(_soffTmp)
     module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
     return module
 
@@ -4740,14 +4798,17 @@ class GlobalWriteBatchWriter:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
+    _soff, _soffTmp = self._subtileStoreSoffset(module)
     module.add(BufferStoreB128(
       src=vgpr(vPack, 4),
       vaddr=vgpr(vAddrScratch),
       saddr=sgpr("SrdD", 4),
-      soffset=0,
+      soffset=_soff,
       mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
       comment=f"16bit paired dwordx4 store tt0={tt0},{tt0+1}"
     ))
+    if _soffTmp is not None:
+      self._epilogScratchFree(_soffTmp)
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
@@ -4825,14 +4886,17 @@ class GlobalWriteBatchWriter:
     module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0<->2"))
     module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1<->3"))
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
+    _soff, _soffTmp = self._subtileStoreSoffset(module)
     module.add(BufferStoreB128(
       src=vgpr(vPack, 4),
       vaddr=vgpr(vAddrScratch),
       saddr=sgpr("SrdD", 4),
-      soffset=0,
+      soffset=_soff,
       mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
       comment=f"[pipeline] 16bit paired dwordx4 store tt0={tt0},{tt0+1}"
     ))
+    if _soffTmp is not None:
+      self._epilogScratchFree(_soffTmp)
     # WAR: the store reads vPack; the next same-buffer pack (2 groups later) overwrites it.
     module.add(SNop(waitState=0, comment="1 wait state: WAR store src -> next same-buffer pack dst"))
     return module
@@ -4914,15 +4978,18 @@ class GlobalWriteBatchWriter:
     bpeCurr = self.parentWriter.states.bpeCexternal
     bpe     = self.parentWriter.states.bpeCexternalGSU1
     globalOffset = addrCalc.globalOffset * bpe // bpeCurr
+    _soff, _soffTmp = self._subtileStoreSoffset(module)
     module.add(BufferStoreB64(
       src=vgpr(vPack+0, 2),
       vaddr=vgpr(vAddr),
       saddr=sgpr("SrdD", 4),
-      soffset=0,
+      soffset=_soff,
       mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=bool(ntd & 0x1),
                            slc=bool((ntd & 0x2) or forceSlc), nt=bool(ntd & 0x4)),
       comment=f"16bit unpaired dwordx2 store tt0={tt0}: 4 M-rows at fixed N-col"
     ))
+    if _soffTmp is not None:
+      self._epilogScratchFree(_soffTmp)
     # WAR: the store reads vPack[0:1]; the next subtile's v_cvt_pk overwrites them.
     # Only a hazard when the ring is a single pair -- with a rotating ring the next
     # pack targets a different pair, which is the point of the ring.
@@ -5130,14 +5197,17 @@ class GlobalWriteBatchWriter:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpInrSgpr, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
+    _soff, _soffTmp = self._subtileStoreSoffset(module)
     module.add(BufferStoreB64(
       src=vgpr(vPack+0, 2),
       vaddr=vgpr(vPack+2),
       saddr=sgpr("SrdD", 4),
-      soffset=0,
+      soffset=_soff,
       mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
       comment=f"orphan tt0={tt0} vc=0..3: 4 consecutive M-rows at fixed N-col"
     ))
+    if _soffTmp is not None:
+      self._epilogScratchFree(_soffTmp)
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))

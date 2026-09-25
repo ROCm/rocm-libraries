@@ -471,6 +471,10 @@ class StateValues:
   # rather than the StoreState itself because that object reaches the writer (and its
   # register pools) and must not be retained here.
   subtileHoistedAddrDVgpr: int           = -1
+  # Rows the fused store has already passed, when it addresses them absolutely
+  # rather than by advancing SrdD. See GlobalWriteBatch._subtileStoreSoffset.
+  subtileAbsRows: int                    = 0
+  subtileAbsRowAddr: bool                = False
   subtileHoistedAddrBlockN: int          = -1
   subtileHoistedAddrArm: int             = -1
   subtileStoreArmId: int                 = 0       # bumped per StoreState (store arm)

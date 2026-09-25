@@ -14967,6 +14967,8 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileHoistedAddrArm = -1
     self.states.subtileHoistedAddrDVgpr = -1
     self.states.subtileHoistedAddrBlockN = -1
+    self.states.subtileAbsRows = 0
+    self.states.subtileAbsRowAddr = plsinDebugEnv("TENSILE_PLSIN_ABS_STORE_ADDR", "0") != "0"
     _nStages = self.states.subtileStoreStages
     if _nStages > 1:
       _tt1Vals = sorted({e[0] for e in elements[0]})
@@ -19090,7 +19092,12 @@ class KernelWriterAssembly(KernelWriter):
           addr0 = vgpr(addrCalc.addrDVgpr,2)
           addr1 = ""
         # CLS: also seed the SRD chain on elt0/batch0 (rowInc==0).
-        if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
+        if self.states.subtileAbsRowAddr:
+          # The row rides in soffset instead of the cursor; see
+          # GlobalWriteBatch._subtileStoreSoffset. This path emits its increment
+          # where it is called, so the row advances here too.
+          self.states.subtileAbsRows += addrCalc.rowInc
+        elif (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
           module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS01, forceinitrow0=1,
                                                  overrideAfterPrimerRows=overrideAfterPrimerRows))
 
