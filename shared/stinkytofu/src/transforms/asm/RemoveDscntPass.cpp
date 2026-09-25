@@ -78,6 +78,9 @@ struct DsLoadEntry {
     int latency = 0;
     int throughput = 0;
     int maxDrain = 0;
+    /// Real, wave-sharing-adjusted issue cost (see makeDsLoadDrainEntry) --
+    /// carried through to toDrainEntry() so it isn't silently dropped.
+    int issueCycles = 0;
     std::vector<StinkyRegister> dests;
 };
 
@@ -292,7 +295,7 @@ AsmDirective* createTextCommentDirective(const std::string& comment) {
     return directive;
 }
 
-int recomputePrefetchInFlightDsLoads(const BasicBlock& bb, const HWModel& hw,
+int recomputePrefetchInFlightDsLoads(const BasicBlock& bb, const HWModel& hw, int numWaves,
                                      std::vector<DsLoadDrainEntry>& inFlight) {
     inFlight.clear();
     for (const IRBase& node : bb) {
@@ -305,7 +308,7 @@ int recomputePrefetchInFlightDsLoads(const BasicBlock& bb, const HWModel& hw,
             const HwInstDesc* desc = inst->getHwInstDesc();
             inFlight.push_back(makeDsLoadDrainEntry(
                 hw, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
-                desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles)));
+                desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles), numWaves));
         } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
             const size_t remaining = static_cast<size_t>(std::max(0, *keep));
             // dscnt keep=K retires the oldest loads first; keep the newest K.
@@ -343,8 +346,8 @@ class RemoveDscntPass : public StinkyInstPass {
         // carried across block boundaries so cycle counting and the in-flight
         // ds_load FIFO persist across BBs.
         hw_ = &passCtx.getHWModel();
-        // Passed through as-is: computeDynamicDrainLatencyForLoads() clamps it
-        // to the range the drain model is defined over.
+        // Passed to makeDsLoadDrainEntry, which clamps it to the range the
+        // drain model is defined over.
         numWaves_ = static_cast<int>(passCtx.getGemmTileConfig().NumWaves);
         PASS_DEBUG(std::cerr << "[RemoveDscnt] numWaves=" << numWaves_ << "\n");
 
@@ -359,7 +362,7 @@ class RemoveDscntPass : public StinkyInstPass {
                 return PreservedAnalyses::none();
             }
             std::vector<DsLoadDrainEntry> recomputedPrefetch;
-            if (recomputePrefetchInFlightDsLoads(bb, *hw_, recomputedPrefetch) > 0) {
+            if (recomputePrefetchInFlightDsLoads(bb, *hw_, numWaves_, recomputedPrefetch) > 0) {
                 state.dsLoadsBeforeActivation = std::move(recomputedPrefetch);
             }
         }
@@ -381,7 +384,10 @@ class RemoveDscntPass : public StinkyInstPass {
     DsLoadDrainEntry toDrainEntry(const DsLoadEntry& entry) const {
         const int latency =
             entry.latency > 0 ? entry.latency : (hw_ ? hw_->lds.readDrainLatency : 0);
-        return {.latency = latency, .throughput = entry.throughput, .maxDrain = entry.maxDrain};
+        return {.latency = latency,
+                .throughput = entry.throughput,
+                .maxDrain = entry.maxDrain,
+                .issueCycles = entry.issueCycles};
     }
 
     /// How many of the pre-activation LDS reads have returned by the time the
@@ -397,8 +403,8 @@ class RemoveDscntPass : public StinkyInstPass {
         int drained = 0;
         for (size_t count = 1; count <= loads.size(); ++count) {
             const int issueTime = computeDsIssueTime(count);
-            const int landsAt = issueTime + computeDynamicDrainLatencyForLoads(
-                                                *hw_, loads.subspan(0, count), numWaves);
+            const int landsAt =
+                issueTime + computeDynamicDrainLatencyForLoads(*hw_, loads.subspan(0, count));
             if (landsAt + dsProximityThreshold_ > totalIssueTime) break;
             drained = static_cast<int>(count);
         }
@@ -434,9 +440,8 @@ class RemoveDscntPass : public StinkyInstPass {
         for (size_t count = 1; count <= loads.size(); ++count) {
             const int elapsedForCount = cycles - inFlight[count - 1].cycle;
             const int landedCyclesAgo =
-                elapsedForCount -
-                computeDynamicDrainLatencyForLoads(
-                    *hw_, std::span<const DsLoadDrainEntry>(loads.data(), count), numWaves_);
+                elapsedForCount - computeDynamicDrainLatencyForLoads(
+                                      *hw_, std::span<const DsLoadDrainEntry>(loads.data(), count));
             if (landedCyclesAgo < dsProximityThreshold_) break;
             drained = static_cast<int>(count);
         }
@@ -492,7 +497,7 @@ class RemoveDscntPass : public StinkyInstPass {
                 const HwInstDesc* desc = inst->getHwInstDesc();
                 dsLoadsBeforeActivation.push_back(makeDsLoadDrainEntry(
                     *hw_, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
-                    desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles)));
+                    desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles), numWaves_));
             } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
                 const int newVal = static_cast<int>(dsLoadsBeforeActivation.size()) - numDsFinished;
                 PASS_DEBUG(std::cerr << "[RemoveDscnt]   reduce dscnt: tighten wait " << *keep
@@ -594,12 +599,13 @@ class RemoveDscntPass : public StinkyInstPass {
                 const HwInstDesc* desc = inst->getHwInstDesc();
                 const DsLoadDrainEntry drain = makeDsLoadDrainEntry(
                     *hw_, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
-                    desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles));
+                    desc ? desc->dsMaxDrain : 0, static_cast<int>(inst->issueCycles), numWaves_);
                 if (isDSRead(*inst)) {
                     inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
                                                           .latency = drain.latency,
                                                           .throughput = drain.throughput,
                                                           .maxDrain = drain.maxDrain,
+                                                          .issueCycles = drain.issueCycles,
                                                           .dests = inst->getDestRegs()});
                 } else {
                     // DS writes contribute to dscnt accounting but have no produced VGPR
@@ -608,6 +614,7 @@ class RemoveDscntPass : public StinkyInstPass {
                                                           .latency = drain.latency,
                                                           .throughput = drain.throughput,
                                                           .maxDrain = drain.maxDrain,
+                                                          .issueCycles = drain.issueCycles,
                                                           .dests = {}});
                 }
                 ++dsLoadsSinceLastKeptDscnt;

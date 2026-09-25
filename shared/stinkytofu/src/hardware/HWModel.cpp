@@ -86,15 +86,9 @@ int capDrainLatency(int latency, int maxDrainLatency) {
 }  // namespace
 
 int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
-                               int dsLoadThroughput, int maxDrainLatency, int rawNumWaves,
-                               int issueCycles) {
-    const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
+                               int dsLoadThroughput, int maxDrainLatency, int issueSpacing) {
     const int queueDepth = hw.lds.readQueueDepth;
     const int throughput = std::max(1, dsLoadThroughput);
-    // Per-wave issue spacing is the same shared-pipe cost dsIssueCyclesForWaves
-    // charges the scheduler's issue clock, seeded from the caller's real ISA
-    // issue cost -- not raw numWaves, and not an assumed constant.
-    const int issueSpacing = dsIssueCyclesForWaves(hw, issueCycles, numWaves);
 
     // A zero queue depth means the arch has no modeled LDS return queue (the
     // other consumers of lds.* already treat it as inert), and a lone load has
@@ -128,18 +122,26 @@ int dsIssueCyclesForWaves(const HWModel& hw, int issueCycles, int numWaves) {
     return issueCycles * std::min(numWaves, share);
 }
 
-int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
-                                       int rawNumWaves) {
+DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, int latency, int dsThroughput,
+                                      int dsMaxDrain, int isaIssueCycles, int rawNumWaves) {
+    const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
+    return {
+        .latency = latency > 0 ? latency : hw.lds.readDrainLatency,
+        .throughput = dsThroughput > 0 ? dsThroughput : hw.lds.dsLoadDefaultThroughput,
+        .maxDrain = dsMaxDrain > 0 ? dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
+        .issueCycles = dsIssueCyclesForWaves(hw, isaIssueCycles, numWaves),
+    };
+}
+
+int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads) {
     if (loads.empty()) return 0;
 
-    const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
     const int queueDepth = hw.lds.readQueueDepth;
     const int count = static_cast<int>(loads.size());
     const int targetLatency = loads.back().latency;
-    // Last load's own issue cost, matching targetLatency above -- see
-    // computeDynamicDrainLatency for why this isn't raw numWaves or an assumed
-    // constant.
-    const int issueSpacing = dsIssueCyclesForWaves(hw, loads.back().issueCycles, numWaves);
+    // Last load's own (already wave-sharing-adjusted) issue cost, matching
+    // targetLatency above -- see makeDsLoadDrainEntry.
+    const int issueSpacing = loads.back().issueCycles;
 
     // Cap with the largest maxDrain among the whole burst, not just the last
     // load.

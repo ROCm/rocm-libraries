@@ -145,53 +145,6 @@ constexpr int kArchKeyGfx1250 = archKey({12, 5, 0});
 // table.
 constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
 
-/// One LDS read in an ordered burst for mixed-type drain estimation.
-/// Callers resolve per-opcode throughput / max-drain / issue cost from
-/// HwInstDesc (with HWModel.lds defaults when the throughput/maxDrain desc
-/// fields are 0) before pushing an entry.
-struct DsLoadDrainEntry {
-    int latency = 0;
-    int throughput = 0;
-    int maxDrain = 0;
-    /// ISA issue cost (HwInstDesc::issue), before any wavesPerDsIssuePipe
-    /// sharing multiplier. Not defaulted to a guessed constant: every caller
-    /// must supply the real per-instruction value.
-    int issueCycles = 0;
-};
-
-/// Resolve a drain-model entry from an instruction's latency, ISA issue cost,
-/// and optional HwInstDesc overrides. \p dsThroughput / \p dsMaxDrain of 0
-/// select the arch defaults on \p hw. \p issueCycles has no arch-default
-/// fallback -- it comes straight from the instruction's own HwInstDesc.
-inline DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, int latency, int dsThroughput,
-                                             int dsMaxDrain, int issueCycles) {
-    return {
-        .latency = latency > 0 ? latency : hw.lds.readDrainLatency,
-        .throughput = dsThroughput > 0 ? dsThroughput : hw.lds.dsLoadDefaultThroughput,
-        .maxDrain = dsMaxDrain > 0 ? dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
-        .issueCycles = issueCycles,
-    };
-}
-
-/// Homogeneous-burst drain estimate. Throughput, max-drain and issueCycles are
-/// already resolved (typically via makeDsLoadDrainEntry / HwInstDesc) -- this
-/// takes the real per-instruction ISA issue cost, not an assumed constant.
-int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
-                               int dsLoadThroughput, int maxDrainLatency, int numWaves,
-                               int issueCycles);
-
-/// Mixed-type burst drain estimate.
-///
-/// Order of non-final loads does not matter. Uses:
-/// - latency from the last load
-/// - max-drain cap = max over every entry's maxDrain
-/// - total load count
-/// - issue throughput as the count-weighted average of per-load throughputs
-/// - issue spacing from the last load's own issueCycles (see
-///   dsIssueCyclesForWaves), not an assumed ISA constant
-int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
-                                       int numWaves);
-
 /// Effective ds issue cost in cycles for one wave, given how many waves are
 /// resident. \p issueCycles is the ISA cost (single-wave); \p numWaves is
 /// GemmTileConfig::NumWaves.
@@ -203,6 +156,46 @@ int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoad
 /// not. If hardware turns out to spread instead, this becomes
 /// ceilDiv(numWaves, pipeCount) and NumWaves == 2 drops back to the ISA cost.
 int dsIssueCyclesForWaves(const HWModel& hw, int issueCycles, int numWaves);
+
+/// One LDS read in an ordered burst for mixed-type drain estimation.
+struct DsLoadDrainEntry {
+    int latency = 0;
+    int throughput = 0;
+    int maxDrain = 0;
+    /// Real per-load issue cost: already passed through dsIssueCyclesForWaves
+    /// at construction (see makeDsLoadDrainEntry), not the bare ISA number.
+    /// Computed once here so no consumer can read this field and forget to
+    /// apply the wave-sharing multiplier.
+    int issueCycles = 0;
+};
+
+/// Resolve a drain-model entry from an instruction's latency, ISA issue cost,
+/// resident wave count, and optional HwInstDesc overrides. \p dsThroughput /
+/// \p dsMaxDrain of 0 select the arch defaults on \p hw. \p isaIssueCycles is
+/// the bare per-instruction ISA number (HwInstDesc::issue /
+/// StinkyInstruction::issueCycles); this resolves and stores the real,
+/// wave-sharing-adjusted cost via dsIssueCyclesForWaves.
+STINKYTOFU_EXPORT DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, int latency,
+                                                        int dsThroughput, int dsMaxDrain,
+                                                        int isaIssueCycles, int numWaves);
+
+/// Homogeneous-burst drain estimate. \p issueSpacing is the real per-load
+/// issue cost (see dsIssueCyclesForWaves) -- already wave-sharing-adjusted,
+/// typically the issueCycles field of a DsLoadDrainEntry built by
+/// makeDsLoadDrainEntry, not a bare ISA number or raw numWaves.
+int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
+                               int dsLoadThroughput, int maxDrainLatency, int issueSpacing);
+
+/// Mixed-type burst drain estimate.
+///
+/// Order of non-final loads does not matter. Uses:
+/// - latency from the last load
+/// - max-drain cap = max over every entry's maxDrain
+/// - total load count
+/// - issue throughput as the count-weighted average of per-load throughputs
+/// - issue spacing from the last load's own (already wave-sharing-adjusted)
+///   issueCycles
+int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads);
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.

@@ -1485,6 +1485,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
     //          signal/wait pairs so both halves share one threshold.
     auto barrierGroups =
         groupBarrierTokens(collectBarrierTokens(regionStart, regionEnd, /*useSrc=*/true));
+    const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
 
     std::vector<BarrierAfterSummary> overlapChecks;
     for (const BarrierTokenGroup& group : barrierGroups) {
@@ -1508,7 +1509,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                     const HwInstDesc* desc = inst.getHwInstDesc();
                     matchingDsLoads.push_back(makeDsLoadDrainEntry(
                         hw_, static_cast<int>(inst.latencyCycles), desc ? desc->dsThroughput : 0,
-                        desc ? desc->dsMaxDrain : 0, static_cast<int>(inst.issueCycles)));
+                        desc ? desc->dsMaxDrain : 0, static_cast<int>(inst.issueCycles), numWaves));
                     targetDSLoad = &inst;
                     targetDSLoadIt = it;  // keep updating → ends up as latest
                     break;
@@ -1538,12 +1539,10 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         // count-weighted average throughput, max maxDrain over the burst), keyed
         // by this pass context's NumWaves.
         const int configuredDrainLatency = dsReadDrainLatency();
-        const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
         const int matchingDsLoadCount = static_cast<int>(matchingDsLoads.size());
         const int latencyForAfterThreshold =
-            configuredDrainLatency > 0
-                ? configuredDrainLatency
-                : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
+            configuredDrainLatency > 0 ? configuredDrainLatency
+                                       : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads);
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
