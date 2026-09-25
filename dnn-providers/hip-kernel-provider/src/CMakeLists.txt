@@ -335,7 +335,6 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
             INSTALL_TEST_FILE "${_hkp_gfx950_external_ctest}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-attention-dense-external-integration
-            ENVIRONMENT ${TEST_ENVIRONMENT}
         )
     endif()
 
@@ -368,6 +367,12 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
 
+        # GTEST_FILTER and ENVIRONMENT belong here rather than in
+        # _gfx950_attention_dense_category_args: that list is populated only under YAML
+        # categorization, so anything folded into it is absent from a legacy-label build,
+        # which then enumerates the whole bundle tree pinned to this engine and runs
+        # without TEST_ENVIRONMENT (ASAN symbolizer, HSA_XNACK). The filter matches the
+        # gpu_ref registration in integration_tests/CMakeLists.txt.
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check
             PLUGIN_TARGET  hip_kernel_provider
@@ -375,6 +380,8 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_SUBDIR hip_kernel_provider
             ${_gfx950_shard_args}
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml
+            GTEST_FILTER   "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
             ${_gfx950_attention_dense_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check target")
