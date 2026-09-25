@@ -288,6 +288,11 @@ if(ROCKE_INSTALL_TESTS)
               "golden gate will fail on its library-kernel cases")
     endif()
 
+    # Keep the LDS skill CLI under tests/ so TheRock's test artifact includes it.
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/scripts/predict.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/analysis/lds-bank-conflict-expert")
+
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source), the WaveScope sidecar
