@@ -12,6 +12,7 @@ raising OSError. This guards against the CI regression where the build container
 ships rocm-smi but not amd-smi.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -38,7 +39,7 @@ pytestmark = [
 def test_missing_amdsmi_is_non_fatal_and_warns():
     """A missing amd-smi must not raise; AMDSMIPath stays None and a warning is issued."""
     GP.globalParameters["AMDSMIPath"] = "stale"
-    with patch.object(GP, "locateExe", side_effect=OSError("Failed to locate amd-smi")), \
+    with patch.object(GP._runtime, "executable_search_paths", return_value=[]), \
          patch.object(GP, "printWarning") as mock_warn:
         # Must not raise, even on non-Windows.
         GP.assignGlobalParameters({}, {})
@@ -48,14 +49,21 @@ def test_missing_amdsmi_is_non_fatal_and_warns():
     assert any("amd-smi" in str(c.args[0]) for c in mock_warn.call_args_list)
 
 
-def test_amdsmi_path_is_set_when_found():
-    """When amd-smi is located, AMDSMIPath is populated with its path."""
+def test_amdsmi_path_is_set_from_the_selected_runtime(tmp_path, monkeypatch):
+    """amd-smi is selected from the frozen runtime, not an ambient prefix."""
+    selected_bin = tmp_path / "selected" / "bin"
+    ambient_bin = tmp_path / "ambient" / "bin"
+    selected_bin.mkdir(parents=True)
+    ambient_bin.mkdir(parents=True)
+    selected_amdsmi = selected_bin / "amd-smi"
+    selected_amdsmi.write_text("#!/bin/sh\n", encoding="utf-8")
+    selected_amdsmi.chmod(0o755)
+    (ambient_bin / "amd-smi").write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("ROCM_PATH", str(ambient_bin.parent))
     GP.globalParameters["AMDSMIPath"] = None
-    with patch.object(GP, "locateExe", return_value="/opt/rocm/bin/amd-smi"):
+    with patch.object(
+        GP._runtime, "executable_search_paths", return_value=[selected_bin]
+    ):
         GP.assignGlobalParameters({}, {})
 
-    assert GP.globalParameters["AMDSMIPath"] == "/opt/rocm/bin/amd-smi"
-    # amd-smi must be the binary that was looked up.
-    with patch.object(GP, "locateExe", return_value="/opt/rocm/bin/amd-smi") as mock_locate:
-        GP.assignGlobalParameters({}, {})
-    assert mock_locate.call_args.args[1] == "amd-smi"
+    assert GP.globalParameters["AMDSMIPath"] == str(selected_amdsmi)
