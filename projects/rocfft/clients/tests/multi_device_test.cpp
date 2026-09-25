@@ -424,6 +424,12 @@ static const auto multi_gpu_tokens = {
     // 3D 8-device decomposition with an unbalanceable slow-dim pencil factorization
     // exercises the BuildOptMultiDevicePlan exception-safety fallback
     "complex_forward_len_8_2_2_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_2_1_2_stride_4_2_2_1_dev_0_brick_lower_0_0_1_0_upper_1_2_2_2_stride_4_2_2_1_dev_1_brick_lower_0_2_0_0_upper_1_4_1_2_stride_4_2_2_1_dev_2_brick_lower_0_2_1_0_upper_1_4_2_2_stride_4_2_2_1_dev_3_brick_lower_0_4_0_0_upper_1_6_1_2_stride_4_2_2_1_dev_4_brick_lower_0_4_1_0_upper_1_6_2_2_stride_4_2_2_1_dev_5_brick_lower_0_6_0_0_upper_1_8_1_2_stride_4_2_2_1_dev_6_brick_lower_0_6_1_0_upper_1_8_2_2_stride_4_2_2_1_dev_7_ofield_brick_lower_0_0_0_0_upper_1_8_1_1_stride_8_1_1_1_dev_0_brick_lower_0_0_0_1_upper_1_8_1_2_stride_8_1_1_1_dev_1_brick_lower_0_0_1_0_upper_1_8_2_1_stride_8_1_1_1_dev_2_brick_lower_0_0_1_1_upper_1_8_2_2_stride_8_1_1_1_dev_3",
+
+    // AIFFT-551: 2-device distributions of a Bluestein (prime 10007) length kept
+    // on the fast/contiguous axis, split on the slow axis at input and on the
+    // prime axis at output, so the Bluestein sub-FFT runs on a contiguous brick.
+    "complex_forward_len_6_10007_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_3_10007_stride_30021_10007_1_dev_0_brick_lower_0_3_0_upper_1_6_10007_stride_30021_10007_1_dev_1_ofield_brick_lower_0_0_0_upper_1_6_5004_stride_30024_5004_1_dev_0_brick_lower_0_0_5004_upper_1_6_10007_stride_30018_5003_1_dev_1",
+    "complex_inverse_len_6_10007_single_ip_batch_1_ifield_brick_lower_0_0_0_upper_1_3_10007_stride_30021_10007_1_dev_0_brick_lower_0_3_0_upper_1_6_10007_stride_30021_10007_1_dev_1_ofield_brick_lower_0_0_0_upper_1_6_5004_stride_30024_5004_1_dev_0_brick_lower_0_0_5004_upper_1_6_10007_stride_30018_5003_1_dev_1",
     // clang-format on
 };
 
@@ -488,6 +494,77 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_adhoc_token,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu_adhoc()),
                          accuracy_test::TestName);
+
+// AIFFT-551: a distributed Bluestein (prime 10007) plan must not silently fall
+// back to running the whole transform on one device. Detect that fallback by
+// checking every device's work buffer stays below the single-device size.
+TEST(multi_gpu_workbuf, distribute_bluestein_workspace)
+{
+    PROB_SKIP_UNITTEST();
+
+    // single-process, single-node 2-device test
+    if(mp_lib != fft_params::fft_mp_lib_none)
+        GTEST_SKIP() << "single-process test only";
+    if(gpus_per_rank < 2)
+        GTEST_SKIP() << "test requires at least 2 devices";
+
+    try
+    {
+        static const std::vector<size_t> length = {6, 10007};
+
+        for(const auto transform_type :
+            {fft_transform_type_complex_forward, fft_transform_type_complex_inverse})
+        {
+            for(const auto placement : {fft_placement_notinplace, fft_placement_inplace})
+            {
+                fft_params base;
+                base.length         = length;
+                base.precision      = fft_precision_single;
+                base.nbatch         = 1;
+                base.transform_type = transform_type;
+                base.placement      = placement;
+                base.mp_lib         = fft_params::fft_mp_lib_none;
+
+                const std::string desc = base.token();
+
+                // Reference: the same logical transform on a single device.  Its
+                // work buffer is what one device needs to run the whole transform.
+                rocfft_params ref{base};
+                ASSERT_EQ(ref.setup_structs(), fft_status_success) << "reference plan: " << desc;
+                const size_t single_whole
+                    = *std::max_element(ref.workbuffersizes.begin(), ref.workbuffersizes.end());
+                ASSERT_GT(single_whole, 0u) << "reference plan needs no work buffer: " << desc;
+
+                // Distribute across 2 devices: split the slow axis on input and the
+                // fast (prime-length) axis on output, so the Bluestein sub-FFT is
+                // computed on the contiguous input brick.
+                fft_params                dist = base;
+                std::vector<unsigned int> in_grid(length.size() + 1, 1);
+                std::vector<unsigned int> out_grid(length.size() + 1, 1);
+                in_grid[1]      = 2; // input split on slow dim
+                out_grid.back() = 2; // output split on fast (prime-length) dim
+                dist.distribute_field<fft_io::fft_io_in>(2, in_grid);
+                dist.distribute_field<fft_io::fft_io_out>(2, out_grid);
+
+                rocfft_params dist_params{dist};
+                ASSERT_EQ(dist_params.setup_structs(), fft_status_success)
+                    << "distributed plan: " << desc;
+                const size_t max_per_device = *std::max_element(dist_params.workbuffersizes.begin(),
+                                                                dist_params.workbuffersizes.end());
+
+                // A device reaching the single-device size means the whole transform
+                // ran on it, i.e. the gather/scatter fallback was taken instead of a
+                // real multi-device decomposition.
+                EXPECT_LT(max_per_device, single_whole)
+                    << "multi-device plan appears to have fallen back to single-device "
+                       "gather/scatter: a device holds a "
+                    << max_per_device << "-byte work buffer vs the " << single_whole
+                    << "-byte single-device size; " << desc;
+            }
+        }
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
 
 std::vector<fft_params> param_generator_some_continuous_brick()
 {
