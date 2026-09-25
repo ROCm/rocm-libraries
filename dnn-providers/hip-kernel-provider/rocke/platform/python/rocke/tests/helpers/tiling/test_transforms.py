@@ -264,3 +264,23 @@ def test_observer_result_types_surfaced_at_package_root() -> None:
     for name in ("Diagnostic", "TransformPlan", "ReorderPlan"):
         assert name in tiling.__all__
     assert all(isinstance(t, type) for t in (Diagnostic, TransformPlan, ReorderPlan))
+
+
+# ---- #47: a REPLICATED / duplicated-coordinate layout is REPORTED, not silently first-slot-classified ----
+
+def test_classify_rejects_a_replicated_layout() -> None:
+    # An element held at MULTIPLE (lane,reg) slots (e.g. gfx11 WMMA duplicates the operand across lane
+    # halves) cannot be paired source<->target by coordinate. The classifier must report it, not let the
+    # first slot silently win (the old `setdefault` mis-classified the reorder). Classify within one copy.
+    replicated = {(0, 0): (7,), (1, 0): (7,)}   # element (7,) held by BOTH lanes
+    with pytest.raises(ValueError, match="REPLICATED"):
+        classify_transform(replicated, replicated)
+
+
+def test_classify_rejects_same_set_different_multiplicity() -> None:
+    # Same element SET, different MULTIPLICITY -- the old `set()` check passed this; the multiset check
+    # rejects it as different elements (a same-size gather/broadcast preserves count but not the set).
+    src = {(0, 0): (0,), (1, 0): (0,), (2, 0): (1,)}   # multiset {(0,): 2, (1,): 1}
+    tgt = {(0, 0): (0,), (1, 0): (1,), (2, 0): (1,)}   # multiset {(0,): 1, (1,): 2}
+    with pytest.raises(ValueError, match="different elements"):
+        classify_transform(src, tgt)

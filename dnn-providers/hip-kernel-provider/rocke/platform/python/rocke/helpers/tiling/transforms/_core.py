@@ -14,6 +14,7 @@ single normalizer that lets labels flow the same way whether they come from a
 from __future__ import annotations
 
 import itertools
+from collections import Counter
 from dataclasses import dataclass
 
 from ..encoding import WarpDistributionEncoding
@@ -133,15 +134,26 @@ def _classify_maps(smap: dict[tuple[int, int], tuple[int, ...]],
             "cannot transform between fragments of different dimensions -- source is "
             f"{len(s_lanes)}x{len(s_regs)} (lanes x regs), target is {len(t_lanes)}x{len(t_regs)}"
         )
-    if set(smap.values()) != set(tmap.values()):
+    if Counter(smap.values()) != Counter(tmap.values()):
         raise ValueError(
             "cannot transform between layouts that hold different elements -- source and target "
-            "describe different tiles (check shapes / that they are the same logical tile)"
+            "describe different tiles, or the same element appears a different number of times "
+            "(check shapes / that they are the same logical tile)"
         )
 
+    # A REPLICATED layout holds one element at several (lane,reg) slots (e.g. gfx11 WMMA duplicates
+    # the operand across lane halves). This coordinate->slot classifier cannot pair source and target
+    # copies -- report it rather than let one slot silently win (which mis-classifies the reorder).
+    # Classify within a single replication copy instead.
     target_of: dict[tuple[int, ...], tuple[int, int]] = {}
     for (lane, reg), coord in tmap.items():
-        target_of.setdefault(coord, (lane, reg))
+        if coord in target_of:
+            raise ValueError(
+                "cannot classify a transform for a REPLICATED layout -- element "
+                f"{coord} occupies multiple (lane, reg) slots, so source and target copies cannot be "
+                "paired by coordinate; classify within a single replication copy instead"
+            )
+        target_of[coord] = (lane, reg)
 
     per_lane_perm: dict[int, dict[int, int]] = {}
     for (lane, reg), coord in smap.items():
