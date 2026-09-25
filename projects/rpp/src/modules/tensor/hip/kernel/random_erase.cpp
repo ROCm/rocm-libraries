@@ -113,7 +113,8 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                        RpptDescPtr dstDescPtr, RpptRoiLtrb* anchorBoxInfoTensor,
                                        T* noiseBuffer, RpptROIPtr roiTensorPtrSrc,
                                        RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = dstDescPtr->w;
     int globalThreads_y = dstDescPtr->h;
@@ -143,6 +144,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
             globalThreads_x = dstDescPtr->w;
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         }
@@ -156,6 +158,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                handle.GetStream(), dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                anchorBoxInfoTensor, noiseBuffer, dstDescPtr->w, dstDescPtr->h);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (srcDescPtr->dataType == RpptDataType::F16) {
             hipLaunchKernelGGL(random_erase_pkd_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
@@ -165,6 +168,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                handle.GetStream(), dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                anchorBoxInfoTensor, noiseBuffer, dstDescPtr->w, dstDescPtr->h);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (srcDescPtr->dataType == RpptDataType::F32) {
             hipLaunchKernelGGL(random_erase_pkd_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
@@ -174,6 +178,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                handle.GetStream(), dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                anchorBoxInfoTensor, noiseBuffer, dstDescPtr->w, dstDescPtr->h);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (srcDescPtr->dataType == RpptDataType::I8) {
             hipLaunchKernelGGL(random_erase_pkd_hip_tensor,
                                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
@@ -183,6 +188,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                handle.GetStream(), dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                anchorBoxInfoTensor, noiseBuffer, dstDescPtr->w, dstDescPtr->h);
+            HIP_CHECK_LAUNCH_RETURN();
         }
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && dstDescPtr->c == 1) {
@@ -200,6 +206,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                       dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, noiseBuffer, dstDescPtr->w, dstDescPtr->h);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && dstDescPtr->c == 3) {
         RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
@@ -216,6 +223,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                       dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, noiseBuffer, dstDescPtr->w, dstDescPtr->h);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
         if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             globalThreads_x =
@@ -231,6 +239,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                           dstDescPtr->strides.hStride),
                                roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
             globalThreads_x = dstDescPtr->w;
             hipLaunchKernelGGL(random_erase_pln3_hip_tensor,
@@ -242,6 +251,7 @@ RppStatus hip_exec_random_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                           dstDescPtr->strides.hStride),
                                anchorBoxInfoTensor, noiseBuffer, dstDescPtr->w, dstDescPtr->h);
+            HIP_CHECK_LAUNCH_RETURN();
         }
     } else
         return RPP_ERROR_NOT_IMPLEMENTED;

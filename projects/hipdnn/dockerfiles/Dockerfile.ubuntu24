@@ -60,6 +60,56 @@ RUN curl -fL https://dvc.org/download/linux-deb/dvc-3.67.0 -o /tmp/dvc.deb && \
     rm /tmp/dvc.deb
 
 # ============================================================================
+# Developer packages, isolated from TheRock's build environment
+# ============================================================================
+FROM base AS install_dev_deps
+
+# GoogleTest/GoogleMock 1.17.0. Fetch a full commit SHA, as in install_kpack.
+RUN mkdir -p /tmp/googletest && cd /tmp/googletest && \
+    git init -q . && \
+    git remote add origin https://github.com/google/googletest.git && \
+    git fetch --depth 1 origin 52eb8108c5bdec04579160ae17225d66034bd723 && \
+    git checkout -q FETCH_HEAD && \
+    cmake -S . -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DBUILD_GMOCK=ON \
+        -DINSTALL_GTEST=ON \
+        -Dgtest_build_tests=OFF \
+        -Dgtest_build_samples=OFF \
+        -Dgmock_build_tests=OFF && \
+    cmake --build build && \
+    DESTDIR=/tmp/dev-deps cmake --install build
+
+# spdlog 1.15.3 with bundled fmt, matching hipDNN's fetch fallback.
+RUN mkdir -p /tmp/spdlog && cd /tmp/spdlog && \
+    git init -q . && \
+    git remote add origin https://github.com/gabime/spdlog.git && \
+    git fetch --depth 1 origin 6fa36017cfd5731d617e1a934f0e5ea9c4445b13 && \
+    git checkout -q FETCH_HEAD && \
+    cmake -S . -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DSPDLOG_INSTALL=ON \
+        -DSPDLOG_BUILD_SHARED=OFF \
+        -DSPDLOG_BUILD_PIC=ON \
+        -DSPDLOG_FMT_EXTERNAL=OFF \
+        -DSPDLOG_FMT_EXTERNAL_HO=OFF \
+        -DSPDLOG_BUILD_TESTS=OFF \
+        -DSPDLOG_BUILD_TESTS_HO=OFF \
+        -DSPDLOG_BUILD_EXAMPLE=OFF \
+        -DSPDLOG_BUILD_EXAMPLE_HO=OFF \
+        -DSPDLOG_BUILD_BENCH=OFF && \
+    cmake --build build && \
+    DESTDIR=/tmp/dev-deps cmake --install build
+
+# ============================================================================
 # rocm_kpack Python tooling
 #
 # hip-kernel-provider packs .co kernels into .kpack archives via rocm_kpack.
@@ -249,7 +299,7 @@ RUN rm -rf /TheRock /venv /tmp/install.log
 # ============================================================================
 FROM base AS install_therock_fullbuild
 
-ARG THEROCK_ASIC=gfx94X
+ARG THEROCK_ASIC=gfx94X-dcgpu
 ARG THEROCK_GIT_HASH=default
 ARG THEROCK_BUILD_MODE=Release
 ARG THEROCK_BUILD_PRESET=linux-release-package
@@ -449,6 +499,9 @@ RUN mkdir -p /opt/rocm
 # container build needs no kpack flags and never fetches. Outside /opt/rocm
 # because that is a run-time mount point.
 COPY --from=install_kpack /opt/rocm-kpack /opt/rocm-kpack
+
+# Only installed developer packages enter this image, outside the ROCm mount.
+COPY --from=install_dev_deps /tmp/dev-deps/usr/local/ /usr/local/
 
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
