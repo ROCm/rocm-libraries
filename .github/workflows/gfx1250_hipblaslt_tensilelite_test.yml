@@ -104,9 +104,13 @@ jobs:
           CMAKE_PREFIX_PATH: /opt/rocm
         run: |
           set -o pipefail
+          # Persist ROCm tools on PATH for later steps (rocm_agent_enumerator for
+          # GPU-arch detect). $GITHUB_PATH prepends; a job-level env: PATH would clobber.
+          echo "/opt/rocm/bin" >> "$GITHUB_PATH"
+          echo "/opt/rocm/lib/llvm/bin" >> "$GITHUB_PATH"
           export PATH="/opt/rocm/lib/llvm/bin:/opt/rocm/bin:$PATH"
           export LD_LIBRARY_PATH="/opt/rocm/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
-          apt-get update -qq && apt-get install -y -qq ccache ninja-build make || true
+          apt-get update -qq && apt-get install -y -qq ccache ninja-build make libopenblas-dev || true
           export Tensile_ASM_COMPILER_LAUNCHER=ccache Tensile_CXX_COMPILER_LAUNCHER=ccache
           # Ninja like TheRock's build; cmake would otherwise default to Unix Makefiles.
           export CMAKE_GENERATOR=Ninja
