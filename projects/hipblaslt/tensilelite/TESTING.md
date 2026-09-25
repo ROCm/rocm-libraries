@@ -209,7 +209,7 @@ fixture or pinning current behavior. In spirit this is closer to
 validate tuning data rather than code, and where each one lives follows from that.
 
 Two of these checks — sibling-`DeviceNames` consistency and the gfx1250v0-overlay's logic-tree shape —
-are implemented in `tensilelite.tensilelite_logic.ValidCorpusConsistency` and run unconditionally inside
+are implemented in `tensilelite.tensilelite_logic.valid_corpus_consistency` and run unconditionally inside
 `TensileLogic --check-all`, so every kernel-generating build checks them regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy of each also lives in
@@ -231,7 +231,7 @@ to be present, which it is not everywhere these tests run (see
 [Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
 doc, and [CI visibility and gating](#ci-visibility-and-gating) below). A separate hermetic suite,
 [`test_valid_corpus_consistency.py`](tensilelite/Tests/unit/test_valid_corpus_consistency.py), tests the
-`ValidCorpusConsistency` checker itself against synthetic fixtures and does not depend on that gate.
+`valid_corpus_consistency` checker itself against synthetic fixtures and does not depend on that gate.
 
 ### How this one was learned: a naming drift silently dropped a working kernel
 

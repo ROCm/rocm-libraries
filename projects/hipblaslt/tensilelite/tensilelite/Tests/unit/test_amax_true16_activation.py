@@ -37,7 +37,7 @@ from gpu_test_helpers import init_rocisa  # noqa: E402
 from tensilelite.Common.Architectures import gfxToIsa  # noqa: E402
 from tensilelite.Common.DataType import DataType  # noqa: E402
 
-from tensilelite._extops import AMaxGenerator  # noqa: E402
+from tensilelite._extops import amax_generator  # noqa: E402
 
 
 # true16 family covered by the NoSDWA arch cap (checkInList(isaVersion[0], {11, 12})).
@@ -84,7 +84,7 @@ _FAKE16_RE = re.compile(
 )
 
 
-def _make_generator(target: str) -> "AMaxGenerator.AMaxKernelGenerator":
+def _make_generator(target: str) -> "amax_generator.AMaxKernelGenerator":
     """Build a half-input AMaxKernelGenerator initialized for ``target``.
 
     Uses the shared init_rocisa helper (gfxToIsa -> ri.init -> ri.setKernel),
@@ -95,7 +95,7 @@ def _make_generator(target: str) -> "AMaxGenerator.AMaxKernelGenerator":
     assert isa, f"unknown gfx target: {target}"
     init_rocisa(target=target, wavesize=32)
     half = DataType("H")
-    return AMaxGenerator.AMaxKernelGenerator(
+    return amax_generator.AMaxKernelGenerator(
         i_type=half,
         o_type=half,
         scale_type=DataType("S"),
