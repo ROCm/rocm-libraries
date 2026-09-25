@@ -17,7 +17,7 @@
 ################################################################################
 
 import contextlib
-from ...ExecutionPolicy import isDataParallel
+from ...ExecutionPolicy import isPersistentDataParallel
 import math
 from functools import singledispatch
 
@@ -2110,7 +2110,7 @@ def tdmApplyTileKOffsetSubtile(writer, kernel, tP):
   mod = Module(f"TDM StreamK K-offset subtile {tc}")
   # DP-only: StreamKLocalStart == 0, so the K-start offset is 0 and this is a
   # no-op. StreamKLocalStart is not allocated in DP-only mode.
-  if isDataParallel(kernel):
+  if isPersistentDataParallel(kernel):
     return mod
   with writer.allocTmpSgpr(2, alignment=2, tag="tdmSkOffset") as tmpSgprRes:
     o = tmpSgprRes.idx

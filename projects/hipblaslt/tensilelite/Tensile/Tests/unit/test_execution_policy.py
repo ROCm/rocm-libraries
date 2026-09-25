@@ -40,7 +40,7 @@ def test_supported_pair_matrix(strategy, assignment):
     policy = resolve_policy(state)
     assert state["_PersistentLoop"] is (strategy != "None")
     assert policy.persistent is (strategy != "None")
-    assert policy.data_parallel is (strategy == "DataParallel")
+    assert policy.persistent_data_parallel is (strategy == "DataParallel")
     assert policy.stream_k is (strategy == "StreamK")
     if strategy == "None":
         assert state["WorkAssignment"] == "StaticGrid"

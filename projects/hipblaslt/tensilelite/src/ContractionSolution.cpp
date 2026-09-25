@@ -1173,7 +1173,7 @@ namespace TensileLite
             // downstream (StridesD/Alpha/...) offsets. Keep appending for every other
             // streamK>0 && atomic==0 kernel (layout unchanged).
             if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0
-                && !sizeMapping.isDataParallel())
+                && !sizeMapping.isPersistentDataParallel())
             {
                 // Assert hardware is not null
                 // For now grouped gemm is not supported and passes nullptr
@@ -1269,7 +1269,7 @@ namespace TensileLite
             // append ws/Flags. In ver3 only Flags stays here; ws is appended after
             // alpha/beta.
             if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0
-                && !sizeMapping.isDataParallel())
+                && !sizeMapping.isPersistentDataParallel())
             {
                 // Assert hardware is not null
                 // For now grouped gemm is not supported and passes nullptr
@@ -1315,7 +1315,7 @@ namespace TensileLite
             }
         }
 
-        if(sizeMapping.isDataParallel())
+        if(sizeMapping.isPersistentDataParallel())
         {
             const uint32_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
             // Legacy DP layout v0: six u32 slots, no workspace/flag pointer.
@@ -1335,8 +1335,8 @@ namespace TensileLite
         {
             if(!sizeMapping.hasStaticAssignment() && !sizeMapping.hasDynamicAssignment() && !sizeMapping.hasHybridAssignment())
             {
-                throw std::runtime_error("Stream-K modes 1 and 2 are no longer supported; "
-                                         "use StreamK=3, 4, or 5");
+                throw std::runtime_error("TileProcessingStrategy=StreamK requires "
+                                         "WorkAssignment=StaticGrid, DynamicWorkQueue, or Hybrid");
             }
 
             if(gsu > 1)
@@ -1472,7 +1472,7 @@ namespace TensileLite
                             sk3_itersPerTile,
                             sk.grid,
                             pAMDGPU->skFullTiles,
-                            sizeMapping.isDataParallel());
+                            sizeMapping.isPersistentDataParallel());
                         sk3_skTiles      = sk3_split.skTiles;
                         sk3_skItersPerWG = sk3_split.skItersPerWG;
                     }
@@ -1554,7 +1554,7 @@ namespace TensileLite
                                              itersPerTile,
                                              sk.grid,
                                              pAMDGPU->skFullTiles,
-                                             sizeMapping.isDataParallel());
+                                             sizeMapping.isPersistentDataParallel());
 
                     args.template append<uint32_t>("SKItersPerWG", split.skItersPerWG);
                     args.template append<uint32_t>("skGrid", sk.grid);
@@ -1591,7 +1591,7 @@ namespace TensileLite
 
             // ver3 places AddressWS after alpha/beta, see the StreamK block above.
             if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0
-                && !sizeMapping.isDataParallel())
+                && !sizeMapping.isPersistentDataParallel())
             {
                 args.template append<void const*>("ws", inputs.ws);
             }
@@ -2626,7 +2626,7 @@ namespace TensileLite
 
         if(sizeMapping.isPersistent())
         {
-            if(sizeMapping.isDataParallel()
+            if(sizeMapping.isPersistentDataParallel()
                && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1))
             {
                 // ForceDPOnly cluster multicast [Cs, Ck]: launch a grid spanning
@@ -2677,7 +2677,7 @@ namespace TensileLite
         // up would only add work-groups that run the whole Stream-K prologue
         // before falling out on an empty iteration range.
         bool persistentSpatialCluster = sizeMapping.isPersistent()
-                                  && sizeMapping.isDataParallel() && enableCluster;
+                                  && sizeMapping.isPersistentDataParallel() && enableCluster;
         if(enableCluster && (!sizeMapping.isPersistent() || persistentSpatialCluster))
         {
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
@@ -4818,7 +4818,7 @@ namespace TensileLite
         if(!sizeMapping.isPersistent())
             return launch;
         launch.totalTiles = problem.getNumTiles(sizeMapping, 1);
-        if(sizeMapping.isDataParallel())
+        if(sizeMapping.isPersistentDataParallel())
             launch.grid = getPersistentGridImpl(*this, problem, hardware, launch.totalTiles,
                                                 origami::reduction_t::none, nullptr,
                                                 nullptr, nullptr, &launch.clusterGridClamp,
@@ -4928,7 +4928,7 @@ namespace TensileLite
         PersistentLaunchSettings sk;
         bool customStreamK = customKernel.workspaceType == CustomWorkspaceType::StreamK || customKernel.workspaceType == CustomWorkspaceType::StreamKWithReduction;
         sizeMapping.validateExecutionPolicy();
-        if(sizeMapping.isDataParallel())
+        if(sizeMapping.isPersistentDataParallel())
         {
             if(gsu > 1)
                 throw std::runtime_error("DataParallel persistent execution does not support GlobalSplitU > 1");
@@ -5458,7 +5458,7 @@ namespace TensileLite
     size_t ContractionSolution::requiredWorkspaceSize(Problem const&  problem,
                                                       Hardware const& hardware) const
     {
-        if(sizeMapping.isDataParallel())
+        if(sizeMapping.isPersistentDataParallel())
             return 0;
         size_t size = 0;
         // TODO: Pass GSU from problem and change value[2] to gsu if gsu != default value
@@ -5502,7 +5502,7 @@ namespace TensileLite
                 gsu = 1;
             }
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-            const bool forceDPOnly = sizeMapping.isDataParallel();
+            const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
             size_t tiles = 0;
             if (useLegacyWorkspaceLogic)
                 tiles = problem.getNumTiles(sizeMapping, 1);
@@ -5725,7 +5725,7 @@ namespace TensileLite
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
-        if(sizeMapping.isDataParallel())
+        if(sizeMapping.isPersistentDataParallel())
             return origami::reduction_t::none;
         auto reductionStrat = origami::reduction_t::tree;
 
@@ -6020,7 +6020,6 @@ namespace TensileLite
                                             : getSKReduction(problem, hardware);
         else
             sk.reduction = getSKReduction(problem, hardware);
-        sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
         sk.smCountTarget             = problem.getParams().smCountTarget();
         sk.grid = getPersistentGridImpl(*this,
                                 problem,
@@ -6035,7 +6034,7 @@ namespace TensileLite
         sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
-        const bool forceDPOnly = sizeMapping.isDataParallel();
+        const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
                || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
@@ -6434,7 +6433,7 @@ namespace TensileLite
                                              itersPerTile,
                                              sk.grid,
                                              pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
-                                             sizeMapping.isDataParallel());
+                                             sizeMapping.isPersistentDataParallel());
 
                     // Capability AND the mode bit: the packer only sets
                     // MagicShiftItersPerTile bit 29 -- the bit the kernel
@@ -6479,7 +6478,7 @@ namespace TensileLite
                 // appended for these kernels, and the device reads AddressFlags == 0
                 // as a request for the parallel reduction path.
                 if(requireSynchronizer && sizeMapping.streamKAtomic == 0
-                   && !sizeMapping.isDataParallel() && synchronizer == nullptr)
+                   && !sizeMapping.isPersistentDataParallel() && synchronizer == nullptr)
                     return refuse("SynchronizerNull",
                                   "the StreamK Synchronizer/Flags pointer is null");
 
@@ -6735,13 +6734,13 @@ namespace TensileLite
                         .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
                         .workgroup_mapping         = self.sizeMapping.workGroupMapping,
                         .workspace_size            = problem.workspaceSize(),
-                        .workspace_size_per_elem_c = self.sizeMapping.isDataParallel()
+                        .workspace_size_per_elem_c = self.sizeMapping.isPersistentDataParallel()
                                                          ? static_cast<size_t>(DataTypeInfo::Get(self.problemType.computeType).elementSize)
                                                          : self.sizeMapping.workspaceSizePerElemC,
                         // The existing grid predictor was calibrated with this model
                         // for whole-tile launches. This adapter preserves its grid policy;
                         // the DataParallel launch itself has no reduction strategy.
-                        .reduction_strategy = self.sizeMapping.isDataParallel()
+                        .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
                                                   ? origami::reduction_t::tree : reductionStrat,
                     };
 
@@ -6774,7 +6773,7 @@ namespace TensileLite
                 skGrid = cuCount;
             }
 
-            if(self.sizeMapping.isDataParallel())
+            if(self.sizeMapping.isPersistentDataParallel())
             {
                 if(outSelectedGrid) *outSelectedGrid = skGrid;
                 if(self.sizeMapping.clusterDim.x * self.sizeMapping.clusterDim.y > 1)
@@ -6858,7 +6857,7 @@ namespace TensileLite
                     // bound.
                     const bool flagRegionBinds
                         = self.sizeMapping.streamKAtomic == 0
-                          && !self.sizeMapping.isDataParallel()
+                          && !self.sizeMapping.isPersistentDataParallel()
                           && reductionStrat != origami::reduction_t::parallel;
 
                     if(g0 > tiles)
@@ -6948,7 +6947,7 @@ namespace TensileLite
             // one work-group per output tile (not a K-split), so skGrid == tiles.
             // The launch pads up to the cluster dims and the boundary peers
             // pad-exit (StreamK.preLoop) when the size is not a cluster multiple.
-            if(self.sizeMapping.hasStaticAssignment() && self.sizeMapping.isDataParallel()
+            if(self.sizeMapping.hasStaticAssignment() && self.sizeMapping.isPersistentDataParallel()
                && (static_cast<size_t>(self.sizeMapping.clusterDim.x)
                    * static_cast<size_t>(self.sizeMapping.clusterDim.y))
                       > 1)
@@ -6989,7 +6988,7 @@ namespace TensileLite
             // to the CU count, well inside the bound on a 256-CU gfx950, but
             // TENSILE_STREAMK_GRID_MULTIPLIER scales it with no cap of its own.
             const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
-                                        && !self.sizeMapping.isDataParallel()
+                                        && !self.sizeMapping.isPersistentDataParallel()
                                         && reductionStrat != origami::reduction_t::parallel
                                         && skGrid > 0 && (tiles % skGrid) != 0;
 
@@ -7078,7 +7077,6 @@ namespace TensileLite
     {
         StreamKDecisions d;
         // Deprecated scraper-facing integer encoding, confined to this adapter.
-        d.streamKMode = !sizeMapping.isStreamK() ? 0 : sizeMapping.hasDynamicAssignment() ? 4 : sizeMapping.hasHybridAssignment() ? 5 : 3;
         if(!sizeMapping.isStreamK())
             return d;
 
@@ -7138,7 +7136,7 @@ namespace TensileLite
         reduction = streamKReconcileReduction(reduction, grid, tiles);
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
-        const bool forceDPOnly = sizeMapping.isDataParallel();
+        const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
         d.streamKDP            = streamKDP;
         d.forceDPOnly          = forceDPOnly;
 
@@ -7243,8 +7241,11 @@ namespace TensileLite
         auto reductionStr = [](origami::reduction_t r) {
             return r == origami::reduction_t::parallel ? "parallel(DP)" : "tree";
         };
+        // Retain the legacy labels and numeric field only at the reporting boundary.
+        const int legacyStreamKMode = !sizeMapping.isStreamK() ? 0
+            : sizeMapping.hasDynamicAssignment() ? 4 : sizeMapping.hasHybridAssignment() ? 5 : 3;
         const char* modeStr = "?";
-        switch(d.streamKMode)
+        switch(legacyStreamKMode)
         {
         case 0: modeStr = "none"; break;
         case 3: modeStr = "SK3(static)"; break;
@@ -7345,7 +7346,7 @@ namespace TensileLite
            << " EffectiveWorkAssignment=" << (d.isDynamic ? "DynamicWorkQueue" : "StaticGrid") << "\n";
         os << "  mode:\n";
         field(9, "mode", modeStr);
-        field(9, "streamK", std::to_string(d.streamKMode));
+        field(9, "streamK", std::to_string(legacyStreamKMode));
         field(9, "reduction", reductionStr(d.reduction));
         field(9, "isDynamic", yn(d.isDynamic));
 
