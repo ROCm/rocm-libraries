@@ -96,7 +96,7 @@ Arguments getrf_setup_arguments(getrf_tuple tup)
     return arg;
 }
 
-template <bool BLOCKED, typename I>
+template <bool BLOCKED, typename I, int BATCH_COUNT = 3>
 class GETF2_GETRF : public ::TestWithParam<getrf_tuple>
 {
 protected:
@@ -113,7 +113,7 @@ protected:
         if(arg.peek<rocblas_int>("m") == 0 && arg.peek<rocblas_int>("n") == 0)
             testing_getf2_getrf_bad_arg<BATCHED, STRIDED, BLOCKED, T, I>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         if(arg.singular == 1)
             testing_getf2_getrf<BATCHED, STRIDED, BLOCKED, T, I>(arg);
 
