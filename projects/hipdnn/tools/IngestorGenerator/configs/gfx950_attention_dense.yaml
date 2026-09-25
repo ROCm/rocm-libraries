@@ -1,17 +1,26 @@
-# Worked example: a real rocKE kernel packaged for gfx950.
+# Source of truth for the shipped hipkernel:Gfx950AttentionDense catalog.
 #
-# The dense flash-attention prefill kernel from
-# rocke/library/kernels/gfx950/attention_dense.py in the PACKAGED dialect: hkp_pack
+# The descriptors under
+# dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/
+# and src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp
+# are generated from this file. After editing it, regenerate from the
+# IngestorGenerator root and copy exactly those files into the provider:
+#     .venv/bin/python generate.py --config configs/gfx950_attention_dense.yaml \
+#         --output-dir <scratch> --force
+# The generated packs/Gfx950AttentionDenseNative.cpp and
+# tests/TestGfx950AttentionDenseMatchers.cpp are stubs; the provider's copies are
+# hand-maintained and must not be overwritten.
+#
+# The kernel is the dense flash-attention prefill from
+# rocke/library/kernels/gfx950/attention_dense.py, in the PACKAGED dialect: hkp_pack
 # lowers the named builder through comgr at build time and rewrites the shipped
 # descriptor to `kind: kpack` before the runtime loader sees it, so nothing dispatches
 # `rocke` at runtime.
 #
-# gfx950 is not a requirement: both the gfx942 and gfx950 builders satisfy hkp_pack's
-# `_require_spec_arch_signature` `(spec, *, arch)` contract.
-#
-# Every `spec` value below is a field of AttentionDenseSpec. The six without defaults
-# (batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, head_size) are MANDATORY:
-# hkp_pack hydrates with Spec(**fields), so a missing one is a TypeError at pack time.
+# Every spec field below (a group's `spec_defaults` plus its shape rows and knob arms)
+# is a field of AttentionDenseSpec. The six without defaults (batch, seqlen_q,
+# seqlen_kv, num_query_heads, num_kv_heads, head_size) are MANDATORY: hkp_pack hydrates
+# with Spec(**fields), so a missing one is a TypeError at pack time.
 #
 # Verify the builder before packing, from the IngestorGenerator root so
 # `codegen` is importable:
