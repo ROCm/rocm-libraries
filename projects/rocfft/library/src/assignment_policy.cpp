@@ -423,19 +423,50 @@ static void RecursiveTraverse(TreeNode* node, const std::function<void(TreeNode*
 
 bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
 {
-    auto getBufSize = [](TreeNode* node, bool input) {
-        auto lengthBlueN = {node->lengthBlueN};
-        auto outputLen   = node->fuseBlue == BFT_NONE ? node->GetOutputLength() : lengthBlueN;
+    // For a fused Bluestein leaf, the leading length dimensions are the
+    // factors of the padded FFT (their product == lengthBlue).  Collapse
+    // them into a single unpadded lengthBlueN extent at the fastest
+    // stride and keep the trailing higher batch dimensions with their own
+    // strides, so the footprint reflects the real (unpadded) data the
+    // node writes to the user buffer rather than the padded working set.
+    auto blueFootprint
+        = [](TreeNode* node, const std::vector<size_t>& stride, std::vector<size_t>& outLen) {
+              outLen.assign(1, node->lengthBlueN);
+              std::vector<size_t> outStr(1, stride.empty() ? 1 : stride.front());
+              size_t              prod = 1;
+              size_t              i    = 0;
+              for(; i < node->length.size(); ++i)
+              {
+                  prod *= node->length[i];
+                  if(prod >= node->lengthBlue)
+                  {
+                      ++i;
+                      break;
+                  }
+              }
+              for(; i < node->length.size(); ++i)
+              {
+                  outLen.push_back(node->length[i]);
+                  outStr.push_back(stride[i]);
+              }
+              return outStr;
+          };
 
+    auto getBufSize = [&blueFootprint](TreeNode* node, bool input) {
         if(input)
             return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
-        else
+
+        if(node->fuseBlue != BFT_NONE && node->UseOutputLengthForPadding())
         {
-            return compute_ptrdiff(node->UseOutputLengthForPadding() ? outputLen : node->length,
-                                   node->outStride,
-                                   node->batch,
-                                   node->oDist);
+            std::vector<size_t> outLen;
+            auto                outStr = blueFootprint(node, node->outStride, outLen);
+            return compute_ptrdiff(outLen, outStr, node->batch, node->oDist);
         }
+        return compute_ptrdiff(node->UseOutputLengthForPadding() ? node->GetOutputLength()
+                                                                 : node->length,
+                               node->outStride,
+                               node->batch,
+                               node->oDist);
     };
 
     size_t sizeBufIn  = 0;

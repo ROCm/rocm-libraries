@@ -686,90 +686,19 @@ rocfft_location_t rocfft_plan_description_t::get_current_location() const
     return current_loc;
 }
 
-// Collapse batch dimensions that are carried as higher length
-// dimensions (indices >= dimension) into the scalar batch/distance,
-// when their input and output strides are contiguous/mergeable.  A 1D
-// (or lower-dimensional) FFT built from a multi-dimensional brick
-// otherwise keeps its extra dimensions as higher length entries; the
-// Bluestein machinery (chirp padding, stride and buffer-size
-// computations) only understands batch expressed as a scalar count +
-// distance, so leaving batch in the length array yields malformed
-// work-buffer sizes and incorrect results for multi-device Bluestein
-// sub-plans.  Non-mergeable layouts are left untouched.
-static void collapse_batch_length_dims(NodeMetaData& planData)
-{
-    const size_t dim = planData.dimension;
-    if(planData.length.size() <= dim)
-        return;
-
-    struct BatchDim
-    {
-        size_t len;
-        size_t iStride;
-        size_t oStride;
-    };
-    std::vector<BatchDim> dims;
-    for(size_t i = dim; i < planData.length.size(); ++i)
-        dims.push_back({planData.length[i], planData.inStride[i], planData.outStride[i]});
-    if(planData.batch > 1)
-        dims.push_back({planData.batch, planData.iDist, planData.oDist});
-
-    dims.erase(
-        std::remove_if(dims.begin(), dims.end(), [](const BatchDim& b) { return b.len <= 1; }),
-        dims.end());
-    std::sort(dims.begin(), dims.end(), [](const BatchDim& a, const BatchDim& b) {
-        return a.iStride < b.iStride;
-    });
-
-    size_t batch  = 1;
-    size_t iDist  = 0;
-    size_t oDist  = 0;
-    bool   merged = true;
-    for(size_t k = 0; k < dims.size(); ++k)
-    {
-        if(k == 0)
-        {
-            batch = dims[k].len;
-            iDist = dims[k].iStride;
-            oDist = dims[k].oStride;
-        }
-        else if(dims[k].iStride == iDist * batch && dims[k].oStride == oDist * batch)
-            batch *= dims[k].len;
-        else
-        {
-            merged = false;
-            break;
-        }
-    }
-    if(!merged)
-        return;
-
-    planData.length.resize(dim);
-    if(planData.outputLength.size() > dim)
-        planData.outputLength.resize(dim);
-    planData.inStride.resize(dim);
-    planData.outStride.resize(dim);
-    planData.batch = batch;
-    if(batch > 1)
-    {
-        planData.iDist = iDist;
-        planData.oDist = oDist;
-    }
-}
-
 // Populate a NodeMetaData's Bluestein strides/distances from its own
 // parameters.  Called from BuildSingleDevicePlan; idempotent so the
 // solution-map fallback recursion can safely re-invoke it.
+//
+// Length dimensions beyond 'dimension' are higher batch dimensions
+// (e.g. a multi-device 1D sub-plan whose brick carries extra rows).
+// They are laid out contiguously after the padded Bluestein FFT
+// dimensions so that the padded-buffer sizing accounts for the whole
+// batch, not just a single transform.
 static void set_bluestein_strides(NodeMetaData& planData)
 {
     planData.inStrideBlue.clear();
     planData.outStrideBlue.clear();
-
-    std::array<size_t, 3> inStridesBlue  = {0, 0, 0};
-    std::array<size_t, 3> outStridesBlue = {0, 0, 0};
-    std::array<size_t, 3> lengthsBlue    = {0, 0, 0};
-    size_t                inDistBlue     = 0;
-    size_t                outDistBlue    = 0;
 
     function_pool pool{planData.deviceProp};
 
@@ -781,103 +710,66 @@ static void set_bluestein_strides(NodeMetaData& planData)
                                     ? planData.outputLength
                                     : planData.length;
 
-    assert(dimension >= 1 && dimension <= lengthsBlue.size());
+    const size_t totalDims = fftLength.size();
+    assert(dimension >= 1 && dimension <= 3 && dimension <= totalDims);
 
+    std::vector<size_t> lengthsBlue(totalDims, 0);
     lengthsBlue[0] = NodeFactory::SupportedLength(pool, precision, fftLength[0])
                          ? fftLength[0]
                          : NodeFactory::GetBluesteinLength(pool, precision, fftLength[0]);
-    for(size_t i = 1; i < dimension; i++)
+    for(size_t i = 1; i < totalDims; i++)
         lengthsBlue[i] = fftLength[i];
 
-    // =================================
-    // inStrides
-    // =================================
-    inStridesBlue[0] = 1;
-
-    if((transformType == rocfft_transform_type_real_forward)
-       && (placement == rocfft_placement_inplace))
-    {
-        // real-to-complex in-place
-        size_t dist = 2 * (1 + (lengthsBlue[0]) / 2);
-
-        for(size_t i = 1; i < dimension; i++)
+    // Compute the padded strides/distance for one set of I/O strides.
+    // The FFT dimensions [0, dimension) follow the transform-specific
+    // padded layout; the remaining higher batch dimensions are packed
+    // contiguously after them.  The returned distance spans the whole
+    // (higher-batch-inclusive) padded transform, i.e. the scalar-batch
+    // stride.
+    auto computeStrides = [&](std::vector<size_t>& strides, size_t& dist) {
+        strides.assign(totalDims, 0);
+        strides[0] = 1;
+        size_t runningDist;
+        if((transformType == rocfft_transform_type_real_forward)
+           && (placement == rocfft_placement_inplace))
         {
-            inStridesBlue[i] = dist;
-            dist *= lengthsBlue[i];
+            // real-to-complex in-place
+            size_t d = 2 * (1 + (lengthsBlue[0]) / 2);
+            for(size_t i = 1; i < dimension; i++)
+            {
+                strides[i] = d;
+                d *= lengthsBlue[i];
+            }
+            runningDist = d;
         }
-
-        inDistBlue = dist;
-    }
-    else if(transformType == rocfft_transform_type_real_inverse)
-    {
-        // complex-to-real
-        size_t dist = 1 + (lengthsBlue[0]) / 2;
-
-        for(size_t i = 1; i < dimension; i++)
+        else if(transformType == rocfft_transform_type_real_inverse)
         {
-            inStridesBlue[i] = dist;
-            dist *= lengthsBlue[i];
+            // complex-to-real
+            size_t d = 1 + (lengthsBlue[0]) / 2;
+            for(size_t i = 1; i < dimension; i++)
+            {
+                strides[i] = d;
+                d *= lengthsBlue[i];
+            }
+            runningDist = d;
         }
-
-        inDistBlue = dist;
-    }
-    else
-    {
-        // Set the inStrides to deal with contiguous data
-        for(size_t i = 1; i < dimension; i++)
-            inStridesBlue[i] = lengthsBlue[i - 1] * inStridesBlue[i - 1];
-
-        inDistBlue = lengthsBlue[dimension - 1] * inStridesBlue[dimension - 1];
-    }
-
-    // =================================
-    // outStrides
-    // =================================
-    outStridesBlue[0] = 1;
-
-    if((transformType == rocfft_transform_type_real_forward)
-       && (placement == rocfft_placement_inplace))
-    {
-        // real-to-complex in-place
-        size_t dist = 2 * (1 + (lengthsBlue[0]) / 2);
-
-        for(size_t i = 1; i < dimension; i++)
+        else
         {
-            outStridesBlue[i] = dist;
-            dist *= lengthsBlue[i];
+            for(size_t i = 1; i < dimension; i++)
+                strides[i] = lengthsBlue[i - 1] * strides[i - 1];
+            runningDist = lengthsBlue[dimension - 1] * strides[dimension - 1];
         }
-
-        outDistBlue = dist;
-    }
-    else if(transformType == rocfft_transform_type_real_inverse)
-    {
-        // complex-to-real
-        size_t dist = 1 + (lengthsBlue[0]) / 2;
-
-        for(size_t i = 1; i < dimension; i++)
+        // higher batch dimensions are contiguous after the FFT dims
+        for(size_t i = dimension; i < totalDims; i++)
         {
-            outStridesBlue[i] = dist;
-            dist *= lengthsBlue[i];
+            strides[i] = runningDist;
+            runningDist *= lengthsBlue[i];
         }
+        dist = runningDist;
+    };
 
-        outDistBlue = dist;
-    }
-    else
-    {
-        // Set the inStrides to deal with contiguous data
-        for(size_t i = 1; i < dimension; i++)
-            outStridesBlue[i] = lengthsBlue[i - 1] * outStridesBlue[i - 1];
-
-        outDistBlue = lengthsBlue[dimension - 1] * outStridesBlue[dimension - 1];
-    }
-
-    for(size_t i = 0; i < dimension; i++)
-    {
-        planData.inStrideBlue.push_back(inStridesBlue[i]);
-        planData.outStrideBlue.push_back(outStridesBlue[i]);
-    }
-    planData.iDistBlue = inDistBlue;
-    planData.oDistBlue = outDistBlue;
+    computeStrides(planData.inStrideBlue, planData.iDistBlue);
+    computeStrides(planData.outStrideBlue, planData.oDistBlue);
 }
 
 NodeMetaData
@@ -2449,10 +2341,6 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
         }
         rootPlanData.input_buffer  = fft_operations.input.buffers[i];
         rootPlanData.output_buffer = fft_operations.output.buffers[i];
-        // Express batch as a scalar count+distance (see helper) so a
-        // 1D Bluestein sub-plan is a plain batched transform rather
-        // than one with batch carried in higher length dimensions.
-        collapse_batch_length_dims(rootPlanData);
         // partOfMultiPlan == true sets ExecPlan::mgpuPlan and allocates its stream/event.
         auto singlePlan = BuildSingleDevicePlan(rootPlanData,
                                                 item_loc,
@@ -2514,11 +2402,6 @@ size_t rocfft_plan_t::C2CBrickOneDimension(size_t                         dimIdx
     rootPlanData.outputLength = transformLengths;
     rootPlanData.inStride     = transformStride;
     rootPlanData.outStride    = transformStride;
-
-    // Express batch as a scalar count+distance (see helper) so a 1D
-    // Bluestein sub-plan is a plain batched transform rather than one
-    // with batch carried in higher length dimensions.
-    collapse_batch_length_dims(rootPlanData);
 
     rootPlanData.direction = transformType == rocfft_transform_type_complex_forward
                                      || transformType == rocfft_transform_type_real_forward
