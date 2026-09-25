@@ -14,8 +14,13 @@
 - [The occupancy model for this kernel](#the-occupancy-model-for-this-kernel)
 - [Lever ledger](#lever-ledger)
   - [Kept — wt_lds bank-conflict pad](#kept--wt_lds-bank-conflict-pad)
+  - [Kept — kv_lds pad narrowed, staging width halved](#kept--kv_lds-pad-narrowed-staging-width-halved)
+  - [Kept — register-resident k-loop prefetch](#kept--register-resident-k-loop-prefetch)
+  - [Kept — score-GEMM read-ahead scheduler pin](#kept--score-gemm-read-ahead-scheduler-pin)
+  - [Rejected — kv_lds XOR swizzle](#rejected--kv_lds-xor-swizzle)
   - [Rejected — num_warps 4 to 8](#rejected--num_warps-4-to-8)
   - [Rejected — r_kv_tile below 64](#rejected--r_kv_tile-below-64)
+  - [Rejected — canned iglp_opt whole-loop interleave](#rejected--canned-iglp_opt-whole-loop-interleave)
 - [Method](#method)
 - [What remains unproven](#what-remains-unproven)
 
@@ -118,6 +123,11 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 1 | `wt_lds` bank-conflict pad (`WT_PAD`) | **Kept** | free in instructions and occupancy; measured improvement |
 | 2 | `num_warps` 4 → 8 | Rejected | occupancy improved, measured latency regressed |
 | 3 | `r_kv_tile` 64 → 32, 64 → 16 | Rejected | no occupancy change at any legal value; small measured regression |
+| 4 | `kv_lds` pad `V8_PAD` → `WT_PAD`, `C_STAGE_W` 8 → 4 | **Kept** | pool total and occupancy unchanged; small static cost; measured improvement on every shape |
+| 5 | `kv_lds` XOR swizzle | Rejected | structurally impossible without breaking a declared store alignment |
+| 6 | Register-resident k-loop prefetch | **Kept** | LDS pool and barrier count unchanged, no spill; measured improvement on every shape |
+| 7 | Canned `iglp_opt` whole-loop interleave | Rejected | both levels regressed measurably; level 1 undoes lever 6 by shortening live ranges |
+| 8 | Score-GEMM read-ahead `sched_group_barrier` pin | **Kept** | instruction mix, LDS pool and barrier count unchanged, VGPR fell, no spill; measured improvement on every shape |
 
 ### Kept — wt_lds bank-conflict pad
 
@@ -146,6 +156,162 @@ across shapes and `WT_PAD = 4` won. Two different a-priori bank models disagreed
 with each other *and* one of them disagreed with the measurement — which is the
 reason the sweep exists. Do not re-derive the width; re-measure it if the access
 pattern changes.
+
+### Kept — kv_lds pad narrowed, staging width halved
+
+Same class of defect as lever 1, one buffer over. `kv_lds` is
+`[block_k, qa_cols + pad]` bf16 and was allocated with `V8_PAD = 8`. A pad of 8
+bf16 elements displaces each row by 16 B — **4 dwords** — so the row stride is
+`≡ 4 (mod 32)` and the bank sequence repeats with period 8. The hot score-GEMM
+B read walks 16 `lane_row` values per execution group, so those 16 lanes land on
+only 8 distinct banks: a clean 2-way conflict on the k-loop's critical read.
+
+Getting off bank 0 is necessary but **not sufficient** — the period of the row
+stride modulo 32 is what matters. `WT_PAD = 4` displaces by 8 B (2 dwords),
+giving stride `≡ 2 (mod 32)`, period 16, and a conflict-free read for a 16-lane
+group. The pad shrinks and the access gets *better*, which is why an "add more
+padding" heuristic would have missed it.
+
+The pad cannot be narrowed alone. [`smem_store_vN`](../../../../platform/python/rocke/core/ir.py#L1694)
+*declares* `align = n * elem_bytes` unconditionally and verifies nothing, so an
+`n = 8` store into a row that is only 8 B-aligned is a **silent miscompile**, not
+an assert — the two constants are load-bearing for each other. Narrowing the pad
+therefore requires narrowing the `c_kv` staging store to match, which is what
+`C_STAGE_W = 4` does; the constant is named so the coupling is visible at the
+definition site rather than implied by the allocation.
+
+Static effect: the emitted LDS pool total is **unchanged**. The lowerer pools by
+liveness with greedy first-fit, so shrinking one buffer only widens a stranded
+hole — the arithmetic sum is not the pool. Occupancy is therefore untouched, and
+there are no spills. The cost is `+4 ds_write`, `+4 global_load` and `+10` VGPR
+(against a 256 ceiling), because the staging loop runs twice as many iterations
+at half the width. The per-element `ct_lds` stores are count-invariant across the
+change — 8 chunks × 4 elements and 4 chunks × 8 elements emit the same number —
+so `ds_read`, `mfma` and `global_store` counts are identical.
+
+The same empirical rule as lever 1 applies, and it is the reason this was
+measured rather than reasoned: narrowing the staging width is a *real* static
+cost, so a derived bank model claiming a win is not enough to keep the lever.
+A/B it and keep it only if the wall clock agrees.
+
+### Kept — register-resident k-loop prefetch
+
+The k loop loaded tile `i`'s `c_kv` and `k_rope` from global **between its two
+barriers**, so the full global latency sat exposed with no compute over it. At one
+workgroup per CU and one wave per SIMD there is no other wave to switch to, so an
+exposed load is a stall in the literal sense — which is what makes this the
+highest-value shape of lever in this regime.
+
+The staging block is split into a load half that touches no LDS and a store half
+that touches no global, with one tile in flight carried across the iteration
+boundary in the `scf_for` `iter_args`. A prologue primes tile 0; each iteration
+drains the stage it was handed, then issues tile `i+1`'s loads, then runs the
+score GEMM, so those loads retire under compute.
+
+Body order is load-bearing: WAR barrier, store, RAW barrier, **then** the
+run-ahead loads, then compute. Issuing the loads before the RAW barrier looks more
+natural and is wrong — [`b.sync()`](../../../../platform/python/rocke/core/ir.py#L3177)
+lowers to `s_waitcnt vmcnt(0) lgkmcnt(0)` ahead of `s_barrier`, so it drains the
+VMEM stream and anything issued earlier is waited on immediately, collapsing the
+hiding window back to zero.
+
+The stage is carried in **registers**, not a second LDS buffer. The structural
+donor, [`build_gfx942_4warp_gqa`](../../../kernels/gfx942/attention_tiled_2d.py#L6236)
+([`fill_load`](../../../kernels/gfx942/attention_tiled_2d.py#L6260) /
+[`fill_store`](../../../kernels/gfx942/attention_tiled_2d.py#L6276) /
+[`body`](../../../kernels/gfx942/attention_tiled_2d.py#L6286)), uses a two-slot LDS
+double buffer and gets down to one barrier per iteration as a result. That is not
+available here: the pool is already near the 64 KiB ceiling and a second
+`kv_lds`/`ct_lds` slot needs tens of KiB more. Registers were the one budget with
+headroom, so the lever spends them instead — and the price is that the single LDS
+buffer forces WAR and RAW to stay separate, leaving the barrier count at two.
+Note that
+[`_issue_k_load_runtime`](../../../kernels/gfx942/attention_tiled_2d.py#L2671) is
+*not* the donor despite the suggestive name; it is an async global→LDS DMA path
+that holds nothing in registers.
+
+Two edge cases, both handled without adding control flow. `n_k_tiles` is zero when
+the KV extent is zero and the early return guards on *q*, not *k*, while
+`iter_args` initialisers must be defined unconditionally — so the prologue selects
+the *page value* down to page 0 (always mapped) rather than predicating the load.
+On the final iteration the next-tile index is **clamped rather than predicated**,
+re-reading the current tile, whose page is already known mapped; the value is
+yielded and never consumed.
+
+Static effect: the LDS pool total, every slot offset, `ds_read`, `ds_write`,
+`v_mfma` and `s_barrier` counts are all **unchanged**; the only delta is
+`+10 global_load`, exactly the hoisted prologue. That the instruction mix is
+otherwise identical is the evidence that this is a pure scheduling change — the
+same work, issued earlier. It costs VGPRs (still well inside the 256 ceiling) and
+produces no spill; a nonzero `scratch_bytes` here would have been a hard stop,
+not something to tune around.
+
+One correctness note worth keeping. Parity reported a worst-case residual slightly
+above the figure recorded for the previous lever. A prefetch must not change
+arithmetic, so rather than shrug at a difference well inside tolerance, the base
+kernel was checked out and parity re-run: residuals are **bit-identical per
+sequence**, and the earlier figure was a mis-transcription. One checkout turned
+"probably fine" into "provably unchanged."
+
+### Kept — score-GEMM read-ahead scheduler pin
+
+Lever 6 issues the global loads a tile early; what the scheduler then interleaves
+between them and the score GEMM decides how much of that latency is actually
+covered. This lever is the natural follow-on, and it is a **call-site hint only** —
+no structural change, no new buffer, no new barrier.
+
+The shape of the score GEMM is what makes a hint worth placing. With
+`block_q == block_k == MFMA_M == MFMA_N == 16` there is exactly one M tile and one
+K tile, so each of its `SCORE_K_ITERS` steps is **two `ds_read`s feeding a single
+MFMA**, and every MFMA of the loop accumulates into the *same* register. The MFMA
+chain is therefore serial: the GEMM is LDS-read-bound with a dependent accumulator,
+not MFMA-throughput-bound.
+
+That rules out copying the donor's hint verbatim. The neighbouring gfx942 attention
+kernel pins its k-loop in **lockstep**, one step at a time
+([`_sched_group_pin_mfma_step`](../../../kernels/gfx942/attention_tiled_2d.py#L158),
+called at [:4249](../../../kernels/gfx942/attention_tiled_2d.py#L4249) with
+`mfma_count=1`). A 1:1 pin keeps each read adjacent to the MFMA that consumes it,
+which is right when the MFMAs are independent and wrong here, where covering a
+serial chain needs the reads to run *ahead* of it. The adopted form emits a
+`(ds_read × 2G, MFMA × G)` pair every `G` steps — a block of reads hoisted above
+the MFMAs they feed, `G` steps deep — via
+[`b.sched_group_barrier()`](../../../../platform/python/rocke/core/ir.py#L3392).
+
+`G` must divide the trip count. A group that leaves a partial trailing block
+measured worse than placing no hint at all, so the emission is guarded on
+`SCORE_K_ITERS % SCORE_SGB_GROUP == 0` and silently omits itself otherwise. Depth
+was swept across the dividing values and the deepest one measured best, consistent
+with the serial-chain reading above; the non-dividing candidate lost, as predicted.
+`SCORE_SGB_GROUP` is a scheduling hint, so a wrong value costs speed and never
+correctness — but it is still swept, not derived.
+
+Static effect: `mfma`, `ds_read`, `ds_write`, `s_barrier` and the LDS pool are all
+**unchanged** — the same instructions in a different order, which is exactly what a
+scheduler hint should produce. VGPR *fell*, and `scratch_bytes` stayed zero.
+
+Note this lever and `iglp_opt` are mutually exclusive: `iglp_opt` claims the whole
+loop schedule, and the donor kernel
+[raises if both flags are set](../../../kernels/gfx942/attention_tiled_2d.py#L772).
+Rejecting `iglp_opt` (below) is what made this lever available.
+
+### Rejected — kv_lds XOR swizzle
+
+The usual alternative to a pad is an XOR swizzle, which costs no LDS at all.
+It is structurally impossible on this buffer.
+
+To break the period-8 pattern the swizzle must displace a row by an odd number
+of dword *pairs* — an offset `≡ 2 (mod 4)` dwords. Working back through the
+column addressing, the only column bit that produces that displacement is bit 2.
+But bit 2 is precisely the bit an `n = 8` vector store must hold invariant to
+keep its declared 16 B alignment true. Any swizzle strong enough to fix the
+conflict breaks the alignment the store has already declared — and per the note
+above, that failure is silent.
+
+Narrowing the store to `n = 4` frees bit 2, but at that point `WT_PAD` alone
+already makes the read conflict-free, so the swizzle buys nothing over lever 4.
+Recorded here so the idea is not re-derived: the blocker is the alignment
+contract, not the bank arithmetic.
 
 ### Rejected — num_warps 4 to 8
 
@@ -193,6 +359,32 @@ Verdict: default retained at 64. This closes the open question of whether the
 planned `r_kv_tile` reduction was worth pairing with a second lever — on the
 evidence it is not, because the pairing partner it needs is a VGPR reduction, not
 a second LDS reduction.
+
+### Rejected — canned iglp_opt whole-loop interleave
+
+[`b.iglp_opt(level)`](../../../../platform/python/rocke/core/ir.py#L3371) asks the
+post-RA scheduler to apply a canned interleaving to the enclosing loop — level 0 is
+the GEMM MFMA-interleave pattern, level 1 the attention-style one. It is a one-line
+lever, so it was tried before the hand-placed pin.
+
+Both levels regressed on every shape, level 1 severely. The instruction mix is
+identical to the baseline at both levels, so the regression is purely ordering —
+and the VGPR count is the tell: at level 1 it drops **sharply** while nothing else
+moves. Shorter live ranges here mean the canned pattern pulled the run-ahead global
+loads back down toward their consumers, which is precisely the hiding window lever 6
+exists to open. The canned attention pattern assumes a loop whose loads are issued
+in place; this loop is no longer that loop.
+
+This matches the codebase's own posture rather than contradicting it: on the
+neighbouring gfx942 attention kernel both
+[`use_iglp_opt`](../../../kernels/gfx942/attention_tiled_2d.py#L451) and
+[`use_qk_pv_sched_group_barrier`](../../../kernels/gfx942/attention_tiled_2d.py#L457)
+default **off**, and the two are mutually exclusive by construction.
+
+Verdict: reverted, and the hint budget spent on the hand-placed pin above instead.
+The general lesson is that a canned schedule is not a free win once a kernel has a
+hand-built latency-hiding structure — it can silently dismantle it, and the static
+resource report shows *that* as an improvement.
 
 ## Method
 
