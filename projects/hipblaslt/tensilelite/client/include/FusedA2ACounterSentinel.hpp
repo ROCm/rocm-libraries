@@ -38,7 +38,7 @@ namespace TensileLite
         // reaches both from one base and never needs W.
         constexpr size_t FUSED_A2A_CURSORS_PER_QUEUE = 2;
 
-        // Twinned with FUSED_A2A_COUNTER*_OFFSET in Tensile/Components/Signature.py.
+        // Twinned with FUSED_A2A_COUNTER*_OFFSET in tensilelite/Components/Signature.py.
         constexpr size_t FUSED_A2A_COUNTER2_OFFSET = fusedA2AAlignLine(
             (size_t)FUSED_A2A_MAX_RANKS * FUSED_A2A_CURSORS_PER_QUEUE * sizeof(uint64_t));
         constexpr size_t FUSED_A2A_COUNTER3_OFFSET = fusedA2AAlignLine(
