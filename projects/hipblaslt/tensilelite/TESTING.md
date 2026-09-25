@@ -379,7 +379,7 @@ Relative to the build, the logic YAML is compiler input rather than build output
 `TensileCreateLibrary` consumes it and emits kernels from it. Validating it is front-end analysis
 rather than testing, and running codegen over input already known to be invalid produces output nobody
 should trust. So the check is wired in as a CMake custom command in
-[`HipBLASLtCodegen.cmake`](../cmake/HipBLASLtCodegen.cmake) that runs ahead of
+[`hipblaslt_codegen.cmake`](../cmake/hipblaslt_codegen.cmake) that runs ahead of
 `TensileCreateLibrary` and writes a stamp file. A failure stops the build.
 
 That placement buys good reach. It runs on every build that generates kernels, including every

@@ -220,13 +220,13 @@ The script will be created in the build folder and will be named in Tensile.bat 
 > Run `tensilelite/bin/Tensile` directly instead.
 
 ```
-Tensile.sh <abs-path>/tensilelite/Tests/gemm/fp16_use_e.yaml tensile-out
+Tensile.sh <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
 ```
 
 or
 
 ```
-Tensile.bat <abs-path>/tensilelite/Tests/gemm/fp16_use_e.yaml tensile-out
+Tensile.bat <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
 ```
 
 **You don't need to rerun CMake unless you delete the ``tensile-out`` folder.**
