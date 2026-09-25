@@ -5271,15 +5271,32 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit). All tPs must agree, otherwise bail.
+    # Gather per-tc (kPad, bpeForLimit). All tPs that survive must agree,
+    # otherwise bail.
+    #
+    # The two tests below are properties of ONE tensor, so they skip that
+    # tensor rather than abandoning the whole list.  A const-unit stride means
+    # the tensor is TLU=1: its SRD limit is already a K-independent tile
+    # window and there is nothing about the K end to tighten.  Returning for
+    # the whole list there left the OTHER operand untightened too -- and in an
+    # NN kernel A is TLU=1 and comes first, so B's limit was never tightened
+    # and the tail loop ran with a bound sitting past the real K end.  That in
+    # turn made tailLoopBoundaryDtlLoadAB inert: the clamp it exists to repair
+    # never fired.  Same per-tensor-gate-applied-to-the-pair shape that was
+    # already fixed in tailLoopBoundaryDtlLoadAB.
+    #
+    # The MX bail-outs further down stay `return module` on purpose: they are
+    # not eligibility tests so much as "this configuration is unsupported",
+    # and dropping one scale tensor from a pair would let the uniformity check
+    # below pass on a list it was written to reject.
     tcKpadBpeList = []
     for tP in tPs:
       tc = tP["tensorChar"]
       if tc not in ("A", "B", "MXSA", "MXSB"):
-        return module
+        continue
       strideF = self.strideRef(tc, tP['tileIdx'])
       if self.isConstUnitStride(strideF):
-        return module
+        continue
       isMx = tc in ("MXSA", "MXSB")
       if isMx:
         tcab = "A" if tc == "MXSA" else "B"
@@ -5303,8 +5320,13 @@ class KernelWriterAssembly(KernelWriter):
         bpeForLimit = float(tP["bpeGR"])
       tcKpadBpeList.append((tc, kPad, bpeForLimit))
 
-    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
-    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    # Every tensor was skipped (e.g. both operands TLU=1): nothing to tighten.
+    if not tcKpadBpeList:
+      return module
+
+    # Joint emission requires uniform kPad/bpe across the tPs that survived
+    # (true for A/B symmetric configs and for MXSA/MXSB scale pairs in the
+    # gauntlet).
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
     if any(kp != kPad or bp != bpeForLimit for _, kp, bp in tcKpadBpeList):
