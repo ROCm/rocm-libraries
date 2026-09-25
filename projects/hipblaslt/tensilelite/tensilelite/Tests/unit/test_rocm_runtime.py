@@ -388,6 +388,19 @@ def test_runtime_initialization_does_not_import_rocisa(tmp_path, monkeypatch):
         ((root / "bin", root / "lib" / "llvm" / "bin"), "test"),
     ]
 
+def test_executable_search_paths_requires_explicit_initialization(monkeypatch):
+    monkeypatch.setattr(_runtime, "_installation", None)
+    monkeypatch.setattr(
+        _runtime,
+        "initialize",
+        lambda: (_ for _ in ()).throw(AssertionError("implicit initialization attempted")),
+    )
+
+    with pytest.raises(
+        _rocm.TensileLiteRuntimeError,
+        match="TensileLite runtime has not been initialized",
+    ):
+        _runtime.executable_search_paths()
 def test_cli_help_does_not_request_client(monkeypatch):
     from tensilelite import cli
 
