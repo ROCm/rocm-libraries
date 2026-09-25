@@ -1247,7 +1247,7 @@ struct SelectedKernel {{
 """
 
         elif self.kernel_name_prefix == "batched_gemm":
-            instance_code += """
+            instance_code += f"""
 
         // Kernel type
         using GemmKernel = ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
@@ -1255,22 +1255,22 @@ struct SelectedKernel {{
         // Kernel arguments
         auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(pipeline)}
 
-        if (!GemmKernel::IsSupportedArgument(kargs)) {
+        if (!GemmKernel::IsSupportedArgument(kargs)) {{
             throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
-        }
+        }}
 
         // Get grid and block sizes
         const dim3 grids = GemmKernel::GridSize(args.M, args.N, args.k_batch, args.batch_count);
         const dim3 blocks = GemmKernel::BlockSize();
 
-        if(stream.log_level_ > 0) {
+        if(stream.log_level_ > 0) {{
             std::cout << "Launching kernel with args: " << GemmKernel::GetName() << '\\n'
                         << "shape: " << TileShape::GetName() << '\\n'
                         << "pipeline: " << GemmPipeline::GetName() << '\\n'
-                        << "grid: {" << grids.x << ", " << grids.y << ", " << grids.z << "}"
-                        << ", blocks: {" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}"
+                        << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
+                        << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
                         << std::endl;
-        }"""
+        }}"""
 
             instance_code += f"""
         // Launch kernel

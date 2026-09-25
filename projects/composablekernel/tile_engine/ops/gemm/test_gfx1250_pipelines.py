@@ -330,7 +330,7 @@ class TestValidationRules(unittest.TestCase):
     def test_mx_comp_async_gfx950_unaffected(self):
         # MX comp_async (gfx950) keeps its own rules: neither the gfx1250
         # layout gate nor the TDM pad gate is consulted on that path.
-        tile = (256, 256, 256, 2, 2, 1, 16, 16, 128)
+        tile = (128, 128, 256, 2, 2, 1, 16, 16, 128)
         want = {"rcr": True, "rrr": False, "crr": False, "ccr": False}
 
         def boom(*_a, **_k):

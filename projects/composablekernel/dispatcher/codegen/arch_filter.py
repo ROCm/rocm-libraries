@@ -855,6 +855,15 @@ class ArchFilter:
             b_lds_layer = max(1, 256 // (config.tile_k * elem_size_b))
             matrix_a_size += max(0, config.tile_m // a_lds_layer - 1) * 16
             matrix_b_size += max(0, config.tile_n // b_lds_layer - 1) * 16
+        elif (
+            config.pipeline == "comp_async"
+            and config.operator == OperatorType.GEMM
+            and self.gpu_arch.split(":")[0] == TDM_ARCH
+        ):
+            # The fp8 XOR-swizzled async descriptor separates its two outer
+            # groups by 16 bytes (same accounting as the Tile Engine).
+            matrix_a_size += 16 if config.datatype_a == "fp8" else 0
+            matrix_b_size += 16 if config.datatype_b == "fp8" else 0
         total_lds = matrix_a_size + matrix_b_size
 
         # The budget depends on the target, not just the pipeline: a tile that
