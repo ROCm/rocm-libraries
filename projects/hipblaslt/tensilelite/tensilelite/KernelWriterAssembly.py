@@ -5988,14 +5988,22 @@ class KernelWriterAssembly(KernelWriter):
     depthU = int(kernel["DepthU"])
 
     # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
-    # agree across tPs, otherwise bail. kRowStride is None when K is the
-    # contiguous dimension and the unroll stride when it is not (TLU=1), where
-    # the window set up in computeLoadSrd spans DepthU K rows.
+    # agree across the tPs that survive, otherwise bail. kRowStride is None when
+    # K is the contiguous dimension and the unroll stride when it is not
+    # (TLU=1), where the window set up in computeLoadSrd spans DepthU K rows.
+    #
+    # A tensor this function does not handle is skipped rather than abandoning
+    # the whole list, so the other operand still gets its limit tightened.
+    #
+    # The MX bail-outs further down stay `return module` on purpose: they are
+    # not eligibility tests so much as "this configuration is unsupported",
+    # and dropping one scale tensor from a pair would let the uniformity check
+    # below pass on a list it was written to reject.
     tcKpadBpeList = []
     for tP in tPs:
       tc = tP["tensorChar"]
       if tc not in ("A", "B", "MXSA", "MXSB"):
-        return module
+        continue
       strideF = self.strideRef(tc, tP['tileIdx'])
       isMx = tc in ("MXSA", "MXSB")
       kRowStride = None
@@ -6027,8 +6035,13 @@ class KernelWriterAssembly(KernelWriter):
           kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
       tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
-    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
-    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    # Every tensor was skipped (e.g. both operands TLU=1): nothing to tighten.
+    if not tcKpadBpeList:
+      return module
+
+    # Joint emission requires uniform kPad/bpe across the tPs that survived
+    # (true for A/B symmetric configs and for MXSA/MXSB scale pairs in the
+    # gauntlet).
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
     if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
