@@ -4,7 +4,6 @@
 import os
 from pathlib import Path
 import runpy
-import shutil
 import subprocess
 import sys
 import zipfile
@@ -20,21 +19,9 @@ _VALIDATOR = _SOURCE_ROOT / "scripts/check_release_wheel_contents.py"
 
 
 def _isolated_source(tmp_path):
-    return Path(
-        shutil.copytree(
-            _SOURCE_ROOT,
-            tmp_path / "source",
-            ignore=shutil.ignore_patterns(
-                ".pytest_cache",
-                ".tox",
-                "__pycache__",
-                "*.egg-info",
-                "build",
-                "build_tmp",
-                "build-adaptor",
-            ),
-        )
-    )
+    destination = tmp_path / "source"
+    runpy.run_path(str(_STAGER))["stage_source"](_SOURCE_ROOT, destination)
+    return destination
 
 
 def _write_minimal_wheel(path, *, name, package_root, scripts, requirements=()):
@@ -53,12 +40,29 @@ def _write_minimal_wheel(path, *, name, package_root, scripts, requirements=()):
 def test_release_source_staging_excludes_shared_build_state(tmp_path):
     source = tmp_path / "input"
     destination = tmp_path / "staged"
+    ignored_directories = (
+        ".agents",
+        ".codex",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "_skbuild",
+        "dist",
+        "htmlcov",
+        "mutants",
+    )
     (source / "package").mkdir(parents=True)
     (source / "package/module.py").write_text("kept", encoding="utf-8")
     (source / "build/lib").mkdir(parents=True)
     (source / "build/lib/stale.py").write_text("stale", encoding="utf-8")
     (source / "package/__pycache__").mkdir()
     (source / "package/__pycache__/module.pyc").write_bytes(b"stale")
+    for ignored_directory in ignored_directories:
+        (source / ignored_directory).mkdir()
+        (source / ignored_directory / "local-state").write_text("stale", encoding="utf-8")
+    (source / ".coverage").write_text("stale", encoding="utf-8")
 
     stager = runpy.run_path(str(_STAGER))
     stager["stage_source"](source, destination)
@@ -66,6 +70,9 @@ def test_release_source_staging_excludes_shared_build_state(tmp_path):
     assert (destination / "package/module.py").read_text(encoding="utf-8") == "kept"
     assert not (destination / "build").exists()
     assert not (destination / "package/__pycache__").exists()
+    assert not (destination / ".coverage").exists()
+    for ignored_directory in ignored_directories:
+        assert not (destination / ignored_directory).exists()
 
 
 def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_path):
