@@ -65,6 +65,31 @@ if  GEKO_ROOT.name != "geko" or not (GEKO_ROOT / "__init__.py").is_file():
 TD_PATH = _THIS_FILE.parents[3]
 
 
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""GEMM Kernel Optimization module.
+Implements the main optimization workflow.
+Generates TensileLite configurations for specific GEMM types and executes multi-GPU
+optimization with automatic load balancing and progress monitoring.
+Key functions:
+    configure: Generate tensilelite configs for GEMM types.
+    run: Execute optimization across multiple GPUs.
+    analyze: Benchmark and filter optimized kernels.
+Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilation.
+"""
+logger = logging.getLogger("GEKO")
+__all__ = ["configure", "run", "analyze"]
+_THIS_FILE = Path(__file__).resolve()
+if len(_THIS_FILE.parents) < 4:
+    raise RuntimeError(f"Invalid GEKO layout: expected at least 4 parent levels for '{_THIS_FILE}'")
+GEKO_ROOT = _THIS_FILE.parents[1]
+if  GEKO_ROOT.name != "geko" or not (GEKO_ROOT / "__init__.py").is_file():
+    raise RuntimeError(
+        f"Invalid GEKO_ROOT '{GEKO_ROOT}'. Expected root package directory containing "
+        f"'__init__.py'."
+TD_PATH = _THIS_FILE.parents[3]
+
+
 @dataclass
 class DeviceState:
     free_slots: int

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import builtins
 import sys
 import types
 from pathlib import Path
@@ -671,7 +672,7 @@ def test_normalize_calls_tensile_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert calls["write"] == (str(out), {"converted": True})
 
 
-def test_normalize_appends_tensile_to_sys_path_when_hipblaslt_given(
+def test_normalize_prioritizes_tensilelite_path_when_hipblaslt_given(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     lib = tmp_path / "lib.yaml"
@@ -685,12 +686,20 @@ def test_normalize_appends_tensile_to_sys_path_when_hipblaslt_given(
         monkeypatch.setitem(sys.modules, mod_name, mod)
 
     original_path = list(sys.path)
+    import_paths = []
+    real_import = builtins.__import__
+
+    def capture_import(name, *args, **kwargs):
+        if name == "tensilelite" or name.startswith("tensilelite."):
+            import_paths.append(sys.path[0])
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", capture_import)
     operations.normalize(lib, tmp_path / "out.yaml", hipblaslt_path=hip)
 
-    assert expected in sys.path
-    # cleanup to avoid polluting other tests
-    if expected not in original_path:
-        sys.path.remove(expected)
+    assert import_paths
+    assert set(import_paths) == {expected}
+    assert sys.path == original_path
 
 
 # ---------------------------------------------------------------------------
