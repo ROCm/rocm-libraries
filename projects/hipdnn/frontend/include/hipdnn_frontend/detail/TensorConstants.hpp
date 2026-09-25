@@ -12,4 +12,9 @@ namespace hipdnn_frontend::detail
 // schema default (tensor_attributes.fbs -> `alignment: long = 16`).
 inline constexpr int64_t DEFAULT_TENSOR_ALIGNMENT = 16;
 
+// Default ragged-offset multiplier. Shared source for the TensorAttributes member
+// default, the lowering guard in DescriptorHelpers, and their tests. Mirrors the
+// schema default (tensor_attributes.fbs -> `ragged_offset_multiplier: long = 1`).
+inline constexpr int64_t DEFAULT_RAGGED_OFFSET_MULTIPLIER = 1;
+
 } // namespace hipdnn_frontend::detail

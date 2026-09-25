@@ -10,7 +10,8 @@ operation per element.
 
 What we cover today:
 
-* Unary ops: ``copy``, ``neg``, ``abs``, ``relu``, ``gelu_tanh``, ``silu``, ``exp2``
+* Unary ops: ``copy``, ``neg``, ``abs``, ``relu``, ``gelu_tanh``, ``silu``, ``exp2``,
+  ``tanh``
 * Binary ops: ``add``, ``sub``, ``mul``, ``max``, ``min``
 * Dtypes: ``f16`` and ``bf16`` for I/O (compute is f32 internally)
 
@@ -38,9 +39,9 @@ CK Tile parity shape:
   kernel falls through to a per-element scalar loop guarded by
   ``cmp_lt(idx, N)``.
 
-The per-element math uses the canonical ``exp2``-based sigmoid /
-``tanh`` pattern (no ``llvm.tanh``, which the AMDGPU backend can't
-lower); negation goes through :meth:`IRBuilder.fneg` rather than
+The per-element math uses the canonical AMDGPU-lowerable sigmoid /
+``tanh`` paths (no ``llvm.tanh``, which the AMDGPU backend can't lower);
+negation goes through :meth:`IRBuilder.fneg` rather than
 ``fsub(0.0, x)`` so the LLVM lowering emits a single ``v_neg``-form
 sign-flip instead of a one-op ``v_sub``.
 """
