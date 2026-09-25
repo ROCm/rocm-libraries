@@ -64,7 +64,7 @@ def client_executable() -> Path:
             ),
             package,
         )
-        identity = validate_client(candidate.path, package)
+        identity = candidate.identity or validate_client(candidate.path, package)
     except ClientBindingError as exc:
         selected = (
             f"  selected client: {candidate.path}\n"
