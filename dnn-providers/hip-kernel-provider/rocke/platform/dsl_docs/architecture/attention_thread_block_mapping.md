@@ -183,7 +183,17 @@ cannot use wide DMA today.
   apparent regressions and one apparent 25%-scale outlier were each identified as artifacts.
 - **Check kernel-name distinctness per arm.** The launcher cache is name-keyed and its
   assertion *passes* on a collision, serving a stale binary and reporting ~1.000x — i.e. a
-  working knob reads as inert. This kernel has shipped that bug twice.
+  working knob reads as inert. This kernel has now shipped that bug three times
+  (`batch`, `waves_per_eu`, and `bt_hkv_minor` on gfx950 only); the third is what made a
+  winning decode read as a 1.5% loss for months. See "Resolved" below.
+- **Re-baseline when the default moves.** A harness that hard-codes its reference keeps
+  quoting the old one. The same variant measured ~5% against `qb_major` and ~1% against
+  the `auto` that replaced it — the first number was not wrong, it was against a decode
+  nothing selects.
+- **Correctness checking is not the cost.** Measured at 2–3% of benchmark wall time
+  (~10% excluding compile), because the SDPA reference is computed once per config and
+  shared across arms. Compilation is 70–75%. Disabling the check to go faster trades the
+  guard that catches name collisions for nothing.
 - **Two independent passes.** Aggregate direction reproduced; per-row winners did not,
   wherever competing variants were within the noise floor.
 
@@ -197,12 +207,18 @@ from, so it is not rediscovered.
 | lever | what it did | why removed |
 |---|---|---|
 | `reverse_qb` | strictly descending query blocks in place of the causal fold, persistent path | H5 — sub-1% on one decode, negative on the rest, in a regime that is not the dispatch choice anyway |
-| `batch_outer` | batch as the slowest work-index field, for `hkv_minor` | H6 — sign flips on `num_kv_heads`, so no safe default exists. **Re-add this one.** As the digit order `VGQB` it is half of the best shared persistent covering set on both arches; the sign flip is the heuristic's selection rule, not a defect. See H14 |
+| `batch_outer` | batch as the slowest work-index field, for `hkv_minor` | H6 — sign flips on `num_kv_heads`, so no safe default exists. ~~**Re-add this one.**~~ SUPERSEDED: it is the digit order `VGQB`, which the persistent `qb_major` reference column later showed to be the WORST of the measured orders despite perfect K/V-per-XCD locality — it pins each CTA to one query block. See "The kv-phase split" below. H14 still stands as a lesson; the specific recommendation does not |
 
 ## In flight: the generalized-ordering sweep
 
+> Its conclusions are amended by "Resolved: the shipped decode was never in the sweep"
+> below, which identifies what this sweep could not see: `asc` was pruned, so the shipped
+> persistent `qb_major` was outside the measured set, and no reference column caught it.
+
 The eight measured points above were hand-written decodes, each chosen before the space
-was understood. Two experimental spec fields now make the space itself reachable:
+was understood. Four experimental spec fields now make the space itself reachable
+(`digit_order`, `qb_traversal`, `qb_phase_rotate`, `kv_split_bt_minor`), plus
+`force_baked_shape` to hold `runtime_shape` equal across a generic-vs-named comparison:
 
 ```
 digit_order: str = ""    # permutation of "QBVG", FASTEST DIGIT FIRST
@@ -387,6 +403,152 @@ measured as its own family. What should *not* move: the `V`-first locality class
 Still open: a heuristic term for `gcd(Hkv, num_xcds) = 2`, where the only substantive
 `Q`-first win lives (`40/10` at low `W/CU`, +2.7–4.3% over the best non-`Q`, reproducible
 across passes), and the gfx950 non-persistent path, which this sweep does not cover.
+
+## Resolved: the shipped decode was never in the sweep
+
+Three findings that together changed the persistent default on both architectures.
+
+**`qb_major` is `BGVQ` with the ASCENDING traversal**, not the fold — its decode sets
+`qb_v = qb0` directly. `asc` was pruned after the screen, so the shipped decode's exact
+configuration was absent from the full sweep, and no persistent `qb_major` reference
+column was carried to catch the omission. Every "X beats qb_major" claim before this was
+therefore unmeasured. The prune itself was sound for the generic decode path it was
+measured on; it did not transfer to a hand-written decode that skips the fold entirely.
+
+**The recorded "bt_hkv_minor loses on gfx950" was a symbol collision.** gfx950 overrode
+`_persist_decode_name_part` by RESTATING the shared tag map instead of extending it, so a
+decode added to the base emitted no tag, shared `qb_major`'s symbol, and — the launcher
+cache being name-keyed — was timed as the same binary twice. Re-measured with distinct
+symbols, that decode wins on gfx950 by a larger margin than on gfx942. The override now
+defers to `super()` first, and `test_persist_decodes_have_distinct_kernel_names_on_both_arches`
+enumerates the decode set so the next shared decode cannot go missing the same way. This
+is the third name-collision bug in this kernel (`batch`, `waves_per_eu`, now this); the
+earlier guards were per-field, this one is per-decode.
+
+**The persistent default is now B-conditional**, shared by both arches through
+`_batch_conditional_auto_decode`:
+
+| batch | decode | digit order |
+|---|---|---|
+| `< num_xcds` | `bt_hkv_minor` | `BVGQ` |
+| `>= num_xcds` | `qb_major_fold` | `BGVQ` + causal fold |
+
+The split is at `num_xcds` because that is where the MECHANISM changes, not where a curve
+crossed. Both candidates put `bt` fastest and differ only in the second digit, and with
+`wi = bt + B*X` the influence of that second digit on `xcd = wi % num_xcds` is decided
+entirely by `gcd(B, num_xcds)`: 3 bits at `B=1`, 1 bit at `B=4`, **zero** once
+`num_xcds | B`. So the two are furthest apart at `B=1` — where `BVGQ` gives each chiplet
+exactly one kv head's K/V and `BGVQ` gives it four — and place work identically above it.
+Past that point they still differ in WHICH kv head each item carries, and the ranking
+REVERSES: `BGVQ` then holds fewer distinct kv heads per chiplet and measured ahead on
+9/10 gfx942 and 5/10 gfx950 configs at `B >= 16`, by up to ~10%. `qb_major_fold` is the
+new named decode for it — `qb_major`'s mapping with the causal fold, which was never
+tried because `qb_major` was described as "the only decode with no fold to replace".
+
+Also resolved: the generic ordering now reaches the gfx950 NON-persistent body. The old
+objection — that a linear decode there would divide by a runtime radix — had a hole:
+`digit_order` already forces `runtime_shape` off, so every radix is baked. The second
+half of that objection was real and is handled by `force_baked_shape`, which holds the
+flag equal on both arms of a generic-vs-named comparison instead of leaving half the
+mapping space unreachable.
+
+## End to end: the shipped path on the real LLM shape list
+
+The sweeps above compare mappings against each other. This one compares the BRANCH
+against `develop` through the dispatcher, with no overrides and `force_baked_shape`
+OFF — the shipped non-persistent decode deliberately runs with `runtime_shape` ON, so
+forcing the shape baked would benchmark a configuration that never ships. Same harness
+against two checkouts; two passes; 91 distinct shapes; zero correctness failures. The
+dispatched kernel differs from `develop` on 91/91, so this measures the policy change
+end to end rather than a subset of it.
+
+| | overall | worst | best | wins |
+|---|---|---|---|---|
+| gfx942 | **+8.5%** | -2.9% | +34.9% | 86/91 |
+| gfx950 | **+6.3%** | -1.7% | +23.6% | 74/91 |
+
+By sequence length — the gain tracks how much work there is to balance, and vanishes
+when a single wave covers the grid:
+
+| `Sq` | gfx942 | gfx950 |
+|---:|---|---|
+| 4096 | +16.4% (16/17) | +11.3% (17/17) |
+| 2048 | +10.5% (22/22) | +8.1% (21/22) |
+| 8192 | +8.9% (16/17) | +6.7% (16/17) |
+| 1024 | +3.6% (14/16) | +5.8% (15/16) |
+| 512 | +3.7% (17/18) | **+0.2% (5/18)** |
+
+By geometry:
+
+| `Hq/Hkv` | gfx942 | gfx950 |
+|---|---|---|
+| 64/8 | +14.9% (15/15) | +6.4% (12/15) |
+| 40/8 | +9.0% (12/12) | +8.6% (10/12) |
+| 64/4 | +8.9% (8/9) | +4.3% (8/9) |
+| 32/32 | +7.3% (10/10) | +7.9% (8/10) |
+| 28/4 | +7.1% (11/11) | +7.6% (7/11) |
+| 40/40 | +6.8% (8/10) | +6.6% (9/10) |
+| 32/8 | +6.7% (14/14) | +4.4% (10/14) |
+| 128/8 | +5.8% (8/10) | +4.7% (10/10) |
+
+gfx950 at `Sq == 512` is the one flat region (5/18 wins): that is the `W/CU < 1` regime,
+where the grid does not fill the machine once and there is nothing for a reordering to
+balance. It is a no-op, not a regression — worst case -1.7%.
+
+**Two scope limits, both structural rather than incidental.**
+
+*Every eligible row in that file is `B == 1`.* So this exercises only the small-batch arm
+(`bt_hkv_minor`) of the B-conditional rule. `qb_major_fold` is NEVER selected here, and
+gfx942 never takes the persistent path at all on this list, since it requires
+`batch >= 16`. The large-batch half of the change rests on the separate sweeps, not on
+this number — do not quote this as validating the whole rule.
+
+*91 of 181 rows dispatch.* The remainder are outside this kernel's scope and are skipped
+identically by both versions: D=192/256, and `full`-mask rows whose `Sq` is not a
+multiple of `block_m`. Not a coverage regression; both checkouts skip the same set.
+
+## The kv-phase split: a negative result worth keeping
+
+At `B > 1` the distinct K/V data is indexed by the PAIR `(bt, hkv)`, so the ideal
+schedule gives each XCD one of the `B*Hkv` tensors at a time and sweeps
+`B*Hkv/num_xcds` phases. Expressing that needs the fused identity `F` in two positions at
+once — low `log2(num_xcds)` bits fastest, high bits slowest — which a permutation of four
+digits cannot do. Implemented as a separate FAMILY (`x` + perm of `y`,`G`,`Q`, six
+members) plus an orthogonal **phase rotation** axis, `qb_phase_rotate`.
+
+Two degeneracy rules make most of the family a relabelling, and they decide where it can
+be tested at all:
+
+| fusion | `F` | collapses to a permutation when |
+|---|---|---|
+| V-minor (default) | `bt*Hkv + hkv` | `Hkv == num_xcds` |
+| B-minor | `hkv*B + bt` | `B == num_xcds` |
+
+`x` adjacent to `y` is always degenerate (it just reassembles `F` contiguously). So the
+common prod geometries, all `Hkv == 8`, are reachable only with the B-minor fusion.
+
+**The locality premise did not hold.** Ranked by K/V tensors per XCD, the best order
+(`VGQB`, a perfect 1.00) measured WORST, and the shipped-class `BVGQ` at 8–32× poorer
+locality won. Per-CTA causal balance is a hard gate; locality only separates variants
+once balance is equal. The phase rotation IS the balance fix and behaves exactly as
+predicted — it swung one variant from about -24% to +6% on gfx950 persistent — but it
+rescues bad variants to parity, not past it, and its sign is arch-dependent.
+
+Measured against the decode the dispatcher actually selects, on `Hkv == 8`:
+
+| path | best split variant | gfx942 | gfx950 |
+|---|---|---|---|
+| persistent | `xGyQ.fold` B-minor | **+1.3%**, worst +0.2%, 9/9 | +0.4%, worst -0.5%, 6/9 |
+| non-persistent | `xGyQ.rev` B-minor | +0.5%, worst -0.8%, 4/9 | -0.5%, worst -1.9%, 1/9 |
+
+Only gfx942 persistent clears that arch's noise floor. It is also the narrowest slice:
+gfx942 takes the persistent path only at `batch >= 16`. The family stays experimental —
+kept, not deleted, because the rotation result explains WHY the high-locality orders lose,
+which is a fact about the space rather than about these variants.
+
+A methodology note that follows from it: quoting a variant against `qb_major` once the
+auto has moved overstates it several-fold. Re-baseline against `auto`, not against
+whatever the harness hard-coded.
 
 ## Further investigation
 

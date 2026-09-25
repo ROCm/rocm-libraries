@@ -57,8 +57,12 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
   against it and which held, why one locality class leads at every batch size, and why
   the persistent and non-persistent paths differ in *who assigns work* rather than in
   what they can express. Its "In flight" section covers the generalized-ordering sweep
-  now making the whole space reachable behind two experimental spec fields, including
-  the measured correction that the two slowest digits are **not** interchangeable.
+  that made the whole space reachable behind experimental spec fields, including the
+  measured correction that the two slowest digits are **not** interchangeable — and
+  "Resolved" records what that sweep could not see, because the shipped decode's own
+  traversal had been pruned from it. Ends with an end-to-end comparison of the branch
+  against `develop` over the real LLM shape list, and one negative result (the kv-phase
+  split) kept because it explains why the highest-locality orders lose.
 
 Experiment summaries are historical evidence tied to their stated hardware,
 toolchain, and configuration. They are not current performance promises.
