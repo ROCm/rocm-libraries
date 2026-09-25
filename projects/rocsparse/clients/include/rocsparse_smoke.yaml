@@ -358,6 +358,7 @@ Tests:
     - sparse_to_sparse: *conversion_shared_formats
     - coosort: *conversion_shared_real
     - spsort_coo: *conversion_shared_spsort
+    - spsort_csr: *conversion_shared_mixed_index
     - csrsort: *conversion_shared_real
     - cscsort: *conversion_shared_real
     - identity: *conversion_shared_real
